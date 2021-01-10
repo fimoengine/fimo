@@ -1,2 +1,2 @@
-# fimod-rs
-Fimod Engine - Multi-platform game engine
+# fimo-rs
+Fimo Engine - Multi-platform game engine
