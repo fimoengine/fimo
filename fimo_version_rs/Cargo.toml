@@ -1,0 +1,16 @@
+[package]
+name = "fimo_version_rs"
+version = "0.1.0"
+authors = ["Gabriel Borrelli <gabriel.borrelli@nanoshellsoft.com>"]
+edition = "2018"
+description = "Utilities for working with emf versions"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+regex = "1.4.3"
+numtoa = "0.2.3"
+lazy_static = "1.4.0"
+emf-core-base-rs = { version = "0.1.1" }
