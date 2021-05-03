@@ -1,0 +1,19 @@
+{
+    "schema": "0",
+    "version": "0.1.0",
+    "name": "module_1",
+    "module_type": "emf::core_base::native",
+    "module_version": "1.0.0",
+    "exports": [
+        {
+            "name": "A",
+            "version": "0.1.0"
+        }
+    ],
+    "load_deps": [
+        {
+            "name": "B",
+            "version": "0.1.0"
+        }
+    ]
+}
