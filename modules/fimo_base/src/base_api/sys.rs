@@ -125,6 +125,7 @@ impl SysAPI {
     pub fn has_fn(&self, id: FnId) -> bool {
         matches!(
             id,
+            // Sys api
             FnId::SysShutdown
                 | FnId::SysPanic
                 | FnId::SysHasFunction
@@ -133,6 +134,7 @@ impl SysAPI {
                 | FnId::SysTryLock
                 | FnId::SysUnlock
                 | FnId::SysGetSyncHandler
+                // Version api
                 | FnId::VersionNewShort
                 | FnId::VersionNewLong
                 | FnId::VersionNewFull
@@ -148,13 +150,16 @@ impl SysAPI {
                 | FnId::VersionCompareWeak
                 | FnId::VersionCompareStrong
                 | FnId::VersionIsCompatible
+                // Extension unwind_internal
+                | FnId::ExtGetUnwindInternalInterface
         )
     }
 
     /// Fetches a function.
     #[inline]
     pub fn get_fn(&self, id: FnId) -> Option<CBaseFn> {
-        use crate::base_interface::{sys_bindings, version_bindings};
+        use crate::base_interface::{extensions_bindings, sys_bindings, version_bindings};
+        use extensions_bindings::unwind_internal;
 
         unsafe {
             match id {
@@ -232,6 +237,11 @@ impl SysAPI {
                 )),
                 FnId::VersionIsCompatible => Some(std::mem::transmute(
                     version_bindings::is_compatible as unsafe extern "C-unwind" fn(_, _, _) -> _,
+                )),
+
+                FnId::ExtGetUnwindInternalInterface => Some(std::mem::transmute(
+                    unwind_internal::get_unwind_internal_interface
+                        as unsafe extern "C-unwind" fn(_) -> _,
                 )),
                 _ => None,
             }
