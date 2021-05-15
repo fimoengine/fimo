@@ -439,3 +439,81 @@ pub(crate) mod version_bindings {
         }
     }
 }
+
+pub(crate) mod extensions_bindings {
+    pub(crate) mod unwind_internal {
+        use crate::base_api::BaseAPI;
+        use emf_core_base_rs::ffi::collections::NonNullConst;
+        use emf_core_base_rs::ffi::extensions::unwind_internal::{
+            Context, PanicFn, ShutdownFn, UnwindInternalInterface,
+        };
+        use emf_core_base_rs::ffi::{CBase, TypeWrapper};
+        use std::ptr::NonNull;
+
+        const INTERFACE: UnwindInternalInterface = UnwindInternalInterface {
+            set_context_fn: TypeWrapper(set_context),
+            get_context_fn: TypeWrapper(get_context),
+            set_shutdown_fn_fn: TypeWrapper(set_shutdown),
+            get_shutdown_fn_fn: TypeWrapper(get_shutdown),
+            set_panic_fn_fn: TypeWrapper(set_panic),
+            get_panic_fn_fn: TypeWrapper(get_panic),
+        };
+
+        pub unsafe extern "C-unwind" fn get_unwind_internal_interface(
+            _base_module: Option<NonNull<CBase>>,
+        ) -> NonNullConst<UnwindInternalInterface> {
+            NonNullConst::from(&INTERFACE)
+        }
+
+        unsafe extern "C-unwind" fn set_context(
+            base_module: Option<NonNull<CBase>>,
+            context: Option<NonNull<Context>>,
+        ) {
+            BaseAPI::from_raw_locked(base_module.unwrap())
+                .get_sys_api()
+                .set_unwind_context(context)
+        }
+
+        unsafe extern "C-unwind" fn get_context(
+            base_module: Option<NonNull<CBase>>,
+        ) -> Option<NonNull<Context>> {
+            BaseAPI::from_raw_locked(base_module.unwrap())
+                .get_sys_api()
+                .get_unwind_context()
+        }
+
+        unsafe extern "C-unwind" fn set_shutdown(
+            base_module: Option<NonNull<CBase>>,
+            shutdown_fn: Option<ShutdownFn>,
+        ) {
+            BaseAPI::from_raw_locked(base_module.unwrap())
+                .get_sys_api()
+                .set_unwind_shutdown(shutdown_fn)
+        }
+
+        unsafe extern "C-unwind" fn get_shutdown(
+            base_module: Option<NonNull<CBase>>,
+        ) -> Option<ShutdownFn> {
+            BaseAPI::from_raw_locked(base_module.unwrap())
+                .get_sys_api()
+                .get_unwind_shutdown()
+        }
+
+        unsafe extern "C-unwind" fn set_panic(
+            base_module: Option<NonNull<CBase>>,
+            panic_fn: Option<PanicFn>,
+        ) {
+            BaseAPI::from_raw_locked(base_module.unwrap())
+                .get_sys_api()
+                .set_unwind_panic(panic_fn)
+        }
+
+        unsafe extern "C-unwind" fn get_panic(
+            base_module: Option<NonNull<CBase>>,
+        ) -> Option<PanicFn> {
+            BaseAPI::from_raw_locked(base_module.unwrap())
+                .get_sys_api()
+                .get_unwind_panic()
+        }
+    }
+}
