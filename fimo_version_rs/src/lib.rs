@@ -6,16 +6,45 @@
     missing_debug_implementations,
     broken_intra_doc_links
 )]
-
-use emf_core_base_rs::version::{Error, ReleaseType, Version};
+use emf_core_base_rs::ownership::Owned;
+use emf_core_base_rs::version::{ReleaseType, Version};
+use emf_core_base_rs::Error;
 use lazy_static::lazy_static;
 use numtoa::NumToA;
 use std::cmp::Ordering;
+use std::fmt::{Display, Formatter};
 
 lazy_static! {
     static ref VERSION_VALIDATOR: regex::Regex =
         regex::Regex::new(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<release_type>(unstable|beta))(\.(?P<release_number>\d+))?)?(\+(?P<build>\d+))?").unwrap();
 }
+
+/// Version errors.
+#[derive(Debug)]
+pub enum VersionError {
+    /// Invalid string format.
+    InvalidString(String),
+    /// Buffer overflow.
+    BufferOverflow {
+        /// Buffer length.
+        buffer: usize,
+        /// Needed length.
+        needed: usize,
+    },
+}
+
+impl Display for VersionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VersionError::InvalidString(str) => write!(f, "Invalid String: {}", str),
+            VersionError::BufferOverflow { buffer, needed } => {
+                write!(f, "Buffer overflow! buffer: {}, needed: {}", buffer, needed)
+            }
+        }
+    }
+}
+
+impl std::error::Error for VersionError {}
 
 /// Constructs a new version.
 ///
@@ -93,7 +122,7 @@ pub const fn new_full(
 ///
 /// Fails if `string_is_valid(buffer) == false`.
 #[inline]
-pub fn from_string(buffer: impl AsRef<str>) -> Result<Version, Error> {
+pub fn from_string(buffer: impl AsRef<str>) -> Result<Version, Error<Owned>> {
     let captures = validate_string(&buffer)?;
 
     let major = captures["major"].parse().unwrap();
@@ -134,16 +163,21 @@ pub fn string_is_valid(version_string: impl AsRef<str>) -> bool {
 /// Checks whether the version string is valid.
 ///
 /// Returns the matches of the regex.
-fn validate_string(version_string: &impl AsRef<str>) -> Result<regex::Captures<'_>, Error> {
-    VERSION_VALIDATOR
-        .captures(version_string.as_ref())
-        .map_or(Err(Error::InvalidString), |v| {
+fn validate_string(version_string: &impl AsRef<str>) -> Result<regex::Captures<'_>, Error<Owned>> {
+    VERSION_VALIDATOR.captures(version_string.as_ref()).map_or(
+        Err(Error::from(Box::new(VersionError::InvalidString(
+            version_string.as_ref().to_string(),
+        )))),
+        |v| {
             if version_string.as_ref().len() == v[0].len() {
                 Ok(v)
             } else {
-                Err(Error::InvalidString)
+                Err(Error::from(Box::new(VersionError::InvalidString(
+                    version_string.as_ref().to_string(),
+                ))))
             }
-        })
+        },
+    )
 }
 
 /// Computes the length of the short version string.
@@ -192,14 +226,20 @@ pub fn string_length_full(version: &Version) -> usize {
 /// # Failure
 ///
 /// This function fails if `buffer.len() < string_length_short(version)`.
-pub fn as_string_short(version: &Version, mut buffer: impl AsMut<str>) -> Result<usize, Error> {
+pub fn as_string_short(
+    version: &Version,
+    mut buffer: impl AsMut<str>,
+) -> Result<usize, Error<Owned>> {
     let mut digit_buffer = [0u8; 20];
     let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
 
     let mut length = 0;
     let major_buff = version.major.numtoa(10, &mut digit_buffer);
     if length + major_buff.len() + 1 >= buffer.len() {
-        return Err(Error::BufferOverflow);
+        return Err(Error::from(Box::new(VersionError::BufferOverflow {
+            buffer: buffer.len(),
+            needed: string_length_short(version),
+        })));
     }
     buffer[length..length + major_buff.len()].copy_from_slice(&major_buff);
     length += major_buff.len();
@@ -209,7 +249,10 @@ pub fn as_string_short(version: &Version, mut buffer: impl AsMut<str>) -> Result
 
     let minor_buff = version.minor.numtoa(10, &mut digit_buffer);
     if length + minor_buff.len() + 1 >= buffer.len() {
-        return Err(Error::BufferOverflow);
+        return Err(Error::from(Box::new(VersionError::BufferOverflow {
+            buffer: buffer.len(),
+            needed: string_length_short(version),
+        })));
     }
     buffer[length..length + minor_buff.len()].copy_from_slice(&minor_buff);
     length += minor_buff.len();
@@ -219,7 +262,10 @@ pub fn as_string_short(version: &Version, mut buffer: impl AsMut<str>) -> Result
 
     let patch_buff = version.patch.numtoa(10, &mut digit_buffer);
     if length + patch_buff.len() > buffer.len() {
-        return Err(Error::BufferOverflow);
+        return Err(Error::from(Box::new(VersionError::BufferOverflow {
+            buffer: buffer.len(),
+            needed: string_length_short(version),
+        })));
     }
     buffer[length..length + patch_buff.len()].copy_from_slice(&patch_buff);
     length += patch_buff.len();
@@ -232,7 +278,10 @@ pub fn as_string_short(version: &Version, mut buffer: impl AsMut<str>) -> Result
 /// # Failure
 ///
 /// This function fails if `buffer.len() < string_length_long(version)`.
-pub fn as_string_long(version: &Version, mut buffer: impl AsMut<str>) -> Result<usize, Error> {
+pub fn as_string_long(
+    version: &Version,
+    mut buffer: impl AsMut<str>,
+) -> Result<usize, Error<Owned>> {
     let mut length = as_string_short(&version, &mut buffer)?;
     let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
 
@@ -244,14 +293,20 @@ pub fn as_string_long(version: &Version, mut buffer: impl AsMut<str>) -> Result<
     };
 
     if length + release_type.len() > buffer.len() {
-        return Err(Error::BufferOverflow);
+        return Err(Error::from(Box::new(VersionError::BufferOverflow {
+            buffer: buffer.len(),
+            needed: string_length_long(version),
+        })));
     }
     buffer[length..length + release_type.len()].copy_from_slice(release_type.as_bytes());
     length += release_type.len();
 
     if version.release_number > 0 {
         if length + 1 > buffer.len() {
-            return Err(Error::BufferOverflow);
+            return Err(Error::from(Box::new(VersionError::BufferOverflow {
+                buffer: buffer.len(),
+                needed: string_length_long(version),
+            })));
         }
         buffer[length] = b'.';
         length += 1;
@@ -259,7 +314,10 @@ pub fn as_string_long(version: &Version, mut buffer: impl AsMut<str>) -> Result<
         let mut digit_buffer = [0u8; 20];
         let release_number_buff = version.release_number.numtoa(10, &mut digit_buffer);
         if length + release_number_buff.len() > buffer.len() {
-            return Err(Error::BufferOverflow);
+            return Err(Error::from(Box::new(VersionError::BufferOverflow {
+                buffer: buffer.len(),
+                needed: string_length_long(version),
+            })));
         }
         buffer[length..length + release_number_buff.len()].copy_from_slice(&release_number_buff);
         length += release_number_buff.len();
@@ -273,14 +331,20 @@ pub fn as_string_long(version: &Version, mut buffer: impl AsMut<str>) -> Result<
 /// # Failure
 ///
 /// This function fails if `buffer.len() < string_length_full(version)`.
-pub fn as_string_full(version: &Version, mut buffer: impl AsMut<str>) -> Result<usize, Error> {
+pub fn as_string_full(
+    version: &Version,
+    mut buffer: impl AsMut<str>,
+) -> Result<usize, Error<Owned>> {
     let mut length = as_string_long(version, &mut buffer)?;
 
     if version.build > 0 {
         let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
 
         if length + 1 > buffer.len() {
-            return Err(Error::BufferOverflow);
+            return Err(Error::from(Box::new(VersionError::BufferOverflow {
+                buffer: buffer.len(),
+                needed: string_length_full(version),
+            })));
         }
         buffer[length] = b'+';
         length += 1;
@@ -288,7 +352,10 @@ pub fn as_string_full(version: &Version, mut buffer: impl AsMut<str>) -> Result<
         let mut digit_buffer = [0u8; 20];
         let build_buff = version.build.numtoa(10, &mut digit_buffer);
         if length + build_buff.len() > buffer.len() {
-            return Err(Error::BufferOverflow);
+            return Err(Error::from(Box::new(VersionError::BufferOverflow {
+                buffer: buffer.len(),
+                needed: string_length_full(version),
+            })));
         }
         buffer[length..length + build_buff.len()].copy_from_slice(&build_buff);
         length += build_buff.len();

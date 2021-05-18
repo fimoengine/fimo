@@ -13,4 +13,4 @@ categories = ["game-development"]
 regex = "1.4.3"
 numtoa = "0.2.3"
 lazy_static = "1.4.0"
-emf-core-base-rs = { version = "0.1.3" }
+emf-core-base-rs = { git = "https://github.com/fimoengine/emf-rs", version = "0.2.0-unstable.0" }
