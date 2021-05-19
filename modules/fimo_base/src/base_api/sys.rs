@@ -11,6 +11,7 @@ use parking_lot::RwLock;
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::mem::swap;
+use std::panic::{AssertUnwindSafe, UnwindSafe};
 use std::ptr::NonNull;
 use thread_local::ThreadLocal;
 
@@ -19,8 +20,8 @@ mod unwind_context;
 
 /// Exit status of the interface.
 #[derive(Debug, Eq, PartialEq, Hash)]
-pub enum ExitStatus {
-    Ok,
+pub enum ExitStatus<T> {
+    Ok(T),
     Shutdown,
     Panic(Option<Error<Owned>>),
     Other,
@@ -88,28 +89,96 @@ impl SysAPI {
         &self,
         context: Option<NonNull<c_void>>,
         func: extern "C-unwind" fn(Option<NonNull<c_void>>),
-    ) -> ExitStatus {
+    ) -> ExitStatus<()> {
         // Initialize a default context
         let default_context = self.unwind_contexts.get_or(|| Cell::new(None));
         if default_context.get() != None {
             panic!("Interface entered twice.");
         }
 
-        default_context.set(Some(unwind_context::construct_context()));
+        self.catch_unwind(move |_| func(context))
+    }
+
+    /// Calls a closure, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        match self.catch_unwind(f) {
+            ExitStatus::Ok(val) => val,
+            ExitStatus::Shutdown => self.shutdown(),
+            ExitStatus::Panic(error) => self.panic(error),
+            ExitStatus::Other => self.panic(Some(Error::from(StaticError::new(
+                "Unknown error occurred!",
+            )))),
+        }
+    }
+
+    /// Calls a closure mutably, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        match self.catch_unwind_mut(f) {
+            ExitStatus::Ok(val) => val,
+            ExitStatus::Shutdown => self.shutdown(),
+            ExitStatus::Panic(error) => self.panic(error),
+            ExitStatus::Other => self.panic(Some(Error::from(StaticError::new(
+                "Unknown error occurred!",
+            )))),
+        }
+    }
+
+    /// Calls a closure, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        let context = self.unwind_contexts.get().unwrap();
+        let old = context.replace(Some(unwind_context::construct_context()));
 
         // Disable outputting the error the stderr
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
 
         // Call the function
-        let result = std::panic::catch_unwind(move || func(context));
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| f(self)));
 
         // Reset
         std::panic::set_hook(default_hook);
-        default_context.set(None);
+        context.set(old);
 
         match result {
-            Ok(_) => ExitStatus::Ok,
+            Ok(res) => ExitStatus::Ok(res),
+            Err(mut err) => {
+                if err.is::<unwind_context::ShutdownSignal>() {
+                    ExitStatus::Shutdown
+                } else if err.is::<unwind_context::PanicSignal>() {
+                    let panic_sig = err.downcast_mut::<unwind_context::PanicSignal>().unwrap();
+                    ExitStatus::Panic(panic_sig.error.take())
+                } else {
+                    ExitStatus::Other
+                }
+            }
+        }
+    }
+
+    /// Calls a closure mutably, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        let context = self.unwind_contexts.get().unwrap();
+        let old = context.replace(Some(unwind_context::construct_context()));
+
+        // Disable outputting the error the stderr
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+
+        // Call the function
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| f(self)));
+
+        // Reset
+        std::panic::set_hook(default_hook);
+        self.unwind_contexts.get().unwrap().set(old);
+
+        match result {
+            Ok(res) => ExitStatus::Ok(res),
             Err(mut err) => {
                 if err.is::<unwind_context::ShutdownSignal>() {
                     ExitStatus::Shutdown
@@ -153,6 +222,24 @@ impl SysAPI {
                 | FnId::VersionCompareWeak
                 | FnId::VersionCompareStrong
                 | FnId::VersionIsCompatible
+                // Library api
+                | FnId::LibraryRegisterLoader
+                | FnId::LibraryUnregisterLoader
+                | FnId::LibraryGetLoaderInterface
+                | FnId::LibraryGetLoaderHandleFromType
+                | FnId::LibraryGetLoaderHandleFromLibrary
+                | FnId::LibraryGetNumLoaders
+                | FnId::LibraryLibraryExists
+                | FnId::LibraryTypeExists
+                | FnId::LibraryGetLibraryTypes
+                | FnId::LibraryCreateLibraryHandle
+                | FnId::LibraryRemoveLibraryHandle
+                | FnId::LibraryLinkLibrary
+                | FnId::LibraryGetInternalLibraryHandle
+                | FnId::LibraryLoad
+                | FnId::LibraryUnload
+                | FnId::LibraryGetDataSymbol
+                | FnId::LibraryGetFunctionSymbol
                 // Extension unwind_internal
                 | FnId::ExtGetUnwindInternalInterface
         )
@@ -161,11 +248,14 @@ impl SysAPI {
     /// Fetches a function.
     #[inline]
     pub fn get_fn(&self, id: FnId) -> Option<CBaseFn> {
-        use crate::base_interface::{extensions_bindings, sys_bindings, version_bindings};
+        use crate::base_interface::{
+            extensions_bindings, library_bindings, sys_bindings, version_bindings,
+        };
         use extensions_bindings::unwind_internal;
 
         unsafe {
             match id {
+                // Sys api
                 FnId::SysShutdown => Some(std::mem::transmute(
                     sys_bindings::shutdown as unsafe extern "C-unwind" fn(_) -> _,
                 )),
@@ -193,7 +283,7 @@ impl SysAPI {
                 FnId::SysSetSyncHandler => Some(std::mem::transmute(
                     sys_bindings::set_sync_handler as unsafe extern "C-unwind" fn(_, _) -> _,
                 )),
-
+                // Version api
                 FnId::VersionNewShort => Some(std::mem::transmute(
                     version_bindings::new_short as unsafe extern "C-unwind" fn(_, _, _, _) -> _,
                 )),
@@ -241,7 +331,65 @@ impl SysAPI {
                 FnId::VersionIsCompatible => Some(std::mem::transmute(
                     version_bindings::is_compatible as unsafe extern "C-unwind" fn(_, _, _) -> _,
                 )),
-
+                // Library api
+                FnId::LibraryRegisterLoader => Some(std::mem::transmute(
+                    library_bindings::register_loader as unsafe extern "C-unwind" fn(_, _, _) -> _,
+                )),
+                FnId::LibraryUnregisterLoader => Some(std::mem::transmute(
+                    library_bindings::unregister_loader as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryGetLoaderInterface => Some(std::mem::transmute(
+                    library_bindings::get_loader_interface
+                        as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryGetLoaderHandleFromType => Some(std::mem::transmute(
+                    library_bindings::get_loader_handle_from_type
+                        as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryGetLoaderHandleFromLibrary => Some(std::mem::transmute(
+                    library_bindings::get_loader_handle_from_library
+                        as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryGetNumLoaders => Some(std::mem::transmute(
+                    library_bindings::get_num_loaders as unsafe extern "C-unwind" fn(_) -> _,
+                )),
+                FnId::LibraryLibraryExists => Some(std::mem::transmute(
+                    library_bindings::library_exists as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryTypeExists => Some(std::mem::transmute(
+                    library_bindings::type_exists as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryGetLibraryTypes => Some(std::mem::transmute(
+                    library_bindings::get_library_types as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryCreateLibraryHandle => Some(std::mem::transmute(
+                    library_bindings::create_library_handle as unsafe extern "C-unwind" fn(_) -> _,
+                )),
+                FnId::LibraryRemoveLibraryHandle => Some(std::mem::transmute(
+                    library_bindings::remove_library_handle
+                        as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryLinkLibrary => Some(std::mem::transmute(
+                    library_bindings::link_library as unsafe extern "C-unwind" fn(_, _, _, _) -> _,
+                )),
+                FnId::LibraryGetInternalLibraryHandle => Some(std::mem::transmute(
+                    library_bindings::get_internal_library_handle
+                        as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryLoad => Some(std::mem::transmute(
+                    library_bindings::load as unsafe extern "C-unwind" fn(_, _, _) -> _,
+                )),
+                FnId::LibraryUnload => Some(std::mem::transmute(
+                    library_bindings::unload as unsafe extern "C-unwind" fn(_, _) -> _,
+                )),
+                FnId::LibraryGetDataSymbol => Some(std::mem::transmute(
+                    library_bindings::get_data_symbol as unsafe extern "C-unwind" fn(_, _, _) -> _,
+                )),
+                FnId::LibraryGetFunctionSymbol => Some(std::mem::transmute(
+                    library_bindings::get_function_symbol
+                        as unsafe extern "C-unwind" fn(_, _, _) -> _,
+                )),
+                // Extension unwind_internal
                 FnId::ExtGetUnwindInternalInterface => Some(std::mem::transmute(
                     unwind_internal::get_unwind_internal_interface
                         as unsafe extern "C-unwind" fn(_) -> _,
@@ -446,8 +594,35 @@ impl<'a> DataGuard<'a, SysAPI, Unlocked> {
         &self,
         context: Option<NonNull<c_void>>,
         func: extern "C-unwind" fn(Option<NonNull<c_void>>),
-    ) -> ExitStatus {
+    ) -> ExitStatus<()> {
         self.data.enter_interface_from_thread(context, func)
+    }
+
+    /// Calls a closure, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        self.data.setup_unwind(f)
+    }
+
+    /// Calls a closure mutably, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        self.data.setup_unwind_mut(f)
+    }
+
+    /// Calls a closure, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        self.data.catch_unwind(f)
+    }
+
+    /// Calls a closure mutably, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        self.data.catch_unwind_mut(f)
     }
 
     /// Locks the interface.
@@ -486,6 +661,33 @@ impl<'a> DataGuard<'a, SysAPI, Locked> {
     pub fn unlock(self) -> DataGuard<'a, SysAPI, Unlocked> {
         self.data.unlock();
         unsafe { self.assume_unlocked() }
+    }
+
+    /// Calls a closure, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        self.data.setup_unwind(f)
+    }
+
+    /// Calls a closure mutably, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        self.data.setup_unwind_mut(f)
+    }
+
+    /// Calls a closure, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        self.data.catch_unwind(f)
+    }
+
+    /// Calls a closure mutably, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        self.data.catch_unwind_mut(f)
     }
 
     /// Checks if a function is implemented.
@@ -632,7 +834,7 @@ mod tests {
 
         let (context, callback) = unsafe { callback.take() };
         let result = sys.enter_interface_from_thread(Some(context), callback);
-        assert_eq!(result, ExitStatus::Ok);
+        assert_eq!(result, ExitStatus::Ok(()));
     }
 
     #[test]
