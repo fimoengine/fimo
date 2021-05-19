@@ -1,3 +1,4 @@
+use crate::base_api::{DataGuard, Locked};
 use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
 use emf_core_base_rs::ffi::library::{
@@ -160,7 +161,7 @@ impl LibraryAPI {
     pub fn register_loader<'loader, LT, T>(
         &mut self,
         loader: &'loader LT,
-        lib_type: &impl AsRef<str>,
+        lib_type: impl AsRef<str>,
     ) -> Result<Loader<'static, Owned>, Error<Owned>>
     where
         T: LibraryLoaderAPI<'static>,
@@ -262,7 +263,7 @@ impl LibraryAPI {
     #[inline]
     pub fn get_loader_handle_from_type<'api>(
         &self,
-        lib_type: &impl AsRef<str>,
+        lib_type: impl AsRef<str>,
     ) -> Result<Loader<'static, BorrowMutable<'api>>, Error<Owned>> {
         if let Some(loader) = self.lib_type_to_loader.get(lib_type.as_ref()) {
             Ok(unsafe { Loader::new(*loader) })
@@ -567,7 +568,7 @@ impl LibraryAPI {
     /// # Note
     ///
     /// Some platforms may differentiate between a `function-pointer` and a `data-pointer`.
-    /// See [get_function_symbol()] for fetching a function.
+    /// See [LibraryAPI::get_function_symbol()] for fetching a function.
     ///
     /// # Return
     ///
@@ -599,7 +600,7 @@ impl LibraryAPI {
     /// # Note
     ///
     /// Some platforms may differentiate between a `function-pointer` and a `data-pointer`.
-    /// See [get_data_symbol()] for fetching some data.
+    /// See [LibraryAPI::get_data_symbol()] for fetching some data.
     ///
     /// # Return
     ///
@@ -608,7 +609,7 @@ impl LibraryAPI {
     pub fn get_function_symbol<'library, 'handle, O, U>(
         &self,
         library: &'handle Library<'library, O>,
-        symbol: &impl AsRef<CStr>,
+        symbol: impl AsRef<CStr>,
         caster: impl FnOnce(CBaseFn) -> U,
     ) -> Result<Symbol<'handle, U>, Error<Owned>>
     where
@@ -620,5 +621,330 @@ impl LibraryAPI {
             self.get_loader_interface(&loader)?;
 
         unsafe { library_loader.get_function_symbol(&internal, &symbol, caster) }
+    }
+}
+
+impl<'a> DataGuard<'a, LibraryAPI, Locked> {
+    /// Registers a new loader.
+    ///
+    /// The loader can load libraries of the type `lib_type`.
+    /// The loader must outlive the binding to the interface.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if the library type already exists.
+    ///
+    /// # Return
+    ///
+    /// Handle on success, error otherwise.
+    #[inline]
+    pub fn register_loader<'loader, LT, T>(
+        &mut self,
+        loader: &'loader LT,
+        lib_type: impl AsRef<str>,
+    ) -> Result<Loader<'static, Owned>, Error<Owned>>
+    where
+        T: LibraryLoaderAPI<'static>,
+        LibraryLoader<T, Owned>: From<&'loader LT>,
+    {
+        self.data.register_loader(loader, lib_type)
+    }
+
+    /// Unregisters an existing loader.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `loader` is invalid.
+    ///
+    /// # Return
+    ///
+    /// Error on failure.
+    #[inline]
+    pub fn unregister_loader(&mut self, loader: Loader<'_, Owned>) -> Result<(), Error<Owned>> {
+        self.data.unregister_loader(loader)
+    }
+
+    /// Fetches the interface of a library loader.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `loader` is invalid.
+    ///
+    /// # Return
+    ///
+    /// Interface on success, error otherwise.
+    #[inline]
+    pub fn get_loader_interface<'loader, O, T>(
+        &self,
+        loader: &Loader<'loader, O>,
+    ) -> Result<LibraryLoader<T, O>, Error<Owned>>
+    where
+        O: ImmutableAccessIdentifier,
+        T: LibraryLoaderAPI<'loader> + LibraryLoaderABICompat,
+    {
+        self.data.get_loader_interface(loader)
+    }
+
+    /// Fetches the loader handle associated with the library type.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `lib_type` is not registered.
+    ///
+    /// # Return
+    ///
+    /// Handle on success, error otherwise.
+    #[inline]
+    pub fn get_loader_handle_from_type<'api>(
+        &self,
+        lib_type: impl AsRef<str>,
+    ) -> Result<Loader<'static, BorrowMutable<'api>>, Error<Owned>> {
+        self.data.get_loader_handle_from_type(lib_type)
+    }
+
+    /// Fetches the loader handle linked with the library handle.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `library` is invalid.
+    ///
+    /// # Return
+    ///
+    /// Handle on success, error otherwise.
+    pub fn get_loader_handle_from_library<'api, 'library, O>(
+        &self,
+        library: &Library<'library, O>,
+    ) -> Result<Loader<'library, BorrowMutable<'api>>, Error<Owned>>
+    where
+        O: ImmutableAccessIdentifier,
+    {
+        self.data.get_loader_handle_from_library(library)
+    }
+
+    /// Fetches the number of registered loaders.
+    ///
+    /// # Return
+    ///
+    /// Number of registered loaders.
+    #[inline]
+    pub fn get_num_loaders(&self) -> usize {
+        self.data.get_num_loaders()
+    }
+
+    /// Checks if a the library handle is valid.
+    ///
+    /// # Return
+    ///
+    /// [true] if the handle is valid, [false] otherwise.
+    #[inline]
+    pub fn library_exists<'library, O>(&self, library: &Library<'library, O>) -> bool
+    where
+        O: ImmutableAccessIdentifier,
+    {
+        self.data.library_exists(library)
+    }
+
+    /// Checks if a library type exists.
+    ///
+    /// # Return
+    ///
+    /// [true] if the type exists, [false] otherwise.
+    #[inline]
+    pub fn type_exists(&self, lib_type: impl AsRef<str>) -> bool {
+        self.data.type_exists(lib_type)
+    }
+
+    /// Copies the strings of the registered library types into a buffer.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `buffer.as_ref().len() < get_num_loaders()`.
+    ///
+    /// # Return
+    ///
+    /// Number of written types on success, error otherwise.
+    #[inline]
+    pub fn get_library_types(
+        &self,
+        buffer: impl AsMut<[LibraryType]>,
+    ) -> Result<usize, Error<Owned>> {
+        self.data.get_library_types(buffer)
+    }
+
+    /// Creates a new unlinked library handle.
+    ///
+    /// # Return
+    ///
+    /// Library handle.
+    ///
+    /// # Safety
+    ///
+    /// The handle must be linked before use.
+    #[inline]
+    pub unsafe fn create_library_handle(&mut self) -> Library<'static, Owned> {
+        self.data.create_library_handle()
+    }
+
+    /// Removes an existing library handle.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `library` is invalid.
+    ///
+    /// # Return
+    ///
+    /// Error on failure.
+    ///
+    /// # Safety
+    ///
+    /// Removing the handle does not unload the library.
+    #[inline]
+    pub unsafe fn remove_library_handle(
+        &mut self,
+        library: Library<'_, Owned>,
+    ) -> Result<(), Error<Owned>> {
+        self.data.remove_library_handle(library)
+    }
+
+    /// Links a library handle to an internal library handle.
+    ///
+    /// Overrides the internal link of the library handle by setting
+    /// it to the new library loader and internal handle.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `library` or `loader` are invalid.
+    ///
+    /// # Return
+    ///
+    /// Error on failure.
+    ///
+    /// # Safety
+    ///
+    /// Incorrect usage can lead to dangling handles or use-after-free errors.
+    #[inline]
+    pub unsafe fn link_library<'library, 'loader, O, LO, IO>(
+        &mut self,
+        library: &Library<'library, O>,
+        loader: &Loader<'loader, LO>,
+        internal: &InternalLibrary<IO>,
+    ) -> Result<(), Error<Owned>>
+    where
+        'loader: 'library,
+        O: MutableAccessIdentifier,
+        LO: ImmutableAccessIdentifier,
+        IO: ImmutableAccessIdentifier,
+    {
+        self.data.link_library(library, loader, internal)
+    }
+
+    /// Fetches the internal handle linked with the library handle.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `handle` is invalid.
+    ///
+    /// # Return
+    ///
+    /// Handle on success, error otherwise.
+    #[inline]
+    pub fn get_internal_library_handle<'library, O>(
+        &self,
+        library: &Library<'library, O>,
+    ) -> Result<InternalLibrary<O>, Error<Owned>>
+    where
+        O: ImmutableAccessIdentifier,
+    {
+        self.data.get_internal_library_handle(library)
+    }
+
+    /// Loads a library. The resulting handle is unique.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `loader` or `path` is invalid or
+    /// the type of the library can not be loaded with the loader.
+    ///
+    /// # Return
+    ///
+    /// Handle on success, error otherwise.
+    #[inline]
+    pub fn load_library<O>(
+        &mut self,
+        loader: &Loader<'static, O>,
+        path: impl AsRef<Path>,
+    ) -> Result<Library<'static, Owned>, Error<Owned>>
+    where
+        O: MutableAccessIdentifier + ImmutableAccessIdentifier,
+    {
+        self.data.load_library(loader, path)
+    }
+
+    /// Unloads a library.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `library` is invalid.
+    ///
+    /// # Return
+    ///
+    /// Error on failure.
+    #[inline]
+    pub fn unload_library(&mut self, library: Library<'_, Owned>) -> Result<(), Error<Owned>> {
+        self.data.unload_library(library)
+    }
+
+    /// Fetches a data symbol from a library.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `library` is invalid or library does not contain `symbol`.
+    ///
+    /// # Note
+    ///
+    /// Some platforms may differentiate between a `function-pointer` and a `data-pointer`.
+    /// See [LibraryAPI::get_function_symbol()] for fetching a function.
+    ///
+    /// # Return
+    ///
+    /// Symbol on success, error otherwise.
+    #[inline]
+    pub fn get_data_symbol<'library, 'handle, O, U>(
+        &self,
+        library: &'handle Library<'library, O>,
+        symbol: impl AsRef<CStr>,
+        caster: impl FnOnce(NonNullConst<c_void>) -> &'library U,
+    ) -> Result<Symbol<'handle, &'library U>, Error<Owned>>
+    where
+        O: ImmutableAccessIdentifier,
+    {
+        self.data.get_data_symbol(library, symbol, caster)
+    }
+
+    /// Fetches a function symbol from a library.
+    ///
+    /// # Failure
+    ///
+    /// The function fails if `library` is invalid or library does not contain `symbol`.
+    ///
+    /// # Note
+    ///
+    /// Some platforms may differentiate between a `function-pointer` and a `data-pointer`.
+    /// See [LibraryAPI::get_data_symbol()] for fetching some data.
+    ///
+    /// # Return
+    ///
+    /// Symbol on success, error otherwise.
+    #[inline]
+    pub fn get_function_symbol<'library, 'handle, O, U>(
+        &self,
+        library: &'handle Library<'library, O>,
+        symbol: impl AsRef<CStr>,
+        caster: impl FnOnce(CBaseFn) -> U,
+    ) -> Result<Symbol<'handle, U>, Error<Owned>>
+    where
+        O: ImmutableAccessIdentifier,
+    {
+        self.data.get_function_symbol(library, symbol, caster)
     }
 }

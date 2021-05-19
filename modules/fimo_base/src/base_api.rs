@@ -12,6 +12,7 @@ mod version;
 
 pub use library::LibraryAPI;
 pub use module::ModuleAPI;
+use std::panic::RefUnwindSafe;
 pub use sys::SysAPI;
 pub use version::VersionAPI;
 
@@ -67,6 +68,8 @@ impl<'a, T> DataGuard<'a, T, Locked> {
         }
     }
 }
+
+impl<'a, T, L> RefUnwindSafe for DataGuard<'a, T, L> {}
 
 /// Interface implementation.
 #[derive(Debug)]

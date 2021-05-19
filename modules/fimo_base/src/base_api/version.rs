@@ -1,5 +1,6 @@
 use crate::base_api::{DataGuard, Locked, Unlocked};
 use emf_core_base_rs::ffi::version::{ReleaseType, Version};
+use emf_core_base_rs::ownership::Owned;
 use emf_core_base_rs::Error;
 use fimo_version_rs::{
     as_string_full, as_string_long, as_string_short, compare, compare_strong, compare_weak,
@@ -7,7 +8,6 @@ use fimo_version_rs::{
     string_length_long, string_length_short,
 };
 use std::cmp::Ordering;
-use emf_core_base_rs::ownership::Owned;
 
 /// Implementation of the version api.
 #[derive(Debug)]
