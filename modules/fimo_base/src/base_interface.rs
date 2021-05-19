@@ -141,10 +141,10 @@ impl BaseInterfaceWrapper {
 pub(crate) mod sys_bindings {
     use crate::base_api::BaseAPI;
     use emf_core_base_rs::ffi::collections::{NonNullConst, Optional};
+    use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::sys::sync_handler::SyncHandlerInterface;
     use emf_core_base_rs::ffi::{Bool, CBase, CBaseFn, FnId};
     use emf_core_base_rs::sys::sync_handler::{SyncHandler, SyncHandlerAPI};
-    use std::ffi::CStr;
     use std::ptr::NonNull;
 
     pub unsafe extern "C-unwind" fn shutdown(base_module: Option<NonNull<CBase>>) -> ! {
@@ -155,27 +155,18 @@ pub(crate) mod sys_bindings {
 
     pub unsafe extern "C-unwind" fn panic(
         base_module: Option<NonNull<CBase>>,
-        error: Option<NonNullConst<u8>>,
+        error: Optional<Error>,
     ) -> ! {
-        match error {
-            None => BaseAPI::from_raw_unlocked(base_module.unwrap())
-                .get_sys_api()
-                .panic(None),
-            Some(error) => BaseAPI::from_raw_unlocked(base_module.unwrap())
-                .get_sys_api()
-                .panic(Some(CStr::from_ptr(error.cast().as_ptr()))),
-        }
+        BaseAPI::from_raw_unlocked(base_module.unwrap())
+            .get_sys_api()
+            .panic(error.into_rust().map(From::from))
     }
 
     pub unsafe extern "C-unwind" fn has_fn(base_module: Option<NonNull<CBase>>, id: FnId) -> Bool {
-        if BaseAPI::from_raw_locked(base_module.unwrap())
+        BaseAPI::from_raw_locked(base_module.unwrap())
             .get_sys_api()
             .has_fn(id)
-        {
-            Bool::True
-        } else {
-            Bool::False
-        }
+            .into()
     }
 
     #[allow(improper_ctypes_definitions)]
@@ -186,7 +177,7 @@ pub(crate) mod sys_bindings {
         BaseAPI::from_raw_locked(base_module.unwrap())
             .get_sys_api()
             .get_fn(id)
-            .map_or(Optional::none(), Optional::some)
+            .map_or(Optional::None, Optional::Some)
     }
 
     pub unsafe extern "C-unwind" fn lock(base_module: Option<NonNull<CBase>>) {
@@ -196,15 +187,11 @@ pub(crate) mod sys_bindings {
     }
 
     pub unsafe extern "C-unwind" fn try_lock(base_module: Option<NonNull<CBase>>) -> Bool {
-        if BaseAPI::from_raw_unlocked(base_module.unwrap())
+        BaseAPI::from_raw_unlocked(base_module.unwrap())
             .get_sys_api()
             .try_lock()
             .is_ok()
-        {
-            Bool::True
-        } else {
-            Bool::False
-        }
+            .into()
     }
 
     pub unsafe extern "C-unwind" fn unlock(base_module: Option<NonNull<CBase>>) {
@@ -235,7 +222,8 @@ pub(crate) mod sys_bindings {
 pub(crate) mod version_bindings {
     use crate::base_api::BaseAPI;
     use emf_core_base_rs::ffi::collections::{ConstSpan, MutSpan, NonNullConst, Result};
-    use emf_core_base_rs::ffi::version::{Error, ReleaseType, Version};
+    use emf_core_base_rs::ffi::errors::Error;
+    use emf_core_base_rs::ffi::version::{ReleaseType, Version};
     use emf_core_base_rs::ffi::{Bool, CBase};
     use std::cmp::Ordering;
     use std::ptr::NonNull;
@@ -289,7 +277,7 @@ pub(crate) mod version_bindings {
         BaseAPI::from_raw_unlocked(base_module.unwrap())
             .get_version_api()
             .from_string(std::str::from_utf8_unchecked(buffer.as_ref().as_ref()))
-            .map_or_else(Result::new_err, Result::new_ok)
+            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
     }
 
     pub unsafe extern "C-unwind" fn string_length_short(
@@ -331,7 +319,7 @@ pub(crate) mod version_bindings {
                 version.as_ref(),
                 std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
             )
-            .map_or_else(Result::new_err, Result::new_ok)
+            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
     }
 
     #[allow(improper_ctypes_definitions)]
@@ -346,7 +334,7 @@ pub(crate) mod version_bindings {
                 version.as_ref(),
                 std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
             )
-            .map_or_else(Result::new_err, Result::new_ok)
+            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
     }
 
     #[allow(improper_ctypes_definitions)]
@@ -361,23 +349,19 @@ pub(crate) mod version_bindings {
                 version.as_ref(),
                 std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
             )
-            .map_or_else(Result::new_err, Result::new_ok)
+            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
     }
 
     pub unsafe extern "C-unwind" fn string_is_valid(
         base_module: Option<NonNull<CBase>>,
         version_string: NonNullConst<ConstSpan<u8>>,
     ) -> Bool {
-        if BaseAPI::from_raw_unlocked(base_module.unwrap())
+        BaseAPI::from_raw_unlocked(base_module.unwrap())
             .get_version_api()
             .string_is_valid(std::str::from_utf8_unchecked(
                 version_string.as_ref().as_ref(),
             ))
-        {
-            Bool::True
-        } else {
-            Bool::False
-        }
+            .into()
     }
 
     pub unsafe extern "C-unwind" fn compare(
@@ -430,15 +414,14 @@ pub(crate) mod version_bindings {
         lhs: NonNullConst<Version>,
         rhs: NonNullConst<Version>,
     ) -> Bool {
-        match BaseAPI::from_raw_unlocked(base_module.unwrap())
+        BaseAPI::from_raw_unlocked(base_module.unwrap())
             .get_version_api()
             .is_compatible(lhs.as_ref(), rhs.as_ref())
-        {
-            true => Bool::True,
-            false => Bool::False,
-        }
+            .into()
     }
 }
+
+pub(crate) mod library_bindings {}
 
 pub(crate) mod extensions_bindings {
     pub(crate) mod unwind_internal {

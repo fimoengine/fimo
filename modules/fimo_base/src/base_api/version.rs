@@ -1,11 +1,13 @@
 use crate::base_api::{DataGuard, Locked, Unlocked};
-use emf_core_base_rs::ffi::version::{Error, ReleaseType, Version};
+use emf_core_base_rs::ffi::version::{ReleaseType, Version};
+use emf_core_base_rs::Error;
 use fimo_version_rs::{
     as_string_full, as_string_long, as_string_short, compare, compare_strong, compare_weak,
     from_string, is_compatible, new_full, new_long, new_short, string_is_valid, string_length_full,
     string_length_long, string_length_short,
 };
 use std::cmp::Ordering;
+use emf_core_base_rs::ownership::Owned;
 
 /// Implementation of the version api.
 #[derive(Debug)]
@@ -71,7 +73,7 @@ impl VersionAPI {
     ///
     /// Fails if `string_is_valid(buffer) == false`.
     #[inline]
-    pub fn from_string(&self, buffer: impl AsRef<str>) -> Result<Version, Error> {
+    pub fn from_string(&self, buffer: impl AsRef<str>) -> Result<Version, Error<Owned>> {
         from_string(buffer)
     }
 
@@ -109,7 +111,7 @@ impl VersionAPI {
         &self,
         version: &Version,
         buffer: impl AsMut<str>,
-    ) -> Result<usize, Error> {
+    ) -> Result<usize, Error<Owned>> {
         as_string_short(version, buffer)
     }
 
@@ -123,7 +125,7 @@ impl VersionAPI {
         &self,
         version: &Version,
         buffer: impl AsMut<str>,
-    ) -> Result<usize, Error> {
+    ) -> Result<usize, Error<Owned>> {
         as_string_long(version, buffer)
     }
 
@@ -137,7 +139,7 @@ impl VersionAPI {
         &self,
         version: &Version,
         buffer: impl AsMut<str>,
-    ) -> Result<usize, Error> {
+    ) -> Result<usize, Error<Owned>> {
         as_string_full(version, buffer)
     }
 
@@ -224,7 +226,7 @@ macro_rules! impl_guarded_version {
             ///
             /// Fails if `string_is_valid(buffer) == false`.
             #[inline]
-            pub fn from_string(&self, buffer: impl AsRef<str>) -> Result<Version, Error> {
+            pub fn from_string(&self, buffer: impl AsRef<str>) -> Result<Version, Error<Owned>> {
                 self.data.from_string(buffer)
             }
 
@@ -262,7 +264,7 @@ macro_rules! impl_guarded_version {
                 &self,
                 version: &Version,
                 buffer: impl AsMut<str>,
-            ) -> Result<usize, Error> {
+            ) -> Result<usize, Error<Owned>> {
                 self.data.as_string_short(version, buffer)
             }
 
@@ -276,7 +278,7 @@ macro_rules! impl_guarded_version {
                 &self,
                 version: &Version,
                 buffer: impl AsMut<str>,
-            ) -> Result<usize, Error> {
+            ) -> Result<usize, Error<Owned>> {
                 self.data.as_string_long(version, buffer)
             }
 
@@ -290,7 +292,7 @@ macro_rules! impl_guarded_version {
                 &self,
                 version: &Version,
                 buffer: impl AsMut<str>,
-            ) -> Result<usize, Error> {
+            ) -> Result<usize, Error<Owned>> {
                 self.data.as_string_full(version, buffer)
             }
 

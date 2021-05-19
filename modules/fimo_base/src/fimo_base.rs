@@ -1,14 +1,72 @@
 use crate::base_interface::BaseInterfaceWrapper;
 use emf_core_base_rs::ffi;
 use emf_core_base_rs::ffi::collections::ConstSpan;
+use emf_core_base_rs::ffi::errors::Error;
 use emf_core_base_rs::ffi::module::native_module::NativeModule;
 use emf_core_base_rs::ffi::module::{
     Interface, InterfaceDescriptor, InterfaceName, ModuleInfo, ModuleName, ModuleStatus,
     ModuleVersion,
 };
+use emf_core_base_rs::ffi::version::Version;
 use emf_core_base_rs::ffi::CBASE_INTERFACE_NAME;
 use fimo_version_rs::is_compatible;
+use std::fmt::{Display, Formatter};
 use std::ptr::NonNull;
+
+#[derive(Debug, Hash)]
+struct InterfaceDesc {
+    name: InterfaceName,
+    version: Version,
+    extensions: Vec<String>,
+}
+
+impl From<InterfaceDescriptor> for InterfaceDesc {
+    fn from(val: InterfaceDescriptor) -> Self {
+        let extensions = val
+            .extensions
+            .iter()
+            .map(|ext| format!("{}", ext))
+            .collect();
+
+        Self {
+            name: val.name,
+            version: val.version,
+            extensions,
+        }
+    }
+}
+
+impl Display for InterfaceDesc {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{:?}, {}", self.name, self.extensions, self.version)
+    }
+}
+
+#[derive(Debug, Hash)]
+enum FimoError {
+    InvalidState {
+        state: ModuleStatus,
+        expected: ModuleStatus,
+    },
+    InvalidInterface {
+        interface: InterfaceDesc,
+    },
+}
+
+impl Display for FimoError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FimoError::InvalidState { state, expected } => {
+                write!(f, "Invalid state! state: {}, expected: {}", state, expected)
+            }
+            FimoError::InvalidInterface { interface } => {
+                write!(f, "Invalid interface! interface: {}", interface)
+            }
+        }
+    }
+}
+
+impl std::error::Error for FimoError {}
 
 /// Base module.
 #[derive(Debug)]
@@ -65,10 +123,17 @@ impl FimoBase {
 
     /// Initializes the instance.
     #[inline]
-    pub fn initialize(&mut self) -> ffi::collections::Result<i8, ffi::module::Error> {
+    pub fn initialize(&mut self) -> ffi::collections::Result<i8, Error> {
         match self.module_status {
             ModuleStatus::Terminated => (),
-            _ => return ffi::collections::Result::new_err(ffi::module::Error::ModuleStateInvalid),
+            state => {
+                return ffi::collections::Result::Err(Error::from(Box::new(
+                    FimoError::InvalidState {
+                        state,
+                        expected: ModuleStatus::Terminated,
+                    },
+                )))
+            }
         };
 
         let base_interface = Box::new(BaseInterfaceWrapper::new());
@@ -87,15 +152,22 @@ impl FimoBase {
         });
 
         self.module_status = ModuleStatus::Ready;
-        ffi::collections::Result::new_ok(0)
+        ffi::collections::Result::Ok(0)
     }
 
     /// Terminates the instance.
     #[inline]
-    pub fn terminate(&mut self) -> ffi::collections::Result<i8, ffi::module::Error> {
+    pub fn terminate(&mut self) -> ffi::collections::Result<i8, Error> {
         match self.module_status {
             ModuleStatus::Ready => (),
-            _ => return ffi::collections::Result::new_err(ffi::module::Error::ModuleStateInvalid),
+            state => {
+                return ffi::collections::Result::Err(Error::from(Box::new(
+                    FimoError::InvalidState {
+                        state,
+                        expected: ModuleStatus::Ready,
+                    },
+                )))
+            }
         };
 
         // Safety: We know the type and validity of the pointer.
@@ -107,7 +179,7 @@ impl FimoBase {
         self.interface_ptr.clear();
 
         self.module_status = ModuleStatus::Terminated;
-        ffi::collections::Result::new_ok(0)
+        ffi::collections::Result::Ok(0)
     }
 
     /// Fetches an interface from the module.
@@ -115,7 +187,7 @@ impl FimoBase {
     pub fn get_interface(
         &self,
         interface: &InterfaceDescriptor,
-    ) -> ffi::collections::Result<Interface, ffi::module::Error> {
+    ) -> ffi::collections::Result<Interface, Error> {
         if let Some(i) = self.interfaces.iter().position(|&v| {
             interface.name == v.name
                 && is_compatible(&interface.version, &v.version)
@@ -124,9 +196,11 @@ impl FimoBase {
                     .iter()
                     .all(|ex| v.extensions.contains(ex))
         }) {
-            ffi::collections::Result::new_ok(self.interface_ptr[i])
+            ffi::collections::Result::Ok(self.interface_ptr[i])
         } else {
-            ffi::collections::Result::new_err(ffi::module::Error::InterfaceNotFound)
+            ffi::collections::Result::Err(Error::from(Box::new(FimoError::InvalidInterface {
+                interface: InterfaceDesc::from(*interface),
+            })))
         }
     }
 
