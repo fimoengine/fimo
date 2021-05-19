@@ -1,12 +1,15 @@
 use crate::base_api::{DataGuard, Locked, Unlocked};
 use emf_core_base_rs::extensions::unwind_internal::UnwindInternalContextRef;
-use emf_core_base_rs::ffi::collections::NonNullConst;
+use emf_core_base_rs::ffi::collections::Optional;
+use emf_core_base_rs::ffi::errors::StaticError;
 use emf_core_base_rs::ffi::extensions::unwind_internal::{Context, PanicFn, ShutdownFn};
 use emf_core_base_rs::ffi::{CBaseFn, FnId};
+use emf_core_base_rs::ownership::Owned;
 use emf_core_base_rs::sys::sync_handler::{SyncHandler, SyncHandlerAPI};
+use emf_core_base_rs::Error;
 use parking_lot::RwLock;
 use std::cell::Cell;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::c_void;
 use std::mem::swap;
 use std::ptr::NonNull;
 use thread_local::ThreadLocal;
@@ -15,11 +18,11 @@ mod sync;
 mod unwind_context;
 
 /// Exit status of the interface.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum ExitStatus {
     Ok,
     Shutdown,
-    Panic(Option<CString>),
+    Panic(Option<Error<Owned>>),
     Other,
 }
 
@@ -64,13 +67,13 @@ impl SysAPI {
 
     /// Panics the interface.
     #[inline]
-    pub fn panic(&self, error: Option<&CStr>) -> ! {
+    pub fn panic(&self, error: Option<Error<Owned>>) -> ! {
         if let Some(context) = self.unwind_contexts.get() {
             if let Some(context) = context.get() {
                 unsafe {
                     (*context._panic)(
                         Some(context._context),
-                        error.map(|e| NonNullConst::from(e.to_bytes_with_nul())),
+                        error.map_or(Optional::None, |e| Optional::Some(e.into_inner())),
                     )
                 }
             }
@@ -107,12 +110,12 @@ impl SysAPI {
 
         match result {
             Ok(_) => ExitStatus::Ok,
-            Err(err) => {
+            Err(mut err) => {
                 if err.is::<unwind_context::ShutdownSignal>() {
                     ExitStatus::Shutdown
                 } else if err.is::<unwind_context::PanicSignal>() {
-                    let panic_sig = err.downcast_ref::<unwind_context::PanicSignal>().unwrap();
-                    ExitStatus::Panic(panic_sig.error.clone())
+                    let panic_sig = err.downcast_mut::<unwind_context::PanicSignal>().unwrap();
+                    ExitStatus::Panic(panic_sig.error.take())
                 } else {
                     ExitStatus::Other
                 }
@@ -324,10 +327,9 @@ impl SysAPI {
             }
         }
 
-        self.panic(Some(
-            CStr::from_bytes_with_nul(b"Unable to set context! Interface entered improperly.\0")
-                .unwrap(),
-        ))
+        self.panic(Some(Error::from(StaticError::new(
+            "Unable to set context! Interface entered improperly.",
+        ))))
     }
 
     /// Fetches the current unwind context.
@@ -339,10 +341,9 @@ impl SysAPI {
             }
         }
 
-        self.panic(Some(
-            CStr::from_bytes_with_nul(b"Unable to get context! Interface entered improperly.\0")
-                .unwrap(),
-        ))
+        self.panic(Some(Error::from(StaticError::new(
+            "Unable to get context! Interface entered improperly.",
+        ))))
     }
 
     /// Sets a new unwind shutdown function.
@@ -366,12 +367,9 @@ impl SysAPI {
             }
         }
 
-        self.panic(Some(
-            CStr::from_bytes_with_nul(
-                b"Unable to set context shutdown! Interface entered improperly.\0",
-            )
-            .unwrap(),
-        ))
+        self.panic(Some(Error::from(StaticError::new(
+            "Unable to set context shutdown! Interface entered improperly.",
+        ))))
     }
 
     /// Fetches the current unwind shutdown function.
@@ -383,12 +381,9 @@ impl SysAPI {
             }
         }
 
-        self.panic(Some(
-            CStr::from_bytes_with_nul(
-                b"Unable to get context shutdown! Interface entered improperly.\0",
-            )
-            .unwrap(),
-        ))
+        self.panic(Some(Error::from(StaticError::new(
+            "Unable to get context shutdown! Interface entered improperly.",
+        ))))
     }
 
     /// Sets a new unwind panic function.
@@ -412,12 +407,9 @@ impl SysAPI {
             }
         }
 
-        self.panic(Some(
-            CStr::from_bytes_with_nul(
-                b"Unable to set context panic! Interface entered improperly.\0",
-            )
-            .unwrap(),
-        ))
+        self.panic(Some(Error::from(StaticError::new(
+            "Unable to set context panic! Interface entered improperly.",
+        ))))
     }
 
     /// Fetches the current unwind shutdown function.
@@ -429,12 +421,9 @@ impl SysAPI {
             }
         }
 
-        self.panic(Some(
-            CStr::from_bytes_with_nul(
-                b"Unable to get context panic! Interface entered improperly.\0",
-            )
-            .unwrap(),
-        ))
+        self.panic(Some(Error::from(StaticError::new(
+            "Unable to get context panic! Interface entered improperly.",
+        ))))
     }
 }
 
@@ -447,7 +436,7 @@ impl<'a> DataGuard<'a, SysAPI, Unlocked> {
 
     /// Panics the interface.
     #[inline]
-    pub fn panic(&self, error: Option<&CStr>) -> ! {
+    pub fn panic(&self, error: Option<Error<Owned>>) -> ! {
         self.data.panic(error)
     }
 
@@ -488,7 +477,7 @@ impl<'a> DataGuard<'a, SysAPI, Locked> {
 
     /// Panics the interface.
     #[inline]
-    pub fn panic(&self, error: Option<&CStr>) -> ! {
+    pub fn panic(&self, error: Option<Error<Owned>>) -> ! {
         self.data.panic(error)
     }
 
@@ -586,8 +575,9 @@ impl<'a> DataGuard<'a, SysAPI, Locked> {
 mod tests {
     use crate::base_api::sys::ExitStatus;
     use crate::base_api::SysAPI;
+    use emf_core_base_rs::ffi::errors::StaticError;
     use std::cell::Cell;
-    use std::ffi::{c_void, CString};
+    use std::ffi::c_void;
     use std::marker::PhantomData;
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -687,17 +677,26 @@ mod tests {
     #[test]
     fn panic_error() {
         let sys = Arc::new(SysAPI::new());
-        let error = CString::new("error").unwrap();
 
         let callback = {
             let sys_c = Arc::clone(&sys);
-            let error_c = error.clone();
-            Callback::new(move || sys_c.panic(Some(error_c.as_c_str())))
+            Callback::new(move || sys_c.panic(Some(From::from(StaticError::new("error!")))))
         };
 
         let (context, callback) = unsafe { callback.take() };
-        let result = sys.enter_interface_from_thread(Some(context), callback);
-        assert_eq!(result, ExitStatus::Panic(Some(error)));
+        let result = match sys.enter_interface_from_thread(Some(context), callback) {
+            ExitStatus::Panic(err) => err.unwrap(),
+            _ => panic!("Should contain panic!"),
+        };
+
+        assert_eq!(
+            format!("{:?}", StaticError::new("error!")),
+            format!("{:?}", result),
+        );
+        assert_eq!(
+            format!("{:}", StaticError::new("error!")),
+            format!("{:}", result),
+        );
     }
 
     #[test]

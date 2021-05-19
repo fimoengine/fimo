@@ -13,8 +13,8 @@ crate-type = ["dylib"]
 lazy_static = "1.4.0"
 parking_lot = "0.11.1"
 thread_local = "1.1.3"
-emf-core-base-rs = "0.1.3"
 fimo_version_rs = { version = "0.1.0", path = "../../fimo_version_rs" }
+emf-core-base-rs = { git = "https://github.com/fimoengine/emf-rs", version = "0.2.0-unstable.0" }
 
 [features]
 default = ["emf-core-base-rs/unwind_internal"]

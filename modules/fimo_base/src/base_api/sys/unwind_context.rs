@@ -1,8 +1,10 @@
 use emf_core_base_rs::extensions::unwind_internal::UnwindInternalContextRef;
-use emf_core_base_rs::ffi::collections::NonNullConst;
+use emf_core_base_rs::ffi::collections::Optional;
+use emf_core_base_rs::ffi::errors::Error as ErrorFFI;
 use emf_core_base_rs::ffi::extensions::unwind_internal::Context;
 use emf_core_base_rs::ffi::TypeWrapper;
-use std::ffi::{CStr, CString};
+use emf_core_base_rs::ownership::Owned;
+use emf_core_base_rs::Error;
 use std::ptr::NonNull;
 
 /// A shutdown signal.
@@ -13,19 +15,16 @@ pub struct ShutdownSignal {}
 #[derive(Debug)]
 pub struct PanicSignal {
     /// Error message of the panic.
-    pub error: Option<CString>,
+    pub error: Option<Error<Owned>>,
 }
 
 extern "C-unwind" fn shutdown(_context: Option<NonNull<Context>>) -> ! {
     std::panic::panic_any(ShutdownSignal {})
 }
 
-extern "C-unwind" fn panic(
-    _context: Option<NonNull<Context>>,
-    error: Option<NonNullConst<u8>>,
-) -> ! {
+extern "C-unwind" fn panic(_context: Option<NonNull<Context>>, error: Optional<ErrorFFI>) -> ! {
     std::panic::panic_any(PanicSignal {
-        error: error.map(|e| unsafe { CStr::from_ptr(e.cast().as_ptr()) }.to_owned()),
+        error: error.map(Error::from).into_rust(),
     })
 }
 
@@ -40,8 +39,8 @@ pub fn construct_context() -> UnwindInternalContextRef {
 #[cfg(test)]
 mod tests {
     use crate::base_api::sys::unwind_context::{construct_context, PanicSignal, ShutdownSignal};
-    use emf_core_base_rs::ffi::collections::NonNullConst;
-    use std::ffi::CStr;
+    use emf_core_base_rs::ffi::collections::Optional;
+    use emf_core_base_rs::ffi::errors::StaticError;
 
     #[test]
     fn shutdown() {
@@ -65,7 +64,7 @@ mod tests {
 
         let result = std::panic::catch_unwind(|| {
             let context = construct_context();
-            unsafe { (*context._panic)(Some(context._context), None) }
+            unsafe { (*context._panic)(Some(context._context), Optional::None) }
         });
         std::panic::set_hook(hook);
 
@@ -79,14 +78,12 @@ mod tests {
         let hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
 
-        let error = CStr::from_bytes_with_nul(b"My error\0").unwrap();
-
         let result = std::panic::catch_unwind(|| {
             let context = construct_context();
             unsafe {
                 (*context._panic)(
                     Some(context._context),
-                    Some(NonNullConst::from(error.to_bytes_with_nul())),
+                    Optional::Some(From::from(StaticError::new("My error"))),
                 )
             }
         });
@@ -95,8 +92,11 @@ mod tests {
         let err = result.err().unwrap();
         assert_eq!(err.is::<PanicSignal>(), true);
         assert_eq!(
-            err.downcast::<PanicSignal>().unwrap().error,
-            Some(error.to_owned())
+            format!("{:?}", StaticError::new("My error")),
+            format!(
+                "{:?}",
+                err.downcast::<PanicSignal>().unwrap().error.unwrap()
+            ),
         );
     }
 }
