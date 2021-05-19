@@ -1,6 +1,6 @@
 [package]
 name = "fimo_version_rs"
-version = "0.1.0"
+version = "0.2.0-unstable.0"
 authors = ["Gabriel Borrelli <gabriel.borrelli@nanoshellsoft.com>"]
 edition = "2018"
 description = "Utilities for working with emf versions"

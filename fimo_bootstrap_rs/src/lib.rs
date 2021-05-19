@@ -182,24 +182,9 @@ impl<'l, 'a, L: CoreLoader<'a>> CoreCFG<'l, 'a, L> {
         let result = interface.lock(|i| -> Result<_, Error<_>> {
             // Unload modules
             for mut module in modules {
-                use emf_core_base_rs::ffi::module as module_ffi;
-                use emf_core_base_rs::module;
-                ModuleAPI::terminate(i, &mut module).map_or_else(
-                    |e| match e {
-                        // Already unloaded.
-                        module::Error::FFIError(module_ffi::Error::ModuleStateInvalid) => Ok(()),
-                        _ => Err(e),
-                    },
-                    |_v| Ok(()),
-                )?;
-                ModuleAPI::unload(i, &mut module).map_or_else(
-                    |e| match e {
-                        // Already unloaded.
-                        module::Error::FFIError(module_ffi::Error::ModuleStateInvalid) => Ok(()),
-                        _ => Err(e),
-                    },
-                    |_v| Ok(()),
-                )?;
+                // Ignore errors.
+                let _ = ModuleAPI::terminate(i, &mut module);
+                let _ = ModuleAPI::unload(i, &mut module);
                 ModuleAPI::remove_module(i, module)?;
             }
 

@@ -50,14 +50,14 @@ pub use native::{NativeLoader, NativeLoaderError, ValidationError};
 
 mod native {
     use crate::core_loader::CoreLoader;
-    use emf_core_base_rs::{module, CBase, CBaseRef};
+    use emf_core_base_rs::module::native_module::{NativeModule, NativeModuleInstance};
+    use emf_core_base_rs::ownership::Owned;
+    use emf_core_base_rs::version::Version;
+    use emf_core_base_rs::{CBase, CBaseRef, Error};
     use libloading::Library;
     use std::marker::PhantomData;
     use std::path::{Path, PathBuf};
 
-    use emf_core_base_rs::module::native_module::{NativeModule, NativeModuleInstance};
-    use emf_core_base_rs::ownership::Owned;
-    use emf_core_base_rs::version::Version;
     pub use manifest::{
         get_manifest_path, parse_manifest, parse_manifest_from_file, ModuleManifest,
         ValidationError,
@@ -146,7 +146,7 @@ mod native {
                 _b: Option<NonNull<CBaseFFI>>,
                 _id: FnId,
             ) -> Optional<CBaseFn> {
-                Optional::none()
+                Optional::None
             }
 
             const BASE_MODULE: ModuleHandle = ModuleHandle { id: 0 };
@@ -156,10 +156,7 @@ mod native {
                     .into_mut()
                     .as_mut()
                     .load(BASE_MODULE, None, TypeWrapper(has_fn), TypeWrapper(get_fn))
-                    .map_or_else(
-                        |e| Err(emf_core_base_rs::module::Error::FFIError(e)),
-                        |v| Ok(NativeModuleInstance::new(v)),
-                    )?;
+                    .map_or_else(|e| Err(Error::new(e)), |v| Ok(NativeModuleInstance::new(v)))?;
 
                 if let Err(e) = module.initialize(&mut instance) {
                     module.unload(instance)?;
@@ -210,8 +207,8 @@ mod native {
         LibError(libloading::Error),
         /// Serde error.
         SerdeError(serde_json::Error),
-        /// Error originating from the module api.
-        ModuleAPIError(module::Error),
+        /// Error originating from the api.
+        APIError(Error<Owned>),
         /// Error while validating a module manifest.
         ModuleManifestError(ValidationError),
         /// The provided core module is invalid.
@@ -236,9 +233,9 @@ mod native {
         }
     }
 
-    impl From<module::Error> for NativeLoaderError {
-        fn from(err: module::Error) -> Self {
-            NativeLoaderError::ModuleAPIError(err)
+    impl From<Error<Owned>> for NativeLoaderError {
+        fn from(err: Error<Owned>) -> Self {
+            NativeLoaderError::APIError(err)
         }
     }
 
