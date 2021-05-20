@@ -153,7 +153,6 @@ impl BaseInterfaceWrapper {
 pub(crate) mod utilities {
     use emf_core_base_rs::ffi::collections::NonNullConst;
     use emf_core_base_rs::ffi::library::OSPathChar;
-    use std::ffi::OsString;
     use std::path::PathBuf;
 
     #[cfg(unix)]
@@ -173,6 +172,7 @@ pub(crate) mod utilities {
 
     #[cfg(windows)]
     pub unsafe fn os_path_to_path_buf(path: NonNullConst<OSPathChar>) -> PathBuf {
+        use std::ffi::OsString;
         use std::os::windows::ffi::OsStringExt;
         let mut ptr = path.as_ptr();
 
@@ -605,7 +605,7 @@ pub(crate) mod library_bindings {
         base.get_sys_api().setup_unwind(|_| {
             base.get_library_api()
                 .get_library_types(&mut *buffer.as_ptr())
-                .map_or_else(|e| Result::Err(e.into_inner()), |v| Result::Ok(v))
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         })
     }
 
