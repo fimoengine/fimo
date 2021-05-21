@@ -284,8 +284,7 @@ pub(crate) mod version_bindings {
         patch: i32,
     ) -> Version {
         BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .new_short(major, minor, patch)
+            .setup_unwind(move |base| base.get_version_api().new_short(major, minor, patch))
     }
 
     #[allow(improper_ctypes_definitions)]
@@ -297,9 +296,10 @@ pub(crate) mod version_bindings {
         release_type: ReleaseType,
         release_number: i8,
     ) -> Version {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .new_long(major, minor, patch, release_type, release_number)
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .new_long(major, minor, patch, release_type, release_number)
+        })
     }
 
     #[allow(improper_ctypes_definitions)]
@@ -312,9 +312,16 @@ pub(crate) mod version_bindings {
         release_number: i8,
         build: i64,
     ) -> Version {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .new_full(major, minor, patch, release_type, release_number, build)
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api().new_full(
+                major,
+                minor,
+                patch,
+                release_type,
+                release_number,
+                build,
+            )
+        })
     }
 
     #[allow(improper_ctypes_definitions)]
@@ -322,10 +329,11 @@ pub(crate) mod version_bindings {
         base_module: Option<NonNull<CBase>>,
         buffer: NonNullConst<ConstSpan<u8>>,
     ) -> Result<Version, Error> {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .from_string(std::str::from_utf8_unchecked(buffer.as_ref().as_ref()))
-            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .from_string(std::str::from_utf8_unchecked(buffer.as_ref().as_ref()))
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        })
     }
 
     pub unsafe extern "C-unwind" fn string_length_short(
@@ -333,8 +341,7 @@ pub(crate) mod version_bindings {
         version: NonNullConst<Version>,
     ) -> usize {
         BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .string_length_short(version.as_ref())
+            .setup_unwind(move |base| base.get_version_api().string_length_short(version.as_ref()))
     }
 
     pub unsafe extern "C-unwind" fn string_length_long(
@@ -342,8 +349,7 @@ pub(crate) mod version_bindings {
         version: NonNullConst<Version>,
     ) -> usize {
         BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .string_length_long(version.as_ref())
+            .setup_unwind(move |base| base.get_version_api().string_length_long(version.as_ref()))
     }
 
     pub unsafe extern "C-unwind" fn string_length_full(
@@ -351,8 +357,7 @@ pub(crate) mod version_bindings {
         version: NonNullConst<Version>,
     ) -> usize {
         BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .string_length_full(version.as_ref())
+            .setup_unwind(move |base| base.get_version_api().string_length_full(version.as_ref()))
     }
 
     pub unsafe extern "C-unwind" fn as_string_short(
@@ -360,13 +365,14 @@ pub(crate) mod version_bindings {
         version: NonNullConst<Version>,
         buffer: NonNull<MutSpan<u8>>,
     ) -> Result<usize, Error> {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .as_string_short(
-                version.as_ref(),
-                std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
-            )
-            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .as_string_short(
+                    version.as_ref(),
+                    std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
+                )
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        })
     }
 
     pub unsafe extern "C-unwind" fn as_string_long(
@@ -374,13 +380,14 @@ pub(crate) mod version_bindings {
         version: NonNullConst<Version>,
         buffer: NonNull<MutSpan<u8>>,
     ) -> Result<usize, Error> {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .as_string_long(
-                version.as_ref(),
-                std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
-            )
-            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .as_string_long(
+                    version.as_ref(),
+                    std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
+                )
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        })
     }
 
     pub unsafe extern "C-unwind" fn as_string_full(
@@ -388,25 +395,27 @@ pub(crate) mod version_bindings {
         version: NonNullConst<Version>,
         buffer: NonNull<MutSpan<u8>>,
     ) -> Result<usize, Error> {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .as_string_full(
-                version.as_ref(),
-                std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
-            )
-            .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .as_string_full(
+                    version.as_ref(),
+                    std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
+                )
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
+        })
     }
 
     pub unsafe extern "C-unwind" fn string_is_valid(
         base_module: Option<NonNull<CBase>>,
         version_string: NonNullConst<ConstSpan<u8>>,
     ) -> Bool {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .string_is_valid(std::str::from_utf8_unchecked(
-                version_string.as_ref().as_ref(),
-            ))
-            .into()
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .string_is_valid(std::str::from_utf8_unchecked(
+                    version_string.as_ref().as_ref(),
+                ))
+                .into()
+        })
     }
 
     pub unsafe extern "C-unwind" fn compare(
@@ -414,14 +423,13 @@ pub(crate) mod version_bindings {
         lhs: NonNullConst<Version>,
         rhs: NonNullConst<Version>,
     ) -> i32 {
-        match BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .compare(lhs.as_ref(), rhs.as_ref())
-        {
-            Ordering::Less => -1,
-            Ordering::Equal => 0,
-            Ordering::Greater => 1,
-        }
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            match base.get_version_api().compare(lhs.as_ref(), rhs.as_ref()) {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            }
+        })
     }
 
     pub unsafe extern "C-unwind" fn compare_weak(
@@ -429,14 +437,16 @@ pub(crate) mod version_bindings {
         lhs: NonNullConst<Version>,
         rhs: NonNullConst<Version>,
     ) -> i32 {
-        match BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .compare_weak(lhs.as_ref(), rhs.as_ref())
-        {
-            Ordering::Less => -1,
-            Ordering::Equal => 0,
-            Ordering::Greater => 1,
-        }
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            match base
+                .get_version_api()
+                .compare_weak(lhs.as_ref(), rhs.as_ref())
+            {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            }
+        })
     }
 
     pub unsafe extern "C-unwind" fn compare_strong(
@@ -444,14 +454,16 @@ pub(crate) mod version_bindings {
         lhs: NonNullConst<Version>,
         rhs: NonNullConst<Version>,
     ) -> i32 {
-        match BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .compare_strong(lhs.as_ref(), rhs.as_ref())
-        {
-            Ordering::Less => -1,
-            Ordering::Equal => 0,
-            Ordering::Greater => 1,
-        }
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            match base
+                .get_version_api()
+                .compare_strong(lhs.as_ref(), rhs.as_ref())
+            {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            }
+        })
     }
 
     pub unsafe extern "C-unwind" fn is_compatible(
@@ -459,10 +471,11 @@ pub(crate) mod version_bindings {
         lhs: NonNullConst<Version>,
         rhs: NonNullConst<Version>,
     ) -> Bool {
-        BaseAPI::from_raw_unlocked(base_module.unwrap())
-            .get_version_api()
-            .is_compatible(lhs.as_ref(), rhs.as_ref())
-            .into()
+        BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
+            base.get_version_api()
+                .is_compatible(lhs.as_ref(), rhs.as_ref())
+                .into()
+        })
     }
 }
 
@@ -494,8 +507,7 @@ pub(crate) mod library_bindings {
         loader: NonNullConst<LibraryLoaderInterface>,
         lib_type: NonNullConst<LibraryType>,
     ) -> Result<LoaderHandle, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .register_loader(
                     &LibraryLoaderWrapper(loader),
@@ -512,8 +524,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         handle: LoaderHandle,
     ) -> Result<i8, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .unregister_loader(Loader::new(handle))
                 .map_or_else(|e| Result::Err(e.into_inner()), |_v| Result::Ok(0))
@@ -524,8 +535,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         handle: LoaderHandle,
     ) -> Result<NonNullConst<LibraryLoaderInterface>, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_loader_interface(&Loader::new(handle))
                 .map_or_else(
@@ -539,8 +549,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         lib_type: NonNullConst<LibraryType>,
     ) -> Result<LoaderHandle, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_loader_handle_from_type(
                     std::str::from_utf8(lib_type.as_ref().as_ref()).unwrap(),
@@ -556,8 +565,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
     ) -> Result<LoaderHandle, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_loader_handle_from_library(&Library::<Owned>::new(handle))
                 .map_or_else(
@@ -568,17 +576,15 @@ pub(crate) mod library_bindings {
     }
 
     pub unsafe extern "C-unwind" fn get_num_loaders(base_module: Option<NonNull<CBase>>) -> usize {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api()
-            .setup_unwind(|_| base.get_library_api().get_num_loaders())
+        BaseAPI::from_raw_locked(base_module.unwrap())
+            .setup_unwind(move |base| base.get_library_api().get_num_loaders())
     }
 
     pub unsafe extern "C-unwind" fn library_exists(
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
     ) -> Bool {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .library_exists(&Library::<Owned>::new(handle))
                 .into()
@@ -589,8 +595,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         lib_type: NonNullConst<LibraryType>,
     ) -> Bool {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .type_exists(std::str::from_utf8(lib_type.as_ref().as_ref()).unwrap())
                 .into()
@@ -601,8 +606,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         buffer: NonNull<MutSpan<LibraryType>>,
     ) -> Result<usize, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_library_types(&mut *buffer.as_ptr())
                 .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
@@ -612,17 +616,15 @@ pub(crate) mod library_bindings {
     pub unsafe extern "C-unwind" fn create_library_handle(
         base_module: Option<NonNull<CBase>>,
     ) -> LibraryHandle {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api()
-            .setup_unwind(|_| base.get_library_api().create_library_handle().as_handle())
+        BaseAPI::from_raw_locked(base_module.unwrap())
+            .setup_unwind(move |base| base.get_library_api().create_library_handle().as_handle())
     }
 
     pub unsafe extern "C-unwind" fn remove_library_handle(
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
     ) -> Result<i8, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .remove_library_handle(Library::new(handle))
                 .map_or_else(|e| Result::Err(e.into_inner()), |_v| Result::Ok(0))
@@ -635,8 +637,7 @@ pub(crate) mod library_bindings {
         loader: LoaderHandle,
         internal: InternalHandle,
     ) -> Result<i8, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .link_library(
                     &Library::<Owned>::new(handle),
@@ -651,8 +652,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
     ) -> Result<InternalHandle, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_internal_library_handle(&Library::<Owned>::new(handle))
                 .map_or_else(
@@ -668,8 +668,7 @@ pub(crate) mod library_bindings {
         path: NonNullConst<OSPathChar>,
     ) -> Result<LibraryHandle, Error> {
         let path = super::utilities::os_path_to_path_buf(path);
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .load_library(&Loader::<Owned>::new(loader), path)
                 .map_or_else(
@@ -683,8 +682,7 @@ pub(crate) mod library_bindings {
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
     ) -> Result<i8, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .unload_library(Library::new(handle))
                 .map_or_else(|e| Result::Err(e.into_inner()), |_v| Result::Ok(0))
@@ -696,8 +694,7 @@ pub(crate) mod library_bindings {
         handle: LibraryHandle,
         symbol: NonNullConst<u8>,
     ) -> Result<Symbol<NonNullConst<c_void>>, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_data_symbol(
                     &Library::<Owned>::new(handle),
@@ -721,8 +718,7 @@ pub(crate) mod library_bindings {
         handle: LibraryHandle,
         symbol: NonNullConst<u8>,
     ) -> Result<Symbol<CBaseFn>, Error> {
-        let base = BaseAPI::from_raw_locked(base_module.unwrap());
-        base.get_sys_api().setup_unwind(|_| {
+        BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_function_symbol(
                     &Library::<Owned>::new(handle),
