@@ -9,7 +9,6 @@ use emf_core_base_rs::sys::sync_handler::{SyncHandler, SyncHandlerAPI};
 use emf_core_base_rs::Error;
 use parking_lot::RwLock;
 use std::cell::Cell;
-use std::ffi::c_void;
 use std::mem::swap;
 use std::panic::{AssertUnwindSafe, UnwindSafe};
 use std::ptr::NonNull;
@@ -85,18 +84,36 @@ impl SysAPI {
 
     /// Enters the interface from a new thread.
     #[inline]
-    pub fn enter_interface_from_thread(
+    pub fn enter_interface_from_thread<F: FnOnce(&Self) -> R + UnwindSafe, R>(
         &self,
-        context: Option<NonNull<c_void>>,
-        func: extern "C-unwind" fn(Option<NonNull<c_void>>),
-    ) -> ExitStatus<()> {
+        f: F,
+    ) -> ExitStatus<R> {
         // Initialize a default context
         let default_context = self.unwind_contexts.get_or(|| Cell::new(None));
         if default_context.get() != None {
-            panic!("Interface entered twice.");
+            self.panic(Some(Error::from(StaticError::new(
+                "Interface entered twice!",
+            ))));
         }
 
-        self.catch_unwind(move |_| func(context))
+        self.catch_unwind(f)
+    }
+
+    /// Enters the interface from a new thread mutably.
+    #[inline]
+    pub fn enter_interface_from_thread_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        // Initialize a default context
+        let default_context = self.unwind_contexts.get_or(|| Cell::new(None));
+        if default_context.get() != None {
+            self.panic(Some(Error::from(StaticError::new(
+                "Interface entered twice!",
+            ))));
+        }
+
+        self.catch_unwind_mut(f)
     }
 
     /// Calls a closure, propagating any panic that occurs.
@@ -128,7 +145,10 @@ impl SysAPI {
     /// Calls a closure, catching any panic that might occur.
     #[inline]
     pub fn catch_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
-        let context = self.unwind_contexts.get().unwrap();
+        let context = self
+            .unwind_contexts
+            .get()
+            .unwrap_or_else(|| panic!("Interface not entered properly"));
         let old = context.replace(Some(unwind_context::construct_context()));
 
         // Disable outputting the error the stderr
@@ -163,7 +183,10 @@ impl SysAPI {
         &mut self,
         f: F,
     ) -> ExitStatus<R> {
-        let context = self.unwind_contexts.get().unwrap();
+        let context = self
+            .unwind_contexts
+            .get()
+            .unwrap_or_else(|| panic!("Interface not entered properly"));
         let old = context.replace(Some(unwind_context::construct_context()));
 
         // Disable outputting the error the stderr
@@ -590,12 +613,26 @@ impl<'a> DataGuard<'a, SysAPI, Unlocked> {
 
     /// Enters the interface from a new thread.
     #[inline]
-    pub fn enter_interface_from_thread(
+    pub fn enter_interface_from_thread<F: FnOnce(&Self) -> R + UnwindSafe, R>(
         &self,
-        context: Option<NonNull<c_void>>,
-        func: extern "C-unwind" fn(Option<NonNull<c_void>>),
-    ) -> ExitStatus<()> {
-        self.data.enter_interface_from_thread(context, func)
+        f: F,
+    ) -> ExitStatus<R> {
+        self.data.enter_interface_from_thread(move |_| f(self))
+    }
+
+    /// Enters the interface from a new thread mutably.
+    #[inline]
+    pub fn enter_interface_from_thread_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .data
+                .enter_interface_from_thread_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
     }
 
     /// Calls a closure, propagating any panic that occurs.
@@ -803,114 +840,39 @@ mod tests {
     use crate::base_api::SysAPI;
     use emf_core_base_rs::ffi::errors::StaticError;
     use std::cell::Cell;
-    use std::ffi::c_void;
-    use std::marker::PhantomData;
-    use std::ptr::NonNull;
+    use std::panic::AssertUnwindSafe;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Barrier};
 
-    struct Callback<F> {
-        pub context: NonNull<c_void>,
-        pub callback: extern "C-unwind" fn(Option<NonNull<c_void>>),
-        _phantom: PhantomData<F>,
-    }
-
-    impl<F> Drop for Callback<F> {
-        fn drop(&mut self) {
-            drop(unsafe { Box::<F>::from_raw(self.context.cast().as_ptr()) });
-        }
-    }
-
-    impl<F> Callback<F>
-    where
-        F: FnOnce(),
-    {
-        pub fn new(f: F) -> Self {
-            Self {
-                context: unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(f))) }.cast(),
-                callback: Self::callback,
-                _phantom: PhantomData,
-            }
-        }
-
-        pub unsafe fn take(
-            self,
-        ) -> (
-            NonNull<c_void>,
-            extern "C-unwind" fn(Option<NonNull<c_void>>),
-        ) {
-            let res = (self.context, self.callback);
-            std::mem::forget(self);
-            res
-        }
-
-        extern "C-unwind" fn callback(context: Option<NonNull<c_void>>) {
-            let f: Box<F> = unsafe { Box::from_raw(context.unwrap().cast().as_ptr()) };
-            f();
-        }
-    }
-
     #[test]
     fn normal_exit() {
-        let sys = Arc::new(SysAPI::new());
-
-        let callback = { Callback::new(move || {}) };
-
-        let (context, callback) = unsafe { callback.take() };
-        let result = sys.enter_interface_from_thread(Some(context), callback);
+        let result = SysAPI::new().enter_interface_from_thread(move |_| {});
         assert_eq!(result, ExitStatus::Ok(()));
     }
 
     #[test]
     fn abnormal_error() {
-        let sys = Arc::new(SysAPI::new());
-
-        let callback = { Callback::new(move || panic!("Hey!")) };
-
-        let (context, callback) = unsafe { callback.take() };
-        let result = sys.enter_interface_from_thread(Some(context), callback);
+        let result = SysAPI::new().enter_interface_from_thread(move |_| panic!("Hey!"));
         assert_eq!(result, ExitStatus::Other);
     }
 
     #[test]
     fn shutdown() {
-        let sys = Arc::new(SysAPI::new());
-
-        let callback = {
-            let sys_c = Arc::clone(&sys);
-            Callback::new(move || sys_c.shutdown())
-        };
-
-        let (context, callback) = unsafe { callback.take() };
-        let result = sys.enter_interface_from_thread(Some(context), callback);
+        let result = SysAPI::new().enter_interface_from_thread(move |sys| sys.shutdown());
         assert_eq!(result, ExitStatus::Shutdown);
     }
 
     #[test]
     fn panic() {
-        let sys = Arc::new(SysAPI::new());
-
-        let callback = {
-            let sys_c = Arc::clone(&sys);
-            Callback::new(move || sys_c.panic(None))
-        };
-
-        let (context, callback) = unsafe { callback.take() };
-        let result = sys.enter_interface_from_thread(Some(context), callback);
+        let result = SysAPI::new().enter_interface_from_thread(move |sys| sys.panic(None));
         assert_eq!(result, ExitStatus::Panic(None));
     }
 
     #[test]
     fn panic_error() {
-        let sys = Arc::new(SysAPI::new());
-
-        let callback = {
-            let sys_c = Arc::clone(&sys);
-            Callback::new(move || sys_c.panic(Some(From::from(StaticError::new("error!")))))
-        };
-
-        let (context, callback) = unsafe { callback.take() };
-        let result = match sys.enter_interface_from_thread(Some(context), callback) {
+        let result = match SysAPI::new().enter_interface_from_thread(move |sys| {
+            sys.panic(Some(From::from(StaticError::new("error!"))))
+        }) {
             ExitStatus::Panic(err) => err.unwrap(),
             _ => panic!("Should contain panic!"),
         };
@@ -937,31 +899,27 @@ mod tests {
         let sys = Arc::new(SysAPI::new());
         let data = Arc::new(CellSend(Cell::new(0usize)));
 
-        let callback = {
-            let sys_c = Arc::clone(&sys);
-            let data_c = Arc::clone(&data);
-            Callback::new(move || {
-                let mut threads = Vec::new();
-                for _ in 0..ITERATIONS {
-                    let sys_thr = Arc::clone(&sys_c);
-                    let data_thr = Arc::clone(&data_c);
+        let sys_c = AssertUnwindSafe(Arc::clone(&sys));
+        let data_c = AssertUnwindSafe(Arc::clone(&data));
 
-                    threads.push(std::thread::spawn(move || {
-                        sys_thr.lock();
-                        data_thr.0.set(data_thr.0.get() + 1);
-                        sys_thr.unlock();
-                    }));
-                }
+        sys.enter_interface_from_thread(move |_| {
+            let mut threads = Vec::new();
+            for _ in 0..ITERATIONS {
+                let sys_thr = Arc::clone(&sys_c);
+                let data_thr = Arc::clone(&data_c);
 
-                // Await for all threads to finish.
-                for t in threads {
-                    t.join().unwrap();
-                }
-            })
-        };
+                threads.push(std::thread::spawn(move || {
+                    sys_thr.lock();
+                    data_thr.0.set(data_thr.0.get() + 1);
+                    sys_thr.unlock();
+                }));
+            }
 
-        let (context, callback) = unsafe { callback.take() };
-        sys.enter_interface_from_thread(Some(context), callback);
+            // Await for all threads to finish.
+            for t in threads {
+                t.join().unwrap();
+            }
+        });
         assert_eq!(data.0.get(), ITERATIONS);
     }
 
@@ -970,38 +928,34 @@ mod tests {
         let sys = Arc::new(SysAPI::new());
         let data = Arc::new(AtomicBool::new(false));
 
-        let callback = {
-            let sys_c = Arc::clone(&sys);
-            let data_c = Arc::clone(&data);
-            Callback::new(move || {
-                let barrier = Arc::new(Barrier::new(2));
-                assert_eq!(sys_c.try_lock(), true);
+        let sys_c = AssertUnwindSafe(Arc::clone(&sys));
+        let data_c = AssertUnwindSafe(Arc::clone(&data));
 
-                let t = {
-                    let sys_t = Arc::clone(&sys_c);
-                    let data_t = Arc::clone(&data_c);
-                    let barrier_t = Arc::clone(&barrier);
+        sys.enter_interface_from_thread(move |_| {
+            let barrier = Arc::new(Barrier::new(2));
+            assert_eq!(sys_c.try_lock(), true);
 
-                    std::thread::spawn(move || {
-                        assert_eq!(sys_t.try_lock(), false);
-                        barrier_t.wait();
+            let t = {
+                let sys_t = Arc::clone(&sys_c);
+                let data_t = Arc::clone(&data_c);
+                let barrier_t = Arc::clone(&barrier);
 
-                        sys_t.lock();
-                        data_t.store(true, Ordering::Release);
-                        sys_t.unlock();
-                    })
-                };
+                std::thread::spawn(move || {
+                    assert_eq!(sys_t.try_lock(), false);
+                    barrier_t.wait();
 
-                barrier.wait();
-                assert_eq!(data_c.load(Ordering::Acquire), false);
-                sys_c.unlock();
+                    sys_t.lock();
+                    data_t.store(true, Ordering::Release);
+                    sys_t.unlock();
+                })
+            };
 
-                t.join().unwrap();
-            })
-        };
+            barrier.wait();
+            assert_eq!(data_c.load(Ordering::Acquire), false);
+            sys_c.unlock();
 
-        let (context, callback) = unsafe { callback.take() };
-        sys.enter_interface_from_thread(Some(context), callback);
+            t.join().unwrap();
+        });
         assert_eq!(data.load(Ordering::Acquire), true);
     }
 }
