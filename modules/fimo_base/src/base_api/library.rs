@@ -13,7 +13,7 @@ use emf_core_base_rs::ownership::{
     BorrowMutable, ImmutableAccessIdentifier, MutableAccessIdentifier, Owned,
 };
 use emf_core_base_rs::Error;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{HashMap, HashSet};
 use std::ffi::{c_void, CStr};
 use std::fmt::{Debug, Display, Formatter};
 use std::path::Path;
@@ -104,14 +104,14 @@ impl std::error::Error for LibraryError {}
 /// Implementation of the library api.
 #[derive(Debug)]
 pub struct LibraryAPI {
-    lib_type_to_loader: BTreeMap<String, LoaderHandle>,
+    lib_type_to_loader: HashMap<String, LoaderHandle>,
 
-    loaders: BTreeMap<LoaderHandle, NonNullConst<LibraryLoaderInterface>>,
-    loader_to_lib_type: BTreeMap<LoaderHandle, String>,
-    loader_to_libraries: BTreeMap<LoaderHandle, BTreeSet<LibraryHandle>>,
+    loaders: HashMap<LoaderHandle, NonNullConst<LibraryLoaderInterface>>,
+    loader_to_lib_type: HashMap<LoaderHandle, String>,
+    loader_to_libraries: HashMap<LoaderHandle, HashSet<LibraryHandle>>,
 
-    library_to_loader: BTreeMap<LibraryHandle, LoaderHandle>,
-    libraries: BTreeMap<LibraryHandle, InternalHandle>,
+    library_to_loader: HashMap<LibraryHandle, LoaderHandle>,
+    libraries: HashMap<LibraryHandle, InternalHandle>,
 
     loader_gen: KeyGenerator<LoaderHandle, fn(&LoaderHandle) -> LoaderHandle>,
     library_gen: KeyGenerator<LibraryHandle, fn(&LibraryHandle) -> LibraryHandle>,
