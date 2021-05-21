@@ -600,29 +600,41 @@ impl<'a> DataGuard<'a, SysAPI, Unlocked> {
 
     /// Calls a closure, propagating any panic that occurs.
     #[inline]
-    pub fn setup_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> R {
-        self.data.setup_unwind(f)
+    pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        self.data.setup_unwind(move |_| f(self))
     }
 
     /// Calls a closure mutably, propagating any panic that occurs.
     #[inline]
-    pub fn setup_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
-        self.data.setup_unwind_mut(f)
+    pub fn setup_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .data
+                .setup_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
     }
 
     /// Calls a closure, catching any panic that might occur.
     #[inline]
-    pub fn catch_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
-        self.data.catch_unwind(f)
+    pub fn catch_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        self.data.catch_unwind(move |_| f(self))
     }
 
     /// Calls a closure mutably, catching any panic that might occur.
     #[inline]
-    pub fn catch_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(
+    pub fn catch_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
         &mut self,
         f: F,
     ) -> ExitStatus<R> {
-        self.data.catch_unwind_mut(f)
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .data
+                .catch_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
     }
 
     /// Locks the interface.
@@ -665,29 +677,41 @@ impl<'a> DataGuard<'a, SysAPI, Locked> {
 
     /// Calls a closure, propagating any panic that occurs.
     #[inline]
-    pub fn setup_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> R {
-        self.data.setup_unwind(f)
+    pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        self.data.setup_unwind(move |_| f(self))
     }
 
     /// Calls a closure mutably, propagating any panic that occurs.
     #[inline]
-    pub fn setup_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
-        self.data.setup_unwind_mut(f)
+    pub fn setup_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .data
+                .setup_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
     }
 
     /// Calls a closure, catching any panic that might occur.
     #[inline]
-    pub fn catch_unwind<F: FnOnce(&SysAPI) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
-        self.data.catch_unwind(f)
+    pub fn catch_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        self.data.catch_unwind(move |_| f(self))
     }
 
     /// Calls a closure mutably, catching any panic that might occur.
     #[inline]
-    pub fn catch_unwind_mut<F: FnOnce(&mut SysAPI) -> R + UnwindSafe, R>(
+    pub fn catch_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
         &mut self,
         f: F,
     ) -> ExitStatus<R> {
-        self.data.catch_unwind_mut(f)
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .data
+                .catch_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
     }
 
     /// Checks if a function is implemented.

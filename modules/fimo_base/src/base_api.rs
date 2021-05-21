@@ -10,9 +10,10 @@ mod module;
 mod sys;
 mod version;
 
+use crate::base_api::sys::ExitStatus;
 pub use library::LibraryAPI;
 pub use module::ModuleAPI;
-use std::panic::RefUnwindSafe;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 pub use sys::SysAPI;
 pub use version::VersionAPI;
 
@@ -168,6 +169,45 @@ impl BaseAPI {
 }
 
 impl<'a> DataGuard<'a, BaseAPI, Unlocked> {
+    /// Calls a closure, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        self.get_sys_api().setup_unwind(move |_| f(self))
+    }
+
+    /// Calls a closure mutably, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .get_sys_api()
+                .setup_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
+    }
+
+    /// Calls a closure, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        self.get_sys_api().catch_unwind(move |_| f(self))
+    }
+
+    /// Calls a closure mutably, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .get_sys_api()
+                .catch_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
+    }
+
     /// Fetches the library api.
     pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_library_api() })
@@ -190,6 +230,45 @@ impl<'a> DataGuard<'a, BaseAPI, Unlocked> {
 }
 
 impl<'a> DataGuard<'a, BaseAPI, Locked> {
+    /// Calls a closure, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
+        self.get_sys_api().setup_unwind(move |_| f(self))
+    }
+
+    /// Calls a closure mutably, propagating any panic that occurs.
+    #[inline]
+    pub fn setup_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(&mut self, f: F) -> R {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .get_sys_api()
+                .setup_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
+    }
+
+    /// Calls a closure, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> ExitStatus<R> {
+        self.get_sys_api().catch_unwind(move |_| f(self))
+    }
+
+    /// Calls a closure mutably, catching any panic that might occur.
+    #[inline]
+    pub fn catch_unwind_mut<F: FnOnce(&mut Self) -> R + UnwindSafe, R>(
+        &mut self,
+        f: F,
+    ) -> ExitStatus<R> {
+        let mut ptr = NonNull::from(self);
+        // The reference is only used once.
+        unsafe {
+            ptr.as_mut()
+                .get_sys_api()
+                .catch_unwind_mut(move |_| f(&mut *ptr.as_ptr()))
+        }
+    }
+
     /// Fetches the library api.
     pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI, Locked> {
         unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_library_api()).assume_locked() }
