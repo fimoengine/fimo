@@ -323,7 +323,7 @@ pub(crate) mod version_bindings {
     ) -> Result<Version, Error> {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
-                .from_string(std::str::from_utf8_unchecked(buffer.as_ref().as_ref()))
+                .from_string(std::str::from_utf8(buffer.as_ref()).unwrap())
                 .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         })
     }
@@ -403,9 +403,7 @@ pub(crate) mod version_bindings {
     ) -> Bool {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
-                .string_is_valid(std::str::from_utf8_unchecked(
-                    version_string.as_ref().as_ref(),
-                ))
+                .string_is_valid(std::str::from_utf8(version_string.as_ref()).unwrap())
                 .into()
         })
     }
