@@ -13,6 +13,7 @@ crate-type = ["dylib"]
 lazy_static = "1.4.0"
 parking_lot = "0.11.1"
 thread_local = "1.1.3"
+libloading = "0.7.0"
 fimo_version_rs = { version = "0.2.0-unstable.0", path = "../../fimo_version_rs" }
 emf-core-base-rs = { git = "https://github.com/fimoengine/emf-rs", version = "0.2.0-unstable.0" }
 

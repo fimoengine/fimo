@@ -1,14 +1,113 @@
-use crate::base_api::BaseAPI;
+use crate::base_api::{BaseAPI, INTERFACE_VERSION};
+use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::module::InterfaceExtension;
 use emf_core_base_rs::ffi::version::Version;
-use emf_core_base_rs::ffi::{CBaseInterface, TypeWrapper};
+use emf_core_base_rs::ffi::{CBaseBinding, CBaseInterface, CBaseInterfaceVTable, TypeWrapper};
 use lazy_static::lazy_static;
+use std::mem::MaybeUninit;
 use std::ptr::NonNull;
 
 lazy_static! {
     static ref EXTENSIONS: Vec<InterfaceExtension> =
         vec![InterfaceExtension::from("unwind_internal")];
 }
+
+union Uninit<T: Copy + Sized> {
+    t: T,
+    u: (),
+}
+
+const unsafe fn uninit<T: Copy + Sized>() -> T {
+    Uninit { u: () }.t
+}
+
+#[allow(invalid_value)]
+const INTERFACE_VTABLE: MaybeUninit<CBaseInterfaceVTable> =
+    MaybeUninit::new(CBaseInterfaceVTable {
+        version: INTERFACE_VERSION,
+        sys_shutdown_fn: TypeWrapper(sys_bindings::shutdown),
+        sys_panic_fn: TypeWrapper(sys_bindings::panic),
+        sys_has_function_fn: TypeWrapper(sys_bindings::has_fn),
+        sys_get_function_fn: TypeWrapper(sys_bindings::get_fn),
+        sys_lock_fn: TypeWrapper(sys_bindings::lock),
+        sys_try_lock_fn: TypeWrapper(sys_bindings::try_lock),
+        sys_unlock_fn: TypeWrapper(sys_bindings::unlock),
+        sys_get_sync_handler_fn: TypeWrapper(sys_bindings::get_sync_handler),
+        sys_set_sync_handler_fn: TypeWrapper(sys_bindings::set_sync_handler),
+        version_new_short_fn: TypeWrapper(version_bindings::new_short),
+        version_new_long_fn: TypeWrapper(version_bindings::new_long),
+        version_new_full_fn: TypeWrapper(version_bindings::new_full),
+        version_from_string_fn: TypeWrapper(version_bindings::from_string),
+        version_string_length_short_fn: TypeWrapper(version_bindings::string_length_short),
+        version_string_length_long_fn: TypeWrapper(version_bindings::string_length_long),
+        version_string_length_full_fn: TypeWrapper(version_bindings::string_length_full),
+        version_as_string_short_fn: TypeWrapper(version_bindings::as_string_short),
+        version_as_string_long_fn: TypeWrapper(version_bindings::as_string_long),
+        version_as_string_full_fn: TypeWrapper(version_bindings::as_string_full),
+        version_string_is_valid_fn: TypeWrapper(version_bindings::string_is_valid),
+        version_compare_fn: TypeWrapper(version_bindings::compare),
+        version_compare_weak_fn: TypeWrapper(version_bindings::compare_weak),
+        version_compare_strong_fn: TypeWrapper(version_bindings::compare_strong),
+        version_is_compatible_fn: TypeWrapper(version_bindings::is_compatible),
+        library_register_loader_fn: TypeWrapper(library_bindings::register_loader),
+        library_unregister_loader_fn: TypeWrapper(library_bindings::unregister_loader),
+        library_get_loader_interface_fn: TypeWrapper(library_bindings::get_loader_interface),
+        library_get_loader_handle_from_type_fn: TypeWrapper(
+            library_bindings::get_loader_handle_from_type,
+        ),
+        library_get_loader_handle_from_library_fn: TypeWrapper(
+            library_bindings::get_loader_handle_from_library,
+        ),
+        library_get_num_loaders_fn: TypeWrapper(library_bindings::get_num_loaders),
+        library_library_exists_fn: TypeWrapper(library_bindings::library_exists),
+        library_type_exists_fn: TypeWrapper(library_bindings::type_exists),
+        library_get_library_types_fn: TypeWrapper(library_bindings::get_library_types),
+        library_create_library_handle_fn: TypeWrapper(library_bindings::create_library_handle),
+        library_remove_library_handle_fn: TypeWrapper(library_bindings::remove_library_handle),
+        library_link_library_fn: TypeWrapper(library_bindings::link_library),
+        library_get_internal_library_handle_fn: TypeWrapper(
+            library_bindings::get_internal_library_handle,
+        ),
+        library_load_fn: TypeWrapper(library_bindings::load),
+        library_unload_fn: TypeWrapper(library_bindings::unload),
+        library_get_data_symbol_fn: TypeWrapper(library_bindings::get_data_symbol),
+        library_get_function_symbol_fn: TypeWrapper(library_bindings::get_function_symbol),
+        module_register_loader_fn: unsafe { uninit() },
+        module_unregister_loader_fn: unsafe { uninit() },
+        module_get_loader_interface_fn: unsafe { uninit() },
+        module_get_loader_handle_from_type_fn: unsafe { uninit() },
+        module_get_loader_handle_from_module_fn: unsafe { uninit() },
+        module_get_num_modules_fn: unsafe { uninit() },
+        module_get_num_loaders_fn: unsafe { uninit() },
+        module_get_num_exported_interfaces_fn: unsafe { uninit() },
+        module_module_exists_fn: unsafe { uninit() },
+        module_type_exists_fn: unsafe { uninit() },
+        module_exported_interface_exists_fn: unsafe { uninit() },
+        module_get_modules_fn: unsafe { uninit() },
+        module_get_module_types_fn: unsafe { uninit() },
+        module_get_exported_interfaces_fn: unsafe { uninit() },
+        module_get_exported_interface_handle_fn: unsafe { uninit() },
+        module_create_module_handle_fn: unsafe { uninit() },
+        module_remove_module_handle_fn: unsafe { uninit() },
+        module_link_module_fn: unsafe { uninit() },
+        module_get_internal_module_handle_fn: unsafe { uninit() },
+        module_add_module_fn: unsafe { uninit() },
+        module_remove_module_fn: unsafe { uninit() },
+        module_load_fn: unsafe { uninit() },
+        module_unload_fn: unsafe { uninit() },
+        module_initialize_fn: unsafe { uninit() },
+        module_terminate_fn: unsafe { uninit() },
+        module_add_dependency_fn: unsafe { uninit() },
+        module_remove_dependency_fn: unsafe { uninit() },
+        module_export_interface_fn: unsafe { uninit() },
+        module_get_load_dependencies_fn: unsafe { uninit() },
+        module_get_runtime_dependencies_fn: unsafe { uninit() },
+        module_get_exportable_interfaces_fn: unsafe { uninit() },
+        module_fetch_status_fn: unsafe { uninit() },
+        module_get_module_path_fn: unsafe { uninit() },
+        module_get_module_info_fn: unsafe { uninit() },
+        module_get_interface_fn: unsafe { uninit() },
+    });
 
 /// Wrapper of the base interface.
 #[derive(Debug)]
@@ -37,102 +136,12 @@ impl BaseInterfaceWrapper {
     #[inline]
     pub fn new() -> Self {
         let base = Box::new(BaseAPI::new());
-        let base_version = base.version();
         let base = NonNull::from(Box::leak(base)).cast();
 
-        #[allow(invalid_value)]
         Self {
             interface: CBaseInterface {
-                version: base_version,
                 base_module: Some(base),
-                sys_shutdown_fn: TypeWrapper(sys_bindings::shutdown),
-                sys_panic_fn: TypeWrapper(sys_bindings::panic),
-                sys_has_function_fn: TypeWrapper(sys_bindings::has_fn),
-                sys_get_function_fn: TypeWrapper(sys_bindings::get_fn),
-                sys_lock_fn: TypeWrapper(sys_bindings::lock),
-                sys_try_lock_fn: TypeWrapper(sys_bindings::try_lock),
-                sys_unlock_fn: TypeWrapper(sys_bindings::unlock),
-                sys_get_sync_handler_fn: TypeWrapper(sys_bindings::get_sync_handler),
-                sys_set_sync_handler_fn: TypeWrapper(sys_bindings::set_sync_handler),
-                version_new_short_fn: TypeWrapper(version_bindings::new_short),
-                version_new_long_fn: TypeWrapper(version_bindings::new_long),
-                version_new_full_fn: TypeWrapper(version_bindings::new_full),
-                version_from_string_fn: TypeWrapper(version_bindings::from_string),
-                version_string_length_short_fn: TypeWrapper(version_bindings::string_length_short),
-                version_string_length_long_fn: TypeWrapper(version_bindings::string_length_long),
-                version_string_length_full_fn: TypeWrapper(version_bindings::string_length_full),
-                version_as_string_short_fn: TypeWrapper(version_bindings::as_string_short),
-                version_as_string_long_fn: TypeWrapper(version_bindings::as_string_long),
-                version_as_string_full_fn: TypeWrapper(version_bindings::as_string_full),
-                version_string_is_valid_fn: TypeWrapper(version_bindings::string_is_valid),
-                version_compare_fn: TypeWrapper(version_bindings::compare),
-                version_compare_weak_fn: TypeWrapper(version_bindings::compare_weak),
-                version_compare_strong_fn: TypeWrapper(version_bindings::compare_strong),
-                version_is_compatible_fn: TypeWrapper(version_bindings::is_compatible),
-                library_register_loader_fn: TypeWrapper(library_bindings::register_loader),
-                library_unregister_loader_fn: TypeWrapper(library_bindings::unregister_loader),
-                library_get_loader_interface_fn: TypeWrapper(
-                    library_bindings::get_loader_interface,
-                ),
-                library_get_loader_handle_from_type_fn: TypeWrapper(
-                    library_bindings::get_loader_handle_from_type,
-                ),
-                library_get_loader_handle_from_library_fn: TypeWrapper(
-                    library_bindings::get_loader_handle_from_library,
-                ),
-                library_get_num_loaders_fn: TypeWrapper(library_bindings::get_num_loaders),
-                library_library_exists_fn: TypeWrapper(library_bindings::library_exists),
-                library_type_exists_fn: TypeWrapper(library_bindings::type_exists),
-                library_get_library_types_fn: TypeWrapper(library_bindings::get_library_types),
-                library_create_library_handle_fn: TypeWrapper(
-                    library_bindings::create_library_handle,
-                ),
-                library_remove_library_handle_fn: TypeWrapper(
-                    library_bindings::remove_library_handle,
-                ),
-                library_link_library_fn: TypeWrapper(library_bindings::link_library),
-                library_get_internal_library_handle_fn: TypeWrapper(
-                    library_bindings::get_internal_library_handle,
-                ),
-                library_load_fn: TypeWrapper(library_bindings::load),
-                library_unload_fn: TypeWrapper(library_bindings::unload),
-                library_get_data_symbol_fn: TypeWrapper(library_bindings::get_data_symbol),
-                library_get_function_symbol_fn: TypeWrapper(library_bindings::get_function_symbol),
-                module_register_loader_fn: unsafe { std::mem::zeroed() },
-                module_unregister_loader_fn: unsafe { std::mem::zeroed() },
-                module_get_loader_interface_fn: unsafe { std::mem::zeroed() },
-                module_get_loader_handle_from_type_fn: unsafe { std::mem::zeroed() },
-                module_get_loader_handle_from_module_fn: unsafe { std::mem::zeroed() },
-                module_get_num_modules_fn: unsafe { std::mem::zeroed() },
-                module_get_num_loaders_fn: unsafe { std::mem::zeroed() },
-                module_get_num_exported_interfaces_fn: unsafe { std::mem::zeroed() },
-                module_module_exists_fn: unsafe { std::mem::zeroed() },
-                module_type_exists_fn: unsafe { std::mem::zeroed() },
-                module_exported_interface_exists_fn: unsafe { std::mem::zeroed() },
-                module_get_modules_fn: unsafe { std::mem::zeroed() },
-                module_get_module_types_fn: unsafe { std::mem::zeroed() },
-                module_get_exported_interfaces_fn: unsafe { std::mem::zeroed() },
-                module_get_exported_interface_handle_fn: unsafe { std::mem::zeroed() },
-                module_create_module_handle_fn: unsafe { std::mem::zeroed() },
-                module_remove_module_handle_fn: unsafe { std::mem::zeroed() },
-                module_link_module_fn: unsafe { std::mem::zeroed() },
-                module_get_internal_module_handle_fn: unsafe { std::mem::zeroed() },
-                module_add_module_fn: unsafe { std::mem::zeroed() },
-                module_remove_module_fn: unsafe { std::mem::zeroed() },
-                module_load_fn: unsafe { std::mem::zeroed() },
-                module_unload_fn: unsafe { std::mem::zeroed() },
-                module_initialize_fn: unsafe { std::mem::zeroed() },
-                module_terminate_fn: unsafe { std::mem::zeroed() },
-                module_add_dependency_fn: unsafe { std::mem::zeroed() },
-                module_remove_dependency_fn: unsafe { std::mem::zeroed() },
-                module_export_interface_fn: unsafe { std::mem::zeroed() },
-                module_get_load_dependencies_fn: unsafe { std::mem::zeroed() },
-                module_get_runtime_dependencies_fn: unsafe { std::mem::zeroed() },
-                module_get_exportable_interfaces_fn: unsafe { std::mem::zeroed() },
-                module_fetch_status_fn: unsafe { std::mem::zeroed() },
-                module_get_module_path_fn: unsafe { std::mem::zeroed() },
-                module_get_module_info_fn: unsafe { std::mem::zeroed() },
-                module_get_interface_fn: unsafe { std::mem::zeroed() },
+                vtable: NonNullConst::from(unsafe { INTERFACE_VTABLE.assume_init_ref() }),
             },
         }
     }
@@ -140,7 +149,7 @@ impl BaseInterfaceWrapper {
     /// Fetches the initialized version.
     #[inline]
     pub fn version(&self) -> Version {
-        self.interface.version
+        self.interface.interface_version()
     }
 
     /// Fetches the implemented extensions.
@@ -151,44 +160,27 @@ impl BaseInterfaceWrapper {
 }
 
 pub(crate) mod utilities {
-    use emf_core_base_rs::ffi::collections::NonNullConst;
-    use emf_core_base_rs::ffi::library::OSPathChar;
+    use emf_core_base_rs::ffi::library::OSPathString;
     use std::path::PathBuf;
 
     #[cfg(unix)]
-    pub unsafe fn os_path_to_path_buf(path: NonNullConst<OSPathChar>) -> PathBuf {
+    pub unsafe fn os_path_to_path_buf(path: OSPathString) -> PathBuf {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
-        let mut ptr = path.as_ptr();
-
-        while *ptr != 0 {
-            ptr = ptr.offset(1);
-        }
-
-        let len = ptr.offset_from(path.as_ptr());
-        let path_slice: &[u8] = std::slice::from_raw_parts(path.as_ptr(), len as usize);
-        PathBuf::from(OsStr::from_bytes(path_slice).to_os_string())
+        PathBuf::from(OsStr::from_bytes(path.as_ref()).to_os_string())
     }
 
     #[cfg(windows)]
-    pub unsafe fn os_path_to_path_buf(path: NonNullConst<OSPathChar>) -> PathBuf {
+    pub unsafe fn os_path_to_path_buf(path: OSPathString) -> PathBuf {
         use std::ffi::OsString;
         use std::os::windows::ffi::OsStringExt;
-        let mut ptr = path.as_ptr();
-
-        while *ptr != 0 {
-            ptr = ptr.offset(1);
-        }
-
-        let len = ptr.offset_from(path.as_ptr());
-        let path_slice: &[u16] = std::slice::from_raw_parts(path.as_ptr(), len as usize);
-        PathBuf::from(OsString::from_wide(path_slice))
+        PathBuf::from(OsString::from_wide(path.as_ref()))
     }
 }
 
 pub(crate) mod sys_bindings {
     use crate::base_api::BaseAPI;
-    use emf_core_base_rs::ffi::collections::{NonNullConst, Optional};
+    use emf_core_base_rs::ffi::collections::Optional;
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::sys::sync_handler::SyncHandlerInterface;
     use emf_core_base_rs::ffi::{Bool, CBase, CBaseFn, FnId};
@@ -250,20 +242,20 @@ pub(crate) mod sys_bindings {
 
     pub unsafe extern "C-unwind" fn get_sync_handler(
         base_module: Option<NonNull<CBase>>,
-    ) -> NonNullConst<SyncHandlerInterface> {
+    ) -> SyncHandlerInterface {
         BaseAPI::from_raw_locked(base_module.unwrap())
             .get_sys_api()
             .get_sync_handler()
-            .to_interface()
+            .to_raw()
     }
 
     pub unsafe extern "C-unwind" fn set_sync_handler(
         base_module: Option<NonNull<CBase>>,
-        handler: Option<NonNullConst<SyncHandlerInterface>>,
+        handler: Optional<SyncHandlerInterface>,
     ) {
         BaseAPI::from_raw_locked(base_module.unwrap())
             .get_sys_api()
-            .set_sync_handler(handler.map(|h| SyncHandler::from_interface(h)))
+            .set_sync_handler(From::from(handler.map(|h| SyncHandler::from_raw(h))))
     }
 }
 
@@ -327,7 +319,7 @@ pub(crate) mod version_bindings {
     #[allow(improper_ctypes_definitions)]
     pub unsafe extern "C-unwind" fn from_string(
         base_module: Option<NonNull<CBase>>,
-        buffer: NonNullConst<ConstSpan<u8>>,
+        buffer: ConstSpan<u8>,
     ) -> Result<Version, Error> {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
@@ -363,13 +355,13 @@ pub(crate) mod version_bindings {
     pub unsafe extern "C-unwind" fn as_string_short(
         base_module: Option<NonNull<CBase>>,
         version: NonNullConst<Version>,
-        buffer: NonNull<MutSpan<u8>>,
+        mut buffer: MutSpan<u8>,
     ) -> Result<usize, Error> {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
                 .as_string_short(
                     version.as_ref(),
-                    std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
+                    std::str::from_utf8_mut(buffer.as_mut()).unwrap(),
                 )
                 .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         })
@@ -378,13 +370,13 @@ pub(crate) mod version_bindings {
     pub unsafe extern "C-unwind" fn as_string_long(
         base_module: Option<NonNull<CBase>>,
         version: NonNullConst<Version>,
-        buffer: NonNull<MutSpan<u8>>,
+        mut buffer: MutSpan<u8>,
     ) -> Result<usize, Error> {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
                 .as_string_long(
                     version.as_ref(),
-                    std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
+                    std::str::from_utf8_mut(buffer.as_mut()).unwrap(),
                 )
                 .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         })
@@ -393,13 +385,13 @@ pub(crate) mod version_bindings {
     pub unsafe extern "C-unwind" fn as_string_full(
         base_module: Option<NonNull<CBase>>,
         version: NonNullConst<Version>,
-        buffer: NonNull<MutSpan<u8>>,
+        mut buffer: MutSpan<u8>,
     ) -> Result<usize, Error> {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
                 .as_string_full(
                     version.as_ref(),
-                    std::str::from_utf8_unchecked_mut((&mut *buffer.as_ptr()).as_mut()),
+                    std::str::from_utf8_mut(buffer.as_mut()).unwrap(),
                 )
                 .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         })
@@ -407,7 +399,7 @@ pub(crate) mod version_bindings {
 
     pub unsafe extern "C-unwind" fn string_is_valid(
         base_module: Option<NonNull<CBase>>,
-        version_string: NonNullConst<ConstSpan<u8>>,
+        version_string: ConstSpan<u8>,
     ) -> Bool {
         BaseAPI::from_raw_unlocked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_version_api()
@@ -485,7 +477,7 @@ pub(crate) mod library_bindings {
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
     use emf_core_base_rs::ffi::library::{
-        InternalHandle, LibraryHandle, LibraryType, LoaderHandle, OSPathChar, Symbol,
+        InternalHandle, LibraryHandle, LibraryType, LoaderHandle, OSPathString, Symbol,
     };
     use emf_core_base_rs::ffi::{Bool, CBase, CBaseFn};
     use emf_core_base_rs::library::library_loader::{LibraryLoader, UnknownLoader};
@@ -494,17 +486,17 @@ pub(crate) mod library_bindings {
     use std::ffi::{c_void, CStr};
     use std::ptr::NonNull;
 
-    struct LibraryLoaderWrapper(NonNullConst<LibraryLoaderInterface>);
+    struct LibraryLoaderWrapper(LibraryLoaderInterface);
 
     impl From<&LibraryLoaderWrapper> for LibraryLoader<UnknownLoader<'static>, Owned> {
         fn from(val: &LibraryLoaderWrapper) -> Self {
-            unsafe { Self::from_interface(val.0) }
+            unsafe { Self::from_raw(val.0) }
         }
     }
 
     pub unsafe extern "C-unwind" fn register_loader(
         base_module: Option<NonNull<CBase>>,
-        loader: NonNullConst<LibraryLoaderInterface>,
+        loader: LibraryLoaderInterface,
         lib_type: NonNullConst<LibraryType>,
     ) -> Result<LoaderHandle, Error> {
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
@@ -534,13 +526,13 @@ pub(crate) mod library_bindings {
     pub unsafe extern "C-unwind" fn get_loader_interface(
         base_module: Option<NonNull<CBase>>,
         handle: LoaderHandle,
-    ) -> Result<NonNullConst<LibraryLoaderInterface>, Error> {
+    ) -> Result<LibraryLoaderInterface, Error> {
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_loader_interface(&Loader::new(handle))
                 .map_or_else(
                     |e| Result::Err(e.into_inner()),
-                    |v: LibraryLoader<UnknownLoader<'_>, Owned>| Result::Ok(v.to_interface()),
+                    |v: LibraryLoader<UnknownLoader<'_>, Owned>| Result::Ok(v.to_raw()),
                 )
         })
     }
@@ -604,11 +596,11 @@ pub(crate) mod library_bindings {
 
     pub unsafe extern "C-unwind" fn get_library_types(
         base_module: Option<NonNull<CBase>>,
-        buffer: NonNull<MutSpan<LibraryType>>,
+        buffer: MutSpan<LibraryType>,
     ) -> Result<usize, Error> {
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
-                .get_library_types(&mut *buffer.as_ptr())
+                .get_library_types(buffer)
                 .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         })
     }
@@ -665,7 +657,7 @@ pub(crate) mod library_bindings {
     pub unsafe extern "C-unwind" fn load(
         base_module: Option<NonNull<CBase>>,
         loader: LoaderHandle,
-        path: NonNullConst<OSPathChar>,
+        path: OSPathString,
     ) -> Result<LibraryHandle, Error> {
         let path = super::utilities::os_path_to_path_buf(path);
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
