@@ -121,7 +121,7 @@ mod native {
             module: &mut Self::Module,
             target_version: &Version,
         ) -> Result<(Self::Interface, Self::Instance, Self::Extensions), Self::Error> {
-            use emf_core_base_rs::ffi::collections::{ConstSpan, NonNullConst, Optional};
+            use emf_core_base_rs::ffi::collections::{ConstSpan, Optional};
             use emf_core_base_rs::ffi::module::native_module::NativeModuleBinding;
             use emf_core_base_rs::ffi::module::ModuleHandle;
             use emf_core_base_rs::ffi::{
@@ -180,7 +180,7 @@ mod native {
                     }
                 };
 
-                let interface = CBase::new(CBaseRef::new(NonNullConst::from(interface.as_ref())));
+                let interface = CBase::new(CBaseRef::new(*interface.as_ref()));
 
                 Ok((interface, instance, ()))
             }

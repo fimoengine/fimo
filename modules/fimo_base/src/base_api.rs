@@ -1,21 +1,26 @@
 //! Implementation of the `emf-core-base` interface.
 use emf_core_base_rs::ffi::version::Version;
 use emf_core_base_rs::ffi::CBase;
-use fimo_version_rs::new_short;
+use fimo_version_rs::new_long;
 use std::cell::UnsafeCell;
 use std::ptr::NonNull;
 
 mod library;
 mod module;
+mod native_loader;
 mod sys;
 mod version;
 
 use crate::base_api::sys::ExitStatus;
+use emf_core_base_rs::version::ReleaseType;
 pub use library::LibraryAPI;
 pub use module::ModuleAPI;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 pub use sys::SysAPI;
 pub use version::VersionAPI;
+
+/// Implemented interface version.
+pub const INTERFACE_VERSION: Version = new_long(0, 2, 0, ReleaseType::Unstable, 0);
 
 /// An unlocked resource.
 #[derive(Debug, Default)]
@@ -93,7 +98,7 @@ impl BaseAPI {
     #[inline]
     pub fn new() -> Self {
         Self {
-            version: new_short(0, 1, 0),
+            version: INTERFACE_VERSION,
             library_api: UnsafeCell::new(LibraryAPI::new()),
             module_api: UnsafeCell::new(ModuleAPI::new()),
             sys_api: UnsafeCell::new(SysAPI::new()),

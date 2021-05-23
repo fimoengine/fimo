@@ -1,4 +1,5 @@
 use crate::base_api::{DataGuard, Locked};
+use crate::KeyGenerator;
 use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
 use emf_core_base_rs::ffi::library::{
@@ -18,49 +19,6 @@ use std::ffi::{c_void, CStr};
 use std::fmt::{Debug, Display, Formatter};
 use std::path::Path;
 
-#[derive(Default, Ord, PartialOrd, Eq, PartialEq)]
-struct KeyGenerator<T, Gen: Fn(&T) -> T> {
-    next_key: T,
-    freed_keys: Vec<T>,
-    generator: Gen,
-}
-
-impl<T: Debug, Gen: Fn(&T) -> T> Debug for KeyGenerator<T, Gen> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KeyGenerator")
-            .field("next_key", &self.next_key)
-            .field("freed_keys", &self.freed_keys)
-            .finish()
-    }
-}
-
-impl<T, Gen: Fn(&T) -> T> KeyGenerator<T, Gen> {
-    /// Constructs an instance
-    pub fn new(key: T, generator: Gen) -> Self {
-        Self {
-            next_key: key,
-            freed_keys: vec![],
-            generator,
-        }
-    }
-
-    /// Fetches the next key.
-    pub fn next_key(&mut self) -> T {
-        if self.freed_keys.is_empty() {
-            let mut next = (self.generator)(&self.next_key);
-            std::mem::swap(&mut self.next_key, &mut next);
-            next
-        } else {
-            self.freed_keys.pop().unwrap()
-        }
-    }
-
-    /// Frees a key.
-    pub fn free_key(&mut self, key: T) {
-        self.freed_keys.push(key)
-    }
-}
-
 const INVALID_LOADER: LoaderHandle = LoaderHandle { id: -1 };
 const INVALID_INTERNAL_HANDLE: InternalHandle = InternalHandle { id: -1 };
 
@@ -71,6 +29,7 @@ enum LibraryError {
     InvalidLibraryHandle { handle: LibraryHandle },
     InvalidLoaderHandle { handle: LoaderHandle },
     BufferOverflow { actual: usize, required: usize },
+    RemovingDefaultHandle,
 }
 
 impl Display for LibraryError {
@@ -95,6 +54,9 @@ impl Display for LibraryError {
                     actual, required
                 )
             }
+            LibraryError::RemovingDefaultHandle => {
+                write!(f, "Default loader handle can not be unloaded!")
+            }
         }
     }
 }
@@ -106,7 +68,7 @@ impl std::error::Error for LibraryError {}
 pub struct LibraryAPI {
     lib_type_to_loader: HashMap<String, LoaderHandle>,
 
-    loaders: HashMap<LoaderHandle, NonNullConst<LibraryLoaderInterface>>,
+    loaders: HashMap<LoaderHandle, LibraryLoaderInterface>,
     loader_to_lib_type: HashMap<LoaderHandle, String>,
     loader_to_libraries: HashMap<LoaderHandle, HashSet<LibraryHandle>>,
 
@@ -164,7 +126,7 @@ impl LibraryAPI {
         lib_type: impl AsRef<str>,
     ) -> Result<Loader<'static, Owned>, Error<Owned>>
     where
-        T: LibraryLoaderAPI<'static>,
+        T: LibraryLoaderAPI<'static> + LibraryLoaderABICompat,
         LibraryLoader<T, Owned>: From<&'loader LT>,
     {
         let lib_type = lib_type.as_ref();
@@ -178,7 +140,7 @@ impl LibraryAPI {
             let key = self.loader_gen.next_key();
             self.lib_type_to_loader.insert(lib_type.to_string(), key);
 
-            self.loaders.insert(key, loader.to_interface());
+            self.loaders.insert(key, loader.to_raw());
             self.loader_to_lib_type.insert(key, lib_type.to_string());
             self.loader_to_libraries.insert(key, Default::default());
 
@@ -198,7 +160,11 @@ impl LibraryAPI {
     #[inline]
     pub fn unregister_loader(&mut self, loader: Loader<'_, Owned>) -> Result<(), Error<Owned>> {
         let handle = loader.as_handle();
-        if handle == DEFAULT_HANDLE || !self.loaders.contains_key(&handle) {
+        if handle == DEFAULT_HANDLE {
+            return Err(Error::from(Box::new(LibraryError::RemovingDefaultHandle)));
+        }
+
+        if self.loaders.contains_key(&handle) {
             return Err(Error::from(Box::new(LibraryError::InvalidLoaderHandle {
                 handle,
             })));
@@ -243,7 +209,7 @@ impl LibraryAPI {
     {
         let handle = loader.as_handle();
         if let Some(interface) = self.loaders.get(&handle) {
-            Ok(unsafe { LibraryLoader::from_interface(*interface) })
+            Ok(unsafe { LibraryLoader::from_raw(*interface) })
         } else {
             Err(Error::from(Box::new(LibraryError::InvalidLoaderHandle {
                 handle,
@@ -644,7 +610,7 @@ impl<'a> DataGuard<'a, LibraryAPI, Locked> {
         lib_type: impl AsRef<str>,
     ) -> Result<Loader<'static, Owned>, Error<Owned>>
     where
-        T: LibraryLoaderAPI<'static>,
+        T: LibraryLoaderAPI<'static> + LibraryLoaderABICompat,
         LibraryLoader<T, Owned>: From<&'loader LT>,
     {
         self.data.register_loader(loader, lib_type)

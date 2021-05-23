@@ -1,6 +1,6 @@
 use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::sys::sync_handler::{
-    SyncHandler as SyncHandlerFFI, SyncHandlerInterface,
+    SyncHandler as SyncHandlerFFI, SyncHandlerInterface, SyncHandlerVTable,
 };
 use emf_core_base_rs::ffi::{Bool, TypeWrapper};
 use emf_core_base_rs::sys::sync_handler::{SyncHandler, SyncHandlerAPI};
@@ -20,6 +20,12 @@ pub struct DefaultSync {
 }
 
 impl DefaultSync {
+    const VTABLE: SyncHandlerVTable = SyncHandlerVTable {
+        lock_fn: TypeWrapper(DefaultSync::lock_internal),
+        try_lock_fn: TypeWrapper(DefaultSync::try_lock_internal),
+        unlock_fn: TypeWrapper(DefaultSync::unlock_internal),
+    };
+
     /// Create a new instance.
     #[inline]
     pub fn new() -> Self {
@@ -29,9 +35,7 @@ impl DefaultSync {
 
         let interface = SyncHandlerInterface {
             handler: Some(NonNull::from(&mut *internal).cast()),
-            lock_fn: TypeWrapper(DefaultSync::lock_internal),
-            try_lock_fn: TypeWrapper(DefaultSync::try_lock_internal),
-            unlock_fn: TypeWrapper(DefaultSync::unlock_internal),
+            vtable: NonNullConst::from(&Self::VTABLE),
         };
 
         Self {
@@ -43,7 +47,7 @@ impl DefaultSync {
     #[inline]
     pub fn as_interface(&self) -> SyncHandler<'static> {
         // Safety: The handler is valid.
-        unsafe { SyncHandler::from_interface(NonNullConst::from(&*self.interface)) }
+        unsafe { SyncHandler::from_raw(*self.interface) }
     }
 
     extern "C-unwind" fn lock_internal(handler: Option<NonNull<SyncHandlerFFI>>) {
