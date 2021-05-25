@@ -3,6 +3,8 @@ use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::module::InterfaceExtension;
 use emf_core_base_rs::ffi::version::Version;
 use emf_core_base_rs::ffi::{CBaseBinding, CBaseInterface, CBaseInterfaceVTable, TypeWrapper};
+use emf_core_base_rs::ownership::Owned;
+use emf_core_base_rs::Error;
 use lazy_static::lazy_static;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
@@ -118,7 +120,7 @@ pub struct BaseInterfaceWrapper {
 
 impl Default for BaseInterfaceWrapper {
     fn default() -> Self {
-        Self::new()
+        Self::new().unwrap()
     }
 }
 
@@ -126,7 +128,9 @@ impl Drop for BaseInterfaceWrapper {
     fn drop(&mut self) {
         // Safety: Guaranteed by the fact that the interface is immutable.
         unsafe {
-            Box::<BaseAPI>::from_raw(self.interface.base_module.take().unwrap().cast().as_ptr())
+            Box::<BaseAPI<'static>>::from_raw(
+                self.interface.base_module.take().unwrap().cast().as_ptr(),
+            )
         };
     }
 }
@@ -134,16 +138,16 @@ impl Drop for BaseInterfaceWrapper {
 impl BaseInterfaceWrapper {
     /// Initialize the interface.
     #[inline]
-    pub fn new() -> Self {
-        let base = Box::new(BaseAPI::new());
+    pub fn new() -> Result<Self, Error<Owned>> {
+        let base = Box::new(BaseAPI::<'static>::new()?);
         let base = NonNull::from(Box::leak(base)).cast();
 
-        Self {
+        Ok(Self {
             interface: CBaseInterface {
                 base_module: Some(base),
                 vtable: NonNullConst::from(unsafe { INTERFACE_VTABLE.assume_init_ref() }),
             },
-        }
+        })
     }
 
     /// Fetches the initialized version.
@@ -161,6 +165,8 @@ impl BaseInterfaceWrapper {
 
 pub(crate) mod utilities {
     use emf_core_base_rs::ffi::library::OSPathString;
+    use std::borrow::Cow;
+    use std::ffi::{CStr, CString};
     use std::path::PathBuf;
 
     #[cfg(unix)]
@@ -175,6 +181,15 @@ pub(crate) mod utilities {
         use std::ffi::OsString;
         use std::os::windows::ffi::OsStringExt;
         PathBuf::from(OsString::from_wide(path.as_ref()))
+    }
+
+    pub fn cstr_cow_from_bytes(symbol: &[u8]) -> Cow<'_, CStr> {
+        const EMPTY: &[u8] = b"\0";
+        match symbol.last() {
+            None => Cow::Borrowed(CStr::from_bytes_with_nul(EMPTY).unwrap()),
+            Some(&0) => Cow::Borrowed(CStr::from_bytes_with_nul(symbol).unwrap()),
+            Some(_) => Cow::Owned(CString::new(symbol).unwrap()),
+        }
     }
 }
 
@@ -475,19 +490,20 @@ pub(crate) mod library_bindings {
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
     use emf_core_base_rs::ffi::library::{
-        InternalHandle, LibraryHandle, LibraryType, LoaderHandle, OSPathString, Symbol,
+        InternalHandle, LibraryHandle, LibraryType, LoaderHandle, OSPathString, Symbol, SymbolName,
     };
     use emf_core_base_rs::ffi::{Bool, CBase, CBaseFn};
     use emf_core_base_rs::library::library_loader::{LibraryLoader, UnknownLoader};
     use emf_core_base_rs::library::{InternalLibrary, Library, Loader};
     use emf_core_base_rs::ownership::Owned;
-    use std::ffi::{c_void, CStr};
+    use std::ffi::c_void;
+    use std::pin::Pin;
     use std::ptr::NonNull;
 
     struct LibraryLoaderWrapper(LibraryLoaderInterface);
 
-    impl From<&LibraryLoaderWrapper> for LibraryLoader<UnknownLoader<'static>, Owned> {
-        fn from(val: &LibraryLoaderWrapper) -> Self {
+    impl<'a> From<&'a LibraryLoaderWrapper> for LibraryLoader<UnknownLoader<'a>, Owned> {
+        fn from(val: &'a LibraryLoaderWrapper) -> Self {
             unsafe { Self::from_raw(val.0) }
         }
     }
@@ -500,7 +516,7 @@ pub(crate) mod library_bindings {
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .register_loader(
-                    &LibraryLoaderWrapper(loader),
+                    Pin::new(&*(&LibraryLoaderWrapper(loader) as *const _)),
                     std::str::from_utf8(lib_type.as_ref().as_ref()).unwrap(),
                 )
                 .map_or_else(
@@ -682,13 +698,13 @@ pub(crate) mod library_bindings {
     pub unsafe extern "C-unwind" fn get_data_symbol(
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
-        symbol: NonNullConst<u8>,
+        symbol: SymbolName,
     ) -> Result<Symbol<NonNullConst<c_void>>, Error> {
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_data_symbol(
                     &Library::<Owned>::new(handle),
-                    CStr::from_ptr(symbol.cast().as_ptr()),
+                    super::utilities::cstr_cow_from_bytes(symbol.as_ref()),
                     |v| &*v.as_ptr(),
                 )
                 .map_or_else(
@@ -706,13 +722,13 @@ pub(crate) mod library_bindings {
     pub unsafe extern "C-unwind" fn get_function_symbol(
         base_module: Option<NonNull<CBase>>,
         handle: LibraryHandle,
-        symbol: NonNullConst<u8>,
+        symbol: SymbolName,
     ) -> Result<Symbol<CBaseFn>, Error> {
         BaseAPI::from_raw_locked(base_module.unwrap()).setup_unwind(move |base| {
             base.get_library_api()
                 .get_function_symbol(
                     &Library::<Owned>::new(handle),
-                    CStr::from_ptr(symbol.cast().as_ptr()),
+                    super::utilities::cstr_cow_from_bytes(symbol.as_ref()),
                     |v| v,
                 )
                 .map_or_else(

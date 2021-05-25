@@ -136,7 +136,10 @@ impl FimoBase {
             }
         };
 
-        let base_interface = Box::new(BaseInterfaceWrapper::new());
+        let base_interface = match BaseInterfaceWrapper::new() {
+            Ok(base) => Box::new(base),
+            Err(err) => return ffi::collections::Result::Err(err.into_inner()),
+        };
 
         let base_descriptor = InterfaceDescriptor {
             name: InterfaceName::from(CBASE_INTERFACE_NAME),

@@ -1,8 +1,15 @@
 //! Implementation of the `emf-core-base` interface.
+use crate::base_api::native_loader::NativeLoader;
+use crate::base_api::sys::ExitStatus;
 use emf_core_base_rs::ffi::version::Version;
 use emf_core_base_rs::ffi::CBase;
+use emf_core_base_rs::ownership::Owned;
+use emf_core_base_rs::version::ReleaseType;
+use emf_core_base_rs::Error;
 use fimo_version_rs::new_long;
 use std::cell::UnsafeCell;
+use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::pin::Pin;
 use std::ptr::NonNull;
 
 mod library;
@@ -11,11 +18,8 @@ mod native_loader;
 mod sys;
 mod version;
 
-use crate::base_api::sys::ExitStatus;
-use emf_core_base_rs::version::ReleaseType;
 pub use library::LibraryAPI;
 pub use module::ModuleAPI;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 pub use sys::SysAPI;
 pub use version::VersionAPI;
 
@@ -79,31 +83,51 @@ impl<'a, T, L> RefUnwindSafe for DataGuard<'a, T, L> {}
 
 /// Interface implementation.
 #[derive(Debug)]
-pub struct BaseAPI {
+pub struct BaseAPI<'i> {
     version: Version,
-    library_api: UnsafeCell<LibraryAPI>,
-    module_api: UnsafeCell<ModuleAPI>,
-    sys_api: UnsafeCell<SysAPI>,
-    version_api: UnsafeCell<VersionAPI>,
+    native_loader: Pin<&'i NativeLoader>,
+    library_api: UnsafeCell<LibraryAPI<'i>>,
+    module_api: UnsafeCell<ModuleAPI<'i>>,
+    sys_api: UnsafeCell<SysAPI<'i>>,
+    version_api: UnsafeCell<VersionAPI<'i>>,
 }
 
-impl Default for BaseAPI {
+impl Default for BaseAPI<'_> {
     fn default() -> Self {
-        Self::new()
+        Self::new().unwrap()
     }
 }
 
-impl BaseAPI {
+impl Drop for BaseAPI<'_> {
+    fn drop(&mut self) {
+        // The loader originates from a Box and is mutable.
+        let loader = unsafe {
+            Box::<NativeLoader>::from_raw(&self.native_loader.get_ref() as *const _ as *mut _)
+        };
+        drop(loader);
+    }
+}
+
+impl<'i> BaseAPI<'i> {
     /// Constructs a new interface.
     #[inline]
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self, Error<Owned>> {
+        let mut api = Self {
             version: INTERFACE_VERSION,
+            native_loader: Pin::new(Box::leak(Box::new(NativeLoader::new()))).into_ref(),
             library_api: UnsafeCell::new(LibraryAPI::new()),
             module_api: UnsafeCell::new(ModuleAPI::new()),
             sys_api: UnsafeCell::new(SysAPI::new()),
             version_api: UnsafeCell::new(VersionAPI::new()),
-        }
+        };
+
+        // Register the native loader.
+        use emf_core_base_rs::library::NATIVE_LIBRARY_TYPE_NAME;
+        api.library_api
+            .get_mut()
+            .register_loader(api.native_loader, NATIVE_LIBRARY_TYPE_NAME)?;
+
+        Ok(api)
     }
 
     /// Interprets the pointer as an unlocked instance.
@@ -112,8 +136,10 @@ impl BaseAPI {
     ///
     /// The validity of the pointer is not checked.
     /// It is assumed that the instance is unlocked.
-    pub unsafe fn from_raw_unlocked(ptr: NonNull<CBase>) -> DataGuard<'static, Self, Unlocked> {
-        <DataGuard<'_, Self>>::new(ptr.cast::<Self>().as_mut())
+    pub unsafe fn from_raw_unlocked(
+        ptr: NonNull<CBase>,
+    ) -> DataGuard<'static, BaseAPI<'static>, Unlocked> {
+        <DataGuard<'_, BaseAPI<'static>>>::new(ptr.cast::<BaseAPI<'static>>().as_mut())
     }
 
     /// Interprets the pointer as an unlocked instance.
@@ -122,7 +148,9 @@ impl BaseAPI {
     ///
     /// The validity of the pointer is not checked.
     /// It is assumed that the instance is locked.
-    pub unsafe fn from_raw_locked(ptr: NonNull<CBase>) -> DataGuard<'static, Self, Locked> {
+    pub unsafe fn from_raw_locked(
+        ptr: NonNull<CBase>,
+    ) -> DataGuard<'static, BaseAPI<'static>, Locked> {
         Self::from_raw_unlocked(ptr).assume_locked()
     }
 
@@ -138,7 +166,7 @@ impl BaseAPI {
     ///
     /// This gives direct access to the api, bypassing the locking mechanism.
     #[inline]
-    pub unsafe fn get_library_api(&self) -> *mut LibraryAPI {
+    pub unsafe fn get_library_api(&self) -> *mut LibraryAPI<'i> {
         self.library_api.get()
     }
 
@@ -148,7 +176,7 @@ impl BaseAPI {
     ///
     /// This gives direct access to the api, bypassing the locking mechanism.
     #[inline]
-    pub unsafe fn get_module_api(&self) -> *mut ModuleAPI {
+    pub unsafe fn get_module_api(&self) -> *mut ModuleAPI<'i> {
         self.module_api.get()
     }
 
@@ -158,7 +186,7 @@ impl BaseAPI {
     ///
     /// This gives direct access to the api, bypassing the locking mechanism.
     #[inline]
-    pub unsafe fn get_sys_api(&self) -> *mut SysAPI {
+    pub unsafe fn get_sys_api(&self) -> *mut SysAPI<'i> {
         self.sys_api.get()
     }
 
@@ -168,12 +196,12 @@ impl BaseAPI {
     ///
     /// This gives direct access to the api, bypassing the locking mechanism.
     #[inline]
-    pub unsafe fn get_version_api(&self) -> *mut VersionAPI {
+    pub unsafe fn get_version_api(&self) -> *mut VersionAPI<'i> {
         self.version_api.get()
     }
 }
 
-impl<'a> DataGuard<'a, BaseAPI, Unlocked> {
+impl<'a, 'i> DataGuard<'a, BaseAPI<'i>, Unlocked> {
     /// Calls a closure, propagating any panic that occurs.
     #[inline]
     pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
@@ -187,27 +215,27 @@ impl<'a> DataGuard<'a, BaseAPI, Unlocked> {
     }
 
     /// Fetches the library api.
-    pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI, Unlocked> {
+    pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI<'i>, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_library_api() })
     }
 
     /// Fetches the module api.
-    pub fn get_module_api(&self) -> DataGuard<'a, ModuleAPI, Unlocked> {
+    pub fn get_module_api(&self) -> DataGuard<'a, ModuleAPI<'i>, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_module_api() })
     }
 
     /// Fetches the sys api.
-    pub fn get_sys_api(&self) -> DataGuard<'a, SysAPI, Unlocked> {
+    pub fn get_sys_api(&self) -> DataGuard<'a, SysAPI<'i>, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_sys_api() })
     }
 
     /// Fetches the version api.
-    pub fn get_version_api(&self) -> DataGuard<'a, VersionAPI, Unlocked> {
+    pub fn get_version_api(&self) -> DataGuard<'a, VersionAPI<'i>, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_version_api() })
     }
 }
 
-impl<'a> DataGuard<'a, BaseAPI, Locked> {
+impl<'a, 'i> DataGuard<'a, BaseAPI<'i>, Locked> {
     /// Calls a closure, propagating any panic that occurs.
     #[inline]
     pub fn setup_unwind<F: FnOnce(&Self) -> R + UnwindSafe, R>(&self, f: F) -> R {
@@ -221,22 +249,22 @@ impl<'a> DataGuard<'a, BaseAPI, Locked> {
     }
 
     /// Fetches the library api.
-    pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI, Locked> {
+    pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI<'i>, Locked> {
         unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_library_api()).assume_locked() }
     }
 
     /// Fetches the module api.
-    pub fn get_module_api(&self) -> DataGuard<'a, ModuleAPI, Locked> {
+    pub fn get_module_api(&self) -> DataGuard<'a, ModuleAPI<'i>, Locked> {
         unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_module_api()).assume_locked() }
     }
 
     /// Fetches the sys api.
-    pub fn get_sys_api(&self) -> DataGuard<'a, SysAPI, Locked> {
+    pub fn get_sys_api(&self) -> DataGuard<'a, SysAPI<'i>, Locked> {
         unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_sys_api()).assume_locked() }
     }
 
     /// Fetches the version api.
-    pub fn get_version_api(&self) -> DataGuard<'a, VersionAPI, Locked> {
+    pub fn get_version_api(&self) -> DataGuard<'a, VersionAPI<'i>, Locked> {
         unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_version_api()).assume_locked() }
     }
 }

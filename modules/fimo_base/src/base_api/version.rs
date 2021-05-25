@@ -8,22 +8,27 @@ use fimo_version_rs::{
     string_length_long, string_length_short,
 };
 use std::cmp::Ordering;
+use std::marker::PhantomData;
 
 /// Implementation of the version api.
 #[derive(Debug)]
-pub struct VersionAPI {}
+pub struct VersionAPI<'i> {
+    phantom: PhantomData<fn() -> &'i ()>,
+}
 
-impl Default for VersionAPI {
+impl Default for VersionAPI<'_> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VersionAPI {
+impl VersionAPI<'_> {
     /// Constructs a new instance.
     #[inline]
     pub fn new() -> Self {
-        Self {}
+        Self {
+            phantom: PhantomData,
+        }
     }
 
     /// Constructs a new version.
@@ -176,7 +181,7 @@ impl VersionAPI {
 
 macro_rules! impl_guarded_version {
     ($l:ty) => {
-        impl<'a> DataGuard<'a, VersionAPI, $l> {
+        impl<'a> DataGuard<'a, VersionAPI<'_>, $l> {
             /// Constructs a new version.
             ///
             /// Constructs a new version with `major`, `minor` and `patch` and sets the rest to `0`.
