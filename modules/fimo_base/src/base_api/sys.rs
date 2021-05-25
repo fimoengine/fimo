@@ -28,19 +28,19 @@ pub enum ExitStatus<T> {
 
 /// Implementation of the sys api.
 #[derive(Debug)]
-pub struct SysAPI {
-    sync_handler: RwLock<SyncHandler<'static>>,
+pub struct SysAPI<'i> {
+    sync_handler: RwLock<SyncHandler<'i>>,
     default_sync: sync::DefaultSync,
     unwind_contexts: ThreadLocal<Cell<Option<UnwindInternalContextRef>>>,
 }
 
-impl Default for SysAPI {
+impl Default for SysAPI<'_> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SysAPI {
+impl<'i> SysAPI<'i> {
     /// Constructs a new instance.
     #[inline]
     pub fn new() -> Self {
@@ -151,15 +151,10 @@ impl SysAPI {
             .unwrap_or_else(|| panic!("Interface not entered properly"));
         let old = context.replace(Some(unwind_context::construct_context()));
 
-        // Disable outputting the error the stderr
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-
         // Call the function
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| f(self)));
 
         // Reset
-        std::panic::set_hook(default_hook);
         context.set(old);
 
         match result {
@@ -189,15 +184,10 @@ impl SysAPI {
             .unwrap_or_else(|| panic!("Interface not entered properly"));
         let old = context.replace(Some(unwind_context::construct_context()));
 
-        // Disable outputting the error the stderr
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-
         // Call the function
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| f(self)));
 
         // Reset
-        std::panic::set_hook(default_hook);
         self.unwind_contexts.get().unwrap().set(old);
 
         match result {
@@ -442,7 +432,7 @@ impl SysAPI {
 
     /// Fetches the active sync handler.
     #[inline]
-    pub fn get_sync_handler(&self) -> SyncHandler<'static> {
+    pub fn get_sync_handler(&self) -> SyncHandler<'i> {
         *self.sync_handler.read()
     }
 
@@ -452,7 +442,7 @@ impl SysAPI {
     ///
     /// Modifying the sync handler may cause unintended side-effects.
     #[inline]
-    pub unsafe fn set_sync_handler(&mut self, s: Option<SyncHandler<'static>>) {
+    pub unsafe fn set_sync_handler(&mut self, s: Option<SyncHandler<'i>>) {
         match s {
             None => {
                 let mut new = self.default_sync.as_interface();
@@ -598,7 +588,7 @@ impl SysAPI {
     }
 }
 
-impl<'a> DataGuard<'a, SysAPI, Unlocked> {
+impl<'a, 'i> DataGuard<'a, SysAPI<'i>, Unlocked> {
     /// Terminates the interface.
     #[inline]
     pub fn shutdown(&self) -> ! {
@@ -676,14 +666,14 @@ impl<'a> DataGuard<'a, SysAPI, Unlocked> {
 
     /// Locks the interface.
     #[inline]
-    pub fn lock(self) -> DataGuard<'a, SysAPI, Locked> {
+    pub fn lock(self) -> DataGuard<'a, SysAPI<'i>, Locked> {
         self.data.lock();
         unsafe { self.assume_locked() }
     }
 
     /// Tries to lock the interface.
     #[inline]
-    pub fn try_lock(self) -> Result<DataGuard<'a, SysAPI, Locked>, Self> {
+    pub fn try_lock(self) -> Result<DataGuard<'a, SysAPI<'i>, Locked>, Self> {
         if self.data.try_lock() {
             Ok(unsafe { self.assume_locked() })
         } else {
@@ -692,7 +682,7 @@ impl<'a> DataGuard<'a, SysAPI, Unlocked> {
     }
 }
 
-impl<'a> DataGuard<'a, SysAPI, Locked> {
+impl<'a, 'i> DataGuard<'a, SysAPI<'i>, Locked> {
     /// Terminates the interface.
     #[inline]
     pub fn shutdown(&self) -> ! {
@@ -707,7 +697,7 @@ impl<'a> DataGuard<'a, SysAPI, Locked> {
 
     /// Unlocks the interface.
     #[inline]
-    pub fn unlock(self) -> DataGuard<'a, SysAPI, Unlocked> {
+    pub fn unlock(self) -> DataGuard<'a, SysAPI<'i>, Unlocked> {
         self.data.unlock();
         unsafe { self.assume_unlocked() }
     }
@@ -775,7 +765,7 @@ impl<'a> DataGuard<'a, SysAPI, Locked> {
     ///
     /// Modifying the sync handler may cause unintended side-effects.
     #[inline]
-    pub unsafe fn set_sync_handler(&mut self, s: Option<SyncHandler<'static>>) {
+    pub unsafe fn set_sync_handler(&mut self, s: Option<SyncHandler<'i>>) {
         self.data.set_sync_handler(s)
     }
 

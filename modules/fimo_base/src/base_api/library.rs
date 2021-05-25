@@ -17,7 +17,9 @@ use emf_core_base_rs::Error;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_void, CStr};
 use std::fmt::{Debug, Display, Formatter};
+use std::marker::PhantomData;
 use std::path::Path;
+use std::pin::Pin;
 
 const INVALID_LOADER: LoaderHandle = LoaderHandle { id: -1 };
 const INVALID_INTERNAL_HANDLE: InternalHandle = InternalHandle { id: -1 };
@@ -65,7 +67,7 @@ impl std::error::Error for LibraryError {}
 
 /// Implementation of the library api.
 #[derive(Debug)]
-pub struct LibraryAPI {
+pub struct LibraryAPI<'i> {
     lib_type_to_loader: HashMap<String, LoaderHandle>,
 
     loaders: HashMap<LoaderHandle, LibraryLoaderInterface>,
@@ -77,15 +79,17 @@ pub struct LibraryAPI {
 
     loader_gen: KeyGenerator<LoaderHandle, fn(&LoaderHandle) -> LoaderHandle>,
     library_gen: KeyGenerator<LibraryHandle, fn(&LibraryHandle) -> LibraryHandle>,
+
+    phantom: PhantomData<fn() -> &'i ()>,
 }
 
-impl Default for LibraryAPI {
+impl Default for LibraryAPI<'_> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LibraryAPI {
+impl<'i> LibraryAPI<'i> {
     /// Constructs a new instance.
     #[inline]
     pub fn new() -> Self {
@@ -104,6 +108,7 @@ impl LibraryAPI {
             libraries: Default::default(),
             loader_gen: KeyGenerator::new(first_loader, loader_generator),
             library_gen: KeyGenerator::new(first_library, library_generator),
+            phantom: PhantomData,
         }
     }
 
@@ -120,22 +125,22 @@ impl LibraryAPI {
     ///
     /// Handle on success, error otherwise.
     #[inline]
-    pub fn register_loader<'loader, LT, T>(
+    pub fn register_loader<LT, T>(
         &mut self,
-        loader: &'loader LT,
+        loader: Pin<&'i LT>,
         lib_type: impl AsRef<str>,
-    ) -> Result<Loader<'static, Owned>, Error<Owned>>
+    ) -> Result<Loader<'i, Owned>, Error<Owned>>
     where
-        T: LibraryLoaderAPI<'static> + LibraryLoaderABICompat,
-        LibraryLoader<T, Owned>: From<&'loader LT>,
+        T: LibraryLoaderAPI<'i> + LibraryLoaderABICompat,
+        LibraryLoader<T, Owned>: From<&'i LT>,
     {
         let lib_type = lib_type.as_ref();
-        let loader: LibraryLoader<T, Owned> = From::from(loader);
+        let loader: LibraryLoader<T, Owned> = From::from(loader.get_ref());
 
         if self.lib_type_to_loader.contains_key(lib_type) {
-            Err(Error::from(Box::new(LibraryError::DuplicatedLibraryType {
+            Err(Error::from(LibraryError::DuplicatedLibraryType {
                 r#type: lib_type.to_string(),
-            })))
+            }))
         } else {
             let key = self.loader_gen.next_key();
             self.lib_type_to_loader.insert(lib_type.to_string(), key);
@@ -161,13 +166,11 @@ impl LibraryAPI {
     pub fn unregister_loader(&mut self, loader: Loader<'_, Owned>) -> Result<(), Error<Owned>> {
         let handle = loader.as_handle();
         if handle == DEFAULT_HANDLE {
-            return Err(Error::from(Box::new(LibraryError::RemovingDefaultHandle)));
+            return Err(Error::from(LibraryError::RemovingDefaultHandle));
         }
 
         if self.loaders.contains_key(&handle) {
-            return Err(Error::from(Box::new(LibraryError::InvalidLoaderHandle {
-                handle,
-            })));
+            return Err(Error::from(LibraryError::InvalidLoaderHandle { handle }));
         }
 
         // Unload loaded libraries
@@ -211,9 +214,7 @@ impl LibraryAPI {
         if let Some(interface) = self.loaders.get(&handle) {
             Ok(unsafe { LibraryLoader::from_raw(*interface) })
         } else {
-            Err(Error::from(Box::new(LibraryError::InvalidLoaderHandle {
-                handle,
-            })))
+            Err(Error::from(LibraryError::InvalidLoaderHandle { handle }))
         }
     }
 
@@ -227,16 +228,16 @@ impl LibraryAPI {
     ///
     /// Handle on success, error otherwise.
     #[inline]
-    pub fn get_loader_handle_from_type<'api>(
+    pub fn get_loader_handle_from_type(
         &self,
         lib_type: impl AsRef<str>,
-    ) -> Result<Loader<'static, BorrowMutable<'api>>, Error<Owned>> {
+    ) -> Result<Loader<'i, BorrowMutable<'_>>, Error<Owned>> {
         if let Some(loader) = self.lib_type_to_loader.get(lib_type.as_ref()) {
             Ok(unsafe { Loader::new(*loader) })
         } else {
-            Err(Error::from(Box::new(LibraryError::InvalidLibraryType {
+            Err(Error::from(LibraryError::InvalidLibraryType {
                 r#type: lib_type.as_ref().to_string(),
-            })))
+            }))
         }
     }
 
@@ -249,10 +250,10 @@ impl LibraryAPI {
     /// # Return
     ///
     /// Handle on success, error otherwise.
-    pub fn get_loader_handle_from_library<'api, 'library, O>(
+    pub fn get_loader_handle_from_library<'library, O>(
         &self,
         library: &Library<'library, O>,
-    ) -> Result<Loader<'library, BorrowMutable<'api>>, Error<Owned>>
+    ) -> Result<Loader<'library, BorrowMutable<'i>>, Error<Owned>>
     where
         O: ImmutableAccessIdentifier,
     {
@@ -260,9 +261,7 @@ impl LibraryAPI {
         if let Some(loader) = self.library_to_loader.get(&handle) {
             Ok(unsafe { Loader::new(*loader) })
         } else {
-            Err(Error::from(Box::new(LibraryError::InvalidLibraryHandle {
-                handle,
-            })))
+            Err(Error::from(LibraryError::InvalidLibraryHandle { handle }))
         }
     }
 
@@ -316,10 +315,10 @@ impl LibraryAPI {
         let buffer = buffer.as_mut();
 
         if buffer.len() < self.get_num_loaders() {
-            Err(Error::from(Box::new(LibraryError::BufferOverflow {
+            Err(Error::from(LibraryError::BufferOverflow {
                 actual: buffer.len(),
                 required: self.get_num_loaders(),
-            })))
+            }))
         } else {
             for lib_type in buffer.iter_mut().zip(self.lib_type_to_loader.iter()) {
                 *lib_type.0 = LibraryType::from(lib_type.1 .0.as_str())
@@ -339,7 +338,7 @@ impl LibraryAPI {
     ///
     /// The handle must be linked before use.
     #[inline]
-    pub unsafe fn create_library_handle(&mut self) -> Library<'static, Owned> {
+    pub unsafe fn create_library_handle(&mut self) -> Library<'i, Owned> {
         let handle = self.library_gen.next_key();
         self.library_to_loader.insert(handle, INVALID_LOADER);
         self.libraries.insert(handle, INVALID_INTERNAL_HANDLE);
@@ -375,9 +374,7 @@ impl LibraryAPI {
 
             Ok(())
         } else {
-            Err(Error::from(Box::new(LibraryError::InvalidLibraryHandle {
-                handle,
-            })))
+            Err(Error::from(LibraryError::InvalidLibraryHandle { handle }))
         }
     }
 
@@ -415,15 +412,15 @@ impl LibraryAPI {
         let internal = internal.as_handle();
 
         if !self.libraries.contains_key(&library) {
-            return Err(Error::from(Box::new(LibraryError::InvalidLibraryHandle {
+            return Err(Error::from(LibraryError::InvalidLibraryHandle {
                 handle: library,
-            })));
+            }));
         }
 
         if !self.loaders.contains_key(&loader) {
-            return Err(Error::from(Box::new(LibraryError::InvalidLoaderHandle {
+            return Err(Error::from(LibraryError::InvalidLoaderHandle {
                 handle: loader,
-            })));
+            }));
         }
 
         // Remove old link
@@ -466,9 +463,9 @@ impl LibraryAPI {
         if let Some(internal) = self.libraries.get(&library.as_handle()) {
             Ok(unsafe { InternalLibrary::new(*internal) })
         } else {
-            Err(Error::from(Box::new(LibraryError::InvalidLibraryHandle {
+            Err(Error::from(LibraryError::InvalidLibraryHandle {
                 handle: library.as_handle(),
-            })))
+            }))
         }
     }
 
@@ -485,9 +482,9 @@ impl LibraryAPI {
     #[inline]
     pub fn load_library<O>(
         &mut self,
-        loader: &Loader<'static, O>,
+        loader: &Loader<'i, O>,
         path: impl AsRef<Path>,
-    ) -> Result<Library<'static, Owned>, Error<Owned>>
+    ) -> Result<Library<'i, Owned>, Error<Owned>>
     where
         O: MutableAccessIdentifier + ImmutableAccessIdentifier,
     {
@@ -590,7 +587,7 @@ impl LibraryAPI {
     }
 }
 
-impl<'a> DataGuard<'a, LibraryAPI, Locked> {
+impl<'a, 'i> DataGuard<'a, LibraryAPI<'i>, Locked> {
     /// Registers a new loader.
     ///
     /// The loader can load libraries of the type `lib_type`.
@@ -604,14 +601,14 @@ impl<'a> DataGuard<'a, LibraryAPI, Locked> {
     ///
     /// Handle on success, error otherwise.
     #[inline]
-    pub fn register_loader<'loader, LT, T>(
+    pub fn register_loader<LT, T>(
         &mut self,
-        loader: &'loader LT,
+        loader: Pin<&'i LT>,
         lib_type: impl AsRef<str>,
-    ) -> Result<Loader<'static, Owned>, Error<Owned>>
+    ) -> Result<Loader<'i, Owned>, Error<Owned>>
     where
-        T: LibraryLoaderAPI<'static> + LibraryLoaderABICompat,
-        LibraryLoader<T, Owned>: From<&'loader LT>,
+        T: LibraryLoaderAPI<'i> + LibraryLoaderABICompat,
+        LibraryLoader<T, Owned>: From<&'i LT>,
     {
         self.data.register_loader(loader, lib_type)
     }
@@ -661,10 +658,10 @@ impl<'a> DataGuard<'a, LibraryAPI, Locked> {
     ///
     /// Handle on success, error otherwise.
     #[inline]
-    pub fn get_loader_handle_from_type<'api>(
+    pub fn get_loader_handle_from_type(
         &self,
         lib_type: impl AsRef<str>,
-    ) -> Result<Loader<'static, BorrowMutable<'api>>, Error<Owned>> {
+    ) -> Result<Loader<'i, BorrowMutable<'_>>, Error<Owned>> {
         self.data.get_loader_handle_from_type(lib_type)
     }
 
@@ -677,10 +674,10 @@ impl<'a> DataGuard<'a, LibraryAPI, Locked> {
     /// # Return
     ///
     /// Handle on success, error otherwise.
-    pub fn get_loader_handle_from_library<'api, 'library, O>(
+    pub fn get_loader_handle_from_library<'library, O>(
         &self,
         library: &Library<'library, O>,
-    ) -> Result<Loader<'library, BorrowMutable<'api>>, Error<Owned>>
+    ) -> Result<Loader<'library, BorrowMutable<'_>>, Error<Owned>>
     where
         O: ImmutableAccessIdentifier,
     {
@@ -747,7 +744,7 @@ impl<'a> DataGuard<'a, LibraryAPI, Locked> {
     ///
     /// The handle must be linked before use.
     #[inline]
-    pub unsafe fn create_library_handle(&mut self) -> Library<'static, Owned> {
+    pub unsafe fn create_library_handle(&mut self) -> Library<'i, Owned> {
         self.data.create_library_handle()
     }
 
@@ -837,9 +834,9 @@ impl<'a> DataGuard<'a, LibraryAPI, Locked> {
     #[inline]
     pub fn load_library<O>(
         &mut self,
-        loader: &Loader<'static, O>,
+        loader: &Loader<'i, O>,
         path: impl AsRef<Path>,
-    ) -> Result<Library<'static, Owned>, Error<Owned>>
+    ) -> Result<Library<'i, Owned>, Error<Owned>>
     where
         O: MutableAccessIdentifier + ImmutableAccessIdentifier,
     {
