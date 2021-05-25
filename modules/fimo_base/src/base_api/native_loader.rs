@@ -126,7 +126,7 @@ impl NativeLoaderInternal {
         path: impl AsRef<OsStr>,
         flags: i32,
     ) -> Result<InternalLibraryHandle, Error<Owned>> {
-        let lib = match unsafe { Library::open(&path, flags) } {
+        let lib = match unsafe { Library::open(Some(&path), flags) } {
             Ok(lib) => lib,
             Err(e) => {
                 return Err(Error::from(NativeLoaderError::LibraryLoadError {
@@ -284,6 +284,7 @@ mod library_loader {
     use emf_core_base_rs::ffi::library::{InternalHandle, OSPathString, Symbol, SymbolName};
     use emf_core_base_rs::ffi::{CBaseFn, TypeWrapper};
     use std::ffi::c_void;
+    #[cfg(windows)]
     use std::os::windows::raw::HANDLE;
     use std::ptr::NonNull;
 
@@ -317,7 +318,7 @@ mod library_loader {
             get_loader(loader)
                 .lock()
                 .load_library(path, RTLD_LAZY | RTLD_LOCAL)
-                .map_or_else(|e| Result::Err(e.into_inner()), |v| Result::Ok)
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         }) {
             Ok(v) => v,
             Err(err) => Result::Err(Error::from(NativeLoaderError::UnknownError { error: err })),
@@ -418,7 +419,7 @@ mod library_loader {
             get_loader(loader)
                 .lock()
                 .load_library(path, flags)
-                .map_or_else(|e| Result::Err(e.into_inner()), |v| Result::Ok)
+                .map_or_else(|e| Result::Err(e.into_inner()), Result::Ok)
         }) {
             Ok(v) => v,
             Err(err) => Result::Err(Error::from(NativeLoaderError::UnknownError { error: err })),
