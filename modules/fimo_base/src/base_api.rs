@@ -100,9 +100,13 @@ impl Default for BaseAPI<'_> {
 
 impl Drop for BaseAPI<'_> {
     fn drop(&mut self) {
+        // Reset the apis.
+        self.library_api.get_mut().reset();
+
+        // Drop the loader.
         // The loader originates from a Box and is mutable.
         let loader = unsafe {
-            Box::<NativeLoader>::from_raw(&self.native_loader.get_ref() as *const _ as *mut _)
+            Box::<NativeLoader>::from_raw(self.native_loader.get_ref() as *const _ as *mut _)
         };
         drop(loader);
     }
