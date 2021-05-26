@@ -112,6 +112,14 @@ impl<'i> LibraryAPI<'i> {
         }
     }
 
+    /// Resets the api.
+    #[inline]
+    pub fn reset(&mut self) {
+        let mut reloaded = Self::new();
+        std::mem::swap(&mut reloaded, self);
+        drop(reloaded);
+    }
+
     /// Registers a new loader.
     ///
     /// The loader can load libraries of the type `lib_type`.
@@ -165,11 +173,13 @@ impl<'i> LibraryAPI<'i> {
     #[inline]
     pub fn unregister_loader(&mut self, loader: Loader<'_, Owned>) -> Result<(), Error<Owned>> {
         let handle = loader.as_handle();
+        // The default handle may not be unregistered.
         if handle == DEFAULT_HANDLE {
             return Err(Error::from(LibraryError::RemovingDefaultHandle));
         }
 
-        if self.loaders.contains_key(&handle) {
+        // Check if the loader is actually registered.
+        if !self.loaders.contains_key(&handle) {
             return Err(Error::from(LibraryError::InvalidLoaderHandle { handle }));
         }
 
@@ -367,10 +377,11 @@ impl<'i> LibraryAPI<'i> {
         let handle = library.as_handle();
         if let Some(loader) = self.library_to_loader.remove(&handle) {
             self.libraries.remove(&handle);
-            self.loader_to_libraries
-                .get_mut(&loader)
-                .unwrap()
-                .remove(&handle);
+
+            // Remove from loader if it was linked.
+            if let Some(library) = self.loader_to_libraries.get_mut(&loader) {
+                library.remove(&handle);
+            }
 
             Ok(())
         } else {
@@ -909,5 +920,281 @@ impl<'a, 'i> DataGuard<'a, LibraryAPI<'i>, Locked> {
         O: ImmutableAccessIdentifier,
     {
         self.data.get_function_symbol(library, symbol, caster)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::base_api::native_loader::NativeLoader;
+    use crate::base_api::LibraryAPI;
+    use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
+    use emf_core_base_rs::ffi::library::InternalHandle;
+    use emf_core_base_rs::library::library_loader::{LibraryLoader, UnknownLoader};
+    use emf_core_base_rs::library::{
+        InternalLibrary, Library, Loader, Symbol, DEFAULT_HANDLE, NATIVE_LIBRARY_TYPE_NAME,
+    };
+    use emf_core_base_rs::ownership::Owned;
+    use std::ffi::CString;
+    use std::ops::{Deref, DerefMut};
+    use std::pin::Pin;
+
+    struct LibWrapper<'a>((LibraryAPI<'a>, Pin<&'a NativeLoader>));
+
+    impl LibWrapper<'_> {
+        pub fn new() -> Self {
+            let loader = Pin::new(Box::leak(Box::new(NativeLoader::new()))).into_ref();
+            let mut api = LibraryAPI::new();
+            api.register_loader(loader, NATIVE_LIBRARY_TYPE_NAME)
+                .unwrap();
+            Self { 0: (api, loader) }
+        }
+    }
+
+    impl Drop for LibWrapper<'_> {
+        fn drop(&mut self) {
+            self.0 .0.reset();
+
+            let loader =
+                unsafe { Box::<NativeLoader>::from_raw(self.0 .1.get_ref() as *const _ as *mut _) };
+            drop(loader);
+        }
+    }
+
+    impl<'a> Deref for LibWrapper<'a> {
+        type Target = LibraryAPI<'a>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0 .0
+        }
+    }
+
+    impl<'a> DerefMut for LibWrapper<'a> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0 .0
+        }
+    }
+
+    struct TestLoader;
+    const TEST_LOADER: &TestLoader = &TestLoader;
+    const TEST_SYMBOL: usize = 123456;
+    const TEST_SYMBOL_2: usize = 654321;
+    fn test_fn() -> bool {
+        true
+    }
+
+    impl From<&'static TestLoader> for LibraryLoader<UnknownLoader<'static>, Owned> {
+        fn from(_: &'static TestLoader) -> Self {
+            use emf_core_base_rs::ffi::collections::{NonNullConst, Result};
+            use emf_core_base_rs::ffi::errors::Error;
+            use emf_core_base_rs::ffi::library::library_loader::{
+                LibraryLoader as LibLoader, LibraryLoaderVTable,
+            };
+            use emf_core_base_rs::ffi::library::{OSPathString, Symbol, SymbolName};
+            use emf_core_base_rs::ffi::{CBaseFn, TypeWrapper};
+            use std::ffi::c_void;
+            use std::ptr::NonNull;
+
+            unsafe extern "C-unwind" fn load(
+                _: Option<NonNull<LibLoader>>,
+                _: OSPathString,
+            ) -> Result<InternalHandle, Error> {
+                Result::Ok(InternalHandle { id: 0 })
+            }
+
+            unsafe extern "C-unwind" fn unload(
+                _: Option<NonNull<LibLoader>>,
+                _: InternalHandle,
+            ) -> Result<i8, Error> {
+                Result::Ok(0)
+            }
+
+            unsafe extern "C-unwind" fn get_data_symbol(
+                _: Option<NonNull<LibLoader>>,
+                h: InternalHandle,
+                _: SymbolName,
+            ) -> Result<Symbol<NonNullConst<c_void>>, Error> {
+                if h.id == 0 {
+                    Result::Ok(Symbol {
+                        symbol: NonNullConst::from(&TEST_SYMBOL).cast(),
+                    })
+                } else {
+                    Result::Ok(Symbol {
+                        symbol: NonNullConst::from(&TEST_SYMBOL_2).cast(),
+                    })
+                }
+            }
+
+            #[allow(improper_ctypes_definitions)]
+            unsafe extern "C-unwind" fn get_fn_symbol(
+                _: Option<NonNull<LibLoader>>,
+                _: InternalHandle,
+                _: SymbolName,
+            ) -> Result<Symbol<CBaseFn>, Error> {
+                Result::Ok(Symbol {
+                    symbol: std::mem::transmute(test_fn as fn() -> bool),
+                })
+            }
+
+            unsafe extern "C-unwind" fn get_extended_vtable(
+                _: Option<NonNull<LibLoader>>,
+            ) -> NonNullConst<c_void> {
+                NonNullConst::dangling()
+            }
+
+            const VTABLE: LibraryLoaderVTable = LibraryLoaderVTable {
+                load_fn: TypeWrapper(load),
+                unload_fn: TypeWrapper(unload),
+                get_data_symbol_fn: TypeWrapper(get_data_symbol),
+                get_function_symbol_fn: TypeWrapper(get_fn_symbol),
+                get_extended_vtable_fn: TypeWrapper(get_extended_vtable),
+            };
+
+            unsafe {
+                LibraryLoader::from_raw(LibraryLoaderInterface {
+                    loader: None,
+                    vtable: NonNullConst::from(&VTABLE),
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn native_loader() {
+        let mut lib = LibWrapper::new();
+        assert!(lib
+            .get_loader_interface::<_, UnknownLoader<'_>>(&DEFAULT_HANDLE)
+            .is_ok());
+        assert_eq!(
+            lib.get_loader_handle_from_type(NATIVE_LIBRARY_TYPE_NAME)
+                .unwrap()
+                .as_handle(),
+            DEFAULT_HANDLE.as_handle()
+        );
+        assert_eq!(lib.get_num_loaders(), 1);
+        assert!(lib.type_exists(NATIVE_LIBRARY_TYPE_NAME));
+
+        let mut buffer = vec![Default::default(); lib.get_num_loaders()];
+        assert_eq!(
+            lib.get_library_types(&mut buffer).unwrap(),
+            lib.get_num_loaders()
+        );
+        assert_eq!(buffer, vec![From::from(NATIVE_LIBRARY_TYPE_NAME)]);
+
+        let default = unsafe { Loader::new(DEFAULT_HANDLE.as_handle()) };
+        assert!(lib.unregister_loader(default).is_err());
+    }
+
+    #[test]
+    fn new_library() {
+        let mut lib = LibWrapper::new();
+
+        let library = unsafe { lib.create_library_handle() };
+        assert!(lib.library_exists(&library));
+        let library_copy = unsafe { Library::<Owned>::new(library.as_handle()) };
+        unsafe {
+            lib.remove_library_handle(library_copy).unwrap();
+        }
+        assert!(!lib.library_exists(&library));
+    }
+
+    #[test]
+    fn loader_registration() {
+        let mut lib = LibWrapper::new();
+        let invalid = unsafe { Loader::new(super::INVALID_LOADER) };
+        assert!(lib.unregister_loader(invalid).is_err());
+
+        const TEST_LOADER_TYPE: &str = "TEST_LOADER";
+        assert!(!lib.type_exists(TEST_LOADER_TYPE));
+
+        let num_loaders = lib.get_num_loaders();
+
+        let test_loader = lib
+            .register_loader(Pin::new(TEST_LOADER), TEST_LOADER_TYPE)
+            .unwrap();
+        assert!(lib.type_exists(TEST_LOADER_TYPE));
+        assert_eq!(
+            lib.get_loader_handle_from_type(TEST_LOADER_TYPE)
+                .unwrap()
+                .as_handle(),
+            test_loader.as_handle()
+        );
+        assert_eq!(lib.get_num_loaders(), num_loaders + 1);
+
+        let library = lib.load_library(&test_loader, "").unwrap();
+
+        lib.unregister_loader(test_loader).unwrap();
+        assert_eq!(lib.get_num_loaders(), num_loaders);
+        assert!(!lib.library_exists(&library));
+    }
+
+    #[test]
+    fn library_loading() {
+        let mut lib = LibWrapper::new();
+        const TEST_LOADER_TYPE: &str = "TEST_LOADER";
+        let test_loader = lib
+            .register_loader(Pin::new(TEST_LOADER), TEST_LOADER_TYPE)
+            .unwrap();
+
+        let library = lib.load_library(&test_loader, "").unwrap();
+        assert_eq!(
+            lib.get_loader_handle_from_library(&library)
+                .unwrap()
+                .as_handle(),
+            test_loader.as_handle()
+        );
+        assert!(lib.library_exists(&library));
+        assert_eq!(
+            lib.get_internal_library_handle(&library)
+                .unwrap()
+                .as_handle()
+                .id,
+            0
+        );
+
+        let data: Symbol<'_, &'static usize> = lib
+            .get_data_symbol(&library, CString::new("").unwrap(), |s| unsafe {
+                &*s.cast().as_ptr()
+            })
+            .unwrap();
+        let func: Symbol<'_, fn() -> bool> = lib
+            .get_function_symbol(&library, CString::new("").unwrap(), |s| unsafe {
+                std::mem::transmute(s)
+            })
+            .unwrap();
+
+        assert_eq!(*AsRef::<usize>::as_ref(&data), TEST_SYMBOL);
+        assert_eq!(func.as_ref()(), test_fn());
+
+        let library_clone = unsafe { Library::new(library.as_handle()) };
+        lib.unload_library(library_clone).unwrap();
+        assert!(!lib.library_exists(&library));
+    }
+
+    #[test]
+    fn library_linking() {
+        let mut lib = LibWrapper::new();
+        const TEST_LOADER_TYPE: &str = "TEST_LOADER";
+        let test_loader = lib
+            .register_loader(Pin::new(TEST_LOADER), TEST_LOADER_TYPE)
+            .unwrap();
+
+        let library = unsafe { lib.create_library_handle() };
+        unsafe {
+            lib.link_library(
+                &library,
+                &test_loader,
+                &InternalLibrary::<Owned>::new(InternalHandle { id: 1 }),
+            )
+            .unwrap();
+        }
+
+        let data: Symbol<'_, &'static usize> = lib
+            .get_data_symbol(&library, CString::new("").unwrap(), |s| unsafe {
+                &*s.cast().as_ptr()
+            })
+            .unwrap();
+
+        assert_eq!(*AsRef::<usize>::as_ref(&data), TEST_SYMBOL_2);
+        lib.unload_library(library).unwrap();
     }
 }
