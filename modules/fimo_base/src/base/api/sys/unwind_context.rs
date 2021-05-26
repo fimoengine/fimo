@@ -38,7 +38,7 @@ pub fn construct_context() -> UnwindInternalContextRef {
 
 #[cfg(test)]
 mod tests {
-    use crate::base_api::sys::unwind_context::{construct_context, PanicSignal, ShutdownSignal};
+    use crate::base::api::sys::unwind_context::{construct_context, PanicSignal, ShutdownSignal};
     use emf_core_base_rs::ffi::collections::Optional;
     use emf_core_base_rs::ffi::errors::StaticError;
 
@@ -53,8 +53,8 @@ mod tests {
         });
         std::panic::set_hook(hook);
 
-        assert_eq!(result.is_err(), true);
-        assert_eq!(result.err().unwrap().is::<ShutdownSignal>(), true);
+        assert!(result.is_err());
+        assert!(result.err().unwrap().is::<ShutdownSignal>());
     }
 
     #[test]
@@ -69,7 +69,7 @@ mod tests {
         std::panic::set_hook(hook);
 
         let err = result.err().unwrap();
-        assert_eq!(err.is::<PanicSignal>(), true);
+        assert!(err.is::<PanicSignal>());
         assert_eq!(err.downcast::<PanicSignal>().unwrap().error, None);
     }
 
@@ -90,7 +90,7 @@ mod tests {
         std::panic::set_hook(hook);
 
         let err = result.err().unwrap();
-        assert_eq!(err.is::<PanicSignal>(), true);
+        assert!(err.is::<PanicSignal>());
         assert_eq!(
             format!("{:?}", StaticError::new("My error")),
             format!(

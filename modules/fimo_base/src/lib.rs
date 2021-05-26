@@ -11,12 +11,13 @@
     broken_intra_doc_links
 )]
 
-mod base_interface;
+mod data_guard;
 mod fimo_base;
 mod key_generator;
 
-pub use fimo_base::FimoBase;
-pub use key_generator::KeyGenerator;
-
-pub mod base_api;
+pub mod base;
 pub mod module_interface;
+
+pub(crate) use data_guard::{DataGuard, Locked, Unlocked};
+pub use fimo_base::FimoBase;
+pub(crate) use key_generator::KeyGenerator;

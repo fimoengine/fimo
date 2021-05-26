@@ -96,7 +96,7 @@ impl DefaultSync {
 
 #[cfg(test)]
 mod tests {
-    use crate::base_api::sys::sync::DefaultSync;
+    use crate::base::api::sys::sync::DefaultSync;
     use emf_core_base_rs::sys::sync_handler::SyncHandlerAPI;
     use std::cell::Cell;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -142,7 +142,7 @@ mod tests {
         let barrier = Arc::new(Barrier::new(2));
 
         let sync_int = sync.as_interface();
-        assert_eq!(unsafe { sync_int.try_lock() }, true);
+        assert!(unsafe { sync_int.try_lock() });
 
         let t = {
             let sync_t = Arc::clone(&sync);
@@ -151,7 +151,7 @@ mod tests {
 
             std::thread::spawn(move || {
                 let sync_int = sync_t.as_interface();
-                assert_eq!(unsafe { sync_int.try_lock() }, false);
+                assert!(unsafe { !sync_int.try_lock() });
                 barrier_t.wait();
 
                 unsafe { sync_int.lock() };
@@ -161,10 +161,10 @@ mod tests {
         };
 
         barrier.wait();
-        assert_eq!(data.load(Ordering::Acquire), false);
+        assert!(!data.load(Ordering::Acquire));
         unsafe { sync_int.unlock() };
 
         t.join().unwrap();
-        assert_eq!(data.load(Ordering::Acquire), true);
+        assert!(data.load(Ordering::Acquire));
     }
 }

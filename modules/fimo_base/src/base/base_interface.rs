@@ -1,4 +1,5 @@
-use crate::base_api::{BaseAPI, INTERFACE_VERSION};
+//! FFI interface of the `emf-core-base` interface.
+use crate::base::{BaseAPI, INTERFACE_VERSION};
 use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::module::InterfaceExtension;
 use emf_core_base_rs::ffi::version::Version;
@@ -194,7 +195,7 @@ pub(crate) mod utilities {
 }
 
 pub(crate) mod sys_bindings {
-    use crate::base_api::BaseAPI;
+    use crate::base::BaseAPI;
     use emf_core_base_rs::ffi::collections::Optional;
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::sys::sync_handler::SyncHandlerInterface;
@@ -275,7 +276,7 @@ pub(crate) mod sys_bindings {
 }
 
 pub(crate) mod version_bindings {
-    use crate::base_api::BaseAPI;
+    use crate::base::BaseAPI;
     use emf_core_base_rs::ffi::collections::{ConstSpan, MutSpan, NonNullConst, Result};
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::version::{ReleaseType, Version};
@@ -485,7 +486,7 @@ pub(crate) mod version_bindings {
 }
 
 pub(crate) mod library_bindings {
-    use crate::base_api::BaseAPI;
+    use crate::base::BaseAPI;
     use emf_core_base_rs::ffi::collections::{MutSpan, NonNullConst, Result};
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
@@ -745,7 +746,7 @@ pub(crate) mod library_bindings {
 
 pub(crate) mod extensions_bindings {
     pub(crate) mod unwind_internal {
-        use crate::base_api::BaseAPI;
+        use crate::base::BaseAPI;
         use emf_core_base_rs::ffi::collections::NonNullConst;
         use emf_core_base_rs::ffi::extensions::unwind_internal::{
             Context, PanicFn, ShutdownFn, UnwindInternalInterface,
