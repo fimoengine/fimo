@@ -1,4 +1,4 @@
-use crate::base_interface::BaseInterfaceWrapper;
+use crate::base::base_interface::BaseInterfaceWrapper;
 use emf_core_base_rs::ffi;
 use emf_core_base_rs::ffi::collections::ConstSpan;
 use emf_core_base_rs::ffi::errors::Error;

@@ -1,4 +1,4 @@
-use crate::base_api::{DataGuard, Locked};
+use crate::base::{DataGuard, Locked};
 use crate::KeyGenerator;
 use emf_core_base_rs::ffi::collections::NonNullConst;
 use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
@@ -925,8 +925,8 @@ impl<'a, 'i> DataGuard<'a, LibraryAPI<'i>, Locked> {
 
 #[cfg(test)]
 mod tests {
-    use crate::base_api::native_loader::NativeLoader;
-    use crate::base_api::LibraryAPI;
+    use crate::base::native_loader::NativeLoader;
+    use crate::base::LibraryAPI;
     use emf_core_base_rs::ffi::library::library_loader::LibraryLoaderInterface;
     use emf_core_base_rs::ffi::library::InternalHandle;
     use emf_core_base_rs::library::library_loader::{LibraryLoader, UnknownLoader};

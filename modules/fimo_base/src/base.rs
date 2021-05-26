@@ -1,6 +1,5 @@
 //! Implementation of the `emf-core-base` interface.
-use crate::base_api::native_loader::NativeLoader;
-use crate::base_api::sys::ExitStatus;
+use crate::{DataGuard, Locked, Unlocked};
 use emf_core_base_rs::ffi::version::Version;
 use emf_core_base_rs::ffi::CBase;
 use emf_core_base_rs::ownership::Owned;
@@ -8,78 +7,24 @@ use emf_core_base_rs::version::ReleaseType;
 use emf_core_base_rs::Error;
 use fimo_version_rs::new_long;
 use std::cell::UnsafeCell;
-use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::panic::UnwindSafe;
 use std::pin::Pin;
 use std::ptr::NonNull;
 
-mod library;
-mod module;
+mod api;
 mod native_loader;
-mod sys;
-mod version;
 
-pub use library::LibraryAPI;
-pub use module::ModuleAPI;
-pub use sys::SysAPI;
-pub use version::VersionAPI;
+pub mod base_interface;
+
+use api::ExitStatus;
+pub use api::LibraryAPI;
+pub use api::ModuleAPI;
+pub use api::SysAPI;
+pub use api::VersionAPI;
+use native_loader::NativeLoader;
 
 /// Implemented interface version.
 pub const INTERFACE_VERSION: Version = new_long(0, 2, 0, ReleaseType::Unstable, 0);
-
-/// An unlocked resource.
-#[derive(Debug, Default)]
-pub struct Unlocked {}
-
-/// A locked resource.
-#[derive(Debug, Default)]
-pub struct Locked {}
-
-/// A guarded resource.
-#[derive(Debug)]
-pub struct DataGuard<'a, T, L = Unlocked> {
-    data: &'a mut T,
-    lock_type: L,
-}
-
-impl<'a, T, L> DataGuard<'a, T, L> {
-    /// Creates a new guard.
-    pub fn new(data: &'a mut T) -> DataGuard<'a, T, Unlocked> {
-        DataGuard {
-            data,
-            lock_type: Unlocked {},
-        }
-    }
-}
-
-impl<'a, T> DataGuard<'a, T, Unlocked> {
-    /// Assumes that the contained data is locked.
-    ///
-    /// # Safety
-    ///
-    /// The assumption is not checked.
-    pub unsafe fn assume_locked(self) -> DataGuard<'a, T, Locked> {
-        DataGuard {
-            data: self.data,
-            lock_type: Locked {},
-        }
-    }
-}
-
-impl<'a, T> DataGuard<'a, T, Locked> {
-    /// Assumes that the contained data is unlocked.
-    ///
-    /// # Safety
-    ///
-    /// The assumption is not checked.
-    pub unsafe fn assume_unlocked(self) -> DataGuard<'a, T, Unlocked> {
-        DataGuard {
-            data: self.data,
-            lock_type: Unlocked {},
-        }
-    }
-}
-
-impl<'a, T, L> RefUnwindSafe for DataGuard<'a, T, L> {}
 
 /// Interface implementation.
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-use crate::base_api::{DataGuard, Locked, Unlocked};
+use crate::base::{DataGuard, Locked, Unlocked};
 use emf_core_base_rs::extensions::unwind_internal::UnwindInternalContextRef;
 use emf_core_base_rs::ffi::collections::Optional;
 use emf_core_base_rs::ffi::errors::StaticError;
@@ -261,7 +261,7 @@ impl<'i> SysAPI<'i> {
     /// Fetches a function.
     #[inline]
     pub fn get_fn(&self, id: FnId) -> Option<CBaseFn> {
-        use crate::base_interface::{
+        use crate::base::base_interface::{
             extensions_bindings, library_bindings, sys_bindings, version_bindings,
         };
         use extensions_bindings::unwind_internal;
@@ -826,8 +826,8 @@ impl<'a, 'i> DataGuard<'a, SysAPI<'i>, Locked> {
 
 #[cfg(test)]
 mod tests {
-    use crate::base_api::sys::ExitStatus;
-    use crate::base_api::SysAPI;
+    use crate::base::api::sys::ExitStatus;
+    use crate::base::SysAPI;
     use emf_core_base_rs::ffi::errors::StaticError;
     use std::cell::Cell;
     use std::panic::AssertUnwindSafe;
@@ -923,7 +923,7 @@ mod tests {
 
         sys.enter_interface_from_thread(move |_| {
             let barrier = Arc::new(Barrier::new(2));
-            assert_eq!(sys_c.try_lock(), true);
+            assert!(sys_c.try_lock());
 
             let t = {
                 let sys_t = Arc::clone(&sys_c);
@@ -931,7 +931,7 @@ mod tests {
                 let barrier_t = Arc::clone(&barrier);
 
                 std::thread::spawn(move || {
-                    assert_eq!(sys_t.try_lock(), false);
+                    assert!(!sys_t.try_lock());
                     barrier_t.wait();
 
                     sys_t.lock();
@@ -941,11 +941,11 @@ mod tests {
             };
 
             barrier.wait();
-            assert_eq!(data_c.load(Ordering::Acquire), false);
+            assert!(!data_c.load(Ordering::Acquire));
             sys_c.unlock();
 
             t.join().unwrap();
         });
-        assert_eq!(data.load(Ordering::Acquire), true);
+        assert!(data.load(Ordering::Acquire));
     }
 }
