@@ -1,21 +1,22 @@
 use crate::DependencyError;
-use emf_core_base_rs::module;
+use emf_core_base_rs::ownership::Owned;
+use emf_core_base_rs::Error as Err;
 
 /// Possible error states
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum Error<LError> {
-    /// Error originating from the module api.
-    ModuleAPIError(module::Error),
+    /// Error originating from the api.
+    APIError(Err<Owned>),
     /// A dependency error.
     DependencyError(DependencyError),
     /// Error originating from a loader.
     LoaderError(LoaderError<LError>),
 }
 
-impl<LError> From<module::Error> for Error<LError> {
-    fn from(err: module::Error) -> Self {
-        Error::ModuleAPIError(err)
+impl<LError> From<Err<Owned>> for Error<LError> {
+    fn from(err: Err<Owned>) -> Self {
+        Error::APIError(err)
     }
 }
 

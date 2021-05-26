@@ -3,8 +3,9 @@ use crate::{
     get_manifest_path, parse_manifest_from_file, ModuleCallback, ModuleManifest, ValidationError,
 };
 use emf_core_base_rs::ffi::CBASE_INTERFACE_NAME;
-use emf_core_base_rs::version;
+use emf_core_base_rs::ownership::Owned;
 use emf_core_base_rs::version::Version;
+use emf_core_base_rs::{version, Error};
 use fimo_version_rs::{compare_strong, from_string, is_compatible};
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::EdgeRef;
@@ -22,8 +23,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum DependencyError {
-    /// Error originating from the version api.
-    VersionAPIError(version::Error),
+    /// Error originating from the api.
+    APIError(Error<Owned>),
     /// Error while validating a module manifest.
     ModuleManifestError(ValidationError),
     /// The provided core module is invalid.
@@ -48,9 +49,9 @@ impl From<ValidationError> for DependencyError {
     }
 }
 
-impl From<version::Error> for DependencyError {
-    fn from(err: version::Error) -> Self {
-        DependencyError::VersionAPIError(err)
+impl From<Error<Owned>> for DependencyError {
+    fn from(err: Error<Owned>) -> Self {
+        DependencyError::APIError(err)
     }
 }
 
