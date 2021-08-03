@@ -3,5 +3,6 @@
 members = [
     "fimo_bootstrap_rs",
     "fimo_version_rs",
-    "modules/fimo_base"
+    "modules/*",
+    "utilities/*"
 ]

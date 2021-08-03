@@ -1,0 +1,17 @@
+[package]
+name = "fimo_module_core"
+version = "0.1.0"
+edition = "2018"
+description = "Fimo module definitions"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+[dependencies]
+serde_json = "1.0"
+libloading = "0.7.0"
+serde = { version = "1.0.123", features = ["derive"] }
+fimo_ffi_core = { version = "0.1.0", path = "../fimo_ffi_core" }
+fimo_version_core = { version = "0.1.0", path = "../fimo_version_core" }
+
+[build-dependencies]
+rustc_version = "0.4.0"
