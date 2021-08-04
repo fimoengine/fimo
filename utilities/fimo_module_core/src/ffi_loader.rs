@@ -144,6 +144,10 @@ impl FFIModuleLoader {
 }
 
 impl ModuleLoader for FFIModuleLoader {
+    fn get_raw_ptr(&self) -> ModulePtr {
+        ModulePtr::Fat(unsafe { std::mem::transmute(self.as_any()) })
+    }
+
     unsafe fn load_module(&self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>> {
         let manifest_path = path.join(MODULE_MANIFEST_PATH);
         let file = File::open(manifest_path)?;
@@ -163,6 +167,10 @@ impl ModuleLoader for FFIModuleLoader {
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
         self
     }
 }
@@ -192,6 +200,15 @@ impl FFIModule {
 }
 
 impl Module for FFIModule {
+    fn get_raw_ptr(&self) -> ModulePtr {
+        if cfg!(any(windows, unix)) {
+            sa::assert_eq_size!(*const u8, Library);
+            ModulePtr::Slim(unsafe { std::mem::transmute_copy(&self.library) })
+        } else {
+            unimplemented!()
+        }
+    }
+
     fn get_module_path(&self) -> &Path {
         self.module_path.as_path()
     }
@@ -217,6 +234,10 @@ impl Module for FFIModule {
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
         self
     }
+
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
+        self
+    }
 }
 
 // SAFETY: The implementation of a module is always `Send + Sync`.
@@ -240,6 +261,10 @@ impl FFIModuleInstance {
 }
 
 impl ModuleInstance for FFIModuleInstance {
+    fn get_raw_ptr(&self) -> ModulePtr {
+        *self.instance_ptr
+    }
+
     fn get_module(&self) -> Arc<dyn Module> {
         self.parent.clone()
     }
@@ -291,6 +316,10 @@ impl ModuleInstance for FFIModuleInstance {
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
         self
     }
+
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
+        self
+    }
 }
 
 // SAFETY: Module instances are always `Send + Sync`.
@@ -329,6 +358,10 @@ impl ModuleInterface for FFIModuleInterface {
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
         self
     }
 }

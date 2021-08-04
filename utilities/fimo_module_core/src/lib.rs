@@ -6,6 +6,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+extern crate static_assertions as sa;
 use std::any::Any;
 use std::error::Error;
 use std::path::Path;
@@ -67,10 +68,18 @@ pub trait ModuleInterface: Send + Sync {
 
     /// Casts the interface to a `&dyn Any`.
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);
+
+    /// Casts the interface to a `&mut dyn Any`.
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static);
 }
 
 /// A module instance.
 pub trait ModuleInstance: Send + Sync {
+    /// Fetches an internal [ModulePtr] to the instance.
+    ///
+    /// The ptr remains valid until the instance is dropped.
+    fn get_raw_ptr(&self) -> ModulePtr;
+
     /// Fetches the parent module.
     ///
     /// # Note
@@ -107,10 +116,18 @@ pub trait ModuleInstance: Send + Sync {
 
     /// Casts the instance to a `&dyn Any`.
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);
+
+    /// Casts the interface to a `&mut dyn Any`.
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static);
 }
 
 /// A module.
 pub trait Module: Send + Sync {
+    /// Fetches an internal [ModulePtr] to the module.
+    ///
+    /// The ptr remains valid until the module is dropped.
+    fn get_raw_ptr(&self) -> ModulePtr;
+
     /// Fetches the path to the module root.
     fn get_module_path(&self) -> &Path;
 
@@ -138,10 +155,18 @@ pub trait Module: Send + Sync {
 
     /// Casts the module to a `&dyn Any`.
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);
+
+    /// Casts the interface to a `&mut dyn Any`.
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static);
 }
 
 /// A module loader.
 pub trait ModuleLoader: Send + Sync {
+    /// Fetches an internal [ModulePtr] to the loader.
+    ///
+    /// The ptr remains valid until the loader is dropped.
+    fn get_raw_ptr(&self) -> ModulePtr;
+
     /// Loads a new module from a path.
     ///
     /// # Note
@@ -159,6 +184,9 @@ pub trait ModuleLoader: Send + Sync {
 
     /// Casts the module loader to a `&dyn Any`.
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);
+
+    /// Casts the interface to a `&mut dyn Any`.
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static);
 }
 
 impl std::fmt::Display for ModuleInfo {
