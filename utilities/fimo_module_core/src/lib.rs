@@ -161,6 +161,24 @@ pub trait ModuleLoader: Send + Sync {
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);
 }
 
+impl std::fmt::Display for ModuleInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "name: {}, version: {}", self.name, self.version)
+    }
+}
+
+impl std::fmt::Display for ModuleInterfaceDescriptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "name: {}, version: {}", self.name, self.version)
+    }
+}
+
+impl std::fmt::Display for ModuleInterfaceDescriptorCompatability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
 impl PartialEq for ModuleInterfaceDescriptorCompatability {
     fn eq(&self, other: &Self) -> bool {
         PartialEq::eq(&self.0.name, &other.0.name)

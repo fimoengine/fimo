@@ -13,6 +13,9 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Loader type of the FFI loader.
+pub const MODULE_LOADER_TYPE: &str = "fimo_ffi_loader";
+
 /// Path from a module root to the manifest.
 pub const MODULE_MANIFEST_PATH: &str = "ffi_module.json";
 
