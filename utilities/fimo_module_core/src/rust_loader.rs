@@ -1,5 +1,7 @@
 //! Loader for Rust modules.
-use crate::{ffi_loader::LoaderManifest, Module, ModuleInfo, ModuleInstance, ModuleLoader};
+use crate::{
+    ffi_loader::LoaderManifest, Module, ModuleInfo, ModuleInstance, ModuleLoader, ModulePtr,
+};
 use fimo_ffi_core::TypeWrapper;
 use libloading::Library;
 use std::any::Any;
@@ -89,6 +91,10 @@ impl RustLoader {
 }
 
 impl ModuleLoader for RustLoader {
+    fn get_raw_ptr(&self) -> ModulePtr {
+        ModulePtr::Fat(unsafe { std::mem::transmute(self.as_any()) })
+    }
+
     unsafe fn load_module(&self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>> {
         let manifest_path = path.join(MODULE_MANIFEST_PATH);
         let file = File::open(manifest_path)?;
@@ -108,6 +114,10 @@ impl ModuleLoader for RustLoader {
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
         self
     }
 }
@@ -155,6 +165,15 @@ impl RustModule {
 }
 
 impl Module for RustModule {
+    fn get_raw_ptr(&self) -> ModulePtr {
+        if cfg!(any(windows, unix)) {
+            sa::assert_eq_size!(*const u8, Library);
+            ModulePtr::Slim(unsafe { std::mem::transmute_copy(&self.library) })
+        } else {
+            unimplemented!()
+        }
+    }
+
     fn get_module_path(&self) -> &Path {
         self.internal_module.get_module_path()
     }
@@ -173,6 +192,10 @@ impl Module for RustModule {
 
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
         self.internal_module.as_any()
+    }
+
+    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
+        self
     }
 }
 
