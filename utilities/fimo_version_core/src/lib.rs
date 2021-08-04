@@ -278,7 +278,7 @@ impl Version {
                 needed: self.string_length_short(),
             });
         }
-        buffer[length..length + major_buff.len()].copy_from_slice(&major_buff);
+        buffer[length..length + major_buff.len()].copy_from_slice(major_buff);
         length += major_buff.len();
 
         buffer[length] = b'.';
@@ -291,7 +291,7 @@ impl Version {
                 needed: self.string_length_short(),
             });
         }
-        buffer[length..length + minor_buff.len()].copy_from_slice(&minor_buff);
+        buffer[length..length + minor_buff.len()].copy_from_slice(minor_buff);
         length += minor_buff.len();
 
         buffer[length] = b'.';
@@ -304,7 +304,7 @@ impl Version {
                 needed: self.string_length_short(),
             });
         }
-        buffer[length..length + patch_buff.len()].copy_from_slice(&patch_buff);
+        buffer[length..length + patch_buff.len()].copy_from_slice(patch_buff);
         length += patch_buff.len();
 
         Ok(length)
@@ -352,8 +352,7 @@ impl Version {
                     needed: self.string_length_long(),
                 });
             }
-            buffer[length..length + release_number_buff.len()]
-                .copy_from_slice(&release_number_buff);
+            buffer[length..length + release_number_buff.len()].copy_from_slice(release_number_buff);
             length += release_number_buff.len();
         }
 
@@ -388,7 +387,7 @@ impl Version {
                     needed: self.string_length_full(),
                 });
             }
-            buffer[length..length + build_buff.len()].copy_from_slice(&build_buff);
+            buffer[length..length + build_buff.len()].copy_from_slice(build_buff);
             length += build_buff.len();
         }
 
@@ -562,19 +561,19 @@ mod tests {
 
     #[test]
     fn validate() {
-        assert_eq!(Version::string_is_valid("1.0.0"), true);
-        assert_eq!(Version::string_is_valid("1.0.0+512"), true);
-        assert_eq!(Version::string_is_valid("1.0.0-unstable"), true);
-        assert_eq!(Version::string_is_valid("1.0.0-unstable+1112"), true);
-        assert_eq!(Version::string_is_valid("1.0.0-beta.12"), true);
-        assert_eq!(Version::string_is_valid("1.0.0-beta.12+1215120"), true);
+        assert!(Version::string_is_valid("1.0.0"));
+        assert!(Version::string_is_valid("1.0.0+512"));
+        assert!(Version::string_is_valid("1.0.0-unstable"));
+        assert!(Version::string_is_valid("1.0.0-unstable+1112"));
+        assert!(Version::string_is_valid("1.0.0-beta.12"));
+        assert!(Version::string_is_valid("1.0.0-beta.12+1215120"));
 
-        assert_eq!(Version::string_is_valid("1"), false);
-        assert_eq!(Version::string_is_valid("1.0"), false);
-        assert_eq!(Version::string_is_valid("1.0.0-"), false);
-        assert_eq!(Version::string_is_valid("1.0.0-stable"), false);
-        assert_eq!(Version::string_is_valid("1.0.0-unstable."), false);
-        assert_eq!(Version::string_is_valid("1.0.0-unstable.0+"), false);
+        assert!(!Version::string_is_valid("1"));
+        assert!(!Version::string_is_valid("1.0"));
+        assert!(!Version::string_is_valid("1.0.0-"));
+        assert!(!Version::string_is_valid("1.0.0-stable"));
+        assert!(!Version::string_is_valid("1.0.0-unstable."));
+        assert!(!Version::string_is_valid("1.0.0-unstable.0+"));
     }
 
     #[test]
@@ -784,9 +783,9 @@ mod tests {
         let v7 = Version::new_full(1, 1, 0, ReleaseType::Stable, 0, 0);
         let v8 = Version::new_full(1, 2, 7, ReleaseType::Stable, 0, 0);
 
-        assert_eq!(Version::is_compatible(&v1, &v2), true);
-        assert_eq!(Version::is_compatible(&v3, &v4), true);
-        assert_eq!(Version::is_compatible(&v5, &v6), true);
-        assert_eq!(Version::is_compatible(&v7, &v8), true);
+        assert!(Version::is_compatible(&v1, &v2));
+        assert!(Version::is_compatible(&v3, &v4));
+        assert!(Version::is_compatible(&v5, &v6));
+        assert!(Version::is_compatible(&v7, &v8));
     }
 }
