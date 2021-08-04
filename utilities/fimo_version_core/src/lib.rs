@@ -8,62 +8,14 @@
 )]
 use lazy_static::lazy_static;
 use numtoa::NumToA;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
 lazy_static! {
     static ref VERSION_VALIDATOR: regex::Regex =
         regex::Regex::new(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<release_type>(unstable|beta))(\.(?P<release_number>\d+))?)?(\+(?P<build>\d+))?").unwrap();
-}
-
-/// Version errors.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub enum VersionError {
-    /// Invalid string format.
-    InvalidString(String),
-    /// Buffer overflow.
-    BufferOverflow {
-        /// Buffer length.
-        buffer: usize,
-        /// Needed length.
-        needed: usize,
-    },
-}
-
-impl Display for VersionError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VersionError::InvalidString(str) => write!(f, "Invalid String: {}", str),
-            VersionError::BufferOverflow { buffer, needed } => {
-                write!(f, "Buffer overflow! buffer: {}, needed: {}", buffer, needed)
-            }
-        }
-    }
-}
-
-impl std::error::Error for VersionError {}
-
-/// Errors of the version api.
-#[repr(i8)]
-#[non_exhaustive]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub enum ReleaseType {
-    /// Stable release.
-    Stable = 0,
-    /// Unstable pre-release.
-    Unstable = 1,
-    /// API-stable pre-release.
-    Beta = 2,
-}
-
-impl Display for ReleaseType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReleaseType::Stable => write!(f, "Stable"),
-            ReleaseType::Unstable => write!(f, "Unstable"),
-            ReleaseType::Beta => write!(f, "Beta"),
-        }
-    }
 }
 
 /// A version.
@@ -82,6 +34,37 @@ pub struct Version {
     pub release_number: i8,
     /// Release type.
     pub release_type: ReleaseType,
+}
+
+/// Errors of the version api.
+#[repr(i8)]
+#[non_exhaustive]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub enum ReleaseType {
+    /// Stable release.
+    #[cfg_attr(feature = "serde", serde(rename = "stable"))]
+    Stable = 0,
+    /// Unstable pre-release.
+    #[cfg_attr(feature = "serde", serde(rename = "unstable"))]
+    Unstable = 1,
+    /// API-stable pre-release.
+    #[cfg_attr(feature = "serde", serde(rename = "beta"))]
+    Beta = 2,
+}
+
+/// Version errors.
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub enum VersionError {
+    /// Invalid string format.
+    InvalidString(String),
+    /// Buffer overflow.
+    BufferOverflow {
+        /// Buffer length.
+        buffer: usize,
+        /// Needed length.
+        needed: usize,
+    },
 }
 
 impl Version {
@@ -490,6 +473,72 @@ impl Display for Version {
         }
     }
 }
+
+impl From<&Version> for String {
+    fn from(version: &Version) -> Self {
+        let req = version.string_length_full();
+        let mut buff = Vec::with_capacity(req);
+        // Safety:
+        let mut str = unsafe {
+            buff.set_len(req);
+            String::from_utf8_unchecked(buff)
+        };
+
+        version.as_string_full(&mut str).unwrap();
+
+        str
+    }
+}
+
+impl From<Version> for String {
+    fn from(version: Version) -> Self {
+        From::from(&version)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Version {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Serialize::serialize(&String::from(self), serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Version {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let string: String = Deserialize::deserialize(deserializer)?;
+        Version::from_string(string).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Display for ReleaseType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReleaseType::Stable => write!(f, "Stable"),
+            ReleaseType::Unstable => write!(f, "Unstable"),
+            ReleaseType::Beta => write!(f, "Beta"),
+        }
+    }
+}
+
+impl Display for VersionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VersionError::InvalidString(str) => write!(f, "Invalid String: {}", str),
+            VersionError::BufferOverflow { buffer, needed } => {
+                write!(f, "Buffer overflow! buffer: {}, needed: {}", buffer, needed)
+            }
+        }
+    }
+}
+
+impl std::error::Error for VersionError {}
 
 #[cfg(test)]
 mod tests {
