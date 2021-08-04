@@ -4,7 +4,7 @@
     missing_docs,
     rust_2018_idioms,
     missing_debug_implementations,
-    broken_intra_doc_links
+    rustdoc::broken_intra_doc_links
 )]
 use emf_core_base_rs::ownership::Owned;
 use emf_core_base_rs::version::{ReleaseType, Version};
@@ -241,7 +241,7 @@ pub fn as_string_short(
             needed: string_length_short(version),
         })));
     }
-    buffer[length..length + major_buff.len()].copy_from_slice(&major_buff);
+    buffer[length..length + major_buff.len()].copy_from_slice(major_buff);
     length += major_buff.len();
 
     buffer[length] = b'.';
@@ -254,7 +254,7 @@ pub fn as_string_short(
             needed: string_length_short(version),
         })));
     }
-    buffer[length..length + minor_buff.len()].copy_from_slice(&minor_buff);
+    buffer[length..length + minor_buff.len()].copy_from_slice(minor_buff);
     length += minor_buff.len();
 
     buffer[length] = b'.';
@@ -267,7 +267,7 @@ pub fn as_string_short(
             needed: string_length_short(version),
         })));
     }
-    buffer[length..length + patch_buff.len()].copy_from_slice(&patch_buff);
+    buffer[length..length + patch_buff.len()].copy_from_slice(patch_buff);
     length += patch_buff.len();
 
     Ok(length)
@@ -282,7 +282,7 @@ pub fn as_string_long(
     version: &Version,
     mut buffer: impl AsMut<str>,
 ) -> Result<usize, Error<Owned>> {
-    let mut length = as_string_short(&version, &mut buffer)?;
+    let mut length = as_string_short(version, &mut buffer)?;
     let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
 
     let release_type = match version.release_type {
@@ -319,7 +319,7 @@ pub fn as_string_long(
                 needed: string_length_long(version),
             })));
         }
-        buffer[length..length + release_number_buff.len()].copy_from_slice(&release_number_buff);
+        buffer[length..length + release_number_buff.len()].copy_from_slice(release_number_buff);
         length += release_number_buff.len();
     }
 
@@ -357,7 +357,7 @@ pub fn as_string_full(
                 needed: string_length_full(version),
             })));
         }
-        buffer[length..length + build_buff.len()].copy_from_slice(&build_buff);
+        buffer[length..length + build_buff.len()].copy_from_slice(build_buff);
         length += build_buff.len();
     }
 

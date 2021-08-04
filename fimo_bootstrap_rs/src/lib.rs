@@ -4,7 +4,7 @@
     missing_docs,
     rust_2018_idioms,
     missing_debug_implementations,
-    broken_intra_doc_links
+    rustdoc::broken_intra_doc_links
 )]
 use emf_core_base_rs::module::{Loader, Module, ModuleAPI};
 use emf_core_base_rs::ownership::BorrowMutable;
