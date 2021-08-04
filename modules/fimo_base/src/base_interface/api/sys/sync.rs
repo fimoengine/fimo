@@ -96,7 +96,7 @@ impl DefaultSync {
 
 #[cfg(test)]
 mod tests {
-    use crate::base::api::sys::sync::DefaultSync;
+    use crate::base_interface::api::sys::sync::DefaultSync;
     use emf_core_base_rs::sys::sync_handler::SyncHandlerAPI;
     use std::cell::Cell;
     use std::sync::atomic::{AtomicBool, Ordering};

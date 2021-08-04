@@ -18,7 +18,6 @@ pub mod base_interface;
 
 use api::ExitStatus;
 pub use api::LibraryAPI;
-pub use api::ModuleAPI;
 pub use api::SysAPI;
 pub use api::VersionAPI;
 use native_loader::NativeLoader;
@@ -32,7 +31,6 @@ pub struct BaseAPI<'i> {
     version: Version,
     native_loader: Pin<&'i NativeLoader>,
     library_api: UnsafeCell<LibraryAPI<'i>>,
-    module_api: UnsafeCell<ModuleAPI<'i>>,
     sys_api: UnsafeCell<SysAPI<'i>>,
     version_api: UnsafeCell<VersionAPI<'i>>,
 }
@@ -65,7 +63,6 @@ impl<'i> BaseAPI<'i> {
             version: INTERFACE_VERSION,
             native_loader: Pin::new(Box::leak(Box::new(NativeLoader::new()))).into_ref(),
             library_api: UnsafeCell::new(LibraryAPI::new()),
-            module_api: UnsafeCell::new(ModuleAPI::new()),
             sys_api: UnsafeCell::new(SysAPI::new()),
             version_api: UnsafeCell::new(VersionAPI::new()),
         };
@@ -119,16 +116,6 @@ impl<'i> BaseAPI<'i> {
         self.library_api.get()
     }
 
-    /// Fetches the module api.
-    ///
-    /// # Safety
-    ///
-    /// This gives direct access to the api, bypassing the locking mechanism.
-    #[inline]
-    pub unsafe fn get_module_api(&self) -> *mut ModuleAPI<'i> {
-        self.module_api.get()
-    }
-
     /// Fetches the sys api.
     ///
     /// # Safety
@@ -168,11 +155,6 @@ impl<'a, 'i> DataGuard<'a, BaseAPI<'i>, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_library_api() })
     }
 
-    /// Fetches the module api.
-    pub fn get_module_api(&self) -> DataGuard<'a, ModuleAPI<'i>, Unlocked> {
-        <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_module_api() })
-    }
-
     /// Fetches the sys api.
     pub fn get_sys_api(&self) -> DataGuard<'a, SysAPI<'i>, Unlocked> {
         <DataGuard<'a, _>>::new(unsafe { &mut *self.data.get_sys_api() })
@@ -200,11 +182,6 @@ impl<'a, 'i> DataGuard<'a, BaseAPI<'i>, Locked> {
     /// Fetches the library api.
     pub fn get_library_api(&self) -> DataGuard<'a, LibraryAPI<'i>, Locked> {
         unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_library_api()).assume_locked() }
-    }
-
-    /// Fetches the module api.
-    pub fn get_module_api(&self) -> DataGuard<'a, ModuleAPI<'i>, Locked> {
-        unsafe { <DataGuard<'a, _>>::new(&mut *self.data.get_module_api()).assume_locked() }
     }
 
     /// Fetches the sys api.

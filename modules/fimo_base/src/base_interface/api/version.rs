@@ -1,4 +1,4 @@
-use crate::base::{DataGuard, Locked, Unlocked};
+use crate::base_interface::{DataGuard, Locked, Unlocked};
 use emf_core_base_rs::ffi::version::{ReleaseType, Version};
 use emf_core_base_rs::ownership::Owned;
 use emf_core_base_rs::Error;

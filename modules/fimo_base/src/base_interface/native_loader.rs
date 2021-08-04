@@ -275,7 +275,7 @@ impl<'a> From<&'a NativeLoader> for LibraryLoader<NativeLibraryLoader<'a>, Owned
 }
 
 mod library_loader {
-    use crate::base::native_loader::{NativeLoader, NativeLoaderError};
+    use crate::base_interface::native_loader::{NativeLoader, NativeLoaderError};
     use emf_core_base_rs::ffi::collections::{NonNullConst, Result};
     use emf_core_base_rs::ffi::errors::Error;
     use emf_core_base_rs::ffi::library::library_loader::{
@@ -312,7 +312,7 @@ mod library_loader {
         path: OSPathString,
     ) -> Result<InternalHandle, Error> {
         match std::panic::catch_unwind(move || {
-            use crate::base::base_interface::utilities::os_path_to_path_buf;
+            use crate::base_interface::base_interface::utilities::os_path_to_path_buf;
             use libloading::os::unix::*;
             let path = os_path_to_path_buf(path);
             get_loader(loader)
@@ -331,7 +331,7 @@ mod library_loader {
         path: OSPathString,
     ) -> Result<InternalHandle, Error> {
         match std::panic::catch_unwind(move || {
-            use crate::base::base_interface::utilities::os_path_to_path_buf;
+            use crate::base_interface::base_interface::utilities::os_path_to_path_buf;
             let path = os_path_to_path_buf(path);
             get_loader(loader)
                 .lock()
@@ -414,7 +414,7 @@ mod library_loader {
         flags: i32,
     ) -> Result<InternalHandle, Error> {
         match std::panic::catch_unwind(move || {
-            use crate::base::base_interface::utilities::os_path_to_path_buf;
+            use crate::base_interface::base_interface::utilities::os_path_to_path_buf;
             let path = os_path_to_path_buf(path);
             get_loader(loader)
                 .lock()
@@ -434,7 +434,7 @@ mod library_loader {
         flags: u32,
     ) -> Result<InternalHandle, Error> {
         match std::panic::catch_unwind(move || {
-            use crate::base::base_interface::utilities::os_path_to_path_buf;
+            use crate::base_interface::base_interface::utilities::os_path_to_path_buf;
             let path = os_path_to_path_buf(path);
             get_loader(loader)
                 .lock()

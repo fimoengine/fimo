@@ -1,4 +1,4 @@
-use crate::base::{DataGuard, Locked, Unlocked};
+use crate::base_interface::{DataGuard, Locked, Unlocked};
 use emf_core_base_rs::extensions::unwind_internal::UnwindInternalContextRef;
 use emf_core_base_rs::ffi::collections::Optional;
 use emf_core_base_rs::ffi::errors::StaticError;
@@ -261,7 +261,7 @@ impl<'i> SysAPI<'i> {
     /// Fetches a function.
     #[inline]
     pub fn get_fn(&self, id: FnId) -> Option<CBaseFn> {
-        use crate::base::base_interface::{
+        use crate::base_interface::base_interface::{
             extensions_bindings, library_bindings, sys_bindings, version_bindings,
         };
         use extensions_bindings::unwind_internal;
@@ -826,8 +826,8 @@ impl<'a, 'i> DataGuard<'a, SysAPI<'i>, Locked> {
 
 #[cfg(test)]
 mod tests {
-    use crate::base::api::sys::ExitStatus;
-    use crate::base::SysAPI;
+    use crate::base_interface::api::sys::ExitStatus;
+    use crate::base_interface::SysAPI;
     use emf_core_base_rs::ffi::errors::StaticError;
     use std::cell::Cell;
     use std::panic::AssertUnwindSafe;
