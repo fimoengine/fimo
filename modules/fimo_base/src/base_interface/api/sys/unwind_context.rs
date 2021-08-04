@@ -38,7 +38,7 @@ pub fn construct_context() -> UnwindInternalContextRef {
 
 #[cfg(test)]
 mod tests {
-    use crate::base::api::sys::unwind_context::{construct_context, PanicSignal, ShutdownSignal};
+    use crate::base_interface::api::sys::unwind_context::{construct_context, PanicSignal, ShutdownSignal};
     use emf_core_base_rs::ffi::collections::Optional;
     use emf_core_base_rs::ffi::errors::StaticError;
 
