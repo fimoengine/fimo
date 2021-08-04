@@ -16,6 +16,9 @@ pub const RUSTC_VERSION: &str = env!("RUSTC_VERSION");
 /// Core version the library was linked with.
 pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Loader type of the Rust loader.
+pub const MODULE_LOADER_TYPE: &str = "fimo_rust_loader";
+
 /// Path from a module root to the manifest.
 pub const MODULE_MANIFEST_PATH: &str = "rust_module.json";
 

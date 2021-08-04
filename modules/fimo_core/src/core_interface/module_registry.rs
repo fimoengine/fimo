@@ -1,4 +1,5 @@
 //! Implementation of the `ModuleRegistry` type.
+use fimo_ffi_core::ArrayString;
 use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map, hash_map, BTreeMap, HashMap};
@@ -26,8 +27,11 @@ pub enum ModuleManifest {
     /// Version `0` manifest schema.
     #[serde(rename = "0")]
     V0 {
+        /// Module information.
         info: ModuleInfo,
+        /// Required module loader.
         loader: String,
+        /// Required dependencies.
         load_deps: Vec<ModuleInterfaceInfo>,
     },
 }
@@ -35,15 +39,20 @@ pub enum ModuleManifest {
 /// Basic module information.
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInfo {
+    /// Module name.
     pub name: String,
+    /// Module version.
     pub version: semver::Version,
 }
 
 /// Basic module interface info.
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInterfaceInfo {
+    /// Name of the interface.
     pub name: String,
+    /// Version of the interface.
     pub version: fimo_version_core::Version,
+    /// Interface extensions.
     pub extensions: Vec<String>,
 }
 
@@ -75,34 +84,41 @@ pub type LoaderCallback = dyn FnOnce(Arc<dyn ModuleLoader>) + Sync + Send;
 /// Type of an interface callback.
 pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
 
-impl std::fmt::Display for ModuleRegistryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-impl std::error::Error for ModuleRegistryError {}
-
-impl<T: ?Sized> CallbackHandle<T> {
-    fn new(id: *const T) -> Self {
-        Self { 0: id }
-    }
-
-    fn as_ptr(&self) -> *const T {
-        self.0
-    }
-}
-
 impl ModuleRegistry {
+    /// Creates a new `ModuleRegistry`.
     pub fn new() -> Self {
-        Self {
+        #[allow(unused_mut)]
+        let mut registry = Self {
             loaders: HashMap::new(),
             interfaces: BTreeMap::new(),
             loader_callbacks: HashMap::new(),
             interface_callbacks: HashMap::new(),
+        };
+
+        if cfg!(feature = "rust_module_loader") {
+            registry
+                .register_loader(
+                    fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
+                    fimo_module_core::rust_loader::RustLoader::new(),
+                )
+                .unwrap();
         }
+
+        if cfg!(feature = "ffi_module_loader") {
+            registry
+                .register_loader(
+                    fimo_module_core::ffi_loader::MODULE_LOADER_TYPE,
+                    fimo_module_core::ffi_loader::FFIModuleLoader::new(),
+                )
+                .unwrap();
+        }
+
+        registry
     }
 
+    /// Registers a new module loader to the `ModuleRegistry`.
+    ///
+    /// The registered loader will be available to the rest of the `ModuleRegistry`.
     pub fn register_loader(
         &mut self,
         loader_type: impl AsRef<str>,
@@ -124,6 +140,9 @@ impl ModuleRegistry {
         Ok(self)
     }
 
+    /// Unregisters an existing module loader from the `ModuleRegistry`.
+    ///
+    /// Notifies all registered callbacks before removing.
     pub fn unregister_loader(
         &mut self,
         loader_type: impl AsRef<str>,
@@ -149,6 +168,9 @@ impl ModuleRegistry {
         Ok(self)
     }
 
+    /// Registers a loader-removal callback to the `ModuleRegistry`.
+    ///
+    /// The callback will be called in case the loader is removed.
     pub fn register_loader_callback(
         &mut self,
         loader_type: impl AsRef<str>,
@@ -167,6 +189,9 @@ impl ModuleRegistry {
         Ok(self)
     }
 
+    /// Unregisters a loader-removal callback from the `ModuleRegistry`.
+    ///
+    /// The callback will not be called.
     pub fn unregister_loader_callback(
         &mut self,
         loader_type: impl AsRef<str>,
@@ -195,6 +220,7 @@ impl ModuleRegistry {
         }
     }
 
+    /// Extracts a loader from the `ModuleRegistry` using the registration type.
     pub fn get_loader_from_type(
         &self,
         loader_type: impl AsRef<str>,
@@ -203,6 +229,7 @@ impl ModuleRegistry {
             .map(|loader| loader.clone())
     }
 
+    /// Registers a new interface to the `ModuleRegistry`.
     pub fn register_interface(
         &mut self,
         descriptor: impl AsRef<ModuleInterfaceDescriptor>,
@@ -225,6 +252,10 @@ impl ModuleRegistry {
         Ok(self)
     }
 
+    /// Unregisters an existing interface from the `ModuleRegistry`.
+    ///
+    /// This function calls the interface-remove callbacks that are registered
+    /// with the interface before removing it.
     pub fn unregister_interface(
         &mut self,
         descriptor: impl AsRef<ModuleInterfaceDescriptor>,
@@ -246,6 +277,9 @@ impl ModuleRegistry {
         Ok(self)
     }
 
+    /// Registers an interface-removed callback to the `ModuleRegistry`.
+    ///
+    /// The callback will be called in case the interface is removed from the `ModuleRegistry`.
     pub fn register_interface_callback(
         &mut self,
         descriptor: impl AsRef<ModuleInterfaceDescriptor>,
@@ -264,6 +298,7 @@ impl ModuleRegistry {
         Ok(self)
     }
 
+    /// Unregisters an interface-removed callback from the `ModuleRegistry` without calling it.
     pub fn unregister_interface_callback(
         &mut self,
         descriptor: impl AsRef<ModuleInterfaceDescriptor>,
@@ -290,6 +325,7 @@ impl ModuleRegistry {
         }
     }
 
+    /// Extracts an interface from the `ModuleRegistry`.
     pub fn get_interface_from_descriptor(
         &self,
         descriptor: impl AsRef<ModuleInterfaceDescriptor>,
@@ -298,13 +334,62 @@ impl ModuleRegistry {
             .map(|interface| interface.clone())
     }
 
-    pub fn get_module_manifest(
+    /// Extracts all interface descriptors with the same name.
+    pub fn get_interface_descriptors_from_name(
         &self,
-        module_path: impl AsRef<Path>,
-    ) -> Result<ModuleManifest, ModuleRegistryError> {
+        interface_name: impl AsRef<str>,
+    ) -> Vec<ModuleInterfaceDescriptor> {
+        self.interfaces
+            .keys()
+            .filter(|x| x.name == interface_name.as_ref())
+            .cloned()
+            .collect()
+    }
+
+    /// Extracts all descriptors of compatible interfaces.
+    pub fn get_compatible_interface_descriptors(
+        &self,
+        interface_name: impl AsRef<str>,
+        interface_version: impl AsRef<fimo_version_core::Version>,
+        interface_extensions: impl AsRef<[ArrayString<32>]>,
+    ) -> Vec<ModuleInterfaceDescriptor> {
+        self.interfaces
+            .keys()
+            .filter(|x| {
+                x.name == interface_name.as_ref()
+                    && interface_version.as_ref().is_compatible(&x.version)
+                    && interface_extensions
+                        .as_ref()
+                        .iter()
+                        .all(|ext| x.extensions.contains(ext))
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+impl ModuleManifest {
+    /// Tries to load the manifest from a module.
+    pub fn load_from_module(module_path: impl AsRef<Path>) -> Result<Self, ModuleRegistryError> {
         let manifest_path = module_path.as_ref().join(MODULE_MANIFEST_PATH);
         let file = File::open(manifest_path)?;
         serde_json::from_reader(BufReader::new(file)).map_err(From::from)
+    }
+}
+
+impl Default for ModuleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: ?Sized> CallbackHandle<T> {
+    fn new(id: *const T) -> Self {
+        Self { 0: id }
+    }
+
+    fn as_ptr(&self) -> *const T {
+        self.0
     }
 }
 
@@ -314,14 +399,41 @@ impl std::fmt::Debug for ModuleRegistry {
     }
 }
 
-impl From<std::io::Error> for ModuleRegistryError {
-    fn from(err: std::io::Error) -> Self {
-        ModuleRegistryError::IOError(err)
+impl std::error::Error for ModuleRegistryError {}
+
+impl std::fmt::Display for ModuleRegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModuleRegistryError::UnknownLoaderType(loader_type) => {
+                write!(f, "unknown loader type: {}", loader_type)
+            }
+            ModuleRegistryError::DuplicateLoaderType(loader_type) => {
+                write!(f, "duplicated loader type: {}", loader_type)
+            }
+            ModuleRegistryError::UnknownInterface(interface) => {
+                write!(f, "unknown interface: {}", interface)
+            }
+            ModuleRegistryError::DuplicateInterface(interface) => {
+                write!(f, "duplicated interface: {}", interface)
+            }
+            ModuleRegistryError::SerdeError(err) => {
+                write!(f, "de-/serialisation error: {}", err)
+            }
+            ModuleRegistryError::IOError(err) => {
+                write!(f, "io error: {}", err)
+            }
+        }
     }
 }
 
 impl From<serde_json::Error> for ModuleRegistryError {
     fn from(err: serde_json::Error) -> Self {
         ModuleRegistryError::SerdeError(err)
+    }
+}
+
+impl From<std::io::Error> for ModuleRegistryError {
+    fn from(err: std::io::Error) -> Self {
+        ModuleRegistryError::IOError(err)
     }
 }

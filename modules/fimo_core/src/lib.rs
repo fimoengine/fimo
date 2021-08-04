@@ -9,9 +9,7 @@
     broken_intra_doc_links
 )]
 
-mod core_module;
-
 pub mod core_interface;
-pub use fimo_ffi_core as ffi;
 
-pub use core_module::FimoCore;
+#[cfg(feature = "module")]
+pub mod core_module;
