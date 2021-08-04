@@ -1,15 +1,25 @@
+//! Implementation of the `ModuleRegistry` type.
 use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
 use serde::{Deserialize, Serialize};
 use std::collections::{btree_map, hash_map, BTreeMap, HashMap};
 use std::fs::File;
 use std::io::BufReader;
-use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Path from module root to manifest file.
 pub const MODULE_MANIFEST_PATH: &str = "module.json";
 
+/// The module registry.
+pub struct ModuleRegistry {
+    loaders: HashMap<String, Arc<dyn ModuleLoader>>,
+    interfaces: BTreeMap<ModuleInterfaceDescriptor, Arc<dyn ModuleInterface>>,
+    loader_callbacks: HashMap<*const dyn ModuleLoader, Vec<Box<LoaderCallback>>>,
+    interface_callbacks: HashMap<*const dyn ModuleInterface, Vec<Box<InterfaceCallback>>>,
+}
+
+/// The manifest of a module.
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "schema")]
 pub enum ModuleManifest {
@@ -22,12 +32,14 @@ pub enum ModuleManifest {
     },
 }
 
+/// Basic module information.
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInfo {
     pub name: String,
     pub version: semver::Version,
 }
 
+/// Basic module interface info.
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInterfaceInfo {
     pub name: String,
@@ -35,18 +47,33 @@ pub struct ModuleInterfaceInfo {
     pub extensions: Vec<String>,
 }
 
-pub type LoaderCallback = dyn FnOnce(Arc<dyn ModuleLoader>) + Sync + Send;
-pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
+/// Handle to a registered callback.
+#[repr(transparent)]
+#[derive(Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
+pub struct CallbackHandle<T: ?Sized>(*const T);
 
+/// Errors from the `ModuleRegistry`.
 #[derive(Debug)]
 pub enum ModuleRegistryError {
+    /// The loader has not been registered.
     UnknownLoaderType(String),
+    /// Tried to register a loader twice.
     DuplicateLoaderType(String),
+    /// The interface has not been registered.
     UnknownInterface(ModuleInterfaceDescriptor),
+    /// Tried to register an interface twice.
     DuplicateInterface(ModuleInterfaceDescriptor),
+    /// De-/Serialisation error.
     SerdeError(serde_json::Error),
+    /// IO error.
     IOError(std::io::Error),
 }
+
+/// Type of a loader callback.
+pub type LoaderCallback = dyn FnOnce(Arc<dyn ModuleLoader>) + Sync + Send;
+
+/// Type of an interface callback.
+pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
 
 impl std::fmt::Display for ModuleRegistryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -56,10 +83,6 @@ impl std::fmt::Display for ModuleRegistryError {
 
 impl std::error::Error for ModuleRegistryError {}
 
-#[repr(transparent)]
-#[derive(Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct CallbackHandle<T: ?Sized>(*const T);
-
 impl<T: ?Sized> CallbackHandle<T> {
     fn new(id: *const T) -> Self {
         Self { 0: id }
@@ -68,13 +91,6 @@ impl<T: ?Sized> CallbackHandle<T> {
     fn as_ptr(&self) -> *const T {
         self.0
     }
-}
-
-pub struct ModuleRegistry {
-    loaders: HashMap<String, Arc<dyn ModuleLoader>>,
-    interfaces: BTreeMap<ModuleInterfaceDescriptor, Arc<dyn ModuleInterface>>,
-    loader_callbacks: HashMap<*const dyn ModuleLoader, Vec<Box<LoaderCallback>>>,
-    interface_callbacks: HashMap<*const dyn ModuleInterface, Vec<Box<InterfaceCallback>>>,
 }
 
 impl ModuleRegistry {
@@ -292,6 +308,12 @@ impl ModuleRegistry {
     }
 }
 
+impl std::fmt::Debug for ModuleRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(ModuleRegistry)")
+    }
+}
+
 impl From<std::io::Error> for ModuleRegistryError {
     fn from(err: std::io::Error) -> Self {
         ModuleRegistryError::IOError(err)
@@ -301,27 +323,5 @@ impl From<std::io::Error> for ModuleRegistryError {
 impl From<serde_json::Error> for ModuleRegistryError {
     fn from(err: serde_json::Error) -> Self {
         ModuleRegistryError::SerdeError(err)
-    }
-}
-
-/// Implementation of the module api.
-#[derive(Debug)]
-pub struct ModuleAPI<'i> {
-    phantom: PhantomData<fn() -> &'i ()>,
-}
-
-impl Default for ModuleAPI<'_> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'i> ModuleAPI<'i> {
-    /// Constructs a new instance.
-    #[inline]
-    pub fn new() -> Self {
-        Self {
-            phantom: PhantomData,
-        }
     }
 }
