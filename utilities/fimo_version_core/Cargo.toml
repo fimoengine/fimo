@@ -10,3 +10,4 @@ categories = ["game-development"]
 regex = "1.4.3"
 numtoa = "0.2.3"
 lazy_static = "1.4.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
