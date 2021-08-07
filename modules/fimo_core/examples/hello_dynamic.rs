@@ -9,18 +9,18 @@ use std::path::Path;
 static A: System = System;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let core_path = if cfg!(windows) {
-        Path::new("../fimo_core.dll")
-    } else if cfg!(unix) {
-        Path::new("../fimo_core.so")
-    } else if cfg!(targetos = "macos") {
-        Path::new("../fimo_core.dylib")
+    let core_path = if cfg!(target_os = "windows") {
+        Path::new("../fimo_core.dll").canonicalize()?
+    } else if cfg!(target_os = "linux") {
+        Path::new("../libfimo_core.so").canonicalize()?
+    } else if cfg!(target_os = "macos") {
+        Path::new("../libfimo_core.dylib").canonicalize()?
     } else {
         unimplemented!()
     };
 
     let module_loader = module::rust_loader::RustLoader::new();
-    let core_module = unsafe { module_loader.load_module_library(core_path)? };
+    let core_module = unsafe { module_loader.load_module_library(core_path.as_path())? };
 
     println!(
         "Core info: {}, Path: {}",
