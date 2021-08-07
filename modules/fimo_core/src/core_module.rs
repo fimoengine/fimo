@@ -21,6 +21,9 @@ use std::sync::{Arc, Weak};
 #[cfg(feature = "rust_module")]
 mod rust_module;
 
+/// Name of the module.
+pub const MODULE_NAME: &str = "fimo_core";
+
 /// Core module.
 pub struct FimoCore {
     available_interfaces: Vec<ModuleInterfaceDescriptor>,
@@ -67,7 +70,9 @@ impl FimoCore {
     /// Constructs a new `FimoCore` instance.
     pub fn new(parent: Arc<dyn Module>) -> Arc<Self> {
         let core_info = ModuleInterfaceDescriptor {
-            name: unsafe { ArrayString::from_utf8_unchecked(b"fimo-core") },
+            name: unsafe {
+                ArrayString::from_utf8_unchecked(crate::core_interface::INTERFACE_NAME.as_bytes())
+            },
             version: crate::core_interface::INTERFACE_VERSION,
             extensions: Default::default(),
         };
@@ -457,7 +462,7 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
 #[allow(dead_code)]
 fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
-        name: unsafe { ArrayString::from_utf8_unchecked(b"fimo_core") },
+        name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
             ArrayString::from_utf8_unchecked(
                 String::from(&crate::core_interface::INTERFACE_VERSION).as_bytes(),

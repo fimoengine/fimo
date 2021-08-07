@@ -4,6 +4,9 @@ use std::any::Any;
 
 pub mod module_registry;
 
+/// Name of the interface.
+pub const INTERFACE_NAME: &str = "fimo-core";
+
 /// Implemented interface version.
 pub const INTERFACE_VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
 
