@@ -458,6 +458,10 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
 fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(b"fimo_core") },
-        version: unsafe { ArrayString::from_utf8_unchecked(b"0.1.0") },
+        version: unsafe {
+            ArrayString::from_utf8_unchecked(
+                String::from(&crate::core_interface::INTERFACE_VERSION).as_bytes(),
+            )
+        },
     }
 }
