@@ -41,8 +41,11 @@ macro_rules! impl_fimo_module_instance {
 #[macro_export]
 macro_rules! to_fimo_module_instance_raw_ptr {
     ($self: expr) => {
-        let ext_stable = $self as &dyn $crate::rust::FimoModuleInstanceExtAPIStable;
-        unsafe { fimo_module_core::ModulePtr::Fat(std::mem::transmute(ext_stable)) }
+        unsafe {
+            fimo_module_core::ModulePtr::Fat(std::mem::transmute(
+                $self as &dyn $crate::rust::FimoModuleInstanceExtAPIStable,
+            ))
+        }
     };
 }
 
@@ -125,7 +128,7 @@ pub trait ModuleRegistry {
     fn register_loader(
         &mut self,
         loader_type: &str,
-        loader: Arc<dyn ModuleLoader + 'static>,
+        loader: &'static (dyn ModuleLoader + 'static),
     ) -> Result<&mut (dyn ModuleRegistry + 'static), Box<dyn Error>>;
 
     /// Unregisters an existing module loader from the `ModuleRegistry`.
@@ -159,7 +162,7 @@ pub trait ModuleRegistry {
     fn get_loader_from_type(
         &self,
         loader_type: &str,
-    ) -> Result<Arc<dyn ModuleLoader + 'static>, Box<dyn Error>>;
+    ) -> Result<&'static (dyn ModuleLoader + 'static), Box<dyn Error>>;
 
     /// Registers a new interface to the `ModuleRegistry`.
     fn register_interface(
@@ -248,7 +251,7 @@ pub trait FimoModuleInstanceExt: FimoModuleInstanceExtAPIStable {
 }
 
 /// Type of a loader callback.
-pub type LoaderCallback = dyn FnOnce(Arc<dyn ModuleLoader>) + Sync + Send;
+pub type LoaderCallback = dyn FnOnce(&'static (dyn ModuleLoader + 'static)) + Sync + Send;
 
 /// Type of an interface callback.
 pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
@@ -364,7 +367,7 @@ impl AsMut<dyn ModuleRegistry> for dyn FimoCore {
 /// a `&dyn InterfaceGuardInternal<dyn FimoCore>` as a [ModulePtr::Fat].
 pub unsafe fn cast_interface(
     interface: Arc<dyn ModuleInterface>,
-) -> Option<Arc<InterfaceMutex<dyn FimoCore>>> {
+) -> Result<Arc<InterfaceMutex<dyn FimoCore>>, std::io::Error> {
     sa::assert_eq_size!(
         &dyn ModuleInterface,
         &InterfaceMutex<dyn FimoCore>,
@@ -384,11 +387,14 @@ pub unsafe fn cast_interface(
         ModulePtr::Fat(ptr) => {
             let guard: &dyn InterfaceGuardInternal<dyn FimoCore> = std::mem::transmute(ptr);
             let mutex_ptr = InterfaceMutex::new(guard);
-            Some(Arc::from_raw(mutex_ptr as *const _))
+            Ok(Arc::from_raw(mutex_ptr as *const _))
         }
         _ => {
             drop(Arc::from_raw(interface_ptr));
-            None
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Pointer layout mismatch",
+            ))
         }
     }
 }

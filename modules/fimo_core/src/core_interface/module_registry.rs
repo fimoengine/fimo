@@ -14,7 +14,7 @@ pub const MODULE_MANIFEST_PATH: &str = "module.json";
 
 /// The module registry.
 pub struct ModuleRegistry {
-    loaders: HashMap<String, Arc<dyn ModuleLoader>>,
+    loaders: HashMap<String, &'static (dyn ModuleLoader + 'static)>,
     interfaces: BTreeMap<ModuleInterfaceDescriptor, Arc<dyn ModuleInterface>>,
     loader_callbacks: HashMap<*const dyn ModuleLoader, Vec<Box<LoaderCallback>>>,
     interface_callbacks: HashMap<*const dyn ModuleInterface, Vec<Box<InterfaceCallback>>>,
@@ -79,7 +79,7 @@ pub enum ModuleRegistryError {
 }
 
 /// Type of a loader callback.
-pub type LoaderCallback = dyn FnOnce(Arc<dyn ModuleLoader>) + Sync + Send;
+pub type LoaderCallback = dyn FnOnce(&'static (dyn ModuleLoader + 'static)) + Sync + Send;
 
 /// Type of an interface callback.
 pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
@@ -122,8 +122,8 @@ impl ModuleRegistry {
     pub fn register_loader(
         &mut self,
         loader_type: impl AsRef<str>,
-        loader: Arc<impl ModuleLoader + 'static>,
-    ) -> Result<&Self, ModuleRegistryError> {
+        loader: &'static (dyn ModuleLoader + 'static),
+    ) -> Result<&mut Self, ModuleRegistryError> {
         let entry = self.loaders.entry(String::from(loader_type.as_ref()));
 
         if let hash_map::Entry::Occupied(_) = &entry {
@@ -132,7 +132,7 @@ impl ModuleRegistry {
             )));
         };
 
-        let loader_ptr = Arc::as_ptr(&loader);
+        let loader_ptr = loader as *const _;
 
         entry.or_insert(loader);
         self.loader_callbacks.insert(loader_ptr, Vec::new());
@@ -146,7 +146,7 @@ impl ModuleRegistry {
     pub fn unregister_loader(
         &mut self,
         loader_type: impl AsRef<str>,
-    ) -> Result<&Self, ModuleRegistryError> {
+    ) -> Result<&mut Self, ModuleRegistryError> {
         // Remove loader from registry
         let loader = match self.loaders.remove(loader_type.as_ref()) {
             None => {
@@ -158,11 +158,11 @@ impl ModuleRegistry {
         };
 
         // Remove and call callbacks
-        let loader_ptr = Arc::as_ptr(&loader);
+        let loader_ptr = loader as *const _;
         let callbacks = self.loader_callbacks.remove(&loader_ptr).unwrap();
 
         for callback in callbacks {
-            callback(loader.clone())
+            callback(loader)
         }
 
         Ok(self)
@@ -176,8 +176,8 @@ impl ModuleRegistry {
         loader_type: impl AsRef<str>,
         callback: Box<LoaderCallback>,
         callback_handle: &mut MaybeUninit<CallbackHandle<LoaderCallback>>,
-    ) -> Result<&Self, ModuleRegistryError> {
-        let loader_ptr = Arc::as_ptr(self.get_loader_ref_from_type(loader_type)?);
+    ) -> Result<&mut Self, ModuleRegistryError> {
+        let loader_ptr = self.get_loader_from_type(loader_type)? as _;
         let callback_ptr = &*callback as *const _;
 
         // Insert callback at the end
@@ -196,8 +196,8 @@ impl ModuleRegistry {
         &mut self,
         loader_type: impl AsRef<str>,
         callback_handle: CallbackHandle<LoaderCallback>,
-    ) -> Result<&Self, ModuleRegistryError> {
-        let loader_ptr = Arc::as_ptr(self.get_loader_ref_from_type(loader_type)?);
+    ) -> Result<&mut Self, ModuleRegistryError> {
+        let loader_ptr = self.get_loader_from_type(loader_type)? as _;
 
         // Remove callback from vec
         self.loader_callbacks
@@ -208,40 +208,30 @@ impl ModuleRegistry {
         Ok(self)
     }
 
-    fn get_loader_ref_from_type(
-        &self,
-        loader_type: impl AsRef<str>,
-    ) -> Result<&Arc<dyn ModuleLoader + 'static>, ModuleRegistryError> {
-        match self.loaders.get(loader_type.as_ref()) {
-            None => Err(ModuleRegistryError::UnknownLoaderType(String::from(
-                loader_type.as_ref(),
-            ))),
-            Some(loader) => Ok(loader),
-        }
-    }
-
     /// Extracts a loader from the `ModuleRegistry` using the registration type.
     pub fn get_loader_from_type(
         &self,
         loader_type: impl AsRef<str>,
-    ) -> Result<Arc<dyn ModuleLoader + 'static>, ModuleRegistryError> {
-        self.get_loader_ref_from_type(loader_type)
-            .map(|loader| loader.clone())
+    ) -> Result<&'static (dyn ModuleLoader + 'static), ModuleRegistryError> {
+        match self.loaders.get(loader_type.as_ref()) {
+            None => Err(ModuleRegistryError::UnknownLoaderType(String::from(
+                loader_type.as_ref(),
+            ))),
+            Some(loader) => Ok(*loader),
+        }
     }
 
     /// Registers a new interface to the `ModuleRegistry`.
     pub fn register_interface(
         &mut self,
-        descriptor: impl AsRef<ModuleInterfaceDescriptor>,
-        interface: Arc<impl ModuleInterface + 'static>,
-    ) -> Result<&Self, ModuleRegistryError> {
+        descriptor: &ModuleInterfaceDescriptor,
+        interface: Arc<dyn ModuleInterface + 'static>,
+    ) -> Result<&mut Self, ModuleRegistryError> {
         // Check if the interface already exists
-        let entry = self.interfaces.entry(*descriptor.as_ref());
+        let entry = self.interfaces.entry(*descriptor);
 
         if let btree_map::Entry::Occupied(_) = &entry {
-            return Err(ModuleRegistryError::DuplicateInterface(
-                *descriptor.as_ref(),
-            ));
+            return Err(ModuleRegistryError::DuplicateInterface(*descriptor));
         };
 
         let interface_ptr = Arc::as_ptr(&interface);
@@ -258,11 +248,11 @@ impl ModuleRegistry {
     /// with the interface before removing it.
     pub fn unregister_interface(
         &mut self,
-        descriptor: impl AsRef<ModuleInterfaceDescriptor>,
-    ) -> Result<&Self, ModuleRegistryError> {
+        descriptor: &ModuleInterfaceDescriptor,
+    ) -> Result<&mut Self, ModuleRegistryError> {
         // Remove interface from registry
-        let interface = match self.interfaces.remove(descriptor.as_ref()) {
-            None => return Err(ModuleRegistryError::UnknownInterface(*descriptor.as_ref())),
+        let interface = match self.interfaces.remove(descriptor) {
+            None => return Err(ModuleRegistryError::UnknownInterface(*descriptor)),
             Some(interface) => interface,
         };
 
@@ -282,10 +272,10 @@ impl ModuleRegistry {
     /// The callback will be called in case the interface is removed from the `ModuleRegistry`.
     pub fn register_interface_callback(
         &mut self,
-        descriptor: impl AsRef<ModuleInterfaceDescriptor>,
+        descriptor: &ModuleInterfaceDescriptor,
         callback: Box<InterfaceCallback>,
         callback_handle: &mut MaybeUninit<CallbackHandle<InterfaceCallback>>,
-    ) -> Result<&Self, ModuleRegistryError> {
+    ) -> Result<&mut Self, ModuleRegistryError> {
         let interface_ptr = Arc::as_ptr(self.get_interface_ref_from_descriptor(descriptor)?);
         let callback_ptr = &*callback as *const _;
 
@@ -301,9 +291,9 @@ impl ModuleRegistry {
     /// Unregisters an interface-removed callback from the `ModuleRegistry` without calling it.
     pub fn unregister_interface_callback(
         &mut self,
-        descriptor: impl AsRef<ModuleInterfaceDescriptor>,
+        descriptor: &ModuleInterfaceDescriptor,
         callback_handle: CallbackHandle<InterfaceCallback>,
-    ) -> Result<&Self, ModuleRegistryError> {
+    ) -> Result<&mut Self, ModuleRegistryError> {
         let interface_ptr = Arc::as_ptr(self.get_interface_ref_from_descriptor(descriptor)?);
 
         // Remove callback from vec
@@ -317,10 +307,10 @@ impl ModuleRegistry {
 
     fn get_interface_ref_from_descriptor(
         &self,
-        descriptor: impl AsRef<ModuleInterfaceDescriptor>,
+        descriptor: &ModuleInterfaceDescriptor,
     ) -> Result<&Arc<dyn ModuleInterface + 'static>, ModuleRegistryError> {
-        match self.interfaces.get(descriptor.as_ref()) {
-            None => Err(ModuleRegistryError::UnknownInterface(*descriptor.as_ref())),
+        match self.interfaces.get(descriptor) {
+            None => Err(ModuleRegistryError::UnknownInterface(*descriptor)),
             Some(interface) => Ok(interface),
         }
     }
@@ -328,7 +318,7 @@ impl ModuleRegistry {
     /// Extracts an interface from the `ModuleRegistry`.
     pub fn get_interface_from_descriptor(
         &self,
-        descriptor: impl AsRef<ModuleInterfaceDescriptor>,
+        descriptor: &ModuleInterfaceDescriptor,
     ) -> Result<Arc<dyn ModuleInterface + 'static>, ModuleRegistryError> {
         self.get_interface_ref_from_descriptor(descriptor)
             .map(|interface| interface.clone())
@@ -350,14 +340,14 @@ impl ModuleRegistry {
     pub fn get_compatible_interface_descriptors(
         &self,
         interface_name: impl AsRef<str>,
-        interface_version: impl AsRef<fimo_version_core::Version>,
+        interface_version: &fimo_version_core::Version,
         interface_extensions: impl AsRef<[ArrayString<32>]>,
     ) -> Vec<ModuleInterfaceDescriptor> {
         self.interfaces
             .keys()
             .filter(|x| {
                 x.name == interface_name.as_ref()
-                    && interface_version.as_ref().is_compatible(&x.version)
+                    && interface_version.is_compatible(&x.version)
                     && interface_extensions
                         .as_ref()
                         .iter()
@@ -376,6 +366,9 @@ impl ModuleManifest {
         serde_json::from_reader(BufReader::new(file)).map_err(From::from)
     }
 }
+
+// SAFETY: The pointers inside the ModuleRegistry stem from Arcs and remain valid when moved.
+unsafe impl Send for ModuleRegistry {}
 
 impl Default for ModuleRegistry {
     fn default() -> Self {
