@@ -450,27 +450,8 @@ impl Version {
 
 impl Display for Version {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.release_type {
-            ReleaseType::Stable => {
-                write!(
-                    f,
-                    "{}.{}.{} Build {}",
-                    self.major, self.minor, self.patch, self.build
-                )
-            }
-            _ => {
-                write!(
-                    f,
-                    "{}.{}.{} {} {} Build {}",
-                    self.major,
-                    self.minor,
-                    self.patch,
-                    self.release_type,
-                    self.release_number,
-                    self.build
-                )
-            }
-        }
+        let version_string = String::from(self);
+        write!(f, "{}", version_string)
     }
 }
 

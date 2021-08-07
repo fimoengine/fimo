@@ -27,13 +27,13 @@ impl CoreInterface {
     }
 
     /// Extracts a reference to an extension from the interface.
-    pub fn get_extension(&self, _extension: impl AsRef<str>) -> Option<&(dyn Any + 'static)> {
+    pub fn find_extension(&self, _extension: impl AsRef<str>) -> Option<&(dyn Any + 'static)> {
         None
     }
 
     /// Extracts a mutable reference to an extension from the interface.
-    pub fn get_extension_mut(
-        &self,
+    pub fn find_extension_mut(
+        &mut self,
         _extension: impl AsRef<str>,
     ) -> Option<&mut (dyn Any + 'static)> {
         None

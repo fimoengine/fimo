@@ -5,6 +5,7 @@ use crate::{
 };
 use fimo_ffi_core::{ConstSpan, NonNullConst, TypeWrapper};
 use libloading::Library;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use std::any::Any;
 use std::error::Error;
@@ -31,7 +32,7 @@ macro_rules! export_ffi_module {
     $get_interface_dependencies:expr, $get_interface:expr) => {
         #[no_mangle]
         #[doc(hidden)]
-        pub const MODULE_DECLARATION: $crate::ffi_loader::FFIModuleVTable =
+        pub static MODULE_DECLARATION: $crate::ffi_loader::FFIModuleVTable =
             $crate::ffi_loader::FFIModuleVTable {
                 get_module_info_fn: $get_module_info,
                 create_instance_fn: $create_instance,
@@ -56,14 +57,16 @@ pub enum LoaderManifest {
 
 /// A FFI module loader.
 #[derive(Debug)]
-pub struct FFIModuleLoader([u8; 0]);
+pub struct FFIModuleLoader {
+    libs: Mutex<Vec<Arc<Library>>>,
+}
 
 /// A FFI module.
 #[derive(Debug)]
 pub struct FFIModule {
-    library: Library,
+    library: Arc<Library>,
     module_path: PathBuf,
-    parent: Arc<FFIModuleLoader>,
+    parent: &'static FFIModuleLoader,
     module_vtable: NonNullConst<FFIModuleVTable>,
 }
 
@@ -138,8 +141,21 @@ pub type ModuleInstanceGetInterfaceFn = TypeWrapper<
 
 impl FFIModuleLoader {
     /// Creates a new `FFIModuleLoader`.
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self { 0: [0; 0] })
+    pub fn new() -> &'static mut Self {
+        Box::leak(Box::new(Self {
+            libs: Default::default(),
+        }))
+    }
+}
+
+impl Drop for FFIModuleLoader {
+    fn drop(&mut self) {
+        let libs = self.libs.get_mut();
+        libs.retain(|lib| !(Arc::strong_count(lib) == 1 && Arc::weak_count(lib) == 0));
+
+        if !libs.is_empty() {
+            panic!("not all libraries were unloaded!")
+        }
     }
 }
 
@@ -148,22 +164,27 @@ impl ModuleLoader for FFIModuleLoader {
         ModulePtr::Fat(unsafe { std::mem::transmute(self.as_any()) })
     }
 
-    unsafe fn load_module(&self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>> {
+    unsafe fn load_module(&'static self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>> {
         let manifest_path = path.join(MODULE_MANIFEST_PATH);
         let file = File::open(manifest_path)?;
         let manifest: LoaderManifest = serde_json::from_reader(BufReader::new(file))?;
 
         let library = match manifest {
-            LoaderManifest::V0 { library_path } => Library::new(library_path)?,
+            LoaderManifest::V0 { library_path } => Arc::new(Library::new(library_path)?),
         };
 
-        // SAFETY: A `FFIModuleLoader` is always in an `Arc`.
-        let self_arc = {
-            Arc::increment_strong_count(self as *const Self);
-            Arc::from_raw(self as *const Self)
-        };
+        self.libs.lock().push(library.clone());
+        FFIModule::new(library, self, path).map(|module| module as Arc<dyn Module>)
+    }
 
-        FFIModule::new(library, self_arc, path).map(|module| module as Arc<dyn Module>)
+    unsafe fn load_module_library(
+        &'static self,
+        path: &Path,
+    ) -> Result<Arc<dyn Module>, Box<dyn Error>> {
+        let library = Arc::new(Library::new(path)?);
+
+        self.libs.lock().push(library.clone());
+        FFIModule::new(library, self, path).map(|module| module as Arc<dyn Module>)
     }
 
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
@@ -182,8 +203,8 @@ impl FFIModule {
     ///
     /// The library must export the module using the [export_ffi_module!] macro.
     pub unsafe fn new(
-        library: Library,
-        parent: Arc<FFIModuleLoader>,
+        library: Arc<Library>,
+        parent: &'static FFIModuleLoader,
         module_path: impl AsRef<Path>,
     ) -> Result<Arc<Self>, Box<dyn Error>> {
         let module_vtable = NonNullConst::new_unchecked(
@@ -217,8 +238,8 @@ impl Module for FFIModule {
         unsafe { &*(self.module_vtable.as_ref().get_module_info_fn)().as_ptr() }
     }
 
-    fn get_module_loader(&self) -> Arc<dyn ModuleLoader> {
-        self.parent.clone()
+    fn get_module_loader(&self) -> &'static (dyn ModuleLoader + 'static) {
+        self.parent
     }
 
     fn create_instance(&self) -> Result<Arc<dyn ModuleInstance>, Box<dyn Error>> {

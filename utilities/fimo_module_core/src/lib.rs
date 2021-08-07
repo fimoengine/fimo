@@ -1,4 +1,5 @@
 //! Implementation of basic fimo module loaders.
+#![feature(get_mut_unchecked)]
 #![feature(c_unwind)]
 #![warn(
     missing_docs,
@@ -140,7 +141,7 @@ pub trait Module: Send + Sync {
     ///
     /// The loader should be stored as an `Arc<impl ModuleLoader>`
     /// internally, to ensure, that the module loader outlives the module.
-    fn get_module_loader(&self) -> Arc<dyn ModuleLoader>;
+    fn get_module_loader(&self) -> &'static (dyn ModuleLoader + 'static);
 
     /// Instantiates the module.
     ///
@@ -167,7 +168,7 @@ pub trait ModuleLoader: Send + Sync {
     /// The ptr remains valid until the loader is dropped.
     fn get_raw_ptr(&self) -> ModulePtr;
 
-    /// Loads a new module from a path.
+    /// Loads a new module from a path to the module root.
     ///
     /// # Note
     ///
@@ -180,7 +181,25 @@ pub trait ModuleLoader: Send + Sync {
     /// - The module ABI must match the loader ABI.
     ///
     /// Violating these invariants may lead to undefined behaviour.
-    unsafe fn load_module(&self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>>;
+    unsafe fn load_module(&'static self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>>;
+
+    /// Loads a new module from a path to the module library.
+    ///
+    /// # Note
+    ///
+    /// The resulting module should not be stored internally as an `Arc<impl Module>`, to
+    /// prevent cyclic references.
+    ///
+    /// # Safety
+    ///
+    /// - The module must be exposed in a way understood by the module loader.
+    /// - The module ABI must match the loader ABI.
+    ///
+    /// Violating these invariants may lead to undefined behaviour.
+    unsafe fn load_module_library(
+        &'static self,
+        path: &Path,
+    ) -> Result<Arc<dyn Module>, Box<dyn Error>>;
 
     /// Casts the module loader to a `&dyn Any`.
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);

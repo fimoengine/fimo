@@ -12,15 +12,22 @@ crate-type = ["lib", "dylib"]
 [dependencies]
 serde_json = "1.0"
 libloading = "0.7.0"
+parking_lot = "0.11.1"
 semver = { version = "1.0.4", features = ["serde"] }
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core" }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
+fimo_core_interface = { version = "0.1.0", path = "../../utilities/fimo_core_interface" }
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core", features = ["serde"] }
 
 [features]
-default = ["module", "default_module_loaders"]
+default = ["default_module_loaders", "rust_module"]
 module = []
+rust_module = ["module"]
 ffi_module_loader = []
 rust_module_loader = []
 default_module_loaders = ["ffi_module_loader", "rust_module_loader"]
+
+[[example]]
+name = "hello_dynamic"
+path = "examples/hello_dynamic.rs"
