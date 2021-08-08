@@ -11,7 +11,7 @@ static A: System = System;
 #[test]
 #[cfg(feature = "rust_module")]
 fn load_dynamic() -> Result<(), Box<dyn Error>> {
-    let artifact_dir = PathBuf::from(env!("ARTIFACT_DIR"));
+    let artifact_dir = PathBuf::from(std::env::current_exe()?.parent().unwrap().parent().unwrap());
 
     let core_path = if cfg!(target_os = "windows") {
         artifact_dir.join("fimo_core.dll").canonicalize()?
