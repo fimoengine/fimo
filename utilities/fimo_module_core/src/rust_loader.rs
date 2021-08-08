@@ -103,6 +103,12 @@ impl ModuleLoader for RustLoader {
         ModulePtr::Fat(unsafe { std::mem::transmute(self.as_any()) })
     }
 
+    fn evict_module_cache(&self) {
+        self.libs
+            .lock()
+            .retain(|lib| !(Arc::strong_count(lib) == 1 && Arc::weak_count(lib) == 0));
+    }
+
     unsafe fn load_module(&'static self, path: &Path) -> Result<Arc<dyn Module>, Box<dyn Error>> {
         let manifest_path = path.join(MODULE_MANIFEST_PATH);
         let file = File::open(manifest_path)?;
