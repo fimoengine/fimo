@@ -27,7 +27,3 @@ rust_module = ["module"]
 ffi_module_loader = []
 rust_module_loader = []
 default_module_loaders = ["ffi_module_loader", "rust_module_loader"]
-
-[[example]]
-name = "hello_dynamic"
-path = "examples/hello_dynamic.rs"
