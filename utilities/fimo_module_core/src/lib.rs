@@ -162,11 +162,17 @@ pub trait Module: Send + Sync {
 }
 
 /// A module loader.
+///
+/// Loaders must hold strong references to their modules.
 pub trait ModuleLoader: Send + Sync {
     /// Fetches an internal [ModulePtr] to the loader.
     ///
     /// The ptr remains valid until the loader is dropped.
     fn get_raw_ptr(&self) -> ModulePtr;
+
+    /// Removes all modules that aren't referenced by anyone from the cache,
+    /// unloading them in the process.
+    fn evict_module_cache(&self);
 
     /// Loads a new module from a path to the module root.
     ///
