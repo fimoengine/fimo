@@ -1,5 +1,5 @@
 //! Implementation of the module.
-use crate::{core_interface::module_registry::ModuleRegistry, CoreInterface};
+use crate::{module_registry::ModuleRegistry, CoreInterface};
 use fimo_core_interface::rust::{
     CallbackHandle, InterfaceCallback, InterfaceGuardInternal, LoaderCallback, TryLockError,
 };
@@ -249,9 +249,7 @@ fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
-            ArrayString::from_utf8_unchecked(
-                String::from(&crate::core_interface::INTERFACE_VERSION).as_bytes(),
-            )
+            ArrayString::from_utf8_unchecked(String::from(&crate::INTERFACE_VERSION).as_bytes())
         },
     }
 }
@@ -259,10 +257,8 @@ fn construct_module_info() -> ModuleInfo {
 #[allow(dead_code)]
 fn get_core_interface_descriptor() -> ModuleInterfaceDescriptor {
     ModuleInterfaceDescriptor {
-        name: unsafe {
-            ArrayString::from_utf8_unchecked(crate::core_interface::INTERFACE_NAME.as_bytes())
-        },
-        version: crate::core_interface::INTERFACE_VERSION,
+        name: unsafe { ArrayString::from_utf8_unchecked(crate::INTERFACE_NAME.as_bytes()) },
+        version: crate::INTERFACE_VERSION,
         extensions: Default::default(),
     }
 }

@@ -38,7 +38,7 @@ pub struct UnknownInterfaceError {
     interface: ModuleInterfaceDescriptor,
 }
 
-/// Error from the [FimoCore::get_interface] function.
+/// Error from the [GenericModuleInstance::get_interface] function.
 #[derive(Debug)]
 pub enum GetInterfaceError {
     /// Error resulting from an unknown interface.
