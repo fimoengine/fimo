@@ -22,6 +22,16 @@ macro_rules! impl_fimo_module_instance {
                 $crate::rust::PKG_VERSION
             }
 
+            fn as_module_instance(&self) -> &(dyn fimo_module_core::ModuleInstance + 'static) {
+                self
+            }
+
+            fn as_module_instance_mut(
+                &mut self,
+            ) -> &mut (dyn fimo_module_core::ModuleInstance + 'static) {
+                self
+            }
+
             fn as_fimo_module_instance(
                 &self,
             ) -> &(dyn $crate::rust::FimoModuleInstanceExt + 'static) {
@@ -237,6 +247,14 @@ pub trait FimoModuleInstanceExtAPIStable: ModuleInstance {
 
     /// Casts the `&dyn FimoModuleInstanceExtAPIStable` to a
     /// `&(dyn FimoModuleInstanceExt + 'static)`.
+    fn as_module_instance(&self) -> &(dyn ModuleInstance + 'static);
+
+    /// Casts the `&mut dyn FimoModuleInstanceExtAPIStable` to a
+    /// `&mut (dyn FimoModuleInstanceExt + 'static)`.
+    fn as_module_instance_mut(&mut self) -> &mut (dyn ModuleInstance + 'static);
+
+    /// Casts the `&dyn FimoModuleInstanceExtAPIStable` to a
+    /// `&(dyn FimoModuleInstanceExt + 'static)`.
     fn as_fimo_module_instance(&self) -> &(dyn FimoModuleInstanceExt + 'static);
 
     /// Casts the `&mut dyn FimoModuleInstanceExtAPIStable` to a
@@ -245,10 +263,7 @@ pub trait FimoModuleInstanceExtAPIStable: ModuleInstance {
 }
 
 /// A trait describing a fimo module.
-pub trait FimoModuleInstanceExt: FimoModuleInstanceExtAPIStable {
-    /// Provides the `fimo-core` interface to the instance.
-    fn set_core_interface(&mut self, fimo_core: Arc<InterfaceMutex<dyn FimoCore>>);
-}
+pub trait FimoModuleInstanceExt: FimoModuleInstanceExtAPIStable {}
 
 /// Type of a loader callback.
 pub type LoaderCallback = dyn FnOnce(&'static (dyn ModuleLoader + 'static)) + Sync + Send;
