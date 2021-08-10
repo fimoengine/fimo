@@ -1,22 +1,18 @@
 //! Implementation of the module.
 use crate::{core_interface::module_registry::ModuleRegistry, CoreInterface};
 use fimo_core_interface::rust::{
-    CallbackHandle, InterfaceCallback, InterfaceGuardInternal, InterfaceMutex, LoaderCallback,
-    TryLockError,
+    CallbackHandle, InterfaceCallback, InterfaceGuardInternal, LoaderCallback, TryLockError,
 };
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{
-    Module, ModuleInfo, ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader,
-    ModulePtr,
+    ModuleInfo, ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader, ModulePtr,
 };
 use fimo_version_core::Version;
 use parking_lot::Mutex;
 use std::any::Any;
-use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
 use std::mem::MaybeUninit;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -24,241 +20,10 @@ mod rust_module;
 /// Name of the module.
 pub const MODULE_NAME: &str = "fimo_core";
 
-/// Core module.
-pub struct FimoCore {
-    available_interfaces: Vec<ModuleInterfaceDescriptor>,
-    interfaces: Mutex<HashMap<ModuleInterfaceDescriptor, Interface>>,
-    interface_dependencies: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
-    // Drop the parent for last
-    parent: Arc<dyn Module>,
-}
-
-/// Error resulting from an unknown interface.
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct UnknownInterfaceError {
-    interface: ModuleInterfaceDescriptor,
-}
-
-/// Error from the [FimoCore::get_interface] function.
-#[derive(Debug)]
-pub enum GetInterfaceError {
-    /// Error resulting from an unknown interface.
-    UnknownInterface(UnknownInterfaceError),
-    /// Error resulting from the unsuccessful construction of an interface.
-    ConstructionError {
-        /// Interface tried to construct.
-        interface: ModuleInterfaceDescriptor,
-        /// Resulting error.
-        error: Box<dyn Error>,
-    },
-}
-
-struct Interface {
-    builder: InterfaceBuilder,
-    ptr: Option<Weak<dyn ModuleInterface>>,
-}
-
 struct MutexWrapper<T> {
     data: Mutex<T>,
     parent: Arc<dyn ModuleInstance>,
 }
-
-type InterfaceBuilder =
-    fn(Arc<dyn ModuleInstance>) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>>;
-
-impl FimoCore {
-    /// Constructs a new `FimoCore` instance.
-    pub fn new(parent: Arc<dyn Module>) -> Arc<Self> {
-        let core_info = ModuleInterfaceDescriptor {
-            name: unsafe {
-                ArrayString::from_utf8_unchecked(crate::core_interface::INTERFACE_NAME.as_bytes())
-            },
-            version: crate::core_interface::INTERFACE_VERSION,
-            extensions: Default::default(),
-        };
-
-        let mut interfaces = HashMap::new();
-        let mut interface_dependencies = HashMap::new();
-
-        interfaces.insert(
-            core_info,
-            Interface {
-                ptr: None,
-                builder: |instance| {
-                    Ok(Arc::new(MutexWrapper {
-                        data: Mutex::new(CoreInterface::new()),
-                        parent: instance,
-                    }))
-                },
-            },
-        );
-
-        interface_dependencies.insert(core_info, vec![]);
-
-        Arc::new(Self {
-            parent,
-            available_interfaces: vec![core_info],
-            interfaces: Mutex::new(interfaces),
-            interface_dependencies,
-        })
-    }
-
-    /// Extracts the available interfaces.
-    pub fn get_available_interfaces(&self) -> &[ModuleInterfaceDescriptor] {
-        self.available_interfaces.as_slice()
-    }
-
-    /// Extracts the dependencies of an interface.
-    pub fn get_interface_dependencies(
-        &self,
-        interface: &ModuleInterfaceDescriptor,
-    ) -> Result<&[ModuleInterfaceDescriptor], UnknownInterfaceError> {
-        if let Some(dependencies) = self.interface_dependencies.get(interface) {
-            Ok(dependencies.as_slice())
-        } else {
-            Err(UnknownInterfaceError {
-                interface: *interface,
-            })
-        }
-    }
-
-    /// Extracts an `Arc<dyn ModuleInterface>` to an interface,
-    /// constructing it if it isn't alive.
-    pub fn get_interface(
-        &self,
-        interface: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, GetInterfaceError> {
-        let mut guard = self.interfaces.lock();
-        if let Some(int) = guard.get_mut(interface) {
-            if let Some(ptr) = &int.ptr {
-                if let Some(arc) = ptr.upgrade() {
-                    return Ok(arc);
-                }
-            }
-
-            // SAFETY: A `FimoCore` is always in an `Arc`.
-            let self_arc = unsafe {
-                Arc::increment_strong_count(self as *const Self);
-                Arc::from_raw(self as *const Self)
-            };
-
-            (int.builder)(self_arc).map_or_else(
-                |e| {
-                    Err(GetInterfaceError::ConstructionError {
-                        interface: *interface,
-                        error: e,
-                    })
-                },
-                |arc| {
-                    int.ptr = Some(Arc::downgrade(&arc));
-                    Ok(arc)
-                },
-            )
-        } else {
-            Err(GetInterfaceError::UnknownInterface(UnknownInterfaceError {
-                interface: *interface,
-            }))
-        }
-    }
-
-    /// Provides an interface to the module instance.
-    pub fn set_dependency(
-        &self,
-        interface_desc: &ModuleInterfaceDescriptor,
-        _interface: Arc<dyn ModuleInterface>,
-    ) -> Result<(), UnknownInterfaceError> {
-        Err(UnknownInterfaceError {
-            interface: *interface_desc,
-        })
-    }
-}
-
-impl ModuleInstance for FimoCore {
-    fn get_raw_ptr(&self) -> ModulePtr {
-        fimo_core_interface::to_fimo_module_instance_raw_ptr!(self)
-    }
-
-    fn get_module(&self) -> Arc<dyn Module> {
-        self.parent.clone()
-    }
-
-    fn get_available_interfaces(&self) -> &[ModuleInterfaceDescriptor] {
-        self.available_interfaces.as_slice()
-    }
-
-    fn get_interface(
-        &self,
-        interface: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
-        self.get_interface(interface).map_err(|e| Box::new(e) as _)
-    }
-
-    fn get_interface_dependencies(
-        &self,
-        interface: &ModuleInterfaceDescriptor,
-    ) -> Result<&[ModuleInterfaceDescriptor], Box<dyn Error>> {
-        self.get_interface_dependencies(interface)
-            .map_err(|e| Box::new(e) as _)
-    }
-
-    fn set_dependency(
-        &self,
-        interface_desc: &ModuleInterfaceDescriptor,
-        interface: Arc<dyn ModuleInterface>,
-    ) -> Result<(), Box<dyn Error>> {
-        self.set_dependency(interface_desc, interface)
-            .map_err(|e| Box::new(e) as _)
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
-        self
-    }
-}
-
-fimo_core_interface::impl_fimo_module_instance! {FimoCore}
-
-impl fimo_core_interface::rust::FimoModuleInstanceExt for FimoCore {
-    fn set_core_interface(
-        &mut self,
-        _: Arc<InterfaceMutex<dyn fimo_core_interface::rust::FimoCore>>,
-    ) {
-    }
-}
-
-impl Debug for FimoCore {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(FimoCore)")
-    }
-}
-
-impl Display for UnknownInterfaceError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unknown interface: {}", self.interface)
-    }
-}
-
-impl Error for UnknownInterfaceError {}
-
-impl Display for GetInterfaceError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GetInterfaceError::UnknownInterface(err) => Display::fmt(err, f),
-            GetInterfaceError::ConstructionError { interface, error } => {
-                write!(
-                    f,
-                    "construction error: interface: {}, error: `{}`",
-                    interface, error
-                )
-            }
-        }
-    }
-}
-
-impl Error for GetInterfaceError {}
 
 impl InterfaceGuardInternal<dyn fimo_core_interface::rust::FimoCore>
     for MutexWrapper<CoreInterface>
@@ -488,5 +253,16 @@ fn construct_module_info() -> ModuleInfo {
                 String::from(&crate::core_interface::INTERFACE_VERSION).as_bytes(),
             )
         },
+    }
+}
+
+#[allow(dead_code)]
+fn get_core_interface_descriptor() -> ModuleInterfaceDescriptor {
+    ModuleInterfaceDescriptor {
+        name: unsafe {
+            ArrayString::from_utf8_unchecked(crate::core_interface::INTERFACE_NAME.as_bytes())
+        },
+        version: crate::core_interface::INTERFACE_VERSION,
+        extensions: Default::default(),
     }
 }
