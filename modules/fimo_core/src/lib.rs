@@ -16,4 +16,4 @@ pub mod core_module;
 
 pub use core_interface::CoreInterface;
 #[cfg(feature = "module")]
-pub use core_module::FimoCore;
+pub use core_module::MODULE_NAME;
