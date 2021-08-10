@@ -160,6 +160,17 @@ impl FimoCore {
             }))
         }
     }
+
+    /// Provides an interface to the module instance.
+    pub fn set_dependency(
+        &self,
+        interface_desc: &ModuleInterfaceDescriptor,
+        _interface: Arc<dyn ModuleInterface>,
+    ) -> Result<(), UnknownInterfaceError> {
+        Err(UnknownInterfaceError {
+            interface: *interface_desc,
+        })
+    }
 }
 
 impl ModuleInstance for FimoCore {
@@ -187,6 +198,15 @@ impl ModuleInstance for FimoCore {
         interface: &ModuleInterfaceDescriptor,
     ) -> Result<&[ModuleInterfaceDescriptor], Box<dyn Error>> {
         self.get_interface_dependencies(interface)
+            .map_err(|e| Box::new(e) as _)
+    }
+
+    fn set_dependency(
+        &self,
+        interface_desc: &ModuleInterfaceDescriptor,
+        interface: Arc<dyn ModuleInterface>,
+    ) -> Result<(), Box<dyn Error>> {
+        self.set_dependency(interface_desc, interface)
             .map_err(|e| Box::new(e) as _)
     }
 

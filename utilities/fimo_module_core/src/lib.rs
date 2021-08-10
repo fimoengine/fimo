@@ -115,6 +115,15 @@ pub trait ModuleInstance: Send + Sync {
         interface: &ModuleInterfaceDescriptor,
     ) -> Result<&[ModuleInterfaceDescriptor], Box<dyn Error>>;
 
+    /// Provides an interface to the module instance.
+    ///
+    /// May return an error if the instance does not require the interface.
+    fn set_dependency(
+        &self,
+        interface_desc: &ModuleInterfaceDescriptor,
+        interface: Arc<dyn ModuleInterface>,
+    ) -> Result<(), Box<dyn Error>>;
+
     /// Casts the instance to a `&dyn Any`.
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static);
 

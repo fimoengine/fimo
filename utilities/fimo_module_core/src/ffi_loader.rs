@@ -340,6 +340,14 @@ impl ModuleInstance for FFIModuleInstance {
         Ok(descriptors)
     }
 
+    fn set_dependency(
+        &self,
+        _interface_desc: &ModuleInterfaceDescriptor,
+        _interface: Arc<dyn ModuleInterface>,
+    ) -> Result<(), Box<dyn Error>> {
+        todo!("Requires ffi wrappers of the traits")
+    }
+
     fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
         self
     }
