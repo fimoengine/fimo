@@ -15,6 +15,7 @@ use std::any::Any;
 #[cfg(feature = "module")]
 pub mod core_module;
 pub mod module_registry;
+pub mod settings_registry;
 
 #[cfg(feature = "module")]
 pub use core_module::MODULE_NAME;
@@ -29,6 +30,7 @@ pub const INTERFACE_VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::U
 #[derive(Debug)]
 pub struct CoreInterface {
     module_registry: module_registry::ModuleRegistry,
+    settings_registry: settings_registry::SettingsRegistry,
 }
 
 impl CoreInterface {
@@ -36,6 +38,7 @@ impl CoreInterface {
     pub fn new() -> Self {
         Self {
             module_registry: module_registry::ModuleRegistry::new(),
+            settings_registry: settings_registry::SettingsRegistry::new(),
         }
     }
 
@@ -65,6 +68,16 @@ impl CoreInterface {
     /// Extracts a mutable reference to the module registry.
     pub fn as_module_registry_mut(&mut self) -> &mut module_registry::ModuleRegistry {
         &mut self.module_registry
+    }
+
+    /// Extracts a reference to the settings registry.
+    pub fn as_settings_registry(&self) -> &settings_registry::SettingsRegistry {
+        &self.settings_registry
+    }
+
+    /// Extracts a mutable reference to the settings registry.
+    pub fn as_settings_registry_mut(&mut self) -> &mut settings_registry::SettingsRegistry {
+        &mut self.settings_registry
     }
 }
 

@@ -1,7 +1,8 @@
 //! Implementation of the module.
-use crate::{module_registry::ModuleRegistry, CoreInterface};
+use crate::{module_registry::ModuleRegistry, settings_registry::SettingsRegistry, CoreInterface};
 use fimo_core_interface::rust::{
-    CallbackHandle, InterfaceCallback, InterfaceGuardInternal, LoaderCallback, TryLockError,
+    CallbackHandle, InterfaceCallback, InterfaceGuardInternal, LoaderCallback, SettingsItem,
+    SettingsUpdateCallback, TryLockError,
 };
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{
@@ -91,6 +92,16 @@ impl fimo_core_interface::rust::FimoCore for CoreInterface {
         &mut self,
     ) -> &mut (dyn fimo_core_interface::rust::ModuleRegistry + 'static) {
         self.as_module_registry_mut()
+    }
+
+    fn as_settings_registry(&self) -> &(dyn fimo_core_interface::rust::SettingsRegistry + 'static) {
+        self.as_settings_registry()
+    }
+
+    fn as_settings_registry_mut(
+        &mut self,
+    ) -> &mut (dyn fimo_core_interface::rust::SettingsRegistry + 'static) {
+        self.as_settings_registry_mut()
     }
 
     fn as_any(&self) -> &(dyn Any + 'static) {
@@ -241,6 +252,72 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
 
     fn as_any_mut(&mut self) -> &mut (dyn Any + 'static) {
         self
+    }
+}
+
+impl fimo_core_interface::rust::SettingsRegistry for SettingsRegistry {
+    fn is_null(&self, item: &str) -> Option<bool> {
+        self.is_null(item)
+    }
+
+    fn is_bool(&self, item: &str) -> Option<bool> {
+        self.is_bool(item)
+    }
+
+    fn is_u64(&self, item: &str) -> Option<bool> {
+        self.is_u64(item)
+    }
+
+    fn is_f64(&self, item: &str) -> Option<bool> {
+        self.is_f64(item)
+    }
+
+    fn is_string(&self, item: &str) -> Option<bool> {
+        self.is_string(item)
+    }
+
+    fn is_number(&self, item: &str) -> Option<bool> {
+        self.is_number(item)
+    }
+
+    fn is_array(&self, item: &str) -> Option<bool> {
+        self.is_array(item)
+    }
+
+    fn is_object(&self, item: &str) -> Option<bool> {
+        self.is_object(item)
+    }
+
+    fn array_len(&self, item: &str) -> Option<usize> {
+        self.array_len(item)
+    }
+
+    fn read_all(&self) -> SettingsItem {
+        self.read_all()
+    }
+
+    fn read(&self, item: &str) -> Option<SettingsItem> {
+        self.read(item)
+    }
+
+    fn write(&mut self, item: &str, value: SettingsItem) -> Option<SettingsItem> {
+        self.write(item, value)
+    }
+
+    fn remove(&mut self, item: &str) -> Option<SettingsItem> {
+        self.remove(item)
+    }
+
+    fn register_callback(
+        &mut self,
+        item: &str,
+        callback: Box<SettingsUpdateCallback>,
+    ) -> Option<CallbackHandle<SettingsUpdateCallback>> {
+        self.register_callback(item, callback)
+    }
+
+    fn unregister_callback(&mut self, item: &str, handle: CallbackHandle<SettingsUpdateCallback>) {
+        self.unregister_callback(item, handle)
     }
 }
 
