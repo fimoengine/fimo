@@ -5,6 +5,7 @@ use fimo_module_core::{
 };
 use fimo_version_core::Version;
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
@@ -78,6 +79,72 @@ pub enum TryLockError {
     WouldBlock,
 }
 
+/// A item from the settings registry.
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
+pub enum SettingsItem {
+    /// Empty value.
+    Null,
+    /// Boolean value.
+    Bool(bool),
+    /// U64 number value.
+    U64(u64),
+    /// F64 number value.
+    F64(f64),
+    /// String value.
+    String(String),
+    /// Array of items.
+    Array(Vec<SettingsItem>),
+    /// Map of items.
+    Object(BTreeMap<String, SettingsItem>),
+}
+
+/// Event types from the settings registry.
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
+pub enum SettingsEvent<'a> {
+    /// New item created.
+    ///
+    /// # Note
+    ///
+    /// Is signaled before the new item is inserted.
+    Create {
+        /// Value to be inserted.
+        value: &'a SettingsItem,
+    },
+    /// Item overwritten.
+    ///
+    /// # Note
+    ///
+    /// Is signaled before the item is overwritten.
+    /// During the event the item is set to the value [SettingsEvent::Null].
+    Overwrite {
+        /// Existing value.
+        old: &'a SettingsItem,
+        /// New value.
+        new: &'a SettingsItem,
+    },
+    /// Item removed.
+    ///
+    /// # Note
+    ///
+    /// Is signaled after the item has been removed.
+    Remove {
+        /// Removed value.
+        value: &'a SettingsItem,
+    },
+    /// Child item updated/created.
+    ///
+    /// # Note
+    ///
+    /// Is signaled after the child has been updated.
+    InternalUpdate,
+    /// Child item removed.
+    ///
+    /// # Note
+    ///
+    /// Is signaled after the child has been removed.
+    InternalRemoval,
+}
+
 /// Handle to a registered callback.
 #[repr(transparent)]
 #[derive(Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
@@ -122,6 +189,12 @@ pub trait FimoCore {
 
     /// Extracts a mutable reference to the module registry.
     fn as_module_registry_mut(&mut self) -> &mut (dyn ModuleRegistry + 'static);
+
+    /// Extracts a reference to the settings registry.
+    fn as_settings_registry(&self) -> &(dyn SettingsRegistry + 'static);
+
+    /// Extracts a mutable reference to the settings registry.
+    fn as_settings_registry_mut(&mut self) -> &mut (dyn SettingsRegistry + 'static);
 
     /// Casts the interface to a `&(dyn Any + 'static)`.
     fn as_any(&self) -> &(dyn Any + 'static);
@@ -234,6 +307,61 @@ pub trait ModuleRegistry {
     fn as_any_mut(&mut self) -> &mut (dyn Any + 'static);
 }
 
+/// Trait describing a `SettingsRegistry`.
+pub trait SettingsRegistry {
+    /// Extracts whether an item is [SettingsItem::Null].
+    fn is_null(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::Bool].
+    fn is_bool(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::U64].
+    fn is_u64(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::F64].
+    fn is_f64(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::String].
+    fn is_string(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::U64] or an [SettingsItem::F64].
+    fn is_number(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::Array].
+    fn is_array(&self, item: &str) -> Option<bool>;
+
+    /// Extracts whether an item is [SettingsItem::Object].
+    fn is_object(&self, item: &str) -> Option<bool>;
+
+    /// Extracts the length of an [SettingsItem::Array] item.
+    fn array_len(&self, item: &str) -> Option<usize>;
+
+    /// Extracts the root item from the `SettingsRegistry`.
+    fn read_all(&self) -> SettingsItem;
+
+    /// Extracts an item from the `SettingsRegistry`.
+    fn read(&self, item: &str) -> Option<SettingsItem>;
+
+    /// Writes into the `SettingsRegistry`.
+    ///
+    /// This function either overwrites an existing item or creates a new one.
+    /// Afterwards the old value is extracted.
+    fn write(&mut self, item: &str, value: SettingsItem) -> Option<SettingsItem>;
+
+    /// Removes an item from the `SettingsRegistry`.
+    fn remove(&mut self, item: &str) -> Option<SettingsItem>;
+
+    /// Registers a callback to an item.
+    fn register_callback(
+        &mut self,
+        item: &str,
+        callback: Box<SettingsUpdateCallback>,
+    ) -> Option<CallbackHandle<SettingsUpdateCallback>>;
+
+    /// Unregisters a callback from an item.
+    fn unregister_callback(&mut self, item: &str, handle: CallbackHandle<SettingsUpdateCallback>);
+}
+
 /// API stable trait for identifying a fimo module.
 ///
 /// Changing this trait is a breaking change because it is used to identify
@@ -271,6 +399,9 @@ pub type LoaderCallback = dyn FnOnce(&'static (dyn ModuleLoader + 'static)) + Sy
 /// Type of an interface callback.
 pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
 
+/// Type of a callback from the settings registry.
+pub type SettingsUpdateCallback = dyn FnMut(&str, SettingsEvent<'_>) + Send + Sync;
+
 impl<T: ?Sized> InterfaceMutex<T> {
     /// Constructs a new `InterfaceMutex<T>`.
     pub fn new(guard: &dyn InterfaceGuardInternal<T>) -> &Self {
@@ -300,6 +431,18 @@ impl<T: ?Sized> InterfaceMutex<T> {
     /// May only be called if the current context holds the mutex.
     pub unsafe fn data_ptr(&self) -> *mut T {
         self.guard.data_ptr()
+    }
+}
+
+impl<T: ?Sized> CallbackHandle<T> {
+    /// Constructs a new `CallbackHandle`.
+    pub fn new(ptr: *const T) -> Self {
+        Self { 0: ptr }
+    }
+
+    /// Extracts the internal ptr.
+    pub fn as_ptr(&self) -> *const T {
+        self.0
     }
 }
 
