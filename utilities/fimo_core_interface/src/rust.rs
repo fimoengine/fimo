@@ -240,7 +240,7 @@ pub enum SettingsEvent<'a> {
     /// # Note
     ///
     /// Is signaled before the item is overwritten.
-    /// During the event the item is set to the value [SettingsEvent::Null].
+    /// During the event the item is set to the value [SettingsItem::Null].
     Overwrite {
         /// Existing value.
         old: &'a SettingsItem,
@@ -490,28 +490,24 @@ pub trait SettingsRegistry {
 /// API stable trait for identifying a fimo module.
 ///
 /// Changing this trait is a breaking change because it is used to identify
-/// version mismatches. Implementors must provide a `&dyn FimoModuleInstanceExtAPIStable`
-/// with the [ModuleInstance::get_raw_ptr] function.
+/// version mismatches. The trait **must** be implemented using the
+/// [`fimo_module_instance_impl!{}`] macro.
 pub trait FimoModuleInstanceExtAPIStable: ModuleInstance {
     /// Extracts the linked package version of this crate.
     ///
     /// Must always be [PKG_VERSION].
     fn pkg_version(&self) -> &str;
 
-    /// Casts the `&dyn FimoModuleInstanceExtAPIStable` to a
-    /// `&(dyn FimoModuleInstanceExt + 'static)`.
+    /// Casts itself to a `&(dyn FimoModuleInstanceExt + 'static)`.
     fn as_module_instance(&self) -> &(dyn ModuleInstance + 'static);
 
-    /// Casts the `&mut dyn FimoModuleInstanceExtAPIStable` to a
-    /// `&mut (dyn FimoModuleInstanceExt + 'static)`.
+    /// Casts itself to a `&mut (dyn FimoModuleInstanceExt + 'static)`.
     fn as_module_instance_mut(&mut self) -> &mut (dyn ModuleInstance + 'static);
 
-    /// Casts the `&dyn FimoModuleInstanceExtAPIStable` to a
-    /// `&(dyn FimoModuleInstanceExt + 'static)`.
+    /// Casts itself to a `&(dyn FimoModuleInstanceExt + 'static)`.
     fn as_fimo_module_instance(&self) -> &(dyn FimoModuleInstanceExt + 'static);
 
-    /// Casts the `&mut dyn FimoModuleInstanceExtAPIStable` to a
-    /// `&mut (dyn FimoModuleInstanceExt + 'static)`.
+    /// Casts itself to a `&mut (dyn FimoModuleInstanceExt + 'static)`.
     fn as_fimo_module_instance_mut(&mut self) -> &mut (dyn FimoModuleInstanceExt + 'static);
 }
 
