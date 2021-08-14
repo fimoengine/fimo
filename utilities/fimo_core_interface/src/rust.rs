@@ -14,10 +14,76 @@ use std::sync::Arc;
 /// Version the library was linked with.
 pub const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Implements the required trait for a fimo module.
+/// Implements part of the [fimo_module_core::ModuleInstance] trait for fimo modules.
+///
+/// # Example
+///
+/// ```
+/// use fimo_module_core::{ModulePtr, Module, ModuleInterfaceDescriptor, ModuleInterface};
+/// use std::sync::Arc;
+/// use std::error::Error;
+/// use std::any::Any;
+///
+/// struct Instance {
+///     // ...
+/// }
+///
+/// impl fimo_module_core::ModuleInstance for Instance {
+///     fimo_core_interface::fimo_module_instance_impl! {}
+///     // Implement remaining functions ...
+///     # fn get_module(&self) -> Arc<dyn Module> {
+///     #     unimplemented!()
+///     # }
+///     # fn get_available_interfaces(&self) -> &[ModuleInterfaceDescriptor] {
+///     #     unimplemented!()
+///     # }
+///     # fn get_interface(&self, interface: &ModuleInterfaceDescriptor) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
+///     #     unimplemented!()
+///     # }
+///     # fn get_interface_dependencies(&self, interface: &ModuleInterfaceDescriptor) -> Result<&[ModuleInterfaceDescriptor], Box<dyn Error>> {
+///     #     unimplemented!()
+///     # }
+///     # fn set_dependency(&self, interface_desc: &ModuleInterfaceDescriptor, interface: Arc<dyn ModuleInterface>) -> Result<(), Box<dyn Error>> {
+///     #     unimplemented!()
+///     # }
+///     # fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
+///     #     unimplemented!()
+///     # }
+///     # fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
+///     #     unimplemented!()
+///     # }
+/// }
+///
+/// fimo_core_interface::fimo_module_instance_impl! {trait_impl, Instance}
+///
+/// impl fimo_core_interface::rust::FimoModuleInstanceExt for Instance {}
+/// ```
 #[macro_export]
-macro_rules! impl_fimo_module_instance {
-    ($instance: ty) => {
+macro_rules! fimo_module_instance_impl {
+    () => {
+        fn get_raw_ptr(&self) -> ModulePtr {
+            $crate::fimo_module_instance_impl! {to_ptr, self}
+        }
+
+        fn get_raw_type_id(&self) -> u64 {
+            $crate::fimo_module_instance_impl! {id}
+        }
+    };
+    (id) => {
+        unsafe {
+            std::mem::transmute::<_, u64>(std::any::TypeId::of::<
+                dyn $crate::rust::FimoModuleInstanceExtAPIStable,
+            >())
+        }
+    };
+    (to_ptr, $instance: expr) => {
+        unsafe {
+            fimo_module_core::ModulePtr::Fat(std::mem::transmute(
+                $instance as &dyn $crate::rust::FimoModuleInstanceExtAPIStable,
+            ))
+        }
+    };
+    (trait_impl, $instance: ty) => {
         impl $crate::rust::FimoModuleInstanceExtAPIStable for $instance {
             fn pkg_version(&self) -> &str {
                 $crate::rust::PKG_VERSION
@@ -48,13 +114,72 @@ macro_rules! impl_fimo_module_instance {
     };
 }
 
-/// Casts an expression to a [fimo_module_core::ModulePtr].
+/// Implements part of the [fimo_module_core::ModuleInterface] trait for the `fimo-core` interface.
+///
+/// # Example
+///
+/// ```
+/// use fimo_module_core::{ModulePtr, ModuleInstance, ModuleInterface};
+/// use fimo_core_interface::rust::{InterfaceGuardInternal, FimoCore, TryLockError};
+/// use std::sync::Arc;
+/// use std::any::Any;
+///
+/// struct CoreInterface {
+///     // ...
+/// }
+///
+/// impl ModuleInterface for CoreInterface {
+///     fimo_core_interface::fimo_core_interface_impl! {}
+///     // Implement remaining functions ...
+///     # fn get_instance(&self) -> Arc<dyn ModuleInstance> {
+///     #     unimplemented!()
+///     # }
+///     # fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
+///     #     unimplemented!()
+///     # }
+///     # fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
+///     #     unimplemented!()
+///     # }
+/// }
+///
+/// impl InterfaceGuardInternal<dyn FimoCore> for CoreInterface {
+///     // ...
+///     # fn lock(&self) -> *mut dyn FimoCore {
+///     #     unimplemented!()
+///     # }
+///     # fn try_lock(&self) -> Result<*mut dyn FimoCore, TryLockError> {
+///     #     unimplemented!()
+///     # }
+///     # unsafe fn unlock(&self) {
+///     #     unimplemented!()
+///     # }
+///     # unsafe fn data_ptr(&self) -> *mut dyn FimoCore {
+///     #     unimplemented!()
+///     # }
+/// }
+/// ```
 #[macro_export]
-macro_rules! to_fimo_module_instance_raw_ptr {
-    ($self: expr) => {
+macro_rules! fimo_core_interface_impl {
+    () => {
+        fn get_raw_ptr(&self) -> ModulePtr {
+            $crate::fimo_core_interface_impl! {to_ptr, self}
+        }
+
+        fn get_raw_type_id(&self) -> u64 {
+            $crate::fimo_core_interface_impl! {id}
+        }
+    };
+    (id) => {
+        unsafe {
+            std::mem::transmute::<_, u64>(std::any::TypeId::of::<
+                dyn $crate::rust::InterfaceGuardInternal<dyn $crate::rust::FimoCore>,
+            >())
+        }
+    };
+    (to_ptr, $interface: expr) => {
         unsafe {
             fimo_module_core::ModulePtr::Fat(std::mem::transmute(
-                $self as &dyn $crate::rust::FimoModuleInstanceExtAPIStable,
+                $interface as &dyn $crate::rust::InterfaceGuardInternal<dyn $crate::rust::FimoCore>,
             ))
         }
     };
@@ -518,11 +643,8 @@ impl AsMut<dyn ModuleRegistry> for dyn FimoCore {
 /// # Safety
 ///
 /// This function is highly unsafe as the compiler can not check the
-/// validity of the cast. It assumes that a `&dyn ModuleInterface` has
-/// the same size of an `&InterfaceMutex<dyn FimoCore>` and
-/// `(*const u8, *const u8)`, and shares the same alignment as an
-/// `&InterfaceMutex<dyn FimoCore>`. `interface.get_raw_ptr()` must return
-/// a `&dyn InterfaceGuardInternal<dyn FimoCore>` as a [ModulePtr::Fat].
+/// validity of the cast. The interface **must** be implemented using the
+/// [`fimo_core_interface_impl!{}`] macro.
 pub unsafe fn cast_interface(
     interface: Arc<dyn ModuleInterface>,
 ) -> Result<Arc<InterfaceMutex<dyn FimoCore>>, std::io::Error> {
@@ -538,22 +660,26 @@ pub unsafe fn cast_interface(
         &dyn InterfaceGuardInternal<dyn FimoCore>
     );
 
-    let interface_ptr = Arc::into_raw(interface);
-    let interface_ref = &*interface_ptr;
+    #[allow(unused_unsafe)]
+    if interface.get_raw_type_id() != fimo_core_interface_impl! {id} {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Type mismatch",
+        ));
+    }
 
-    match interface_ref.get_raw_ptr() {
+    match interface.get_raw_ptr() {
         ModulePtr::Fat(ptr) => {
             let guard: &dyn InterfaceGuardInternal<dyn FimoCore> = std::mem::transmute(ptr);
             let mutex_ptr = InterfaceMutex::new(guard);
+
+            std::mem::forget(interface);
             Ok(Arc::from_raw(mutex_ptr as *const _))
         }
-        _ => {
-            drop(Arc::from_raw(interface_ptr));
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Pointer layout mismatch",
-            ))
-        }
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Pointer layout mismatch",
+        )),
     }
 }
 
@@ -562,11 +688,8 @@ pub unsafe fn cast_interface(
 /// # Safety
 ///
 /// This function is highly unsafe as the compiler can not check the
-/// validity of the cast. It assumes that a `&dyn ModuleInstance` has
-/// the same size of a `&dyn FimoModuleInstanceExt`, `&dyn FimoModuleInstanceExtAPIStable`
-/// and `(*const u8, *const u8)`, and shares the same alignment as a
-/// `&dyn FimoModuleInstanceExt`. `instance.get_raw_ptr()` must return
-/// a `&dyn FimoModuleInstanceExtAPIStable` as a [ModulePtr::Fat].
+/// validity of the cast. The instance **must** be implemented using the
+/// [`fimo_module_instance_impl!{}`] macro.
 pub unsafe fn cast_instance(
     instance: Arc<dyn ModuleInstance>,
 ) -> Result<Arc<dyn FimoModuleInstanceExt>, std::io::Error> {
@@ -578,30 +701,32 @@ pub unsafe fn cast_instance(
     );
     sa::assert_eq_align!(&dyn ModuleInstance, &dyn FimoModuleInstanceExt,);
 
-    let instance_ptr = Arc::into_raw(instance);
-    let instance_ref = &*instance_ptr;
+    #[allow(unused_unsafe)]
+    if instance.get_raw_type_id() != fimo_module_instance_impl! {id} {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Type mismatch",
+        ));
+    }
 
-    match instance_ref.get_raw_ptr() {
+    match instance.get_raw_ptr() {
         ModulePtr::Fat(ptr) => {
             let ext_stable: &dyn FimoModuleInstanceExtAPIStable = std::mem::transmute(ptr);
 
             if PKG_VERSION != ext_stable.pkg_version() {
-                drop(Arc::from_raw(instance_ptr));
                 Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "Version mismatch",
                 ))
             } else {
+                std::mem::forget(instance);
                 let ext = ext_stable.as_fimo_module_instance();
                 Ok(Arc::from_raw(ext as *const _))
             }
         }
-        _ => {
-            drop(Arc::from_raw(instance_ptr));
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Pointer layout mismatch",
-            ))
-        }
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Pointer layout mismatch",
+        )),
     }
 }

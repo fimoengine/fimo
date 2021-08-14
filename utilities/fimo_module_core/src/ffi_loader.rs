@@ -164,6 +164,10 @@ impl ModuleLoader for FFIModuleLoader {
         ModulePtr::Fat(unsafe { std::mem::transmute(self.as_any()) })
     }
 
+    fn get_raw_type_id(&self) -> u64 {
+        unsafe { std::mem::transmute(self.type_id()) }
+    }
+
     fn evict_module_cache(&self) {
         self.libs
             .lock()
@@ -236,6 +240,10 @@ impl Module for FFIModule {
         }
     }
 
+    fn get_raw_type_id(&self) -> u64 {
+        unsafe { std::mem::transmute(self.library.type_id()) }
+    }
+
     fn get_module_path(&self) -> &Path {
         self.module_path.as_path()
     }
@@ -290,6 +298,10 @@ impl FFIModuleInstance {
 impl ModuleInstance for FFIModuleInstance {
     fn get_raw_ptr(&self) -> ModulePtr {
         *self.instance_ptr
+    }
+
+    fn get_raw_type_id(&self) -> u64 {
+        todo!("Add new function to the instance VTable")
     }
 
     fn get_module(&self) -> Arc<dyn Module> {
@@ -386,6 +398,10 @@ impl FFIModuleInterface {
 impl ModuleInterface for FFIModuleInterface {
     fn get_raw_ptr(&self) -> ModulePtr {
         *self.interface_ptr
+    }
+
+    fn get_raw_type_id(&self) -> u64 {
+        todo!("Add new function to the module VTable")
     }
 
     fn get_instance(&self) -> Arc<dyn ModuleInstance> {
