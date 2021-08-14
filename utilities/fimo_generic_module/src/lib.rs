@@ -206,6 +206,17 @@ impl Module for GenericModule {
         }
     }
 
+    fn get_raw_type_id(&self) -> u64 {
+        // SAFETY: The value is initialized and lives as long as the instance.
+        unsafe {
+            self.parent
+                .assume_init_ref()
+                .upgrade()
+                .unwrap()
+                .get_raw_type_id()
+        }
+    }
+
     fn get_module_path(&self) -> &Path {
         // SAFETY: The value is initialized and lives as long as the instance.
         unsafe {
@@ -268,9 +279,7 @@ impl Debug for GenericModuleInstance {
 }
 
 impl ModuleInstance for GenericModuleInstance {
-    fn get_raw_ptr(&self) -> ModulePtr {
-        fimo_core_interface::to_fimo_module_instance_raw_ptr!(self)
-    }
+    fimo_core_interface::fimo_module_instance_impl! {}
 
     fn get_module(&self) -> Arc<dyn Module> {
         self.parent.clone()
@@ -313,7 +322,7 @@ impl ModuleInstance for GenericModuleInstance {
     }
 }
 
-fimo_core_interface::impl_fimo_module_instance! {GenericModuleInstance}
+fimo_core_interface::fimo_module_instance_impl! {trait_impl, GenericModuleInstance}
 
 impl fimo_core_interface::rust::FimoModuleInstanceExt for GenericModuleInstance {}
 

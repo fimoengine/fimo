@@ -103,6 +103,10 @@ impl ModuleLoader for RustLoader {
         ModulePtr::Fat(unsafe { std::mem::transmute(self.as_any()) })
     }
 
+    fn get_raw_type_id(&self) -> u64 {
+        unsafe { std::mem::transmute(self.type_id()) }
+    }
+
     fn evict_module_cache(&self) {
         self.libs
             .lock()
@@ -214,6 +218,10 @@ impl Module for RustModule {
         } else {
             unimplemented!()
         }
+    }
+
+    fn get_raw_type_id(&self) -> u64 {
+        unsafe { std::mem::transmute(self.library.type_id()) }
     }
 
     fn get_module_path(&self) -> &Path {

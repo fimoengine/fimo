@@ -53,10 +53,7 @@ impl InterfaceGuardInternal<dyn fimo_core_interface::rust::FimoCore>
 }
 
 impl ModuleInterface for MutexWrapper<CoreInterface> {
-    fn get_raw_ptr(&self) -> ModulePtr {
-        let guard = self as &dyn InterfaceGuardInternal<dyn fimo_core_interface::rust::FimoCore>;
-        unsafe { ModulePtr::Fat(std::mem::transmute(guard)) }
-    }
+    fimo_core_interface::fimo_core_interface_impl! {}
 
     fn get_instance(&self) -> Arc<dyn ModuleInstance> {
         self.parent.clone()

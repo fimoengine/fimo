@@ -64,6 +64,9 @@ pub trait ModuleInterface: Send + Sync {
     /// The ptr remains valid until the interface is dropped.
     fn get_raw_ptr(&self) -> ModulePtr;
 
+    /// Extracts the type identifier of the raw interface.
+    fn get_raw_type_id(&self) -> u64;
+
     /// Fetches the parent instance.
     fn get_instance(&self) -> Arc<dyn ModuleInstance>;
 
@@ -80,6 +83,9 @@ pub trait ModuleInstance: Send + Sync {
     ///
     /// The ptr remains valid until the instance is dropped.
     fn get_raw_ptr(&self) -> ModulePtr;
+
+    /// Extracts the type identifier of the raw instance.
+    fn get_raw_type_id(&self) -> u64;
 
     /// Fetches the parent module.
     ///
@@ -138,6 +144,9 @@ pub trait Module: Send + Sync {
     /// The ptr remains valid until the module is dropped.
     fn get_raw_ptr(&self) -> ModulePtr;
 
+    /// Extracts the type identifier of the raw module.
+    fn get_raw_type_id(&self) -> u64;
+
     /// Fetches the path to the module root.
     fn get_module_path(&self) -> &Path;
 
@@ -178,6 +187,9 @@ pub trait ModuleLoader: Send + Sync {
     ///
     /// The ptr remains valid until the loader is dropped.
     fn get_raw_ptr(&self) -> ModulePtr;
+
+    /// Extracts the type identifier of the raw loader.
+    fn get_raw_type_id(&self) -> u64;
 
     /// Removes all modules that aren't referenced by anyone from the cache,
     /// unloading them in the process.
