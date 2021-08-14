@@ -1,4 +1,5 @@
 //! Implementation of the `ModuleRegistry` type.
+use fimo_core_interface::rust::CallbackHandle;
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
 use serde::{Deserialize, Serialize};
@@ -55,11 +56,6 @@ pub struct ModuleInterfaceInfo {
     /// Interface extensions.
     pub extensions: Vec<String>,
 }
-
-/// Handle to a registered callback.
-#[repr(transparent)]
-#[derive(Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct CallbackHandle<T: ?Sized>(*const T);
 
 /// Errors from the `ModuleRegistry`.
 #[derive(Debug)]
@@ -373,16 +369,6 @@ unsafe impl Send for ModuleRegistry {}
 impl Default for ModuleRegistry {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl<T: ?Sized> CallbackHandle<T> {
-    fn new(id: *const T) -> Self {
-        Self { 0: id }
-    }
-
-    fn as_ptr(&self) -> *const T {
-        self.0
     }
 }
 

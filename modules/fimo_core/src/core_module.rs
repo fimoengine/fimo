@@ -140,14 +140,8 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
         callback_handle: &mut MaybeUninit<CallbackHandle<LoaderCallback>>,
     ) -> Result<&mut (dyn fimo_core_interface::rust::ModuleRegistry + 'static), Box<dyn Error>>
     {
-        unsafe {
-            self.register_loader_callback(
-                loader_type,
-                callback,
-                std::mem::transmute(callback_handle),
-            )
+        self.register_loader_callback(loader_type, callback, callback_handle)
             .map_or_else(|e| Err(Box::new(e) as _), |r| Ok(r as _))
-        }
     }
 
     fn unregister_loader_callback(
@@ -156,10 +150,8 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
         callback_handle: CallbackHandle<LoaderCallback>,
     ) -> Result<&mut (dyn fimo_core_interface::rust::ModuleRegistry + 'static), Box<dyn Error>>
     {
-        unsafe {
-            self.unregister_loader_callback(loader_type, std::mem::transmute(callback_handle))
-                .map_or_else(|e| Err(Box::new(e) as _), |r| Ok(r as _))
-        }
+        self.unregister_loader_callback(loader_type, callback_handle)
+            .map_or_else(|e| Err(Box::new(e) as _), |r| Ok(r as _))
     }
 
     fn get_loader_from_type(
@@ -196,14 +188,8 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
         callback_handle: &mut MaybeUninit<CallbackHandle<InterfaceCallback>>,
     ) -> Result<&mut (dyn fimo_core_interface::rust::ModuleRegistry + 'static), Box<dyn Error>>
     {
-        unsafe {
-            self.register_interface_callback(
-                descriptor,
-                callback,
-                std::mem::transmute(callback_handle),
-            )
+        self.register_interface_callback(descriptor, callback, callback_handle)
             .map_or_else(|e| Err(Box::new(e) as _), |r| Ok(r as _))
-        }
     }
 
     fn unregister_interface_callback(
@@ -212,10 +198,8 @@ impl fimo_core_interface::rust::ModuleRegistry for ModuleRegistry {
         callback_handle: CallbackHandle<InterfaceCallback>,
     ) -> Result<&mut (dyn fimo_core_interface::rust::ModuleRegistry + 'static), Box<dyn Error>>
     {
-        unsafe {
-            self.unregister_interface_callback(descriptor, std::mem::transmute(callback_handle))
-                .map_or_else(|e| Err(Box::new(e) as _), |r| Ok(r as _))
-        }
+        self.unregister_interface_callback(descriptor, callback_handle)
+            .map_or_else(|e| Err(Box::new(e) as _), |r| Ok(r as _))
     }
 
     fn get_interface_from_descriptor(
