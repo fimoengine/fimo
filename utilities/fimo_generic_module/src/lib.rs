@@ -24,6 +24,7 @@ pub struct GenericModule {
 
 /// A generic rust module instance.
 pub struct GenericModuleInstance {
+    pkg_versions: HashMap<String, String>,
     public_interfaces: Vec<ModuleInterfaceDescriptor>,
     interfaces: Mutex<HashMap<ModuleInterfaceDescriptor, Interface>>,
     interface_dependencies: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
@@ -81,32 +82,39 @@ impl GenericModuleInstance {
     /// Constructs a new `GenericModuleInstance`.
     pub fn new(
         parent: Arc<RustModule>,
+        pkg_versions: HashMap<String, String>,
         interfaces: HashMap<
             ModuleInterfaceDescriptor,
             (InterfaceBuilder, Vec<ModuleInterfaceDescriptor>),
         >,
     ) -> Arc<Self> {
-        let pub_inter = interfaces.keys().copied().collect();
-        let inter = interfaces
+        let public_interfaces: Vec<_> = interfaces.keys().copied().collect();
+        let interface: HashMap<_, _> = interfaces
             .iter()
-            .map(|(m, i)| {
-                (
-                    *m,
-                    Interface {
-                        builder: i.0,
-                        ptr: None,
-                    },
-                )
+            .map(|(descriptor, &(builder, _))| {
+                let interface = Interface { builder, ptr: None };
+                (*descriptor, interface)
             })
             .collect();
-        let dep_map = interfaces.keys().map(|i| (*i, None)).collect();
-        let inter_dep = interfaces.into_iter().map(|(d, i)| (d, i.1)).collect();
+
+        let interface_dependencies: HashMap<_, _> = interfaces
+            .into_iter()
+            .map(|(descriptor, (_, dependencies))| (descriptor, dependencies))
+            .collect();
+
+        let mut dependency_map: HashMap<_, _> = HashMap::new();
+        for (_, dependencies) in interface_dependencies.iter() {
+            for dependency in dependencies {
+                dependency_map.insert(*dependency, None);
+            }
+        }
 
         Arc::new(Self {
-            public_interfaces: pub_inter,
-            interfaces: Mutex::new(inter),
-            interface_dependencies: inter_dep,
-            dependency_map: Mutex::new(dep_map),
+            pkg_versions,
+            public_interfaces,
+            interfaces: Mutex::new(interface),
+            interface_dependencies,
+            dependency_map: Mutex::new(dependency_map),
             parent,
         })
     }
@@ -324,7 +332,11 @@ impl ModuleInstance for GenericModuleInstance {
 
 fimo_core_interface::fimo_module_instance_impl! {trait_impl, GenericModuleInstance}
 
-impl fimo_core_interface::rust::FimoModuleInstanceExt for GenericModuleInstance {}
+impl fimo_core_interface::rust::FimoModuleInstanceExt for GenericModuleInstance {
+    fn get_pkg_version(&self, pkg: &str) -> Option<&str> {
+        self.pkg_versions.get(pkg).map(|v| v.as_str())
+    }
+}
 
 impl std::fmt::Display for UnknownInterfaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
