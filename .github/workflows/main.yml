@@ -26,6 +26,7 @@ jobs:
     name: Test Suite
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ macos-latest, windows-latest, ubuntu-latest ]
         rust:
@@ -40,6 +41,9 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: -- --nocapture
+        env:
+          RUST_BACKTRACE: 1
 
   fmt:
     name: Rustfmt
@@ -81,3 +85,27 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
+
+  sanitizer:
+    name: Sanitizers (fimo_tasks)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sanitizer: [ memory, thread ]
+        rust:
+          - nightly
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rust-src
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: -Zbuild-std --target x86_64-unknown-linux-gnu --release -p fimo_tasks --lib -- --test-threads=1
+        env:
+          RUSTFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
+          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tsan

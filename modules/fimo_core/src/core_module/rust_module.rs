@@ -21,7 +21,11 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
     let mut interfaces = HashMap::new();
     interfaces.insert(core_desc, (build_core_interface as _, vec![]));
 
-    Ok(GenericModuleInstance::new(parent, interfaces))
+    Ok(GenericModuleInstance::new(
+        parent,
+        Default::default(),
+        interfaces,
+    ))
 }
 
 fn build_core_interface(

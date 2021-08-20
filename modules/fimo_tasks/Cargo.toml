@@ -1,0 +1,28 @@
+[package]
+name = "fimo_tasks"
+version = "0.1.0"
+edition = "2018"
+description = "Fimo engine task runtime"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+[lib]
+crate-type = ["lib", "dylib"]
+
+[dependencies]
+atomic = "0.5"
+context = "2.0"
+num_cpus = "1.13"
+parking_lot = "0.11"
+crossbeam-deque = "0.8"
+fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core" }
+fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
+fimo_tasks_interface = { version = "0.1.0", path = "../../utilities/fimo_tasks_interface" }
+fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core", optional = true }
+fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
+fimo_core_interface = { version = "0.1.0", path = "../../utilities/fimo_core_interface", optional = true }
+
+[features]
+default = ["rust_module"]
+module = ["fimo_ffi_core", "fimo_module_core", "fimo_core_interface"]
+rust_module = ["module"]

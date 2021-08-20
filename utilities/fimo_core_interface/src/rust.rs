@@ -56,7 +56,12 @@ pub const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// fimo_core_interface::fimo_module_instance_impl! {trait_impl, Instance}
 ///
-/// impl fimo_core_interface::rust::FimoModuleInstanceExt for Instance {}
+/// impl fimo_core_interface::rust::FimoModuleInstanceExt for Instance {
+///     // Implement remaining functions ...
+///     # fn get_pkg_version(&self, pkg: &str) -> Option<&str> {
+///     #     None
+///     # }
+/// }
 /// ```
 #[macro_export]
 macro_rules! fimo_module_instance_impl {
@@ -70,11 +75,7 @@ macro_rules! fimo_module_instance_impl {
         }
     };
     (id) => {
-        unsafe {
-            std::mem::transmute::<_, u64>(std::any::TypeId::of::<
-                dyn $crate::rust::FimoModuleInstanceExtAPIStable,
-            >())
-        }
+        0x66696d6f0000
     };
     (to_ptr, $instance: expr) => {
         unsafe {
@@ -170,11 +171,7 @@ macro_rules! fimo_core_interface_impl {
         }
     };
     (id) => {
-        unsafe {
-            std::mem::transmute::<_, u64>(std::any::TypeId::of::<
-                dyn $crate::rust::InterfaceGuardInternal<dyn $crate::rust::FimoCore>,
-            >())
-        }
+        0x66696d6f0001
     };
     (to_ptr, $interface: expr) => {
         unsafe {
@@ -512,7 +509,10 @@ pub trait FimoModuleInstanceExtAPIStable: ModuleInstance {
 }
 
 /// A trait describing a fimo module.
-pub trait FimoModuleInstanceExt: FimoModuleInstanceExtAPIStable {}
+pub trait FimoModuleInstanceExt: FimoModuleInstanceExtAPIStable {
+    /// Extracts the linked package version of a crate.
+    fn get_pkg_version(&self, pkg: &str) -> Option<&str>;
+}
 
 /// Type of a loader callback.
 pub type LoaderCallback = dyn FnOnce(&'static (dyn ModuleLoader + 'static)) + Sync + Send;
