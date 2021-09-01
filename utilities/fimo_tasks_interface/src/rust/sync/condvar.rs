@@ -108,6 +108,10 @@ impl CondvarInner {
         }
     }
 
+    pub(crate) fn wait_on_if(&self, predicate: Option<WaitOnFn>) {
+        self.raw.wait_on_if(predicate)
+    }
+
     pub(crate) fn wait_and_try_lock<'a, T: 'a>(&self, data: &mut WaitAndLockData<'a, T>) {
         let try_lock = |data: usize| {
             let data = unsafe { &mut *(data as *mut WaitAndLockData<'a, T>) };
@@ -123,7 +127,7 @@ impl CondvarInner {
         };
 
         let data_ptr = data as *mut _ as usize;
-        self.raw.wait_on_if(Some(WaitOnFn {
+        self.wait_on_if(Some(WaitOnFn {
             data: data_ptr,
             validate: try_lock,
             after_sleep: |_, _| {},
@@ -163,7 +167,7 @@ impl CondvarInner {
         }
 
         let data_ptr = data as *mut _ as usize;
-        self.raw.wait_on_if(Some(WaitOnFn {
+        self.wait_on_if(Some(WaitOnFn {
             data: data_ptr,
             validate: validate::<T>,
             after_sleep: unlock_mutex::<T>,
