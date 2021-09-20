@@ -1,5 +1,6 @@
 //! Implementation of basic fimo module loaders.
 #![feature(get_mut_unchecked)]
+#![feature(auto_traits)]
 #![feature(c_unwind)]
 #![warn(
     missing_docs,
@@ -12,6 +13,10 @@ use std::any::Any;
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
+
+mod dyn_arc;
+
+pub use dyn_arc::*;
 
 pub mod ffi_loader;
 pub mod rust_loader;
