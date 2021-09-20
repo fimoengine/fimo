@@ -1,5 +1,6 @@
 //! A utility crate for bootstrapping emf modules.
 #![feature(c_unwind)]
+#![allow(dead_code)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
