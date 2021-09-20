@@ -9,7 +9,7 @@ use std::pin::Pin;
 pub struct Task<T: 'static + Send> {
     data: UnsafeCell<MaybeUninit<T>>,
     raw: MaybeUninit<RawTask>,
-    pin: PhantomPinned,
+    _pin: PhantomPinned,
 }
 
 /// Status of a task.
@@ -37,7 +37,7 @@ impl<T: 'static + Send> Task<T> {
         let mut res = Box::pin(Self {
             data: UnsafeCell::new(MaybeUninit::uninit()),
             raw: MaybeUninit::uninit(),
-            pin: Default::default(),
+            _pin: Default::default(),
         });
 
         let task_func = {
