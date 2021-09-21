@@ -29,13 +29,33 @@ pub auto trait DynArcBase {}
 /// Caster type for [`DynArc`] and [`DynWeak`].
 pub trait DynArcCaster<T: DynArcBase + ?Sized>: Copy {
     /// Casts `&dyn DynArcBase` to a `&T`.
-    fn as_self(&self, base: &dyn DynArcBase) -> &T;
+    ///
+    /// # Safety
+    ///
+    /// The value of `data` must be compatible with the caster.
+    unsafe fn as_self(&self, base: &dyn DynArcBase) -> &T {
+        let base_ptr = base as *const _;
+        let self_ptr = self.as_self_ptr(base_ptr);
+        &*self_ptr
+    }
 
     /// Casts `&mut dyn DynArcBase` to a `&mut T`.
-    fn as_self_mut(&self, base: &mut dyn DynArcBase) -> &mut T;
+    ///
+    /// # Safety
+    ///
+    /// The value of `data` must be compatible with the caster.
+    unsafe fn as_self_mut(&self, base: &mut dyn DynArcBase) -> &mut T {
+        let base_ptr = base as *mut _ as *const _;
+        let self_ptr = self.as_self_ptr(base_ptr);
+        &mut *(self_ptr as *mut T)
+    }
 
     /// Casts `*const dyn DynArcBase` to a `*const T`.
-    fn as_self_ptr(&self, base: *const dyn DynArcBase) -> *const T;
+    ///
+    /// # Safety
+    ///
+    /// The value of `data` must be compatible with the caster.
+    unsafe fn as_self_ptr<'a>(&self, base: *const (dyn DynArcBase + 'a)) -> *const T;
 }
 
 impl<T: 'static + DynArcBase, C: DynArcCaster<T>> DynArc<T, C> {
@@ -61,7 +81,7 @@ impl<T: DynArcBase + ?Sized, C: DynArcCaster<T>> DynArc<T, C> {
     #[inline]
     pub fn as_ptr(this: &DynArc<T, C>) -> *const T {
         let ptr = Arc::as_ptr(&this.inner);
-        this.caster.as_self_ptr(ptr)
+        unsafe { this.caster.as_self_ptr(ptr) }
     }
 
     /// Consumes the `DynArc`, returning the inner [`Arc`] and caster.
@@ -119,7 +139,7 @@ impl<T: DynArcBase + ?Sized, C: DynArcCaster<T>> DynArc<T, C> {
     pub fn get_mut(this: &mut DynArc<T, C>) -> Option<&mut T> {
         let inner = &mut this.inner;
         let caster = &this.caster;
-        Arc::get_mut(inner).map(move |b| caster.as_self_mut(b))
+        Arc::get_mut(inner).map(move |b| unsafe { caster.as_self_mut(b) })
     }
 }
 
@@ -166,7 +186,7 @@ impl<T: DynArcBase + ?Sized, C: DynArcCaster<T>> std::ops::Deref for DynArc<T, C
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.caster.as_self(&*self.inner)
+        unsafe { self.caster.as_self(&*self.inner) }
     }
 }
 
@@ -263,7 +283,7 @@ impl<T: DynArcBase + ?Sized, C: DynArcCaster<T>> DynWeak<T, C> {
     #[inline]
     pub fn as_ptr(&self) -> *const T {
         let ptr = self.inner.as_ptr();
-        self.caster.as_self_ptr(ptr)
+        unsafe { self.caster.as_self_ptr(ptr) }
     }
 
     /// Fetches the inner [`Weak`] pointer and Caster.
