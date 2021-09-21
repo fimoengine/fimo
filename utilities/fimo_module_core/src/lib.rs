@@ -1,6 +1,5 @@
 //! Implementation of basic fimo module loaders.
 #![feature(get_mut_unchecked)]
-#![feature(auto_traits)]
 #![feature(c_unwind)]
 #![warn(
     missing_docs,

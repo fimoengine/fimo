@@ -24,7 +24,9 @@ pub struct DynWeak<T: DynArcBase + ?Sized, C: DynArcCaster<T>> {
 }
 
 /// Base type of the [`DynArc`] and [`DynWeak`] types.
-pub auto trait DynArcBase {}
+pub trait DynArcBase {}
+
+impl<T: ?Sized> DynArcBase for T {}
 
 /// Caster type for [`DynArc`] and [`DynWeak`].
 pub trait DynArcCaster<T: DynArcBase + ?Sized>: Copy {
