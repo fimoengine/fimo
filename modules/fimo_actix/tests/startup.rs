@@ -1,7 +1,7 @@
 use fimo_actix_interface::{FimoActix, FimoActixCaster, ServerStatus};
 use fimo_module_core::DynArc;
-use std::error::Error;
 use reqwest::Url;
+use std::error::Error;
 
 fn initialize() -> Result<DynArc<FimoActix, FimoActixCaster>, Box<dyn Error>> {
     let (core_instance, core_interface) = module_loading::get_core_interface()?;
