@@ -8,7 +8,7 @@ use std::fmt::{Debug, Formatter};
 
 lazy_static! {
     static ref ITEM_IDENTIFIER: regex::Regex =
-        regex::Regex::new(r"(?P<identifier>\w*)(\[(?P<index>\d+)\])?").unwrap();
+        regex::Regex::new(r"(?P<identifier>[\w\-]*)(\[(?P<index>\d+)\])?").unwrap();
 }
 
 /// The settings registry.
@@ -125,9 +125,13 @@ impl SettingsRegistry {
         item: impl AsRef<str>,
         callback: Box<SettingsUpdateCallback>,
     ) -> Option<CallbackHandle<SettingsUpdateCallback>> {
-        self.root
-            .get_item_mut(item)
-            .map(|i| i.register_callback(callback))
+        if item.as_ref() == "" {
+            Some(self.root.register_callback(callback))
+        } else {
+            self.root
+                .get_item_mut(item)
+                .map(|i| i.register_callback(callback))
+        }
     }
 
     /// Unregisters a callback from an item.
@@ -136,7 +140,9 @@ impl SettingsRegistry {
         item: impl AsRef<str>,
         handle: CallbackHandle<SettingsUpdateCallback>,
     ) {
-        if let Some(i) = self.root.get_item_mut(item) {
+        if item.as_ref() == "" {
+            self.root.unregister_callback(handle)
+        } else if let Some(i) = self.root.get_item_mut(item) {
             i.unregister_callback(handle)
         }
     }

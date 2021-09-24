@@ -4,6 +4,7 @@ use fimo_module_core::{
     ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader, ModulePtr,
 };
 use fimo_version_core::Version;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::error::Error;
@@ -202,7 +203,8 @@ pub enum TryLockError {
 }
 
 /// A item from the settings registry.
-#[derive(Debug, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Clone, PartialOrd, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum SettingsItem {
     /// Empty value.
     Null,
