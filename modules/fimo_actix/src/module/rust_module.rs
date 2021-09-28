@@ -2,12 +2,13 @@ use crate::module::core_bindings::scope_builder;
 use crate::module::{construct_module_info, get_actix_interface_descriptor, FimoActixInterface};
 use crate::FimoActixServer;
 use fimo_actix_interface::ScopeBuilder;
-use fimo_core_interface::rust::{FimoCore, InterfaceGuard, SettingsItem};
-use fimo_ffi_core::ArrayString;
+use fimo_core_interface::rust::{
+    build_interface_descriptor as core_descriptor, FimoCore, SettingsItem, SettingsItemType,
+    SettingsRegistryPath,
+};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{RustModule, RustModuleExt};
 use fimo_module_core::{ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor};
-use fimo_version_core::{ReleaseType, Version};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind;
@@ -26,10 +27,7 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
     let mut interfaces = HashMap::new();
     interfaces.insert(
         core_desc,
-        (
-            build_tasks_interface as _,
-            vec![core_interface_descriptor()],
-        ),
+        (build_tasks_interface as _, vec![core_descriptor()]),
     );
 
     let pkg_versions = HashMap::new();
@@ -41,7 +39,7 @@ fn build_tasks_interface(
     dep_map: &HashMap<ModuleInterfaceDescriptor, Option<Weak<dyn ModuleInterface>>>,
 ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
     let core_interface = dep_map
-        .get(&core_interface_descriptor())
+        .get(&core_descriptor())
         .map(|i| Weak::upgrade(i.as_ref().unwrap()));
 
     if core_interface.is_none() || core_interface.as_ref().unwrap().is_none() {
@@ -54,84 +52,49 @@ fn build_tasks_interface(
     let core_interface =
         unsafe { fimo_core_interface::rust::cast_interface(core_interface.unwrap().unwrap())? };
 
-    let guard = core_interface.try_lock();
-    match guard {
-        Ok(mut guard) => {
-            // read settings from registry.
-            let settings_registry = guard.as_settings_registry_mut();
-            if !settings_registry.is_object("fimo-actix").unwrap_or(false) {
-                settings_registry.write(
-                    "fimo-actix",
-                    SettingsItem::Object {
-                        0: Default::default(),
-                    },
-                );
-            }
-            let port_setting = settings_registry.read("fimo-actix::port");
-            let core_bindings_setting = settings_registry.read("fimo-actix::core_bindings");
+    const DEFAULT_PORT: usize = 8080usize;
+    const DEFAULT_ENABLE_CORE_BINDINGS: bool = true;
 
-            let port = match port_setting {
-                None => {
-                    let port = 8080usize;
-                    settings_registry.write("fimo-actix::port", SettingsItem::U64(port as u64));
-                    port
-                }
-                Some(SettingsItem::U64(n)) => n as usize,
-                _ => {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::Other,
-                        "fimo-actix::port: expected u64 value",
-                    )));
-                }
-            };
+    let settings_path = SettingsRegistryPath::new("fimo-actix").unwrap();
+    let port_path = settings_path.join(SettingsRegistryPath::new("port").unwrap());
+    let enable_bindings_path =
+        settings_path.join(SettingsRegistryPath::new("core_bindings").unwrap());
 
-            let core_bindings = match core_bindings_setting {
-                None => {
-                    let core_bindings = true;
-                    settings_registry.write(
-                        "fimo-actix::core_bindings",
-                        SettingsItem::Bool(core_bindings),
-                    );
-                    core_bindings
-                }
-                Some(SettingsItem::Bool(n)) => n,
-                _ => {
-                    return Err(Box::new(std::io::Error::new(
-                        ErrorKind::Other,
-                        "fimo-actix::core_bindings: expected bool value",
-                    )));
-                }
-            };
-
-            let address = format!("127.0.0.1:{}", port);
-
-            let server = Arc::new(FimoActixInterface {
-                server: FimoActixServer::new(address),
-                parent: instance,
-            });
-
-            if core_bindings {
-                bind_core(server.clone(), guard)
-            }
-
-            Ok(server)
-        }
-        Err(_) => Err(Box::new(std::io::Error::new(
-            ErrorKind::Other,
-            "can not lock the fimo-core interface",
-        ))),
+    let registry = core_interface.get_settings_registry();
+    if !registry
+        .item_type(settings_path)
+        .unwrap_or(SettingsItemType::Null)
+        .is_object()
+    {
+        registry
+            .write(settings_path, SettingsItem::Object(Default::default()))
+            .unwrap();
     }
+
+    let port = registry
+        .try_read_or(port_path, DEFAULT_PORT)
+        .unwrap()
+        .unwrap_or(DEFAULT_PORT);
+    let enable_bindings = registry
+        .try_read_or(enable_bindings_path, DEFAULT_ENABLE_CORE_BINDINGS)
+        .unwrap()
+        .unwrap_or(DEFAULT_ENABLE_CORE_BINDINGS);
+
+    let address = format!("127.0.0.1:{}", port);
+
+    let server = Arc::new(FimoActixInterface {
+        server: FimoActixServer::new(address),
+        parent: instance,
+    });
+
+    if enable_bindings {
+        bind_core(server.clone(), &*core_interface)
+    }
+
+    Ok(server)
 }
 
-fn core_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked("fimo-core".as_bytes()) },
-        version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0),
-        extensions: Default::default(),
-    }
-}
-
-fn bind_core(server: Arc<FimoActixInterface>, core: InterfaceGuard<'_, dyn FimoCore>) {
+fn bind_core(server: Arc<FimoActixInterface>, core: &FimoCore) {
     let (builder, _callback) = scope_builder(core);
     let scope_builder = ScopeBuilder::from(Box::new(builder));
     server.server.register_scope("/core", scope_builder);

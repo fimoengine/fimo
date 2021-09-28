@@ -1,11 +1,12 @@
 use crate::module::{construct_module_info, get_tasks_interface_descriptor, TaskInterface};
 use crate::TaskRuntime;
-use fimo_core_interface::rust::SettingsItem;
-use fimo_ffi_core::ArrayString;
+use fimo_core_interface::rust::{
+    build_interface_descriptor as core_descriptor, SettingsItem, SettingsItemType,
+    SettingsRegistryPath,
+};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{RustModule, RustModuleExt};
 use fimo_module_core::{ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor};
-use fimo_version_core::{ReleaseType, Version};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind;
@@ -24,10 +25,7 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
     let mut interfaces = HashMap::new();
     interfaces.insert(
         core_desc,
-        (
-            build_tasks_interface as _,
-            vec![core_interface_descriptor()],
-        ),
+        (build_tasks_interface as _, vec![core_descriptor()]),
     );
 
     let mut pkg_versions = HashMap::new();
@@ -44,7 +42,7 @@ fn build_tasks_interface(
     dep_map: &HashMap<ModuleInterfaceDescriptor, Option<Weak<dyn ModuleInterface>>>,
 ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
     let core_interface = dep_map
-        .get(&core_interface_descriptor())
+        .get(&core_descriptor())
         .map(|i| Weak::upgrade(i.as_ref().unwrap()));
 
     if core_interface.is_none() || core_interface.as_ref().unwrap().is_none() {
@@ -57,81 +55,43 @@ fn build_tasks_interface(
     let core_interface =
         unsafe { fimo_core_interface::rust::cast_interface(core_interface.unwrap().unwrap())? };
 
-    let guard = core_interface.try_lock();
-    match guard {
-        Ok(mut guard) => {
-            // read settings from registry.
-            let settings_registry = guard.as_settings_registry_mut();
-            let num_cores_val = settings_registry.read("fimo_tasks::num_cores");
-            let max_tasks_val = settings_registry.read("fimo_tasks::max_tasks");
-            let allocated_tasks_val = settings_registry.read("fimo_tasks::allocated_tasks");
+    #[allow(non_snake_case)]
+    let NUM_CORES = num_cpus::get();
+    const MAX_TASKS: usize = 1024;
+    const ALLOCATED_TASKS: usize = 128;
 
-            let num_cores = match num_cores_val {
-                None => {
-                    let cores = num_cpus::get();
-                    settings_registry
-                        .write("fimo_tasks::num_cores", SettingsItem::U64(cores as u64));
-                    cores
-                }
-                Some(val) => match val {
-                    SettingsItem::U64(n) => n as usize,
-                    _ => {
-                        return Err(Box::new(std::io::Error::new(
-                            ErrorKind::Other,
-                            "fimo_tasks::num_cores: expected u64 value",
-                        )));
-                    }
-                },
-            };
+    let settings_path = SettingsRegistryPath::new("fimo-tasks").unwrap();
+    let num_cores_path = settings_path.join(SettingsRegistryPath::new("num_cores").unwrap());
+    let max_tasks_path = settings_path.join(SettingsRegistryPath::new("max_tasks").unwrap());
+    let allocated_tasks_path =
+        settings_path.join(SettingsRegistryPath::new("allocated_tasks").unwrap());
 
-            let max_tasks = match max_tasks_val {
-                None => {
-                    settings_registry.write("fimo_tasks::max_tasks", SettingsItem::U64(1024));
-                    1024
-                }
-                Some(val) => match val {
-                    SettingsItem::U64(n) => n as usize,
-                    _ => {
-                        return Err(Box::new(std::io::Error::new(
-                            ErrorKind::Other,
-                            "fimo_tasks::max_tasks: expected u64 value",
-                        )));
-                    }
-                },
-            };
-
-            let allocated_tasks = match allocated_tasks_val {
-                None => {
-                    settings_registry.write("fimo_tasks::allocated_tasks", SettingsItem::U64(128));
-                    128
-                }
-                Some(val) => match val {
-                    SettingsItem::U64(n) => n as usize,
-                    _ => {
-                        return Err(Box::new(std::io::Error::new(
-                            ErrorKind::Other,
-                            "fimo_tasks::allocated_tasks: expected u64 value",
-                        )));
-                    }
-                },
-            };
-
-            Ok(Arc::new(TaskInterface {
-                runtime: TaskRuntime::new(num_cores, max_tasks, allocated_tasks),
-                parent: instance,
-            }))
-        }
-        Err(_) => Err(Box::new(std::io::Error::new(
-            ErrorKind::Other,
-            "can not lock the fimo-core interface",
-        ))),
+    let registry = core_interface.get_settings_registry();
+    if !registry
+        .item_type(settings_path)
+        .unwrap_or(SettingsItemType::Null)
+        .is_object()
+    {
+        registry
+            .write(settings_path, SettingsItem::Object(Default::default()))
+            .unwrap();
     }
-}
 
-fn core_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked("fimo-core".as_bytes()) },
-        version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0),
-        extensions: Default::default(),
-    }
+    let num_cores = registry
+        .try_read_or(num_cores_path, NUM_CORES)
+        .unwrap()
+        .unwrap_or(NUM_CORES);
+    let max_tasks = registry
+        .try_read_or(max_tasks_path, MAX_TASKS)
+        .unwrap()
+        .unwrap_or(MAX_TASKS);
+    let allocated_tasks = registry
+        .try_read_or(allocated_tasks_path, ALLOCATED_TASKS)
+        .unwrap()
+        .unwrap_or(ALLOCATED_TASKS);
+
+    Ok(Arc::new(TaskInterface {
+        runtime: TaskRuntime::new(num_cores, max_tasks, allocated_tasks),
+        parent: instance,
+    }))
 }

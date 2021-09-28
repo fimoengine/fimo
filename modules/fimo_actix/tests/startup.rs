@@ -1,16 +1,12 @@
-use fimo_actix_interface::{FimoActix, FimoActixCaster, ServerStatus};
-use fimo_module_core::DynArc;
+use fimo_actix_interface::ServerStatus;
 use reqwest::Url;
 use std::error::Error;
 
-fn initialize() -> Result<DynArc<FimoActix, FimoActixCaster>, Box<dyn Error>> {
-    let (core_instance, core_interface) = module_loading::get_core_interface()?;
-    module_loading::get_actix_interface(&core_instance, &core_interface)
-}
-
 #[test]
 fn startup_server() -> Result<(), Box<dyn Error>> {
-    let actix = initialize()?;
+    let (core_instance, core) = module_loading::get_core_interface()?;
+    let actix = module_loading::get_actix_interface(&core_instance, &core)?;
+
     assert_eq!(actix.get_server_status(), ServerStatus::Stopped);
     assert_eq!(actix.start(), ServerStatus::Running);
     assert_eq!(actix.get_server_status(), ServerStatus::Running);
@@ -19,6 +15,11 @@ fn startup_server() -> Result<(), Box<dyn Error>> {
     let body = reqwest::blocking::get(url)?.text()?;
 
     println!("{}", body);
+
+    let root_item = core.get_settings_registry().read_all();
+    let body_root = serde_json::from_str(body.as_str()).unwrap();
+
+    assert_eq!(root_item, body_root);
 
     assert_eq!(actix.stop(), ServerStatus::Stopped);
     assert_eq!(actix.get_server_status(), ServerStatus::Stopped);
