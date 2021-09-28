@@ -1,7 +1,7 @@
 [package]
 name = "fimo_core"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 description = "Core module of the fimo engine"
 license = "MIT OR Apache-2.0"
 categories = ["game-development"]
@@ -19,9 +19,13 @@ semver = { version = "1.0.4", features = ["serde"] }
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core" }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
-fimo_core_interface = { version = "0.1.0", path = "../../utilities/fimo_core_interface" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
+fimo_core_interface = { version = "=0.1.0", path = "../../utilities/fimo_core_interface" }
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core", features = ["serde"] }
+
+[dev-dependencies]
+module_paths = { path = "../../test_utilities/module_paths" }
+module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]
 default = ["default_module_loaders", "rust_module"]

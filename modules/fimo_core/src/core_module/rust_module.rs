@@ -1,9 +1,8 @@
-use crate::core_module::{construct_module_info, get_core_interface_descriptor, MutexWrapper};
-use crate::CoreInterface;
+use crate::core_module::{construct_module_info, CoreWrapper};
+use fimo_core_interface::rust::build_interface_descriptor;
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{RustModule, RustModuleExt};
 use fimo_module_core::{ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor};
-use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, Weak};
@@ -16,7 +15,7 @@ extern "C-unwind" fn construct_module() -> Result<Box<dyn RustModuleExt>, Box<dy
 }
 
 fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>> {
-    let core_desc = get_core_interface_descriptor();
+    let core_desc = build_interface_descriptor();
 
     let mut interfaces = HashMap::new();
     interfaces.insert(core_desc, (build_core_interface as _, vec![]));
@@ -32,8 +31,8 @@ fn build_core_interface(
     instance: Arc<dyn ModuleInstance>,
     _dep_map: &HashMap<ModuleInterfaceDescriptor, Option<Weak<dyn ModuleInterface>>>,
 ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
-    Ok(Arc::new(MutexWrapper {
-        data: Mutex::new(CoreInterface::new()),
+    Ok(Arc::new(CoreWrapper {
+        interface: Default::default(),
         parent: instance,
     }))
 }

@@ -1,4 +1,6 @@
 //! Library implementing FFI-safe equivalents of Rust's data types.
+#![feature(unboxed_closures)]
+#![feature(fn_traits)]
 #![feature(c_unwind)]
 #![warn(
     missing_docs,
@@ -10,6 +12,7 @@ pub mod arc;
 pub mod array_string;
 pub mod error;
 pub mod error_info;
+pub mod heap_fn;
 pub mod non_null_const;
 pub mod optional;
 pub mod result;

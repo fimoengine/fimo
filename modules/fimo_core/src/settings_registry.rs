@@ -1,25 +1,548 @@
 //! Implementation of the `SettingsRegistry` type.
 use fimo_core_interface::rust::{
-    CallbackHandle, SettingsEvent, SettingsItem, SettingsUpdateCallback,
+    SettingsEvent, SettingsEventCallback, SettingsEventCallbackId, SettingsItem, SettingsItemType,
+    SettingsRegistryPath, SettingsRegistryPathBuf, SettingsRegistryPathComponent,
+    SettingsRegistryPathComponentIter, SettingsRegistryPathNotFoundError, SettingsRegistryVTable,
 };
-use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
+use std::ops::{Deref, RangeFrom};
 
-lazy_static! {
-    static ref ITEM_IDENTIFIER: regex::Regex =
-        regex::Regex::new(r"(?P<identifier>[\w\-]*)(\[(?P<index>\d+)\])?").unwrap();
-}
+const VTABLE: SettingsRegistryVTable = SettingsRegistryVTable::new(
+    |ptr, path| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().contains(path)
+    },
+    |ptr, path| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().item_type(path)
+    },
+    |ptr, path| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().read(path)
+    },
+    |ptr, path, value| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().write(path, value)
+    },
+    |ptr, path, value| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().read_or(path, value)
+    },
+    |ptr, path| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().remove(path)
+    },
+    |ptr, path, f| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        let path = unsafe { &*path };
+        registry.inner.lock().register_callback(path, f)
+    },
+    |ptr, id| {
+        let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+        registry.inner.lock().unregister_callback(id)
+    },
+);
 
 /// The settings registry.
 #[derive(Debug)]
 pub struct SettingsRegistry {
+    inner: parking_lot::Mutex<SettingsRegistryInner>,
+}
+
+impl SettingsRegistry {
+    /// Constructs a new `SettingsRegistry`.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            inner: parking_lot::Mutex::new(SettingsRegistryInner::new()),
+        }
+    }
+}
+
+impl Deref for SettingsRegistry {
+    type Target = fimo_core_interface::rust::SettingsRegistry;
+
+    fn deref(&self) -> &Self::Target {
+        let self_ptr = self as *const _ as *const ();
+        let vtable = &VTABLE;
+
+        unsafe { &*Self::Target::from_raw_parts(self_ptr, vtable) }
+    }
+}
+
+impl Default for SettingsRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug)]
+struct SettingsRegistryInner {
     root: Item,
+    id_gen: RangeFrom<usize>,
+    callback_map: BTreeMap<usize, SettingsRegistryPathBuf>,
+}
+
+impl SettingsRegistryInner {
+    #[inline]
+    fn new() -> Self {
+        Self {
+            root: Item::new(ItemValue::Object(Default::default())),
+            id_gen: (0..),
+            callback_map: Default::default(),
+        }
+    }
+
+    #[inline]
+    fn contains(&self, path: &SettingsRegistryPath) -> bool {
+        self.root.contains(path.iter())
+    }
+
+    #[inline]
+    fn item_type(&self, path: &SettingsRegistryPath) -> Option<SettingsItemType> {
+        self.root
+            .find_recursive(path.iter())
+            .map(|item| item.item_type())
+    }
+
+    #[inline]
+    fn read(&self, path: &SettingsRegistryPath) -> Option<SettingsItem> {
+        self.root.read(path.iter())
+    }
+
+    #[inline]
+    fn write(
+        &mut self,
+        path: &SettingsRegistryPath,
+        value: SettingsItem,
+    ) -> Result<Option<SettingsItem>, SettingsRegistryPathNotFoundError> {
+        self.root.write(path, path.iter(), value)
+    }
+
+    #[inline]
+    fn read_or(
+        &mut self,
+        path: &SettingsRegistryPath,
+        value: SettingsItem,
+    ) -> Result<SettingsItem, SettingsRegistryPathNotFoundError> {
+        self.root.read_or(path, path.iter(), value)
+    }
+
+    #[inline]
+    fn remove(&mut self, path: &SettingsRegistryPath) -> Option<SettingsItem> {
+        self.root.remove(path, path.iter())
+    }
+
+    #[inline]
+    fn register_callback(
+        &mut self,
+        path: &SettingsRegistryPath,
+        f: SettingsEventCallback,
+    ) -> Option<SettingsEventCallbackId> {
+        let item = self.root.find_recursive_mut(path.iter());
+        item.and_then(|i| {
+            self.id_gen.next().map(|id| {
+                i.callbacks.insert(id, f);
+                let c_id = unsafe { SettingsEventCallbackId::from_usize(id) };
+
+                self.callback_map.insert(id, path.to_path_buf());
+                c_id
+            })
+        })
+    }
+
+    #[inline]
+    fn unregister_callback(&mut self, id: SettingsEventCallbackId) {
+        let id = usize::from(id);
+        let path = self
+            .callback_map
+            .remove(&id)
+            .unwrap_or_else(|| panic!("invalid callback id {:?}", id));
+
+        if let Some(item) = self.root.find_recursive_mut(path.iter()) {
+            item.callbacks.remove(&id);
+        }
+    }
 }
 
 struct Item {
     value: ItemValue,
-    callbacks: Vec<Box<SettingsUpdateCallback>>,
+    callbacks: BTreeMap<usize, SettingsEventCallback>,
+}
+
+impl Item {
+    #[inline]
+    fn new(value: ItemValue) -> Self {
+        Self {
+            value,
+            callbacks: BTreeMap::default(),
+        }
+    }
+
+    #[inline]
+    fn item_type(&self) -> SettingsItemType {
+        match &self.value {
+            ItemValue::Null => SettingsItemType::Null,
+            ItemValue::Bool(_) => SettingsItemType::Bool,
+            ItemValue::U64(_) => SettingsItemType::U64,
+            ItemValue::F64(_) => SettingsItemType::F64,
+            ItemValue::String(_) => SettingsItemType::String,
+            ItemValue::Array(arr) => SettingsItemType::Array { len: arr.len() },
+            ItemValue::Object(_) => SettingsItemType::Object,
+        }
+    }
+
+    #[inline]
+    fn unwrap_array(&self) -> &Vec<Item> {
+        match &self.value {
+            ItemValue::Array(vec) => vec,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn unwrap_array_mut(&mut self) -> &mut Vec<Item> {
+        match &mut self.value {
+            ItemValue::Array(vec) => vec,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn unwrap_object(&self) -> &BTreeMap<String, Item> {
+        match &self.value {
+            ItemValue::Object(obj) => obj,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn unwrap_object_mut(&mut self) -> &mut BTreeMap<String, Item> {
+        match &mut self.value {
+            ItemValue::Object(obj) => obj,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline]
+    fn contains(&self, mut components: SettingsRegistryPathComponentIter<'_>) -> bool {
+        let item = self.get_item(&mut components);
+        item.map(|item| {
+            if components.peekable().peek().is_none() {
+                true
+            } else {
+                item.contains(components)
+            }
+        })
+        .unwrap_or(false)
+    }
+
+    #[inline]
+    fn read(&self, mut components: SettingsRegistryPathComponentIter<'_>) -> Option<SettingsItem> {
+        let item = self.get_item(&mut components);
+        item.and_then(|item| {
+            if components.peekable().peek().is_none() {
+                Some(SettingsItem::from(&item.value))
+            } else {
+                item.read(components)
+            }
+        })
+    }
+
+    #[inline]
+    fn write(
+        &mut self,
+        path: &SettingsRegistryPath,
+        mut components: SettingsRegistryPathComponentIter<'_>,
+        value: SettingsItem,
+    ) -> Result<Option<SettingsItem>, SettingsRegistryPathNotFoundError> {
+        self.dispatch_event(path, SettingsEvent::StartWrite { new: &value });
+
+        let self_ptr: *mut _ = self as _;
+
+        let components_copy = components;
+        let item = self.get_item_mut(&mut components);
+
+        let res = {
+            if let Some(item) = item {
+                if components.peekable().peek().is_none() {
+                    let item_ptr = item as *mut Item;
+                    if item_ptr != self_ptr {
+                        item.dispatch_event(path, SettingsEvent::StartWrite { new: &value });
+                    }
+
+                    let old = Some(SettingsItem::from(&item.value));
+                    item.value = value.into();
+
+                    if item_ptr != self_ptr {
+                        item.dispatch_event(path, SettingsEvent::EndWrite { old: &old });
+                    }
+                    Ok(old)
+                } else {
+                    item.write(path, components, value)
+                }
+            } else {
+                self.insert_item(path, components_copy, value).map(|_| None)
+            }
+        };
+
+        let event = res.as_ref().map_or_else(
+            |_| SettingsEvent::AbortWrite,
+            |old| SettingsEvent::EndWrite { old },
+        );
+        self.dispatch_event(path, event);
+
+        res
+    }
+
+    #[inline]
+    fn read_or(
+        &mut self,
+        path: &SettingsRegistryPath,
+        mut components: SettingsRegistryPathComponentIter<'_>,
+        value: SettingsItem,
+    ) -> Result<SettingsItem, SettingsRegistryPathNotFoundError> {
+        self.dispatch_event(path, SettingsEvent::StartReadOr { value: &value });
+
+        let self_ptr: *mut _ = self as _;
+
+        let components_copy = components;
+        let item = self.get_item_mut(&mut components);
+
+        let res = {
+            if let Some(item) = item {
+                if components.peekable().peek().is_none() {
+                    let item_ptr = item as *mut Item;
+                    if item_ptr != self_ptr {
+                        item.dispatch_event(path, SettingsEvent::StartReadOr { value: &value });
+                    }
+
+                    let value = SettingsItem::from(&item.value);
+                    if item_ptr != self_ptr {
+                        item.dispatch_event(path, SettingsEvent::EndReadOr { value: &value });
+                    }
+
+                    Ok(value)
+                } else {
+                    item.read_or(path, components, value)
+                }
+            } else {
+                self.insert_item(path, components_copy, value.clone())
+                    .map(|_| value)
+            }
+        };
+
+        let event = res.as_ref().map_or_else(
+            |_| SettingsEvent::AbortReadOr,
+            |value| SettingsEvent::EndReadOr { value },
+        );
+        self.dispatch_event(path, event);
+
+        res
+    }
+
+    #[inline]
+    fn remove(
+        &mut self,
+        path: &SettingsRegistryPath,
+        mut components: SettingsRegistryPathComponentIter<'_>,
+    ) -> Option<SettingsItem> {
+        let name = {
+            let mut components = components;
+            match components.next() {
+                None => return None,
+                // check that it is the last component.
+                Some(name) => components.next().or(Some(name)),
+            }
+        };
+
+        let res = {
+            // remove last component directly
+            if let Some(name) = name {
+                if !self.item_type().is_object() {
+                    return None;
+                }
+
+                let obj = self.unwrap_object_mut();
+
+                let item = match name {
+                    SettingsRegistryPathComponent::Item { name } => obj.remove(name).map(|i| i),
+                    SettingsRegistryPathComponent::ArrayItem { name, index } => {
+                        let arr = obj.get_mut(name);
+                        arr.and_then(|arr| {
+                            if !arr.item_type().is_array() {
+                                return None;
+                            }
+
+                            let arr = arr.unwrap_array_mut();
+                            if arr.len() <= index {
+                                None
+                            } else {
+                                Some(arr.remove(index))
+                            }
+                        })
+                    }
+                };
+
+                if let Some(mut item) = item {
+                    let mut value = ItemValue::Null;
+                    std::mem::swap(&mut item.value, &mut value);
+
+                    let value = value.into();
+                    item.dispatch_event(path, SettingsEvent::Remove { value: &value });
+
+                    Some(value)
+                } else {
+                    None
+                }
+            } else {
+                self.get_item_mut(&mut components)
+                    .and_then(|item| item.remove(path, components))
+            }
+        };
+
+        if let Some(value) = res.as_ref() {
+            self.dispatch_event(path, SettingsEvent::Remove { value })
+        }
+
+        res
+    }
+
+    #[inline]
+    fn insert_item(
+        &mut self,
+        path: &SettingsRegistryPath,
+        mut components: SettingsRegistryPathComponentIter<'_>,
+        value: SettingsItem,
+    ) -> Result<(), SettingsRegistryPathNotFoundError> {
+        let item_name = components.next().unwrap();
+        let last = components.next().is_none();
+
+        if self.item_type().is_object() && item_name.is_item() && last {
+            let obj = self.unwrap_object_mut();
+            obj.insert(
+                String::from(item_name.as_ref()),
+                Item::new(From::from(value)),
+            );
+
+            Ok(())
+        } else {
+            Err(SettingsRegistryPathNotFoundError::new(path))
+        }
+    }
+
+    #[inline]
+    fn get_item(&self, components: &mut SettingsRegistryPathComponentIter<'_>) -> Option<&Self> {
+        if let Some(component) = components.next() {
+            if !self.item_type().is_object() {
+                return None;
+            }
+
+            let obj = self.unwrap_object();
+
+            match component {
+                SettingsRegistryPathComponent::Item { name } => obj.get(name),
+                SettingsRegistryPathComponent::ArrayItem { name, index } => {
+                    let item = obj.get(name);
+                    item.and_then(|i| {
+                        if !i.item_type().is_array() {
+                            return None;
+                        }
+
+                        let array = i.unwrap_array();
+                        array.get(index)
+                    })
+                }
+            }
+        } else {
+            Some(self)
+        }
+    }
+
+    #[inline]
+    fn get_item_mut(
+        &mut self,
+        components: &mut SettingsRegistryPathComponentIter<'_>,
+    ) -> Option<&mut Self> {
+        if let Some(component) = components.next() {
+            if !self.item_type().is_object() {
+                return None;
+            }
+
+            let obj = self.unwrap_object_mut();
+
+            match component {
+                SettingsRegistryPathComponent::Item { name } => obj.get_mut(name),
+                SettingsRegistryPathComponent::ArrayItem { name, index } => {
+                    let item = obj.get_mut(name);
+                    item.and_then(|i| {
+                        if !i.item_type().is_array() {
+                            return None;
+                        }
+
+                        let array = i.unwrap_array_mut();
+                        array.get_mut(index)
+                    })
+                }
+            }
+        } else {
+            Some(self)
+        }
+    }
+
+    #[inline]
+    fn find_recursive(
+        &self,
+        mut components: SettingsRegistryPathComponentIter<'_>,
+    ) -> Option<&Self> {
+        let item = self.get_item(&mut components);
+        item.and_then(|item| {
+            if components.peekable().peek().is_some() {
+                item.find_recursive(components)
+            } else {
+                Some(item)
+            }
+        })
+    }
+
+    #[inline]
+    fn find_recursive_mut(
+        &mut self,
+        mut components: SettingsRegistryPathComponentIter<'_>,
+    ) -> Option<&mut Self> {
+        let item = self.get_item_mut(&mut components);
+        item.and_then(|item| {
+            if components.peekable().peek().is_some() {
+                item.find_recursive_mut(components)
+            } else {
+                Some(item)
+            }
+        })
+    }
+
+    #[inline]
+    fn dispatch_event<P: AsRef<SettingsRegistryPath>>(
+        &mut self,
+        path: P,
+        event: SettingsEvent<'_>,
+    ) {
+        for c in self.callbacks.values_mut() {
+            c(path.as_ref(), event)
+        }
+    }
+}
+
+impl Debug for Item {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.value, f)
+    }
 }
 
 #[derive(Debug)]
@@ -33,396 +556,9 @@ enum ItemValue {
     Object(BTreeMap<String, Item>),
 }
 
-struct ItemIdentifier<'a> {
-    identifier: &'a str,
-    index: Option<usize>,
-}
-
-impl SettingsRegistry {
-    /// Constructs a new `SettingsRegistry`.
-    pub fn new() -> Self {
-        Self {
-            root: Item::new(ItemValue::Object(BTreeMap::new())),
-        }
-    }
-
-    /// Extracts whether an item is [SettingsItem::Null].
-    pub fn is_null(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_null())
-    }
-
-    /// Extracts whether an item is [SettingsItem::Bool].
-    pub fn is_bool(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_bool())
-    }
-
-    /// Extracts whether an item is [SettingsItem::U64].
-    pub fn is_u64(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_u64())
-    }
-
-    /// Extracts whether an item is [SettingsItem::F64].
-    pub fn is_f64(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_f64())
-    }
-
-    /// Extracts whether an item is [SettingsItem::String].
-    pub fn is_string(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_string())
-    }
-
-    /// Extracts whether an item is [SettingsItem::U64] or an [SettingsItem::F64].
-    pub fn is_number(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_number())
-    }
-
-    /// Extracts whether an item is [SettingsItem::Array].
-    pub fn is_array(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_array())
-    }
-
-    /// Extracts whether an item is [SettingsItem::Object].
-    pub fn is_object(&self, item: impl AsRef<str>) -> Option<bool> {
-        self.root.get_item(item).map(|i| i.is_object())
-    }
-
-    /// Extracts the length of an [SettingsItem::Array] item.
-    pub fn array_len(&self, item: impl AsRef<str>) -> Option<usize> {
-        self.root
-            .get_item(item)
-            .map(|i| i.array_len())
-            .unwrap_or(None)
-    }
-
-    /// Extracts the root item from the `SettingsRegistry`.
-    pub fn read_all(&self) -> SettingsItem {
-        (&self.root.value).into()
-    }
-
-    /// Extracts an item from the `SettingsRegistry`.
-    pub fn read(&self, item: impl AsRef<str>) -> Option<SettingsItem> {
-        self.root.read(item)
-    }
-
-    /// Writes into the `SettingsRegistry`.
-    ///
-    /// This function either overwrites an existing item or creates a new one.
-    /// Afterwards the old value is extracted.
-    pub fn write(&mut self, item: impl AsRef<str>, value: SettingsItem) -> Option<SettingsItem> {
-        self.root
-            .write(item.as_ref(), item.as_ref(), value)
-            .unwrap_or(None)
-    }
-
-    /// Removes an item from the `SettingsRegistry`.
-    pub fn remove(&mut self, item: impl AsRef<str>) -> Option<SettingsItem> {
-        self.root.remove(item.as_ref(), item.as_ref())
-    }
-
-    /// Registers a callback to an item.
-    pub fn register_callback(
-        &mut self,
-        item: impl AsRef<str>,
-        callback: Box<SettingsUpdateCallback>,
-    ) -> Option<CallbackHandle<SettingsUpdateCallback>> {
-        if item.as_ref() == "" {
-            Some(self.root.register_callback(callback))
-        } else {
-            self.root
-                .get_item_mut(item)
-                .map(|i| i.register_callback(callback))
-        }
-    }
-
-    /// Unregisters a callback from an item.
-    pub fn unregister_callback(
-        &mut self,
-        item: impl AsRef<str>,
-        handle: CallbackHandle<SettingsUpdateCallback>,
-    ) {
-        if item.as_ref() == "" {
-            self.root.unregister_callback(handle)
-        } else if let Some(i) = self.root.get_item_mut(item) {
-            i.unregister_callback(handle)
-        }
-    }
-}
-
-impl Item {
-    fn new(value: ItemValue) -> Self {
-        Self {
-            value,
-            callbacks: vec![],
-        }
-    }
-
-    fn is_null(&self) -> bool {
-        matches!(self.value, ItemValue::Null)
-    }
-
-    fn is_bool(&self) -> bool {
-        matches!(self.value, ItemValue::Bool(_))
-    }
-
-    fn is_u64(&self) -> bool {
-        matches!(self.value, ItemValue::U64(_))
-    }
-
-    fn is_f64(&self) -> bool {
-        matches!(self.value, ItemValue::F64(_))
-    }
-
-    fn is_string(&self) -> bool {
-        matches!(self.value, ItemValue::String(_))
-    }
-
-    fn is_number(&self) -> bool {
-        matches!(self.value, ItemValue::U64(_) | ItemValue::F64(_))
-    }
-
-    fn is_array(&self) -> bool {
-        matches!(self.value, ItemValue::Array(_))
-    }
-
-    fn is_object(&self) -> bool {
-        matches!(self.value, ItemValue::Object(_))
-    }
-
-    fn array_len(&self) -> Option<usize> {
-        match &self.value {
-            ItemValue::Array(arr) => Some(arr.len()),
-            _ => None,
-        }
-    }
-
-    fn read(&self, item: impl AsRef<str>) -> Option<SettingsItem> {
-        self.get_item(item).map(|i| (&i.value).into())
-    }
-
-    fn write(
-        &mut self,
-        path: impl AsRef<str>,
-        item: impl AsRef<str>,
-        value: SettingsItem,
-    ) -> Option<Option<SettingsItem>> {
-        let (name, rest) = match item.as_ref().split_once("::") {
-            None => (item.as_ref(), None),
-            Some((name, rest)) => (name, Some(rest)),
-        };
-
-        match self.get_item_mut(name) {
-            // Create items.
-            None => {
-                let obj = match &mut self.value {
-                    ItemValue::Object(obj) => obj,
-                    _ => return None,
-                };
-
-                if rest.is_some() {
-                    return None;
-                }
-
-                // Notify callbacks.
-                for callback in &mut self.callbacks {
-                    callback(path.as_ref(), SettingsEvent::Create { value: &value });
-                }
-
-                obj.insert(
-                    String::from(name),
-                    Item {
-                        value: value.into(),
-                        callbacks: vec![],
-                    },
-                );
-                Some(None)
-            }
-            // Overwrite.
-            Some(item) => match rest {
-                // Overwrite item.
-                None => {
-                    // Insert temporary null value.
-                    let mut tmp = Item {
-                        value: ItemValue::Null,
-                        callbacks: vec![],
-                    };
-                    std::mem::swap(item, &mut tmp);
-                    item.callbacks = tmp.callbacks;
-
-                    // Extract old value.
-                    let old: SettingsItem = tmp.value.into();
-
-                    // Notify callbacks.
-                    for callback in &mut item.callbacks {
-                        callback(
-                            path.as_ref(),
-                            SettingsEvent::Overwrite {
-                                old: &old,
-                                new: &value,
-                            },
-                        );
-                    }
-
-                    // Set new value.
-                    item.value = value.into();
-                    Some(Some(old))
-                }
-                // Overwrite sub-item.
-                Some(rest) => {
-                    let value = item.write(path.as_ref(), rest, value);
-
-                    if value.is_some() {
-                        // Notify callbacks.
-                        for callback in &mut item.callbacks {
-                            callback(path.as_ref(), SettingsEvent::InternalUpdate);
-                        }
-                    }
-
-                    value
-                }
-            },
-        }
-    }
-
-    fn remove(&mut self, path: impl AsRef<str>, item: impl AsRef<str>) -> Option<SettingsItem> {
-        let (name, rest) = match item.as_ref().split_once("::") {
-            None => (item.as_ref(), None),
-            Some((name, rest)) => (name, Some(rest)),
-        };
-
-        if let Some(rest) = rest {
-            let item = match self.get_item_mut(name) {
-                None => return None,
-                Some(item) => item,
-            };
-
-            let removed = item.remove(path.as_ref(), rest);
-            if removed.is_some() {
-                for callback in &mut self.callbacks {
-                    callback(path.as_ref(), SettingsEvent::InternalRemoval);
-                }
-            }
-            removed
-        } else {
-            let removed = match &mut self.value {
-                ItemValue::Object(obj) => obj.remove(name).map(|i| (i.value.into(), i.callbacks)),
-                _ => return None,
-            };
-
-            if let Some((removed, callbacks)) = removed {
-                for mut callback in callbacks {
-                    callback(path.as_ref(), SettingsEvent::Remove { value: &removed })
-                }
-
-                for callback in &mut self.callbacks {
-                    callback(path.as_ref(), SettingsEvent::InternalRemoval);
-                }
-
-                Some(removed)
-            } else {
-                None
-            }
-        }
-    }
-
-    fn register_callback(
-        &mut self,
-        callback: Box<SettingsUpdateCallback>,
-    ) -> CallbackHandle<SettingsUpdateCallback> {
-        let callback_ptr = &*callback as *const _;
-        self.callbacks.push(callback);
-        CallbackHandle::new(callback_ptr)
-    }
-
-    fn unregister_callback(&mut self, handle: CallbackHandle<SettingsUpdateCallback>) {
-        self.callbacks.retain(|x| handle.as_ptr() != &*x)
-    }
-
-    fn get_item(&self, item: impl AsRef<str>) -> Option<&Item> {
-        let (identifier, rest) = match item.as_ref().split_once("::") {
-            None => (get_item_identifier(item.as_ref()), None),
-            Some((first, rest)) => (get_item_identifier(first), Some(rest)),
-        };
-
-        identifier.as_ref()?;
-
-        let obj = match &self.value {
-            ItemValue::Object(obj) => obj,
-            _ => return None,
-        };
-
-        let identifier = identifier.unwrap();
-        let sub_item = match obj.get(identifier.identifier) {
-            None => return None,
-            Some(item) => match identifier.index {
-                None => item,
-                Some(index) => {
-                    if let ItemValue::Array(arr) = &item.value {
-                        match arr.get(index) {
-                            None => return None,
-                            Some(item) => item,
-                        }
-                    } else {
-                        return None;
-                    }
-                }
-            },
-        };
-
-        if let Some(sub_identifier) = rest {
-            sub_item.get_item(sub_identifier)
-        } else {
-            Some(sub_item)
-        }
-    }
-
-    fn get_item_mut(&mut self, item: impl AsRef<str>) -> Option<&mut Item> {
-        let (identifier, rest) = match item.as_ref().split_once("::") {
-            None => (get_item_identifier(item.as_ref()), None),
-            Some((first, rest)) => (get_item_identifier(first), Some(rest)),
-        };
-
-        identifier.as_ref()?;
-
-        let obj = match &mut self.value {
-            ItemValue::Object(obj) => obj,
-            _ => return None,
-        };
-
-        let identifier = identifier.unwrap();
-        let sub_item = match obj.get_mut(identifier.identifier) {
-            None => return None,
-            Some(item) => match identifier.index {
-                None => item,
-                Some(index) => {
-                    if let ItemValue::Array(arr) = &mut item.value {
-                        match arr.get_mut(index) {
-                            None => return None,
-                            Some(item) => item,
-                        }
-                    } else {
-                        return None;
-                    }
-                }
-            },
-        };
-
-        if let Some(sub_identifier) = rest {
-            sub_item.get_item_mut(sub_identifier)
-        } else {
-            Some(sub_item)
-        }
-    }
-}
-
-impl Default for SettingsRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Debug for Item {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.value, f)
+impl From<Item> for SettingsItem {
+    fn from(item: Item) -> Self {
+        SettingsItem::from(item.value)
     }
 }
 
@@ -475,7 +611,7 @@ impl From<&SettingsItem> for ItemValue {
                     .iter()
                     .map(|v| Item {
                         value: v.into(),
-                        callbacks: vec![],
+                        callbacks: BTreeMap::default(),
                     })
                     .collect();
                 ItemValue::Array(v)
@@ -488,7 +624,7 @@ impl From<&SettingsItem> for ItemValue {
                             k.clone(),
                             Item {
                                 value: v.into(),
-                                callbacks: vec![],
+                                callbacks: BTreeMap::default(),
                             },
                         )
                     })
@@ -508,7 +644,7 @@ impl From<SettingsItem> for ItemValue {
                     .into_iter()
                     .map(|v| Item {
                         value: v.into(),
-                        callbacks: vec![],
+                        callbacks: BTreeMap::default(),
                     })
                     .collect();
                 ItemValue::Array(v)
@@ -516,24 +652,4 @@ impl From<SettingsItem> for ItemValue {
             _ => From::from(&item),
         }
     }
-}
-
-fn get_item_identifier(identifier: &str) -> Option<ItemIdentifier<'_>> {
-    if let Some(capture) = ITEM_IDENTIFIER.captures(identifier) {
-        let identifier = capture.name("identifier").unwrap().as_str();
-        return if let Some(index) = capture.name("index") {
-            let index: usize = index.as_str().parse().unwrap();
-            Some(ItemIdentifier {
-                identifier,
-                index: Some(index),
-            })
-        } else {
-            Some(ItemIdentifier {
-                identifier,
-                index: None,
-            })
-        };
-    }
-
-    None
 }

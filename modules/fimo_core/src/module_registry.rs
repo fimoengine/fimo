@@ -1,24 +1,659 @@
 //! Implementation of the `ModuleRegistry` type.
-use fimo_core_interface::rust::CallbackHandle;
+use fimo_core_interface::rust::{
+    InterfaceCallback, InterfaceCallbackId, InterfaceId, LoaderCallback, LoaderCallbackId,
+    LoaderId, ModuleRegistryVTable,
+};
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
+use fimo_version_core::Version;
 use serde::{Deserialize, Serialize};
-use std::collections::{btree_map, hash_map, BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::mem::MaybeUninit;
+use std::iter::Step;
+use std::ops::{Deref, RangeFrom};
 use std::path::Path;
 use std::sync::Arc;
 
 /// Path from module root to manifest file.
 pub const MODULE_MANIFEST_PATH: &str = "module.json";
 
+const VTABLE: ModuleRegistryVTable = ModuleRegistryVTable::new(
+    |ptr, r#type, loader| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let r#type = unsafe { &*r#type };
+        registry
+            .inner
+            .lock()
+            .register_loader(r#type, loader)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, id| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        registry
+            .inner
+            .lock()
+            .unregister_loader(id)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, r#type, callback| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let r#type = unsafe { &*r#type };
+        registry
+            .inner
+            .lock()
+            .register_loader_callback(r#type, callback)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, id| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        registry
+            .inner
+            .lock()
+            .unregister_loader_callback(id)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, r#type| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let r#type = unsafe { &*r#type };
+        registry
+            .inner
+            .lock()
+            .get_loader_from_type(r#type)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, descriptor, interface| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let descriptor = unsafe { &*descriptor };
+        registry
+            .inner
+            .lock()
+            .register_interface(descriptor, interface)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, id| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        registry
+            .inner
+            .lock()
+            .unregister_interface(id)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, descriptor, callback| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let descriptor = unsafe { &*descriptor };
+        registry
+            .inner
+            .lock()
+            .register_interface_callback(descriptor, callback)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, id| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        registry
+            .inner
+            .lock()
+            .unregister_interface_callback(id)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, descriptor| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let descriptor = unsafe { &*descriptor };
+        registry
+            .inner
+            .lock()
+            .get_interface_from_descriptor(descriptor)
+            .map_err(|e| Box::new(e) as _)
+    },
+    |ptr, name| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let name = unsafe { &*name };
+        registry
+            .inner
+            .lock()
+            .get_interface_descriptors_from_name(name)
+    },
+    |ptr, name, version, extensions| {
+        let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+        let name = unsafe { &*name };
+        let version = unsafe { &*version };
+        let extensions = unsafe { &*extensions };
+        registry
+            .inner
+            .lock()
+            .get_compatible_interface_descriptors(name, version, extensions)
+    },
+);
+
 /// The module registry.
 pub struct ModuleRegistry {
-    loaders: HashMap<String, &'static (dyn ModuleLoader + 'static)>,
-    interfaces: BTreeMap<ModuleInterfaceDescriptor, Arc<dyn ModuleInterface>>,
-    loader_callbacks: HashMap<*const dyn ModuleLoader, Vec<Box<LoaderCallback>>>,
-    interface_callbacks: HashMap<*const dyn ModuleInterface, Vec<Box<InterfaceCallback>>>,
+    inner: parking_lot::Mutex<ModuleRegistryInner>,
+}
+
+impl ModuleRegistry {
+    /// Constructs a new `ModuleRegistry`.
+    #[inline]
+    pub fn new() -> Self {
+        let registry = Self {
+            inner: parking_lot::Mutex::new(ModuleRegistryInner::new()),
+        };
+
+        if cfg!(feature = "rust_module_loader") {
+            let handle = registry
+                .register_loader(
+                    fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
+                    fimo_module_core::rust_loader::RustLoader::new(),
+                )
+                .unwrap();
+            std::mem::forget(handle);
+        }
+
+        if cfg!(feature = "ffi_module_loader") {
+            let handle = registry
+                .register_loader(
+                    fimo_module_core::ffi_loader::MODULE_LOADER_TYPE,
+                    fimo_module_core::ffi_loader::FFIModuleLoader::new(),
+                )
+                .unwrap();
+            std::mem::forget(handle);
+        }
+
+        registry
+    }
+}
+
+impl Default for ModuleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Deref for ModuleRegistry {
+    type Target = fimo_core_interface::rust::ModuleRegistry;
+
+    fn deref(&self) -> &Self::Target {
+        let self_ptr = self as *const _ as *const ();
+        let vtable = &VTABLE;
+
+        unsafe { &*fimo_core_interface::rust::ModuleRegistry::from_raw_parts(self_ptr, vtable) }
+    }
+}
+
+struct ModuleRegistryInner {
+    loader_id_gen: RangeFrom<IdWrapper<LoaderId>>,
+    loader_callback_id_gen: RangeFrom<IdWrapper<LoaderCallbackId>>,
+    interface_id_gen: RangeFrom<IdWrapper<InterfaceId>>,
+    interface_callback_id_gen: RangeFrom<IdWrapper<InterfaceCallbackId>>,
+    loaders: BTreeMap<LoaderId, LoaderCollection>,
+    loader_type_map: BTreeMap<String, LoaderId>,
+    loader_callback_map: BTreeMap<LoaderCallbackId, LoaderId>,
+    interfaces: BTreeMap<InterfaceId, InterfaceCollection>,
+    interface_map: BTreeMap<ModuleInterfaceDescriptor, InterfaceId>,
+    interface_callback_map: BTreeMap<InterfaceCallbackId, InterfaceId>,
+}
+
+struct LoaderCollection {
+    loader: &'static dyn ModuleLoader,
+    callbacks: BTreeMap<LoaderCallbackId, LoaderCallback>,
+}
+
+struct InterfaceCollection {
+    interface: Arc<dyn ModuleInterface>,
+    callbacks: BTreeMap<InterfaceCallbackId, InterfaceCallback>,
+}
+
+impl ModuleRegistryInner {
+    #[inline]
+    fn new() -> Self {
+        Self {
+            loader_id_gen: RangeFrom {
+                start: Default::default(),
+            },
+            loader_callback_id_gen: RangeFrom {
+                start: Default::default(),
+            },
+            interface_id_gen: RangeFrom {
+                start: Default::default(),
+            },
+            interface_callback_id_gen: RangeFrom {
+                start: Default::default(),
+            },
+            loaders: Default::default(),
+            loader_type_map: Default::default(),
+            loader_callback_map: Default::default(),
+            interfaces: Default::default(),
+            interface_map: Default::default(),
+            interface_callback_map: Default::default(),
+        }
+    }
+
+    #[inline]
+    fn register_loader(
+        &mut self,
+        r#type: &str,
+        loader: &'static dyn ModuleLoader,
+    ) -> Result<LoaderId, ModuleRegistryError> {
+        if self.loader_type_map.contains_key(r#type) {
+            return Err(ModuleRegistryError::DuplicateLoaderType(String::from(
+                r#type,
+            )));
+        }
+
+        if let Some(id) = self.loader_id_gen.next() {
+            self.loaders.insert(
+                id.get(),
+                LoaderCollection {
+                    loader,
+                    callbacks: BTreeMap::new(),
+                },
+            );
+
+            self.loader_type_map.insert(String::from(r#type), id.get());
+            Ok(id.get())
+        } else {
+            Err(ModuleRegistryError::IdExhaustion)
+        }
+    }
+
+    #[inline]
+    fn unregister_loader(
+        &mut self,
+        id: LoaderId,
+    ) -> Result<&'static dyn ModuleLoader, ModuleRegistryError> {
+        let loader = self.loaders.remove(&id);
+
+        if loader.is_none() {
+            return Err(ModuleRegistryError::UnknownLoaderId(id));
+        }
+
+        let LoaderCollection { loader, callbacks } = loader.unwrap();
+        self.loader_type_map.retain(|_, l_id| *l_id != id);
+
+        for (_, callback) in callbacks {
+            callback(loader)
+        }
+
+        Ok(loader)
+    }
+
+    #[inline]
+    fn register_loader_callback(
+        &mut self,
+        r#type: &str,
+        callback: LoaderCallback,
+    ) -> Result<LoaderCallbackId, ModuleRegistryError> {
+        if let Some(id) = self.loader_callback_id_gen.next() {
+            let LoaderCollection { callbacks, .. } = self.get_loader_from_type_inner_mut(r#type)?;
+            callbacks.insert(id.get(), callback);
+
+            let loader_id = unsafe { std::ptr::read(self.loader_type_map.get(r#type).unwrap()) };
+            self.loader_callback_map.insert(id.get(), loader_id);
+
+            Ok(id.get())
+        } else {
+            Err(ModuleRegistryError::IdExhaustion)
+        }
+    }
+
+    #[inline]
+    fn unregister_loader_callback(
+        &mut self,
+        id: LoaderCallbackId,
+    ) -> Result<(), ModuleRegistryError> {
+        if let Some(l_id) = self.loader_callback_map.remove(&id) {
+            let collection = self.loaders.get_mut(&l_id);
+            if collection.is_none() {
+                return Ok(());
+            }
+
+            let LoaderCollection { callbacks, .. } = collection.unwrap();
+            callbacks.remove(&id);
+
+            Ok(())
+        } else {
+            Err(ModuleRegistryError::UnknownLoaderCallbackId(id))
+        }
+    }
+
+    #[inline]
+    fn get_loader_from_type(
+        &self,
+        r#type: &str,
+    ) -> Result<&'static dyn ModuleLoader, ModuleRegistryError> {
+        let LoaderCollection { loader, .. } = self.get_loader_from_type_inner(r#type)?;
+        Ok(*loader)
+    }
+
+    #[inline]
+    fn get_loader_from_type_inner(
+        &self,
+        r#type: &str,
+    ) -> Result<&LoaderCollection, ModuleRegistryError> {
+        if let Some(id) = self.loader_type_map.get(r#type) {
+            Ok(self.loaders.get(id).unwrap())
+        } else {
+            Err(ModuleRegistryError::UnknownLoaderType(String::from(r#type)))
+        }
+    }
+
+    #[inline]
+    fn get_loader_from_type_inner_mut(
+        &mut self,
+        r#type: &str,
+    ) -> Result<&mut LoaderCollection, ModuleRegistryError> {
+        if let Some(id) = self.loader_type_map.get(r#type) {
+            Ok(self.loaders.get_mut(id).unwrap())
+        } else {
+            Err(ModuleRegistryError::UnknownLoaderType(String::from(r#type)))
+        }
+    }
+
+    #[inline]
+    fn register_interface(
+        &mut self,
+        descriptor: &ModuleInterfaceDescriptor,
+        interface: Arc<dyn ModuleInterface>,
+    ) -> Result<InterfaceId, ModuleRegistryError> {
+        if self.interface_map.contains_key(descriptor) {
+            return Err(ModuleRegistryError::DuplicateInterface(*descriptor));
+        }
+
+        if let Some(id) = self.interface_id_gen.next() {
+            self.interfaces.insert(
+                id.get(),
+                InterfaceCollection {
+                    interface,
+                    callbacks: Default::default(),
+                },
+            );
+
+            self.interface_map.insert(*descriptor, id.get());
+            Ok(id.get())
+        } else {
+            Err(ModuleRegistryError::IdExhaustion)
+        }
+    }
+
+    #[inline]
+    fn unregister_interface(
+        &mut self,
+        id: InterfaceId,
+    ) -> Result<Arc<dyn ModuleInterface>, ModuleRegistryError> {
+        let interface = self.interfaces.remove(&id);
+
+        if interface.is_none() {
+            return Err(ModuleRegistryError::UnknownInterfaceId(id));
+        }
+
+        let InterfaceCollection {
+            interface,
+            callbacks,
+        } = interface.unwrap();
+        self.interface_map.retain(|_, i_id| *i_id != id);
+
+        for (_, callback) in callbacks {
+            callback(interface.clone())
+        }
+
+        Ok(interface)
+    }
+
+    #[inline]
+    fn register_interface_callback(
+        &mut self,
+        descriptor: &ModuleInterfaceDescriptor,
+        callback: InterfaceCallback,
+    ) -> Result<InterfaceCallbackId, ModuleRegistryError> {
+        if let Some(id) = self.interface_callback_id_gen.next() {
+            let InterfaceCollection { callbacks, .. } =
+                self.get_interface_from_descriptor_inner_mut(descriptor)?;
+            callbacks.insert(id.get(), callback);
+
+            let interface_id =
+                unsafe { std::ptr::read(self.interface_map.get(descriptor).unwrap()) };
+            self.interface_callback_map.insert(id.get(), interface_id);
+
+            Ok(id.get())
+        } else {
+            Err(ModuleRegistryError::IdExhaustion)
+        }
+    }
+
+    #[inline]
+    fn unregister_interface_callback(
+        &mut self,
+        id: InterfaceCallbackId,
+    ) -> Result<(), ModuleRegistryError> {
+        if let Some(l_id) = self.interface_callback_map.remove(&id) {
+            let collection = self.interfaces.get_mut(&l_id);
+            if collection.is_none() {
+                return Ok(());
+            }
+
+            let InterfaceCollection { callbacks, .. } = collection.unwrap();
+            callbacks.remove(&id);
+
+            Ok(())
+        } else {
+            Err(ModuleRegistryError::UnknownInterfaceCallbackId(id))
+        }
+    }
+
+    #[inline]
+    fn get_interface_from_descriptor(
+        &self,
+        descriptor: &ModuleInterfaceDescriptor,
+    ) -> Result<Arc<dyn ModuleInterface>, ModuleRegistryError> {
+        let InterfaceCollection { interface, .. } =
+            self.get_interface_from_descriptor_inner(descriptor)?;
+        Ok(interface.clone())
+    }
+
+    #[inline]
+    fn get_interface_from_descriptor_inner(
+        &self,
+        descriptor: &ModuleInterfaceDescriptor,
+    ) -> Result<&InterfaceCollection, ModuleRegistryError> {
+        if let Some(id) = self.interface_map.get(descriptor) {
+            Ok(self.interfaces.get(id).unwrap())
+        } else {
+            Err(ModuleRegistryError::UnknownInterface(*descriptor))
+        }
+    }
+
+    #[inline]
+    fn get_interface_from_descriptor_inner_mut(
+        &mut self,
+        descriptor: &ModuleInterfaceDescriptor,
+    ) -> Result<&mut InterfaceCollection, ModuleRegistryError> {
+        if let Some(id) = self.interface_map.get(descriptor) {
+            Ok(self.interfaces.get_mut(id).unwrap())
+        } else {
+            Err(ModuleRegistryError::UnknownInterface(*descriptor))
+        }
+    }
+
+    #[inline]
+    fn get_interface_descriptors_from_name(&self, name: &str) -> Vec<ModuleInterfaceDescriptor> {
+        self.interface_map
+            .keys()
+            .filter(|x| x.name == name.as_ref())
+            .cloned()
+            .collect()
+    }
+
+    #[inline]
+    fn get_compatible_interface_descriptors(
+        &self,
+        name: &str,
+        version: &Version,
+        extensions: &[ArrayString<32>],
+    ) -> Vec<ModuleInterfaceDescriptor> {
+        self.interface_map
+            .keys()
+            .filter(|x| {
+                x.name == name.as_ref()
+                    && version.is_compatible(&x.version)
+                    && extensions
+                        .as_ref()
+                        .iter()
+                        .all(|ext| x.extensions.contains(ext))
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+impl std::fmt::Debug for ModuleRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(ModuleRegistry)")
+    }
+}
+
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+struct IdWrapper<T> {
+    id: T,
+}
+
+impl<T> IdWrapper<T> {
+    fn get(&self) -> T {
+        unsafe { std::ptr::read(&self.id) }
+    }
+}
+
+impl<T> Clone for IdWrapper<T> {
+    fn clone(&self) -> Self {
+        Self { id: self.get() }
+    }
+}
+
+impl Default for IdWrapper<LoaderId> {
+    fn default() -> Self {
+        Self {
+            id: unsafe { LoaderId::from_raw(0) },
+        }
+    }
+}
+
+impl Default for IdWrapper<LoaderCallbackId> {
+    fn default() -> Self {
+        Self {
+            id: unsafe { LoaderCallbackId::from_usize(0) },
+        }
+    }
+}
+
+impl Default for IdWrapper<InterfaceId> {
+    fn default() -> Self {
+        Self {
+            id: unsafe { InterfaceId::from_raw(0) },
+        }
+    }
+}
+
+impl Default for IdWrapper<InterfaceCallbackId> {
+    fn default() -> Self {
+        Self {
+            id: unsafe { InterfaceCallbackId::from_usize(0) },
+        }
+    }
+}
+
+impl Step for IdWrapper<LoaderId> {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        let start = start.get().into();
+        let end = end.get().into();
+        usize::steps_between(&start, &end)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::forward_checked(start, count).map(|id| Self {
+            id: unsafe { LoaderId::from_raw(id) },
+        })
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::backward_checked(start, count).map(|id| Self {
+            id: unsafe { LoaderId::from_raw(id) },
+        })
+    }
+}
+
+impl Step for IdWrapper<LoaderCallbackId> {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        let start = start.get().into();
+        let end = end.get().into();
+        usize::steps_between(&start, &end)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::forward_checked(start, count).map(|id| Self {
+            id: unsafe { LoaderCallbackId::from_usize(id) },
+        })
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::backward_checked(start, count).map(|id| Self {
+            id: unsafe { LoaderCallbackId::from_usize(id) },
+        })
+    }
+}
+
+impl Step for IdWrapper<InterfaceId> {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        let start = start.get().into();
+        let end = end.get().into();
+        usize::steps_between(&start, &end)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::forward_checked(start, count).map(|id| Self {
+            id: unsafe { InterfaceId::from_raw(id) },
+        })
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::backward_checked(start, count).map(|id| Self {
+            id: unsafe { InterfaceId::from_raw(id) },
+        })
+    }
+}
+
+impl Step for IdWrapper<InterfaceCallbackId> {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        let start = start.get().into();
+        let end = end.get().into();
+        usize::steps_between(&start, &end)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::forward_checked(start, count).map(|id| Self {
+            id: unsafe { InterfaceCallbackId::from_usize(id) },
+        })
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        let start = start.get().into();
+        usize::backward_checked(start, count).map(|id| Self {
+            id: unsafe { InterfaceCallbackId::from_usize(id) },
+        })
+    }
+}
+
+/// Basic module information.
+#[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInfo {
+    /// Module name.
+    pub name: String,
+    /// Module version.
+    pub version: semver::Version,
 }
 
 /// The manifest of a module.
@@ -37,13 +672,13 @@ pub enum ModuleManifest {
     },
 }
 
-/// Basic module information.
-#[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleInfo {
-    /// Module name.
-    pub name: String,
-    /// Module version.
-    pub version: semver::Version,
+impl ModuleManifest {
+    /// Tries to load the manifest from a module.
+    pub fn load_from_module(module_path: impl AsRef<Path>) -> Result<Self, ModuleRegistryError> {
+        let manifest_path = module_path.as_ref().join(MODULE_MANIFEST_PATH);
+        let file = File::open(manifest_path)?;
+        serde_json::from_reader(BufReader::new(file)).map_err(From::from)
+    }
 }
 
 /// Basic module interface info.
@@ -60,322 +695,28 @@ pub struct ModuleInterfaceInfo {
 /// Errors from the `ModuleRegistry`.
 #[derive(Debug)]
 pub enum ModuleRegistryError {
+    /// The loader id does not exist.
+    UnknownLoaderId(LoaderId),
     /// The loader has not been registered.
     UnknownLoaderType(String),
     /// Tried to register a loader twice.
     DuplicateLoaderType(String),
+    /// The loader callback id does not exist.
+    UnknownLoaderCallbackId(LoaderCallbackId),
+    /// The interface id does not exist.
+    UnknownInterfaceId(InterfaceId),
     /// The interface has not been registered.
     UnknownInterface(ModuleInterfaceDescriptor),
     /// Tried to register an interface twice.
     DuplicateInterface(ModuleInterfaceDescriptor),
+    /// The interface callback id does not exist.
+    UnknownInterfaceCallbackId(InterfaceCallbackId),
     /// De-/Serialisation error.
     SerdeError(serde_json::Error),
     /// IO error.
     IOError(std::io::Error),
-}
-
-/// Type of a loader callback.
-pub type LoaderCallback = dyn FnOnce(&'static (dyn ModuleLoader + 'static)) + Sync + Send;
-
-/// Type of an interface callback.
-pub type InterfaceCallback = dyn FnOnce(Arc<dyn ModuleInterface>) + Sync + Send;
-
-impl ModuleRegistry {
-    /// Creates a new `ModuleRegistry`.
-    pub fn new() -> Self {
-        #[allow(unused_mut)]
-        let mut registry = Self {
-            loaders: HashMap::new(),
-            interfaces: BTreeMap::new(),
-            loader_callbacks: HashMap::new(),
-            interface_callbacks: HashMap::new(),
-        };
-
-        if cfg!(feature = "rust_module_loader") {
-            registry
-                .register_loader(
-                    fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::rust_loader::RustLoader::new(),
-                )
-                .unwrap();
-        }
-
-        if cfg!(feature = "ffi_module_loader") {
-            registry
-                .register_loader(
-                    fimo_module_core::ffi_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::ffi_loader::FFIModuleLoader::new(),
-                )
-                .unwrap();
-        }
-
-        registry
-    }
-
-    /// Registers a new module loader to the `ModuleRegistry`.
-    ///
-    /// The registered loader will be available to the rest of the `ModuleRegistry`.
-    pub fn register_loader(
-        &mut self,
-        loader_type: impl AsRef<str>,
-        loader: &'static (dyn ModuleLoader + 'static),
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        let entry = self.loaders.entry(String::from(loader_type.as_ref()));
-
-        if let hash_map::Entry::Occupied(_) = &entry {
-            return Err(ModuleRegistryError::DuplicateLoaderType(String::from(
-                loader_type.as_ref(),
-            )));
-        };
-
-        let loader_ptr = loader as *const _;
-
-        entry.or_insert(loader);
-        self.loader_callbacks.insert(loader_ptr, Vec::new());
-
-        Ok(self)
-    }
-
-    /// Unregisters an existing module loader from the `ModuleRegistry`.
-    ///
-    /// Notifies all registered callbacks before removing.
-    pub fn unregister_loader(
-        &mut self,
-        loader_type: impl AsRef<str>,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        // Remove loader from registry
-        let loader = match self.loaders.remove(loader_type.as_ref()) {
-            None => {
-                return Err(ModuleRegistryError::UnknownLoaderType(String::from(
-                    loader_type.as_ref(),
-                )));
-            }
-            Some(loader) => loader,
-        };
-
-        // Remove and call callbacks
-        let loader_ptr = loader as *const _;
-        let callbacks = self.loader_callbacks.remove(&loader_ptr).unwrap();
-
-        for callback in callbacks {
-            callback(loader)
-        }
-
-        Ok(self)
-    }
-
-    /// Registers a loader-removal callback to the `ModuleRegistry`.
-    ///
-    /// The callback will be called in case the loader is removed.
-    pub fn register_loader_callback(
-        &mut self,
-        loader_type: impl AsRef<str>,
-        callback: Box<LoaderCallback>,
-        callback_handle: &mut MaybeUninit<CallbackHandle<LoaderCallback>>,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        let loader_ptr = self.get_loader_from_type(loader_type)? as _;
-        let callback_ptr = &*callback as *const _;
-
-        // Insert callback at the end
-        let callbacks = self.loader_callbacks.get_mut(&loader_ptr).unwrap();
-        callbacks.push(callback);
-
-        callback_handle.write(CallbackHandle::new(callback_ptr));
-
-        Ok(self)
-    }
-
-    /// Unregisters a loader-removal callback from the `ModuleRegistry`.
-    ///
-    /// The callback will not be called.
-    pub fn unregister_loader_callback(
-        &mut self,
-        loader_type: impl AsRef<str>,
-        callback_handle: CallbackHandle<LoaderCallback>,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        let loader_ptr = self.get_loader_from_type(loader_type)? as _;
-
-        // Remove callback from vec
-        self.loader_callbacks
-            .get_mut(&loader_ptr)
-            .unwrap()
-            .retain(|x| callback_handle.as_ptr() != &*x);
-
-        Ok(self)
-    }
-
-    /// Extracts a loader from the `ModuleRegistry` using the registration type.
-    pub fn get_loader_from_type(
-        &self,
-        loader_type: impl AsRef<str>,
-    ) -> Result<&'static (dyn ModuleLoader + 'static), ModuleRegistryError> {
-        match self.loaders.get(loader_type.as_ref()) {
-            None => Err(ModuleRegistryError::UnknownLoaderType(String::from(
-                loader_type.as_ref(),
-            ))),
-            Some(loader) => Ok(*loader),
-        }
-    }
-
-    /// Registers a new interface to the `ModuleRegistry`.
-    pub fn register_interface(
-        &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
-        interface: Arc<dyn ModuleInterface + 'static>,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        // Check if the interface already exists
-        let entry = self.interfaces.entry(*descriptor);
-
-        if let btree_map::Entry::Occupied(_) = &entry {
-            return Err(ModuleRegistryError::DuplicateInterface(*descriptor));
-        };
-
-        let interface_ptr = Arc::as_ptr(&interface);
-
-        entry.or_insert(interface);
-        self.interface_callbacks.insert(interface_ptr, Vec::new());
-
-        Ok(self)
-    }
-
-    /// Unregisters an existing interface from the `ModuleRegistry`.
-    ///
-    /// This function calls the interface-remove callbacks that are registered
-    /// with the interface before removing it.
-    pub fn unregister_interface(
-        &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        // Remove interface from registry
-        let interface = match self.interfaces.remove(descriptor) {
-            None => return Err(ModuleRegistryError::UnknownInterface(*descriptor)),
-            Some(interface) => interface,
-        };
-
-        // Remove and call callbacks
-        let interface_ptr = Arc::as_ptr(&interface);
-        let callbacks = self.interface_callbacks.remove(&interface_ptr).unwrap();
-
-        for callback in callbacks {
-            callback(interface.clone())
-        }
-
-        Ok(self)
-    }
-
-    /// Registers an interface-removed callback to the `ModuleRegistry`.
-    ///
-    /// The callback will be called in case the interface is removed from the `ModuleRegistry`.
-    pub fn register_interface_callback(
-        &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
-        callback: Box<InterfaceCallback>,
-        callback_handle: &mut MaybeUninit<CallbackHandle<InterfaceCallback>>,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        let interface_ptr = Arc::as_ptr(self.get_interface_ref_from_descriptor(descriptor)?);
-        let callback_ptr = &*callback as *const _;
-
-        // Insert callback at the end
-        let callbacks = self.interface_callbacks.get_mut(&interface_ptr).unwrap();
-        callbacks.push(callback);
-
-        callback_handle.write(CallbackHandle::new(callback_ptr));
-
-        Ok(self)
-    }
-
-    /// Unregisters an interface-removed callback from the `ModuleRegistry` without calling it.
-    pub fn unregister_interface_callback(
-        &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
-        callback_handle: CallbackHandle<InterfaceCallback>,
-    ) -> Result<&mut Self, ModuleRegistryError> {
-        let interface_ptr = Arc::as_ptr(self.get_interface_ref_from_descriptor(descriptor)?);
-
-        // Remove callback from vec
-        self.interface_callbacks
-            .get_mut(&interface_ptr)
-            .unwrap()
-            .retain(|x| callback_handle.as_ptr() != &*x);
-
-        Ok(self)
-    }
-
-    fn get_interface_ref_from_descriptor(
-        &self,
-        descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<&Arc<dyn ModuleInterface + 'static>, ModuleRegistryError> {
-        match self.interfaces.get(descriptor) {
-            None => Err(ModuleRegistryError::UnknownInterface(*descriptor)),
-            Some(interface) => Ok(interface),
-        }
-    }
-
-    /// Extracts an interface from the `ModuleRegistry`.
-    pub fn get_interface_from_descriptor(
-        &self,
-        descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface + 'static>, ModuleRegistryError> {
-        self.get_interface_ref_from_descriptor(descriptor)
-            .map(|interface| interface.clone())
-    }
-
-    /// Extracts all interface descriptors with the same name.
-    pub fn get_interface_descriptors_from_name(
-        &self,
-        interface_name: impl AsRef<str>,
-    ) -> Vec<ModuleInterfaceDescriptor> {
-        self.interfaces
-            .keys()
-            .filter(|x| x.name == interface_name.as_ref())
-            .cloned()
-            .collect()
-    }
-
-    /// Extracts all descriptors of compatible interfaces.
-    pub fn get_compatible_interface_descriptors(
-        &self,
-        interface_name: impl AsRef<str>,
-        interface_version: &fimo_version_core::Version,
-        interface_extensions: impl AsRef<[ArrayString<32>]>,
-    ) -> Vec<ModuleInterfaceDescriptor> {
-        self.interfaces
-            .keys()
-            .filter(|x| {
-                x.name == interface_name.as_ref()
-                    && interface_version.is_compatible(&x.version)
-                    && interface_extensions
-                        .as_ref()
-                        .iter()
-                        .all(|ext| x.extensions.contains(ext))
-            })
-            .cloned()
-            .collect()
-    }
-}
-
-impl ModuleManifest {
-    /// Tries to load the manifest from a module.
-    pub fn load_from_module(module_path: impl AsRef<Path>) -> Result<Self, ModuleRegistryError> {
-        let manifest_path = module_path.as_ref().join(MODULE_MANIFEST_PATH);
-        let file = File::open(manifest_path)?;
-        serde_json::from_reader(BufReader::new(file)).map_err(From::from)
-    }
-}
-
-// SAFETY: The pointers inside the ModuleRegistry stem from Arcs and remain valid when moved.
-unsafe impl Send for ModuleRegistry {}
-
-impl Default for ModuleRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Debug for ModuleRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("(ModuleRegistry)")
-    }
+    /// Exhausted all possible ids
+    IdExhaustion,
 }
 
 impl std::error::Error for ModuleRegistryError {}
@@ -383,11 +724,20 @@ impl std::error::Error for ModuleRegistryError {}
 impl std::fmt::Display for ModuleRegistryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ModuleRegistryError::UnknownLoaderId(id) => {
+                write!(f, "unknown loader id: {:?}", id)
+            }
             ModuleRegistryError::UnknownLoaderType(loader_type) => {
                 write!(f, "unknown loader type: {}", loader_type)
             }
             ModuleRegistryError::DuplicateLoaderType(loader_type) => {
                 write!(f, "duplicated loader type: {}", loader_type)
+            }
+            ModuleRegistryError::UnknownLoaderCallbackId(id) => {
+                write!(f, "unknown loader callback id: {:?}", id)
+            }
+            ModuleRegistryError::UnknownInterfaceId(id) => {
+                write!(f, "unknown interface id: {:?}", id)
             }
             ModuleRegistryError::UnknownInterface(interface) => {
                 write!(f, "unknown interface: {}", interface)
@@ -395,11 +745,17 @@ impl std::fmt::Display for ModuleRegistryError {
             ModuleRegistryError::DuplicateInterface(interface) => {
                 write!(f, "duplicated interface: {}", interface)
             }
+            ModuleRegistryError::UnknownInterfaceCallbackId(id) => {
+                write!(f, "unknown interface callback id: {:?}", id)
+            }
             ModuleRegistryError::SerdeError(err) => {
                 write!(f, "de-/serialisation error: {}", err)
             }
             ModuleRegistryError::IOError(err) => {
                 write!(f, "io error: {}", err)
+            }
+            ModuleRegistryError::IdExhaustion => {
+                write!(f, "no more ids available")
             }
         }
     }
