@@ -4,7 +4,7 @@ use fimo_module_core::{DynArc, ModuleLoader};
 use std::error::Error;
 use std::sync::Arc;
 
-use core_interface::rust::{FimoCore, FimoModuleInstanceExt, InterfaceMutex};
+use core_interface::rust::{FimoCore, FimoCoreCaster, FimoModuleInstanceExt};
 use fimo_core_interface as core_interface;
 
 #[cfg(feature = "tasks_module")]
@@ -21,7 +21,7 @@ use fimo_actix_interface as actix_interface;
 pub fn get_core_interface() -> Result<
     (
         Arc<dyn FimoModuleInstanceExt>,
-        Arc<InterfaceMutex<dyn FimoCore>>,
+        DynArc<FimoCore, FimoCoreCaster>,
     ),
     Box<dyn Error>,
 > {
@@ -46,13 +46,12 @@ pub fn get_core_interface() -> Result<
 #[cfg(feature = "tasks_module")]
 pub fn get_tasks_interface(
     core_instance: &Arc<dyn FimoModuleInstanceExt>,
-    core_interface: &Arc<InterfaceMutex<dyn FimoCore>>,
+    core_interface: &DynArc<FimoCore, FimoCoreCaster>,
 ) -> Result<Arc<dyn FimoTasks>, Box<dyn Error>> {
-    let tasks_module = {
-        let mut guard = core_interface.lock();
-        let module_registry = guard.as_module_registry_mut();
-        let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
-        unsafe { loader.load_module_library(module_paths::tasks_module_path().unwrap().as_path())? }
+    let module_registry = core_interface.get_module_registry();
+    let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
+    let tasks_module = unsafe {
+        loader.load_module_library(module_paths::tasks_module_path().unwrap().as_path())?
     };
 
     let tasks_instance =
@@ -69,6 +68,12 @@ pub fn get_tasks_interface(
         .unwrap();
 
     let i = core_instance.get_interface(core_descriptor)?;
+    let handle = core_interface
+        .get_module_registry()
+        .register_interface(tasks_descriptor, i.clone())
+        .unwrap();
+    std::mem::forget(handle);
+
     tasks_instance.set_dependency(core_descriptor, i)?;
     unsafe {
         Ok(tasks_interface::rust::cast_interface(
@@ -80,13 +85,12 @@ pub fn get_tasks_interface(
 #[cfg(feature = "actix_module")]
 pub fn get_actix_interface(
     core_instance: &Arc<dyn FimoModuleInstanceExt>,
-    core_interface: &Arc<InterfaceMutex<dyn FimoCore>>,
+    core_interface: &DynArc<FimoCore, FimoCoreCaster>,
 ) -> Result<DynArc<FimoActix, FimoActixCaster>, Box<dyn Error>> {
-    let actix_module = {
-        let mut guard = core_interface.lock();
-        let module_registry = guard.as_module_registry_mut();
-        let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
-        unsafe { loader.load_module_library(module_paths::actix_module_path().unwrap().as_path())? }
+    let module_registry = core_interface.get_module_registry();
+    let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
+    let actix_module = unsafe {
+        loader.load_module_library(module_paths::actix_module_path().unwrap().as_path())?
     };
 
     let actix_instance =
@@ -103,6 +107,12 @@ pub fn get_actix_interface(
         .unwrap();
 
     let i = core_instance.get_interface(core_descriptor)?;
+    let handle = core_interface
+        .get_module_registry()
+        .register_interface(actix_descriptor, i.clone())
+        .unwrap();
+    std::mem::forget(handle);
+
     actix_instance.set_dependency(core_descriptor, i)?;
     unsafe {
         Ok(actix_interface::cast_interface(

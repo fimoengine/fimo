@@ -1,7 +1,7 @@
 [package]
 name = "fimo_tasks"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 description = "Fimo engine task runtime"
 license = "MIT OR Apache-2.0"
 categories = ["game-development"]
@@ -21,6 +21,9 @@ fimo_tasks_interface = { version = "0.1.0", path = "../../utilities/fimo_tasks_i
 fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core", optional = true }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
 fimo_core_interface = { version = "0.1.0", path = "../../utilities/fimo_core_interface", optional = true }
+
+[dev-dependencies]
+module_loading = { path = "../../test_utilities/module_loading", features = ["tasks_module"] }
 
 [features]
 default = ["rust_module"]

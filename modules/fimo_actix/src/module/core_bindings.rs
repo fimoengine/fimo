@@ -1,11 +1,13 @@
 use fimo_actix_interface::actix::{web, HttpResponse, Responder, Scope};
 use fimo_core_interface::rust::{
-    CallbackHandle, FimoCore, InterfaceGuard, SettingsItem, SettingsUpdateCallback,
+    FimoCore, SettingsEvent, SettingsEventCallbackHandle, SettingsItem, SettingsRegistryPath,
+    ROOT_PATH,
 };
 use parking_lot::Mutex;
+use std::collections::BTreeMap;
 
 struct CoreSettings {
-    root: Mutex<SettingsItem>,
+    root: Mutex<BTreeMap<String, SettingsItem>>,
 }
 
 async fn index() -> impl Responder {
@@ -18,14 +20,17 @@ async fn settings(data: web::Data<CoreSettings>) -> impl Responder {
 }
 
 pub(crate) fn scope_builder(
-    mut core: InterfaceGuard<'_, dyn FimoCore>,
+    core: &FimoCore,
 ) -> (
     impl Fn(Scope) -> Scope + Send + Sync,
-    CallbackHandle<SettingsUpdateCallback>,
+    SettingsEventCallbackHandle<'_>,
 ) {
-    let registry = core.as_settings_registry_mut();
+    let registry = core.get_settings_registry();
     let handle = registry
-        .register_callback("", Box::new(|_p, _e| {}))
+        .register_callback(
+            ROOT_PATH,
+            Box::new(|_p: &SettingsRegistryPath, _e: SettingsEvent<'_>| {}),
+        )
         .unwrap();
 
     let root = registry.read_all();
