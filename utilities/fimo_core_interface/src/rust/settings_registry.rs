@@ -1,3 +1,4 @@
+//! Specification of a settings registry.
 use fimo_ffi_core::fn_wrapper::HeapFnMut;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};

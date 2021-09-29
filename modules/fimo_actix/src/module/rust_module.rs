@@ -3,8 +3,9 @@ use crate::module::{construct_module_info, get_actix_interface_descriptor, FimoA
 use crate::FimoActixServer;
 use fimo_actix_interface::ScopeBuilder;
 use fimo_core_interface::rust::{
-    build_interface_descriptor as core_descriptor, FimoCore, SettingsItem, SettingsItemType,
-    SettingsRegistryPath,
+    build_interface_descriptor as core_descriptor,
+    settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
+    FimoCore,
 };
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{RustModule, RustModuleExt};

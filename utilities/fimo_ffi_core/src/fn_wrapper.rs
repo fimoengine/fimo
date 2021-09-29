@@ -4,13 +4,13 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 #[repr(C)]
-struct RawHeapFn<Args, T> {
+struct RawCallable<Args, T> {
     ptr: *const (),
     drop: fn(*const ()),
     call: fn(*const (), Args) -> T,
 }
 
-impl<Args, T> RawHeapFn<Args, T> {
+impl<Args, T> RawCallable<Args, T> {
     #[inline]
     unsafe fn new(ptr: *const (), drop: fn(*const ()), call: fn(*const (), Args) -> T) -> Self {
         Self { ptr, drop, call }
@@ -22,14 +22,14 @@ impl<Args, T> RawHeapFn<Args, T> {
     }
 }
 
-impl<Args, T> Drop for RawHeapFn<Args, T> {
+impl<Args, T> Drop for RawCallable<Args, T> {
     #[inline]
     fn drop(&mut self) {
         (self.drop)(self.ptr)
     }
 }
 
-impl<Args, T> Debug for RawHeapFn<Args, T> {
+impl<Args, T> Debug for RawCallable<Args, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawHeapFn")
             .field("ptr", &self.ptr)
@@ -39,40 +39,54 @@ impl<Args, T> Debug for RawHeapFn<Args, T> {
     }
 }
 
-/// A [`FnOnce`] wrapped by reference.
-pub struct RefFnOnce<'a, Args, T> {
-    raw: RawHeapFn<Args, T>,
-    _phantom: PhantomData<fn() -> &'a mut ()>,
+/// A [`FnOnce`] reference without lifetimes.
+#[repr(C)]
+pub struct RawFnOnce<Args, T> {
+    raw: RawCallable<Args, T>,
 }
 
-impl<'a, Args, T> RefFnOnce<'a, Args, T> {
-    /// Constructs a new `RefFnOnce` with a callable reference.
+impl<Args, T> RawFnOnce<Args, T> {
+    /// Constructs a new `RawFnOnce` with a callable reference.
     ///
     /// # Safety
     ///
-    /// Once called, `f` is owned by the `RefFnOnce` and may not be used anymore.
-    /// An exception to this rule is, if the `RefFnOnce` was forgotten with [`std::mem::forget`].
+    /// The reference `f` must outlive the `RawFnOnce`.
+    /// Once called, `f` is owned by the `RawFnOnce` and may not be used anymore.
+    /// An exception to this rule is, if the `RawFnOnce` was forgotten with [`std::mem::forget`].
     #[inline]
-    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'a mut F) -> Self {
+    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'_ mut F) -> Self {
         let raw = f as *mut F;
         Self {
             // we own `f` so we drop the value.
-            raw: RawHeapFn::new(raw as *const (), drop_value::<F>, Self::call_ref::<F>),
-            _phantom: Default::default(),
+            raw: RawCallable::new(raw as *const (), drop_value::<F>, Self::call_ref::<F>),
         }
     }
 
-    /// Constructs a new `RefFnOnce`.
+    /// Constructs a new `RawFnOnce`.
     #[inline]
-    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> RefFnOnce<'static, Args, T> {
+    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> Self {
         let raw = Box::into_raw(f);
-        RefFnOnce {
+        Self {
             raw: unsafe {
                 // drop the Box
-                RawHeapFn::new(raw as *const (), drop_boxed::<F>, Self::call_boxed::<F>)
+                RawCallable::new(raw as *const (), drop_boxed::<F>, Self::call_boxed::<F>)
             },
-            _phantom: Default::default(),
         }
+    }
+
+    /// Calls the function consuming the wrapper.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    #[inline]
+    pub unsafe extern "rust-call" fn call_once(self, args: Args) -> T {
+        let res = self.raw.call(args);
+
+        // the internal value is dropped when called.
+        std::mem::forget(self);
+        res
     }
 
     fn call_boxed<F: FnOnce<Args, Output = T>>(ptr: *const (), args: Args) -> T {
@@ -88,28 +102,242 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
     }
 }
 
-impl<'a, Args, T> FnOnce<Args> for RefFnOnce<'a, Args, T> {
+impl<Args, T> Debug for RawFnOnce<Args, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.raw, f)
+    }
+}
+
+/// A [`FnMut`] reference without lifetimes.
+#[repr(C)]
+pub struct RawFnMut<Args, T> {
+    raw: RawCallable<Args, T>,
+}
+
+impl<Args, T> RawFnMut<Args, T> {
+    /// Constructs a new `RawFnMut` by wrapping `f`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure, that `f` outlives the `RawFnMut`.
+    #[inline]
+    pub unsafe fn new<F: FnMut<Args, Output = T>>(f: &mut F) -> Self {
+        let raw = f as *mut F;
+        Self {
+            // we wrap by reference, so we don't need to drop.
+            raw: RawCallable::new(raw as *const (), drop_forget, Self::call_ref::<F>),
+        }
+    }
+
+    /// Constructs a new `RawFnMut`.
+    #[inline]
+    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> Self {
+        let raw = Box::into_raw(f);
+        Self {
+            // the box needs to be dropped.
+            raw: unsafe {
+                RawCallable::new(raw as *const (), drop_boxed::<F>, Self::call_ref::<F>)
+            },
+        }
+    }
+
+    /// Calls the function consuming the wrapper.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    #[inline]
+    pub unsafe extern "rust-call" fn call_once(mut self, args: Args) -> T {
+        self.call_mut(args)
+    }
+
+    /// Calls the function by mutable reference.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    #[inline]
+    pub unsafe extern "rust-call" fn call_mut(&mut self, args: Args) -> T {
+        self.raw.call(args)
+    }
+
+    fn call_ref<F: FnMut<Args, Output = T>>(ptr: *const (), args: Args) -> T {
+        let raw = ptr as *mut F;
+        let f = unsafe { &mut *raw };
+        <F as FnMut<Args>>::call_mut(f, args)
+    }
+}
+
+impl<Args, T> Debug for RawFnMut<Args, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.raw, f)
+    }
+}
+
+/// A [`Fn`] reference without lifetimes.
+#[repr(C)]
+pub struct RawFn<Args, T> {
+    raw: RawCallable<Args, T>,
+}
+
+impl<Args, T> RawFn<Args, T> {
+    /// Constructs a new `RawFn` by wrapping `f`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure, that `f` outlives the `RawFn`.
+    #[inline]
+    pub unsafe fn new<F: Fn<Args, Output = T>>(f: &F) -> Self {
+        let raw = f as *const F;
+        Self {
+            // references do not need dropping
+            raw: RawCallable::new(raw as *const (), drop_forget, Self::call_ref::<F>),
+        }
+    }
+
+    /// Constructs a new `RawFn.
+    #[inline]
+    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> Self {
+        let raw = Box::into_raw(f);
+        Self {
+            raw: unsafe {
+                // drop the Box
+                RawCallable::new(raw as *const (), drop_boxed::<F>, Self::call_ref::<F>)
+            },
+        }
+    }
+
+    /// Constructs a new `RawFn`.
+    #[inline]
+    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> Self {
+        let raw = Arc::into_raw(f);
+        Self {
+            raw: unsafe {
+                // drop the Arc
+                RawCallable::new(raw as *const (), drop_arc::<F>, Self::call_ref::<F>)
+            },
+        }
+    }
+
+    /// Calls the function consuming the wrapper.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    #[inline]
+    pub unsafe extern "rust-call" fn call_once(mut self, args: Args) -> T {
+        self.call_mut(args)
+    }
+
+    /// Calls the function by mutable reference.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    #[inline]
+    pub unsafe extern "rust-call" fn call_mut(&mut self, args: Args) -> T {
+        self.call(args)
+    }
+
+    /// Calls the function by reference.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    #[inline]
+    pub unsafe extern "rust-call" fn call(&self, args: Args) -> T {
+        self.raw.call(args)
+    }
+
+    fn call_ref<F: Fn<Args, Output = T>>(ptr: *const (), args: Args) -> T {
+        let raw = ptr as *const F;
+        let f = unsafe { &*raw };
+        <F as Fn<Args>>::call(f, args)
+    }
+}
+
+impl<Args, T> Debug for RawFn<Args, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.raw, f)
+    }
+}
+
+/// A [`FnOnce`] wrapped by reference.
+#[repr(C)]
+pub struct RefFnOnce<'a, Args, T> {
+    raw: RawFnOnce<Args, T>,
+    _phantom: PhantomData<fn() -> &'a mut ()>,
+}
+
+impl<'a, Args, T> RefFnOnce<'a, Args, T> {
+    /// Constructs a new `RefFnOnce` with a callable reference.
+    ///
+    /// # Safety
+    ///
+    /// Once called, `f` is owned by the `RefFnOnce` and may not be used anymore.
+    /// An exception to this rule is, if the `RefFnOnce` was forgotten with [`std::mem::forget`].
+    #[inline]
+    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'a mut F) -> Self {
+        Self {
+            raw: RawFnOnce::new(f),
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Constructs a new `RefFnOnce`.
+    #[inline]
+    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> RefFnOnce<'static, Args, T> {
+        RefFnOnce {
+            raw: RawFnOnce::new_boxed(f),
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Extracts the raw wrapper.
+    #[inline]
+    pub fn into_raw(self) -> RawFnOnce<Args, T> {
+        self.raw
+    }
+
+    /// Constructs a new `RefFnOnce` from a [`RawFnOnce`].
+    ///
+    /// # Safety
+    ///
+    /// Construction from a raw value is inherently unsafe,
+    /// because that allows for the wrapped value to be moved.
+    #[inline]
+    pub unsafe fn from_raw(f: RawFnOnce<Args, T>) -> Self {
+        RefFnOnce {
+            raw: f,
+            _phantom: Default::default(),
+        }
+    }
+}
+
+impl<Args, T> FnOnce<Args> for RefFnOnce<'_, Args, T> {
     type Output = T;
 
     #[inline]
     extern "rust-call" fn call_once(self, args: Args) -> Self::Output {
-        let res = self.raw.call(args);
-
-        // the internal value is dropped when called.
-        std::mem::forget(self);
-        res
+        unsafe { self.raw.call_once(args) }
     }
 }
 
-impl<'a, Args, T> Debug for RefFnOnce<'a, Args, T> {
+impl<Args, T> Debug for RefFnOnce<'_, Args, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
 }
 
 /// A [`FnMut`] wrapped by reference.
+#[repr(C)]
 pub struct RefFnMut<'a, Args, T> {
-    raw: RawHeapFn<Args, T>,
+    raw: RawFnMut<Args, T>,
     _phantom: PhantomData<fn() -> &'a mut ()>,
 }
 
@@ -117,10 +345,9 @@ impl<'a, Args, T> RefFnMut<'a, Args, T> {
     /// Constructs a new `RefFnMut` by wrapping `f`.
     #[inline]
     pub fn new<F: FnMut<Args, Output = T>>(f: &'a mut F) -> Self {
-        let raw = f as *mut F;
         Self {
-            // we wrap by reference, so we don't need to drop.
-            raw: unsafe { RawHeapFn::new(raw as *const (), drop_forget, Self::call_ref::<F>) },
+            // `f` will outlive self because of the `'a` lifetime.
+            raw: unsafe { RawFnMut::new(f) },
             _phantom: Default::default(),
         }
     }
@@ -128,18 +355,30 @@ impl<'a, Args, T> RefFnMut<'a, Args, T> {
     /// Constructs a new `RefFnMut`.
     #[inline]
     pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> RefFnMut<'static, Args, T> {
-        let raw = Box::into_raw(f);
         RefFnMut {
-            // the box needs to be dropped.
-            raw: unsafe { RawHeapFn::new(raw as *const (), drop_boxed::<F>, Self::call_ref::<F>) },
+            raw: RawFnMut::new_boxed(f),
             _phantom: Default::default(),
         }
     }
 
-    fn call_ref<F: FnMut<Args, Output = T>>(ptr: *const (), args: Args) -> T {
-        let raw = ptr as *mut F;
-        let f = unsafe { &mut *raw };
-        <F as FnMut<Args>>::call_mut(f, args)
+    /// Extracts the raw wrapper.
+    #[inline]
+    pub fn into_raw(self) -> RawFnMut<Args, T> {
+        self.raw
+    }
+
+    /// Constructs a new `RefFnMut` from a [`RawFnMut`].
+    ///
+    /// # Safety
+    ///
+    /// Construction from a raw value is inherently unsafe,
+    /// because that allows for the wrapped value to be moved.
+    #[inline]
+    pub unsafe fn from_raw(f: RawFnMut<Args, T>) -> Self {
+        RefFnMut {
+            raw: f,
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -155,7 +394,7 @@ impl<'a, Args, T> FnOnce<Args> for RefFnMut<'a, Args, T> {
 impl<'a, Args, T> FnMut<Args> for RefFnMut<'a, Args, T> {
     #[inline]
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
-        self.raw.call(args)
+        unsafe { self.raw.call_mut(args) }
     }
 }
 
@@ -166,8 +405,9 @@ impl<'a, Args, T> Debug for RefFnMut<'a, Args, T> {
 }
 
 /// A [`Fn`] wrapped by reference.
+#[repr(C)]
 pub struct RefFn<'a, Args, T> {
-    raw: RawHeapFn<Args, T>,
+    raw: RawFn<Args, T>,
     _phantom: PhantomData<fn() -> &'a ()>,
 }
 
@@ -175,12 +415,9 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
     /// Constructs a new `RefFn` by wrapping `f`.
     #[inline]
     pub fn new<F: Fn<Args, Output = T>>(f: &'a F) -> Self {
-        let raw = f as *const F;
         Self {
-            raw: unsafe {
-                // references do not need dropping
-                RawHeapFn::new(raw as *const (), drop_forget, Self::call_ref::<F>)
-            },
+            // `f` will outlive self because of the `'a` lifetime.
+            raw: unsafe { RawFn::new(f) },
             _phantom: Default::default(),
         }
     }
@@ -188,12 +425,8 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
     /// Constructs a new `RefFn.
     #[inline]
     pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> RefFn<'static, Args, T> {
-        let raw = Box::into_raw(f);
         RefFn {
-            raw: unsafe {
-                // drop the Box
-                RawHeapFn::new(raw as *const (), drop_boxed::<F>, Self::call_ref::<F>)
-            },
+            raw: RawFn::new_boxed(f),
             _phantom: Default::default(),
         }
     }
@@ -201,20 +434,30 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
     /// Constructs a new `RefFn`.
     #[inline]
     pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> RefFn<'static, Args, T> {
-        let raw = Arc::into_raw(f);
         RefFn {
-            raw: unsafe {
-                // drop the Arc
-                RawHeapFn::new(raw as *const (), drop_arc::<F>, Self::call_ref::<F>)
-            },
+            raw: RawFn::new_arc(f),
             _phantom: Default::default(),
         }
     }
 
-    fn call_ref<F: Fn<Args, Output = T>>(ptr: *const (), args: Args) -> T {
-        let raw = ptr as *const F;
-        let f = unsafe { &*raw };
-        <F as Fn<Args>>::call(f, args)
+    /// Extracts the raw wrapper.
+    #[inline]
+    pub fn into_raw(self) -> RawFn<Args, T> {
+        self.raw
+    }
+
+    /// Constructs a new `RefFn` from a [`RawFn`].
+    ///
+    /// # Safety
+    ///
+    /// Construction from a raw value is inherently unsafe,
+    /// because that allows for the wrapped value to be moved.
+    #[inline]
+    pub unsafe fn from_raw(f: RawFn<Args, T>) -> Self {
+        RefFn {
+            raw: f,
+            _phantom: Default::default(),
+        }
     }
 }
 
@@ -237,7 +480,7 @@ impl<'a, Args, T> FnMut<Args> for RefFn<'a, Args, T> {
 impl<'a, Args, T> Fn<Args> for RefFn<'a, Args, T> {
     #[inline]
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
-        self.raw.call(args)
+        unsafe { self.raw.call(args) }
     }
 }
 
@@ -248,6 +491,7 @@ impl<'a, Args, T> Debug for RefFn<'a, Args, T> {
 }
 
 /// A [`FnOnce`] allocated on the heap.
+#[repr(C)]
 pub struct HeapFnOnce<Args, T> {
     raw: RefFnOnce<'static, Args, T>,
 }
@@ -284,6 +528,7 @@ impl<Args, T> Debug for HeapFnOnce<Args, T> {
 }
 
 /// A [`FnMut`] allocated on the heap.
+#[repr(C)]
 pub struct HeapFnMut<Args, T> {
     raw: RefFnMut<'static, Args, T>,
 }
@@ -327,6 +572,7 @@ impl<Args, T> Debug for HeapFnMut<Args, T> {
 }
 
 /// A [`Fn`] allocated on the heap.
+#[repr(C)]
 pub struct HeapFn<Args, T> {
     raw: RefFn<'static, Args, T>,
 }

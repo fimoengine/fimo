@@ -1,7 +1,9 @@
 use fimo_actix_interface::actix::{web, HttpResponse, Responder, Scope};
 use fimo_core_interface::rust::{
-    FimoCore, SettingsEvent, SettingsEventCallbackHandle, SettingsItem, SettingsRegistryPath,
-    ROOT_PATH,
+    settings_registry::{
+        SettingsEvent, SettingsEventCallbackHandle, SettingsItem, SettingsRegistryPath, ROOT_PATH,
+    },
+    FimoCore,
 };
 use parking_lot::Mutex;
 use std::collections::BTreeMap;

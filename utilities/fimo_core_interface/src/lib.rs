@@ -2,6 +2,7 @@
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
 #![feature(unboxed_closures)]
+#![feature(const_mut_refs)]
 #![feature(trait_alias)]
 #![feature(fn_traits)]
 #![feature(unsize)]
