@@ -12,7 +12,7 @@ pub mod arc;
 pub mod array_string;
 pub mod error;
 pub mod error_info;
-pub mod heap_fn;
+pub mod fn_wrapper;
 pub mod non_null_const;
 pub mod optional;
 pub mod result;

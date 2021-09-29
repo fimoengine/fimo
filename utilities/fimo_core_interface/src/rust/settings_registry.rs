@@ -1,4 +1,4 @@
-use fimo_ffi_core::heap_fn::HeapFnMut;
+use fimo_ffi_core::fn_wrapper::HeapFnMut;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

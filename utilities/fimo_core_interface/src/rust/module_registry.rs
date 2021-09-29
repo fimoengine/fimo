@@ -1,4 +1,4 @@
-use fimo_ffi_core::heap_fn::HeapFnOnce;
+use fimo_ffi_core::fn_wrapper::HeapFnOnce;
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
 use fimo_version_core::Version;
