@@ -1,5 +1,5 @@
 //! Implementation of the `SettingsRegistry` type.
-use fimo_core_interface::rust::{
+use fimo_core_interface::rust::settings_registry::{
     SettingsEvent, SettingsEventCallback, SettingsEventCallbackId, SettingsItem, SettingsItemType,
     SettingsRegistryPath, SettingsRegistryPathBuf, SettingsRegistryPathComponent,
     SettingsRegistryPathComponentIter, SettingsRegistryPathNotFoundError, SettingsRegistryVTable,
@@ -67,7 +67,7 @@ impl SettingsRegistry {
 }
 
 impl Deref for SettingsRegistry {
-    type Target = fimo_core_interface::rust::SettingsRegistry;
+    type Target = fimo_core_interface::rust::settings_registry::SettingsRegistry;
 
     fn deref(&self) -> &Self::Target {
         let self_ptr = self as *const _ as *const ();

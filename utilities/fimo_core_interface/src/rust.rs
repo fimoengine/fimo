@@ -17,11 +17,8 @@ pub const INTERFACE_NAME: &str = "fimo-core";
 /// Implemented interface version.
 pub const INTERFACE_VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
 
-mod module_registry;
-mod settings_registry;
-
-pub use module_registry::*;
-pub use settings_registry::*;
+pub mod module_registry;
+pub mod settings_registry;
 
 /// Implements part of the [fimo_module_core::ModuleInstance] trait for fimo modules.
 ///
@@ -221,14 +218,14 @@ impl FimoCore {
 
     /// Fetches the module registry.
     #[inline]
-    pub fn get_module_registry(&self) -> &ModuleRegistry {
+    pub fn get_module_registry(&self) -> &module_registry::ModuleRegistry {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { &*(vtable.get_module_registry)(ptr) }
     }
 
     /// Fetches the settings registry.
     #[inline]
-    pub fn get_settings_registry(&self) -> &SettingsRegistry {
+    pub fn get_settings_registry(&self) -> &settings_registry::SettingsRegistry {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { &*(vtable.get_settings_registry)(ptr) }
     }
@@ -274,8 +271,8 @@ unsafe impl Sync for FimoCore {}
 pub struct FimoCoreVTable {
     get_interface_version: fn(*const ()) -> Version,
     find_extension: fn(*const (), *const str) -> Option<*const (dyn Any + 'static)>,
-    get_module_registry: fn(*const ()) -> *const ModuleRegistry,
-    get_settings_registry: fn(*const ()) -> *const SettingsRegistry,
+    get_module_registry: fn(*const ()) -> *const module_registry::ModuleRegistry,
+    get_settings_registry: fn(*const ()) -> *const settings_registry::SettingsRegistry,
 }
 
 impl FimoCoreVTable {
@@ -283,8 +280,8 @@ impl FimoCoreVTable {
     pub const fn new(
         get_interface_version: fn(*const ()) -> Version,
         find_extension: fn(*const (), *const str) -> Option<*const (dyn Any + 'static)>,
-        get_module_registry: fn(*const ()) -> *const ModuleRegistry,
-        get_settings_registry: fn(*const ()) -> *const SettingsRegistry,
+        get_module_registry: fn(*const ()) -> *const module_registry::ModuleRegistry,
+        get_settings_registry: fn(*const ()) -> *const settings_registry::SettingsRegistry,
     ) -> Self {
         Self {
             get_interface_version,

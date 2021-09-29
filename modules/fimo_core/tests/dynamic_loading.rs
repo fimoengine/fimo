@@ -1,5 +1,5 @@
+use ci::rust::settings_registry::{SettingsEvent, SettingsItem, SettingsRegistryPath};
 use fimo_core_interface as ci;
-use fimo_core_interface::rust::{SettingsEvent, SettingsItem, SettingsRegistryPath};
 use fimo_module_core as module;
 use fimo_module_core::ModuleLoader;
 use module_paths::core_module_path;
@@ -58,10 +58,7 @@ fn settings_registry() -> Result<(), Box<dyn Error>> {
 
     let settings_registry = core.get_settings_registry();
 
-    let array = vec![
-        ci::rust::SettingsItem::Bool(false),
-        ci::rust::SettingsItem::Bool(false),
-    ];
+    let array = vec![SettingsItem::Bool(false), SettingsItem::Bool(false)];
     let object = BTreeMap::new();
 
     let none_path = SettingsRegistryPath::new("none").unwrap();
