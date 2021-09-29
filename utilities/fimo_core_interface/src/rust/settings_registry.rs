@@ -129,6 +129,10 @@ impl SettingsRegistry {
     }
 
     /// Registers a callback to an item.
+    ///
+    /// # Note
+    ///
+    /// The callback may not call into the `SettingsRegistry`.
     #[inline]
     pub fn register_callback<
         F: FnMut(&'_ SettingsRegistryPath, SettingsEvent<'_>) + Send + Sync,
@@ -1004,21 +1008,21 @@ impl SettingsRegistryPathBuf {
         }
     }
 
-    /// Invokes [`reserve`](String:Reserve) on the underlying
+    /// Invokes [`reserve`](String::reserve) on the underlying
     /// instance of [`String`].
     #[inline]
     pub fn reserve(&mut self, additional: usize) {
         self.path.reserve(additional)
     }
 
-    /// Invokes [`reserve_exact`](String:reserve_exact) on the
+    /// Invokes [`reserve_exact`](String::reserve_exact) on the
     /// underlying instance of [`String`].
     #[inline]
     pub fn reserve_exact(&mut self, additional: usize) {
         self.path.reserve_exact(additional)
     }
 
-    /// Invokes [`shrink_to_fit`](String:shrink_to_fit) on the
+    /// Invokes [`shrink_to_fit`](String::shrink_to_fit) on the
     /// underlying instance of [`String`].
     #[inline]
     pub fn shrink_to_fit(&mut self) {
