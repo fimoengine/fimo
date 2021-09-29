@@ -373,7 +373,7 @@ impl Item {
                 let obj = self.unwrap_object_mut();
 
                 let item = match name {
-                    SettingsRegistryPathComponent::Item { name } => obj.remove(name).map(|i| i),
+                    SettingsRegistryPathComponent::Item { name } => obj.remove(name),
                     SettingsRegistryPathComponent::ArrayItem { name, index } => {
                         let arr = obj.get_mut(name);
                         arr.and_then(|arr| {

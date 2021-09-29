@@ -477,7 +477,7 @@ impl ModuleRegistryInner {
     fn get_interface_descriptors_from_name(&self, name: &str) -> Vec<ModuleInterfaceDescriptor> {
         self.interface_map
             .keys()
-            .filter(|x| x.name == name.as_ref())
+            .filter(|x| x.name == name)
             .cloned()
             .collect()
     }
@@ -492,7 +492,7 @@ impl ModuleRegistryInner {
         self.interface_map
             .keys()
             .filter(|x| {
-                x.name == name.as_ref()
+                x.name == name
                     && version.is_compatible(&x.version)
                     && extensions
                         .as_ref()
