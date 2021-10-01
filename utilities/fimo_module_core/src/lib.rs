@@ -1,4 +1,6 @@
 //! Implementation of basic fimo module loaders.
+#![feature(const_fn_fn_ptr_basics)]
+#![feature(const_fn_trait_bound)]
 #![feature(get_mut_unchecked)]
 #![feature(c_unwind)]
 #![warn(
@@ -19,6 +21,8 @@ pub use dyn_arc::*;
 
 pub mod ffi_loader;
 pub mod rust_loader;
+
+pub mod rust;
 
 /// Module information.
 #[repr(C)]
