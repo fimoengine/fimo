@@ -4,6 +4,8 @@ use std::error::Error;
 use std::marker::PhantomData;
 use std::path::Path;
 
+pub mod module_loader;
+
 /// A type-erased module object.
 ///
 /// # Safety
@@ -21,10 +23,10 @@ pub type ModuleLoader = ModuleObject<ModuleLoaderVTable>;
 /// A type-erased module.
 pub type Module = ModuleObject<ModuleVTable>;
 
-/// A type-erased module module instance.
+/// A type-erased module instance.
 pub type ModuleInstance = ModuleObject<ModuleInstanceVTable>;
 
-/// A type-erased module module interface.
+/// A type-erased module interface.
 pub type ModuleInterface = ModuleObject<ModuleInterfaceVTable>;
 
 /// A [`DynArc`] for a [`Module`].
@@ -52,14 +54,39 @@ impl<T: 'static> ModuleObject<T> {
 
         (ptr, vtable)
     }
+    
+    /// Splits the reference into a data- and vtable- pointer.
+    #[inline]
+    pub fn into_raw_parts_mut(&mut self) -> (*mut (), &'static T) {
+        // safety: `&mut Self` has the same layout as `&mut [()]`
+        let s: &mut [()] = unsafe { std::mem::transmute(self) };
 
-    /// Constructs a `*const FimoCore` from a data- and vtable- pointer.
+        // safety: the values are properly initialized upon construction.
+        let ptr = s.as_mut_ptr();
+        let vtable = unsafe { &*(s.len() as *const T) };
+
+        (ptr, vtable)
+    }
+
+    /// Constructs a `*const ModuleObject` from a data- and vtable- pointer.
     #[inline]
     pub fn from_raw_parts(data: *const (), vtable: &'static T) -> *const Self {
         // `()` has size 0 and alignment 1, so it should be sound to use an
         // arbitrary ptr and length.
         let vtable_ptr = vtable as *const _ as usize;
         let s = std::ptr::slice_from_raw_parts(data, vtable_ptr);
+
+        // safety: the types have the same layout
+        unsafe { std::mem::transmute(s) }
+    }
+
+    /// Constructs a `*mut ModuleObject` from a data- and vtable- pointer.
+    #[inline]
+    pub fn from_raw_parts_mut(data: *mut (), vtable: &'static T) -> *mut Self {
+        // `()` has size 0 and alignment 1, so it should be sound to use an
+        // arbitrary ptr and length.
+        let vtable_ptr = vtable as *const _ as usize;
+        let s = std::ptr::slice_from_raw_parts_mut(data, vtable_ptr);
 
         // safety: the types have the same layout
         unsafe { std::mem::transmute(s) }
