@@ -13,6 +13,7 @@ use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
 use fimo_ffi_core::ArrayString;
+use fimo_module_core::rust::ModuleObject;
 use fimo_module_core::{
     rust::ModuleInterfaceArc, DynArc, DynArcBase, DynArcCaster, ModuleInterfaceDescriptor,
     ModulePtr,
@@ -77,16 +78,7 @@ pub enum ServerEvent {
 
 /// The fimo-actix interface.
 pub struct FimoActix {
-    // Use `[()]` to make `FimoActix` into a DST with size 0 and alignment 1.
-    // The first part of the pointer will be a pointer to the type-erased data
-    // and the second part is a pointer to a `FimoActixVTable`.
-    //
-    // Using a `dyn Trait` is unsound, as the layout of a VTable is not specified.
-    // Will be changed to a proper DST implementation once custom DSTs land in the
-    // language.
-    //
-    // Reading or writing to this field will cause UB.
-    _inner: [()],
+    inner: ModuleObject<FimoActixVTable>,
 }
 
 impl FimoActix {
@@ -206,15 +198,7 @@ impl FimoActix {
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts(&self) -> (*const (), &'static FimoActixVTable) {
-        // A `FimoActix` is just a wrapper around a `[()]`.
-        let slice: &[()] = unsafe { std::mem::transmute(self) };
-
-        let ptr = slice.as_ptr();
-        let vtable_ptr = slice.len() as *const FimoActixVTable;
-
-        // We know that the pointer is valid because it is an
-        // invariant of the `FimoActix` type.
-        (ptr, unsafe { &*vtable_ptr })
+        self.inner.into_raw_parts()
     }
 
     /// Constructs a `*const FimoActix` from a data- and vtable- pointer.
@@ -223,13 +207,7 @@ impl FimoActix {
         data_address: *const (),
         vtable: &'static FimoActixVTable,
     ) -> *const Self {
-        let vtable_ptr = vtable as *const _ as usize;
-
-        // Store the data as the pointer and the vtable as the slice.
-        let slice_ptr = std::ptr::slice_from_raw_parts(data_address, vtable_ptr);
-
-        // `FimoActix` and `[()]` have the same layout.
-        slice_ptr as *const Self
+        ModuleObject::from_raw_parts(data_address, vtable) as *const Self
     }
 }
 

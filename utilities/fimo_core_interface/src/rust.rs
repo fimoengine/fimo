@@ -1,6 +1,6 @@
 //! Definition of the Rust `fimo-core` interface.
 use fimo_ffi_core::ArrayString;
-use fimo_module_core::rust::ModuleInterfaceArc;
+use fimo_module_core::rust::{ModuleInterfaceArc, ModuleObject};
 use fimo_module_core::{DynArc, DynArcBase, DynArcCaster, ModuleInterfaceDescriptor, ModulePtr};
 use fimo_version_core::{ReleaseType, Version};
 use std::any::Any;
@@ -33,9 +33,9 @@ macro_rules! fimo_core_interface_impl {
 /// Type-erased `fimo-core` interface.
 ///
 /// The underlying type must implement `Send` and `Sync`.
+#[repr(transparent)]
 pub struct FimoCore {
-    // makes `FimoCore` into a DST with size 0 and alignment 1.
-    _inner: [()],
+    inner: ModuleObject<FimoCoreVTable>,
 }
 
 impl FimoCore {
@@ -63,26 +63,13 @@ impl FimoCore {
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts(&self) -> (*const (), &'static FimoCoreVTable) {
-        // safety: `&Self` has the same layout as `&[()]`
-        let s: &[()] = unsafe { std::mem::transmute(self) };
-
-        // safety: the values are properly initialized upon construction.
-        let ptr = s.as_ptr();
-        let vtable = unsafe { &*(s.len() as *const FimoCoreVTable) };
-
-        (ptr, vtable)
+        self.inner.into_raw_parts()
     }
 
     /// Constructs a `*const FimoCore` from a data- and vtable- pointer.
     #[inline]
     pub fn from_raw_parts(data: *const (), vtable: &'static FimoCoreVTable) -> *const Self {
-        // `()` has size 0 and alignment 1, so it should be sound to use an
-        // arbitrary ptr and length.
-        let vtable_ptr = vtable as *const _ as usize;
-        let s = std::ptr::slice_from_raw_parts(data, vtable_ptr);
-
-        // safety: the types have the same layout
-        unsafe { std::mem::transmute(s) }
+        ModuleObject::from_raw_parts(data, vtable) as *const Self
     }
 }
 

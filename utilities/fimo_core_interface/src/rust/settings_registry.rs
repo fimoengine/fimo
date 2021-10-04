@@ -1,5 +1,6 @@
 //! Specification of a settings registry.
 use fimo_ffi_core::fn_wrapper::HeapFnMut;
+use fimo_module_core::rust::ModuleObject;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -17,8 +18,9 @@ lazy_static! {
 /// Type-erased settings registry.
 ///
 /// The underlying type must implement `Send` and `Sync`.
+#[repr(transparent)]
 pub struct SettingsRegistry {
-    _inner: [()],
+    inner: ModuleObject<SettingsRegistryVTable>,
 }
 
 impl SettingsRegistry {
@@ -164,26 +166,13 @@ impl SettingsRegistry {
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts(&self) -> (*const (), &'static SettingsRegistryVTable) {
-        // safety: `&Self` has the same layout as `&[()]`
-        let s: &[()] = unsafe { std::mem::transmute(self) };
-
-        // safety: the values are properly initialized upon construction.
-        let ptr = s.as_ptr();
-        let vtable = unsafe { &*(s.len() as *const SettingsRegistryVTable) };
-
-        (ptr, vtable)
+        self.inner.into_raw_parts()
     }
 
     /// Constructs a `*const ModuleRegistry` from a data- and vtable- pointer.
     #[inline]
     pub fn from_raw_parts(data: *const (), vtable: &'static SettingsRegistryVTable) -> *const Self {
-        // `()` has size 0 and alignment 1, so it should be sound to use an
-        // arbitrary ptr and length.
-        let vtable_ptr = vtable as *const _ as usize;
-        let s = std::ptr::slice_from_raw_parts(data, vtable_ptr);
-
-        // safety: the types have the same layout
-        unsafe { std::mem::transmute(s) }
+        ModuleObject::from_raw_parts(data, vtable) as *const Self
     }
 }
 

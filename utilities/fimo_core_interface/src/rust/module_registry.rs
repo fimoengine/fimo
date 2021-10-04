@@ -1,7 +1,7 @@
 //! Specification of a module registry.
 use fimo_ffi_core::fn_wrapper::{HeapFnOnce, RawFnOnce};
 use fimo_ffi_core::ArrayString;
-use fimo_module_core::rust::ModuleInterfaceCaster;
+use fimo_module_core::rust::{ModuleInterfaceCaster, ModuleObject};
 use fimo_module_core::{
     rust::{ModuleInterface, ModuleInterfaceArc, ModuleLoader},
     DynArc, DynArcCaster, ModuleInterfaceDescriptor,
@@ -16,8 +16,9 @@ use std::ops::Deref;
 /// Type-erased module registry.
 ///
 /// The underlying type must implement `Send` and `Sync`.
+#[repr(transparent)]
 pub struct ModuleRegistry {
-    _inner: [()],
+    inner: ModuleObject<ModuleRegistryVTable>,
 }
 
 impl ModuleRegistry {
@@ -309,26 +310,13 @@ impl ModuleRegistry {
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts(&self) -> (*const (), &'static ModuleRegistryVTable) {
-        // safety: `&Self` has the same layout as `&[()]`
-        let s: &[()] = unsafe { std::mem::transmute(self) };
-
-        // safety: the values are properly initialized upon construction.
-        let ptr = s.as_ptr();
-        let vtable = unsafe { &*(s.len() as *const ModuleRegistryVTable) };
-
-        (ptr, vtable)
+        self.inner.into_raw_parts()
     }
 
     /// Constructs a `*const ModuleRegistry` from a data- and vtable- pointer.
     #[inline]
     pub fn from_raw_parts(data: *const (), vtable: &'static ModuleRegistryVTable) -> *const Self {
-        // `()` has size 0 and alignment 1, so it should be sound to use an
-        // arbitrary ptr and length.
-        let vtable_ptr = vtable as *const _ as usize;
-        let s = std::ptr::slice_from_raw_parts(data, vtable_ptr);
-
-        // safety: the types have the same layout
-        unsafe { std::mem::transmute(s) }
+        ModuleObject::from_raw_parts(data, vtable) as *const Self
     }
 }
 
@@ -361,8 +349,9 @@ impl ModuleRegistryVTable {
 /// Type-erased module registry.
 ///
 /// The underlying type must implement `Send` and `Sync`.
+#[repr(transparent)]
 pub struct ModuleRegistryInner {
-    _inner: [()],
+    inner: ModuleObject<ModuleRegistryInnerVTable>,
 }
 
 impl ModuleRegistryInner {
@@ -541,27 +530,13 @@ impl ModuleRegistryInner {
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts(&self) -> (*const (), &'static ModuleRegistryInnerVTable) {
-        // safety: `&Self` has the same layout as `&[()]`
-        let s: &[()] = unsafe { std::mem::transmute(self) };
-
-        // safety: the values are properly initialized upon construction.
-        let ptr = s.as_ptr();
-        let vtable = unsafe { &*(s.len() as *const ModuleRegistryInnerVTable) };
-
-        (ptr, vtable)
+        self.inner.into_raw_parts()
     }
 
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts_mut(&mut self) -> (*mut (), &'static ModuleRegistryInnerVTable) {
-        // safety: `&Self` has the same layout as `&[()]`
-        let s: &mut [()] = unsafe { std::mem::transmute(self) };
-
-        // safety: the values are properly initialized upon construction.
-        let ptr = s.as_mut_ptr();
-        let vtable = unsafe { &*(s.len() as *const ModuleRegistryInnerVTable) };
-
-        (ptr, vtable)
+        self.inner.into_raw_parts_mut()
     }
 
     /// Constructs a `*const ModuleRegistryInner` from a data- and vtable- pointer.
@@ -570,13 +545,7 @@ impl ModuleRegistryInner {
         data: *const (),
         vtable: &'static ModuleRegistryInnerVTable,
     ) -> *const Self {
-        // `()` has size 0 and alignment 1, so it should be sound to use an
-        // arbitrary ptr and length.
-        let vtable_ptr = vtable as *const _ as usize;
-        let s = std::ptr::slice_from_raw_parts(data, vtable_ptr);
-
-        // safety: the types have the same layout
-        unsafe { std::mem::transmute(s) }
+        ModuleObject::from_raw_parts(data, vtable) as *const Self
     }
 
     /// Constructs a `*mut ModuleRegistryInner` from a data- and vtable- pointer.
@@ -585,13 +554,7 @@ impl ModuleRegistryInner {
         data: *mut (),
         vtable: &'static ModuleRegistryInnerVTable,
     ) -> *mut Self {
-        // `()` has size 0 and alignment 1, so it should be sound to use an
-        // arbitrary ptr and length.
-        let vtable_ptr = vtable as *const _ as usize;
-        let s = std::ptr::slice_from_raw_parts_mut(data, vtable_ptr);
-
-        // safety: the types have the same layout
-        unsafe { std::mem::transmute(s) }
+        ModuleObject::from_raw_parts_mut(data, vtable) as *mut Self
     }
 }
 
