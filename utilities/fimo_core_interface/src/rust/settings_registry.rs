@@ -1220,9 +1220,7 @@ impl<F: FnMut(&'_ SettingsRegistryPath, SettingsEvent<'_>) + Send + Sync> From<B
 {
     #[inline]
     fn from(f: Box<F>) -> Self {
-        let mut f = *f;
-        let wrapper = move |path, event| f(path, event);
-        let inner = HeapFnMut::new_boxed(Box::new(wrapper));
+        let inner = HeapFnMut::new_boxed(f);
 
         Self {
             inner: unsafe { std::mem::transmute(inner) },
