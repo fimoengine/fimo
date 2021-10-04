@@ -314,9 +314,9 @@ impl<T: DynArcBase + ?Sized, C: DynArcCaster<T>> DynWeak<T, C> {
     /// Returns [`None`] if the inner value has since been dropped.
     #[inline]
     pub fn upgrade(&self) -> Option<DynArc<T, C>> {
-        self.inner.upgrade().map(|inner | {
-            unsafe { DynArc::from_inner((inner, self.caster)) }
-        })
+        self.inner
+            .upgrade()
+            .map(|inner| unsafe { DynArc::from_inner((inner, self.caster)) })
     }
 
     /// Fetches the number of [`DynArc`] pointers pointing to this allocation.

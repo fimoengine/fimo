@@ -3,7 +3,7 @@ use crate::TaskRuntime;
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{
     rust::{ModuleInstanceArc, ModuleInterfaceVTable},
-    ModuleInfo, ModuleInterfaceDescriptor,
+    ModuleInfo,
 };
 use fimo_tasks_interface::rust::{FimoTasks, TaskRuntimeInner};
 use fimo_version_core::Version;
@@ -23,6 +23,9 @@ const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
     |_ptr| {
         fimo_tasks_interface::fimo_tasks_interface_impl! {id}
     },
+    |_ptr| {
+        fimo_tasks_interface::fimo_tasks_interface_impl! {version}
+    },
     |ptr| {
         let interface = unsafe { &*(ptr as *const TaskInterface) };
         interface.parent.clone()
@@ -36,7 +39,7 @@ struct TaskInterface {
 
 impl FimoTasks for TaskInterface {
     fn get_interface_version(&self) -> Version {
-        fimo_tasks_interface::INTERFACE_VERSION
+        fimo_tasks_interface::rust::INTERFACE_VERSION
     }
 
     fn find_extension(&self, _extension: &str) -> Option<&(dyn Any + 'static)> {
@@ -67,19 +70,8 @@ fn construct_module_info() -> ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
             ArrayString::from_utf8_unchecked(
-                String::from(&fimo_tasks_interface::INTERFACE_VERSION).as_bytes(),
+                String::from(&fimo_tasks_interface::rust::INTERFACE_VERSION).as_bytes(),
             )
         },
-    }
-}
-
-#[allow(dead_code)]
-fn get_tasks_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe {
-            ArrayString::from_utf8_unchecked(fimo_tasks_interface::INTERFACE_NAME.as_bytes())
-        },
-        version: fimo_tasks_interface::INTERFACE_VERSION,
-        extensions: Default::default(),
     }
 }

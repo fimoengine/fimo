@@ -1,11 +1,18 @@
 //! Definition of the Rust `fimo-tasks` interface.
+use fimo_ffi_core::ArrayString;
 use fimo_module_core::{
     rust::{ModuleInterface, ModuleInterfaceArc},
-    ModulePtr,
+    ModuleInterfaceDescriptor, ModulePtr,
 };
-use fimo_version_core::Version;
+use fimo_version_core::{ReleaseType, Version};
 use std::any::Any;
 use std::sync::Arc;
+
+/// Name of the interface.
+pub const INTERFACE_NAME: &str = "fimo-tasks";
+
+/// Implemented interface version.
+pub const INTERFACE_VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
 
 thread_local! {static RUNTIME: std::cell::Cell<Option<&'static TaskRuntime>> = std::cell::Cell::new(None)}
 
@@ -19,17 +26,14 @@ pub use raw_task::{RawTask, Result, TaskHandle, TaskInner, TaskStatus};
 pub use task::{Task, TaskCompletionStatus};
 pub use task_runtime::{NotifyFn, SpawnAllFn, TaskRuntime, TaskRuntimeInner, WaitOnFn, WorkerId};
 
-/// Package version the library was linked with.
-pub const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Name of the package the library was linked with.
-pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
-
 /// Implements part of the [`ModuleInterface`] vtable for the `fimo-tasks` interface.
 #[macro_export]
 macro_rules! fimo_tasks_interface_impl {
     (id) => {
         "fimo::interface::tasks"
+    };
+    (version) => {
+        $crate::rust::INTERFACE_VERSION
     };
     (to_ptr, $interface: expr) => {
         unsafe {
@@ -118,18 +122,15 @@ pub unsafe fn cast_interface(
         ));
     }
 
-    // ensure that the versions match.
-    match fimo_core_interface::rust::cast_instance(interface.get_instance()) {
-        Ok(instance) => {
-            let tasks_version = instance.as_fimo_module_instance().get_pkg_version(PKG_NAME);
-            if tasks_version.is_none() || (PKG_VERSION != tasks_version.unwrap()) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "fimo_tasks_interface version mismatch",
-                ));
-            }
-        }
-        Err(e) => return Err(e),
+    if !INTERFACE_VERSION.is_compatible(&interface.get_version()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Versions incompatible. Requested {}, available {}.",
+                INTERFACE_VERSION,
+                interface.get_version()
+            ),
+        ));
     }
 
     match interface.get_raw_ptr() {
@@ -142,5 +143,14 @@ pub unsafe fn cast_interface(
             std::io::ErrorKind::Other,
             "Pointer layout mismatch",
         )),
+    }
+}
+
+/// Builds the [`ModuleInterfaceDescriptor`] for the interface.
+pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
+    ModuleInterfaceDescriptor {
+        name: unsafe { ArrayString::from_utf8_unchecked(INTERFACE_NAME.as_bytes()) },
+        version: INTERFACE_VERSION,
+        extensions: Default::default(),
     }
 }

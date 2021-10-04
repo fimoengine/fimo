@@ -2,6 +2,7 @@
 use crate::{
     DynArc, DynArcBase, DynArcCaster, DynWeak, ModuleInfo, ModuleInterfaceDescriptor, ModulePtr,
 };
+use fimo_version_core::Version;
 use std::borrow::Borrow;
 use std::error::Error;
 use std::marker::PhantomData;
@@ -304,6 +305,13 @@ impl ModuleInterface {
         unsafe { &*(vtable.get_raw_type_id)(ptr) }
     }
 
+    /// Extracts the version of the implemented interface.
+    #[inline]
+    pub fn get_version(&self) -> Version {
+        let (ptr, vtable) = self.into_raw_parts();
+        (vtable.get_version)(ptr)
+    }
+
     /// Fetches the parent instance.
     #[inline]
     pub fn get_instance(&self) -> ModuleInstanceArc {
@@ -444,6 +452,7 @@ impl ModuleInstanceVTable {
 pub struct ModuleInterfaceVTable {
     get_raw_ptr: fn(*const ()) -> ModulePtr,
     get_raw_type_id: fn(*const ()) -> *const str,
+    get_version: fn(*const ()) -> Version,
     get_instance: fn(*const ()) -> ModuleInstanceArc,
 }
 
@@ -452,11 +461,13 @@ impl ModuleInterfaceVTable {
     pub const fn new(
         get_raw_ptr: fn(*const ()) -> ModulePtr,
         get_raw_type_id: fn(*const ()) -> *const str,
+        get_version: fn(*const ()) -> Version,
         get_instance: fn(*const ()) -> ModuleInstanceArc,
     ) -> Self {
         Self {
             get_raw_ptr,
             get_raw_type_id,
+            get_version,
             get_instance,
         }
     }

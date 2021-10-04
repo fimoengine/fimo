@@ -25,8 +25,7 @@ fn load_dynamic() -> Result<(), Box<dyn Error>> {
         core_module.get_module_path().display()
     );
 
-    let fimo_instance = unsafe { ci::rust::cast_instance(core_module.create_instance()?)? };
-    let core_instance = fimo_instance.as_module_instance();
+    let core_instance = core_module.create_instance()?;
 
     println!(
         "Available interfaces: {:?}",
@@ -45,9 +44,10 @@ fn load_dynamic() -> Result<(), Box<dyn Error>> {
         core_instance.get_interface_dependencies(core_descriptor)?
     );
 
-    let core = unsafe { ci::rust::cast_interface(core_instance.get_interface(core_descriptor)?)? };
-    print!("Core version: {}", core.get_interface_version());
+    let core_interface = core_instance.get_interface(core_descriptor)?;
+    print!("Core version: {}", core_interface.get_version());
 
+    let _ = unsafe { ci::rust::cast_interface(core_interface)? };
     Ok(())
 }
 
