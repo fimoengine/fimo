@@ -4,7 +4,10 @@ use fimo_core_interface::rust::module_registry::{
     LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
 };
 use fimo_ffi_core::ArrayString;
-use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
+use fimo_module_core::{
+    rust::{ModuleInterfaceArc, ModuleLoader},
+    ModuleInterfaceDescriptor,
+};
 use fimo_version_core::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -13,7 +16,6 @@ use std::io::BufReader;
 use std::iter::Step;
 use std::ops::{Deref, DerefMut, RangeFrom};
 use std::path::Path;
-use std::sync::Arc;
 
 /// Path from module root to manifest file.
 pub const MODULE_MANIFEST_PATH: &str = "module.json";
@@ -120,18 +122,8 @@ impl ModuleRegistry {
         if cfg!(feature = "rust_module_loader") {
             let handle = registry
                 .register_loader(
-                    fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::rust_loader::RustLoader::new(),
-                )
-                .unwrap();
-            std::mem::forget(handle);
-        }
-
-        if cfg!(feature = "ffi_module_loader") {
-            let handle = registry
-                .register_loader(
-                    fimo_module_core::ffi_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::ffi_loader::FFIModuleLoader::new(),
+                    fimo_module_core::rust::module_loader::MODULE_LOADER_TYPE,
+                    fimo_module_core::rust::module_loader::RustLoader::new(),
                 )
                 .unwrap();
             std::mem::forget(handle);
@@ -182,12 +174,12 @@ struct ModuleRegistryInner {
 }
 
 struct LoaderCollection {
-    loader: &'static dyn ModuleLoader,
+    loader: &'static ModuleLoader,
     callbacks: BTreeMap<LoaderCallbackId, LoaderCallback>,
 }
 
 struct InterfaceCollection {
-    interface: Arc<dyn ModuleInterface>,
+    interface: ModuleInterfaceArc,
     callbacks: BTreeMap<InterfaceCallbackId, InterfaceCallback>,
 }
 
@@ -220,7 +212,7 @@ impl ModuleRegistryInner {
     fn register_loader(
         &mut self,
         r#type: &str,
-        loader: &'static dyn ModuleLoader,
+        loader: &'static ModuleLoader,
     ) -> Result<LoaderId, ModuleRegistryError> {
         if self.loader_type_map.contains_key(r#type) {
             return Err(ModuleRegistryError::DuplicateLoaderType(String::from(
@@ -248,7 +240,7 @@ impl ModuleRegistryInner {
     fn unregister_loader(
         &mut self,
         id: LoaderId,
-    ) -> Result<&'static dyn ModuleLoader, ModuleRegistryError> {
+    ) -> Result<&'static ModuleLoader, ModuleRegistryError> {
         let loader = self.loaders.remove(&id);
 
         if loader.is_none() {
@@ -309,7 +301,7 @@ impl ModuleRegistryInner {
     fn get_loader_from_type(
         &self,
         r#type: &str,
-    ) -> Result<&'static dyn ModuleLoader, ModuleRegistryError> {
+    ) -> Result<&'static ModuleLoader, ModuleRegistryError> {
         let LoaderCollection { loader, .. } = self.get_loader_from_type_inner(r#type)?;
         Ok(*loader)
     }
@@ -342,7 +334,7 @@ impl ModuleRegistryInner {
     fn register_interface(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: Arc<dyn ModuleInterface>,
+        interface: ModuleInterfaceArc,
     ) -> Result<InterfaceId, ModuleRegistryError> {
         if self.interface_map.contains_key(descriptor) {
             return Err(ModuleRegistryError::DuplicateInterface(*descriptor));
@@ -368,7 +360,7 @@ impl ModuleRegistryInner {
     fn unregister_interface(
         &mut self,
         id: InterfaceId,
-    ) -> Result<Arc<dyn ModuleInterface>, ModuleRegistryError> {
+    ) -> Result<ModuleInterfaceArc, ModuleRegistryError> {
         let interface = self.interfaces.remove(&id);
 
         if interface.is_none() {
@@ -434,7 +426,7 @@ impl ModuleRegistryInner {
     fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, ModuleRegistryError> {
+    ) -> Result<ModuleInterfaceArc, ModuleRegistryError> {
         let InterfaceCollection { interface, .. } =
             self.get_interface_from_descriptor_inner(descriptor)?;
         Ok(interface.clone())

@@ -1,13 +1,17 @@
 //! Specification of a module registry.
 use fimo_ffi_core::fn_wrapper::{HeapFnOnce, RawFnOnce};
 use fimo_ffi_core::ArrayString;
-use fimo_module_core::{ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader};
+use fimo_module_core::rust::ModuleInterfaceCaster;
+use fimo_module_core::{
+    rust::{ModuleInterface, ModuleInterfaceArc, ModuleLoader},
+    DynArc, DynArcCaster, ModuleInterfaceDescriptor,
+};
 use fimo_version_core::Version;
+use std::borrow::Borrow;
 use std::error::Error;
-use std::marker::{PhantomData, Unsize};
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
-use std::sync::Arc;
 
 /// Type-erased module registry.
 ///
@@ -37,7 +41,7 @@ impl ModuleRegistry {
     ///
     /// The registered loader will be available to the rest of the `ModuleRegistry`.
     #[inline]
-    pub fn register_loader<T: ModuleLoader>(
+    pub fn register_loader<T: Borrow<ModuleLoader>>(
         &self,
         r#type: &str,
         loader: &'static T,
@@ -61,7 +65,7 @@ impl ModuleRegistry {
     ///
     /// Notifies all registered callbacks before returning.
     #[inline]
-    pub fn unregister_loader<T: ModuleLoader>(
+    pub fn unregister_loader<T: Borrow<ModuleLoader>>(
         &self,
         loader: LoaderHandle<'_, T>,
     ) -> Result<&'static T, Box<dyn Error>> {
@@ -88,7 +92,7 @@ impl ModuleRegistry {
     #[inline]
     pub fn register_loader_callback<
         'a,
-        F: FnOnce(&mut ModuleRegistryInner, &dyn ModuleLoader) + Send + Sync,
+        F: FnOnce(&mut ModuleRegistryInner, &'static ModuleLoader) + Send + Sync,
     >(
         &'a self,
         r#type: &str,
@@ -135,7 +139,7 @@ impl ModuleRegistry {
     pub fn get_loader_from_type(
         &self,
         r#type: &str,
-    ) -> Result<&'static dyn ModuleLoader, Box<dyn Error>> {
+    ) -> Result<&'static ModuleLoader, Box<dyn Error>> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -149,12 +153,16 @@ impl ModuleRegistry {
     }
 
     /// Registers a new interface to the `ModuleRegistry`.
+    ///
+    /// # Panic
+    ///
+    /// Panics if the implementation of [`Borrow`] does not return the same reference.
     #[inline]
-    pub fn register_interface<T: ModuleInterface + Unsize<dyn ModuleInterface> + ?Sized>(
+    pub fn register_interface<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>>(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: Arc<T>,
-    ) -> Result<InterfaceHandle<'_, T>, Box<dyn Error>> {
+        interface: DynArc<T, C>,
+    ) -> Result<InterfaceHandle<'_, T, C>, Box<dyn Error>> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -176,10 +184,10 @@ impl ModuleRegistry {
     /// This function calls the interface-remove callbacks that are registered
     /// with the interface before removing it.
     #[inline]
-    pub fn unregister_interface<T: ModuleInterface + ?Sized>(
+    pub fn unregister_interface<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>>(
         &self,
-        handle: InterfaceHandle<'_, T>,
-    ) -> Result<Arc<T>, Box<dyn Error>> {
+        handle: InterfaceHandle<'_, T, C>,
+    ) -> Result<DynArc<T, C>, Box<dyn Error>> {
         let (id, i, _) = handle.into_raw_parts();
         let mut res = MaybeUninit::uninit();
 
@@ -202,7 +210,7 @@ impl ModuleRegistry {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_interface_callback<
-        F: FnOnce(&mut ModuleRegistryInner, Arc<dyn ModuleInterface>) + Send + Sync,
+        F: FnOnce(&mut ModuleRegistryInner, ModuleInterfaceArc) + Send + Sync,
     >(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
@@ -247,7 +255,7 @@ impl ModuleRegistry {
     pub fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
+    ) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -362,13 +370,13 @@ impl ModuleRegistryInner {
     ///
     /// The registered loader will be available to the rest of the `ModuleRegistry`.
     #[inline]
-    pub fn register_loader<T: ModuleLoader>(
+    pub fn register_loader<T: Borrow<ModuleLoader>>(
         &mut self,
         r#type: &str,
         loader: &'static T,
     ) -> Result<LoaderId, Box<dyn Error>> {
         let (ptr, vtable) = self.into_raw_parts_mut();
-        (vtable.register_loader)(ptr, r#type, loader)
+        (vtable.register_loader)(ptr, r#type, loader.borrow())
     }
 
     /// Unregisters an existing module loader from the `ModuleRegistry`.
@@ -378,7 +386,7 @@ impl ModuleRegistryInner {
     pub fn unregister_loader(
         &mut self,
         id: LoaderId,
-    ) -> Result<&'static dyn ModuleLoader, Box<dyn Error>> {
+    ) -> Result<&'static ModuleLoader, Box<dyn Error>> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.unregister_loader)(ptr, id)
     }
@@ -392,7 +400,7 @@ impl ModuleRegistryInner {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_loader_callback<
-        F: FnOnce(&mut ModuleRegistryInner, &dyn ModuleLoader) + Send + Sync,
+        F: FnOnce(&mut ModuleRegistryInner, &'static ModuleLoader) + Send + Sync,
     >(
         &mut self,
         r#type: &str,
@@ -424,18 +432,29 @@ impl ModuleRegistryInner {
     pub fn get_loader_from_type(
         &self,
         r#type: &str,
-    ) -> Result<&'static dyn ModuleLoader, Box<dyn Error>> {
+    ) -> Result<&'static ModuleLoader, Box<dyn Error>> {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.get_loader_from_type)(ptr, r#type)
     }
 
     /// Registers a new interface to the `ModuleRegistry`.
+    ///
+    /// # Panic
+    ///
+    /// Panics if the implementation of [`Borrow`] does not return the same reference.
     #[inline]
-    pub fn register_interface<T: ModuleInterface + Unsize<dyn ModuleInterface> + ?Sized>(
+    pub fn register_interface<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>>(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: Arc<T>,
+        interface: DynArc<T, C>,
     ) -> Result<InterfaceId, Box<dyn Error>> {
+        let (ptr, vtable) = (*interface).borrow().into_raw_parts();
+        assert_eq!(ptr, &*interface as *const _ as *const ());
+
+        let (base, _) = DynArc::into_inner(interface);
+        let caster = ModuleInterfaceCaster::new(vtable);
+        let interface = unsafe { ModuleInterfaceArc::from_inner((base, caster)) };
+
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.register_interface)(ptr, descriptor, interface)
     }
@@ -448,7 +467,7 @@ impl ModuleRegistryInner {
     pub fn unregister_interface(
         &mut self,
         id: InterfaceId,
-    ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
+    ) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.unregister_interface)(ptr, id)
     }
@@ -462,7 +481,7 @@ impl ModuleRegistryInner {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_interface_callback<
-        F: FnOnce(&mut ModuleRegistryInner, Arc<dyn ModuleInterface>) + Send + Sync,
+        F: FnOnce(&mut ModuleRegistryInner, ModuleInterfaceArc) + Send + Sync,
     >(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
@@ -492,7 +511,7 @@ impl ModuleRegistryInner {
     pub fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
+    ) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.get_interface_from_descriptor)(ptr, descriptor)
     }
@@ -592,20 +611,19 @@ unsafe impl Sync for ModuleRegistryInner {}
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct ModuleRegistryInnerVTable {
     register_loader:
-        fn(*mut (), *const str, &'static dyn ModuleLoader) -> Result<LoaderId, Box<dyn Error>>,
-    unregister_loader: fn(*mut (), LoaderId) -> Result<&'static dyn ModuleLoader, Box<dyn Error>>,
+        fn(*mut (), *const str, &'static ModuleLoader) -> Result<LoaderId, Box<dyn Error>>,
+    unregister_loader: fn(*mut (), LoaderId) -> Result<&'static ModuleLoader, Box<dyn Error>>,
     register_loader_callback:
         fn(*mut (), *const str, LoaderCallback) -> Result<LoaderCallbackId, Box<dyn Error>>,
     unregister_loader_callback: fn(*mut (), LoaderCallbackId) -> Result<(), Box<dyn Error>>,
     get_loader_from_type:
-        fn(*const (), *const str) -> Result<&'static dyn ModuleLoader, Box<dyn Error>>,
+        fn(*const (), *const str) -> Result<&'static ModuleLoader, Box<dyn Error>>,
     register_interface: fn(
         *mut (),
         *const ModuleInterfaceDescriptor,
-        Arc<dyn ModuleInterface>,
+        ModuleInterfaceArc,
     ) -> Result<InterfaceId, Box<dyn Error>>,
-    unregister_interface:
-        fn(*mut (), InterfaceId) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>>,
+    unregister_interface: fn(*mut (), InterfaceId) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
     register_interface_callback: fn(
         *mut (),
         *const ModuleInterfaceDescriptor,
@@ -615,7 +633,7 @@ pub struct ModuleRegistryInnerVTable {
     get_interface_from_descriptor: fn(
         *const (),
         *const ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>>,
+    ) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
     get_interface_descriptors_from_name:
         fn(*const (), *const str) -> Vec<ModuleInterfaceDescriptor>,
     get_compatible_interface_descriptors: fn(
@@ -633,12 +651,9 @@ impl ModuleRegistryInnerVTable {
         register_loader: fn(
             *mut (),
             *const str,
-            &'static dyn ModuleLoader,
+            &'static ModuleLoader,
         ) -> Result<LoaderId, Box<dyn Error>>,
-        unregister_loader: fn(
-            *mut (),
-            LoaderId,
-        ) -> Result<&'static dyn ModuleLoader, Box<dyn Error>>,
+        unregister_loader: fn(*mut (), LoaderId) -> Result<&'static ModuleLoader, Box<dyn Error>>,
         register_loader_callback: fn(
             *mut (),
             *const str,
@@ -648,16 +663,16 @@ impl ModuleRegistryInnerVTable {
         get_loader_from_type: fn(
             *const (),
             *const str,
-        ) -> Result<&'static dyn ModuleLoader, Box<dyn Error>>,
+        ) -> Result<&'static ModuleLoader, Box<dyn Error>>,
         register_interface: fn(
             *mut (),
             *const ModuleInterfaceDescriptor,
-            Arc<dyn ModuleInterface>,
+            ModuleInterfaceArc,
         ) -> Result<InterfaceId, Box<dyn Error>>,
         unregister_interface: fn(
             *mut (),
             InterfaceId,
-        ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>>,
+        ) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
         register_interface_callback: fn(
             *mut (),
             *const ModuleInterfaceDescriptor,
@@ -670,8 +685,7 @@ impl ModuleRegistryInnerVTable {
         get_interface_from_descriptor: fn(
             *const (),
             *const ModuleInterfaceDescriptor,
-        )
-            -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>>,
+        ) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
         get_interface_descriptors_from_name: fn(
             *const (),
             *const str,
@@ -702,13 +716,13 @@ impl ModuleRegistryInnerVTable {
 
 /// Handle to a loader.
 #[derive(Debug)]
-pub struct LoaderHandle<'a, T: ModuleLoader + 'static> {
+pub struct LoaderHandle<'a, T: Borrow<ModuleLoader> + 'static> {
     id: LoaderId,
     loader: &'static T,
     registry: &'a ModuleRegistry,
 }
 
-impl<'a, T: ModuleLoader + 'static> LoaderHandle<'a, T> {
+impl<'a, T: Borrow<ModuleLoader> + 'static> LoaderHandle<'a, T> {
     /// Constructs a new `LoaderHandle` from from its raw parts.
     ///
     /// # Safety
@@ -736,7 +750,7 @@ impl<'a, T: ModuleLoader + 'static> LoaderHandle<'a, T> {
     }
 }
 
-impl<'a, T: ModuleLoader> Deref for LoaderHandle<'a, T> {
+impl<'a, T: Borrow<ModuleLoader>> Deref for LoaderHandle<'a, T> {
     type Target = T;
 
     #[inline]
@@ -745,7 +759,7 @@ impl<'a, T: ModuleLoader> Deref for LoaderHandle<'a, T> {
     }
 }
 
-impl<T: ModuleLoader> Drop for LoaderHandle<'_, T> {
+impl<T: Borrow<ModuleLoader>> Drop for LoaderHandle<'_, T> {
     #[inline]
     fn drop(&mut self) {
         // safety: `LoaderId` is a simple `usize`.
@@ -781,14 +795,14 @@ impl From<LoaderId> for usize {
 
 /// Handle to a interface.
 #[derive(Debug)]
-pub struct InterfaceHandle<'a, T: ModuleInterface + ?Sized> {
+pub struct InterfaceHandle<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> {
     id: InterfaceId,
-    interface: Arc<T>,
+    interface: DynArc<T, C>,
     registry: &'a ModuleRegistry,
     _phantom: PhantomData<fn() -> *const T>,
 }
 
-impl<'a, T: ModuleInterface + ?Sized> InterfaceHandle<'a, T> {
+impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> InterfaceHandle<'a, T, C> {
     /// Constructs a new `InterfaceHandle` from its raw parts.
     ///
     /// # Safety
@@ -798,7 +812,7 @@ impl<'a, T: ModuleInterface + ?Sized> InterfaceHandle<'a, T> {
     #[inline]
     pub unsafe fn from_raw_parts(
         id: InterfaceId,
-        interface: Arc<T>,
+        interface: DynArc<T, C>,
         registry: &'a ModuleRegistry,
     ) -> Self {
         Self {
@@ -811,7 +825,7 @@ impl<'a, T: ModuleInterface + ?Sized> InterfaceHandle<'a, T> {
 
     /// Splits the `InterfaceHandle` into its raw parts.
     #[inline]
-    pub fn into_raw_parts(self) -> (InterfaceId, Arc<T>, &'a ModuleRegistry) {
+    pub fn into_raw_parts(self) -> (InterfaceId, DynArc<T, C>, &'a ModuleRegistry) {
         let id = unsafe { std::ptr::read(&self.id) };
         let interface = unsafe { std::ptr::read(&self.interface) };
         let registry = self.registry;
@@ -819,17 +833,25 @@ impl<'a, T: ModuleInterface + ?Sized> InterfaceHandle<'a, T> {
 
         (id, interface, registry)
     }
-}
 
-impl<'a, T: ModuleInterface + ?Sized> Deref for InterfaceHandle<'a, T> {
-    type Target = Arc<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.interface
+    /// Clones the wrapped interface.
+    #[inline]
+    pub fn get_interface(&self) -> DynArc<T, C> {
+        self.interface.clone()
     }
 }
 
-impl<T: ModuleInterface + ?Sized> Drop for InterfaceHandle<'_, T> {
+impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> Deref
+    for InterfaceHandle<'a, T, C>
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.interface
+    }
+}
+
+impl<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> Drop for InterfaceHandle<'_, T, C> {
     fn drop(&mut self) {
         let id = unsafe { std::ptr::read(&self.id) };
         self.registry.enter_inner(move |inner| {
@@ -925,22 +947,22 @@ impl From<LoaderCallbackId> for usize {
 /// A loader removed callback.
 #[derive(Debug)]
 pub struct LoaderCallback {
-    inner: HeapFnOnce<(*mut ModuleRegistryInner, &'static dyn ModuleLoader), ()>,
+    inner: HeapFnOnce<(*mut ModuleRegistryInner, &'static ModuleLoader), ()>,
 }
 
-impl FnOnce<(*mut ModuleRegistryInner, &'static dyn ModuleLoader)> for LoaderCallback {
+impl FnOnce<(*mut ModuleRegistryInner, &'static ModuleLoader)> for LoaderCallback {
     type Output = ();
 
     #[inline]
     extern "rust-call" fn call_once(
         self,
-        args: (*mut ModuleRegistryInner, &'static dyn ModuleLoader),
+        args: (*mut ModuleRegistryInner, &'static ModuleLoader),
     ) -> Self::Output {
         self.inner.call_once(args)
     }
 }
 
-impl<F: FnOnce(*mut ModuleRegistryInner, &'static dyn ModuleLoader) + Send + Sync> From<Box<F>>
+impl<F: FnOnce(*mut ModuleRegistryInner, &'static ModuleLoader) + Send + Sync> From<Box<F>>
     for LoaderCallback
 {
     #[inline]
@@ -1018,22 +1040,22 @@ impl From<InterfaceCallbackId> for usize {
 /// A loader removed callback.
 #[derive(Debug)]
 pub struct InterfaceCallback {
-    inner: HeapFnOnce<(*mut ModuleRegistryInner, Arc<dyn ModuleInterface>), ()>,
+    inner: HeapFnOnce<(*mut ModuleRegistryInner, ModuleInterfaceArc), ()>,
 }
 
-impl FnOnce<(*mut ModuleRegistryInner, Arc<dyn ModuleInterface>)> for InterfaceCallback {
+impl FnOnce<(*mut ModuleRegistryInner, ModuleInterfaceArc)> for InterfaceCallback {
     type Output = ();
 
     #[inline]
     extern "rust-call" fn call_once(
         self,
-        args: (*mut ModuleRegistryInner, Arc<dyn ModuleInterface>),
+        args: (*mut ModuleRegistryInner, ModuleInterfaceArc),
     ) -> Self::Output {
         self.inner.call_once(args)
     }
 }
 
-impl<F: FnOnce(*mut ModuleRegistryInner, Arc<dyn ModuleInterface>) + Send + Sync> From<Box<F>>
+impl<F: FnOnce(*mut ModuleRegistryInner, ModuleInterfaceArc) + Send + Sync> From<Box<F>>
     for InterfaceCallback
 {
     #[inline]

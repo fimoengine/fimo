@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
-use fimo_module_core::rust_loader::{RustLoader, MODULE_LOADER_TYPE};
-use fimo_module_core::{DynArc, ModuleLoader};
+use fimo_module_core::rust::module_loader::{RustLoader, MODULE_LOADER_TYPE};
+use fimo_module_core::rust::ModuleLoader;
+use fimo_module_core::DynArc;
 use std::error::Error;
 use std::sync::Arc;
 
@@ -27,18 +28,23 @@ pub fn get_core_interface() -> Result<
 > {
     let module_loader = RustLoader::new();
     let core_module = unsafe {
-        module_loader.load_module_library(module_paths::core_module_path().unwrap().as_path())?
+        module_loader.load_module_raw(module_paths::core_module_path().unwrap().as_path())?
     };
     let core_instance =
         unsafe { core_interface::rust::cast_instance(core_module.create_instance()?)? };
     let core_descriptor = core_instance
+        .as_module_instance()
         .get_available_interfaces()
         .iter()
         .find(|interface| interface.name == "fimo-core")
         .unwrap();
 
     let interface = unsafe {
-        core_interface::rust::cast_interface(core_instance.get_interface(core_descriptor)?)?
+        core_interface::rust::cast_interface(
+            core_instance
+                .as_module_instance()
+                .get_interface(core_descriptor)?,
+        )?
     };
     Ok((core_instance, interface))
 }
@@ -50,34 +56,41 @@ pub fn get_tasks_interface(
 ) -> Result<Arc<dyn FimoTasks>, Box<dyn Error>> {
     let module_registry = core_interface.get_module_registry();
     let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
-    let tasks_module = unsafe {
-        loader.load_module_library(module_paths::tasks_module_path().unwrap().as_path())?
-    };
+    let tasks_module =
+        unsafe { loader.load_module_raw(module_paths::tasks_module_path().unwrap().as_path())? };
 
     let tasks_instance =
         unsafe { core_interface::rust::cast_instance(tasks_module.create_instance()?)? };
     let tasks_descriptor = tasks_instance
+        .as_module_instance()
         .get_available_interfaces()
         .iter()
         .find(|interface| interface.name == tasks_interface::INTERFACE_NAME)
         .unwrap();
     let core_descriptor = core_instance
+        .as_module_instance()
         .get_available_interfaces()
         .iter()
         .find(|interface| interface.name == "fimo-core")
         .unwrap();
 
-    let i = core_instance.get_interface(core_descriptor)?;
+    let i = core_instance
+        .as_module_instance()
+        .get_interface(core_descriptor)?;
     let handle = core_interface
         .get_module_registry()
         .register_interface(tasks_descriptor, i.clone())
         .unwrap();
     std::mem::forget(handle);
 
-    tasks_instance.set_dependency(core_descriptor, i)?;
+    tasks_instance
+        .as_module_instance()
+        .set_core_dependency(core_descriptor, i)?;
     unsafe {
         Ok(tasks_interface::rust::cast_interface(
-            tasks_instance.get_interface(tasks_descriptor)?,
+            tasks_instance
+                .as_module_instance()
+                .get_interface(tasks_descriptor)?,
         )?)
     }
 }
@@ -89,34 +102,41 @@ pub fn get_actix_interface(
 ) -> Result<DynArc<FimoActix, FimoActixCaster>, Box<dyn Error>> {
     let module_registry = core_interface.get_module_registry();
     let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
-    let actix_module = unsafe {
-        loader.load_module_library(module_paths::actix_module_path().unwrap().as_path())?
-    };
+    let actix_module =
+        unsafe { loader.load_module_raw(module_paths::actix_module_path().unwrap().as_path())? };
 
     let actix_instance =
         unsafe { core_interface::rust::cast_instance(actix_module.create_instance()?)? };
     let actix_descriptor = actix_instance
+        .as_module_instance()
         .get_available_interfaces()
         .iter()
         .find(|interface| interface.name == actix_interface::INTERFACE_NAME)
         .unwrap();
     let core_descriptor = core_instance
+        .as_module_instance()
         .get_available_interfaces()
         .iter()
         .find(|interface| interface.name == "fimo-core")
         .unwrap();
 
-    let i = core_instance.get_interface(core_descriptor)?;
+    let i = core_instance
+        .as_module_instance()
+        .get_interface(core_descriptor)?;
     let handle = core_interface
         .get_module_registry()
         .register_interface(actix_descriptor, i.clone())
         .unwrap();
     std::mem::forget(handle);
 
-    actix_instance.set_dependency(core_descriptor, i)?;
+    actix_instance
+        .as_module_instance()
+        .set_core_dependency(core_descriptor, i)?;
     unsafe {
         Ok(actix_interface::cast_interface(
-            actix_instance.get_interface(actix_descriptor)?,
+            actix_instance
+                .as_module_instance()
+                .get_interface(actix_descriptor)?,
         )?)
     }
 }

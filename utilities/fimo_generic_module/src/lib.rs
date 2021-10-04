@@ -1,18 +1,140 @@
 //! Implementation of a generic rust module.
 #![feature(maybe_uninit_extra)]
-use fimo_module_core::rust_loader::{RustModule, RustModuleExt};
-use fimo_module_core::{
-    Module, ModuleInfo, ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor, ModuleLoader,
-    ModulePtr,
+use fimo_module_core::rust::module_loader::RustModuleInnerCaster;
+use fimo_module_core::rust::{
+    module_loader::{RustModule, RustModuleInnerArc, RustModuleInnerVTable},
+    Module, ModuleArc, ModuleCaster, ModuleInstance, ModuleInstanceArc, ModuleInstanceCaster,
+    ModuleInstanceVTable, ModuleInterfaceArc, ModuleInterfaceWeak, ModuleVTable,
 };
+use fimo_module_core::{ModuleInfo, ModuleInterfaceDescriptor};
 use parking_lot::Mutex;
-use std::any::Any;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::mem::MaybeUninit;
-use std::path::Path;
+use std::ops::Deref;
 use std::sync::{Arc, Weak};
+
+const MODULE_VTABLE: ModuleVTable = ModuleVTable::new(
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+
+        // SAFETY: The value is initialized and lives as long as the instance.
+        unsafe {
+            module
+                .parent
+                .assume_init_ref()
+                .upgrade()
+                .unwrap()
+                .get_raw_ptr()
+        }
+    },
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+
+        // SAFETY: The value is initialized and lives as long as the instance.
+        unsafe {
+            module
+                .parent
+                .assume_init_ref()
+                .upgrade()
+                .unwrap()
+                .get_raw_type_id()
+        }
+    },
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+
+        // SAFETY: The value is initialized and lives as long as the instance.
+        unsafe {
+            &*(module
+                .parent
+                .assume_init_ref()
+                .upgrade()
+                .unwrap()
+                .get_module_path() as *const _)
+        }
+    },
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+        &module.module_info
+    },
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+
+        // SAFETY: The value is initialized and lives as long as the instance.
+        unsafe {
+            module
+                .parent
+                .assume_init_ref()
+                .upgrade()
+                .unwrap()
+                .get_module_loader()
+        }
+    },
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+        let parent = unsafe { module.parent.assume_init_ref().upgrade().unwrap() };
+        (module.instance_builder)(parent).map(|i| {
+            let (_, vtable) = (&**i).into_raw_parts();
+            let caster = ModuleInstanceCaster::new(vtable);
+            unsafe { ModuleInstanceArc::from_inner((i, caster)) }
+        })
+    },
+);
+
+const MODULE_INNER_VTABLE: RustModuleInnerVTable = RustModuleInnerVTable::new(
+    |ptr, parent| {
+        let module = unsafe { &mut *(ptr as *mut GenericModule) };
+        module.parent = MaybeUninit::new(parent);
+    },
+    |ptr| {
+        let module = unsafe { &*(ptr as *const GenericModule) };
+        &**module
+    },
+);
+
+const MODULE_INSTANCE_VTABLE: ModuleInstanceVTable = ModuleInstanceVTable::new(
+    |ptr| {
+        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
+        fimo_core_interface::fimo_module_instance_impl! {to_ptr, inst}
+    },
+    |_ptr| {
+        fimo_core_interface::fimo_module_instance_impl! {id}
+    },
+    |ptr| {
+        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
+        let parent = inst.parent.clone();
+        let (_, vtable) = (&**parent).into_raw_parts();
+        let caster = ModuleCaster::new(vtable);
+
+        unsafe { ModuleArc::from_inner((parent, caster)) }
+    },
+    |ptr| {
+        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
+        inst.get_available_interfaces()
+    },
+    |ptr, desc| {
+        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
+        let desc = unsafe { &*desc };
+
+        inst.get_interface(desc).map_err(|e| Box::new(e) as _)
+    },
+    |ptr, desc| {
+        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
+        let desc = unsafe { &*desc };
+
+        inst.get_interface_dependencies(desc)
+            .map_or_else(|e| Err(Box::new(e) as _), |dep| Ok(dep as _))
+    },
+    |ptr, desc, interface| {
+        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
+        let desc = unsafe { &*desc };
+
+        inst.set_dependency(desc, interface)
+            .map_err(|e| Box::new(e) as _)
+    },
+);
 
 /// A generic rust module.
 #[derive(Debug)]
@@ -28,7 +150,7 @@ pub struct GenericModuleInstance {
     public_interfaces: Vec<ModuleInterfaceDescriptor>,
     interfaces: Mutex<HashMap<ModuleInterfaceDescriptor, Interface>>,
     interface_dependencies: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
-    dependency_map: Mutex<HashMap<ModuleInterfaceDescriptor, Option<Weak<dyn ModuleInterface>>>>,
+    dependency_map: Mutex<HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>>,
     // Drop the parent for last
     parent: Arc<RustModule>,
 }
@@ -55,7 +177,7 @@ pub enum GetInterfaceError {
 
 struct Interface {
     builder: InterfaceBuilder,
-    ptr: Option<Weak<dyn ModuleInterface>>,
+    ptr: Option<ModuleInterfaceWeak>,
 }
 
 /// Builds a module instance.
@@ -63,18 +185,24 @@ pub type InstanceBuilder =
     fn(Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>>;
 
 type InterfaceBuilder = fn(
-    Arc<dyn ModuleInstance>,
-    &HashMap<ModuleInterfaceDescriptor, Option<Weak<dyn ModuleInterface>>>,
-) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>>;
+    Arc<GenericModuleInstance>,
+    &HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>,
+) -> Result<ModuleInterfaceArc, Box<dyn Error>>;
 
 impl GenericModule {
     /// Constructs a new `GenericModule`.
-    pub fn new(module_info: ModuleInfo, instance_builder: InstanceBuilder) -> Box<Self> {
-        Box::new(Self {
+    pub fn new_inner(
+        module_info: ModuleInfo,
+        instance_builder: InstanceBuilder,
+    ) -> RustModuleInnerArc {
+        let module = Arc::new(Self {
             module_info,
             parent: MaybeUninit::uninit(),
             instance_builder,
-        })
+        });
+
+        let caster = RustModuleInnerCaster::new(&MODULE_INNER_VTABLE);
+        unsafe { RustModuleInnerArc::from_inner((module, caster)) }
     }
 }
 
@@ -119,6 +247,12 @@ impl GenericModuleInstance {
         })
     }
 
+    /// Coerces the generic instance to a type-erased instance.
+    pub fn as_module_instance_arc(this: Arc<Self>) -> ModuleInstanceArc {
+        let caster = ModuleInstanceCaster::new(&MODULE_INSTANCE_VTABLE);
+        unsafe { ModuleInstanceArc::from_inner((this, caster)) }
+    }
+
     /// Extracts the available interfaces.
     pub fn get_available_interfaces(&self) -> &[ModuleInterfaceDescriptor] {
         self.public_interfaces.as_slice()
@@ -138,12 +272,12 @@ impl GenericModuleInstance {
         }
     }
 
-    /// Extracts an `Arc<dyn ModuleInterface>` to an interface,
+    /// Extracts an [`ModuleInterfaceArc`] to an interface,
     /// constructing it if it isn't alive.
     pub fn get_interface(
         &self,
         interface: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, GetInterfaceError> {
+    ) -> Result<ModuleInterfaceArc, GetInterfaceError> {
         let mut guard = self.interfaces.lock();
         let dep_map = self.dependency_map.lock();
         if let Some(int) = guard.get_mut(interface) {
@@ -167,7 +301,7 @@ impl GenericModuleInstance {
                     })
                 },
                 |arc| {
-                    int.ptr = Some(Arc::downgrade(&arc));
+                    int.ptr = Some(ModuleInterfaceArc::downgrade(&arc));
                     Ok(arc)
                 },
             )
@@ -182,11 +316,11 @@ impl GenericModuleInstance {
     pub fn set_dependency(
         &self,
         interface_desc: &ModuleInterfaceDescriptor,
-        interface: Arc<dyn ModuleInterface>,
+        interface: ModuleInterfaceArc,
     ) -> Result<(), UnknownInterfaceError> {
         let mut guard = self.dependency_map.lock();
         if let Some(dep) = guard.get_mut(interface_desc) {
-            *dep = Some(Arc::downgrade(&interface));
+            *dep = Some(ModuleInterfaceArc::downgrade(&interface));
             Ok(())
         } else {
             Err(UnknownInterfaceError {
@@ -196,137 +330,37 @@ impl GenericModuleInstance {
     }
 }
 
+impl Deref for GenericModule {
+    type Target = Module;
+
+    fn deref(&self) -> &Self::Target {
+        let self_ptr = self as *const _ as *const ();
+        let vtable = &MODULE_VTABLE;
+
+        unsafe { &*Module::from_raw_parts(self_ptr, vtable) }
+    }
+}
+
 impl Drop for GenericModule {
     fn drop(&mut self) {
         unsafe { self.parent.assume_init_drop() }
     }
 }
 
-impl Module for GenericModule {
-    fn get_raw_ptr(&self) -> ModulePtr {
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            self.parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_raw_ptr()
-        }
-    }
+impl Deref for GenericModuleInstance {
+    type Target = ModuleInstance;
 
-    fn get_raw_type_id(&self) -> u64 {
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            self.parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_raw_type_id()
-        }
-    }
+    fn deref(&self) -> &Self::Target {
+        let self_ptr = self as *const _ as *const ();
+        let vtable = &MODULE_INSTANCE_VTABLE;
 
-    fn get_module_path(&self) -> &Path {
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            &*(self
-                .parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_module_path() as *const _)
-        }
-    }
-
-    fn get_module_info(&self) -> &ModuleInfo {
-        &self.module_info
-    }
-
-    fn get_module_loader(&self) -> &'static (dyn ModuleLoader + 'static) {
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            self.parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_module_loader()
-        }
-    }
-
-    fn create_instance(&self) -> Result<Arc<dyn ModuleInstance>, Box<dyn Error>> {
-        let parent = unsafe { self.parent.assume_init_ref().upgrade().unwrap() };
-        (self.instance_builder)(parent).map(|i| i as _)
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
-        self
-    }
-}
-
-impl RustModuleExt for GenericModule {
-    fn set_weak_parent_handle(&mut self, module: Weak<RustModule>) {
-        self.parent = MaybeUninit::new(module);
-    }
-
-    fn as_module(&self) -> &(dyn Module + 'static) {
-        self
-    }
-
-    fn as_module_mut(&mut self) -> &mut (dyn Module + 'static) {
-        self
+        unsafe { &*ModuleInstance::from_raw_parts(self_ptr, vtable) }
     }
 }
 
 impl Debug for GenericModuleInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(GenericModuleInstance)")
-    }
-}
-
-impl ModuleInstance for GenericModuleInstance {
-    fimo_core_interface::fimo_module_instance_impl! {}
-
-    fn get_module(&self) -> Arc<dyn Module> {
-        self.parent.clone()
-    }
-
-    fn get_available_interfaces(&self) -> &[ModuleInterfaceDescriptor] {
-        self.get_available_interfaces()
-    }
-
-    fn get_interface(
-        &self,
-        interface: &ModuleInterfaceDescriptor,
-    ) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
-        self.get_interface(interface).map_err(|e| Box::new(e) as _)
-    }
-
-    fn get_interface_dependencies(
-        &self,
-        interface: &ModuleInterfaceDescriptor,
-    ) -> Result<&[ModuleInterfaceDescriptor], Box<dyn Error>> {
-        self.get_interface_dependencies(interface)
-            .map_err(|e| Box::new(e) as _)
-    }
-
-    fn set_dependency(
-        &self,
-        interface_desc: &ModuleInterfaceDescriptor,
-        interface: Arc<dyn ModuleInterface>,
-    ) -> Result<(), Box<dyn Error>> {
-        self.set_dependency(interface_desc, interface)
-            .map_err(|e| Box::new(e) as _)
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
-        self
     }
 }
 

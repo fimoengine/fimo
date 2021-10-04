@@ -12,8 +12,7 @@ use actix_web::Scope;
 use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
-use fimo_module_core::{DynArc, DynArcBase, DynArcCaster, ModuleInterface, ModulePtr};
-use std::sync::Arc;
+use fimo_module_core::{rust::ModuleInterfaceArc, DynArc, DynArcBase, DynArcCaster, ModulePtr};
 
 /// Name of the interface.
 pub const INTERFACE_NAME: &str = "fimo-actix";
@@ -21,28 +20,15 @@ pub const INTERFACE_NAME: &str = "fimo-actix";
 /// Implemented interface version.
 pub const INTERFACE_VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
 
-/// Implements part of the [fimo_module_core::ModuleInterface] trait
+/// Implements part of the [fimo_module_core::rust::ModuleInterface] vtable
 /// for the `fimo-actix` interface.
 #[macro_export]
 macro_rules! fimo_actix_interface_impl {
-    () => {
-        fn get_raw_ptr(&self) -> fimo_module_core::ModulePtr {
-            $crate::fimo_actix_interface_impl! {to_ptr, self}
-        }
-
-        fn get_raw_type_id(&self) -> u64 {
-            $crate::fimo_actix_interface_impl! {id}
-        }
-    };
     (id) => {
-        0x66696d6f0003
+        "fimo::interface::actix"
     };
-    (to_ptr, $interface: expr) => {
-        unsafe {
-            fimo_module_core::ModulePtr::Fat(std::mem::transmute(
-                $interface as &dyn $crate::FimoActixInner,
-            ))
-        }
+    (to_ptr, $vtable: expr) => {
+        fimo_module_core::ModulePtr::Slim(&$vtable as *const _ as *const u8)
     };
 }
 
@@ -94,16 +80,6 @@ pub struct FimoActix {
     //
     // Reading or writing to this field will cause UB.
     _inner: [()],
-}
-
-/// Type representing the fimo-actix interface.
-// Changing the trait is an abi break.
-pub trait FimoActixInner: Send + Sync {
-    /// Casts itself to a `DynArcBase`.
-    fn as_base(&self) -> &dyn DynArcBase;
-
-    /// Fetches the caster for the interface.
-    fn get_caster(&self) -> FimoActixCaster;
 }
 
 impl FimoActix {
@@ -523,7 +499,7 @@ unsafe impl Sync for Callback {}
 /// validity of the cast. The interface **must** be implemented using the
 /// [`fimo_actix_interface_impl!{}`] macro.
 pub unsafe fn cast_interface(
-    interface: Arc<dyn ModuleInterface>,
+    interface: ModuleInterfaceArc,
 ) -> std::result::Result<DynArc<FimoActix, FimoActixCaster>, std::io::Error> {
     #[allow(unused_unsafe)]
     if interface.get_raw_type_id() != fimo_actix_interface_impl! {id} {
@@ -540,14 +516,12 @@ pub unsafe fn cast_interface(
     }
 
     match interface.get_raw_ptr() {
-        ModulePtr::Fat(ptr) => {
-            std::mem::forget(interface);
-            let tasks_interface: &dyn FimoActixInner = std::mem::transmute(ptr);
+        ModulePtr::Slim(ptr) => {
+            let vtable = &*(ptr as *const FimoActixVTable);
+            let caster = FimoActixCaster::new(vtable);
 
-            let base = tasks_interface.as_base();
-            let caster = tasks_interface.get_caster();
-            let inner = (Arc::from_raw(base), caster);
-            Ok(DynArc::from_inner(inner))
+            let (base, _) = ModuleInterfaceArc::into_inner(interface);
+            Ok(DynArc::from_inner((base, caster)))
         }
         _ => Err(std::io::Error::new(
             std::io::ErrorKind::Other,

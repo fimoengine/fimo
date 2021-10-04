@@ -7,6 +7,7 @@ use crate::{DynArc, DynArcBase, DynArcCaster, ModulePtr};
 use libloading::Library;
 use parking_lot::Mutex;
 use serde::Deserialize;
+use std::borrow::Borrow;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
@@ -30,13 +31,13 @@ const MODULE_DECLARATION_NAME_WITH_NULL: &[u8] = b"RUST_MODULE_DECLARATION\0";
 
 /// Exports a module to enable its loading with the Rust loader.
 #[macro_export]
-macro_rules! _export_rust_module {
+macro_rules! export_rust_module {
     ($load_fn:expr) => {
         #[no_mangle]
         #[doc(hidden)]
         pub static RUST_MODULE_DECLARATION: $crate::rust::module_loader::ModuleDeclaration =
             $crate::rust::module_loader::ModuleDeclaration {
-                rustc_version: $crate::rust_loader::RUSTC_VERSION,
+                rustc_version: $crate::rust::module_loader::RUSTC_VERSION,
                 load_fn: $load_fn,
             };
     };
@@ -138,6 +139,12 @@ impl Deref for RustLoader {
     }
 }
 
+impl Borrow<ModuleLoader> for RustLoader {
+    fn borrow(&self) -> &ModuleLoader {
+        &**self
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct RawLoader {
     libs: Mutex<Vec<Arc<Library>>>,
@@ -217,6 +224,23 @@ impl RustModule {
     }
 }
 
+impl Deref for RustModule {
+    type Target = Module;
+
+    fn deref(&self) -> &Self::Target {
+        let self_ptr = self as *const _ as *const ();
+        let vtable = &MODULE_VTABLE;
+
+        unsafe { &*Module::from_raw_parts(self_ptr, vtable) }
+    }
+}
+
+impl Borrow<Module> for RustModule {
+    fn borrow(&self) -> &Module {
+        &**self
+    }
+}
+
 impl RustModuleInner {
     /// Sets the reference to the wrapping [RustModule].
     ///
@@ -256,7 +280,7 @@ pub struct RustModuleInnerVTable {
 
 impl RustModuleInnerVTable {
     /// Constructs a new `RustModuleInnerVTable`.
-    pub fn new(
+    pub const fn new(
         set_parent_handle: fn(*mut (), Weak<RustModule>),
         as_module: fn(*const ()) -> *const Module,
     ) -> Self {

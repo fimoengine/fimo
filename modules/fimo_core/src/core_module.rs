@@ -1,11 +1,9 @@
 //! Implementation of the module.
 use crate::CoreInterface;
-use fimo_core_interface::rust::{FimoCore, FimoCoreCaster, FimoCoreInner, FimoCoreVTable};
+use fimo_core_interface::rust::FimoCoreVTable;
 use fimo_ffi_core::ArrayString;
-use fimo_module_core::{DynArcBase, ModuleInfo, ModuleInstance, ModuleInterface, ModulePtr};
-use std::any::Any;
-use std::ops::Deref;
-use std::sync::Arc;
+use fimo_module_core::rust::{ModuleInstanceArc, ModuleInterfaceVTable};
+use fimo_module_core::ModuleInfo;
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -36,48 +34,22 @@ const VTABLE: FimoCoreVTable = FimoCoreVTable::new(
     },
 );
 
+const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
+    |_ptr| {
+        fimo_core_interface::fimo_core_interface_impl! {to_ptr, VTABLE}
+    },
+    |_ptr| {
+        fimo_core_interface::fimo_core_interface_impl! {id}
+    },
+    |ptr| {
+        let core = unsafe { &*(ptr as *const CoreWrapper) };
+        core.parent.clone()
+    },
+);
+
 struct CoreWrapper {
     interface: CoreInterface,
-    parent: Arc<dyn ModuleInstance>,
-}
-
-impl Deref for CoreWrapper {
-    type Target = FimoCore;
-
-    fn deref(&self) -> &Self::Target {
-        let self_ptr = self as *const _ as *const ();
-        let vtable = &VTABLE;
-
-        unsafe { &*FimoCore::from_raw_parts(self_ptr, vtable) }
-    }
-}
-
-impl ModuleInterface for CoreWrapper {
-    fimo_core_interface::fimo_core_interface_impl! {}
-
-    fn get_instance(&self) -> Arc<dyn ModuleInstance> {
-        self.parent.clone()
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
-        self
-    }
-}
-
-impl FimoCoreInner for CoreWrapper {
-    fn as_base(&self) -> &dyn DynArcBase {
-        self
-    }
-
-    fn get_caster(&self) -> FimoCoreCaster {
-        let core = &**self;
-        let (_, vtable) = core.into_raw_parts();
-        FimoCoreCaster::new(vtable)
-    }
+    parent: ModuleInstanceArc,
 }
 
 #[allow(dead_code)]

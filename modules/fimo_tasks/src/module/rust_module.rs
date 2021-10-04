@@ -1,22 +1,31 @@
-use crate::module::{construct_module_info, get_tasks_interface_descriptor, TaskInterface};
+use crate::module::{
+    construct_module_info, get_tasks_interface_descriptor, TaskInterface, INTERFACE_VTABLE,
+};
 use crate::TaskRuntime;
 use fimo_core_interface::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
 };
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
-use fimo_module_core::rust_loader::{RustModule, RustModuleExt};
-use fimo_module_core::{ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor};
+use fimo_module_core::rust::module_loader::{RustModule, RustModuleInnerArc};
+use fimo_module_core::rust::ModuleInterfaceCaster;
+use fimo_module_core::{
+    rust::{ModuleInterfaceArc, ModuleInterfaceWeak},
+    ModuleInterfaceDescriptor,
+};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-fimo_module_core::export_rust_module! {fimo_ffi_core::TypeWrapper(construct_module)}
+fimo_module_core::export_rust_module! {construct_module}
 
 #[allow(dead_code, improper_ctypes_definitions)]
-extern "C-unwind" fn construct_module() -> Result<Box<dyn RustModuleExt>, Box<dyn Error>> {
-    Ok(GenericModule::new(construct_module_info(), build_instance))
+extern "C" fn construct_module() -> Result<RustModuleInnerArc, Box<dyn Error>> {
+    Ok(GenericModule::new_inner(
+        construct_module_info(),
+        build_instance,
+    ))
 }
 
 fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>> {
@@ -38,12 +47,12 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
 }
 
 fn build_tasks_interface(
-    instance: Arc<dyn ModuleInstance>,
-    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<Weak<dyn ModuleInterface>>>,
-) -> Result<Arc<dyn ModuleInterface>, Box<dyn Error>> {
+    instance: Arc<GenericModuleInstance>,
+    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>,
+) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
     let core_interface = dep_map
         .get(&core_descriptor())
-        .map(|i| Weak::upgrade(i.as_ref().unwrap()));
+        .map(|i| i.as_ref().unwrap().upgrade());
 
     if core_interface.is_none() || core_interface.as_ref().unwrap().is_none() {
         return Err(Box::new(std::io::Error::new(
@@ -90,8 +99,11 @@ fn build_tasks_interface(
         .unwrap()
         .unwrap_or(ALLOCATED_TASKS);
 
-    Ok(Arc::new(TaskInterface {
+    let base = Arc::new(TaskInterface {
         runtime: TaskRuntime::new(num_cores, max_tasks, allocated_tasks),
-        parent: instance,
-    }))
+        parent: GenericModuleInstance::as_module_instance_arc(instance),
+    });
+
+    let caster = ModuleInterfaceCaster::new(&INTERFACE_VTABLE);
+    unsafe { Ok(ModuleInterfaceArc::from_inner((base, caster))) }
 }
