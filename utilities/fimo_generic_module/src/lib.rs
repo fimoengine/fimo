@@ -6,7 +6,7 @@ use fimo_module_core::rust::{
     Module, ModuleArc, ModuleCaster, ModuleInstance, ModuleInstanceArc, ModuleInstanceCaster,
     ModuleInstanceVTable, ModuleInterfaceArc, ModuleInterfaceWeak, ModuleVTable,
 };
-use fimo_module_core::{ModuleInfo, ModuleInterfaceDescriptor};
+use fimo_module_core::{ModuleInfo, ModuleInterfaceDescriptor, ModulePtr};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::error::Error;
@@ -95,13 +95,8 @@ const MODULE_INNER_VTABLE: RustModuleInnerVTable = RustModuleInnerVTable::new(
 );
 
 const MODULE_INSTANCE_VTABLE: ModuleInstanceVTable = ModuleInstanceVTable::new(
-    |ptr| {
-        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
-        fimo_core_interface::fimo_module_instance_impl! {to_ptr, inst}
-    },
-    |_ptr| {
-        fimo_core_interface::fimo_module_instance_impl! {id}
-    },
+    |_ptr| ModulePtr::Slim(&MODULE_INSTANCE_VTABLE as *const _ as *const u8),
+    |_ptr| "fimo::module_instance::generic",
     |ptr| {
         let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
         let parent = inst.parent.clone();
@@ -146,7 +141,6 @@ pub struct GenericModule {
 
 /// A generic rust module instance.
 pub struct GenericModuleInstance {
-    pkg_versions: HashMap<String, String>,
     public_interfaces: Vec<ModuleInterfaceDescriptor>,
     interfaces: Mutex<HashMap<ModuleInterfaceDescriptor, Interface>>,
     interface_dependencies: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
@@ -210,7 +204,6 @@ impl GenericModuleInstance {
     /// Constructs a new `GenericModuleInstance`.
     pub fn new(
         parent: Arc<RustModule>,
-        pkg_versions: HashMap<String, String>,
         interfaces: HashMap<
             ModuleInterfaceDescriptor,
             (InterfaceBuilder, Vec<ModuleInterfaceDescriptor>),
@@ -238,7 +231,6 @@ impl GenericModuleInstance {
         }
 
         Arc::new(Self {
-            pkg_versions,
             public_interfaces,
             interfaces: Mutex::new(interface),
             interface_dependencies,
@@ -361,14 +353,6 @@ impl Deref for GenericModuleInstance {
 impl Debug for GenericModuleInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(GenericModuleInstance)")
-    }
-}
-
-fimo_core_interface::fimo_module_instance_impl! {trait_impl, GenericModuleInstance}
-
-impl fimo_core_interface::rust::FimoModuleInstanceExt for GenericModuleInstance {
-    fn get_pkg_version(&self, pkg: &str) -> Option<&str> {
-        self.pkg_versions.get(pkg).map(|v| v.as_str())
     }
 }
 

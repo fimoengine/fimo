@@ -3,7 +3,7 @@ use crate::FimoActixServer;
 use fimo_actix_interface::FimoActixVTable;
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::rust::ModuleInterfaceVTable;
-use fimo_module_core::{rust::ModuleInstanceArc, ModuleInfo, ModuleInterfaceDescriptor};
+use fimo_module_core::{rust::ModuleInstanceArc, ModuleInfo};
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -65,6 +65,9 @@ const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
     |_ptr| {
         fimo_actix_interface::fimo_actix_interface_impl! {id}
     },
+    |_ptr| {
+        fimo_actix_interface::fimo_actix_interface_impl! {version}
+    },
     |ptr| {
         let interface = unsafe { &*(ptr as *const FimoActixInterface) };
         interface.parent.clone()
@@ -85,16 +88,5 @@ fn construct_module_info() -> ModuleInfo {
                 String::from(&fimo_actix_interface::INTERFACE_VERSION).as_bytes(),
             )
         },
-    }
-}
-
-#[allow(dead_code)]
-fn get_actix_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe {
-            ArrayString::from_utf8_unchecked(fimo_actix_interface::INTERFACE_NAME.as_bytes())
-        },
-        version: fimo_actix_interface::INTERFACE_VERSION,
-        extensions: Default::default(),
     }
 }

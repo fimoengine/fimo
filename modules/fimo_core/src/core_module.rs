@@ -12,10 +12,6 @@ mod rust_module;
 pub const MODULE_NAME: &str = "fimo_core";
 
 const VTABLE: FimoCoreVTable = FimoCoreVTable::new(
-    |ptr| {
-        let wrapper = unsafe { &*(ptr as *const CoreWrapper) };
-        wrapper.interface.get_interface_version()
-    },
     |ptr, extension| {
         let wrapper = unsafe { &*(ptr as *const CoreWrapper) };
         let extension = unsafe { &*extension };
@@ -40,6 +36,9 @@ const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
     },
     |_ptr| {
         fimo_core_interface::fimo_core_interface_impl! {id}
+    },
+    |_ptr| {
+        fimo_core_interface::fimo_core_interface_impl! {version}
     },
     |ptr| {
         let core = unsafe { &*(ptr as *const CoreWrapper) };

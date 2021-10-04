@@ -1,6 +1,4 @@
-use crate::module::{
-    construct_module_info, get_tasks_interface_descriptor, TaskInterface, INTERFACE_VTABLE,
-};
+use crate::module::{construct_module_info, TaskInterface, INTERFACE_VTABLE};
 use crate::TaskRuntime;
 use fimo_core_interface::rust::{
     build_interface_descriptor as core_descriptor,
@@ -13,6 +11,7 @@ use fimo_module_core::{
     rust::{ModuleInterfaceArc, ModuleInterfaceWeak},
     ModuleInterfaceDescriptor,
 };
+use fimo_tasks_interface::rust::build_interface_descriptor as tasks_descriptor;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind;
@@ -29,7 +28,7 @@ extern "C" fn construct_module() -> Result<RustModuleInnerArc, Box<dyn Error>> {
 }
 
 fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>> {
-    let core_desc = get_tasks_interface_descriptor();
+    let core_desc = tasks_descriptor();
 
     let mut interfaces = HashMap::new();
     interfaces.insert(
@@ -37,13 +36,7 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
         (build_tasks_interface as _, vec![core_descriptor()]),
     );
 
-    let mut pkg_versions = HashMap::new();
-    pkg_versions.insert(
-        String::from(fimo_tasks_interface::rust::PKG_NAME),
-        String::from(fimo_tasks_interface::rust::PKG_VERSION),
-    );
-
-    Ok(GenericModuleInstance::new(parent, pkg_versions, interfaces))
+    Ok(GenericModuleInstance::new(parent, interfaces))
 }
 
 fn build_tasks_interface(

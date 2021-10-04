@@ -11,7 +11,6 @@
     rustdoc::broken_intra_doc_links
 )]
 use fimo_core_interface::rust::{FimoCore, FimoCoreVTable, INTERFACE_VERSION};
-use fimo_version_core::Version;
 use std::any::Any;
 use std::ops::Deref;
 
@@ -24,10 +23,6 @@ pub mod settings_registry;
 pub use core_module::MODULE_NAME;
 
 const VTABLE: FimoCoreVTable = FimoCoreVTable::new(
-    |ptr| {
-        let interface = unsafe { &*(ptr as *const CoreInterface) };
-        CoreInterface::get_interface_version(interface)
-    },
     |ptr, extension| {
         let interface = unsafe { &*(ptr as *const CoreInterface) };
         let extension = unsafe { &*extension };
@@ -57,11 +52,6 @@ impl CoreInterface {
             module_registry: module_registry::ModuleRegistry::new(),
             settings_registry: settings_registry::SettingsRegistry::new(),
         }
-    }
-
-    /// Extracts the interface version.
-    pub fn get_interface_version(&self) -> Version {
-        INTERFACE_VERSION
     }
 
     /// Extracts a reference to an extension from the interface.

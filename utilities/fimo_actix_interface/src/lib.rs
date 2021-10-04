@@ -12,7 +12,11 @@ use actix_web::Scope;
 use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
-use fimo_module_core::{rust::ModuleInterfaceArc, DynArc, DynArcBase, DynArcCaster, ModulePtr};
+use fimo_ffi_core::ArrayString;
+use fimo_module_core::{
+    rust::ModuleInterfaceArc, DynArc, DynArcBase, DynArcCaster, ModuleInterfaceDescriptor,
+    ModulePtr,
+};
 
 /// Name of the interface.
 pub const INTERFACE_NAME: &str = "fimo-actix";
@@ -26,6 +30,9 @@ pub const INTERFACE_VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::U
 macro_rules! fimo_actix_interface_impl {
     (id) => {
         "fimo::interface::actix"
+    };
+    (version) => {
+        $crate::INTERFACE_VERSION
     };
     (to_ptr, $vtable: expr) => {
         fimo_module_core::ModulePtr::Slim(&$vtable as *const _ as *const u8)
@@ -509,10 +516,15 @@ pub unsafe fn cast_interface(
         ));
     }
 
-    // ensure that the versions match.
-    match fimo_core_interface::rust::cast_instance(interface.get_instance()) {
-        Ok(_) => {}
-        Err(e) => return Err(e),
+    if !INTERFACE_VERSION.is_compatible(&interface.get_version()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Versions incompatible. Requested {}, available {}.",
+                INTERFACE_VERSION,
+                interface.get_version()
+            ),
+        ));
     }
 
     match interface.get_raw_ptr() {
@@ -527,5 +539,14 @@ pub unsafe fn cast_interface(
             std::io::ErrorKind::Other,
             "Pointer layout mismatch",
         )),
+    }
+}
+
+/// Builds the [`ModuleInterfaceDescriptor`] for the interface.
+pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
+    ModuleInterfaceDescriptor {
+        name: unsafe { ArrayString::from_utf8_unchecked(INTERFACE_NAME.as_bytes()) },
+        version: INTERFACE_VERSION,
+        extensions: Default::default(),
     }
 }

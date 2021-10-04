@@ -1,9 +1,7 @@
 use crate::module::core_bindings::scope_builder;
-use crate::module::{
-    construct_module_info, get_actix_interface_descriptor, FimoActixInterface, INTERFACE_VTABLE,
-};
+use crate::module::{construct_module_info, FimoActixInterface, INTERFACE_VTABLE};
 use crate::FimoActixServer;
-use fimo_actix_interface::ScopeBuilder;
+use fimo_actix_interface::{build_interface_descriptor as actix_descriptor, ScopeBuilder};
 use fimo_core_interface::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
@@ -32,7 +30,7 @@ extern "C" fn construct_module() -> Result<RustModuleInnerArc, Box<dyn Error>> {
 }
 
 fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>> {
-    let core_desc = get_actix_interface_descriptor();
+    let core_desc = actix_descriptor();
 
     let mut interfaces = HashMap::new();
     interfaces.insert(
@@ -40,8 +38,7 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
         (build_tasks_interface as _, vec![core_descriptor()]),
     );
 
-    let pkg_versions = HashMap::new();
-    Ok(GenericModuleInstance::new(parent, pkg_versions, interfaces))
+    Ok(GenericModuleInstance::new(parent, interfaces))
 }
 
 fn build_tasks_interface(
