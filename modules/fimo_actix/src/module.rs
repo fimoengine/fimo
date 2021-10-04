@@ -1,12 +1,9 @@
 //! Implementation of the module.
 use crate::FimoActixServer;
-use fimo_actix_interface::{FimoActixCaster, FimoActixInner, FimoActixVTable};
+use fimo_actix_interface::FimoActixVTable;
 use fimo_ffi_core::ArrayString;
-use fimo_module_core::{
-    DynArcBase, ModuleInfo, ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor,
-};
-use std::any::Any;
-use std::sync::Arc;
+use fimo_module_core::rust::ModuleInterfaceVTable;
+use fimo_module_core::{rust::ModuleInstanceArc, ModuleInfo, ModuleInterfaceDescriptor};
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -61,35 +58,22 @@ const VTABLE: FimoActixVTable = FimoActixVTable::new(
     },
 );
 
+const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
+    |_ptr| {
+        fimo_actix_interface::fimo_actix_interface_impl! {to_ptr, VTABLE}
+    },
+    |_ptr| {
+        fimo_actix_interface::fimo_actix_interface_impl! {id}
+    },
+    |ptr| {
+        let interface = unsafe { &*(ptr as *const FimoActixInterface) };
+        interface.parent.clone()
+    },
+);
+
 struct FimoActixInterface {
     server: FimoActixServer<String>,
-    parent: Arc<dyn ModuleInstance>,
-}
-
-impl FimoActixInner for FimoActixInterface {
-    fn as_base(&self) -> &dyn DynArcBase {
-        self
-    }
-
-    fn get_caster(&self) -> FimoActixCaster {
-        FimoActixCaster::new(&VTABLE)
-    }
-}
-
-impl ModuleInterface for FimoActixInterface {
-    fimo_actix_interface::fimo_actix_interface_impl! {}
-
-    fn get_instance(&self) -> Arc<dyn ModuleInstance> {
-        Arc::clone(&self.parent)
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
-        self
-    }
+    parent: ModuleInstanceArc,
 }
 
 #[allow(dead_code)]

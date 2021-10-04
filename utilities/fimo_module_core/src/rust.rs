@@ -1,5 +1,8 @@
 //! Definition of Rust modules.
-use crate::{DynArc, DynArcBase, DynArcCaster, ModuleInfo, ModuleInterfaceDescriptor, ModulePtr};
+use crate::{
+    DynArc, DynArcBase, DynArcCaster, DynWeak, ModuleInfo, ModuleInterfaceDescriptor, ModulePtr,
+};
+use std::borrow::Borrow;
 use std::error::Error;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -38,6 +41,15 @@ pub type ModuleInstanceArc = DynArc<ModuleInstance, ModuleInstanceCaster>;
 /// A [`DynArc`] for a [`ModuleInterface`].
 pub type ModuleInterfaceArc = DynArc<ModuleInterface, ModuleInterfaceCaster>;
 
+/// A [`DynWeak`] for a [`Module`].
+pub type ModuleWeak = DynWeak<Module, ModuleCaster>;
+
+/// A [`DynWeak`] for a [`ModuleInstance`].
+pub type ModuleInstanceWeak = DynWeak<ModuleInstance, ModuleInstanceCaster>;
+
+/// A [`DynWeak`] for a [`ModuleInterface`].
+pub type ModuleInterfaceWeak = DynWeak<ModuleInterface, ModuleInterfaceCaster>;
+
 /// A [`Result`] alias.
 pub type ModuleResult<T> = Result<T, Box<dyn Error>>;
 
@@ -54,7 +66,7 @@ impl<T: 'static> ModuleObject<T> {
 
         (ptr, vtable)
     }
-    
+
     /// Splits the reference into a data- and vtable- pointer.
     #[inline]
     pub fn into_raw_parts_mut(&mut self) -> (*mut (), &'static T) {
@@ -241,22 +253,22 @@ impl ModuleInstance {
     /// Multiple calls with the same interface will retrieve the same
     /// instance if is has not already been dropped.
     #[inline]
-    pub fn get_interface<D: AsRef<ModuleInterfaceDescriptor>>(
+    pub fn get_interface<D: Borrow<ModuleInterfaceDescriptor>>(
         &self,
         desc: D,
     ) -> ModuleResult<ModuleInterfaceArc> {
         let (ptr, vtable) = self.into_raw_parts();
-        (vtable.get_interface)(ptr, desc.as_ref())
+        (vtable.get_interface)(ptr, desc.borrow())
     }
 
     /// Fetches the dependencies of an interface.
     #[inline]
-    pub fn get_interface_dependencies<D: AsRef<ModuleInterfaceDescriptor>>(
+    pub fn get_interface_dependencies<D: Borrow<ModuleInterfaceDescriptor>>(
         &self,
         desc: D,
     ) -> ModuleResult<&[ModuleInterfaceDescriptor]> {
         let (ptr, vtable) = self.into_raw_parts();
-        (vtable.get_interface_dependencies)(ptr, desc.as_ref()).map(|dep| unsafe { &*dep })
+        (vtable.get_interface_dependencies)(ptr, desc.borrow()).map(|dep| unsafe { &*dep })
     }
 
     /// Provides an core interface to the module instance.
@@ -265,13 +277,13 @@ impl ModuleInstance {
     ///
     /// May return an error if the instance does not require the interface.
     #[inline]
-    pub fn set_core_dependency<D: AsRef<ModuleInterfaceDescriptor>>(
+    pub fn set_core_dependency<D: Borrow<ModuleInterfaceDescriptor>>(
         &self,
         desc: D,
         interface: ModuleInterfaceArc,
     ) -> ModuleResult<()> {
         let (ptr, vtable) = self.into_raw_parts();
-        (vtable.set_core_dependency)(ptr, desc.as_ref(), interface)
+        (vtable.set_core_dependency)(ptr, desc.borrow(), interface)
     }
 }
 
@@ -433,6 +445,21 @@ pub struct ModuleInterfaceVTable {
     get_raw_ptr: fn(*const ()) -> ModulePtr,
     get_raw_type_id: fn(*const ()) -> *const str,
     get_instance: fn(*const ()) -> ModuleInstanceArc,
+}
+
+impl ModuleInterfaceVTable {
+    /// Constructs a new `ModuleInterfaceVTable`.
+    pub const fn new(
+        get_raw_ptr: fn(*const ()) -> ModulePtr,
+        get_raw_type_id: fn(*const ()) -> *const str,
+        get_instance: fn(*const ()) -> ModuleInstanceArc,
+    ) -> Self {
+        Self {
+            get_raw_ptr,
+            get_raw_type_id,
+            get_instance,
+        }
+    }
 }
 
 /// [`DynArc`] caster.

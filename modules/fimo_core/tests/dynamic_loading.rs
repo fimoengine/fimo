@@ -1,7 +1,6 @@
 use ci::rust::settings_registry::{SettingsEvent, SettingsItem, SettingsRegistryPath};
 use fimo_core_interface as ci;
-use fimo_module_core as module;
-use fimo_module_core::ModuleLoader;
+use fimo_module_core::rust as module;
 use module_paths::core_module_path;
 use std::alloc::System;
 use std::collections::BTreeMap;
@@ -17,8 +16,8 @@ static A: System = System;
 fn load_dynamic() -> Result<(), Box<dyn Error>> {
     let core_path = core_module_path()?;
 
-    let module_loader = module::rust_loader::RustLoader::new();
-    let core_module = unsafe { module_loader.load_module_library(core_path.as_path())? };
+    let module_loader = module::module_loader::RustLoader::new();
+    let core_module = unsafe { module_loader.load_module_raw(core_path.as_path())? };
 
     println!(
         "Core info: {}, Path: {}",
@@ -26,7 +25,8 @@ fn load_dynamic() -> Result<(), Box<dyn Error>> {
         core_module.get_module_path().display()
     );
 
-    let core_instance = unsafe { ci::rust::cast_instance(core_module.create_instance()?)? };
+    let fimo_instance = unsafe { ci::rust::cast_instance(core_module.create_instance()?)? };
+    let core_instance = fimo_instance.as_module_instance();
 
     println!(
         "Available interfaces: {:?}",

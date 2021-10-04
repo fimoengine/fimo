@@ -309,6 +309,16 @@ impl<T: DynArcBase + ?Sized, C: DynArcCaster<T>> DynWeak<T, C> {
         }
     }
 
+    /// Attempts to upgrade the `DynWeak` pointer to a [`DynArc`].
+    ///
+    /// Returns [`None`] if the inner value has since been dropped.
+    #[inline]
+    pub fn upgrade(&self) -> Option<DynArc<T, C>> {
+        self.inner.upgrade().map(|inner | {
+            unsafe { DynArc::from_inner((inner, self.caster)) }
+        })
+    }
+
     /// Fetches the number of [`DynArc`] pointers pointing to this allocation.
     #[inline]
     pub fn strong_count(&self) -> usize {

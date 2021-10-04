@@ -2,12 +2,12 @@
 use crate::TaskRuntime;
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{
-    ModuleInfo, ModuleInstance, ModuleInterface, ModuleInterfaceDescriptor, ModulePtr,
+    rust::{ModuleInstanceArc, ModuleInterfaceVTable},
+    ModuleInfo, ModuleInterfaceDescriptor,
 };
 use fimo_tasks_interface::rust::{FimoTasks, TaskRuntimeInner};
 use fimo_version_core::Version;
 use std::any::Any;
-use std::sync::Arc;
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -15,9 +15,23 @@ mod rust_module;
 /// Name of the module.
 pub const MODULE_NAME: &str = "fimo_tasks";
 
+const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
+    |ptr| {
+        let interface = unsafe { &*(ptr as *const TaskInterface) };
+        fimo_tasks_interface::fimo_tasks_interface_impl! {to_ptr, interface}
+    },
+    |_ptr| {
+        fimo_tasks_interface::fimo_tasks_interface_impl! {id}
+    },
+    |ptr| {
+        let interface = unsafe { &*(ptr as *const TaskInterface) };
+        interface.parent.clone()
+    },
+);
+
 struct TaskInterface {
     runtime: TaskRuntime,
-    parent: Arc<dyn ModuleInstance>,
+    parent: ModuleInstanceArc,
 }
 
 impl FimoTasks for TaskInterface {
@@ -43,22 +57,6 @@ impl FimoTasks for TaskInterface {
     }
 
     fn as_any_mut(&mut self) -> &mut (dyn Any + 'static) {
-        self
-    }
-}
-
-impl ModuleInterface for TaskInterface {
-    fimo_tasks_interface::fimo_tasks_interface_impl! {}
-
-    fn get_instance(&self) -> Arc<dyn ModuleInstance> {
-        Arc::clone(&self.parent)
-    }
-
-    fn as_any(&self) -> &(dyn Any + Send + Sync + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + Send + Sync + 'static) {
         self
     }
 }

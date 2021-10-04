@@ -1,5 +1,8 @@
 //! Definition of the Rust `fimo-tasks` interface.
-use fimo_module_core::{ModuleInterface, ModulePtr};
+use fimo_module_core::{
+    rust::{ModuleInterface, ModuleInterfaceArc},
+    ModulePtr,
+};
 use fimo_version_core::Version;
 use std::any::Any;
 use std::sync::Arc;
@@ -26,17 +29,8 @@ pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 /// for the `fimo-tasks` interface.
 #[macro_export]
 macro_rules! fimo_tasks_interface_impl {
-    () => {
-        fn get_raw_ptr(&self) -> ModulePtr {
-            $crate::fimo_tasks_interface_impl! {to_ptr, self}
-        }
-
-        fn get_raw_type_id(&self) -> u64 {
-            $crate::fimo_tasks_interface_impl! {id}
-        }
-    };
     (id) => {
-        0x66696d6f0002
+        "fimo::interface::tasks"
     };
     (to_ptr, $interface: expr) => {
         unsafe {
@@ -112,14 +106,10 @@ pub fn initialize_local_bindings(runtime: &TaskRuntime) {
 /// validity of the cast. The interface **must** be implemented using the
 /// [`fimo_tasks_interface_impl!{}`] macro.
 pub unsafe fn cast_interface(
-    interface: Arc<dyn ModuleInterface>,
+    interface: ModuleInterfaceArc,
 ) -> std::result::Result<Arc<dyn FimoTasks>, std::io::Error> {
-    static_assertions::assert_eq_size!(
-        &dyn ModuleInterface,
-        &dyn FimoTasks,
-        (*const u8, *const u8)
-    );
-    static_assertions::assert_eq_align!(&dyn ModuleInterface, &dyn FimoTasks,);
+    static_assertions::assert_eq_size!(&ModuleInterface, &dyn FimoTasks, (*const u8, *const u8));
+    static_assertions::assert_eq_align!(&ModuleInterface, &dyn FimoTasks,);
 
     #[allow(unused_unsafe)]
     if interface.get_raw_type_id() != fimo_tasks_interface_impl! {id} {
