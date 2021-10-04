@@ -340,11 +340,13 @@ pub(crate) mod box_error {
         }
 
         #[inline]
+        #[allow(clippy::box_collection)]
         pub fn display_info(&self) -> Box<String> {
             Box::new(format!("{}", unsafe { self.error.as_ref() }))
         }
 
         #[inline]
+        #[allow(clippy::box_collection)]
         pub fn debug_info(&self) -> Box<String> {
             Box::new(format!("{:?}", unsafe { self.error.as_ref() }))
         }
@@ -426,11 +428,13 @@ pub(crate) mod box_error {
         }
 
         #[inline]
+        #[allow(clippy::box_collection)]
         pub fn display_info(&self) -> Box<String> {
             Box::new(format!("{}", &self.error))
         }
 
         #[inline]
+        #[allow(clippy::box_collection)]
         pub fn debug_info(&self) -> Box<String> {
             Box::new(format!("{:?}", &self.error))
         }

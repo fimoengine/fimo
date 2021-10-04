@@ -25,8 +25,7 @@ pub const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Name of the package the library was linked with.
 pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
-/// Implements part of the [fimo_module_core::ModuleInterface] trait
-/// for the `fimo-tasks` interface.
+/// Implements part of the [`ModuleInterface`] vtable for the `fimo-tasks` interface.
 #[macro_export]
 macro_rules! fimo_tasks_interface_impl {
     (id) => {
