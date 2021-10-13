@@ -9,6 +9,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+extern crate static_assertions as sa;
 use fimo_actix_interface::actix::dev::Server;
 use fimo_actix_interface::actix::rt::{Arbiter, System};
 use fimo_actix_interface::actix::{App, HttpServer, Scope};
@@ -25,11 +26,14 @@ use std::sync::mpsc::Sender;
 pub mod module;
 
 /// Server manager
-pub struct FimoActixServer<A: 'static + ToSocketAddrs + Sync> {
+pub struct FimoActixServer<A: 'static + ToSocketAddrs + Send + Sync> {
     inner: Mutex<ActixServerInner<A>>,
 }
 
-struct ActixServerInner<A: 'static + ToSocketAddrs + Sync> {
+// use `String` as a catch-all.
+sa::assert_impl_all!(FimoActixServer<String>: Send, Sync);
+
+struct ActixServerInner<A: 'static + ToSocketAddrs + Send + Sync> {
     address: A,
     arbiter: Arbiter,
     status: ServerStatus,
@@ -41,7 +45,7 @@ struct ActixServerInner<A: 'static + ToSocketAddrs + Sync> {
     callbacks: BTreeMap<usize, Callback>,
 }
 
-impl<A: 'static + ToSocketAddrs + Sync> FimoActixServer<A> {
+impl<A: 'static + ToSocketAddrs + Send + Sync> FimoActixServer<A> {
     /// Constructs a new `FimoActixServer`.
     ///
     /// The server starts after [`FimoActixServer::start`] is called.
@@ -124,13 +128,13 @@ impl<A: 'static + ToSocketAddrs + Sync> FimoActixServer<A> {
     }
 }
 
-impl<A: 'static + ToSocketAddrs + Sync> std::fmt::Debug for FimoActixServer<A> {
+impl<A: 'static + ToSocketAddrs + Send + Sync> std::fmt::Debug for FimoActixServer<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(FimoActixServer)")
     }
 }
 
-impl<A: 'static + ToSocketAddrs + Sync> ActixServerInner<A> {
+impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
     fn new(address: A) -> Self {
         let arbiter = std::thread::spawn(|| {
             let _ = System::new();
@@ -358,7 +362,7 @@ impl<A: 'static + ToSocketAddrs + Sync> ActixServerInner<A> {
     }
 }
 
-impl<A: 'static + ToSocketAddrs + Sync> std::fmt::Debug for ActixServerInner<A> {
+impl<A: 'static + ToSocketAddrs + Send + Sync> std::fmt::Debug for ActixServerInner<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(ActixServerInner)")
     }

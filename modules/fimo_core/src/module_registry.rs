@@ -111,6 +111,8 @@ pub struct ModuleRegistry {
     inner: parking_lot::Mutex<ModuleRegistryInner>,
 }
 
+sa::assert_impl_all!(ModuleRegistry: Send, Sync);
+
 impl ModuleRegistry {
     /// Constructs a new `ModuleRegistry`.
     #[inline]

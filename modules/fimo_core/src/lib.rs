@@ -10,6 +10,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+extern crate static_assertions as sa;
 use fimo_core_interface::rust::{FimoCore, FimoCoreVTable, INTERFACE_VERSION};
 use std::any::Any;
 use std::ops::Deref;
@@ -44,6 +45,8 @@ pub struct CoreInterface {
     module_registry: module_registry::ModuleRegistry,
     settings_registry: settings_registry::SettingsRegistry,
 }
+
+sa::assert_impl_all!(CoreInterface: Send, Sync);
 
 impl CoreInterface {
     /// Initializes the `CoreInterface`.

@@ -58,7 +58,7 @@ fn settings_registry() -> Result<(), Box<dyn Error>> {
 
     let settings_registry = core.get_settings_registry();
 
-    let array = vec![SettingsItem::Bool(false), SettingsItem::Bool(false)];
+    let array = vec![SettingsItem::from(false), SettingsItem::from(false)];
     let object = BTreeMap::new();
 
     let none_path = SettingsRegistryPath::new("none").unwrap();
@@ -69,39 +69,63 @@ fn settings_registry() -> Result<(), Box<dyn Error>> {
     let array_path = SettingsRegistryPath::new("array").unwrap();
     let object_path = SettingsRegistryPath::new("object").unwrap();
 
-    let _ = settings_registry.write(none_path, ());
-    let _ = settings_registry.write(bool_path, false);
-    let _ = settings_registry.write(integer_path, 65u32);
-    let _ = settings_registry.write(float_path, 20.0);
-    let _ = settings_registry.write(string_path, String::from("Hey!"));
-    let _ = settings_registry.write(array_path, array.clone());
-    let _ = settings_registry.write(object_path, object.clone());
+    let _ = settings_registry.write(none_path, ()).unwrap();
+    let _ = settings_registry.write(bool_path, false).unwrap();
+    let _ = settings_registry.write(integer_path, 65u32).unwrap();
+    let _ = settings_registry.write(float_path, 20.0).unwrap();
+    let _ = settings_registry
+        .write(string_path, String::from("Hey!"))
+        .unwrap();
+    let _ = settings_registry.write(array_path, array.clone()).unwrap();
+    let _ = settings_registry
+        .write(object_path, object.clone())
+        .unwrap();
 
     assert_eq!(
         settings_registry
             .read::<SettingsItem, _>(none_path)
+            .unwrap()
             .unwrap(),
-        SettingsItem::Null
+        SettingsItem::from(())
     );
-    assert!(!settings_registry.read::<bool, _>(bool_path).unwrap());
+    assert!(!settings_registry
+        .read::<bool, _>(bool_path)
+        .unwrap()
+        .unwrap());
     assert_eq!(
-        settings_registry.read::<u32, _>(integer_path).unwrap(),
+        settings_registry
+            .read::<u32, _>(integer_path)
+            .unwrap()
+            .unwrap(),
         65u32
     );
-    assert!((settings_registry.read::<f64, _>(float_path).unwrap() - 20.0).abs() < f64::EPSILON);
+    assert!(
+        (settings_registry
+            .read::<f64, _>(float_path)
+            .unwrap()
+            .unwrap()
+            - 20.0)
+            .abs()
+            < f64::EPSILON
+    );
     assert_eq!(
-        settings_registry.read::<String, _>(string_path).unwrap(),
+        settings_registry
+            .read::<String, _>(string_path)
+            .unwrap()
+            .unwrap(),
         String::from("Hey!")
     );
     assert_eq!(
         settings_registry
             .read::<Vec<SettingsItem>, _>(array_path)
+            .unwrap()
             .unwrap(),
         array
     );
     assert_eq!(
         settings_registry
             .read::<BTreeMap<String, SettingsItem>, _>(object_path)
+            .unwrap()
             .unwrap(),
         object
     );
@@ -112,24 +136,28 @@ fn settings_registry() -> Result<(), Box<dyn Error>> {
     let _ = settings_registry.write(array_index_path, true);
     let _ = settings_registry.write(&sub_object_path, true);
 
-    assert!(settings_registry.read::<bool, _>(array_index_path).unwrap(),);
-    assert!(settings_registry.read::<bool, _>(sub_object_path).unwrap(),);
+    assert!(settings_registry
+        .read::<bool, _>(array_index_path)
+        .unwrap()
+        .unwrap(),);
+    assert!(settings_registry
+        .read::<bool, _>(sub_object_path)
+        .unwrap()
+        .unwrap(),);
 
     let flag = Arc::new(AtomicBool::new(false));
     let flag_clone = Arc::clone(&flag);
     let _callback = settings_registry.register_callback(
         none_path,
-        Box::new(
-            move |path: &SettingsRegistryPath, event: SettingsEvent<'_>| {
-                flag_clone.store(true, Ordering::Relaxed);
-                assert_eq!(path, none_path);
-                assert!(matches!(event, SettingsEvent::Remove { .. }));
-            },
-        ),
+        Box::new(move |path: &SettingsRegistryPath, event: &SettingsEvent| {
+            flag_clone.store(true, Ordering::Relaxed);
+            assert_eq!(path, none_path);
+            assert!(matches!(event, SettingsEvent::Remove { .. }));
+        }),
     );
     assert_eq!(
-        settings_registry.remove(none_path).unwrap(),
-        SettingsItem::Null
+        settings_registry.remove(none_path).unwrap().unwrap(),
+        SettingsItem::from(())
     );
     assert!(flag.load(Ordering::Acquire));
 

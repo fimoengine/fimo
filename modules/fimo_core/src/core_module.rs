@@ -51,6 +51,8 @@ struct CoreWrapper {
     parent: ModuleInstanceArc,
 }
 
+sa::assert_impl_all!(CoreWrapper: Send, Sync);
+
 #[allow(dead_code)]
 fn construct_module_info() -> ModuleInfo {
     ModuleInfo {

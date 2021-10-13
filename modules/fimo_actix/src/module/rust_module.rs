@@ -5,16 +5,16 @@ use fimo_actix_interface::{build_interface_descriptor as actix_descriptor, Scope
 use fimo_core_interface::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
-    FimoCore,
+    FimoCore, FimoCoreCaster,
 };
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust::module_loader::{RustModule, RustModuleInnerArc};
 use fimo_module_core::rust::ModuleInterfaceCaster;
 use fimo_module_core::{
     rust::{ModuleInterfaceArc, ModuleInterfaceWeak},
-    ModuleInterfaceDescriptor,
+    DynArc, ModuleInterfaceDescriptor,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::io::ErrorKind;
 use std::sync::Arc;
@@ -70,11 +70,12 @@ fn build_tasks_interface(
     let registry = core_interface.get_settings_registry();
     if !registry
         .item_type(settings_path)
+        .unwrap_or(None)
         .unwrap_or(SettingsItemType::Null)
         .is_object()
     {
         registry
-            .write(settings_path, SettingsItem::Object(Default::default()))
+            .write(settings_path, SettingsItem::new_object())
             .unwrap();
     }
 
@@ -89,21 +90,31 @@ fn build_tasks_interface(
 
     let address = format!("127.0.0.1:{}", port);
 
-    let server = Arc::new(FimoActixInterface {
+    let mut server = Arc::new(FimoActixInterface {
         server: FimoActixServer::new(address),
         parent: GenericModuleInstance::as_module_instance_arc(instance),
+        core: None,
     });
 
     if enable_bindings {
-        bind_core(server.clone(), &*core_interface)
+        server = bind_core(server, core_interface)
     }
 
     let caster = ModuleInterfaceCaster::new(&INTERFACE_VTABLE);
     unsafe { Ok(ModuleInterfaceArc::from_inner((server, caster))) }
 }
 
-fn bind_core(server: Arc<FimoActixInterface>, core: &FimoCore) {
-    let (builder, _callback) = scope_builder(core);
+fn bind_core(
+    mut server: Arc<FimoActixInterface>,
+    core: DynArc<FimoCore, FimoCoreCaster>,
+) -> Arc<FimoActixInterface> {
+    let (builder, callback) = scope_builder(&*core);
     let scope_builder = ScopeBuilder::from(Box::new(builder));
     server.server.register_scope("/core", scope_builder);
+
+    let inner = Arc::get_mut(&mut server).unwrap();
+    let (id, _) = callback.into_raw_parts();
+    inner.core = Some((core, id));
+
+    server
 }
