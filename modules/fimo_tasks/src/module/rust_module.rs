@@ -12,7 +12,7 @@ use fimo_module_core::{
     ModuleInterfaceDescriptor,
 };
 use fimo_tasks_interface::rust::build_interface_descriptor as tasks_descriptor;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::io::ErrorKind;
 use std::sync::Arc;
@@ -71,11 +71,12 @@ fn build_tasks_interface(
     let registry = core_interface.get_settings_registry();
     if !registry
         .item_type(settings_path)
+        .unwrap_or(None)
         .unwrap_or(SettingsItemType::Null)
         .is_object()
     {
         registry
-            .write(settings_path, SettingsItem::Object(Default::default()))
+            .write(settings_path, SettingsItem::new_object())
             .unwrap();
     }
 

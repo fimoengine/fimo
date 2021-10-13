@@ -1,9 +1,13 @@
 //! Implementation of the module.
 use crate::FimoActixServer;
 use fimo_actix_interface::FimoActixVTable;
+use fimo_core_interface::rust::settings_registry::{
+    SettingsEventCallbackHandle, SettingsEventCallbackId,
+};
+use fimo_core_interface::rust::{FimoCore, FimoCoreCaster};
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::rust::ModuleInterfaceVTable;
-use fimo_module_core::{rust::ModuleInstanceArc, ModuleInfo};
+use fimo_module_core::{rust::ModuleInstanceArc, DynArc, ModuleInfo};
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -77,6 +81,19 @@ const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
 struct FimoActixInterface {
     server: FimoActixServer<String>,
     parent: ModuleInstanceArc,
+    core: Option<(DynArc<FimoCore, FimoCoreCaster>, SettingsEventCallbackId)>,
+}
+
+sa::assert_impl_all!(FimoActixInterface: Send, Sync);
+
+impl Drop for FimoActixInterface {
+    fn drop(&mut self) {
+        if let Some((core, id)) = self.core.take() {
+            let registry = core.get_settings_registry();
+            let handle = unsafe { SettingsEventCallbackHandle::from_raw_parts(id, registry) };
+            registry.unregister_callback(handle);
+        }
+    }
 }
 
 #[allow(dead_code)]
