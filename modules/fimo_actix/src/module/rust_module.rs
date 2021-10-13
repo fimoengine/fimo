@@ -14,7 +14,7 @@ use fimo_module_core::{
     rust::{ModuleInterfaceArc, ModuleInterfaceWeak},
     DynArc, ModuleInterfaceDescriptor,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::sync::Arc;
