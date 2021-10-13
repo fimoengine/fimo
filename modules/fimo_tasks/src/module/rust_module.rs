@@ -12,7 +12,7 @@ use fimo_module_core::{
     ModuleInterfaceDescriptor,
 };
 use fimo_tasks_interface::rust::build_interface_descriptor as tasks_descriptor;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind;
 use std::sync::Arc;
