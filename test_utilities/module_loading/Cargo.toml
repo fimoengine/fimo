@@ -6,9 +6,9 @@ edition = "2021"
 [dependencies]
 module_paths = { path = "../module_paths" }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
-fimo_core_interface = { version = "0.1.0", path = "../../utilities/fimo_core_interface" }
-fimo_tasks_interface = { version = "0.1.0", path = "../../utilities/fimo_tasks_interface", optional = true }
-fimo_actix_interface = { version = "0.1.0", path = "../../utilities/fimo_actix_interface", optional = true }
+fimo_core_interface = { version = "0.1.0", path = "../../interfaces/fimo_core_interface" }
+fimo_tasks_interface = { version = "0.1.0", path = "../../interfaces/fimo_tasks_interface", optional = true }
+fimo_actix_interface = { version = "0.1.0", path = "../../interfaces/fimo_actix_interface", optional = true }
 
 [features]
 tasks_module = ["fimo_tasks_interface", "module_paths/tasks_module"]

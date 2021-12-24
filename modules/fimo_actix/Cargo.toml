@@ -16,10 +16,10 @@ static_assertions = "1.1.0"
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
-fimo_actix_interface = { version = "0.1.0", path = "../../utilities/fimo_actix_interface" }
+fimo_actix_interface = { version = "0.1.0", path = "../../interfaces/fimo_actix_interface" }
 fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core", optional = true }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
-fimo_core_interface = { version = "0.1.0", path = "../../utilities/fimo_core_interface", optional = true }
+fimo_core_interface = { version = "0.1.0", path = "../../interfaces/fimo_core_interface", optional = true }
 
 [dev-dependencies]
 serde_json = "1.0.68"
