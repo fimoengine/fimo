@@ -21,7 +21,7 @@ serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core" }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
-fimo_core_interface = { version = "=0.1.0", path = "../../utilities/fimo_core_interface" }
+fimo_core_interface = { version = "=0.1.0", path = "../../interfaces/fimo_core_interface" }
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core", features = ["serde"] }
 
 [dev-dependencies]
