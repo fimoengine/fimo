@@ -10,7 +10,7 @@
     rustdoc::broken_intra_doc_links
 )]
 extern crate static_assertions as sa;
-use fimo_actix_interface::actix::dev::Server;
+use fimo_actix_interface::actix::dev::ServerHandle;
 use fimo_actix_interface::actix::rt::{Arbiter, System};
 use fimo_actix_interface::actix::{App, HttpServer, Scope};
 use fimo_actix_interface::{
@@ -37,7 +37,7 @@ struct ActixServerInner<A: 'static + ToSocketAddrs + Send + Sync> {
     address: A,
     arbiter: Arbiter,
     status: ServerStatus,
-    server: Option<Server>,
+    server: Option<ServerHandle>,
     scope_ids: RangeFrom<usize>,
     callback_ids: RangeFrom<usize>,
     scopes: BTreeMap<String, ScopeBuilder>,
@@ -248,7 +248,7 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
         async fn builder<A: 'static + ToSocketAddrs + Sync>(
             address: &'static A,
             scopes: &'static BTreeMap<String, ScopeBuilder>,
-            tx: Sender<Option<Server>>,
+            tx: Sender<Option<ServerHandle>>,
         ) {
             let server = {
                 let server_builder = HttpServer::new(move || {
@@ -267,7 +267,7 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
                 server_builder.run()
             };
 
-            tx.send(Some(server.clone())).unwrap();
+            tx.send(Some(server.handle())).unwrap();
             server.await.unwrap();
         }
 
@@ -284,45 +284,60 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
     }
 
     fn stop_server(&mut self) -> bool {
-        let (tx, rx) = std::sync::mpsc::channel();
+        match self.server.take() {
+            None => false,
+            Some(server) => {
+                let (tx, rx) = std::sync::mpsc::channel();
 
-        async fn stop_server(server: Server, tx: Sender<()>) {
-            server.stop(true).await;
-            tx.send(()).unwrap();
+                async fn stop_server(server: ServerHandle, tx: Sender<()>) {
+                    server.stop(true).await;
+                    tx.send(()).unwrap();
+                }
+                let future = stop_server(server, tx);
+                self.arbiter.spawn(future);
+                let _ = rx.recv().unwrap();
+
+                true
+            }
         }
-        let future = stop_server(self.server.clone().unwrap(), tx);
-        self.arbiter.spawn(future);
-        let _ = rx.recv().unwrap();
-
-        true
     }
 
     fn pause_server(&mut self) -> bool {
-        let (tx, rx) = std::sync::mpsc::channel();
+        match &self.server {
+            None => false,
+            Some(server) => {
+                let (tx, rx) = std::sync::mpsc::channel();
 
-        async fn pause_server(server: Server, tx: Sender<()>) {
-            server.pause().await;
-            tx.send(()).unwrap();
+                async fn pause_server(server: ServerHandle, tx: Sender<()>) {
+                    server.pause().await;
+                    tx.send(()).unwrap();
+                }
+                let future = pause_server(server.clone(), tx);
+                self.arbiter.spawn(future);
+                let _ = rx.recv().unwrap();
+
+                true
+            }
         }
-        let future = pause_server(self.server.clone().unwrap(), tx);
-        self.arbiter.spawn(future);
-        let _ = rx.recv().unwrap();
-
-        true
     }
 
     fn resume_server(&mut self) -> bool {
-        let (tx, rx) = std::sync::mpsc::channel();
+        match &self.server {
+            None => false,
+            Some(server) => {
+                let (tx, rx) = std::sync::mpsc::channel();
 
-        async fn resume_server(server: Server, tx: Sender<()>) {
-            server.resume().await;
-            tx.send(()).unwrap();
+                async fn resume_server(server: ServerHandle, tx: Sender<()>) {
+                    server.resume().await;
+                    tx.send(()).unwrap();
+                }
+                let future = resume_server(server.clone(), tx);
+                self.arbiter.spawn(future);
+                let _ = rx.recv().unwrap();
+
+                true
+            }
         }
-        let future = resume_server(self.server.clone().unwrap(), tx);
-        self.arbiter.spawn(future);
-        let _ = rx.recv().unwrap();
-
-        true
     }
 
     fn get_server_status(&self) -> ServerStatus {
