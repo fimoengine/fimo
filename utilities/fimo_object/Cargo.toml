@@ -1,0 +1,11 @@
+[package]
+name = "fimo_object"
+version = "0.1.0"
+edition = "2021"
+description = "Low-level repressentation of an object"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
