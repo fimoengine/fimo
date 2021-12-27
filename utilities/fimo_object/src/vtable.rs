@@ -1,5 +1,6 @@
 //! Object vtable utilities.
 use crate::ConstStr;
+use std::marker::PhantomData;
 
 /// Definition of an Object id.
 pub trait ObjectID: Sized {
@@ -8,7 +9,7 @@ pub trait ObjectID: Sized {
 }
 
 /// Definition of an object vtable.
-pub trait VTable: 'static + Send + Sync {
+pub trait VTable: 'static + Send + Sync + Sized {
     /// Required marker traits.
     type Markers;
 
@@ -39,47 +40,10 @@ pub trait VTable: 'static + Send + Sync {
 ///
 /// Contains the data required for allocating/deallocating and casting any object.
 #[repr(C)]
+#[fimo_vtable("__internal_fimo_object_base")]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-pub struct BaseInterface {
-    /// Dropping procedure for the object.
-    ///
-    /// Consumes the pointer.
-    pub drop_in_place: unsafe extern "C" fn(*mut ()),
+pub struct BaseInterface;
 
-    /// Size of the object.
-    pub object_size: usize,
-
-    /// Alignment of the object.
-    pub object_alignment: usize,
-
-    /// Unique id of the object type.
-    pub object_id: ConstStr<'static>,
-
-    /// Unique id of the interface type.
-    pub interface_id: ConstStr<'static>,
-}
-
-impl VTable for BaseInterface {
-    type Markers = ();
-    const INTERFACE_ID: &'static str = "";
-
-    unsafe fn drop_in_place(&self, obj: *mut ()) {
-        (self.drop_in_place)(obj)
-    }
-
-    fn size_of(&self) -> usize {
-        self.object_size
-    }
-
-    fn align_of(&self) -> usize {
-        self.object_alignment
-    }
-
-    fn object_id(&self) -> ConstStr<'static> {
-        self.object_id
-    }
-
-    fn interface_id(&self) -> ConstStr<'static> {
-        self.interface_id
-    }
-}
+/// Default vtable marker.
+#[allow(missing_debug_implementations)]
+pub struct DefaultMarker(PhantomData<*const ()>);

@@ -6,6 +6,5 @@ description = "Low-level repressentation of an object"
 license = "MIT OR Apache-2.0"
 categories = ["game-development"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+fimo_object_proc_macro = { version = "0.1.0", path = "../fimo_object_proc_macro" }

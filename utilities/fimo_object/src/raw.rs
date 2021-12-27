@@ -111,9 +111,9 @@ pub fn cast_base_mut<T: VTable>(obj: RawObjectMut<T>) -> RawObjectMut<BaseInterf
 }
 
 /// Casts the interface of the object.
-pub fn try_cast<T: VTable>(
-    obj: RawObject<BaseInterface>,
-) -> Result<RawObject<T>, CastError<RawObject<BaseInterface>>> {
+pub fn try_cast<T: VTable, U: VTable>(
+    obj: RawObject<U>,
+) -> Result<RawObject<T>, CastError<RawObject<U>>> {
     if obj.vtable.interface_id() == T::INTERFACE_ID {
         // safety: the interface id's are unique, so we can ensure that the object
         // contains a reference to a `T`.
@@ -129,9 +129,9 @@ pub fn try_cast<T: VTable>(
 }
 
 /// Casts the interface of the object.
-pub fn try_cast_mut<T: VTable>(
-    obj: RawObjectMut<BaseInterface>,
-) -> Result<RawObjectMut<T>, CastError<RawObjectMut<BaseInterface>>> {
+pub fn try_cast_mut<T: VTable, U: VTable>(
+    obj: RawObjectMut<U>,
+) -> Result<RawObjectMut<T>, CastError<RawObjectMut<U>>> {
     if obj.vtable.interface_id() == T::INTERFACE_ID {
         // safety: the interface id's are unique, so we can ensure that the object
         // contains a reference to a `T`.

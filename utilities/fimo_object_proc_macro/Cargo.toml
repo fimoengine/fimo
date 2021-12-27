@@ -1,0 +1,15 @@
+[package]
+name = "fimo_object_proc_macro"
+version = "0.1.0"
+edition = "2021"
+description = "Utility for creating fimo-object vtables"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
