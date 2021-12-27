@@ -31,6 +31,66 @@ pub trait CoerceObjectMut<T: VTable>: CoerceObject<T> {
     }
 }
 
+/// Marker trait for a wrapper around an [`Object<T>`].
+///
+/// # Safety
+///
+/// The implementor must ensure that the type is only a wrapper the object.
+pub unsafe trait ObjectWrapper {
+    /// VTable of the object.
+    type VTable: VTable;
+
+    /// Casts a pointer to Self to an object.
+    fn as_object(ptr: *const Self) -> *const Object<Self::VTable>;
+
+    /// Casts a pointer to Self to an object.
+    fn as_object_mut(ptr: *mut Self) -> *mut Object<Self::VTable> {
+        let obj = Self::as_object(ptr);
+        obj as *mut _
+    }
+
+    /// Casts a pointer to an object to a pointer to Self.
+    fn from_object(obj: *const Object<Self::VTable>) -> *const Self;
+
+    /// Casts a pointer to an object to a pointer to Self.
+    fn from_object_mut(obj: *mut Object<Self::VTable>) -> *mut Self {
+        let this = Self::from_object(obj);
+        this as *mut _
+    }
+
+    /// Splits the object up into it's raw parts.
+    fn into_raw_parts(ptr: *const Self) -> (*const (), &'static Self::VTable) {
+        let obj = Self::as_object(ptr);
+        into_raw_parts(obj)
+    }
+
+    /// Splits the object up into it's raw parts.
+    fn into_raw_parts_mut(ptr: *mut Self) -> (*mut (), &'static Self::VTable) {
+        let obj = Self::as_object_mut(ptr);
+        into_raw_parts_mut(obj)
+    }
+
+    /// Constructs the object from it's raw parts.
+    ///
+    /// # Safety
+    ///
+    /// See [`from_raw_parts`].
+    unsafe fn from_raw_parts(ptr: *const (), vtable: &'static Self::VTable) -> *const Self {
+        let obj = from_raw_parts(ptr, vtable);
+        Self::from_object(obj)
+    }
+
+    /// Constructs the object from it's raw parts.
+    ///
+    /// # Safety
+    ///
+    /// See [`from_raw_parts_mut`].
+    unsafe fn from_raw_parts_mut(ptr: *mut (), vtable: &'static Self::VTable) -> *mut Self {
+        let obj = from_raw_parts_mut(ptr, vtable);
+        Self::from_object_mut(obj)
+    }
+}
+
 /// An object
 ///
 /// # Layout
@@ -50,9 +110,21 @@ pub struct Object<T: VTable> {
     _inner: [()],
 }
 
-impl Object<BaseInterface> {
-    /// Casts the `&Object<BaseInterface>` to a `&Object<T>`.
-    pub fn try_cast<T: VTable>(&self) -> Result<&Object<T>, CastError<&Self>> {
+impl<T: VTable> Object<T> {
+    /// Casts an object to the base object.
+    pub fn cast_base(&self) -> &Object<BaseInterface> {
+        // safety: transmuting to the base interface is always sound.
+        unsafe { std::mem::transmute::<&Self, _>(self) }
+    }
+
+    /// Casts an object to the base object.
+    pub fn cast_base_mut(&mut self) -> &mut Object<BaseInterface> {
+        // safety: transmuting to the base interface is always sound.
+        unsafe { std::mem::transmute::<&mut Self, _>(self) }
+    }
+
+    /// Casts the `&Object<T>` to a `&Object<U>`.
+    pub fn try_cast<U: VTable>(&self) -> Result<&Object<U>, CastError<&Self>> {
         let raw = into_raw(self);
         let casted = crate::raw::try_cast(raw);
         casted.map_or_else(
@@ -67,8 +139,8 @@ impl Object<BaseInterface> {
         )
     }
 
-    /// Casts the `&mut Object<BaseInterface>` to a `&mut Object<T>`.
-    pub fn try_cast_mut<T: VTable>(&mut self) -> Result<&mut Object<T>, CastError<&mut Self>> {
+    /// Casts the `&mut Object<T>` to a `&mut Object<U>`.
+    pub fn try_cast_mut<U: VTable>(&mut self) -> Result<&mut Object<U>, CastError<&mut Self>> {
         let raw = into_raw_mut(self);
         let casted = crate::raw::try_cast_mut(raw);
         casted.map_or_else(
@@ -81,20 +153,6 @@ impl Object<BaseInterface> {
             },
             |obj| unsafe { Ok(&mut *from_raw_mut(obj)) },
         )
-    }
-}
-
-impl<T: VTable> Object<T> {
-    /// Casts an object to the base object.
-    pub fn cast_base(&self) -> &Object<BaseInterface> {
-        // safety: transmuting to the base interface is always sound.
-        unsafe { std::mem::transmute::<&Self, _>(self) }
-    }
-
-    /// Casts an object to the base object.
-    pub fn cast_base_mut(&mut self) -> &mut Object<BaseInterface> {
-        // safety: transmuting to the base interface is always sound.
-        unsafe { std::mem::transmute::<&mut Self, _>(self) }
     }
 
     /// Casts the object to a `&O`.
@@ -155,6 +213,18 @@ impl<T: VTable> Debug for Object<T> {
             .field("object_id", &vtable.object_id())
             .field("interface_id", &vtable.interface_id())
             .finish()
+    }
+}
+
+unsafe impl<T: VTable> ObjectWrapper for Object<T> {
+    type VTable = T;
+
+    fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+        ptr
+    }
+
+    fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+        obj
     }
 }
 
