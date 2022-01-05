@@ -1,5 +1,5 @@
 //! Object vtable utilities.
-use crate::ConstStr;
+use crate::{fimo_vtable, ConstStr};
 use std::marker::PhantomData;
 
 /// Definition of an Object id.
@@ -40,7 +40,7 @@ pub trait VTable: 'static + Send + Sync + Sized {
 ///
 /// Contains the data required for allocating/deallocating and casting any object.
 #[repr(C)]
-#[fimo_vtable("__internal_fimo_object_base")]
+#[fimo_vtable(id = "__internal_fimo_object_base", marker = "DefaultMarker")]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
 pub struct BaseInterface;
 

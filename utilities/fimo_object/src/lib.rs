@@ -15,9 +15,9 @@
 #![feature(unsize)]
 #![feature(coerce_unsized)]
 
-#[macro_use]
-extern crate fimo_object_proc_macro;
 extern crate self as fimo_object;
+
+pub use fimo_object_proc_macro::fimo_vtable;
 
 pub mod obj_box;
 pub mod object;
