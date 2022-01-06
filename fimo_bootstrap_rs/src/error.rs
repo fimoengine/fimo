@@ -38,6 +38,6 @@ pub struct LoaderError<LError>(pub(crate) LError);
 
 impl<LError> From<LError> for LoaderError<LError> {
     fn from(err: LError) -> Self {
-        Self { 0: err }
+        Self(err)
     }
 }

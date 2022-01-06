@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 /// ```
 /// #![feature(const_fn_trait_bound)]
 /// #![feature(const_fn_fn_ptr_basics)]
-/// 
+///
 /// use fimo_object::fimo_vtable;
 ///
 /// fimo_vtable! {
@@ -202,6 +202,8 @@ fimo_vtable! {
 pub struct DefaultMarker(PhantomData<*const ()>);
 
 /// Drops the pointed to value.
+///
+/// # Safety
 ///
 /// See [std::ptr::drop_in_place].
 pub unsafe extern "C" fn drop_obj_in_place<T: ObjectID>(ptr: *mut ()) {
