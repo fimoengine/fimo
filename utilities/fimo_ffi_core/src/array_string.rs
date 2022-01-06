@@ -64,7 +64,7 @@ impl<const LEN: usize> ArrayString<LEN> {
         match std::str::from_utf8(slice) {
             // SAFETY: The contents and the length of the slice are valid.
             Ok(_) => unsafe { Ok(Self::from_utf8_unchecked(slice)) },
-            Err(e) => Err(FromUtf8Error::Utf8Error { 0: e }),
+            Err(e) => Err(FromUtf8Error::Utf8Error(e)),
         }
     }
 
