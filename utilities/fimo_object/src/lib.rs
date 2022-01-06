@@ -14,10 +14,8 @@
 #![feature(fn_traits)]
 #![feature(unsize)]
 #![feature(coerce_unsized)]
-
-extern crate self as fimo_object;
-
-pub use fimo_object_proc_macro::fimo_vtable;
+#![feature(const_fn_trait_bound)]
+#![feature(const_fn_fn_ptr_basics)]
 
 pub mod obj_box;
 pub mod object;

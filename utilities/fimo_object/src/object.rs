@@ -188,8 +188,8 @@ impl<T: VTable> Object<T> {
     }
 }
 
-unsafe impl<T: VTable> Send for Object<T> where <T as VTable>::Markers: Send {}
-unsafe impl<T: VTable> Sync for Object<T> where <T as VTable>::Markers: Sync {}
+unsafe impl<T: VTable> Send for Object<T> where <T as VTable>::Marker: Send {}
+unsafe impl<T: VTable> Sync for Object<T> where <T as VTable>::Marker: Sync {}
 
 impl<T: VTable> AsRef<Object<BaseInterface>> for Object<T> {
     fn as_ref(&self) -> &Object<BaseInterface> {

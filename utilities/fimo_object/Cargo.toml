@@ -5,6 +5,3 @@ edition = "2021"
 description = "Low-level repressentation of an object"
 license = "MIT OR Apache-2.0"
 categories = ["game-development"]
-
-[dependencies]
-fimo_object_proc_macro = { version = "0.1.0", path = "../fimo_object_proc_macro" }

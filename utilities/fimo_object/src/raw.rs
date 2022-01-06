@@ -9,8 +9,8 @@ pub struct RawObject<T: VTable> {
     vtable: &'static T,
 }
 
-unsafe impl<T: VTable> Send for RawObject<T> where <T as VTable>::Markers: Send {}
-unsafe impl<T: VTable> Sync for RawObject<T> where <T as VTable>::Markers: Sync {}
+unsafe impl<T: VTable> Send for RawObject<T> where <T as VTable>::Marker: Send {}
+unsafe impl<T: VTable> Sync for RawObject<T> where <T as VTable>::Marker: Sync {}
 
 impl<T: VTable> Copy for RawObject<T> {}
 
@@ -47,8 +47,8 @@ pub struct RawObjectMut<T: VTable> {
     vtable: &'static T,
 }
 
-unsafe impl<T: VTable> Send for RawObjectMut<T> where <T as VTable>::Markers: Send {}
-unsafe impl<T: VTable> Sync for RawObjectMut<T> where <T as VTable>::Markers: Sync {}
+unsafe impl<T: VTable> Send for RawObjectMut<T> where <T as VTable>::Marker: Send {}
+unsafe impl<T: VTable> Sync for RawObjectMut<T> where <T as VTable>::Marker: Sync {}
 
 impl<T: VTable> Copy for RawObjectMut<T> {}
 

@@ -498,8 +498,10 @@ pub unsafe fn from_utf8_mut_inner(data: &mut [u8]) -> Result<StrInner<true>, std
 ///
 /// - A [`SpanInner<T>`] does not track the lifetime of `T`.
 /// - See [`std::str::from_utf8_unchecked`].
-pub unsafe fn from_utf8_unchecked_inner(data: &[u8]) -> StrInner<false> {
-    std::str::from_utf8_unchecked(data).into()
+pub const unsafe fn from_utf8_unchecked_inner(data: &[u8]) -> StrInner<false> {
+    StrInner {
+        inner: crate::span::from_raw_parts_inner(data.as_ptr(), data.len()),
+    }
 }
 
 /// Converts a slice of bytes to a string slice.
@@ -517,11 +519,11 @@ pub unsafe fn from_utf8_unchecked_mut_inner(data: &mut [u8]) -> StrInner<true> {
 /// # Safety
 ///
 /// This function can assign an arbitrary lifetime to the returned string.
-pub unsafe fn from_inner<'a, const MUT: bool>(s: StrInner<MUT>) -> ConstStr<'a> {
+pub const unsafe fn from_inner<'a, const MUT: bool>(s: StrInner<MUT>) -> ConstStr<'a> {
     ConstStr {
         // safety: they have the same layout.
         inner: std::mem::transmute(s),
-        _phantom: Default::default(),
+        _phantom: PhantomData,
     }
 }
 
@@ -560,7 +562,7 @@ pub fn from_utf8_mut(data: &mut [u8]) -> Result<MutStr<'_>, std::str::Utf8Error>
 /// # Safety
 ///
 /// See [`std::str::from_utf8_unchecked`].
-pub unsafe fn from_utf8_unchecked(data: &[u8]) -> ConstStr<'_> {
+pub const unsafe fn from_utf8_unchecked(data: &[u8]) -> ConstStr<'_> {
     from_inner(from_utf8_unchecked_inner(data))
 }
 
