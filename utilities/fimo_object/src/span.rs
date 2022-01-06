@@ -409,8 +409,11 @@ impl<T: Ord, const MUT: bool> Ord for SpanInner<T, MUT> {
 /// # Safety
 ///
 /// A [`SpanInner<T>`] does not track the lifetime of `T`.
-pub unsafe fn from_ref_inner<T>(s: &T) -> SpanInner<T, false> {
-    std::slice::from_ref(s).into()
+pub const unsafe fn from_ref_inner<T>(s: &T) -> SpanInner<T, false> {
+    SpanInner {
+        ptr: NonNull::new_unchecked(s as *const _ as *mut _),
+        len: 1,
+    }
 }
 
 /// Converts a reference to `T` into a [`SpanInner<T, true>`] of length 1 (without copying).
@@ -419,7 +422,10 @@ pub unsafe fn from_ref_inner<T>(s: &T) -> SpanInner<T, false> {
 ///
 /// A [`SpanInner<T>`] does not track the lifetime of `T`.
 pub unsafe fn from_mut_inner<T>(s: &mut T) -> SpanInner<T, true> {
-    std::slice::from_mut(s).into()
+    SpanInner {
+        ptr: NonNull::new_unchecked(s),
+        len: 1,
+    }
 }
 
 /// Forms s [`SpanInner<T, false>`] from a pointer and a length.
@@ -428,8 +434,11 @@ pub unsafe fn from_mut_inner<T>(s: &mut T) -> SpanInner<T, true> {
 ///
 /// - A [`SpanInner<T>`] does not track the lifetime of `T`.
 /// - See [std::slice::from_raw_parts] for more details.
-pub unsafe fn from_raw_parts_inner<T>(data: *const T, len: usize) -> SpanInner<T, false> {
-    std::slice::from_raw_parts(data, len).into()
+pub const unsafe fn from_raw_parts_inner<T>(data: *const T, len: usize) -> SpanInner<T, false> {
+    SpanInner {
+        ptr: NonNull::new_unchecked(data as *mut _),
+        len,
+    }
 }
 
 /// Performs the same functionality as [from_raw_parts_inner], except
@@ -440,17 +449,30 @@ pub unsafe fn from_raw_parts_inner<T>(data: *const T, len: usize) -> SpanInner<T
 /// - A [`SpanInner<T>`] does not track the lifetime of `T`.
 /// - See [std::slice::from_raw_parts] for more details.
 pub unsafe fn from_raw_parts_mut_inner<T>(data: *mut T, len: usize) -> SpanInner<T, true> {
-    std::slice::from_raw_parts_mut(data, len).into()
+    SpanInner {
+        ptr: NonNull::new_unchecked(data),
+        len,
+    }
 }
 
 /// Converts a reference to `T` into a [`ConstSpan<T>`] of length 1 (without copying).
-pub fn from_ref<T>(s: &T) -> ConstSpan<'_, T> {
-    std::slice::from_ref(s).into()
+pub const fn from_ref<T>(s: &T) -> ConstSpan<'_, T> {
+    unsafe {
+        ConstSpan {
+            inner: from_ref_inner(s),
+            _phantom: PhantomData,
+        }
+    }
 }
 
 /// Converts a reference to `T` into a [`MutSpan<T>`] of length 1 (without copying).
 pub fn from_mut<T>(s: &mut T) -> MutSpan<'_, T> {
-    std::slice::from_mut(s).into()
+    unsafe {
+        MutSpan {
+            inner: from_mut_inner(s),
+            _phantom: PhantomData,
+        }
+    }
 }
 
 /// Converts a [`SpanInner<T, false>`] to a [`ConstSpan<T>`].
@@ -458,11 +480,11 @@ pub fn from_mut<T>(s: &mut T) -> MutSpan<'_, T> {
 /// # Safety
 ///
 /// This function can assign an arbitrary lifetime to the returned span.
-pub unsafe fn from_inner<'a, T, const MUT: bool>(s: SpanInner<T, MUT>) -> ConstSpan<'a, T> {
+pub const unsafe fn from_inner<'a, T, const MUT: bool>(s: SpanInner<T, MUT>) -> ConstSpan<'a, T> {
     ConstSpan {
         // safety: they have the same layout.
         inner: std::mem::transmute(s),
-        _phantom: Default::default(),
+        _phantom: PhantomData,
     }
 }
 
@@ -474,7 +496,7 @@ pub unsafe fn from_inner<'a, T, const MUT: bool>(s: SpanInner<T, MUT>) -> ConstS
 pub unsafe fn from_inner_mut<'a, T>(s: SpanInner<T, true>) -> MutSpan<'a, T> {
     MutSpan {
         inner: s,
-        _phantom: Default::default(),
+        _phantom: PhantomData,
     }
 }
 
@@ -483,7 +505,7 @@ pub unsafe fn from_inner_mut<'a, T>(s: SpanInner<T, true>) -> MutSpan<'a, T> {
 /// # Safety
 ///
 /// - See [std::slice::from_raw_parts] for more details.
-pub unsafe fn from_raw_parts<'a, T>(data: *const T, len: usize) -> ConstSpan<'a, T> {
+pub const unsafe fn from_raw_parts<'a, T>(data: *const T, len: usize) -> ConstSpan<'a, T> {
     from_inner(from_raw_parts_inner(data, len))
 }
 
