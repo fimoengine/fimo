@@ -4,7 +4,7 @@
 // terms.
 
 use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
-use crate::object::ObjectWrapper;
+use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
 use crate::vtable::BaseInterface;
 use crate::{CoerceObjectMut, Object};
@@ -14,14 +14,17 @@ use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use std::hash::{Hash, Hasher};
-use std::marker::{PhantomData, Unsize};
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
-use std::ops::{CoerceUnsized, Deref};
+use std::ops::Deref;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::process::abort;
 use std::ptr::NonNull;
 use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
+
+#[cfg(test)]
+mod test;
 
 /// A soft limit on the amount of references that may be made to an `ObjArc`.
 ///
@@ -48,7 +51,7 @@ macro_rules! acquire {
 
 /// A reference-counted pointer type for heap allocation, akin to an [`std::sync::Arc`].
 #[repr(C)]
-pub struct ObjArc<T: ?Sized, A: Allocator = Global> {
+pub struct ObjArc<T: ObjPtrCompat + ?Sized, A: Allocator = Global> {
     ptr: NonNull<ObjArcInner<T>>,
     phantom: PhantomData<ObjArcInner<T>>,
     alloc: A,
@@ -134,7 +137,7 @@ impl<T, A: Allocator> ObjArc<T, A> {
     }
 }
 
-impl<O: ObjectWrapper, A: Allocator> ObjArc<O, A> {
+impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// Coerces a `ObjArc<T, A>` to an `ObjArc<O, A>`.
     pub fn coerce_object<T: CoerceObjectMut<O::VTable>>(a: ObjArc<T, A>) -> ObjArc<O, A> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
@@ -163,7 +166,7 @@ impl<O: ObjectWrapper, A: Allocator> ObjArc<O, A> {
     }
 
     /// Tries casting the object to another object.
-    pub fn try_cast<U: ObjectWrapper>(
+    pub fn try_cast<U: ObjectWrapper + ?Sized>(
         a: ObjArc<O, A>,
     ) -> Result<ObjArc<U, A>, CastError<ObjArc<O, A>>> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
@@ -202,7 +205,7 @@ impl<T, A: Allocator> ObjArc<MaybeUninit<T>, A> {
     }
 }
 
-impl<T: ?Sized> ObjArc<T> {
+impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// Constructs an `ObjArc<T>` from a raw pointer.
     ///
     /// # Safety
@@ -236,7 +239,7 @@ impl<T: ?Sized> ObjArc<T> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// Constructs an `ObjArc<T>` from a raw pointer and the allocator.
     ///
     /// # Safety
@@ -411,7 +414,7 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// Returns a mutable reference into the given `ObjArc`, if there are
     /// no other `ObjArc` or [`ObjWeak`] pointers to the same allocation.
     ///
@@ -546,31 +549,32 @@ impl<T: Clone, A: Allocator + Clone> ObjArc<T, A> {
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjArc<T, A> {}
+unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Send> Send for ObjArc<T, A> {}
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjArc<T, A> {}
+unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjArc<T, A> {}
 
-impl<T: RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> UnwindSafe for ObjArc<T, A> {}
+impl<T: ObjPtrCompat + RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> UnwindSafe
+    for ObjArc<T, A>
+{
+}
 
-impl<T: Unsize<U> + ?Sized, U: ?Sized, A: Allocator> CoerceUnsized<ObjArc<U, A>> for ObjArc<T, A> {}
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> Unpin for ObjArc<T, A> {}
 
-impl<T: ?Sized, A: Allocator> Unpin for ObjArc<T, A> {}
-
-impl<T: ?Sized, A: Allocator> AsRef<T> for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> AsRef<T> for ObjArc<T, A> {
     #[inline]
     fn as_ref(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ?Sized, A: Allocator> Borrow<T> for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> Borrow<T> for ObjArc<T, A> {
     #[inline]
     fn borrow(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ?Sized, A: Allocator + Clone> Clone for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator + Clone> Clone for ObjArc<T, A> {
     #[inline]
     fn clone(&self) -> Self {
         // Using a relaxed ordering is alright here, as knowledge of the
@@ -607,21 +611,21 @@ impl<T: ?Sized, A: Allocator + Clone> Clone for ObjArc<T, A> {
     }
 }
 
-impl<T: ?Sized + Debug, A: Allocator> Debug for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized + Debug, A: Allocator> Debug for ObjArc<T, A> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + Display, A: Allocator> Display for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized + Display, A: Allocator> Display for ObjArc<T, A> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized, A: Allocator> Pointer for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> Pointer for ObjArc<T, A> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Pointer::fmt(&(&**self as *const T), f)
@@ -635,7 +639,7 @@ impl<T: Default, A: Allocator + Default> Default for ObjArc<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> Deref for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> Deref for ObjArc<T, A> {
     type Target = T;
 
     #[inline]
@@ -644,7 +648,7 @@ impl<T: ?Sized, A: Allocator> Deref for ObjArc<T, A> {
     }
 }
 
-unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjArc<T, A> {
+unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjArc<T, A> {
     #[inline]
     fn drop(&mut self) {
         // Because `fetch_sub` is already atomic, we do not need to synchronize
@@ -716,7 +720,7 @@ impl<T> From<T> for ObjArc<T> {
     }
 }
 
-impl<T: Hash + ?Sized, A: Allocator> Hash for ObjArc<T, A> {
+impl<T: ObjPtrCompat + Hash + ?Sized, A: Allocator> Hash for ObjArc<T, A> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
@@ -738,40 +742,40 @@ trait MarkerEq: PartialEq<Self> {}
 
 impl<T: Eq> MarkerEq for T {}
 
-trait ObjArcEqIdent<T: ?Sized + PartialEq, A: Allocator> {
+trait ObjArcEqIdent<T: ObjPtrCompat + ?Sized + PartialEq, A: Allocator> {
     fn eq(&self, other: &ObjArc<T, A>) -> bool;
 }
 
-impl<T: ?Sized + PartialEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized + PartialEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
     #[inline]
     default fn eq(&self, other: &ObjArc<T, A>) -> bool {
         **self == **other
     }
 }
 
-impl<T: ?Sized + MarkerEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized + MarkerEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
     #[inline]
     fn eq(&self, other: &ObjArc<T, A>) -> bool {
         ObjArc::ptr_eq(self, other) || **self == **other
     }
 }
 
-impl<T: ?Sized + PartialEq, A: Allocator> PartialEq for ObjArc<T, A> {
+impl<T: ObjPtrCompat + ?Sized + PartialEq, A: Allocator> PartialEq for ObjArc<T, A> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         ObjArcEqIdent::eq(self, other)
     }
 }
 
-impl<T: PartialOrd<T> + ?Sized, A: Allocator> PartialOrd for ObjArc<T, A> {
+impl<T: ObjPtrCompat + PartialOrd<T> + ?Sized, A: Allocator> PartialOrd for ObjArc<T, A> {
     fn partial_cmp(&self, other: &ObjArc<T, A>) -> Option<Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
-impl<T: Eq + ?Sized, A: Allocator> Eq for ObjArc<T, A> {}
+impl<T: ObjPtrCompat + Eq + ?Sized, A: Allocator> Eq for ObjArc<T, A> {}
 
-impl<T: Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
+impl<T: ObjPtrCompat + Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
     fn cmp(&self, other: &Self) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
@@ -780,7 +784,7 @@ impl<T: Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
 /// `ObjWeak` is a version of [`ObjArc`] that holds a non-owning reference to
 /// the managed allocation, akin to a [`std::sync::Weak`].
 #[repr(C)]
-pub struct ObjWeak<T: ?Sized, A: Allocator = Global> {
+pub struct ObjWeak<T: ObjPtrCompat + ?Sized, A: Allocator = Global> {
     // This is a `NonNull` to allow optimizing the size of this type in enums,
     // but it is not necessarily a valid pointer.
     // `Weak::new` sets this to `usize::MAX` so that it doesn’t need
@@ -809,7 +813,7 @@ impl<T, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-impl<T: ?Sized> ObjWeak<T> {
+impl<T: ObjPtrCompat + ?Sized> ObjWeak<T> {
     /// Converts a raw pointer previously created by [`ObjWeak::into_raw`] back into `ObjWeak<T>`
     /// in the provided allocator.
     ///
@@ -821,7 +825,7 @@ impl<T: ?Sized> ObjWeak<T> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Returns a raw pointer to the object `T` pointed to by this `ObjWeak<T>`.
     pub fn as_ptr(&self) -> *const T {
         let ptr: *mut ObjArcInner<T> = NonNull::as_ptr(self.ptr);
@@ -882,7 +886,7 @@ impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Attempts to upgrade the `ObjWeak` pointer to an [`ObjArc`], delaying
     /// dropping of the inner value if successful.
     pub fn upgrade(&self) -> Option<ObjArc<T, A>>
@@ -994,16 +998,11 @@ impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjWeak<T, A> {}
+unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Send> Send for ObjWeak<T, A> {}
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjWeak<T, A> {}
+unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjWeak<T, A> {}
 
-impl<T: Unsize<U> + ?Sized, U: ?Sized, A: Allocator> CoerceUnsized<ObjWeak<U, A>>
-    for ObjWeak<T, A>
-{
-}
-
-impl<T: ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
+impl<T: ObjPtrCompat + ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
     fn clone(&self) -> Self {
         let inner = if let Some(inner) = self.inner() {
             inner
@@ -1031,7 +1030,7 @@ impl<T: ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
     }
 }
 
-impl<T: ?Sized + Debug, A: Allocator> Debug for ObjWeak<T, A> {
+impl<T: ObjPtrCompat + ?Sized + Debug, A: Allocator> Debug for ObjWeak<T, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "(ObjWeak)")
     }
@@ -1043,7 +1042,7 @@ impl<T, A: Allocator + Default> Default for ObjWeak<T, A> {
     }
 }
 
-unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
+unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
     fn drop(&mut self) {
         // If we find out that we were the last weak pointer, then its time to
         // deallocate the data entirely. See the discussion in Arc::drop() about
@@ -1071,7 +1070,7 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
 
 #[repr(C)]
 #[allow(missing_debug_implementations)]
-struct ObjArcInner<T: ?Sized> {
+struct ObjArcInner<T: ObjPtrCompat + ?Sized> {
     strong: atomic::AtomicUsize,
 
     // the value usize::MAX acts as a sentinel for temporarily "locking" the
@@ -1081,20 +1080,24 @@ struct ObjArcInner<T: ?Sized> {
     data: T,
 }
 
-impl<T: ?Sized> ObjArcInner<T> {
+impl<T: ObjPtrCompat + ?Sized> ObjArcInner<T> {
     fn get_layout(&self) -> Layout {
         let ptr: *const T = std::ptr::addr_of!(self.data);
 
         let layout = Layout::new::<ObjArcInner<()>>();
         let data_layout = unsafe { crate::obj_box::ConstructLayoutRaw::layout_for_raw(ptr) };
 
-        layout.extend(data_layout).expect("Layout extended").0.pad_to_align()
+        layout
+            .extend(data_layout)
+            .expect("Layout extended")
+            .0
+            .pad_to_align()
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send> Send for ObjArcInner<T> {}
+unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send> Send for ObjArcInner<T> {}
 
-unsafe impl<T: ?Sized + Sync + Send> Sync for ObjArcInner<T> {}
+unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send> Sync for ObjArcInner<T> {}
 
 /// Helper type to allow accessing the reference counts without
 /// making any assertions about the data field.
@@ -1110,7 +1113,9 @@ struct WeakInner<'a> {
 ///
 /// The pointer must point to (and have valid metadata for) a previously
 /// valid instance of T, but the T is allowed to be dropped.
-unsafe fn data_offset<T: ?Sized + crate::obj_box::ConstructLayoutRaw>(ptr: *const T) -> isize {
+unsafe fn data_offset<T: ObjPtrCompat + ?Sized + crate::obj_box::ConstructLayoutRaw>(
+    ptr: *const T,
+) -> isize {
     // Align the unsized value to the end of the ObjArcInner.
     // Because ObjArcInner is repr(C), it will always be the last field in memory.
     data_offset_align(T::align_of_val_raw(ptr))

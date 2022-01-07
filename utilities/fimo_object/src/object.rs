@@ -36,7 +36,7 @@ pub trait CoerceObjectMut<T: VTable>: CoerceObject<T> {
 /// # Safety
 ///
 /// The implementor must ensure that the type is only a wrapper the object.
-pub unsafe trait ObjectWrapper {
+pub unsafe trait ObjectWrapper: ObjPtrCompat {
     /// VTable of the object.
     type VTable: VTable;
 
@@ -90,6 +90,16 @@ pub unsafe trait ObjectWrapper {
         Self::from_object_mut(obj)
     }
 }
+
+/// Marker for types compatible with the custom pointer types.
+///
+/// # Safety
+///
+/// This marker can be safely implemented for Sized types or
+/// types only wrapping an [`ObjectWrapper`].
+pub unsafe trait ObjPtrCompat {}
+
+unsafe impl<T> ObjPtrCompat for T {}
 
 /// An object
 ///
@@ -227,6 +237,8 @@ unsafe impl<T: VTable> ObjectWrapper for Object<T> {
         obj
     }
 }
+
+unsafe impl<T: VTable> ObjPtrCompat for Object<T> {}
 
 /// Casts the object into it's raw representation.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
