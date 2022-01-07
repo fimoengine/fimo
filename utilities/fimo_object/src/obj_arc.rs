@@ -1063,7 +1063,7 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
             acquire!(inner.weak);
             unsafe {
                 self.alloc
-                    .deallocate(self.ptr.cast(), Layout::for_value_raw(self.ptr.as_ptr()))
+                    .deallocate(self.ptr.cast(), (&*self.ptr.as_ptr()).get_layout())
             }
         }
     }
@@ -1079,6 +1079,17 @@ struct ObjArcInner<T: ?Sized> {
     // to avoid races in `make_mut` and `get_mut`.
     weak: atomic::AtomicUsize,
     data: T,
+}
+
+impl<T: ?Sized> ObjArcInner<T> {
+    fn get_layout(&self) -> Layout {
+        let ptr: *const T = std::ptr::addr_of!(self.data);
+
+        let layout = Layout::new::<ObjArcInner<()>>();
+        let data_layout = unsafe { crate::obj_box::ConstructLayoutRaw::layout_for_raw(ptr) };
+
+        layout.extend(data_layout).expect("Layout extended").0.pad_to_align()
+    }
 }
 
 unsafe impl<T: ?Sized + Sync + Send> Send for ObjArcInner<T> {}
