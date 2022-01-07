@@ -12,8 +12,6 @@
 #![feature(specialization)]
 #![feature(unboxed_closures)]
 #![feature(fn_traits)]
-#![feature(unsize)]
-#![feature(coerce_unsized)]
 #![feature(const_fn_trait_bound)]
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(alloc_layout_extra)]
@@ -29,5 +27,7 @@ pub mod str;
 pub mod vtable;
 
 pub use crate::str::{ConstStr, MutStr};
+pub use obj_arc::{ObjArc, ObjWeak};
+pub use obj_box::ObjBox;
 pub use object::{CoerceObject, CoerceObjectMut, Object};
 pub use span::{ConstSpan, MutSpan};
