@@ -260,7 +260,11 @@ impl<T: ?Sized, A: Allocator> BorrowMut<T> for ObjBox<T, A> {
 
 impl<T: Clone, A: Allocator + Clone> Clone for ObjBox<T, A> {
     fn clone(&self) -> Self {
-        ObjBox::new_in((&**self).clone(), self.1.clone())
+        let mut boxed = ObjBox::new_uninit_in(self.1.clone());
+        unsafe {
+            (**self).write_clone_into_raw(boxed.as_mut_ptr());
+            boxed.assume_init()
+        }
     }
 }
 
@@ -447,11 +451,24 @@ impl<T: Eq + ?Sized, A: Allocator> Eq for ObjBox<T, A> {}
 
 impl<T: ?Sized, A: Allocator + 'static> Unpin for ObjBox<T, A> {}
 
-trait ConstructLayoutRaw {
+pub(crate) trait ConstructLayoutRaw {
+    unsafe fn size_of_val_raw(ptr: *const Self) -> usize;
+    unsafe fn align_of_val_raw(ptr: *const Self) -> usize;
     unsafe fn layout_for_raw(ptr: *const Self) -> Layout;
 }
 
 impl<T: ?Sized> ConstructLayoutRaw for T {
+    #[inline]
+    default unsafe fn size_of_val_raw(ptr: *const Self) -> usize {
+        size_of_val_raw(ptr)
+    }
+
+    #[inline]
+    default unsafe fn align_of_val_raw(ptr: *const Self) -> usize {
+        align_of_val_raw(ptr)
+    }
+
+    #[inline]
     default unsafe fn layout_for_raw(ptr: *const Self) -> Layout {
         Layout::from_size_align_unchecked(size_of_val_raw(ptr), align_of_val_raw(ptr))
     }
@@ -460,17 +477,31 @@ impl<T: ?Sized> ConstructLayoutRaw for T {
 // `Object<T>` and it's wrappers do not work with the current type-system.
 // As a workaround we manually retrieve to layout of the object.
 impl<T: ObjectWrapper + ?Sized> ConstructLayoutRaw for T {
+    #[inline]
+    unsafe fn size_of_val_raw(ptr: *const Self) -> usize {
+        let obj = T::as_object(ptr);
+        crate::object::size_of_val(obj)
+    }
+
+    #[inline]
+    unsafe fn align_of_val_raw(ptr: *const Self) -> usize {
+        let obj = T::as_object(ptr);
+        crate::object::align_of_val(obj)
+    }
+
+    #[inline]
     unsafe fn layout_for_raw(ptr: *const Self) -> Layout {
         let (_, vtable) = T::into_raw_parts(ptr);
         Layout::from_size_align_unchecked(vtable.size_of(), vtable.align_of())
     }
 }
 
-trait PtrDrop {
+pub(crate) trait PtrDrop {
     unsafe fn drop_in_place(ptr: *mut Self);
 }
 
 impl<T: ?Sized> PtrDrop for T {
+    #[inline]
     default unsafe fn drop_in_place(ptr: *mut Self) {
         std::ptr::drop_in_place(ptr)
     }
@@ -478,8 +509,32 @@ impl<T: ?Sized> PtrDrop for T {
 
 // The drop procedure is contained inside the vtable of the object.
 impl<T: ObjectWrapper + ?Sized> PtrDrop for T {
+    #[inline]
     unsafe fn drop_in_place(ptr: *mut Self) {
         let obj = T::as_object_mut(ptr);
         crate::object::drop_in_place(obj)
+    }
+}
+
+/// Specialize clones into pre-allocated, uninitialized memory.
+/// Used by `ObjBox::clone` and `ObjArc::make_mut`.
+pub(crate) trait WriteCloneIntoRaw: Sized {
+    unsafe fn write_clone_into_raw(&self, target: *mut Self);
+}
+
+impl<T: Clone> WriteCloneIntoRaw for T {
+    #[inline]
+    default unsafe fn write_clone_into_raw(&self, target: *mut Self) {
+        // Having allocated *first* may allow the optimizer to create
+        // the cloned value in-place, skipping the local and move.
+        target.write(self.clone());
+    }
+}
+
+impl<T: Copy> WriteCloneIntoRaw for T {
+    #[inline]
+    unsafe fn write_clone_into_raw(&self, target: *mut Self) {
+        // We can always copy in-place, without ever involving a local value.
+        target.copy_from_nonoverlapping(self, 1);
     }
 }
