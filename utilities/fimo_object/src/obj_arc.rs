@@ -7,7 +7,7 @@ use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
 use crate::vtable::BaseInterface;
-use crate::{CoerceObjectMut, Object};
+use crate::{CoerceObject, Object};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -59,19 +59,57 @@ pub struct ObjArc<T: ObjPtrCompat + ?Sized, A: Allocator = Global> {
 
 impl<T> ObjArc<T> {
     /// Constructs a new `ObjArc` using the provided value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    /// ```
     #[inline]
     pub fn new(data: T) -> ObjArc<T> {
         ObjArc::new_in(data, Global)
     }
 
     /// Constructs a new `ObjArc` with uninitialized contents.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let mut five = ObjArc::<u32>::new_uninit();
+    ///
+    /// let five = unsafe {
+    ///     // Deferred initialization:
+    ///     ObjArc::get_mut_unchecked(&mut five).as_mut_ptr().write(5);
+    ///
+    ///     five.assume_init()
+    /// };
+    ///
+    /// assert_eq!(*five, 5)
+    /// ```
     #[inline]
+    #[must_use]
     pub fn new_uninit() -> ObjArc<MaybeUninit<T>> {
         ObjArc::new_uninit_in(Global)
     }
 
     /// Constructs a new `ObjArc` with zeroed contents.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let zero = ObjArc::<u32>::new_zeroed();
+    /// let zero = unsafe { zero.assume_init() };
+    ///
+    /// assert_eq!(*zero, 0)
+    /// ```
     #[inline]
+    #[must_use]
     pub fn new_zeroed() -> ObjArc<MaybeUninit<T>> {
         ObjArc::new_zeroed_in(Global)
     }
@@ -79,6 +117,17 @@ impl<T> ObjArc<T> {
 
 impl<T, A: Allocator> ObjArc<T, A> {
     /// Constructs a new `ObjArc` using the provided value and allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new_in(5, Global);
+    /// ```
     #[inline]
     pub fn new_in(data: T, alloc: A) -> ObjArc<T, A> {
         // construct an uninitialized version and write the value into it.
@@ -93,7 +142,28 @@ impl<T, A: Allocator> ObjArc<T, A> {
     }
 
     /// Constructs a new `ObjArc` with uninitialized contents using the provided allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let mut five = ObjArc::<u32>::new_uninit_in(Global);
+    ///
+    /// let five = unsafe {
+    ///     // Deferred initialization:
+    ///     ObjArc::get_mut_unchecked(&mut five).as_mut_ptr().write(5);
+    ///
+    ///     five.assume_init()
+    /// };
+    ///
+    /// assert_eq!(*five, 5)
+    /// ```
     #[inline]
+    #[must_use]
     pub fn new_uninit_in(alloc: A) -> ObjArc<MaybeUninit<T>, A> {
         let x = ObjBox::new_in(
             ObjArcInner {
@@ -115,7 +185,22 @@ impl<T, A: Allocator> ObjArc<T, A> {
     }
 
     /// Constructs a new `ObjArc` with zeroed contents using the provided allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let zero = ObjArc::<u32>::new_zeroed_in(Global);
+    /// let zero = unsafe { zero.assume_init() };
+    ///
+    /// assert_eq!(*zero, 0)
+    /// ```
     #[inline]
+    #[must_use]
     pub fn new_zeroed_in(alloc: A) -> ObjArc<MaybeUninit<T>, A> {
         let x = ObjBox::new_in(
             ObjArcInner {
@@ -139,7 +224,72 @@ impl<T, A: Allocator> ObjArc<T, A> {
 
 impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// Coerces a `ObjArc<T, A>` to an `ObjArc<O, A>`.
-    pub fn coerce_object<T: CoerceObjectMut<O::VTable>>(a: ObjArc<T, A>) -> ObjArc<O, A> {
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::vtable::ObjectID;
+    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
+    ///
+    /// // Define a custom interface vtable.
+    /// fimo_vtable! {
+    ///     struct ObjVTable<id = "test_vtable"> {
+    ///         add: fn(*const (), usize) -> usize
+    ///     }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// impl ObjectID for MyObj {
+    ///     const OBJECT_ID: &'static str = "test_obj";
+    /// }
+    /// impl CoerceObject<ObjVTable> for MyObj {
+    ///     fn get_vtable() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
+    ///             |ptr, num| unsafe { (*(ptr as *const MyObj)).0 + num }
+    ///         );
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// // Helper type for accessing the interface.
+    /// struct Obj {
+    ///     inner: Object<ObjVTable>
+    /// }
+    /// impl Obj {
+    ///     pub fn add(&self, num: usize) -> usize {
+    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
+    ///         (vtable.add)(ptr, num)
+    ///     }
+    /// }
+    /// unsafe impl ObjPtrCompat for Obj {}
+    /// unsafe impl ObjectWrapper for Obj {
+    ///     type VTable = ObjVTable;
+    ///
+    ///     fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         ptr as *const Object<_>
+    ///     }
+    ///
+    ///     fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         obj as *const Self
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// assert_eq!(x.0, 5);
+    ///
+    /// let x: ObjArc<Obj> = ObjArc::coerce_object(x);
+    /// assert_eq!(x.add(0), 5);
+    /// assert_eq!(x.add(1), 6);
+    /// assert_eq!(x.add(5), 10);
+    /// ```
+    pub fn coerce_object<T: CoerceObject<O::VTable>>(a: ObjArc<T, A>) -> ObjArc<O, A> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let obj = unsafe { T::coerce_obj(&*ptr) };
         let ptr = O::from_object(obj);
@@ -147,7 +297,51 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     }
 
     /// Tries to revert from an `ObjArc<O, A>` to an `ObjArc<T, A>`.
-    pub fn try_object_cast<T: CoerceObjectMut<O::VTable>>(
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::vtable::ObjectID;
+    ///
+    /// // Define a custom interface vtable.
+    /// fimo_vtable! {
+    ///     struct ObjVTable<id = "test_vtable">;
+    /// }
+    ///
+    /// // Define custom objects implementing the interface.
+    /// struct FirstObj(usize);
+    /// struct SecondObj;
+    /// impl ObjectID for FirstObj {
+    ///     const OBJECT_ID: &'static str = "first_obj";
+    /// }
+    /// impl ObjectID for SecondObj {
+    ///     const OBJECT_ID: &'static str = "second_obj";
+    /// }
+    /// impl CoerceObject<ObjVTable> for FirstObj {
+    ///     fn get_vtable() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<FirstObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    /// impl CoerceObject<ObjVTable> for SecondObj {
+    ///     fn get_vtable() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<SecondObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(FirstObj(5));
+    /// let obj: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
+    /// let also_obj = ObjArc::clone(&obj);
+    /// assert_eq!(ObjArc::try_object_cast::<FirstObj>(obj).unwrap().0, 5);
+    /// assert!(ObjArc::try_object_cast::<SecondObj>(also_obj).is_err());
+    ///
+    /// ```
+    pub fn try_object_cast<T: CoerceObject<O::VTable>>(
         a: ObjArc<O, A>,
     ) -> Result<ObjArc<T, A>, CastError<ObjArc<O, A>>> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
@@ -166,6 +360,72 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     }
 
     /// Tries casting the object to another object.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::vtable::ObjectID;
+    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
+    ///
+    /// // Define a custom interface vtable.
+    /// fimo_vtable! {
+    ///     struct ObjVTable<id = "test_vtable"> {
+    ///         add: fn(*const (), usize) -> usize
+    ///     }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// impl ObjectID for MyObj {
+    ///     const OBJECT_ID: &'static str = "test_obj";
+    /// }
+    /// impl CoerceObject<ObjVTable> for MyObj {
+    ///     fn get_vtable() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
+    ///             |ptr, num| unsafe { (*(ptr as *const MyObj)).0 + num }
+    ///         );
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// // Helper type for accessing the interface.
+    /// struct Obj {
+    ///     inner: Object<ObjVTable>
+    /// }
+    /// impl Obj {
+    ///     pub fn add(&self, num: usize) -> usize {
+    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
+    ///         (vtable.add)(ptr, num)
+    ///     }
+    /// }
+    /// unsafe impl ObjPtrCompat for Obj {}
+    /// unsafe impl ObjectWrapper for Obj {
+    ///     type VTable = ObjVTable;
+    ///
+    ///     fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         ptr as *const Object<_>
+    ///     }
+    ///
+    ///     fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         obj as *const Self
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// assert_eq!(x.0, 5);
+    ///
+    /// let x: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
+    /// let x: ObjArc<Obj> = ObjArc::try_cast(x).unwrap();
+    /// assert_eq!(x.add(0), 5);
+    /// assert_eq!(x.add(1), 6);
+    /// assert_eq!(x.add(5), 10);
+    /// ```
     pub fn try_cast<U: ObjectWrapper + ?Sized>(
         a: ObjArc<O, A>,
     ) -> Result<ObjArc<U, A>, CastError<ObjArc<O, A>>> {
@@ -185,6 +445,73 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     }
 
     /// Casts an `ObjArc<O, A>` to an `ObjArc<Object<BaseInterface>>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::vtable::ObjectID;
+    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
+    ///
+    /// // Define a custom interface vtable.
+    /// fimo_vtable! {
+    ///     struct ObjVTable<id = "test_vtable"> {
+    ///         add: fn(*const (), usize) -> usize
+    ///     }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// impl ObjectID for MyObj {
+    ///     const OBJECT_ID: &'static str = "test_obj";
+    /// }
+    /// impl CoerceObject<ObjVTable> for MyObj {
+    ///     fn get_vtable() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
+    ///             |ptr, num| unsafe { (*(ptr as *const MyObj)).0 + num }
+    ///         );
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// // Helper type for accessing the interface.
+    /// struct Obj {
+    ///     inner: Object<ObjVTable>
+    /// }
+    /// impl Obj {
+    ///     pub fn add(&self, num: usize) -> usize {
+    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
+    ///         (vtable.add)(ptr, num)
+    ///     }
+    /// }
+    /// unsafe impl ObjPtrCompat for Obj {}
+    /// unsafe impl ObjectWrapper for Obj {
+    ///     type VTable = ObjVTable;
+    ///
+    ///     fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         ptr as *const Object<_>
+    ///     }
+    ///
+    ///     fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         obj as *const Self
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// assert_eq!(x.0, 5);
+    ///
+    /// let x: ObjArc<Obj> = ObjArc::coerce_object(x);
+    /// let x = ObjArc::cast_base(x);
+    /// let x: ObjArc<Obj> = ObjArc::try_cast(x).unwrap();
+    /// assert_eq!(x.add(0), 5);
+    /// assert_eq!(x.add(1), 6);
+    /// assert_eq!(x.add(5), 10);
+    /// ```
     pub fn cast_base(a: ObjArc<O, A>) -> ObjArc<Object<BaseInterface>, A> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let obj = unsafe { &*O::as_object(ptr) };
@@ -199,6 +526,24 @@ impl<T, A: Allocator> ObjArc<MaybeUninit<T>, A> {
     /// # Safety
     ///
     /// See [std::sync::Arc::assume_init].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let mut five = ObjArc::<u32>::new_uninit();
+    ///
+    /// let five = unsafe {
+    ///     // Deferred initialization:
+    ///     ObjArc::get_mut_unchecked(&mut five).as_mut_ptr().write(5);
+    ///
+    ///     five.assume_init()
+    /// };
+    ///
+    /// assert_eq!(*five, 5)
+    /// ```
+    #[inline]
     pub unsafe fn assume_init(self) -> ObjArc<T, A> {
         let (ptr, alloc) = ObjArc::into_raw_parts(self);
         ObjArc::from_raw_parts(ptr as *const T, alloc)
@@ -211,6 +556,25 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// # Safety
     ///
     /// See [std::sync::Arc::from_raw].
+    ///
+    /// # Safety
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let x = ObjArc::new("hello".to_owned());
+    /// let x_ptr = ObjArc::into_raw(x);
+    ///
+    /// unsafe {
+    ///     // Convert back to an `ObjArc` to prevent leak.
+    ///     let x = ObjArc::from_raw(x_ptr);
+    ///     assert_eq!(&*x, "hello");
+    ///
+    ///     // Further calls to `ObjArc::from_raw(x_ptr)` would be memory-unsafe.
+    /// }
+    ///
+    /// // The memory was freed when `x` went out of scope above, so `x_ptr` is now dangling!
+    /// ```
     #[inline]
     pub unsafe fn from_raw(ptr: *const T) -> ObjArc<T> {
         ObjArc::from_raw_parts(ptr, Global)
@@ -222,6 +586,24 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// # Safety
     ///
     /// See [std::sync::Arc::increment_strong_count].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    ///
+    /// unsafe {
+    ///     let ptr = ObjArc::into_raw(five);
+    ///     ObjArc::increment_strong_count(ptr);
+    ///
+    ///     // This assertion is deterministic because we haven't shared
+    ///     // the `ObjArc` between threads.
+    ///     let five = ObjArc::from_raw(ptr);
+    ///     assert_eq!(2, ObjArc::strong_count(&five));
+    /// }
+    /// ```
     #[inline]
     pub unsafe fn increment_strong_count(ptr: *const T) {
         ObjArc::increment_strong_count_in(ptr, Global)
@@ -233,6 +615,26 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// # Safety
     ///
     /// See [std::sync::Arc::decrement_strong_count].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    ///
+    /// unsafe {
+    ///     let ptr = ObjArc::into_raw(five);
+    ///     ObjArc::increment_strong_count(ptr);
+    ///
+    ///     // This assertion is deterministic because we haven't shared
+    ///     // the `ObjArc` between threads.
+    ///     let five = ObjArc::from_raw(ptr);
+    ///     assert_eq!(2, ObjArc::strong_count(&five));
+    ///     ObjArc::decrement_strong_count(ptr);
+    ///     assert_eq!(1, ObjArc::strong_count(&five));
+    /// }
+    /// ```
     #[inline]
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         ObjArc::decrement_strong_count_in(ptr, Global)
@@ -245,6 +647,28 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Safety
     ///
     /// See [std::sync::Arc::from_raw].
+    ///
+    /// # Safety
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let x = ObjArc::new_in("hello".to_owned(), Global);
+    /// let (x_ptr, x_alloc) = ObjArc::into_raw_parts(x);
+    ///
+    /// unsafe {
+    ///     // Convert back to an `ObjArc` to prevent leak.
+    ///     let x = ObjArc::from_raw_parts(x_ptr, x_alloc);
+    ///     assert_eq!(&*x, "hello");
+    ///
+    ///     // Further calls to `ObjArc::from_raw_parts(x_ptr, x_alloc)` would be memory-unsafe.
+    /// }
+    ///
+    /// // The memory was freed when `x` went out of scope above, so `x_ptr` is now dangling!
+    /// ```
     #[inline]
     pub unsafe fn from_raw_parts(ptr: *const T, alloc: A) -> ObjArc<T, A> {
         let offset = data_offset(ptr);
@@ -260,6 +684,16 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     }
 
     /// Consumes the `ObjArc`, returning the wrapped pointer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let x = ObjArc::new("hello".to_owned());
+    /// let x_ptr = ObjArc::into_raw(x);
+    /// assert_eq!(unsafe { &*x_ptr }, "hello");
+    /// ```
     #[inline]
     pub fn into_raw(this: ObjArc<T, A>) -> *const T {
         let ptr: *const T = unsafe { std::ptr::addr_of!((*this.ptr.as_ptr()).data) };
@@ -268,6 +702,19 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     }
 
     /// Consumes the `ObjArc`, returning the wrapped pointer and allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let x = ObjArc::new_in("hello".to_owned(), Global);
+    /// let (x_ptr, x_alloc) = ObjArc::into_raw_parts(x);
+    /// assert_eq!(unsafe { &*x_ptr }, "hello");
+    /// ```
     #[inline]
     pub fn into_raw_parts(this: ObjArc<T, A>) -> (*const T, A) {
         let (ptr, alloc): (*const T, A) = unsafe {
@@ -282,12 +729,37 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     }
 
     /// Provides a raw pointer to the data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let x = ObjArc::new("hello".to_owned());
+    /// let y = ObjArc::clone(&x);
+    /// let x_ptr = ObjArc::as_ptr(&x);
+    /// assert_eq!(x_ptr, ObjArc::as_ptr(&y));
+    /// assert_eq!(unsafe { &*x_ptr }, "hello");
+    /// ```
     #[inline]
+    #[must_use]
     pub fn as_ptr(this: &ObjArc<T, A>) -> *const T {
         unsafe { std::ptr::addr_of!((*this.ptr.as_ptr()).data) }
     }
 
     /// Returns a reference to the underlying allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let x = ObjArc::new_in("hello".to_owned(), Global);
+    /// let alloc = ObjArc::allocator(&x);
+    /// ```
     #[inline]
     pub fn allocator(this: &ObjArc<T, A>) -> &A {
         &this.alloc
@@ -318,6 +790,19 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     }
 
     /// Gets the number of [`ObjWeak`] pointers to this allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    /// let _weak_five = ObjArc::downgrade(&five);
+    ///
+    /// // This assertion is deterministic because we haven't shared
+    /// // the `ObjArc` or `ObjWeak` between threads.
+    /// assert_eq!(1, ObjArc::weak_count(&five));
+    /// ```
     #[inline]
     pub fn weak_count(this: &Self) -> usize {
         let cnt = this.inner().weak.load(SeqCst);
@@ -331,12 +816,35 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     }
 
     /// Gets the number of strong (`ObjArc`) pointers to this allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    /// let _also_five = ObjArc::clone(&five);
+    ///
+    /// // This assertion is deterministic because we haven't shared
+    /// // the `ObjArc` between threads.
+    /// assert_eq!(2, ObjArc::strong_count(&five));
+    /// ```
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
         this.inner().strong.load(SeqCst)
     }
 
     /// Creates a new [`ObjWeak`] pointer to this allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    ///
+    /// let weak_five = ObjArc::downgrade(&five);
+    /// ```
     #[inline]
     pub fn downgrade(this: &Self) -> ObjWeak<T, A>
     where
@@ -385,6 +893,27 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Safety
     ///
     /// See [std::sync::Arc::increment_strong_count].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new_in(5, Global);
+    ///
+    /// unsafe {
+    ///     let (ptr, alloc) = ObjArc::into_raw_parts(five);
+    ///     ObjArc::increment_strong_count_in(ptr, alloc);
+    ///
+    ///     // This assertion is deterministic because we haven't shared
+    ///     // the `ObjArc` between threads.
+    ///     let five = ObjArc::from_raw_parts(ptr, alloc);
+    ///     assert_eq!(2, ObjArc::strong_count(&five));
+    /// }
+    /// ```
     #[inline]
     pub unsafe fn increment_strong_count_in(ptr: *const T, alloc: A)
     where
@@ -402,12 +931,48 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Safety
     ///
     /// See [std::sync::Arc::decrement_strong_count].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new_in(5, Global);
+    ///
+    /// unsafe {
+    ///     let (ptr, alloc) = ObjArc::into_raw_parts(five);
+    ///     ObjArc::increment_strong_count_in(ptr, alloc);
+    ///
+    ///     // This assertion is deterministic because we haven't shared
+    ///     // the `ObjArc` between threads.
+    ///     let five = ObjArc::from_raw_parts(ptr, alloc);
+    ///     assert_eq!(2, ObjArc::strong_count(&five));
+    ///     ObjArc::decrement_strong_count_in(ptr, alloc);
+    ///     assert_eq!(1, ObjArc::strong_count(&five));
+    /// }
+    /// ```
     #[inline]
     pub unsafe fn decrement_strong_count_in(ptr: *const T, alloc: A) {
         std::mem::drop(ObjArc::from_raw_parts(ptr, alloc))
     }
 
     /// Returns `true` if the two `ObjArc`s point to the same allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    /// let same_five = ObjArc::clone(&five);
+    /// let other_five = ObjArc::new(5);
+    ///
+    /// assert!(ObjArc::ptr_eq(&five, &same_five));
+    /// assert!(!ObjArc::ptr_eq(&five, &other_five));
+    /// ```
     #[inline]
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
         this.ptr.as_ptr() == other.ptr.as_ptr()
@@ -420,6 +985,19 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     ///
     /// Returns [`None`] otherwise, because it is not safe to
     /// mutate a shared value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let mut x = ObjArc::new(3);
+    /// *ObjArc::get_mut(&mut x).unwrap() = 4;
+    /// assert_eq!(*x, 4);
+    ///
+    /// let _y = ObjArc::clone(&x);
+    /// assert!(ObjArc::get_mut(&mut x).is_none());
+    /// ```
     #[inline]
     pub fn get_mut(this: &mut ObjArc<T, A>) -> Option<&mut T> {
         if this.is_unique() {
@@ -440,6 +1018,18 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Safety
     ///
     /// See [std::sync::Arc::get_mut_unchecked].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let mut x = ObjArc::new(String::new());
+    /// unsafe {
+    ///     ObjArc::get_mut_unchecked(&mut x).push_str("foo")
+    /// }
+    /// assert_eq!(*x, "foo");
+    /// ```
     #[inline]
     pub unsafe fn get_mut_unchecked(this: &mut ObjArc<T, A>) -> &mut T {
         // We are careful to *not* create a reference covering the "count" fields, as
@@ -486,6 +1076,24 @@ impl<T: Clone, A: Allocator + Clone> ObjArc<T, A> {
     /// Makes a mutable reference into the given Arc.
     ///
     /// See [std::sync::Arc::make_mut].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let mut data = ObjArc::new(5);
+    ///
+    /// *ObjArc::make_mut(&mut data) += 1;          // Won't clone anything
+    /// let mut other_data = ObjArc::clone(&data);  // Won't clone anything
+    /// *ObjArc::make_mut(&mut data) += 1;          // Clones inner data
+    /// *ObjArc::make_mut(&mut data) += 1;          // Won't clone anything
+    /// *ObjArc::make_mut(&mut other_data) *= 2;    // Won't clone anything
+    ///
+    /// // Now `data` and `other_data` point to different allocations.
+    /// assert_eq!(*data, 8);
+    /// assert_eq!(*other_data, 12);
+    /// ```
     #[inline]
     pub fn make_mut(this: &mut ObjArc<T, A>) -> &mut T {
         // Note that we hold both a strong reference and a weak reference.
@@ -797,6 +1405,16 @@ pub struct ObjWeak<T: ObjPtrCompat + ?Sized, A: Allocator = Global> {
 
 impl<T> ObjWeak<T> {
     /// Constructs a new `ObjWeak<T, A>`, without allocating any memory.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjWeak;
+    ///
+    /// let empty: ObjWeak<i64> = ObjWeak::new();
+    /// assert!(empty.upgrade().is_none());
+    /// ```
+    #[must_use]
     pub fn new() -> ObjWeak<T> {
         ObjWeak::new_in(Global)
     }
@@ -805,6 +1423,19 @@ impl<T> ObjWeak<T> {
 impl<T, A: Allocator> ObjWeak<T, A> {
     /// Constructs a new `ObjWeak<T, A>`, without allocating any memory, technically in the provided
     /// allocator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::ObjWeak;
+    ///
+    /// let empty: ObjWeak<i64> = ObjWeak::new_in(Global);
+    /// assert!(empty.upgrade().is_none());
+    /// ```
+    #[must_use]
     pub fn new_in(alloc: A) -> ObjWeak<T, A> {
         ObjWeak {
             ptr: NonNull::new(usize::MAX as *mut ObjArcInner<T>).expect("MAX is not 0"),
@@ -820,6 +1451,27 @@ impl<T: ObjPtrCompat + ?Sized> ObjWeak<T> {
     /// # Safety
     ///
     /// See [`std::sync::Weak::from_raw`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::{ObjArc, ObjWeak};
+    ///
+    /// let strong = ObjArc::new("hello".to_owned());
+    ///
+    /// let raw_1 = ObjArc::downgrade(&strong).into_raw();
+    /// let raw_2 = ObjArc::downgrade(&strong).into_raw();
+    ///
+    /// assert_eq!(2, ObjArc::weak_count(&strong));
+    ///
+    /// assert_eq!("hello", &*unsafe { ObjWeak::from_raw(raw_1) }.upgrade().unwrap());
+    /// assert_eq!(1, ObjArc::weak_count(&strong));
+    ///
+    /// drop(strong);
+    ///
+    /// // Decrement the last weak count.
+    /// assert!(unsafe { ObjWeak::from_raw(raw_2) }.upgrade().is_none())
+    /// ```
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self::from_raw_parts(ptr, Global)
     }
@@ -827,6 +1479,26 @@ impl<T: ObjPtrCompat + ?Sized> ObjWeak<T> {
 
 impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Returns a raw pointer to the object `T` pointed to by this `ObjWeak<T>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    /// use std::ptr;
+    ///
+    /// let strong = ObjArc::new("hello".to_owned());
+    /// let weak = ObjArc::downgrade(&strong);
+    /// // Both point to the same object
+    /// assert!(ptr::eq(&*strong, weak.as_ptr()));
+    /// // The strong here keeps it alive, so we can still access the object.
+    /// assert_eq!("hello", unsafe { &*weak.as_ptr() });
+    ///
+    /// drop(strong);
+    /// // But not any more. We can do weak.as_ptr(), but accessing the pointer would lead to
+    /// // undefined behaviour.
+    /// // assert_eq!("hello", unsafe { &*weak.as_ptr() });
+    /// ```
+    #[must_use]
     pub fn as_ptr(&self) -> *const T {
         let ptr: *mut ObjArcInner<T> = NonNull::as_ptr(self.ptr);
 
@@ -843,6 +1515,22 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 
     /// Consumes the `ObjWeak<T>` and turns it into a raw pointer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::{ObjArc, ObjWeak};
+    ///
+    /// let strong = ObjArc::new("hello".to_owned());
+    /// let weak = ObjArc::downgrade(&strong);
+    /// let raw = weak.into_raw();
+    ///
+    /// assert_eq!(1, ObjArc::weak_count(&strong));
+    /// assert_eq!("hello", unsafe { &*raw });
+    ///
+    /// drop(unsafe { ObjWeak::from_raw(raw) });
+    /// assert_eq!(0, ObjArc::weak_count(&strong));
+    /// ```
     pub fn into_raw(self) -> *const T {
         let result = self.as_ptr();
         std::mem::forget(self);
@@ -850,6 +1538,25 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 
     /// Consumes the `ObjWeak<T>` and turns it into a raw pointer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::{ObjArc, ObjWeak};
+    ///
+    /// let strong = ObjArc::new_in("hello".to_owned(), Global);
+    /// let weak = ObjArc::downgrade(&strong);
+    /// let (raw, alloc) = weak.into_raw_parts();
+    ///
+    /// assert_eq!(1, ObjArc::weak_count(&strong));
+    /// assert_eq!("hello", unsafe { &*raw });
+    ///
+    /// drop(unsafe { ObjWeak::from_raw_parts(raw, alloc) });
+    /// assert_eq!(0, ObjArc::weak_count(&strong));
+    /// ```
     pub fn into_raw_parts(self) -> (*const T, A) {
         let ptr = self.as_ptr();
         let alloc = unsafe { std::ptr::read(&self.alloc) };
@@ -863,6 +1570,30 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// # Safety
     ///
     /// See [`std::sync::Weak::from_raw`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(allocator_api)]
+    ///
+    /// use std::alloc::Global;
+    /// use fimo_object::{ObjArc, ObjWeak};
+    ///
+    /// let strong = ObjArc::new_in("hello".to_owned(), Global);
+    ///
+    /// let (raw_1, alloc_1) = ObjArc::downgrade(&strong).into_raw_parts();
+    /// let (raw_2, alloc_2) = ObjArc::downgrade(&strong).into_raw_parts();
+    ///
+    /// assert_eq!(2, ObjArc::weak_count(&strong));
+    ///
+    /// assert_eq!("hello", &*unsafe { ObjWeak::from_raw_parts(raw_1, alloc_1) }.upgrade().unwrap());
+    /// assert_eq!(1, ObjArc::weak_count(&strong));
+    ///
+    /// drop(strong);
+    ///
+    /// // Decrement the last weak count.
+    /// assert!(unsafe { ObjWeak::from_raw_parts(raw_2, alloc_2) }.upgrade().is_none())
+    /// ```
     pub unsafe fn from_raw_parts(ptr: *const T, alloc: A) -> Self {
         // See ObjWeak::as_ptr for context on how the input pointer is derived.
 
@@ -889,6 +1620,25 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
 impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Attempts to upgrade the `ObjWeak` pointer to an [`ObjArc`], delaying
     /// dropping of the inner value if successful.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let five = ObjArc::new(5);
+    ///
+    /// let weak_five = ObjArc::downgrade(&five);
+    ///
+    /// let strong_five: Option<ObjArc<_>> = weak_five.upgrade();
+    /// assert!(strong_five.is_some());
+    ///
+    /// // Destroy all strong pointers.
+    /// drop(strong_five);
+    /// drop(five);
+    ///
+    /// assert!(weak_five.upgrade().is_none());
+    /// ```
     pub fn upgrade(&self) -> Option<ObjArc<T, A>>
     where
         A: Clone,
@@ -991,6 +1741,37 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Returns `true` if the two `ObjWeak`s point to the same allocation (similar to
     /// [`std::ptr::eq`]), or if both don't point to any allocation
     /// (because they were created with `ObjWeak::new()`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_object::ObjArc;
+    ///
+    /// let first_arc = ObjArc::new(5);
+    /// let first = ObjArc::downgrade(&first_arc);
+    /// let second = ObjArc::downgrade(&first_arc);
+    ///
+    /// assert!(first.ptr_eq(&second));
+    ///
+    /// let third_arc = ObjArc::new(5);
+    /// let third = ObjArc::downgrade(&third_arc);
+    ///
+    /// assert!(!first.ptr_eq(&third));
+    /// ```
+    ///
+    /// Comparing `ObjWeak::new`.
+    ///
+    /// ```
+    /// use fimo_object::{ObjArc, ObjWeak};
+    ///
+    /// let first = ObjWeak::new();
+    /// let second = ObjWeak::new();
+    /// assert!(first.ptr_eq(&second));
+    ///
+    /// let third_arc = ObjArc::new(());
+    /// let third = ObjArc::downgrade(&third_arc);
+    /// assert!(!first.ptr_eq(&third));
+    /// ```
     #[inline]
     #[must_use]
     pub fn ptr_eq(&self, other: &Self) -> bool {
