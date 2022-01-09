@@ -5,6 +5,77 @@ use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, Object, Optional, SpanInner, St
 use fimo_version_core::Version;
 use std::path::{Path, PathBuf};
 
+/// Defines a new interface.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(const_fn_trait_bound)]
+/// #![feature(const_fn_fn_ptr_basics)]
+///
+/// use fimo_version_core::Version;
+/// use fimo_module_core::{fimo_vtable, fimo_interface};
+///
+/// fimo_vtable! {
+///     struct VTable<id = "unique id">;
+/// }
+///
+/// // interface without extensions.
+/// fimo_interface! {
+///     struct Simple<vtable = VTable> {
+///         name: "MyInterface",
+///         version: Version::new_short(1, 1, 0),
+///     }
+/// }
+///
+/// // interface without extensions.
+/// fimo_interface! {
+///     struct Complex<vtable = VTable> {
+///         name: "MyInterface",
+///         version: Version::new_short(1, 1, 0),
+///         extensions: ["ext1", "ext2"]
+///     }
+/// }
+///
+/// ```
+#[macro_export]
+macro_rules! fimo_interface {
+    (
+        $(#[$attr:meta])*
+        $vis:vis struct $name:ident<vtable = $vtable:ty> {
+            name: $i_name:literal,
+            version: $i_version:expr,
+            extensions: [ $($i_ext:literal),* ] $(,)?
+        }
+    ) => {
+        $crate::fimo_object! {
+            $(#[$attr])*
+            $vis struct $name<vtable = $vtable>;
+        }
+        impl $crate::FimoInterface for $name {
+            const NAME: &'static str = $i_name;
+            const VERSION: fimo_version_core::Version = $i_version;
+            const EXTENSIONS: &'static [&'static str] = &[ $($i_ext),* ];
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis struct $name:ident<vtable = $vtable:ty> {
+            name: $i_name:literal,
+            version: $i_version:expr $(,)?
+        }
+    ) => {
+        $crate::fimo_interface! {
+            $(#[$attr])*
+            $vis struct $name<vtable = $vtable> {
+                name: $i_name,
+                version: $i_version,
+                extensions: [],
+            }
+        }
+    }
+}
+
 /// Marker type that implements `Send` and `Sync`.
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct SendSyncMarker;

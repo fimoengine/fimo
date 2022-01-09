@@ -26,7 +26,7 @@ macro_rules! fimo_object {
         $(#[$attr:meta])*
         $vis:vis struct $name:ident<vtable = $vtable:ty> $(;)?
     ) => {
-        $crate ::fimo_object! {
+        $crate::fimo_object! {
             $(#[$attr])*
             $vis struct $name<vtable = $vtable, no_debug>;
         }
