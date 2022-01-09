@@ -53,7 +53,7 @@ macro_rules! fimo_vtable {
         $vis:vis struct $name:ident<id = $id:literal, marker = $marker:ty>{
             $(
                 $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
-            ),*
+            ),* $(,)?
         }
     ) => {
         $(#[$attr])*
@@ -123,7 +123,7 @@ macro_rules! fimo_vtable {
         $vis:vis struct $name:ident<id = $id:literal>{
             $(
                 $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
-            ),*
+            ),* $(,)?
         }
     ) => {
         $crate::fimo_vtable!{

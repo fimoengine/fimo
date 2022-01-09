@@ -12,21 +12,23 @@
 extern crate static_assertions as sa;
 
 mod dyn_arc;
-pub use dyn_arc::*;
 
-pub mod rust;
+pub use dyn_arc::*;
+use std::fmt::Debug;
+
+pub mod rust_loader;
 
 /// Module information.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct ModuleInfo {
+pub struct ModuleInfo<S = fimo_ffi_core::ArrayString<32>> {
     /// Module name.
-    pub name: fimo_ffi_core::ArrayString<32>,
+    pub name: S,
     /// Module version.
-    pub version: fimo_ffi_core::ArrayString<32>,
+    pub version: S,
 }
 
-impl std::fmt::Display for ModuleInfo {
+impl<S: std::fmt::Display> std::fmt::Display for ModuleInfo<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "name: {}, version: {}", self.name, self.version)
     }
@@ -61,3 +63,19 @@ pub enum ModulePtr {
     /// Unspecified layout.
     Other([u8; 32]),
 }
+
+mod error;
+mod interfaces;
+
+pub mod rust;
+
+pub use error::{Error, ErrorKind, Result};
+pub use interfaces::*;
+
+/// Type of a path character.
+#[cfg(unix)]
+pub type PathChar = u8;
+
+/// Type of a path character.
+#[cfg(windows)]
+pub type PathChar = u16;

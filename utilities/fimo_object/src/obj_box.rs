@@ -109,7 +109,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
     /// Coerces a `ObjBox<T, A>` to an `ObjBox<O, A>`.
     pub fn coerce_object<T: CoerceObjectMut<O::VTable>>(b: ObjBox<T, A>) -> ObjBox<O, A> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = unsafe { T::coerce_obj_mut(&mut *ptr) };
+        let obj = T::coerce_obj_mut_raw(ptr);
         let ptr = O::from_object_mut(obj);
         unsafe { ObjBox::from_raw_parts(ptr, alloc) }
     }
@@ -119,10 +119,10 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
         b: ObjBox<O, A>,
     ) -> Result<ObjBox<T, A>, CastError<ObjBox<O, A>>> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = unsafe { &mut *O::as_object_mut(ptr) };
+        let obj = O::as_object_mut(ptr);
 
         unsafe {
-            match obj.try_cast_obj_mut::<T>() {
+            match Object::<O::VTable>::try_cast_obj_mut_raw::<T>(obj) {
                 Ok(casted) => Ok(ObjBox::from_raw_parts(casted, alloc)),
                 Err(err) => Err(CastError {
                     obj: ObjBox::from_raw_parts(ptr, alloc),
@@ -138,10 +138,10 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
         b: ObjBox<O, A>,
     ) -> Result<ObjBox<U, A>, CastError<ObjBox<O, A>>> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = unsafe { &mut *O::as_object_mut(ptr) };
+        let obj = O::as_object_mut(ptr);
 
         unsafe {
-            match obj.try_cast_mut::<U::VTable>() {
+            match Object::<O::VTable>::try_cast_mut_raw::<U::VTable>(obj) {
                 Ok(casted) => Ok(ObjBox::from_raw_parts(U::from_object_mut(casted), alloc)),
                 Err(err) => Err(CastError {
                     obj: ObjBox::from_raw_parts(ptr, alloc),
@@ -155,8 +155,8 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
     /// Casts an `ObjBox<O, A>` to an `ObjBox<Object<BaseInterface>>`.
     pub fn cast_base(b: ObjBox<O, A>) -> ObjBox<Object<BaseInterface>, A> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = unsafe { &mut *O::as_object_mut(ptr) };
-        let obj = obj.cast_base_mut();
+        let obj = O::as_object_mut(ptr);
+        let obj = Object::<O::VTable>::cast_base_mut_raw(obj);
         unsafe { ObjBox::from_raw_parts(obj, alloc) }
     }
 }
