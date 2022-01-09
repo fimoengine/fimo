@@ -1,0 +1,11 @@
+[package]
+name = "fimo_ffi"
+version = "0.1.0"
+edition = "2021"
+description = "Fimo ffi definitions"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+[dependencies]
+fimo_object = { version = "0.1.0", path = "../fimo_object" }
+fimo_ffi_core = { version = "0.1.0", path = "../fimo_ffi_core" }

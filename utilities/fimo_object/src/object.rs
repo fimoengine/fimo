@@ -4,6 +4,94 @@ use crate::vtable::{BaseInterface, ObjectID, VTable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
+/// Defines a new object with the specified wrapper.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(const_fn_trait_bound)]
+/// #![feature(const_fn_fn_ptr_basics)]
+///
+/// use fimo_object::{fimo_vtable, fimo_object};
+///
+/// fimo_vtable! {
+///     struct VTable<id = "unique id">;
+/// }
+///
+/// fimo_object!(struct Obj<vtable = VTable>;);
+/// ```
+#[macro_export]
+macro_rules! fimo_object {
+    (
+        $(#[$attr:meta])*
+        $vis:vis struct $name:ident<vtable = $vtable:ty> $(;)?
+    ) => {
+        $crate ::fimo_object! {
+            $(#[$attr])*
+            $vis struct $name<vtable = $vtable, no_debug>;
+        }
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, std::stringify!(($name)))
+            }
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        $vis:vis struct $name:ident<vtable = $vtable:ty $(, no_debug)? > $(;)?
+    ) => {
+        $(#[$attr])*
+        #[repr(transparent)]
+        $vis struct $name {
+            inner: $crate::object::Object<$vtable>,
+        }
+        impl $name {
+            /// Splits the object reference into it's raw parts.
+            #[inline]
+            pub fn into_raw_parts(&self) -> (*const (), &'static $vtable) {
+                $crate::object::into_raw_parts(&self.inner)
+            }
+            /// Splits the mutable object reference into it's raw parts.
+            #[inline]
+            pub fn into_raw_parts_mut(&mut self) -> (*mut (), &'static $vtable) {
+                $crate::object::into_raw_parts_mut(&mut self.inner)
+            }
+            /// Constructs a reference to the object from it's raw parts.
+            ///
+            /// # Safety
+            ///
+            /// - The vtable must have a compatible layout.
+            /// - The object pointer must be compatible with the vtable.
+            #[inline]
+            pub unsafe fn from_raw_parts(ptr: *const (), vtable: &'static $vtable) -> *const $name {
+                $crate::object::from_raw_parts(ptr, vtable) as _
+            }
+            /// Constructs a mutable reference to the object from it's raw parts.
+            ///
+            /// # Safety
+            ///
+            /// - The vtable must have a compatible layout.
+            /// - The object pointer must be compatible with the vtable.
+            #[inline]
+            pub unsafe fn from_raw_parts_mut(ptr: *mut (), vtable: &'static $vtable) -> *mut $name {
+                $crate::object::from_raw_parts_mut(ptr, vtable) as _
+            }
+        }
+        unsafe impl $crate::object::ObjPtrCompat for $name {}
+        unsafe impl $crate::object::ObjectWrapper for $name {
+            type VTable = $vtable;
+            #[inline]
+            fn as_object(ptr: *const Self) -> *const $crate::object::Object<Self::VTable> {
+                ptr as _
+            }
+            #[inline]
+            fn from_object(obj: *const $crate::object::Object<Self::VTable>) -> *const Self {
+                obj as _
+            }
+        }
+    };
+}
+
 /// Used for coercing a type to an Object reference.
 pub trait CoerceObject<T: VTable>: ObjectID {
     /// Fetches a static reference to the vtable.
@@ -11,11 +99,21 @@ pub trait CoerceObject<T: VTable>: ObjectID {
 
     /// Coerces the Object to a `&Object<T>`.
     fn coerce_obj(&self) -> &Object<T> {
-        let ptr = self as *const _ as *const ();
+        // safety: dereferencing is safe, as the pointer stems from self.
+        unsafe { &*Self::coerce_obj_raw(self) }
+    }
+
+    /// Coerces a pointer to `Self` to a pointer to [`Object`].
+    ///
+    /// # Safety
+    ///
+    /// This function is safe, but it may not be safe to
+    /// dereference the resulting pointer.
+    fn coerce_obj_raw(this: *const Self) -> *const Object<T> {
         let vtable: &'static T = Self::get_vtable();
 
         // safety: the reference stems from self so it is valid.
-        unsafe { &*from_raw_parts(ptr, vtable) }
+        unsafe { from_raw_parts(this as *const (), vtable) }
     }
 }
 
@@ -23,11 +121,21 @@ pub trait CoerceObject<T: VTable>: ObjectID {
 pub trait CoerceObjectMut<T: VTable>: CoerceObject<T> {
     /// Coerces the Object to a `&mut Object<T>`.
     fn coerce_obj_mut(&mut self) -> &mut Object<T> {
-        let ptr = self as *mut _ as *mut ();
+        // safety: dereferencing is safe, as the pointer stems from self.
+        unsafe { &mut *Self::coerce_obj_mut_raw(self) }
+    }
+
+    /// Coerces a mutable pointer to `Self` to a mutable pointer to [`Object`].
+    ///
+    /// # Safety
+    ///
+    /// This function is safe, but it may not be safe to
+    /// dereference the resulting pointer.
+    fn coerce_obj_mut_raw(this: *mut Self) -> *mut Object<T> {
         let vtable: &'static T = Self::get_vtable();
 
         // safety: the reference stems from self so it is valid.
-        unsafe { &mut *from_raw_parts_mut(ptr, vtable) }
+        unsafe { from_raw_parts_mut(this as *mut (), vtable) }
     }
 }
 
@@ -114,6 +222,7 @@ unsafe impl<T> ObjPtrCompat for T {}
 /// like `Box` and `Arc`. This is because they are unable to access the size and alignment
 /// of the object, as `std::mem::size_of_val::<Object<T>>` and
 /// `std::mem::align_of_val::<Object<T>>` return wrong numbers.
+#[repr(transparent)]
 pub struct Object<T: VTable> {
     _phantom: PhantomData<&'static T>,
     // makes `ModuleLoader` into a DST with size 0 and alignment 1.
@@ -123,20 +232,29 @@ pub struct Object<T: VTable> {
 impl<T: VTable> Object<T> {
     /// Casts an object to the base object.
     pub fn cast_base(&self) -> &Object<BaseInterface> {
+        unsafe { &*Self::cast_base_raw(self) }
+    }
+
+    /// Casts a `*const Object<T>` to a `*const Object<BaseInterface>`.
+    pub fn cast_base_raw(o: *const Self) -> *const Object<BaseInterface> {
         // safety: transmuting to the base interface is always sound.
-        unsafe { std::mem::transmute::<&Self, _>(self) }
+        o as _
     }
 
     /// Casts an object to the base object.
     pub fn cast_base_mut(&mut self) -> &mut Object<BaseInterface> {
+        unsafe { &mut *Self::cast_base_mut_raw(self) }
+    }
+
+    /// Casts a `*mut Object<T>` to a `*mut Object<BaseInterface>`.
+    pub fn cast_base_mut_raw(o: *mut Self) -> *mut Object<BaseInterface> {
         // safety: transmuting to the base interface is always sound.
-        unsafe { std::mem::transmute::<&mut Self, _>(self) }
+        o as _
     }
 
     /// Casts the `&Object<T>` to a `&Object<U>`.
     pub fn try_cast<U: VTable>(&self) -> Result<&Object<U>, CastError<&Self>> {
-        let raw = into_raw(self);
-        let casted = crate::raw::try_cast(raw);
+        let casted = Self::try_cast_raw(self);
         casted.map_or_else(
             |err| {
                 Err(CastError {
@@ -145,14 +263,31 @@ impl<T: VTable> Object<T> {
                     available: err.available,
                 })
             },
-            |obj| unsafe { Ok(&*from_raw(obj)) },
+            |obj| unsafe { Ok(&*obj) },
+        )
+    }
+
+    /// Casts the `*const Object<T>` to a `*const Object<U>`.
+    pub fn try_cast_raw<U: VTable>(
+        o: *const Self,
+    ) -> Result<*const Object<U>, CastError<*const Self>> {
+        let raw = into_raw(o);
+        let casted = crate::raw::try_cast(raw);
+        casted.map_or_else(
+            |err| {
+                Err(CastError {
+                    obj: o,
+                    required: err.required,
+                    available: err.available,
+                })
+            },
+            |obj| Ok(from_raw(obj)),
         )
     }
 
     /// Casts the `&mut Object<T>` to a `&mut Object<U>`.
     pub fn try_cast_mut<U: VTable>(&mut self) -> Result<&mut Object<U>, CastError<&mut Self>> {
-        let raw = into_raw_mut(self);
-        let casted = crate::raw::try_cast_mut(raw);
+        let casted = Self::try_cast_mut_raw(self);
         casted.map_or_else(
             |err| {
                 Err(CastError {
@@ -161,14 +296,31 @@ impl<T: VTable> Object<T> {
                     available: err.available,
                 })
             },
-            |obj| unsafe { Ok(&mut *from_raw_mut(obj)) },
+            |obj| unsafe { Ok(&mut *obj) },
+        )
+    }
+
+    /// Casts the `*mut Object<T>` to a `*mut Object<U>`.
+    pub fn try_cast_mut_raw<U: VTable>(
+        o: *mut Self,
+    ) -> Result<*mut Object<U>, CastError<*mut Self>> {
+        let raw = into_raw_mut(o);
+        let casted = crate::raw::try_cast_mut(raw);
+        casted.map_or_else(
+            |err| {
+                Err(CastError {
+                    obj: o,
+                    required: err.required,
+                    available: err.available,
+                })
+            },
+            |obj| Ok(from_raw_mut(obj)),
         )
     }
 
     /// Casts the object to a `&O`.
     pub fn try_cast_obj<O: ObjectID>(&self) -> Result<&O, CastError<&Self>> {
-        let raw = into_raw(self);
-        let res = crate::raw::try_cast_obj::<T, O>(raw);
+        let res = Self::try_cast_obj_raw(self);
         res.map_or_else(
             |err| {
                 Err(CastError {
@@ -179,6 +331,18 @@ impl<T: VTable> Object<T> {
             },
             |obj| unsafe { Ok(&*obj) },
         )
+    }
+
+    /// Casts the object pointer to a `*const O`.
+    pub fn try_cast_obj_raw<O: ObjectID>(
+        o: *const Self,
+    ) -> Result<*const O, CastError<*const Self>> {
+        let raw = into_raw(o);
+        crate::raw::try_cast_obj::<T, O>(raw).map_err(|e| CastError {
+            obj: o,
+            required: e.required,
+            available: e.available,
+        })
     }
 
     /// Casts the object to a `&mut O`.
@@ -195,6 +359,16 @@ impl<T: VTable> Object<T> {
             },
             |obj| unsafe { Ok(&mut *obj) },
         )
+    }
+
+    /// Casts the mutable object pointer to a `*mut O`.
+    pub fn try_cast_obj_mut_raw<O: ObjectID>(o: *mut Self) -> Result<*mut O, CastError<*mut Self>> {
+        let raw = into_raw_mut(o);
+        crate::raw::try_cast_obj_mut::<T, O>(raw).map_err(|e| CastError {
+            obj: o,
+            required: e.required,
+            available: e.available,
+        })
     }
 }
 
