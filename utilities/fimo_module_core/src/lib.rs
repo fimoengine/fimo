@@ -70,6 +70,7 @@ mod interfaces;
 pub mod rust;
 
 pub use error::{Error, ErrorKind, Result};
+pub use fimo_ffi::{fimo_object, fimo_vtable};
 pub use interfaces::*;
 
 /// Type of a path character.
