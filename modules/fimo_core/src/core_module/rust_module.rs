@@ -1,5 +1,5 @@
 use crate::core_module::{construct_module_info, CoreWrapper};
-use fimo_core_interface::rust::build_interface_descriptor;
+use fimo_core_int::rust::build_interface_descriptor;
 use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleParent};

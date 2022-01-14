@@ -4,7 +4,7 @@ use crate::TaskRuntimeInner;
 use atomic::Atomic;
 use context::stack::{ProtectedFixedSizeStack, Stack};
 use context::Context;
-use fimo_tasks_interface::rust::{NotifyFn, RawTask, TaskHandle, TaskStatus, WaitOnFn, WorkerId};
+use fimo_tasks_int::rust::{NotifyFn, RawTask, TaskHandle, TaskStatus, WaitOnFn, WorkerId};
 use parking_lot::Condvar;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

@@ -1,5 +1,5 @@
 use crate::runtime::enter_runtime_call;
-use fimo_tasks_interface::rust as ft;
+use fimo_tasks_int::rust as ft;
 use ft::{Task, TaskCompletionStatus};
 
 #[test]

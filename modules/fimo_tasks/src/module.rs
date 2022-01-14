@@ -4,7 +4,7 @@ use fimo_ffi::object::CoerceObject;
 use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
-use fimo_tasks_interface::rust::{FimoTasksVTable, TaskRuntimeInner};
+use fimo_tasks_int::rust::{IFimoTasksVTable, TaskRuntimeInner};
 use fimo_version_core::Version;
 
 #[cfg(feature = "rust_module")]
@@ -25,12 +25,12 @@ impl ObjectID for TaskInterface {
 impl CoerceObject<IModuleInterfaceVTable> for TaskInterface {
     fn get_vtable() -> &'static IModuleInterfaceVTable {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            let i: &FimoTasksVTable = TaskInterface::get_vtable();
+            let i: &IFimoTasksVTable = TaskInterface::get_vtable();
             i.as_base()
         }
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn version(_ptr: *const ()) -> Version {
-            fimo_tasks_interface::rust::FimoTasks::VERSION
+            fimo_tasks_int::rust::IFimoTasks::VERSION
         }
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn extension(
@@ -51,11 +51,11 @@ impl CoerceObject<IModuleInterfaceVTable> for TaskInterface {
     }
 }
 
-impl CoerceObject<FimoTasksVTable> for TaskInterface {
-    fn get_vtable() -> &'static FimoTasksVTable {
-        static VTABLE: FimoTasksVTable = FimoTasksVTable::new::<TaskInterface>(|ptr| unsafe {
+impl CoerceObject<IFimoTasksVTable> for TaskInterface {
+    fn get_vtable() -> &'static IFimoTasksVTable {
+        static VTABLE: IFimoTasksVTable = IFimoTasksVTable::new::<TaskInterface>(|ptr| unsafe {
             &(*(ptr as *const TaskInterface)).runtime as &dyn TaskRuntimeInner as *const _
-                as *const fimo_tasks_interface::rust::TaskRuntime
+                as *const fimo_tasks_int::rust::TaskRuntime
         });
         &VTABLE
     }
@@ -67,7 +67,7 @@ fn construct_module_info() -> ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
             ArrayString::from_utf8_unchecked(
-                String::from(&fimo_tasks_interface::rust::FimoTasks::VERSION).as_bytes(),
+                String::from(&fimo_tasks_int::rust::IFimoTasks::VERSION).as_bytes(),
             )
         },
     }

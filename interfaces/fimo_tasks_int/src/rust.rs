@@ -21,13 +21,13 @@ fimo_interface! {
     /// Trait describing the `fimo-tasks` interface.
     ///
     /// Must be `Send` and `Sync`.
-    pub struct FimoTasks<vtable = FimoTasksVTable> {
+    pub struct IFimoTasks<vtable = IFimoTasksVTable> {
         name: "fimo::interfaces::tasks::fimo_tasks",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0)
     }
 }
 
-impl FimoTasks {
+impl IFimoTasks {
     /// Extracts a reference to the task runtime.
     pub fn as_task_runtime(&self) -> &TaskRuntime {
         let (ptr, vtable) = self.into_raw_parts();
@@ -36,8 +36,8 @@ impl FimoTasks {
 }
 
 fimo_vtable! {
-    /// `FimoTasks` interface vtable.
-    pub struct FimoTasksVTable<id = "fimo::interfaces::tasks::fimo_tasks", marker = SendSyncMarker> {
+    /// VTable of an [`IFimoTasks`].
+    pub struct IFimoTasksVTable<id = "fimo::interfaces::tasks::fimo_tasks", marker = SendSyncMarker> {
         /// Extracts a reference to the task runtime.
         pub as_task_runtime: fn(*const ()) -> *const TaskRuntime
     }
@@ -82,8 +82,8 @@ pub fn initialize_local_bindings(runtime: &TaskRuntime) {
 /// Builds the [`ModuleInterfaceDescriptor`] for the interface.
 pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
     ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked(FimoTasks::NAME.as_bytes()) },
-        version: FimoTasks::VERSION,
+        name: unsafe { ArrayString::from_utf8_unchecked(IFimoTasks::NAME.as_bytes()) },
+        version: IFimoTasks::VERSION,
         extensions: Default::default(),
     }
 }

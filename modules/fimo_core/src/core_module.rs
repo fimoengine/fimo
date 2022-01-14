@@ -1,8 +1,8 @@
 //! Implementation of the module.
 use crate::CoreInterface;
-use fimo_core_interface::rust::module_registry::IModuleRegistry;
-use fimo_core_interface::rust::settings_registry::SettingsRegistry;
-use fimo_core_interface::rust::FimoCoreVTable;
+use fimo_core_int::rust::module_registry::IModuleRegistry;
+use fimo_core_int::rust::settings_registry::SettingsRegistry;
+use fimo_core_int::rust::{IFimoCore, IFimoCoreVTable};
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
@@ -26,9 +26,9 @@ impl ObjectID for CoreWrapper {
     const OBJECT_ID: &'static str = "fimo::modules::core::core_wrapper";
 }
 
-impl CoerceObject<FimoCoreVTable> for CoreWrapper {
-    fn get_vtable() -> &'static FimoCoreVTable {
-        static VTABLE: FimoCoreVTable = FimoCoreVTable::new::<CoreWrapper>(
+impl CoerceObject<IFimoCoreVTable> for CoreWrapper {
+    fn get_vtable() -> &'static IFimoCoreVTable {
+        static VTABLE: IFimoCoreVTable = IFimoCoreVTable::new::<CoreWrapper>(
             |ptr| {
                 let this = unsafe { &*(ptr as *const CoreWrapper) };
                 IModuleRegistry::from_object(this.interface.as_module_registry().coerce_obj())
@@ -45,12 +45,12 @@ impl CoerceObject<FimoCoreVTable> for CoreWrapper {
 impl CoerceObject<IModuleInterfaceVTable> for CoreWrapper {
     fn get_vtable() -> &'static IModuleInterfaceVTable {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            let i: &FimoCoreVTable = CoreWrapper::get_vtable();
+            let i: &IFimoCoreVTable = CoreWrapper::get_vtable();
             i.as_base()
         }
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn version(_ptr: *const ()) -> Version {
-            fimo_core_interface::rust::FimoCore::VERSION
+            IFimoCore::VERSION
         }
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn extension(
@@ -76,9 +76,7 @@ fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
-            ArrayString::from_utf8_unchecked(
-                String::from(fimo_core_interface::rust::FimoCore::VERSION).as_bytes(),
-            )
+            ArrayString::from_utf8_unchecked(String::from(IFimoCore::VERSION).as_bytes())
         },
     }
 }

@@ -6,9 +6,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-use fimo_tasks_interface::rust::{
-    NotifyFn, RawTask, Result, SpawnAllFn, TaskHandle, WaitOnFn, WorkerId,
-};
+use fimo_tasks_int::rust::{NotifyFn, RawTask, Result, SpawnAllFn, TaskHandle, WaitOnFn, WorkerId};
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::time::Instant;
@@ -323,7 +321,7 @@ impl TaskRuntime {
     }
 }
 
-impl fimo_tasks_interface::rust::TaskRuntimeInner for TaskRuntime {
+impl fimo_tasks_int::rust::TaskRuntimeInner for TaskRuntime {
     fn execute_task(&self, f: Box<dyn FnOnce() + Send>, dependencies: &[TaskHandle]) -> Result<()> {
         self.inner.as_ref().execute_task(Some(f), dependencies)
     }

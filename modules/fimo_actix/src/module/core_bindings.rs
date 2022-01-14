@@ -1,10 +1,10 @@
-use fimo_actix_interface::actix::{web, HttpResponse, Responder, Scope};
-use fimo_core_interface::rust::settings_registry::SettingsRegistryPathBuf;
-use fimo_core_interface::rust::{
+use fimo_actix_int::actix::{web, HttpResponse, Responder, Scope};
+use fimo_core_int::rust::settings_registry::SettingsRegistryPathBuf;
+use fimo_core_int::rust::{
     settings_registry::{
         SettingsEvent, SettingsEventCallbackHandle, SettingsItem, SettingsRegistryPath,
     },
-    FimoCore,
+    IFimoCore,
 };
 use futures::lock::Mutex;
 use serde::Serialize;
@@ -68,7 +68,7 @@ async fn settings_events(data: web::Data<CoreSettings>) -> impl Responder {
 }
 
 pub(crate) fn scope_builder(
-    core: &FimoCore,
+    core: &IFimoCore,
 ) -> (
     impl Fn(Scope) -> Scope + Send + Sync,
     SettingsEventCallbackHandle<'_>,

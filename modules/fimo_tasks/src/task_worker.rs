@@ -3,7 +3,7 @@ use crate::task_scheduler::{TaskSchedulerMsg, TaskSchedulerMsgType};
 use crate::TaskRuntimeInner;
 use context::{Context, Transfer};
 use crossbeam_deque::{Injector, Stealer, Worker};
-use fimo_tasks_interface::rust::{TaskHandle, TaskStatus, WaitOnFn, WorkerId};
+use fimo_tasks_int::rust::{TaskHandle, TaskStatus, WaitOnFn, WorkerId};
 use std::cell::Cell;
 use std::mem::ManuallyDrop;
 use std::pin::Pin;

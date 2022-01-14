@@ -1,15 +1,15 @@
 use crate::module::{construct_module_info, TaskInterface};
 use crate::TaskRuntime;
-use fimo_core_interface::rust::{
+use fimo_core_int::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
-    FimoCore,
+    IFimoCore,
 };
 use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleParent};
 use fimo_module_core::{Error, ErrorKind, IModuleInterface, ModuleInterfaceDescriptor};
-use fimo_tasks_interface::rust::build_interface_descriptor as tasks_descriptor;
+use fimo_tasks_int::rust::build_interface_descriptor as tasks_descriptor;
 use std::collections::HashMap;
 
 fimo_module_core::rust_module! {construct_module}
@@ -52,7 +52,7 @@ fn build_tasks_interface(
     }
 
     let core_interface = core_interface.unwrap().unwrap();
-    let core_interface: ObjArc<FimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
+    let core_interface: ObjArc<IFimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
 
     #[allow(non_snake_case)]
     let NUM_CORES = num_cpus::get();

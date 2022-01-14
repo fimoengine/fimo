@@ -1,6 +1,6 @@
 use crate::runtime::enter_runtime_call;
-use fimo_tasks_interface::rust::sync::{Condvar, Mutex};
-use fimo_tasks_interface::rust::{get_runtime, Task};
+use fimo_tasks_int::rust::sync::{Condvar, Mutex};
+use fimo_tasks_int::rust::{get_runtime, Task};
 use std::sync::Arc;
 
 #[test]

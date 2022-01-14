@@ -57,13 +57,13 @@ pub enum ServerEvent {
 
 fimo_interface! {
     /// The fimo-actix interface.
-    pub struct FimoActix<vtable = FimoActixVTable> {
+    pub struct IFimoActix<vtable = IFimoActixVTable> {
         name: "fimo::interfaces::actix::fimo_actix",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0)
     }
 }
 
-impl FimoActix {
+impl IFimoActix {
     /// Starts the server if it is not running.
     #[inline]
     pub fn start(&self) -> ServerStatus {
@@ -179,10 +179,10 @@ impl FimoActix {
 }
 
 fimo_vtable! {
-    /// VTable of the fimo-actix interface.
+    /// VTable of a [`IFimoActix`].
     #[allow(clippy::type_complexity)]
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct FimoActixVTable<id = "fimo::interfaces::actix::fimo_actix", marker = SendSyncMarker> {
+    pub struct IFimoActixVTable<id = "fimo::interfaces::actix::fimo_actix", marker = SendSyncMarker> {
         /// Starts the server if it is not running.
         pub start: unsafe fn(*const ()) -> ServerStatus,
         /// Stops the server if it is running.
@@ -215,7 +215,7 @@ fimo_vtable! {
 #[derive(Debug)]
 pub struct ScopeBuilderGuard<'a> {
     id: ScopeBuilderId,
-    interface: &'a FimoActix,
+    interface: &'a IFimoActix,
 }
 
 impl Drop for ScopeBuilderGuard<'_> {
@@ -251,7 +251,7 @@ impl From<ScopeBuilderId> for usize {
 #[derive(Debug)]
 pub struct CallbackGuard<'a> {
     id: CallbackId,
-    interface: &'a FimoActix,
+    interface: &'a IFimoActix,
 }
 
 impl Drop for CallbackGuard<'_> {
@@ -359,8 +359,8 @@ unsafe impl Sync for Callback {}
 /// Builds the [`ModuleInterfaceDescriptor`] for the interface.
 pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
     ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked(FimoActix::NAME.as_bytes()) },
-        version: FimoActix::VERSION,
+        name: unsafe { ArrayString::from_utf8_unchecked(IFimoActix::NAME.as_bytes()) },
+        version: IFimoActix::VERSION,
         extensions: Default::default(),
     }
 }
