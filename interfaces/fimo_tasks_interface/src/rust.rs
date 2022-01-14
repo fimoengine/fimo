@@ -1,5 +1,5 @@
 //! Definition of the Rust `fimo-tasks` interface.
-use fimo_ffi_core::ArrayString;
+use fimo_ffi::ArrayString;
 use fimo_module_core::{
     fimo_interface, fimo_vtable, FimoInterface, ModuleInterfaceDescriptor, SendSyncMarker,
 };

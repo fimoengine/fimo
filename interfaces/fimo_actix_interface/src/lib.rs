@@ -13,8 +13,8 @@ use actix_web::Scope;
 use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
-use fimo_ffi_core::fn_wrapper::{HeapFn, HeapFnMut};
-use fimo_ffi_core::ArrayString;
+use fimo_ffi::fn_wrapper::{HeapFn, HeapFnMut};
+use fimo_ffi::ArrayString;
 use fimo_module_core::{
     fimo_interface, fimo_vtable, FimoInterface, ModuleInterfaceDescriptor, SendSyncMarker,
 };

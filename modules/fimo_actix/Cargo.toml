@@ -18,7 +18,6 @@ fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_co
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
 fimo_actix_interface = { version = "0.1.0", path = "../../interfaces/fimo_actix_interface" }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi", optional = true }
-fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core", optional = true }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
 fimo_core_interface = { version = "0.1.0", path = "../../interfaces/fimo_core_interface", optional = true }
 
@@ -29,5 +28,5 @@ module_loading = { path = "../../test_utilities/module_loading", features = ["ac
 
 [features]
 default = ["rust_module"]
-module = ["fimo_ffi", "fimo_ffi_core", "fimo_module_core", "fimo_core_interface"]
+module = ["fimo_ffi", "fimo_module_core", "fimo_core_interface"]
 rust_module = ["module"]
