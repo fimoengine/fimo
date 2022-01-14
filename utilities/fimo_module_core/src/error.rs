@@ -2,7 +2,7 @@ use fimo_ffi::error::{InnerError, ToBoxedError};
 use fimo_ffi::ObjBox;
 
 /// Result type for modules.
-pub type Result<T> = fimo_ffi_core::Result<T, Error>;
+pub type Result<T> = fimo_ffi::Result<T, Error>;
 
 /// Error type for modules.
 #[repr(C)]

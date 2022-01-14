@@ -7,8 +7,7 @@ use fimo_core_interface::rust::settings_registry::{
 use fimo_core_interface::rust::FimoCore;
 use fimo_ffi::object::CoerceObject;
 use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
-use fimo_ffi::{ObjArc, Object, StrInner};
-use fimo_ffi_core::{ArrayString, Optional};
+use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
 use fimo_version_core::Version;
 

@@ -19,7 +19,6 @@ static_assertions = "1.1.0"
 semver = { version = "1.0.4", features = ["serde"] }
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
-fimo_ffi_core = { version = "0.1.0", path = "../../utilities/fimo_ffi_core" }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
 fimo_core_interface = { version = "=0.1.0", path = "../../interfaces/fimo_core_interface" }

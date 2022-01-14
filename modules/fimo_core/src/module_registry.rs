@@ -5,8 +5,7 @@ use fimo_core_interface::rust::module_registry::{
 };
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::vtable::ObjectID;
-use fimo_ffi::ObjArc;
-use fimo_ffi_core::ArrayString;
+use fimo_ffi::{ArrayString, ObjArc};
 use fimo_module_core::{
     Error, ErrorKind, IModuleInterface, IModuleLoader, ModuleInterfaceDescriptor,
 };

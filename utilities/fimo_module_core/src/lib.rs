@@ -22,7 +22,7 @@ use std::fmt::Debug;
 /// Module information.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct ModuleInfo<S = fimo_ffi_core::ArrayString<128>> {
+pub struct ModuleInfo<S = fimo_ffi::ArrayString<128>> {
     /// Module name.
     pub name: S,
     /// Module version.
@@ -40,11 +40,11 @@ impl<S: std::fmt::Display> std::fmt::Display for ModuleInfo<S> {
 #[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
 pub struct ModuleInterfaceDescriptor {
     /// Name of the interface.
-    pub name: fimo_ffi_core::ArrayString<128>,
+    pub name: fimo_ffi::ArrayString<128>,
     /// Version of the interface.
     pub version: fimo_version_core::Version,
     /// Available interface extensions.
-    pub extensions: fimo_ffi_core::ConstSpan<fimo_ffi_core::ArrayString<128>>,
+    pub extensions: fimo_ffi::SpanInner<fimo_ffi::ArrayString<128>, false>,
 }
 
 impl std::fmt::Display for ModuleInterfaceDescriptor {
