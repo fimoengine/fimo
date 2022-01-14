@@ -1,13 +1,12 @@
 //! Implementation of the module.
 use crate::TaskRuntime;
-use fimo_ffi_core::ArrayString;
-use fimo_module_core::{
-    rust::{ModuleInstanceArc, ModuleInterfaceVTable},
-    ModuleInfo,
-};
-use fimo_tasks_interface::rust::{FimoTasks, TaskRuntimeInner};
+use fimo_ffi::object::CoerceObject;
+use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
+use fimo_ffi::{ObjArc, Object, StrInner};
+use fimo_ffi_core::{ArrayString, Optional};
+use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
+use fimo_tasks_interface::rust::{FimoTasksVTable, TaskRuntimeInner};
 use fimo_version_core::Version;
-use std::any::Any;
 
 #[cfg(feature = "rust_module")]
 mod rust_module;
@@ -15,52 +14,51 @@ mod rust_module;
 /// Name of the module.
 pub const MODULE_NAME: &str = "fimo_tasks";
 
-const INTERFACE_VTABLE: ModuleInterfaceVTable = ModuleInterfaceVTable::new(
-    |ptr| {
-        let interface = unsafe { &*(ptr as *const TaskInterface) };
-        fimo_tasks_interface::fimo_tasks_interface_impl! {to_ptr, interface}
-    },
-    |_ptr| {
-        fimo_tasks_interface::fimo_tasks_interface_impl! {id}
-    },
-    |_ptr| {
-        fimo_tasks_interface::fimo_tasks_interface_impl! {version}
-    },
-    |ptr| {
-        let interface = unsafe { &*(ptr as *const TaskInterface) };
-        interface.parent.clone()
-    },
-);
-
 struct TaskInterface {
     runtime: TaskRuntime,
-    parent: ModuleInstanceArc,
+    parent: ObjArc<IModuleInstance>,
 }
 
-impl FimoTasks for TaskInterface {
-    fn get_interface_version(&self) -> Version {
-        fimo_tasks_interface::rust::INTERFACE_VERSION
-    }
+impl ObjectID for TaskInterface {
+    const OBJECT_ID: &'static str = "fimo::modules::tasks::task_interface";
+}
 
-    fn find_extension(&self, _extension: &str) -> Option<&(dyn Any + 'static)> {
-        None
-    }
+impl CoerceObject<IModuleInterfaceVTable> for TaskInterface {
+    fn get_vtable() -> &'static IModuleInterfaceVTable {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+            let i: &FimoTasksVTable = TaskInterface::get_vtable();
+            i.as_base()
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn version(_ptr: *const ()) -> Version {
+            fimo_tasks_interface::rust::FimoTasks::VERSION
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn extension(
+            _ptr: *const (),
+            _ext: StrInner<false>,
+        ) -> Optional<*const Object<IBaseInterface>> {
+            Optional::None
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn instance(ptr: *const ()) -> ObjArc<IModuleInstance> {
+            let this = &*(ptr as *const TaskInterface);
+            this.parent.clone()
+        }
 
-    fn find_extension_mut(&mut self, _extension: &str) -> Option<&mut (dyn Any + 'static)> {
-        None
+        static VTABLE: IModuleInterfaceVTable =
+            IModuleInterfaceVTable::new::<TaskInterface>(inner, version, extension, instance);
+        &VTABLE
     }
+}
 
-    fn as_task_runtime(&self) -> &fimo_tasks_interface::rust::TaskRuntime {
-        let inner = &self.runtime as &dyn TaskRuntimeInner;
-        unsafe { &*(inner as *const _ as *const fimo_tasks_interface::rust::TaskRuntime) }
-    }
-
-    fn as_any(&self) -> &(dyn Any + 'static) {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut (dyn Any + 'static) {
-        self
+impl CoerceObject<FimoTasksVTable> for TaskInterface {
+    fn get_vtable() -> &'static FimoTasksVTable {
+        static VTABLE: FimoTasksVTable = FimoTasksVTable::new::<TaskInterface>(|ptr| unsafe {
+            &(*(ptr as *const TaskInterface)).runtime as &dyn TaskRuntimeInner as *const _
+                as *const fimo_tasks_interface::rust::TaskRuntime
+        });
+        &VTABLE
     }
 }
 
@@ -70,7 +68,7 @@ fn construct_module_info() -> ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
             ArrayString::from_utf8_unchecked(
-                String::from(&fimo_tasks_interface::rust::INTERFACE_VERSION).as_bytes(),
+                String::from(&fimo_tasks_interface::rust::FimoTasks::VERSION).as_bytes(),
             )
         },
     }

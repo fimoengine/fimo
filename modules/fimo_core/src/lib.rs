@@ -11,9 +11,6 @@
     rustdoc::broken_intra_doc_links
 )]
 extern crate static_assertions as sa;
-use fimo_core_interface::rust::{FimoCore, FimoCoreVTable, INTERFACE_VERSION};
-use std::any::Any;
-use std::ops::Deref;
 
 #[cfg(feature = "module")]
 pub mod core_module;
@@ -22,22 +19,6 @@ pub mod settings_registry;
 
 #[cfg(feature = "module")]
 pub use core_module::MODULE_NAME;
-
-const VTABLE: FimoCoreVTable = FimoCoreVTable::new(
-    |ptr, extension| {
-        let interface = unsafe { &*(ptr as *const CoreInterface) };
-        let extension = unsafe { &*extension };
-        CoreInterface::find_extension(interface, extension).map(|ext| ext as *const _)
-    },
-    |ptr| {
-        let interface = unsafe { &*(ptr as *const CoreInterface) };
-        &**CoreInterface::as_module_registry(interface)
-    },
-    |ptr| {
-        let interface = unsafe { &*(ptr as *const CoreInterface) };
-        &**CoreInterface::as_settings_registry(interface)
-    },
-);
 
 /// Interface implementation.
 #[derive(Debug)]
@@ -55,11 +36,6 @@ impl CoreInterface {
             module_registry: module_registry::ModuleRegistry::new(),
             settings_registry: settings_registry::SettingsRegistry::new(),
         }
-    }
-
-    /// Extracts a reference to an extension from the interface.
-    pub fn find_extension(&self, _extension: impl AsRef<str>) -> Option<&(dyn Any + 'static)> {
-        None
     }
 
     /// Extracts a reference to the module registry.
@@ -88,16 +64,5 @@ impl AsRef<settings_registry::SettingsRegistry> for CoreInterface {
 impl Default for CoreInterface {
     fn default() -> Self {
         CoreInterface::new()
-    }
-}
-
-impl Deref for CoreInterface {
-    type Target = FimoCore;
-
-    fn deref(&self) -> &Self::Target {
-        let self_ptr = self as *const _ as *const ();
-        let vtable = &VTABLE;
-
-        unsafe { &*FimoCore::from_raw_parts(self_ptr, vtable) }
     }
 }

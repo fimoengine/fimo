@@ -1,153 +1,19 @@
 //! Implementation of a generic rust module.
 #![feature(maybe_uninit_extra)]
-use fimo_module_core::rust::module_loader::RustModuleInnerCaster;
-use fimo_module_core::rust::{
-    module_loader::{RustModule, RustModuleInnerArc, RustModuleInnerVTable},
-    Module, ModuleArc, ModuleCaster, ModuleInstance, ModuleInstanceArc, ModuleInstanceCaster,
-    ModuleInstanceVTable, ModuleInterfaceArc, ModuleInterfaceWeak, ModuleVTable,
+
+use fimo_ffi::error::InnerError;
+use fimo_ffi::object::CoerceObject;
+use fimo_ffi::vtable::{IBaseInterface, ObjectID};
+use fimo_ffi::{ObjArc, ObjWeak, SpanInner};
+use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleInnerVTable, IRustModuleParent};
+use fimo_module_core::{
+    Error, ErrorKind, IModule, IModuleInstance, IModuleInstanceVTable, IModuleInterface,
+    IModuleLoader, IModuleVTable, ModuleInfo, ModuleInterfaceDescriptor, PathChar,
 };
-use fimo_module_core::{ModuleInfo, ModuleInterfaceDescriptor, ModulePtr};
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Debug;
 use std::mem::MaybeUninit;
-use std::ops::Deref;
-use std::sync::{Arc, Weak};
-
-const MODULE_VTABLE: ModuleVTable = ModuleVTable::new(
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            module
-                .parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_raw_ptr()
-        }
-    },
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            module
-                .parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_raw_type_id()
-        }
-    },
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            &*(module
-                .parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_module_path() as *const _)
-        }
-    },
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-        &module.module_info
-    },
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-
-        // SAFETY: The value is initialized and lives as long as the instance.
-        unsafe {
-            module
-                .parent
-                .assume_init_ref()
-                .upgrade()
-                .unwrap()
-                .get_module_loader()
-        }
-    },
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-        let parent = unsafe { module.parent.assume_init_ref().upgrade().unwrap() };
-        (module.instance_builder)(parent).map(|i| {
-            let (_, vtable) = (&**i).into_raw_parts();
-            let caster = ModuleInstanceCaster::new(vtable);
-            unsafe { ModuleInstanceArc::from_inner((i, caster)) }
-        })
-    },
-);
-
-const MODULE_INNER_VTABLE: RustModuleInnerVTable = RustModuleInnerVTable::new(
-    |ptr, parent| {
-        let module = unsafe { &mut *(ptr as *mut GenericModule) };
-        module.parent = MaybeUninit::new(parent);
-    },
-    |ptr| {
-        let module = unsafe { &*(ptr as *const GenericModule) };
-        &**module
-    },
-);
-
-const MODULE_INSTANCE_VTABLE: ModuleInstanceVTable = ModuleInstanceVTable::new(
-    |_ptr| ModulePtr::Slim(&MODULE_INSTANCE_VTABLE as *const _ as *const u8),
-    |_ptr| "fimo::module_instance::generic",
-    |ptr| {
-        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
-        let parent = inst.parent.clone();
-        let (_, vtable) = (&**parent).into_raw_parts();
-        let caster = ModuleCaster::new(vtable);
-
-        unsafe { ModuleArc::from_inner((parent, caster)) }
-    },
-    |ptr| {
-        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
-        inst.get_available_interfaces()
-    },
-    |ptr, desc| {
-        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
-        let desc = unsafe { &*desc };
-
-        inst.get_interface(desc).map_err(|e| Box::new(e) as _)
-    },
-    |ptr, desc| {
-        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
-        let desc = unsafe { &*desc };
-
-        inst.get_interface_dependencies(desc)
-            .map_or_else(|e| Err(Box::new(e) as _), |dep| Ok(dep as _))
-    },
-    |ptr, desc, interface| {
-        let inst = unsafe { &*(ptr as *const GenericModuleInstance) };
-        let desc = unsafe { &*desc };
-
-        inst.set_dependency(desc, interface)
-            .map_err(|e| Box::new(e) as _)
-    },
-);
-
-/// A generic rust module.
-#[derive(Debug)]
-pub struct GenericModule {
-    module_info: ModuleInfo,
-    parent: MaybeUninit<Weak<RustModule>>,
-    instance_builder: InstanceBuilder,
-}
-
-/// A generic rust module instance.
-pub struct GenericModuleInstance {
-    public_interfaces: Vec<ModuleInterfaceDescriptor>,
-    interfaces: Mutex<HashMap<ModuleInterfaceDescriptor, Interface>>,
-    interface_dependencies: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
-    dependency_map: Mutex<HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>>,
-    // Drop the parent for last
-    parent: Arc<RustModule>,
-}
 
 /// Error resulting from an unknown interface.
 #[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
@@ -155,60 +21,129 @@ pub struct UnknownInterfaceError {
     interface: ModuleInterfaceDescriptor,
 }
 
-/// Error from the [GenericModuleInstance::get_interface] function.
-#[derive(Debug)]
-pub enum GetInterfaceError {
-    /// Error resulting from an unknown interface.
-    UnknownInterface(UnknownInterfaceError),
-    /// Error resulting from the unsuccessful construction of an interface.
-    ConstructionError {
-        /// Interface tried to construct.
-        interface: ModuleInterfaceDescriptor,
-        /// Resulting error.
-        error: Box<dyn Error>,
-    },
-}
-
 struct Interface {
     builder: InterfaceBuilder,
-    ptr: Option<ModuleInterfaceWeak>,
+    ptr: Option<ObjWeak<IModuleInterface>>,
 }
 
 /// Builds a module instance.
 pub type InstanceBuilder =
-    fn(Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>>;
+    fn(ObjArc<IRustModuleParent>) -> Result<ObjArc<GenericModuleInstance>, Error>;
 
 type InterfaceBuilder = fn(
-    Arc<GenericModuleInstance>,
-    &HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>,
-) -> Result<ModuleInterfaceArc, Box<dyn Error>>;
+    ObjArc<GenericModuleInstance>,
+    &HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<IModuleInterface>>>,
+) -> Result<ObjArc<IModuleInterface>, Error>;
+
+/// A generic rust module.
+#[derive(Debug)]
+pub struct GenericModule {
+    module_info: ModuleInfo,
+    parent: MaybeUninit<ObjWeak<IRustModuleParent>>,
+    instance_builder: InstanceBuilder,
+}
 
 impl GenericModule {
     /// Constructs a new `GenericModule`.
     pub fn new_inner(
         module_info: ModuleInfo,
         instance_builder: InstanceBuilder,
-    ) -> RustModuleInnerArc {
-        let module = Arc::new(Self {
+    ) -> ObjArc<IRustModuleInner> {
+        let module = ObjArc::new(Self {
             module_info,
             parent: MaybeUninit::uninit(),
             instance_builder,
         });
 
-        let caster = RustModuleInnerCaster::new(&MODULE_INNER_VTABLE);
-        unsafe { RustModuleInnerArc::from_inner((module, caster)) }
+        ObjArc::coerce_object(module)
     }
+}
+
+impl ObjectID for GenericModule {
+    const OBJECT_ID: &'static str = "fimo::utils::generic_module::generic_module";
+}
+
+impl CoerceObject<IModuleVTable> for GenericModule {
+    fn get_vtable() -> &'static IModuleVTable {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+            let i: &IRustModuleInnerVTable = GenericModule::get_vtable();
+            std::mem::transmute(i)
+        }
+        unsafe extern "C" fn module_path(ptr: *const ()) -> SpanInner<PathChar, false> {
+            let this = &*(ptr as *const GenericModule);
+            let parent = this.parent.assume_init_ref().upgrade().unwrap();
+            parent.module_path()
+        }
+        unsafe extern "C" fn module_info(ptr: *const ()) -> *const ModuleInfo {
+            let this = &*(ptr as *const GenericModule);
+            &this.module_info
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn module_loader(ptr: *const ()) -> &'static IModuleLoader {
+            let this = &*(ptr as *const GenericModule);
+            let parent = this.parent.assume_init_ref().upgrade().unwrap();
+            parent.module_loader()
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn new_instance(
+            ptr: *const (),
+        ) -> fimo_ffi::Result<ObjArc<IModuleInstance>, Error> {
+            let this = &*(ptr as *const GenericModule);
+            let parent = this.parent.assume_init_ref().upgrade().unwrap();
+            (this.instance_builder)(parent)
+                .map(ObjArc::<IModuleInstance>::coerce_object)
+                .into()
+        }
+
+        static VTABLE: IModuleVTable = IModuleVTable::new::<GenericModule>(
+            inner,
+            module_path,
+            module_info,
+            module_loader,
+            new_instance,
+        );
+        &VTABLE
+    }
+}
+
+impl CoerceObject<IRustModuleInnerVTable> for GenericModule {
+    fn get_vtable() -> &'static IRustModuleInnerVTable {
+        static VTABLE: IRustModuleInnerVTable = IRustModuleInnerVTable::new::<GenericModule>(
+            |_ptr| GenericModule::get_vtable(),
+            |ptr, parent| unsafe {
+                let this = &mut *(ptr as *mut GenericModule);
+                this.parent = MaybeUninit::new(parent);
+            },
+        );
+        &VTABLE
+    }
+}
+
+impl Drop for GenericModule {
+    fn drop(&mut self) {
+        unsafe { self.parent.assume_init_drop() }
+    }
+}
+
+/// A generic rust module instance.
+pub struct GenericModuleInstance {
+    public_interfaces: Vec<ModuleInterfaceDescriptor>,
+    interfaces: Mutex<HashMap<ModuleInterfaceDescriptor, Interface>>,
+    interface_dependencies: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
+    dependency_map: Mutex<HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<IModuleInterface>>>>,
+    // Drop the parent for last
+    parent: ObjArc<IRustModuleParent>,
 }
 
 impl GenericModuleInstance {
     /// Constructs a new `GenericModuleInstance`.
     pub fn new(
-        parent: Arc<RustModule>,
+        parent: ObjArc<IRustModuleParent>,
         interfaces: HashMap<
             ModuleInterfaceDescriptor,
             (InterfaceBuilder, Vec<ModuleInterfaceDescriptor>),
         >,
-    ) -> Arc<Self> {
+    ) -> ObjArc<Self> {
         let public_interfaces: Vec<_> = interfaces.keys().copied().collect();
         let interface: HashMap<_, _> = interfaces
             .iter()
@@ -230,19 +165,13 @@ impl GenericModuleInstance {
             }
         }
 
-        Arc::new(Self {
+        ObjArc::new(Self {
             public_interfaces,
             interfaces: Mutex::new(interface),
             interface_dependencies,
             dependency_map: Mutex::new(dependency_map),
             parent,
         })
-    }
-
-    /// Coerces the generic instance to a type-erased instance.
-    pub fn as_module_instance_arc(this: Arc<Self>) -> ModuleInstanceArc {
-        let caster = ModuleInstanceCaster::new(&MODULE_INSTANCE_VTABLE);
-        unsafe { ModuleInstanceArc::from_inner((this, caster)) }
     }
 
     /// Extracts the available interfaces.
@@ -264,12 +193,12 @@ impl GenericModuleInstance {
         }
     }
 
-    /// Extracts an [`ModuleInterfaceArc`] to an interface,
+    /// Extracts an [`ObjArc<IModuleInterface>`] to an interface,
     /// constructing it if it isn't alive.
     pub fn get_interface(
         &self,
         interface: &ModuleInterfaceDescriptor,
-    ) -> Result<ModuleInterfaceArc, GetInterfaceError> {
+    ) -> Result<ObjArc<IModuleInterface>, GetInterfaceError> {
         let mut guard = self.interfaces.lock();
         let dep_map = self.dependency_map.lock();
         if let Some(int) = guard.get_mut(interface) {
@@ -281,8 +210,8 @@ impl GenericModuleInstance {
 
             // SAFETY: A `GenericModuleInstance` is always in an `Arc`.
             let self_arc = unsafe {
-                Arc::increment_strong_count(self as *const Self);
-                Arc::from_raw(self as *const Self)
+                ObjArc::increment_strong_count(self);
+                ObjArc::from_raw(self)
             };
 
             (int.builder)(self_arc, &*dep_map).map_or_else(
@@ -293,7 +222,7 @@ impl GenericModuleInstance {
                     })
                 },
                 |arc| {
-                    int.ptr = Some(ModuleInterfaceArc::downgrade(&arc));
+                    int.ptr = Some(ObjArc::downgrade(&arc));
                     Ok(arc)
                 },
             )
@@ -308,11 +237,11 @@ impl GenericModuleInstance {
     pub fn set_dependency(
         &self,
         interface_desc: &ModuleInterfaceDescriptor,
-        interface: ModuleInterfaceArc,
+        interface: ObjArc<IModuleInterface>,
     ) -> Result<(), UnknownInterfaceError> {
         let mut guard = self.dependency_map.lock();
         if let Some(dep) = guard.get_mut(interface_desc) {
-            *dep = Some(ModuleInterfaceArc::downgrade(&interface));
+            *dep = Some(ObjArc::downgrade(&interface));
             Ok(())
         } else {
             Err(UnknownInterfaceError {
@@ -322,31 +251,72 @@ impl GenericModuleInstance {
     }
 }
 
-impl Deref for GenericModule {
-    type Target = Module;
-
-    fn deref(&self) -> &Self::Target {
-        let self_ptr = self as *const _ as *const ();
-        let vtable = &MODULE_VTABLE;
-
-        unsafe { &*Module::from_raw_parts(self_ptr, vtable) }
-    }
+impl ObjectID for GenericModuleInstance {
+    const OBJECT_ID: &'static str = "fimo::utils::generic_module::generic_module_instance";
 }
 
-impl Drop for GenericModule {
-    fn drop(&mut self) {
-        unsafe { self.parent.assume_init_drop() }
-    }
-}
+impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
+    fn get_vtable() -> &'static IModuleInstanceVTable {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+            let i: &IModuleInstanceVTable = GenericModuleInstance::get_vtable();
+            std::mem::transmute(i)
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn module(ptr: *const ()) -> ObjArc<IModule> {
+            let this = &*(ptr as *const GenericModuleInstance);
+            let parent = this.parent.clone();
+            let (parent, alloc) = ObjArc::into_raw_parts(parent);
+            let module = (*parent).as_module();
+            ObjArc::from_raw_parts(module, alloc)
+        }
+        unsafe extern "C" fn available_interfaces(
+            ptr: *const (),
+        ) -> SpanInner<ModuleInterfaceDescriptor, false> {
+            let this = &*(ptr as *const GenericModuleInstance);
+            this.get_available_interfaces().into()
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn interface(
+            ptr: *const (),
+            desc: *const ModuleInterfaceDescriptor,
+        ) -> fimo_module_core::Result<ObjArc<IModuleInterface>> {
+            let this = &*(ptr as *const GenericModuleInstance);
+            this.get_interface(&*desc)
+                .map_err(|e| Error::new(ErrorKind::Internal, e))
+                .into()
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn dependencies(
+            ptr: *const (),
+            desc: *const ModuleInterfaceDescriptor,
+        ) -> fimo_module_core::Result<SpanInner<ModuleInterfaceDescriptor, false>> {
+            let this = &*(ptr as *const GenericModuleInstance);
+            this.get_interface_dependencies(&*desc).map_or_else(
+                |e| fimo_module_core::Result::Err(Error::new(ErrorKind::NotFound, e)),
+                |d| fimo_module_core::Result::Ok(d.into()),
+            )
+        }
+        #[allow(improper_ctypes_definitions)]
+        unsafe extern "C" fn set_core(
+            ptr: *const (),
+            desc: *const ModuleInterfaceDescriptor,
+            core: ObjArc<IModuleInterface>,
+        ) -> fimo_module_core::Result<()> {
+            let this = &*(ptr as *const GenericModuleInstance);
+            this.set_dependency(&*desc, core)
+                .map_err(|e| Error::new(ErrorKind::NotFound, e))
+                .into()
+        }
 
-impl Deref for GenericModuleInstance {
-    type Target = ModuleInstance;
-
-    fn deref(&self) -> &Self::Target {
-        let self_ptr = self as *const _ as *const ();
-        let vtable = &MODULE_INSTANCE_VTABLE;
-
-        unsafe { &*ModuleInstance::from_raw_parts(self_ptr, vtable) }
+        static VTABLE: IModuleInstanceVTable = IModuleInstanceVTable::new::<GenericModuleInstance>(
+            inner,
+            module,
+            available_interfaces,
+            interface,
+            dependencies,
+            set_core,
+        );
+        &VTABLE
     }
 }
 
@@ -362,7 +332,19 @@ impl std::fmt::Display for UnknownInterfaceError {
     }
 }
 
-impl Error for UnknownInterfaceError {}
+/// Error from the [GenericModuleInstance::get_interface] function.
+#[derive(Debug)]
+pub enum GetInterfaceError {
+    /// Error resulting from an unknown interface.
+    UnknownInterface(UnknownInterfaceError),
+    /// Error resulting from the unsuccessful construction of an interface.
+    ConstructionError {
+        /// Interface tried to construct.
+        interface: ModuleInterfaceDescriptor,
+        /// Resulting error.
+        error: Error,
+    },
+}
 
 impl std::fmt::Display for GetInterfaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -379,4 +361,11 @@ impl std::fmt::Display for GetInterfaceError {
     }
 }
 
-impl Error for GetInterfaceError {}
+impl InnerError for GetInterfaceError {
+    fn source(&self) -> Option<&fimo_ffi::IError> {
+        match self {
+            GetInterfaceError::UnknownInterface(_) => None,
+            GetInterfaceError::ConstructionError { error, .. } => error.source(),
+        }
+    }
+}

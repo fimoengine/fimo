@@ -1,4 +1,4 @@
-use crate::vtable::{BaseInterface, ObjectID};
+use crate::vtable::{IBaseInterface, ObjectID};
 use crate::{CoerceObject, ObjArc, ObjWeak, Object};
 use std::cell::RefCell;
 
@@ -92,9 +92,9 @@ fn drop_obj() {
     impl ObjectID for TestObj<'_> {
         const OBJECT_ID: &'static str = "TestObj";
     }
-    impl CoerceObject<BaseInterface> for TestObj<'_> {
-        fn get_vtable() -> &'static BaseInterface {
-            static VTABLE: BaseInterface = BaseInterface::new::<TestObj<'_>>();
+    impl CoerceObject<IBaseInterface> for TestObj<'_> {
+        fn get_vtable() -> &'static IBaseInterface {
+            static VTABLE: IBaseInterface = IBaseInterface::new::<TestObj<'_>>();
             &VTABLE
         }
     }
@@ -103,7 +103,7 @@ fn drop_obj() {
     let x = ObjArc::new(TestObj(&val));
     assert_eq!(*x.0.borrow(), 0);
 
-    let x: ObjArc<Object<BaseInterface>> = ObjArc::coerce_object(x);
+    let x: ObjArc<Object<IBaseInterface>> = ObjArc::coerce_object(x);
     assert_eq!(*val.borrow(), 0);
 
     std::mem::drop(x);

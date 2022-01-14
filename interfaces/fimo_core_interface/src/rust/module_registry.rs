@@ -1,35 +1,32 @@
 //! Specification of a module registry.
-use fimo_ffi_core::fn_wrapper::{HeapFnOnce, RawFnOnce};
-use fimo_ffi_core::ArrayString;
-use fimo_module_core::rust::{ModuleInterfaceCaster, ModuleObject};
+use fimo_ffi::fn_wrapper::RawFnOnce;
+use fimo_ffi::object::{CoerceObject, ObjectWrapper};
+use fimo_ffi::{ArrayString, HeapFnOnce, ObjArc};
 use fimo_module_core::{
-    rust::{ModuleInterface, ModuleInterfaceArc, ModuleLoader},
-    DynArc, DynArcCaster, ModuleInterfaceDescriptor,
+    fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
+    IModuleLoaderVTable, ModuleInterfaceDescriptor, SendSyncMarker,
 };
 use fimo_version_core::Version;
-use std::borrow::Borrow;
-use std::error::Error;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 
-/// Type-erased module registry.
-///
-/// The underlying type must implement `Send` and `Sync`.
-#[repr(transparent)]
-pub struct ModuleRegistry {
-    inner: ModuleObject<ModuleRegistryVTable>,
+fimo_object! {
+    /// Interface to a module registry.
+    ///
+    /// The underlying type must implement `Send` and `Sync`.
+    pub struct IModuleRegistry<vtable = ModuleRegistryVTable>;
 }
 
-impl ModuleRegistry {
+impl IModuleRegistry {
     /// Enters the inner registry.
     ///
     /// # Deadlock
     ///
     /// The function may only call into the registry with the provided inner reference.
     #[inline]
-    pub fn enter_inner<F: FnOnce(&'_ mut ModuleRegistryInner)>(&self, f: F) {
-        let mut wrapper = move |inner: *mut ModuleRegistryInner| {
+    pub fn enter_inner<F: FnOnce(&'_ mut IModuleRegistryInner)>(&self, f: F) {
+        let mut wrapper = move |inner: *mut IModuleRegistryInner| {
             unsafe { f(&mut *inner) };
         };
         let wrapper_ref = unsafe { RawFnOnce::new(&mut wrapper) };
@@ -42,11 +39,11 @@ impl ModuleRegistry {
     ///
     /// The registered loader will be available to the rest of the `ModuleRegistry`.
     #[inline]
-    pub fn register_loader<T: Borrow<ModuleLoader>>(
+    pub fn register_loader<T: CoerceObject<IModuleLoaderVTable>>(
         &self,
         r#type: &str,
         loader: &'static T,
-    ) -> Result<LoaderHandle<'_, T>, Box<dyn Error>> {
+    ) -> Result<LoaderHandle<'_, T>, Error> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -66,10 +63,10 @@ impl ModuleRegistry {
     ///
     /// Notifies all registered callbacks before returning.
     #[inline]
-    pub fn unregister_loader<T: Borrow<ModuleLoader>>(
+    pub fn unregister_loader<T: CoerceObject<IModuleLoaderVTable>>(
         &self,
         loader: LoaderHandle<'_, T>,
-    ) -> Result<&'static T, Box<dyn Error>> {
+    ) -> Result<&'static T, Error> {
         let (id, loader, _) = loader.into_raw();
         let mut res = MaybeUninit::uninit();
 
@@ -92,13 +89,12 @@ impl ModuleRegistry {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_loader_callback<
-        'a,
-        F: FnOnce(&mut ModuleRegistryInner, &'static ModuleLoader) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync,
     >(
-        &'a self,
+        &self,
         r#type: &str,
         callback: F,
-    ) -> Result<LoaderCallbackHandle<'a>, Box<dyn Error>> {
+    ) -> Result<LoaderCallbackHandle<'_>, Error> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -121,7 +117,7 @@ impl ModuleRegistry {
     pub fn unregister_loader_callback(
         &self,
         handle: LoaderCallbackHandle<'_>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Error> {
         let (id, _) = handle.into_raw_parts();
         let mut res = MaybeUninit::uninit();
 
@@ -137,10 +133,7 @@ impl ModuleRegistry {
 
     /// Fetches the loader associated with the `type`.
     #[inline]
-    pub fn get_loader_from_type(
-        &self,
-        r#type: &str,
-    ) -> Result<&'static ModuleLoader, Box<dyn Error>> {
+    pub fn get_loader_from_type(&self, r#type: &str) -> Result<&'static IModuleLoader, Error> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -154,16 +147,12 @@ impl ModuleRegistry {
     }
 
     /// Registers a new interface to the `ModuleRegistry`.
-    ///
-    /// # Panic
-    ///
-    /// Panics if the implementation of [`Borrow`] does not return the same reference.
     #[inline]
-    pub fn register_interface<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>>(
+    pub fn register_interface<T: CoerceObject<IModuleInterfaceVTable>>(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: DynArc<T, C>,
-    ) -> Result<InterfaceHandle<'_, T, C>, Box<dyn Error>> {
+        interface: ObjArc<T>,
+    ) -> Result<InterfaceHandle<'_, T>, Error> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -185,10 +174,10 @@ impl ModuleRegistry {
     /// This function calls the interface-remove callbacks that are registered
     /// with the interface before removing it.
     #[inline]
-    pub fn unregister_interface<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>>(
+    pub fn unregister_interface<T: CoerceObject<IModuleInterfaceVTable>>(
         &self,
-        handle: InterfaceHandle<'_, T, C>,
-    ) -> Result<DynArc<T, C>, Box<dyn Error>> {
+        handle: InterfaceHandle<'_, T>,
+    ) -> Result<ObjArc<T>, Error> {
         let (id, i, _) = handle.into_raw_parts();
         let mut res = MaybeUninit::uninit();
 
@@ -211,12 +200,12 @@ impl ModuleRegistry {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_interface_callback<
-        F: FnOnce(&mut ModuleRegistryInner, ModuleInterfaceArc) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync,
     >(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
         callback: F,
-    ) -> Result<InterfaceCallbackHandle<'_>, Box<dyn Error>> {
+    ) -> Result<InterfaceCallbackHandle<'_>, Error> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -237,7 +226,7 @@ impl ModuleRegistry {
     pub fn unregister_interface_callback(
         &self,
         handle: InterfaceCallbackHandle<'_>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Error> {
         let (id, _) = handle.into_raw_parts();
         let mut res = MaybeUninit::uninit();
 
@@ -256,7 +245,7 @@ impl ModuleRegistry {
     pub fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
+    ) -> Result<ObjArc<IModuleInterface>, Error> {
         let mut res = MaybeUninit::uninit();
 
         {
@@ -293,7 +282,7 @@ impl ModuleRegistry {
         &self,
         name: &str,
         version: &Version,
-        extensions: &[ArrayString<32>],
+        extensions: &[ArrayString<128>],
     ) -> Vec<ModuleInterfaceDescriptor> {
         let mut res = MaybeUninit::uninit();
 
@@ -306,76 +295,44 @@ impl ModuleRegistry {
 
         unsafe { res.assume_init() }
     }
+}
 
-    /// Splits the reference into a data- and vtable- pointer.
-    #[inline]
-    pub fn into_raw_parts(&self) -> (*const (), &'static ModuleRegistryVTable) {
-        self.inner.into_raw_parts()
-    }
-
-    /// Constructs a `*const ModuleRegistry` from a data- and vtable- pointer.
-    #[inline]
-    pub fn from_raw_parts(data: *const (), vtable: &'static ModuleRegistryVTable) -> *const Self {
-        ModuleObject::from_raw_parts(data, vtable) as *const Self
+fimo_vtable! {
+    /// VTable of the [`IModuleRegistry`] type.
+    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    pub struct ModuleRegistryVTable<id = "fimo::interfaces::core::module::module_registry", marker = SendSyncMarker> {
+        enter_inner: fn(*const (), RawFnOnce<(*mut IModuleRegistryInner,), ()>),
     }
 }
 
-impl std::fmt::Debug for ModuleRegistry {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(ModuleRegistry)")
-    }
+fimo_object! {
+    /// Type-erased module registry.
+    ///
+    /// The underlying type must implement `Send` and `Sync`.
+    pub struct IModuleRegistryInner<vtable = ModuleRegistryInnerVTable>;
 }
 
-unsafe impl Send for ModuleRegistry {}
-unsafe impl Sync for ModuleRegistry {}
-
-/// VTable of the [`ModuleRegistry`] type.
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct ModuleRegistryVTable {
-    enter_inner: fn(*const (), RawFnOnce<(*mut ModuleRegistryInner,), ()>),
-}
-
-impl ModuleRegistryVTable {
-    /// Constructs a new `ModuleRegistryVTable`.
-    pub const fn new(
-        enter_inner: fn(*const (), RawFnOnce<(*mut ModuleRegistryInner,), ()>),
-    ) -> Self {
-        Self { enter_inner }
-    }
-}
-
-/// Type-erased module registry.
-///
-/// The underlying type must implement `Send` and `Sync`.
-#[repr(transparent)]
-pub struct ModuleRegistryInner {
-    inner: ModuleObject<ModuleRegistryInnerVTable>,
-}
-
-impl ModuleRegistryInner {
+impl IModuleRegistryInner {
     /// Registers a new module loader to the `ModuleRegistry`.
     ///
     /// The registered loader will be available to the rest of the `ModuleRegistry`.
     #[inline]
-    pub fn register_loader<T: Borrow<ModuleLoader>>(
+    pub fn register_loader<T: CoerceObject<IModuleLoaderVTable>>(
         &mut self,
         r#type: &str,
         loader: &'static T,
-    ) -> Result<LoaderId, Box<dyn Error>> {
+    ) -> Result<LoaderId, Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
-        (vtable.register_loader)(ptr, r#type, loader.borrow())
+        let loader = loader.coerce_obj();
+        let loader = IModuleLoader::from_object(loader);
+        (vtable.register_loader)(ptr, r#type, loader)
     }
 
     /// Unregisters an existing module loader from the `ModuleRegistry`.
     ///
     /// Notifies all registered callbacks before returning.
     #[inline]
-    pub fn unregister_loader(
-        &mut self,
-        id: LoaderId,
-    ) -> Result<&'static ModuleLoader, Box<dyn Error>> {
+    pub fn unregister_loader(&mut self, id: LoaderId) -> Result<&'static IModuleLoader, Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.unregister_loader)(ptr, id)
     }
@@ -389,13 +346,13 @@ impl ModuleRegistryInner {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_loader_callback<
-        F: FnOnce(&mut ModuleRegistryInner, &'static ModuleLoader) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync,
     >(
         &mut self,
         r#type: &str,
         callback: F,
-    ) -> Result<LoaderCallbackId, Box<dyn Error>> {
-        let wrapper = Box::new(move |inner: *mut ModuleRegistryInner, loader| unsafe {
+    ) -> Result<LoaderCallbackId, Error> {
+        let wrapper = Box::new(move |inner: *mut IModuleRegistryInner, loader| unsafe {
             callback(&mut *inner, loader)
         });
 
@@ -408,43 +365,27 @@ impl ModuleRegistryInner {
     ///
     /// The callback will not be called.
     #[inline]
-    pub fn unregister_loader_callback(
-        &mut self,
-        id: LoaderCallbackId,
-    ) -> Result<(), Box<dyn Error>> {
+    pub fn unregister_loader_callback(&mut self, id: LoaderCallbackId) -> Result<(), Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.unregister_loader_callback)(ptr, id)
     }
 
-    /// Fetches the loader associated with the `type`.
+    /// Fetches the loader associated with the type.
     #[inline]
-    pub fn get_loader_from_type(
-        &self,
-        r#type: &str,
-    ) -> Result<&'static ModuleLoader, Box<dyn Error>> {
+    pub fn get_loader_from_type(&self, r#type: &str) -> Result<&'static IModuleLoader, Error> {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.get_loader_from_type)(ptr, r#type)
     }
 
     /// Registers a new interface to the `ModuleRegistry`.
-    ///
-    /// # Panic
-    ///
-    /// Panics if the implementation of [`Borrow`] does not return the same reference.
     #[inline]
-    pub fn register_interface<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>>(
+    pub fn register_interface<T: CoerceObject<IModuleInterfaceVTable>>(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: DynArc<T, C>,
-    ) -> Result<InterfaceId, Box<dyn Error>> {
-        let (ptr, vtable) = (*interface).borrow().into_raw_parts();
-        assert_eq!(ptr, &*interface as *const _ as *const ());
-
-        let (base, _) = DynArc::into_inner(interface);
-        let caster = ModuleInterfaceCaster::new(vtable);
-        let interface = unsafe { ModuleInterfaceArc::from_inner((base, caster)) };
-
+        interface: ObjArc<T>,
+    ) -> Result<InterfaceId, Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
+        let interface = ObjArc::coerce_object(interface);
         (vtable.register_interface)(ptr, descriptor, interface)
     }
 
@@ -456,7 +397,7 @@ impl ModuleRegistryInner {
     pub fn unregister_interface(
         &mut self,
         id: InterfaceId,
-    ) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
+    ) -> Result<ObjArc<IModuleInterface>, Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.unregister_interface)(ptr, id)
     }
@@ -470,13 +411,13 @@ impl ModuleRegistryInner {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_interface_callback<
-        F: FnOnce(&mut ModuleRegistryInner, ModuleInterfaceArc) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync,
     >(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
         callback: F,
-    ) -> Result<InterfaceCallbackId, Box<dyn Error>> {
-        let wrapper = Box::new(move |inner: *mut ModuleRegistryInner, interface| unsafe {
+    ) -> Result<InterfaceCallbackId, Error> {
+        let wrapper = Box::new(move |inner: *mut IModuleRegistryInner, interface| unsafe {
             callback(&mut *inner, interface)
         });
 
@@ -487,10 +428,7 @@ impl ModuleRegistryInner {
 
     /// Unregisters an interface-removed callback from the `ModuleRegistry` without calling it.
     #[inline]
-    pub fn unregister_interface_callback(
-        &mut self,
-        id: InterfaceCallbackId,
-    ) -> Result<(), Box<dyn Error>> {
+    pub fn unregister_interface_callback(&mut self, id: InterfaceCallbackId) -> Result<(), Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.unregister_interface_callback)(ptr, id)
     }
@@ -500,7 +438,7 @@ impl ModuleRegistryInner {
     pub fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
+    ) -> Result<ObjArc<IModuleInterface>, Error> {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.get_interface_from_descriptor)(ptr, descriptor)
     }
@@ -521,171 +459,96 @@ impl ModuleRegistryInner {
         &self,
         name: &str,
         version: &Version,
-        extensions: &[ArrayString<32>],
+        extensions: &[ArrayString<128>],
     ) -> Vec<ModuleInterfaceDescriptor> {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.get_compatible_interface_descriptors)(ptr, name, version, extensions)
     }
-
-    /// Splits the reference into a data- and vtable- pointer.
-    #[inline]
-    pub fn into_raw_parts(&self) -> (*const (), &'static ModuleRegistryInnerVTable) {
-        self.inner.into_raw_parts()
-    }
-
-    /// Splits the reference into a data- and vtable- pointer.
-    #[inline]
-    pub fn into_raw_parts_mut(&mut self) -> (*mut (), &'static ModuleRegistryInnerVTable) {
-        self.inner.into_raw_parts_mut()
-    }
-
-    /// Constructs a `*const ModuleRegistryInner` from a data- and vtable- pointer.
-    #[inline]
-    pub fn from_raw_parts(
-        data: *const (),
-        vtable: &'static ModuleRegistryInnerVTable,
-    ) -> *const Self {
-        ModuleObject::from_raw_parts(data, vtable) as *const Self
-    }
-
-    /// Constructs a `*mut ModuleRegistryInner` from a data- and vtable- pointer.
-    #[inline]
-    pub fn from_raw_parts_mut(
-        data: *mut (),
-        vtable: &'static ModuleRegistryInnerVTable,
-    ) -> *mut Self {
-        ModuleObject::from_raw_parts_mut(data, vtable) as *mut Self
-    }
 }
 
-impl std::fmt::Debug for ModuleRegistryInner {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(ModuleRegistry)")
-    }
-}
-
-unsafe impl Send for ModuleRegistryInner {}
-unsafe impl Sync for ModuleRegistryInner {}
-
-/// VTable of the [`ModuleRegistryInner`] type.
-#[repr(C)]
-#[allow(clippy::type_complexity)]
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct ModuleRegistryInnerVTable {
-    register_loader:
-        fn(*mut (), *const str, &'static ModuleLoader) -> Result<LoaderId, Box<dyn Error>>,
-    unregister_loader: fn(*mut (), LoaderId) -> Result<&'static ModuleLoader, Box<dyn Error>>,
-    register_loader_callback:
-        fn(*mut (), *const str, LoaderCallback) -> Result<LoaderCallbackId, Box<dyn Error>>,
-    unregister_loader_callback: fn(*mut (), LoaderCallbackId) -> Result<(), Box<dyn Error>>,
-    get_loader_from_type:
-        fn(*const (), *const str) -> Result<&'static ModuleLoader, Box<dyn Error>>,
-    register_interface: fn(
-        *mut (),
-        *const ModuleInterfaceDescriptor,
-        ModuleInterfaceArc,
-    ) -> Result<InterfaceId, Box<dyn Error>>,
-    unregister_interface: fn(*mut (), InterfaceId) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
-    register_interface_callback: fn(
-        *mut (),
-        *const ModuleInterfaceDescriptor,
-        InterfaceCallback,
-    ) -> Result<InterfaceCallbackId, Box<dyn Error>>,
-    unregister_interface_callback: fn(*mut (), InterfaceCallbackId) -> Result<(), Box<dyn Error>>,
-    get_interface_from_descriptor: fn(
-        *const (),
-        *const ModuleInterfaceDescriptor,
-    ) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
-    get_interface_descriptors_from_name:
-        fn(*const (), *const str) -> Vec<ModuleInterfaceDescriptor>,
-    get_compatible_interface_descriptors: fn(
-        *const (),
-        *const str,
-        *const Version,
-        *const [ArrayString<32>],
-    ) -> Vec<ModuleInterfaceDescriptor>,
-}
-
-impl ModuleRegistryInnerVTable {
-    /// Constructs a new `ModuleRegistryVTable`.
-    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-    pub const fn new(
-        register_loader: fn(
-            *mut (),
-            *const str,
-            &'static ModuleLoader,
-        ) -> Result<LoaderId, Box<dyn Error>>,
-        unregister_loader: fn(*mut (), LoaderId) -> Result<&'static ModuleLoader, Box<dyn Error>>,
-        register_loader_callback: fn(
-            *mut (),
-            *const str,
-            LoaderCallback,
-        ) -> Result<LoaderCallbackId, Box<dyn Error>>,
-        unregister_loader_callback: fn(*mut (), LoaderCallbackId) -> Result<(), Box<dyn Error>>,
-        get_loader_from_type: fn(
-            *const (),
-            *const str,
-        ) -> Result<&'static ModuleLoader, Box<dyn Error>>,
-        register_interface: fn(
+fimo_vtable! {
+    /// VTable of the [`IModuleRegistryInner`] type.
+    #[allow(clippy::type_complexity)]
+    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    pub struct ModuleRegistryInnerVTable<id = "fimo::interfaces::core::module::module_registry", marker = SendSyncMarker> {
+        /// Registers a new module loader to the `ModuleRegistry`.
+        ///
+        /// The registered loader will be available to the rest of the `ModuleRegistry`.
+        pub register_loader:
+            fn(*mut (), *const str, &'static IModuleLoader) -> Result<LoaderId, Error>,
+        /// Unregisters an existing module loader from the `ModuleRegistry`.
+        ///
+        /// Notifies all registered callbacks before returning.
+        pub unregister_loader: fn(*mut (), LoaderId) -> Result<&'static IModuleLoader, Error>,
+        /// Registers a loader-removal callback to the `ModuleRegistry`.
+        ///
+        /// The callback will be called in case the loader is removed.
+        ///
+        /// # Deadlock
+        ///
+        /// The callback may only call into the registry over the provided reference.
+        pub register_loader_callback:
+            fn(*mut (), *const str, LoaderCallback) -> Result<LoaderCallbackId, Error>,
+        /// Unregisters a loader-removal callback from the `ModuleRegistry`.
+        ///
+        /// The callback will not be called.
+        pub unregister_loader_callback: fn(*mut (), LoaderCallbackId) -> Result<(), Error>,
+        /// Fetches the loader associated with the type.
+        pub get_loader_from_type:
+            fn(*const (), *const str) -> Result<&'static IModuleLoader, Error>,
+        /// Registers a new interface to the `ModuleRegistry`.
+        pub register_interface: fn(
             *mut (),
             *const ModuleInterfaceDescriptor,
-            ModuleInterfaceArc,
-        ) -> Result<InterfaceId, Box<dyn Error>>,
-        unregister_interface: fn(
-            *mut (),
-            InterfaceId,
-        ) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
-        register_interface_callback: fn(
+            ObjArc<IModuleInterface>,
+        ) -> Result<InterfaceId, Error>,
+        /// Unregisters an existing interface from the `ModuleRegistry`.
+        ///
+        /// This function calls the interface-remove callbacks that are registered
+        /// with the interface before removing it.
+        pub unregister_interface:
+            fn(*mut (), InterfaceId) -> Result<ObjArc<IModuleInterface>, Error>,
+        /// Registers an interface-removed callback to the `ModuleRegistry`.
+        ///
+        /// The callback will be called in case the interface is removed from the `ModuleRegistry`.
+        ///
+        /// # Deadlock
+        ///
+        /// The callback may only call into the registry over the provided reference.
+        pub register_interface_callback: fn(
             *mut (),
             *const ModuleInterfaceDescriptor,
             InterfaceCallback,
-        ) -> Result<InterfaceCallbackId, Box<dyn Error>>,
-        unregister_interface_callback: fn(
-            *mut (),
-            InterfaceCallbackId,
-        ) -> Result<(), Box<dyn Error>>,
-        get_interface_from_descriptor: fn(
+        ) -> Result<InterfaceCallbackId, Error>,
+        /// Unregisters an interface-removed callback from the `ModuleRegistry` without calling it.
+        pub unregister_interface_callback: fn(*mut (), InterfaceCallbackId) -> Result<(), Error>,
+        /// Extracts an interface from the `ModuleRegistry`.
+        pub get_interface_from_descriptor: fn(
             *const (),
             *const ModuleInterfaceDescriptor,
-        ) -> Result<ModuleInterfaceArc, Box<dyn Error>>,
-        get_interface_descriptors_from_name: fn(
-            *const (),
-            *const str,
-        ) -> Vec<ModuleInterfaceDescriptor>,
-        get_compatible_interface_descriptors: fn(
+        ) -> Result<ObjArc<IModuleInterface>, Error>,
+        /// Extracts all interface descriptors with the same name.
+        pub get_interface_descriptors_from_name:
+            fn(*const (), *const str) -> Vec<ModuleInterfaceDescriptor>,
+        /// Extracts all descriptors of compatible interfaces.
+        pub get_compatible_interface_descriptors: fn(
             *const (),
             *const str,
             *const Version,
-            *const [ArrayString<32>],
+            *const [ArrayString<128>],
         ) -> Vec<ModuleInterfaceDescriptor>,
-    ) -> Self {
-        Self {
-            register_loader,
-            unregister_loader,
-            register_loader_callback,
-            unregister_loader_callback,
-            get_loader_from_type,
-            register_interface,
-            unregister_interface,
-            register_interface_callback,
-            unregister_interface_callback,
-            get_interface_from_descriptor,
-            get_interface_descriptors_from_name,
-            get_compatible_interface_descriptors,
-        }
     }
 }
 
 /// Handle to a loader.
 #[derive(Debug)]
-pub struct LoaderHandle<'a, T: Borrow<ModuleLoader> + 'static> {
+pub struct LoaderHandle<'a, T: CoerceObject<IModuleLoaderVTable> + 'static> {
     id: LoaderId,
     loader: &'static T,
-    registry: &'a ModuleRegistry,
+    registry: &'a IModuleRegistry,
 }
 
-impl<'a, T: Borrow<ModuleLoader> + 'static> LoaderHandle<'a, T> {
+impl<'a, T: CoerceObject<IModuleLoaderVTable> + 'static> LoaderHandle<'a, T> {
     /// Constructs a new `LoaderHandle` from from its raw parts.
     ///
     /// # Safety
@@ -693,7 +556,11 @@ impl<'a, T: Borrow<ModuleLoader> + 'static> LoaderHandle<'a, T> {
     /// The caller must guarantee, that `T` is matches with the
     /// original type.
     #[inline]
-    pub unsafe fn from_raw(id: LoaderId, loader: &'static T, registry: &'a ModuleRegistry) -> Self {
+    pub unsafe fn from_raw(
+        id: LoaderId,
+        loader: &'static T,
+        registry: &'a IModuleRegistry,
+    ) -> Self {
         Self {
             id,
             loader,
@@ -703,7 +570,7 @@ impl<'a, T: Borrow<ModuleLoader> + 'static> LoaderHandle<'a, T> {
 
     /// Splits the `LoaderHandle` into its raw components.
     #[inline]
-    pub fn into_raw(self) -> (LoaderId, &'static T, &'a ModuleRegistry) {
+    pub fn into_raw(self) -> (LoaderId, &'static T, &'a IModuleRegistry) {
         let id = unsafe { std::ptr::read(&self.id) };
         let loader = unsafe { std::ptr::read(&self.loader) };
         let registry = self.registry;
@@ -713,7 +580,7 @@ impl<'a, T: Borrow<ModuleLoader> + 'static> LoaderHandle<'a, T> {
     }
 }
 
-impl<'a, T: Borrow<ModuleLoader>> Deref for LoaderHandle<'a, T> {
+impl<'a, T: CoerceObject<IModuleLoaderVTable>> Deref for LoaderHandle<'a, T> {
     type Target = T;
 
     #[inline]
@@ -722,7 +589,7 @@ impl<'a, T: Borrow<ModuleLoader>> Deref for LoaderHandle<'a, T> {
     }
 }
 
-impl<T: Borrow<ModuleLoader>> Drop for LoaderHandle<'_, T> {
+impl<T: CoerceObject<IModuleLoaderVTable>> Drop for LoaderHandle<'_, T> {
     #[inline]
     fn drop(&mut self) {
         // safety: `LoaderId` is a simple `usize`.
@@ -758,14 +625,14 @@ impl From<LoaderId> for usize {
 
 /// Handle to a interface.
 #[derive(Debug)]
-pub struct InterfaceHandle<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> {
+pub struct InterfaceHandle<'a, T: CoerceObject<IModuleInterfaceVTable>> {
     id: InterfaceId,
-    interface: DynArc<T, C>,
-    registry: &'a ModuleRegistry,
+    interface: ObjArc<T>,
+    registry: &'a IModuleRegistry,
     _phantom: PhantomData<fn() -> *const T>,
 }
 
-impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> InterfaceHandle<'a, T, C> {
+impl<'a, T: CoerceObject<IModuleInterfaceVTable>> InterfaceHandle<'a, T> {
     /// Constructs a new `InterfaceHandle` from its raw parts.
     ///
     /// # Safety
@@ -775,8 +642,8 @@ impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> InterfaceHandl
     #[inline]
     pub unsafe fn from_raw_parts(
         id: InterfaceId,
-        interface: DynArc<T, C>,
-        registry: &'a ModuleRegistry,
+        interface: ObjArc<T>,
+        registry: &'a IModuleRegistry,
     ) -> Self {
         Self {
             id,
@@ -788,7 +655,7 @@ impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> InterfaceHandl
 
     /// Splits the `InterfaceHandle` into its raw parts.
     #[inline]
-    pub fn into_raw_parts(self) -> (InterfaceId, DynArc<T, C>, &'a ModuleRegistry) {
+    pub fn into_raw_parts(self) -> (InterfaceId, ObjArc<T>, &'a IModuleRegistry) {
         let id = unsafe { std::ptr::read(&self.id) };
         let interface = unsafe { std::ptr::read(&self.interface) };
         let registry = self.registry;
@@ -799,14 +666,12 @@ impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> InterfaceHandl
 
     /// Clones the wrapped interface.
     #[inline]
-    pub fn get_interface(&self) -> DynArc<T, C> {
+    pub fn get_interface(&self) -> ObjArc<T> {
         self.interface.clone()
     }
 }
 
-impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> Deref
-    for InterfaceHandle<'a, T, C>
-{
+impl<'a, T: CoerceObject<IModuleInterfaceVTable>> Deref for InterfaceHandle<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -814,7 +679,7 @@ impl<'a, T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> Deref
     }
 }
 
-impl<T: Borrow<ModuleInterface> + ?Sized, C: DynArcCaster<T>> Drop for InterfaceHandle<'_, T, C> {
+impl<T: CoerceObject<IModuleInterfaceVTable>> Drop for InterfaceHandle<'_, T> {
     fn drop(&mut self) {
         let id = unsafe { std::ptr::read(&self.id) };
         self.registry.enter_inner(move |inner| {
@@ -850,13 +715,13 @@ impl From<InterfaceId> for usize {
 #[derive(Debug)]
 pub struct LoaderCallbackHandle<'a> {
     id: LoaderCallbackId,
-    registry: &'a ModuleRegistry,
+    registry: &'a IModuleRegistry,
 }
 
 impl<'a> LoaderCallbackHandle<'a> {
     /// Splits a `LoaderCallbackHandle` into its raw components.
     #[inline]
-    pub fn into_raw_parts(self) -> (LoaderCallbackId, &'a ModuleRegistry) {
+    pub fn into_raw_parts(self) -> (LoaderCallbackId, &'a IModuleRegistry) {
         let id = unsafe { std::ptr::read(&self.id) };
         let registry = self.registry;
         std::mem::forget(self);
@@ -870,7 +735,7 @@ impl<'a> LoaderCallbackHandle<'a> {
     ///
     /// The caller must guarantee, that the id is valid.
     #[inline]
-    pub unsafe fn from_raw_parts(id: LoaderCallbackId, registry: &'a ModuleRegistry) -> Self {
+    pub unsafe fn from_raw_parts(id: LoaderCallbackId, registry: &'a IModuleRegistry) -> Self {
         Self { id, registry }
     }
 }
@@ -910,22 +775,22 @@ impl From<LoaderCallbackId> for usize {
 /// A loader removed callback.
 #[derive(Debug)]
 pub struct LoaderCallback {
-    inner: HeapFnOnce<(*mut ModuleRegistryInner, &'static ModuleLoader), ()>,
+    inner: HeapFnOnce<(*mut IModuleRegistryInner, &'static IModuleLoader), ()>,
 }
 
-impl FnOnce<(*mut ModuleRegistryInner, &'static ModuleLoader)> for LoaderCallback {
+impl FnOnce<(*mut IModuleRegistryInner, &'static IModuleLoader)> for LoaderCallback {
     type Output = ();
 
     #[inline]
     extern "rust-call" fn call_once(
         self,
-        args: (*mut ModuleRegistryInner, &'static ModuleLoader),
+        args: (*mut IModuleRegistryInner, &'static IModuleLoader),
     ) -> Self::Output {
         self.inner.call_once(args)
     }
 }
 
-impl<F: FnOnce(*mut ModuleRegistryInner, &'static ModuleLoader) + Send + Sync> From<Box<F>>
+impl<F: FnOnce(*mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync> From<Box<F>>
     for LoaderCallback
 {
     #[inline]
@@ -943,13 +808,13 @@ unsafe impl Sync for LoaderCallback {}
 #[derive(Debug)]
 pub struct InterfaceCallbackHandle<'a> {
     id: InterfaceCallbackId,
-    registry: &'a ModuleRegistry,
+    registry: &'a IModuleRegistry,
 }
 
 impl<'a> InterfaceCallbackHandle<'a> {
     /// Splits a `InterfaceCallbackHandle` into its raw components.
     #[inline]
-    pub fn into_raw_parts(self) -> (InterfaceCallbackId, &'a ModuleRegistry) {
+    pub fn into_raw_parts(self) -> (InterfaceCallbackId, &'a IModuleRegistry) {
         let id = unsafe { std::ptr::read(&self.id) };
         let registry = self.registry;
         std::mem::forget(self);
@@ -963,7 +828,7 @@ impl<'a> InterfaceCallbackHandle<'a> {
     ///
     /// The caller must guarantee, that the id is valid.
     #[inline]
-    pub unsafe fn from_raw_parts(id: InterfaceCallbackId, registry: &'a ModuleRegistry) -> Self {
+    pub unsafe fn from_raw_parts(id: InterfaceCallbackId, registry: &'a IModuleRegistry) -> Self {
         Self { id, registry }
     }
 }
@@ -1003,22 +868,22 @@ impl From<InterfaceCallbackId> for usize {
 /// A loader removed callback.
 #[derive(Debug)]
 pub struct InterfaceCallback {
-    inner: HeapFnOnce<(*mut ModuleRegistryInner, ModuleInterfaceArc), ()>,
+    inner: HeapFnOnce<(*mut IModuleRegistryInner, ObjArc<IModuleInterface>), ()>,
 }
 
-impl FnOnce<(*mut ModuleRegistryInner, ModuleInterfaceArc)> for InterfaceCallback {
+impl FnOnce<(*mut IModuleRegistryInner, ObjArc<IModuleInterface>)> for InterfaceCallback {
     type Output = ();
 
     #[inline]
     extern "rust-call" fn call_once(
         self,
-        args: (*mut ModuleRegistryInner, ModuleInterfaceArc),
+        args: (*mut IModuleRegistryInner, ObjArc<IModuleInterface>),
     ) -> Self::Output {
         self.inner.call_once(args)
     }
 }
 
-impl<F: FnOnce(*mut ModuleRegistryInner, ModuleInterfaceArc) + Send + Sync> From<Box<F>>
+impl<F: FnOnce(*mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync> From<Box<F>>
     for InterfaceCallback
 {
     #[inline]

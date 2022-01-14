@@ -6,7 +6,7 @@
 use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::BaseInterface;
+use crate::vtable::IBaseInterface;
 use crate::{CoerceObject, Object};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
@@ -270,12 +270,12 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// unsafe impl ObjectWrapper for Obj {
     ///     type VTable = ObjVTable;
     ///
-    ///     fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
     ///         // `*const Self` and `*const Object<_>` have the same layout.
     ///         ptr as *const Object<_>
     ///     }
     ///
-    ///     fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
     ///         // `*const Self` and `*const Object<_>` have the same layout.
     ///         obj as *const Self
     ///     }
@@ -292,7 +292,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     pub fn coerce_object<T: CoerceObject<O::VTable>>(a: ObjArc<T, A>) -> ObjArc<O, A> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let obj = T::coerce_obj_raw(ptr);
-        let ptr = O::from_object(obj);
+        let ptr = O::from_object_raw(obj);
         unsafe { ObjArc::from_raw_parts(ptr, alloc) }
     }
 
@@ -345,7 +345,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
         a: ObjArc<O, A>,
     ) -> Result<ObjArc<T, A>, CastError<ObjArc<O, A>>> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object(ptr);
+        let obj = O::as_object_raw(ptr);
 
         unsafe {
             match Object::<O::VTable>::try_cast_obj_raw::<T>(obj) {
@@ -406,12 +406,12 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// unsafe impl ObjectWrapper for Obj {
     ///     type VTable = ObjVTable;
     ///
-    ///     fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
     ///         // `*const Self` and `*const Object<_>` have the same layout.
     ///         ptr as *const Object<_>
     ///     }
     ///
-    ///     fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
     ///         // `*const Self` and `*const Object<_>` have the same layout.
     ///         obj as *const Self
     ///     }
@@ -430,11 +430,11 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
         a: ObjArc<O, A>,
     ) -> Result<ObjArc<U, A>, CastError<ObjArc<O, A>>> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object(ptr);
+        let obj = O::as_object_raw(ptr);
 
         unsafe {
             match Object::<O::VTable>::try_cast_raw::<U::VTable>(obj) {
-                Ok(casted) => Ok(ObjArc::from_raw_parts(U::from_object(casted), alloc)),
+                Ok(casted) => Ok(ObjArc::from_raw_parts(U::from_object_raw(casted), alloc)),
                 Err(err) => Err(CastError {
                     obj: ObjArc::from_raw_parts(ptr, alloc),
                     required: err.required,
@@ -491,12 +491,12 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// unsafe impl ObjectWrapper for Obj {
     ///     type VTable = ObjVTable;
     ///
-    ///     fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
     ///         // `*const Self` and `*const Object<_>` have the same layout.
     ///         ptr as *const Object<_>
     ///     }
     ///
-    ///     fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
     ///         // `*const Self` and `*const Object<_>` have the same layout.
     ///         obj as *const Self
     ///     }
@@ -512,9 +512,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// assert_eq!(x.add(1), 6);
     /// assert_eq!(x.add(5), 10);
     /// ```
-    pub fn cast_base(a: ObjArc<O, A>) -> ObjArc<Object<BaseInterface>, A> {
+    pub fn cast_base(a: ObjArc<O, A>) -> ObjArc<Object<IBaseInterface>, A> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object(ptr);
+        let obj = O::as_object_raw(ptr);
         let obj = Object::<O::VTable>::cast_base_raw(obj);
         unsafe { ObjArc::from_raw_parts(obj, alloc) }
     }
@@ -1449,7 +1449,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
     pub fn coerce_object<T: CoerceObject<O::VTable>>(w: ObjWeak<T, A>) -> ObjWeak<O, A> {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         let obj = T::coerce_obj_raw(ptr);
-        let ptr = O::from_object(obj);
+        let ptr = O::from_object_raw(obj);
         unsafe { ObjWeak::from_raw_parts(ptr, alloc) }
     }
 
@@ -1458,7 +1458,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
         w: ObjWeak<O, A>,
     ) -> Result<ObjWeak<T, A>, CastError<ObjWeak<O, A>>> {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object(ptr);
+        let obj = O::as_object_raw(ptr);
 
         unsafe {
             match Object::<O::VTable>::try_cast_obj_raw::<T>(obj) {
@@ -1477,11 +1477,11 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
         w: ObjWeak<O, A>,
     ) -> Result<ObjWeak<U, A>, CastError<ObjWeak<O, A>>> {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object(ptr);
+        let obj = O::as_object_raw(ptr);
 
         unsafe {
             match Object::<O::VTable>::try_cast_raw::<U::VTable>(obj) {
-                Ok(casted) => Ok(ObjWeak::from_raw_parts(U::from_object(casted), alloc)),
+                Ok(casted) => Ok(ObjWeak::from_raw_parts(U::from_object_raw(casted), alloc)),
                 Err(err) => Err(CastError {
                     obj: ObjWeak::from_raw_parts(ptr, alloc),
                     required: err.required,
@@ -1492,9 +1492,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
     }
 
     /// Casts an `ObjWeak<O, A>` to an `ObjWeak<Object<BaseInterface>>`.
-    pub fn cast_base(w: ObjWeak<O, A>) -> ObjWeak<Object<BaseInterface>, A> {
+    pub fn cast_base(w: ObjWeak<O, A>) -> ObjWeak<Object<IBaseInterface>, A> {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object(ptr);
+        let obj = O::as_object_raw(ptr);
         let obj = Object::<O::VTable>::cast_base_raw(obj);
         unsafe { ObjWeak::from_raw_parts(obj, alloc) }
     }

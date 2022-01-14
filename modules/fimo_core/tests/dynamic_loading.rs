@@ -1,10 +1,12 @@
 use ci::rust::settings_registry::{SettingsEvent, SettingsItem, SettingsRegistryPath};
 use fimo_core_interface as ci;
-use fimo_module_core::rust as module;
+use fimo_core_interface::rust::FimoCore;
+use fimo_ffi::ObjArc;
+use fimo_module_core as module;
+use fimo_module_core::{Error, ErrorKind, FimoInterface, IModuleInterface};
 use module_paths::core_module_path;
 use std::alloc::System;
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -13,47 +15,47 @@ static A: System = System;
 
 #[test]
 #[cfg(feature = "rust_module")]
-fn load_dynamic() -> Result<(), Box<dyn Error>> {
-    let core_path = core_module_path()?;
+fn load_dynamic() -> Result<(), Error> {
+    let core_path = core_module_path().map_err(|e| Error::new(ErrorKind::Unknown, e))?;
 
-    let module_loader = module::module_loader::RustLoader::new();
+    let module_loader = module::rust_loader::RustLoader::new();
     let core_module = unsafe { module_loader.load_module_raw(core_path.as_path())? };
 
     println!(
         "Core info: {}, Path: {}",
-        core_module.get_module_info(),
-        core_module.get_module_path().display()
+        core_module.module_info(),
+        core_module.module_path_buf().display()
     );
 
-    let core_instance = core_module.create_instance()?;
+    let core_instance = core_module.new_instance()?;
 
     println!(
         "Available interfaces: {:?}",
-        core_instance.get_available_interfaces()
+        core_instance.available_interfaces()
     );
 
     let core_descriptor = core_instance
-        .get_available_interfaces()
+        .available_interfaces()
         .iter()
-        .find(|interface| interface.name == "fimo-core")
+        .find(|interface| interface.name == FimoCore::NAME)
         .unwrap();
 
     println!("Core interface: {}", core_descriptor);
     println!(
         "Core dependencies: {:?}",
-        core_instance.get_interface_dependencies(core_descriptor)?
+        core_instance.dependencies(core_descriptor).into_rust()?
     );
 
-    let core_interface = core_instance.get_interface(core_descriptor)?;
-    print!("Core version: {}", core_interface.get_version());
+    let core_interface = core_instance.interface(core_descriptor).into_rust()?;
+    print!("Core version: {}", core_interface.version());
 
-    let _ = unsafe { ci::rust::cast_interface(core_interface)? };
+    let _: ObjArc<FimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
     Ok(())
 }
 
 #[test]
 #[cfg(feature = "rust_module")]
-fn settings_registry() -> Result<(), Box<dyn Error>> {
+fn settings_registry() -> Result<(), Error> {
     let (_, core) = module_loading::get_core_interface()?;
 
     let settings_registry = core.get_settings_registry();

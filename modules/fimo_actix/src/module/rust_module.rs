@@ -1,35 +1,31 @@
 use crate::module::core_bindings::scope_builder;
-use crate::module::{construct_module_info, FimoActixInterface, INTERFACE_VTABLE};
+use crate::module::{construct_module_info, FimoActixInterface};
 use crate::FimoActixServer;
 use fimo_actix_interface::{build_interface_descriptor as actix_descriptor, ScopeBuilder};
 use fimo_core_interface::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
-    FimoCore, FimoCoreCaster,
+    FimoCore,
 };
+use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
-use fimo_module_core::rust::module_loader::{RustModule, RustModuleInnerArc};
-use fimo_module_core::rust::ModuleInterfaceCaster;
-use fimo_module_core::{
-    rust::{ModuleInterfaceArc, ModuleInterfaceWeak},
-    DynArc, ModuleInterfaceDescriptor,
-};
+use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleParent};
+use fimo_module_core::{Error, ErrorKind, IModuleInterface, ModuleInterfaceDescriptor};
 use std::collections::HashMap;
-use std::error::Error;
-use std::io::ErrorKind;
-use std::sync::Arc;
 
-fimo_module_core::export_rust_module! {construct_module}
+fimo_module_core::rust_module! {construct_module}
 
 #[allow(dead_code, improper_ctypes_definitions)]
-extern "C" fn construct_module() -> Result<RustModuleInnerArc, Box<dyn Error>> {
+extern "C" fn construct_module() -> Result<ObjArc<IRustModuleInner>, Error> {
     Ok(GenericModule::new_inner(
         construct_module_info(),
         build_instance,
     ))
 }
 
-fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>> {
+fn build_instance(
+    parent: ObjArc<IRustModuleParent>,
+) -> Result<ObjArc<GenericModuleInstance>, Error> {
     let core_desc = actix_descriptor();
 
     let mut interfaces = HashMap::new();
@@ -42,22 +38,22 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
 }
 
 fn build_tasks_interface(
-    instance: Arc<GenericModuleInstance>,
-    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>,
-) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
+    instance: ObjArc<GenericModuleInstance>,
+    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<IModuleInterface>>>,
+) -> Result<ObjArc<IModuleInterface>, Error> {
     let core_interface = dep_map
         .get(&core_descriptor())
         .map(|i| i.as_ref().unwrap().upgrade());
 
     if core_interface.is_none() || core_interface.as_ref().unwrap().is_none() {
-        return Err(Box::new(std::io::Error::new(
+        return Err(Error::new(
             ErrorKind::NotFound,
             "fimo-core interface not found",
-        )));
+        ));
     }
 
-    let core_interface =
-        unsafe { fimo_core_interface::rust::cast_interface(core_interface.unwrap().unwrap())? };
+    let core_interface = core_interface.unwrap().unwrap();
+    let core_interface: ObjArc<FimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
 
     const DEFAULT_PORT: usize = 8080usize;
     const DEFAULT_ENABLE_CORE_BINDINGS: bool = true;
@@ -90,9 +86,9 @@ fn build_tasks_interface(
 
     let address = format!("127.0.0.1:{}", port);
 
-    let mut server = Arc::new(FimoActixInterface {
+    let mut server = ObjArc::new(FimoActixInterface {
         server: FimoActixServer::new(address),
-        parent: GenericModuleInstance::as_module_instance_arc(instance),
+        parent: ObjArc::coerce_object(instance),
         core: None,
     });
 
@@ -100,19 +96,18 @@ fn build_tasks_interface(
         server = bind_core(server, core_interface)
     }
 
-    let caster = ModuleInterfaceCaster::new(&INTERFACE_VTABLE);
-    unsafe { Ok(ModuleInterfaceArc::from_inner((server, caster))) }
+    Ok(ObjArc::coerce_object(server))
 }
 
 fn bind_core(
-    mut server: Arc<FimoActixInterface>,
-    core: DynArc<FimoCore, FimoCoreCaster>,
-) -> Arc<FimoActixInterface> {
+    mut server: ObjArc<FimoActixInterface>,
+    core: ObjArc<FimoCore>,
+) -> ObjArc<FimoActixInterface> {
     let (builder, callback) = scope_builder(&*core);
     let scope_builder = ScopeBuilder::from(Box::new(builder));
     server.server.register_scope("/core", scope_builder);
 
-    let inner = Arc::get_mut(&mut server).unwrap();
+    let inner = ObjArc::get_mut(&mut server).unwrap();
     let (id, _) = callback.into_raw_parts();
     inner.core = Some((core, id));
 
