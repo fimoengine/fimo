@@ -1,5 +1,5 @@
 //! Implementation of the `SettingsRegistry` type.
-use fimo_core_interface::rust::settings_registry::{
+use fimo_core_int::rust::settings_registry::{
     SettingsEvent, SettingsEventCallback, SettingsEventCallbackId, SettingsItem,
     SettingsItemMetadata, SettingsItemType, SettingsRegistryInvalidPathError, SettingsRegistryPath,
     SettingsRegistryPathBuf, SettingsRegistryVTable,

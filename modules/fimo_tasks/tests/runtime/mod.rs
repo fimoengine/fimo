@@ -1,5 +1,5 @@
 use crate::initialize;
-use fimo_tasks_interface::rust as ft;
+use fimo_tasks_int::rust as ft;
 
 pub fn enter_runtime_call(f: impl FnOnce() + Send) {
     let tasks_interface = initialize().unwrap();

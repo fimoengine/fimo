@@ -2,7 +2,7 @@ use crate::task_scheduler::TaskSlot;
 use crate::TaskRuntime;
 use atomic::Atomic;
 use context::Context;
-use fimo_tasks_interface::rust::{NotifyFn, TaskHandle, TaskInner, TaskStatus, WaitOnFn, WorkerId};
+use fimo_tasks_int::rust::{NotifyFn, TaskHandle, TaskInner, TaskStatus, WaitOnFn, WorkerId};
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::fmt::{Debug, Formatter};

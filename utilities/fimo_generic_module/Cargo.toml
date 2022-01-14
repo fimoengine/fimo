@@ -12,4 +12,4 @@ categories = ["game-development"]
 parking_lot = "0.11.1"
 fimo_ffi = { version = "0.1.0", path = "../fimo_ffi" }
 fimo_module_core = { version = "0.1.0", path = "../fimo_module_core" }
-fimo_core_interface = { version = "0.1.0", path = "../../interfaces/fimo_core_interface" }
+fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int" }

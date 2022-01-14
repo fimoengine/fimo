@@ -1,4 +1,4 @@
-use fimo_actix_interface::ServerStatus;
+use fimo_actix_int::ServerStatus;
 use fimo_module_core::{Error, ErrorKind};
 use reqwest::Url;
 

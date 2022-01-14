@@ -17,15 +17,15 @@ parking_lot = "0.11"
 crossbeam-deque = "0.8"
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
-fimo_tasks_interface = { version = "0.1.0", path = "../../interfaces/fimo_tasks_interface" }
+fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int" }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi", optional = true }
+fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", optional = true }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
-fimo_core_interface = { version = "0.1.0", path = "../../interfaces/fimo_core_interface", optional = true }
 
 [dev-dependencies]
 module_loading = { path = "../../test_utilities/module_loading", features = ["tasks_module"] }
 
 [features]
 default = ["rust_module"]
-module = ["fimo_ffi", "fimo_module_core", "fimo_core_interface"]
+module = ["fimo_ffi", "fimo_module_core", "fimo_core_int"]
 rust_module = ["module"]

@@ -1,11 +1,11 @@
 use crate::module::core_bindings::scope_builder;
 use crate::module::{construct_module_info, FimoActixInterface};
 use crate::FimoActixServer;
-use fimo_actix_interface::{build_interface_descriptor as actix_descriptor, ScopeBuilder};
-use fimo_core_interface::rust::{
+use fimo_actix_int::{build_interface_descriptor as actix_descriptor, ScopeBuilder};
+use fimo_core_int::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
-    FimoCore,
+    IFimoCore,
 };
 use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
@@ -53,7 +53,7 @@ fn build_tasks_interface(
     }
 
     let core_interface = core_interface.unwrap().unwrap();
-    let core_interface: ObjArc<FimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
+    let core_interface: ObjArc<IFimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
 
     const DEFAULT_PORT: usize = 8080usize;
     const DEFAULT_ENABLE_CORE_BINDINGS: bool = true;
@@ -101,7 +101,7 @@ fn build_tasks_interface(
 
 fn bind_core(
     mut server: ObjArc<FimoActixInterface>,
-    core: ObjArc<FimoCore>,
+    core: ObjArc<IFimoCore>,
 ) -> ObjArc<FimoActixInterface> {
     let (builder, callback) = scope_builder(&*core);
     let scope_builder = ScopeBuilder::from(Box::new(builder));

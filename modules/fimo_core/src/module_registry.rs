@@ -1,7 +1,7 @@
 //! Implementation of the `ModuleRegistry` type.
-use fimo_core_interface::rust::module_registry::{
-    IModuleRegistryInner, InterfaceCallback, InterfaceCallbackId, InterfaceId, LoaderCallback,
-    LoaderCallbackId, LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
+use fimo_core_int::rust::module_registry::{
+    IModuleRegistry, IModuleRegistryInner, InterfaceCallback, InterfaceCallbackId, InterfaceId,
+    LoaderCallback, LoaderCallbackId, LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
 };
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::vtable::ObjectID;
@@ -35,8 +35,6 @@ impl ModuleRegistry {
         let registry = Self {
             inner: parking_lot::Mutex::new(ModuleRegistryInner::new()),
         };
-
-        use fimo_core_interface::rust::module_registry::IModuleRegistry;
         let i_registry = IModuleRegistry::from_object(registry.coerce_obj());
 
         if cfg!(feature = "rust_module_loader") {

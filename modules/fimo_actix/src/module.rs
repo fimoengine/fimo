@@ -1,10 +1,10 @@
 //! Implementation of the module.
 use crate::FimoActixServer;
-use fimo_actix_interface::FimoActixVTable;
-use fimo_core_interface::rust::settings_registry::{
+use fimo_actix_int::{IFimoActix, IFimoActixVTable};
+use fimo_core_int::rust::settings_registry::{
     SettingsEventCallbackHandle, SettingsEventCallbackId,
 };
-use fimo_core_interface::rust::FimoCore;
+use fimo_core_int::rust::IFimoCore;
 use fimo_ffi::object::CoerceObject;
 use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
@@ -23,7 +23,7 @@ pub const MODULE_NAME: &str = "fimo_actix";
 struct FimoActixInterface {
     server: FimoActixServer<String>,
     parent: ObjArc<IModuleInstance>,
-    core: Option<(ObjArc<FimoCore>, SettingsEventCallbackId)>,
+    core: Option<(ObjArc<IFimoCore>, SettingsEventCallbackId)>,
 }
 
 sa::assert_impl_all!(FimoActixInterface: Send, Sync);
@@ -32,9 +32,9 @@ impl ObjectID for FimoActixInterface {
     const OBJECT_ID: &'static str = "fimo::modules::actix::actix";
 }
 
-impl CoerceObject<FimoActixVTable> for FimoActixInterface {
-    fn get_vtable() -> &'static FimoActixVTable {
-        static VTABLE: FimoActixVTable = FimoActixVTable::new::<FimoActixInterface>(
+impl CoerceObject<IFimoActixVTable> for FimoActixInterface {
+    fn get_vtable() -> &'static IFimoActixVTable {
+        static VTABLE: IFimoActixVTable = IFimoActixVTable::new::<FimoActixInterface>(
             |ptr| {
                 let interface = unsafe { &*(ptr as *const FimoActixInterface) };
                 interface.server.start()
@@ -84,12 +84,12 @@ impl CoerceObject<FimoActixVTable> for FimoActixInterface {
 impl CoerceObject<IModuleInterfaceVTable> for FimoActixInterface {
     fn get_vtable() -> &'static IModuleInterfaceVTable {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            let i: &FimoActixVTable = FimoActixInterface::get_vtable();
+            let i: &IFimoActixVTable = FimoActixInterface::get_vtable();
             i.as_base()
         }
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn version(_ptr: *const ()) -> Version {
-            fimo_actix_interface::FimoActix::VERSION
+            IFimoActix::VERSION
         }
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn extension(
@@ -125,9 +125,7 @@ fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
         name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
         version: unsafe {
-            ArrayString::from_utf8_unchecked(
-                String::from(fimo_actix_interface::FimoActix::NAME).as_bytes(),
-            )
+            ArrayString::from_utf8_unchecked(String::from(IFimoActix::NAME).as_bytes())
         },
     }
 }

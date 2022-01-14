@@ -1,6 +1,6 @@
 use ci::rust::settings_registry::{SettingsEvent, SettingsItem, SettingsRegistryPath};
-use fimo_core_interface as ci;
-use fimo_core_interface::rust::FimoCore;
+use fimo_core_int as ci;
+use fimo_core_int::rust::IFimoCore;
 use fimo_ffi::ObjArc;
 use fimo_module_core as module;
 use fimo_module_core::{Error, ErrorKind, FimoInterface, IModuleInterface};
@@ -37,7 +37,7 @@ fn load_dynamic() -> Result<(), Error> {
     let core_descriptor = core_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == FimoCore::NAME)
+        .find(|interface| interface.name == IFimoCore::NAME)
         .unwrap();
 
     println!("Core interface: {}", core_descriptor);
@@ -49,7 +49,7 @@ fn load_dynamic() -> Result<(), Error> {
     let core_interface = core_instance.interface(core_descriptor).into_rust()?;
     print!("Core version: {}", core_interface.version());
 
-    let _: ObjArc<FimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
+    let _: ObjArc<IFimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
     Ok(())
 }
 

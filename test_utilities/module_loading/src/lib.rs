@@ -5,21 +5,21 @@ use fimo_module_core::Error;
 use fimo_module_core::{FimoInterface, IModule, IModuleInstance, IModuleInterface};
 use std::sync::Arc;
 
-use core_interface::rust::FimoCore;
-use fimo_core_interface as core_interface;
+use core_interface::rust::IFimoCore;
+use fimo_core_int as core_interface;
 
 #[cfg(feature = "tasks_module")]
-use fimo_tasks_interface as tasks_interface;
+use fimo_tasks_int as tasks_interface;
 #[cfg(feature = "tasks_module")]
-use tasks_interface::rust::FimoTasks;
+use tasks_interface::rust::IFimoTasks;
 
 #[cfg(feature = "actix_module")]
-use actix_interface::FimoActix;
+use actix_interface::IFimoActix;
 #[cfg(feature = "actix_module")]
-use fimo_actix_interface as actix_interface;
+use fimo_actix_int as actix_interface;
 
 #[allow(clippy::type_complexity)]
-pub fn get_core_interface() -> Result<(ObjArc<IModuleInstance>, ObjArc<FimoCore>), Error> {
+pub fn get_core_interface() -> Result<(ObjArc<IModuleInstance>, ObjArc<IFimoCore>), Error> {
     let module_loader = RustLoader::new();
     let core_module = unsafe {
         module_loader.load_module_raw(module_paths::core_module_path().unwrap().as_path())?
@@ -28,7 +28,7 @@ pub fn get_core_interface() -> Result<(ObjArc<IModuleInstance>, ObjArc<FimoCore>
     let core_descriptor = core_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == FimoCore::NAME)
+        .find(|interface| interface.name == IFimoCore::NAME)
         .unwrap();
 
     let interface = core_instance.interface(core_descriptor).into_rust()?;
@@ -39,8 +39,8 @@ pub fn get_core_interface() -> Result<(ObjArc<IModuleInstance>, ObjArc<FimoCore>
 #[cfg(feature = "tasks_module")]
 pub fn get_tasks_interface(
     core_instance: &ObjArc<IModuleInstance>,
-    core_interface: &ObjArc<FimoCore>,
-) -> Result<ObjArc<FimoTasks>, Error> {
+    core_interface: &ObjArc<IFimoCore>,
+) -> Result<ObjArc<IFimoTasks>, Error> {
     let module_registry = core_interface.get_module_registry();
     let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
     let tasks_module = unsafe {
@@ -53,12 +53,12 @@ pub fn get_tasks_interface(
     let tasks_descriptor = tasks_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == FimoTasks::NAME)
+        .find(|interface| interface.name == IFimoTasks::NAME)
         .unwrap();
     let core_descriptor = core_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == FimoCore::NAME)
+        .find(|interface| interface.name == IFimoCore::NAME)
         .unwrap();
 
     let i = core_instance.interface(core_descriptor).into_rust()?;
@@ -71,8 +71,8 @@ pub fn get_tasks_interface(
 #[cfg(feature = "actix_module")]
 pub fn get_actix_interface(
     core_instance: &ObjArc<IModuleInstance>,
-    core_interface: &ObjArc<FimoCore>,
-) -> Result<ObjArc<FimoActix>, Error> {
+    core_interface: &ObjArc<IFimoCore>,
+) -> Result<ObjArc<IFimoActix>, Error> {
     let module_registry = core_interface.get_module_registry();
     let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
     let actix_module = unsafe {
@@ -85,12 +85,12 @@ pub fn get_actix_interface(
     let actix_descriptor = actix_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == FimoActix::NAME)
+        .find(|interface| interface.name == IFimoActix::NAME)
         .unwrap();
     let core_descriptor = core_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == FimoCore::NAME)
+        .find(|interface| interface.name == IFimoCore::NAME)
         .unwrap();
 
     let i = core_instance.interface(core_descriptor).into_rust()?;

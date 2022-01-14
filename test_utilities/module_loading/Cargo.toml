@@ -7,10 +7,10 @@ edition = "2021"
 module_paths = { path = "../module_paths" }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
-fimo_core_interface = { version = "0.1.0", path = "../../interfaces/fimo_core_interface" }
-fimo_tasks_interface = { version = "0.1.0", path = "../../interfaces/fimo_tasks_interface", optional = true }
-fimo_actix_interface = { version = "0.1.0", path = "../../interfaces/fimo_actix_interface", optional = true }
+fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int" }
+fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int", optional = true }
+fimo_actix_int = { version = "0.1.0", path = "../../interfaces/fimo_actix_int", optional = true }
 
 [features]
-tasks_module = ["fimo_tasks_interface", "module_paths/tasks_module"]
-actix_module = ["fimo_actix_interface", "module_paths/actix_module"]
+tasks_module = ["fimo_tasks_int", "module_paths/tasks_module"]
+actix_module = ["fimo_actix_int", "module_paths/actix_module"]

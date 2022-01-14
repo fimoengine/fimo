@@ -1,6 +1,6 @@
 use crate::runtime::enter_runtime_call;
-use fimo_tasks_interface::rust::sync::Barrier;
-use fimo_tasks_interface::rust::{Task, TaskCompletionStatus};
+use fimo_tasks_int::rust::sync::Barrier;
+use fimo_tasks_int::rust::{Task, TaskCompletionStatus};
 use std::sync::Arc;
 
 #[test]

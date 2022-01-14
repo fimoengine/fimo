@@ -12,13 +12,13 @@ fimo_interface! {
     /// Type-erased `fimo-core` interface.
     ///
     /// The underlying type must implement `Send` and `Sync`.
-    pub struct FimoCore<vtable = FimoCoreVTable> {
+    pub struct IFimoCore<vtable = IFimoCoreVTable> {
         name: "fimo::interfaces::core::fimo_core",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0),
     }
 }
 
-impl FimoCore {
+impl IFimoCore {
     /// Fetches the module registry.
     #[inline]
     pub fn get_module_registry(&self) -> &module_registry::IModuleRegistry {
@@ -35,9 +35,9 @@ impl FimoCore {
 }
 
 fimo_vtable! {
-    /// VTable of the `fimo-core` interface.
+    /// VTable of an [`IFimoCore`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct FimoCoreVTable<id = "fimo::interfaces::core::fimo_core", marker = SendSyncMarker> {
+    pub struct IFimoCoreVTable<id = "fimo::interfaces::core::fimo_core", marker = SendSyncMarker> {
         /// Fetches the module registry.
         pub get_module_registry: fn(*const ()) -> *const module_registry::IModuleRegistry,
         /// Fetches the settings registry.
@@ -48,8 +48,8 @@ fimo_vtable! {
 /// Builds the [`ModuleInterfaceDescriptor`] for the interface.
 pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
     ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked(FimoCore::NAME.as_bytes()) },
-        version: FimoCore::VERSION,
+        name: unsafe { ArrayString::from_utf8_unchecked(IFimoCore::NAME.as_bytes()) },
+        version: IFimoCore::VERSION,
         extensions: Default::default(),
     }
 }

@@ -4,7 +4,7 @@ use crate::task_worker::{TaskWorker, WORKER};
 use crate::TaskRuntime;
 use atomic::Atomic;
 use crossbeam_deque::{Injector, Stealer};
-use fimo_tasks_interface::rust::{NotifyFn, RawTask, Result, TaskHandle, TaskInner, WorkerId};
+use fimo_tasks_int::rust::{NotifyFn, RawTask, Result, TaskHandle, TaskInner, WorkerId};
 use parking_lot::{Condvar, Mutex};
 use std::marker::PhantomPinned;
 use std::pin::Pin;

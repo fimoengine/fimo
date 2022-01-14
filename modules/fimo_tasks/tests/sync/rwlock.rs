@@ -1,6 +1,6 @@
 use crate::runtime::enter_runtime_call;
-use fimo_tasks_interface::rust::sync::RwLock;
-use fimo_tasks_interface::rust::Task;
+use fimo_tasks_int::rust::sync::RwLock;
+use fimo_tasks_int::rust::Task;
 use std::mem::forget;
 use std::sync::Arc;
 
