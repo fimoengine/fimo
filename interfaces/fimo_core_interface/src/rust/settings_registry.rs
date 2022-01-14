@@ -1,6 +1,6 @@
 //! Specification of a settings registry.
-use fimo_ffi_core::fn_wrapper::HeapFnMut;
-use fimo_module_core::rust::ModuleObject;
+use fimo_ffi::HeapFnMut;
+use fimo_module_core::{fimo_object, fimo_vtable, SendSyncMarker};
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 
@@ -10,12 +10,11 @@ mod settings_registry_path;
 pub use settings_item::*;
 pub use settings_registry_path::*;
 
-/// Type-erased settings registry.
-///
-/// The underlying type must implement `Send` and `Sync`.
-#[repr(transparent)]
-pub struct SettingsRegistry {
-    inner: ModuleObject<SettingsRegistryVTable>,
+fimo_object! {
+    /// Type-erased settings registry.
+    ///
+    /// The underlying type must implement `Send` and `Sync`.
+    pub struct SettingsRegistry<vtable = SettingsRegistryVTable>;
 }
 
 impl SettingsRegistry {
@@ -185,29 +184,7 @@ impl SettingsRegistry {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.unregister_callback)(ptr, id)
     }
-
-    /// Splits the reference into a data- and vtable- pointer.
-    #[inline]
-    pub fn into_raw_parts(&self) -> (*const (), &'static SettingsRegistryVTable) {
-        self.inner.into_raw_parts()
-    }
-
-    /// Constructs a `*const ModuleRegistry` from a data- and vtable- pointer.
-    #[inline]
-    pub fn from_raw_parts(data: *const (), vtable: &'static SettingsRegistryVTable) -> *const Self {
-        ModuleObject::from_raw_parts(data, vtable) as *const Self
-    }
 }
-
-impl std::fmt::Debug for SettingsRegistry {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(SettingsRegistry)")
-    }
-}
-
-unsafe impl Send for SettingsRegistry {}
-unsafe impl Sync for SettingsRegistry {}
 
 /// Error from using an invalid path.
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -237,93 +214,60 @@ impl SettingsRegistryInvalidPathError {
     }
 }
 
-/// VTable of the [`SettingsRegistry`] type.
-#[repr(C)]
-#[allow(clippy::type_complexity)]
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct SettingsRegistryVTable {
-    contains: fn(
-        *const (),
-        *const SettingsRegistryPath,
-    ) -> Result<bool, SettingsRegistryInvalidPathError>,
-    item_type: fn(
-        *const (),
-        *const SettingsRegistryPath,
-    ) -> Result<Option<SettingsItemType>, SettingsRegistryInvalidPathError>,
-    read: fn(
-        *const (),
-        *const SettingsRegistryPath,
-    ) -> Result<Option<SettingsItem>, SettingsRegistryInvalidPathError>,
-    write: fn(
-        *const (),
-        *const SettingsRegistryPath,
-        SettingsItem,
-    ) -> Result<Option<SettingsItem>, SettingsRegistryInvalidPathError>,
-    read_or: fn(
-        *const (),
-        *const SettingsRegistryPath,
-        SettingsItem,
-    ) -> Result<SettingsItem, SettingsRegistryInvalidPathError>,
-    remove: fn(
-        *const (),
-        *const SettingsRegistryPath,
-    ) -> Result<Option<SettingsItem>, SettingsRegistryInvalidPathError>,
-    register_callback: fn(
-        *const (),
-        *const SettingsRegistryPath,
-        SettingsEventCallback,
-    ) -> Option<SettingsEventCallbackId>,
-    unregister_callback: fn(*const (), SettingsEventCallbackId),
-}
-
-impl SettingsRegistryVTable {
-    /// Constructs a new `SettingsRegistryVTable`.
-    #[allow(clippy::too_many_arguments)]
-    pub const fn new(
-        contains: fn(
+fimo_vtable! {
+    /// VTable of the [`SettingsRegistry`] type.
+    #[allow(clippy::type_complexity)]
+    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    pub struct SettingsRegistryVTable<id = "fimo::interfaces::core::settings::settings_registry", marker = SendSyncMarker> {
+        /// Checks whether an item is contained.
+        pub contains: fn(
             *const (),
             *const SettingsRegistryPath,
         ) -> Result<bool, SettingsRegistryInvalidPathError>,
-        item_type: fn(
+        /// Extracts the type of an item.
+        pub item_type: fn(
             *const (),
             *const SettingsRegistryPath,
-        )
-            -> Result<Option<SettingsItemType>, SettingsRegistryInvalidPathError>,
-        read: fn(
+        ) -> Result<Option<SettingsItemType>, SettingsRegistryInvalidPathError>,
+        /// Extracts an item from the `SettingsRegistry`.
+        pub read: fn(
             *const (),
             *const SettingsRegistryPath,
         ) -> Result<Option<SettingsItem>, SettingsRegistryInvalidPathError>,
-        write: fn(
+        /// Writes into the `SettingsRegistry`.
+        ///
+        /// This function either overwrites an existing item or creates a new one.
+        /// Afterwards the old value is extracted.
+        pub write: fn(
             *const (),
             *const SettingsRegistryPath,
             SettingsItem,
         ) -> Result<Option<SettingsItem>, SettingsRegistryInvalidPathError>,
-        read_or: fn(
+        /// Reads or initializes an item from the `SettingsRegistry`.
+        ///
+        /// See [`SettingsRegistry::read`] and [`SettingsRegistry::write`].
+        pub read_or: fn(
             *const (),
             *const SettingsRegistryPath,
             SettingsItem,
         ) -> Result<SettingsItem, SettingsRegistryInvalidPathError>,
-        remove: fn(
+        /// Removes an item from the `SettingsRegistry`.
+        pub remove: fn(
             *const (),
             *const SettingsRegistryPath,
         ) -> Result<Option<SettingsItem>, SettingsRegistryInvalidPathError>,
-        register_callback: fn(
+        /// Registers a callback to an item.
+        ///
+        /// # Note
+        ///
+        /// The callback may not call into the `SettingsRegistry`.
+        pub register_callback: fn(
             *const (),
             *const SettingsRegistryPath,
             SettingsEventCallback,
         ) -> Option<SettingsEventCallbackId>,
-        unregister_callback: fn(*const (), SettingsEventCallbackId),
-    ) -> Self {
-        Self {
-            contains,
-            item_type,
-            read,
-            write,
-            read_or,
-            remove,
-            register_callback,
-            unregister_callback,
-        }
+        /// Unregisters a callback from an item.
+        pub unregister_callback: fn(*const (), SettingsEventCallbackId),
     }
 }
 

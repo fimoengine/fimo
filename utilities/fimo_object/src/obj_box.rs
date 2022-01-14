@@ -1,7 +1,7 @@
 //! Definition of an object-aware box type.
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::{BaseInterface, VTable};
+use crate::vtable::{IBaseInterface, VTable};
 use crate::{CoerceObjectMut, Object};
 use std::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
@@ -110,7 +110,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
     pub fn coerce_object<T: CoerceObjectMut<O::VTable>>(b: ObjBox<T, A>) -> ObjBox<O, A> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         let obj = T::coerce_obj_mut_raw(ptr);
-        let ptr = O::from_object_mut(obj);
+        let ptr = O::from_object_mut_raw(obj);
         unsafe { ObjBox::from_raw_parts(ptr, alloc) }
     }
 
@@ -119,7 +119,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
         b: ObjBox<O, A>,
     ) -> Result<ObjBox<T, A>, CastError<ObjBox<O, A>>> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = O::as_object_mut(ptr);
+        let obj = O::as_object_mut_raw(ptr);
 
         unsafe {
             match Object::<O::VTable>::try_cast_obj_mut_raw::<T>(obj) {
@@ -138,11 +138,14 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
         b: ObjBox<O, A>,
     ) -> Result<ObjBox<U, A>, CastError<ObjBox<O, A>>> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = O::as_object_mut(ptr);
+        let obj = O::as_object_mut_raw(ptr);
 
         unsafe {
             match Object::<O::VTable>::try_cast_mut_raw::<U::VTable>(obj) {
-                Ok(casted) => Ok(ObjBox::from_raw_parts(U::from_object_mut(casted), alloc)),
+                Ok(casted) => Ok(ObjBox::from_raw_parts(
+                    U::from_object_mut_raw(casted),
+                    alloc,
+                )),
                 Err(err) => Err(CastError {
                     obj: ObjBox::from_raw_parts(ptr, alloc),
                     required: err.required,
@@ -153,9 +156,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
     }
 
     /// Casts an `ObjBox<O, A>` to an `ObjBox<Object<BaseInterface>>`.
-    pub fn cast_base(b: ObjBox<O, A>) -> ObjBox<Object<BaseInterface>, A> {
+    pub fn cast_base(b: ObjBox<O, A>) -> ObjBox<Object<IBaseInterface>, A> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = O::as_object_mut(ptr);
+        let obj = O::as_object_mut_raw(ptr);
         let obj = Object::<O::VTable>::cast_base_mut_raw(obj);
         unsafe { ObjBox::from_raw_parts(obj, alloc) }
     }
@@ -479,13 +482,13 @@ impl<T: ObjPtrCompat + ?Sized> ConstructLayoutRaw for T {
 impl<T: ObjectWrapper + ?Sized> ConstructLayoutRaw for T {
     #[inline]
     unsafe fn size_of_val_raw(ptr: *const Self) -> usize {
-        let obj = T::as_object(ptr);
+        let obj = T::as_object_raw(ptr);
         crate::object::size_of_val(obj)
     }
 
     #[inline]
     unsafe fn align_of_val_raw(ptr: *const Self) -> usize {
-        let obj = T::as_object(ptr);
+        let obj = T::as_object_raw(ptr);
         crate::object::align_of_val(obj)
     }
 
@@ -511,7 +514,7 @@ impl<T: ObjPtrCompat + ?Sized> PtrDrop for T {
 impl<T: ObjectWrapper + ?Sized> PtrDrop for T {
     #[inline]
     unsafe fn drop_in_place(ptr: *mut Self) {
-        let obj = T::as_object_mut(ptr);
+        let obj = T::as_object_mut_raw(ptr);
         crate::object::drop_in_place(obj)
     }
 }

@@ -1,10 +1,10 @@
 //! Loader for rust modules.
 use crate::{
-    Error, ErrorKind, Module, ModuleInfo, ModuleInstance, ModuleLoader, ModuleLoaderVTable,
-    ModuleVTable, PathChar, SendSyncMarker,
+    Error, ErrorKind, IModule, IModuleInstance, IModuleLoader, IModuleLoaderVTable, IModuleVTable,
+    ModuleInfo, PathChar, SendSyncMarker,
 };
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::vtable::{BaseInterface, ObjectID};
+use fimo_ffi::vtable::{IBaseInterface, ObjectID};
 use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, ObjWeak, SpanInner};
 use libloading::Library;
 use parking_lot::Mutex;
@@ -38,7 +38,7 @@ macro_rules! rust_module {
         pub static RUST_MODULE_DECLARATION: $crate::rust_loader::ModuleDeclaration =
             $crate::rust_loader::ModuleDeclaration {
                 rustc_version: $crate::rust_loader::RUSTC_VERSION,
-                load_fn: $load_fn,
+                load_fn: $load,
             };
     };
 }
@@ -63,7 +63,7 @@ pub struct ModuleDeclaration {
     /// Used Rust version.
     pub rustc_version: &'static str,
     /// Load function.
-    pub load_fn: extern "C" fn() -> Result<ObjArc<RustModuleInner>, Error>,
+    pub load_fn: extern "C" fn() -> Result<ObjArc<IRustModuleInner>, Error>,
 }
 
 /// A Rust module loader.
@@ -121,27 +121,13 @@ impl RustLoader {
 }
 
 impl ObjectID for RustLoader {
-    const OBJECT_ID: &'static str = "fimo::module::loader::rust::rust_loader";
+    const OBJECT_ID: &'static str = "fimo::utils::module::loader::rust::rust_loader";
 }
 
-impl CoerceObject<ModuleLoaderVTable> for RustLoader {
-    fn get_vtable() -> &'static ModuleLoaderVTable {
-        #[cfg(unix)]
-        fn to_os_string(path: &[PathChar]) -> PathBuf {
-            use std::ffi::OsString;
-            use std::os::unix::ffi::OsStringExt;
-            let v = Vec::from(path);
-            PathBuf::from(OsString::from_vec(v))
-        }
-        #[cfg(windows)]
-        fn to_os_string(path: &[PathChar]) -> PathBuf {
-            use std::ffi::OsString;
-            use std::os::windows::ffi::OsStringExt;
-            PathBuf::from(OsString::from_wide(path))
-        }
-
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static BaseInterface {
-            &*(&VTABLE as *const _ as *const BaseInterface)
+impl CoerceObject<IModuleLoaderVTable> for RustLoader {
+    fn get_vtable() -> &'static IModuleLoaderVTable {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+            &*(&VTABLE as *const _ as *const IBaseInterface)
         }
         unsafe extern "C" fn evict(ptr: *const ()) {
             let this = &*(ptr as *const RustLoader);
@@ -151,10 +137,10 @@ impl CoerceObject<ModuleLoaderVTable> for RustLoader {
         unsafe extern "C" fn load_module(
             ptr: *const (),
             path: SpanInner<PathChar, false>,
-        ) -> crate::Result<ObjArc<Module>> {
+        ) -> crate::Result<ObjArc<IModule>> {
             let this = &*(ptr as *const RustLoader);
             let path: &[PathChar] = path.into();
-            let path = to_os_string(path);
+            let path = to_path_buf(path);
             let m = this.load_module(path.as_path());
             let m = m.map(ObjArc::coerce_object);
             From::from(m)
@@ -163,19 +149,33 @@ impl CoerceObject<ModuleLoaderVTable> for RustLoader {
         unsafe extern "C" fn load_module_raw(
             ptr: *const (),
             path: SpanInner<PathChar, false>,
-        ) -> crate::Result<ObjArc<Module>> {
+        ) -> crate::Result<ObjArc<IModule>> {
             let this = &*(ptr as *const RustLoader);
             let path: &[PathChar] = path.into();
-            let path = to_os_string(path);
+            let path = to_path_buf(path);
             let m = this.load_module_raw(path.as_path());
             let m = m.map(ObjArc::coerce_object);
             From::from(m)
         }
 
-        static VTABLE: ModuleLoaderVTable =
-            ModuleLoaderVTable::new::<RustLoader>(inner, evict, load_module, load_module_raw);
+        static VTABLE: IModuleLoaderVTable =
+            IModuleLoaderVTable::new::<RustLoader>(inner, evict, load_module, load_module_raw);
         &VTABLE
     }
+}
+
+#[cfg(unix)]
+fn to_path_buf(path: &[PathChar]) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let v = Vec::from(path);
+    PathBuf::from(OsString::from_vec(v))
+}
+#[cfg(windows)]
+fn to_path_buf(path: &[PathChar]) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    PathBuf::from(OsString::from_wide(path))
 }
 
 #[derive(Debug)]
@@ -221,7 +221,7 @@ impl Drop for RawLoader {
 pub struct RustModule {
     path: Vec<PathChar>,
     parent: &'static RustLoader,
-    module: ObjArc<RustModuleInner>,
+    module: ObjArc<IRustModuleInner>,
     _library: Arc<Library>,
 }
 
@@ -266,7 +266,7 @@ impl RustModule {
             module: inner,
         });
 
-        let weak_module: ObjWeak<RustModuleParent> =
+        let weak_module: ObjWeak<IRustModuleParent> =
             ObjWeak::coerce_object(ObjArc::downgrade(&module));
         let m = ObjArc::get_mut_unchecked(&mut module);
         let inner = ObjArc::get_mut_unchecked(&mut m.module);
@@ -279,6 +279,12 @@ impl RustModule {
     #[inline]
     pub fn module_path(&self) -> &[PathChar] {
         self.path.as_slice()
+    }
+
+    /// Constructs a [`PathBuf`] containing the path to the module root.
+    #[inline]
+    pub fn module_path_buf(&self) -> PathBuf {
+        to_path_buf(self.module_path())
     }
 
     /// Extracts a reference to the [`ModuleInfo`].
@@ -295,27 +301,37 @@ impl RustModule {
 
     /// Instantiates the module.
     #[inline]
-    pub fn new_instance(&self) -> Result<ObjArc<ModuleInstance>, Error> {
+    pub fn new_instance(&self) -> Result<ObjArc<IModuleInstance>, Error> {
         self.module.new_instance().into_rust()
     }
 }
 
 impl ObjectID for RustModule {
-    const OBJECT_ID: &'static str = "fimo::module::loader::rust::rust_module";
+    const OBJECT_ID: &'static str = "fimo::utils::module::loader::rust::rust_module";
 }
 
-impl CoerceObject<RustModuleParentVTable> for RustModule {
+impl CoerceObject<IRustModuleParentVTable> for RustModule {
     #[inline]
-    fn get_vtable() -> &'static RustModuleParentVTable {
-        static VTABLE: RustModuleParentVTable = RustModuleParentVTable::new::<RustModule>();
+    fn get_vtable() -> &'static IRustModuleParentVTable {
+        static VTABLE: IRustModuleParentVTable = IRustModuleParentVTable::new::<RustModule>(
+            |_ptr| RustModule::get_vtable(),
+            |ptr| {
+                let this = unsafe { &*(ptr as *const RustModule) };
+                this.module_path().into()
+            },
+            |ptr| unsafe {
+                let this = &*(ptr as *const RustModule);
+                IModuleLoader::from_object(this.module_loader().coerce_obj())
+            },
+        );
         &VTABLE
     }
 }
 
-impl CoerceObject<ModuleVTable> for RustModule {
-    fn get_vtable() -> &'static ModuleVTable {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static BaseInterface {
-            &*(&VTABLE as *const _ as *const BaseInterface)
+impl CoerceObject<IModuleVTable> for RustModule {
+    fn get_vtable() -> &'static IModuleVTable {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+            &*(&VTABLE as *const _ as *const IBaseInterface)
         }
         unsafe extern "C" fn module_path(ptr: *const ()) -> SpanInner<PathChar, false> {
             let this = &*(ptr as *const RustModule);
@@ -326,17 +342,19 @@ impl CoerceObject<ModuleVTable> for RustModule {
             this.module_info()
         }
         #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn module_loader(ptr: *const ()) -> &'static ModuleLoader {
+        unsafe extern "C" fn module_loader(ptr: *const ()) -> &'static IModuleLoader {
             let this = &*(ptr as *const RustModule);
-            &*ModuleLoader::from_object(this.module_loader().coerce_obj())
+            IModuleLoader::from_object(this.module_loader().coerce_obj())
         }
         #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn new_instance(ptr: *const ()) -> crate::Result<ObjArc<ModuleInstance>> {
+        unsafe extern "C" fn new_instance(
+            ptr: *const (),
+        ) -> crate::Result<ObjArc<IModuleInstance>> {
             let this = &*(ptr as *const RustModule);
             this.new_instance().into()
         }
 
-        static VTABLE: ModuleVTable = ModuleVTable::new::<RustModule>(
+        static VTABLE: IModuleVTable = IModuleVTable::new::<RustModule>(
             inner,
             module_path,
             module_info,
@@ -351,33 +369,63 @@ fimo_object! {
     /// Parent of a type-erased rust module.
     ///
     /// Implements a part of the [`Module`] interface.
-    pub struct RustModuleParent<vtable = RustModuleParentVTable>;
+    pub struct IRustModuleParent<vtable = IRustModuleParentVTable>;
+}
+
+impl IRustModuleParent {
+    /// Coerces the rust module to a [`IModule`].
+    #[inline]
+    pub fn as_module(&self) -> &IModule {
+        let (ptr, vtable) = self.into_raw_parts();
+        unsafe {
+            let vtable = (vtable.as_module)(ptr);
+            &*IModule::from_raw_parts(ptr, vtable)
+        }
+    }
+
+    /// Fetches the path to the module root.
+    pub fn module_path(&self) -> SpanInner<PathChar, false> {
+        let (ptr, vtable) = self.into_raw_parts();
+        unsafe { (vtable.module_path)(ptr) }
+    }
+
+    /// Fetches a pointer to the [`IModuleLoader`] which loaded the module.
+    pub fn module_loader(&self) -> &'static IModuleLoader {
+        let (ptr, vtable) = self.into_raw_parts();
+        unsafe { (vtable.module_loader)(ptr) }
+    }
 }
 
 fimo_vtable! {
-    /// VTable of a rust module parent.
+    /// VTable of a [`IRustModuleParent`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct RustModuleParentVTable<id = "fimo::module::loader::rust::module_parent", marker =  SendSyncMarker> {
+    pub struct IRustModuleParentVTable<id = "fimo::utils::module::loader::rust::module_parent", marker =  SendSyncMarker> {
+        /// Fetches the module interface for the rust module.
+        pub as_module: unsafe fn(*const ()) -> &'static IModuleVTable,
+        /// Fetches the path to the module root.
+        pub module_path: unsafe fn(*const ()) -> SpanInner<PathChar, false>,
+        /// Fetches a pointer to the [`ModuleLoader`] which loaded the module.
+        pub module_loader: unsafe fn(*const ()) -> &'static IModuleLoader,
     }
 }
 
 fimo_object! {
     /// A type-erased rust module.
-    pub struct RustModuleInner<vtable = RustModuleInnerVTable>;
+    pub struct IRustModuleInner<vtable = IRustModuleInnerVTable>;
 }
 
-impl RustModuleInner {
-    /// Coerces the rust module to a [`Module`].
+impl IRustModuleInner {
+    /// Coerces the rust module to a [`IModule`].
     #[inline]
-    pub fn as_module(&self) -> &Module {
+    pub fn as_module(&self) -> &IModule {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.as_module)(ptr);
-            &*Module::from_raw_parts(ptr, vtable)
+            &*IModule::from_raw_parts(ptr, vtable)
         }
     }
 
-    /// Sets the reference to the wrapping [RustModule].
+    /// Sets the reference to the wrapping [`IRustModuleParent`].
     ///
     /// The handle must remain stored as a `ObjWeak<T>` handle, as it otherwise
     /// prevents the dropping of the module. This handle must be used when
@@ -386,14 +434,14 @@ impl RustModuleInner {
     /// # Safety
     ///
     /// May only be called once during the initialization.
-    pub unsafe fn set_parent_handle(&mut self, module: ObjWeak<RustModuleParent>) {
+    pub unsafe fn set_parent_handle(&mut self, module: ObjWeak<IRustModuleParent>) {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.set_parent_handle)(ptr, module)
     }
 }
 
-impl Deref for RustModuleInner {
-    type Target = Module;
+impl Deref for IRustModuleInner {
+    type Target = IModule;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -402,18 +450,18 @@ impl Deref for RustModuleInner {
 }
 
 fimo_vtable! {
-    /// VTable of a rust module.
+    /// VTable of a [`IRustModuleInner`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct RustModuleInnerVTable<id = "fimo::module::loader::rust::module_inner", marker =  SendSyncMarker> {
+    pub struct IRustModuleInnerVTable<id = "fimo::utils::module::loader::rust::module_inner", marker =  SendSyncMarker> {
         // The functions don't need the C ABI, as by this point we already ensured
         // that the module was compiled with the same version of the compiler.
         /// Fetches the module interface for the rust module.
-        pub as_module: fn(*const ()) -> &'static ModuleVTable,
-        /// Sets the reference to the wrapping [RustModule].
+        pub as_module: unsafe fn(*const ()) -> &'static IModuleVTable,
+        /// Sets the reference to the wrapping [`IRustModuleParent`].
         ///
         /// The handle must remain stored as a `ObjWeak<T>` handle, as it otherwise
         /// prevents the dropping of the module. This handle must be used when
         /// constructing an instance.
-        pub set_parent_handle: unsafe fn(*mut (), ObjWeak<RustModuleParent>)
+        pub set_parent_handle: unsafe fn(*mut (), ObjWeak<IRustModuleParent>)
     }
 }

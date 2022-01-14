@@ -1,6 +1,6 @@
 //! Object utilities.
 use crate::raw::{CastError, RawObject, RawObjectMut};
-use crate::vtable::{BaseInterface, ObjectID, VTable};
+use crate::vtable::{IBaseInterface, ObjectID, VTable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -81,11 +81,11 @@ macro_rules! fimo_object {
         unsafe impl $crate::object::ObjectWrapper for $name {
             type VTable = $vtable;
             #[inline]
-            fn as_object(ptr: *const Self) -> *const $crate::object::Object<Self::VTable> {
+            fn as_object_raw(ptr: *const Self) -> *const $crate::object::Object<Self::VTable> {
                 ptr as _
             }
             #[inline]
-            fn from_object(obj: *const $crate::object::Object<Self::VTable>) -> *const Self {
+            fn from_object_raw(obj: *const $crate::object::Object<Self::VTable>) -> *const Self {
                 obj as _
             }
         }
@@ -148,33 +148,57 @@ pub unsafe trait ObjectWrapper: ObjPtrCompat {
     /// VTable of the object.
     type VTable: VTable;
 
-    /// Casts a pointer to Self to an object.
-    fn as_object(ptr: *const Self) -> *const Object<Self::VTable>;
+    /// Casts a reference to `self` to a object reference.
+    fn as_object(&self) -> &Object<Self::VTable> {
+        let obj = Self::as_object_raw(self);
+        unsafe { &*obj }
+    }
+
+    /// Casts a mutable reference to `self` to a mutable object reference.
+    fn as_object_mut(&mut self) -> &mut Object<Self::VTable> {
+        let obj = Self::as_object_mut_raw(self);
+        unsafe { &mut *obj }
+    }
 
     /// Casts a pointer to Self to an object.
-    fn as_object_mut(ptr: *mut Self) -> *mut Object<Self::VTable> {
-        let obj = Self::as_object(ptr);
+    fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable>;
+
+    /// Casts a pointer to Self to an object.
+    fn as_object_mut_raw(ptr: *mut Self) -> *mut Object<Self::VTable> {
+        let obj = Self::as_object_raw(ptr);
         obj as *mut _
     }
 
-    /// Casts a pointer to an object to a pointer to Self.
-    fn from_object(obj: *const Object<Self::VTable>) -> *const Self;
+    /// Casts a reference to an object to a reference to Self.
+    fn from_object(obj: &Object<Self::VTable>) -> &Self {
+        let this = Self::from_object_raw(obj);
+        unsafe { &*this }
+    }
+
+    /// Casts a mutable reference to an object to a mutable reference to Self.
+    fn from_object_mut(obj: &mut Object<Self::VTable>) -> &mut Self {
+        let this = Self::from_object_mut_raw(obj);
+        unsafe { &mut *this }
+    }
 
     /// Casts a pointer to an object to a pointer to Self.
-    fn from_object_mut(obj: *mut Object<Self::VTable>) -> *mut Self {
-        let this = Self::from_object(obj);
+    fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self;
+
+    /// Casts a pointer to an object to a pointer to Self.
+    fn from_object_mut_raw(obj: *mut Object<Self::VTable>) -> *mut Self {
+        let this = Self::from_object_raw(obj);
         this as *mut _
     }
 
     /// Splits the object up into it's raw parts.
     fn into_raw_parts(ptr: *const Self) -> (*const (), &'static Self::VTable) {
-        let obj = Self::as_object(ptr);
+        let obj = Self::as_object_raw(ptr);
         into_raw_parts(obj)
     }
 
     /// Splits the object up into it's raw parts.
     fn into_raw_parts_mut(ptr: *mut Self) -> (*mut (), &'static Self::VTable) {
-        let obj = Self::as_object_mut(ptr);
+        let obj = Self::as_object_mut_raw(ptr);
         into_raw_parts_mut(obj)
     }
 
@@ -185,7 +209,7 @@ pub unsafe trait ObjectWrapper: ObjPtrCompat {
     /// See [`from_raw_parts`].
     unsafe fn from_raw_parts(ptr: *const (), vtable: &'static Self::VTable) -> *const Self {
         let obj = from_raw_parts(ptr, vtable);
-        Self::from_object(obj)
+        Self::from_object_raw(obj)
     }
 
     /// Constructs the object from it's raw parts.
@@ -195,7 +219,7 @@ pub unsafe trait ObjectWrapper: ObjPtrCompat {
     /// See [`from_raw_parts_mut`].
     unsafe fn from_raw_parts_mut(ptr: *mut (), vtable: &'static Self::VTable) -> *mut Self {
         let obj = from_raw_parts_mut(ptr, vtable);
-        Self::from_object_mut(obj)
+        Self::from_object_mut_raw(obj)
     }
 }
 
@@ -231,23 +255,23 @@ pub struct Object<T: VTable> {
 
 impl<T: VTable> Object<T> {
     /// Casts an object to the base object.
-    pub fn cast_base(&self) -> &Object<BaseInterface> {
+    pub fn cast_base(&self) -> &Object<IBaseInterface> {
         unsafe { &*Self::cast_base_raw(self) }
     }
 
     /// Casts a `*const Object<T>` to a `*const Object<BaseInterface>`.
-    pub fn cast_base_raw(o: *const Self) -> *const Object<BaseInterface> {
+    pub fn cast_base_raw(o: *const Self) -> *const Object<IBaseInterface> {
         // safety: transmuting to the base interface is always sound.
         o as _
     }
 
     /// Casts an object to the base object.
-    pub fn cast_base_mut(&mut self) -> &mut Object<BaseInterface> {
+    pub fn cast_base_mut(&mut self) -> &mut Object<IBaseInterface> {
         unsafe { &mut *Self::cast_base_mut_raw(self) }
     }
 
     /// Casts a `*mut Object<T>` to a `*mut Object<BaseInterface>`.
-    pub fn cast_base_mut_raw(o: *mut Self) -> *mut Object<BaseInterface> {
+    pub fn cast_base_mut_raw(o: *mut Self) -> *mut Object<IBaseInterface> {
         // safety: transmuting to the base interface is always sound.
         o as _
     }
@@ -375,14 +399,14 @@ impl<T: VTable> Object<T> {
 unsafe impl<T: VTable> Send for Object<T> where <T as VTable>::Marker: Send {}
 unsafe impl<T: VTable> Sync for Object<T> where <T as VTable>::Marker: Sync {}
 
-impl<T: VTable> AsRef<Object<BaseInterface>> for Object<T> {
-    fn as_ref(&self) -> &Object<BaseInterface> {
+impl<T: VTable> AsRef<Object<IBaseInterface>> for Object<T> {
+    fn as_ref(&self) -> &Object<IBaseInterface> {
         self.cast_base()
     }
 }
 
-impl<T: VTable> AsMut<Object<BaseInterface>> for Object<T> {
-    fn as_mut(&mut self) -> &mut Object<BaseInterface> {
+impl<T: VTable> AsMut<Object<IBaseInterface>> for Object<T> {
+    fn as_mut(&mut self) -> &mut Object<IBaseInterface> {
         self.cast_base_mut()
     }
 }
@@ -403,11 +427,11 @@ impl<T: VTable> Debug for Object<T> {
 unsafe impl<T: VTable> ObjectWrapper for Object<T> {
     type VTable = T;
 
-    fn as_object(ptr: *const Self) -> *const Object<Self::VTable> {
+    fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
         ptr
     }
 
-    fn from_object(obj: *const Object<Self::VTable>) -> *const Self {
+    fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
         obj
     }
 }
@@ -508,21 +532,21 @@ pub fn interface_id<T: VTable>(obj: *const Object<T>) -> &'static str {
 mod tests {
     use crate::object::Object;
     use crate::raw::{RawObject, RawObjectMut};
-    use crate::vtable::BaseInterface;
+    use crate::vtable::IBaseInterface;
 
     #[test]
     fn layout() {
-        let object_size = std::mem::size_of::<*const Object<BaseInterface>>();
-        let object_mut_size = std::mem::size_of::<*mut Object<BaseInterface>>();
-        let raw_object_size = std::mem::size_of::<RawObject<BaseInterface>>();
-        let raw_object_mut_size = std::mem::size_of::<RawObjectMut<BaseInterface>>();
+        let object_size = std::mem::size_of::<*const Object<IBaseInterface>>();
+        let object_mut_size = std::mem::size_of::<*mut Object<IBaseInterface>>();
+        let raw_object_size = std::mem::size_of::<RawObject<IBaseInterface>>();
+        let raw_object_mut_size = std::mem::size_of::<RawObjectMut<IBaseInterface>>();
         assert_eq!(object_size, raw_object_size);
         assert_eq!(object_mut_size, raw_object_mut_size);
 
-        let object_align = std::mem::align_of::<*const Object<BaseInterface>>();
-        let object_mut_align = std::mem::align_of::<*mut Object<BaseInterface>>();
-        let raw_object_align = std::mem::align_of::<RawObject<BaseInterface>>();
-        let raw_object_mut_align = std::mem::align_of::<RawObjectMut<BaseInterface>>();
+        let object_align = std::mem::align_of::<*const Object<IBaseInterface>>();
+        let object_mut_align = std::mem::align_of::<*mut Object<IBaseInterface>>();
+        let raw_object_align = std::mem::align_of::<RawObject<IBaseInterface>>();
+        let raw_object_mut_align = std::mem::align_of::<RawObjectMut<IBaseInterface>>();
         assert_eq!(object_align, raw_object_align);
         assert_eq!(object_mut_align, raw_object_mut_align);
     }

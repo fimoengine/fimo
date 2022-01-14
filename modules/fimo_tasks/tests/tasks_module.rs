@@ -1,8 +1,8 @@
+use fimo_ffi::ObjArc;
+use fimo_module_core::Error;
 use fimo_tasks_interface::rust::FimoTasks;
 use module_loading::{get_core_interface, get_tasks_interface};
 use std::alloc::System;
-use std::error::Error;
-use std::sync::Arc;
 
 #[global_allocator]
 static A: System = System;
@@ -14,7 +14,7 @@ mod sync;
 #[cfg(test)]
 mod tasks;
 
-fn initialize() -> Result<Arc<dyn FimoTasks>, Box<dyn Error>> {
+fn initialize() -> Result<ObjArc<FimoTasks>, Error> {
     let (core_instance, core_interface) = get_core_interface()?;
     get_tasks_interface(&core_instance, &core_interface)
 }

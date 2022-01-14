@@ -1,5 +1,5 @@
 //! Definition of raw objects.
-use crate::vtable::{BaseInterface, ObjectID, VTable};
+use crate::vtable::{IBaseInterface, ObjectID, VTable};
 use std::fmt::{Debug, Formatter, Pointer};
 
 /// Raw representation of an immutable object.
@@ -99,13 +99,13 @@ pub struct CastError<T> {
 }
 
 /// Casts an object to the base object.
-pub fn cast_base<T: VTable>(obj: RawObject<T>) -> RawObject<BaseInterface> {
+pub fn cast_base<T: VTable>(obj: RawObject<T>) -> RawObject<IBaseInterface> {
     // safety: we assume that the start of `T` matches with `BaseInterface`.
     unsafe { std::mem::transmute(obj) }
 }
 
 /// Casts an object to the base object.
-pub fn cast_base_mut<T: VTable>(obj: RawObjectMut<T>) -> RawObjectMut<BaseInterface> {
+pub fn cast_base_mut<T: VTable>(obj: RawObjectMut<T>) -> RawObjectMut<IBaseInterface> {
     // safety: we assume that the start of `T` matches with `BaseInterface`.
     unsafe { std::mem::transmute(obj) }
 }

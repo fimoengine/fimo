@@ -1,6 +1,8 @@
-use crate::{Error, ErrorKind, ModuleInfo, ModuleInterfaceDescriptor, PathChar, Result};
+use crate::{
+    Error, ErrorKind, ModuleInfo, ModuleInterfaceDescriptor, PathChar, Result, SendSyncMarker,
+};
 use fimo_ffi::object::ObjectWrapper;
-use fimo_ffi::vtable::BaseInterface;
+use fimo_ffi::vtable::IBaseInterface;
 use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, Object, Optional, SpanInner, StrInner};
 use fimo_version_core::Version;
 use std::path::{Path, PathBuf};
@@ -76,19 +78,15 @@ macro_rules! fimo_interface {
     }
 }
 
-/// Marker type that implements `Send` and `Sync`.
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct SendSyncMarker;
-
 fimo_object! {
     /// A type-erased module loader.
-    pub struct ModuleLoader<vtable = ModuleLoaderVTable>;
+    pub struct IModuleLoader<vtable = IModuleLoaderVTable>;
 }
 
-impl ModuleLoader {
-    /// Casts the `ModuleLoader` to an internal object.
+impl IModuleLoader {
+    /// Casts the `IModuleLoader` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<BaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBaseInterface> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -115,7 +113,7 @@ impl ModuleLoader {
     ///
     /// Violating these invariants may lead to undefined behaviour.
     #[inline]
-    pub unsafe fn load_module<P: AsRef<Path>>(&'static self, path: P) -> Result<ObjArc<Module>> {
+    pub unsafe fn load_module<P: AsRef<Path>>(&'static self, path: P) -> Result<ObjArc<IModule>> {
         let (ptr, vtable) = self.into_raw_parts();
         Self::load_inner(path, ptr, vtable.load_module)
     }
@@ -132,7 +130,7 @@ impl ModuleLoader {
     pub unsafe fn load_module_raw<P: AsRef<Path>>(
         &'static self,
         path: P,
-    ) -> Result<ObjArc<Module>> {
+    ) -> Result<ObjArc<IModule>> {
         let (ptr, vtable) = self.into_raw_parts();
         Self::load_inner(path, ptr, vtable.load_module_raw)
     }
@@ -142,8 +140,8 @@ impl ModuleLoader {
     fn load_inner<P: AsRef<Path>>(
         path: P,
         ptr: *const (),
-        f: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<Module>>,
-    ) -> Result<ObjArc<Module>> {
+        f: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<IModule>>,
+    ) -> Result<ObjArc<IModule>> {
         use std::os::unix::ffi::OsStrExt;
 
         let path = path.as_ref();
@@ -157,8 +155,8 @@ impl ModuleLoader {
     fn load_inner<P: AsRef<Path>>(
         path: P,
         ptr: *const (),
-        f: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<Module>>,
-    ) -> Result<ObjArc<Module>> {
+        f: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<IModule>>,
+    ) -> Result<ObjArc<IModule>> {
         use std::os::windows::ffi::OsStrExt;
 
         let path = path.as_ref();
@@ -170,11 +168,11 @@ impl ModuleLoader {
 }
 
 fimo_vtable! {
-    /// VTable of a module loader.
+    /// VTable of a [`IModuleLoader`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct ModuleLoaderVTable<id = "fimo::module::interfaces::module_loader", marker = SendSyncMarker> {
+    pub struct IModuleLoaderVTable<id = "fimo::utils::module::interfaces::module_loader", marker = SendSyncMarker> {
         /// Fetches an internal vtable for the loader.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static BaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Removes all modules that aren't referenced by anyone from the cache,
         /// unloading them in the process.
         pub evict_module_cache: unsafe extern "C" fn(*const ()),
@@ -186,7 +184,7 @@ fimo_vtable! {
         /// - The module ABI must match the loader ABI.
         ///
         /// Violating these invariants may lead to undefined behaviour.
-        pub load_module: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<Module>>,
+        pub load_module: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<IModule >>,
         /// Loads a new module from a path to the module library.
         ///
         /// # Safety
@@ -195,19 +193,19 @@ fimo_vtable! {
         /// - The module ABI must match the loader ABI.
         ///
         /// Violating these invariants may lead to undefined behaviour.
-        pub load_module_raw: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<Module>>,
+        pub load_module_raw: unsafe extern "C" fn(*const (), SpanInner<PathChar, false>) -> Result<ObjArc<IModule >>,
     }
 }
 
 fimo_object! {
-    /// A type-erased module.
-    pub struct Module<vtable = ModuleVTable>;
+    /// Interface of a module.
+    pub struct IModule<vtable = IModuleVTable>;
 }
 
-impl Module {
-    /// Casts the `Module` to an internal object.
+impl IModule {
+    /// Casts the `IModule` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<BaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBaseInterface> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -254,7 +252,7 @@ impl Module {
 
     /// Fetches a reference to the modules [`ModuleInfo`].
     #[inline]
-    pub fn module_loader(&self) -> &'static ModuleLoader {
+    pub fn module_loader(&self) -> &'static IModuleLoader {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { &*(vtable.module_loader)(ptr) }
     }
@@ -267,24 +265,24 @@ impl Module {
     ///
     /// This function will result in an unique instance, or an error, each time it is called.
     #[inline]
-    pub fn new_instance(&self) -> Result<ObjArc<ModuleInstance>> {
+    pub fn new_instance(&self) -> Result<ObjArc<IModuleInstance>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { (vtable.new_instance)(ptr) }
     }
 }
 
 fimo_vtable! {
-    /// VTable of a module.
+    /// VTable of a [`IModule`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct ModuleVTable<id = "fimo::module::interfaces::module", marker = SendSyncMarker> {
+    pub struct IModuleVTable<id = "fimo::utils::module::interfaces::module", marker = SendSyncMarker> {
         /// Fetches an internal vtable for the module.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static BaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Fetches the path to the module root.
         pub module_path: unsafe extern "C" fn(*const ()) -> SpanInner<PathChar, false>,
         /// Fetches a pointer to the modules [`ModuleInfo`].
         pub module_info: unsafe extern "C" fn(*const ()) -> *const ModuleInfo,
         /// Fetches a pointer to the [`ModuleLoader`] which loaded the module.
-        pub module_loader: unsafe extern "C" fn(*const ()) -> &'static ModuleLoader,
+        pub module_loader: unsafe extern "C" fn(*const ()) -> &'static IModuleLoader,
         /// Instantiates the module.
         ///
         /// A module may disallow multiple instantiations.
@@ -292,19 +290,19 @@ fimo_vtable! {
         /// # Note
         ///
         /// This function will result in an unique instance, or an error, each time it is called.
-        pub new_instance: unsafe extern "C" fn(*const ()) -> Result<ObjArc<ModuleInstance>>,
+        pub new_instance: unsafe extern "C" fn(*const ()) -> Result<ObjArc<IModuleInstance >>,
     }
 }
 
 fimo_object! {
-    /// A type-erased module instance.
-    pub struct ModuleInstance<vtable = ModuleInstanceVTable>;
+    /// Interface of a module instance.
+    pub struct IModuleInstance<vtable = IModuleInstanceVTable>;
 }
 
-impl ModuleInstance {
-    /// Casts the `ModuleInstance` to an internal object.
+impl IModuleInstance {
+    /// Casts the `IModuleInstance` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<BaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBaseInterface> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -316,7 +314,7 @@ impl ModuleInstance {
 
     /// Fetches the parent module.
     #[inline]
-    pub fn module(&self) -> ObjArc<Module> {
+    pub fn module(&self) -> ObjArc<IModule> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { (vtable.module)(ptr) }
     }
@@ -336,7 +334,7 @@ impl ModuleInstance {
     /// Multiple calls with the same interface will retrieve the same
     /// instance if is has not already been dropped.
     #[inline]
-    pub fn interface(&self, i: &ModuleInterfaceDescriptor) -> Result<ObjArc<ModuleInterface>> {
+    pub fn interface(&self, i: &ModuleInterfaceDescriptor) -> Result<ObjArc<IModuleInterface>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { (vtable.interface)(ptr, i) }
     }
@@ -360,7 +358,7 @@ impl ModuleInstance {
     pub fn set_core(
         &self,
         i: &ModuleInterfaceDescriptor,
-        core: ObjArc<ModuleInterface>,
+        core: ObjArc<IModuleInterface>,
     ) -> Result<()> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { (vtable.set_core)(ptr, i, core) }
@@ -368,13 +366,13 @@ impl ModuleInstance {
 }
 
 fimo_vtable! {
-    /// VTable of a module instance.
+    /// VTable of a [`IModuleInstance`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct ModuleInstanceVTable<id = "fimo::module::interfaces::module_instance", marker = SendSyncMarker> {
+    pub struct IModuleInstanceVTable<id = "fimo::utils::module::interfaces::module_instance", marker = SendSyncMarker> {
         /// Fetches an internal vtable for the instance.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static BaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Fetches the parent module.
-        pub module: unsafe extern "C" fn(*const ()) -> ObjArc<Module>,
+        pub module: unsafe extern "C" fn(*const ()) -> ObjArc<IModule>,
         /// Fetches a span of the available interfaces.
         ///
         /// The resulting descriptors can be used to instantiate the interfaces.
@@ -388,7 +386,7 @@ fimo_vtable! {
         pub interface: unsafe extern "C" fn(
             *const (),
             *const ModuleInterfaceDescriptor
-        ) -> Result<ObjArc<ModuleInterface>>,
+        ) -> Result<ObjArc<IModuleInterface >>,
         /// Fetches the dependencies of an interface.
         pub dependencies: unsafe extern "C" fn(
             *const (),
@@ -402,7 +400,7 @@ fimo_vtable! {
         pub set_core: unsafe extern "C" fn(
             *const (),
             *const ModuleInterfaceDescriptor,
-            ObjArc<ModuleInterface>
+            ObjArc<IModuleInterface>
         ) -> Result<()>,
     }
 }
@@ -418,14 +416,14 @@ pub trait FimoInterface {
 }
 
 fimo_object! {
-    /// A type-erased module interface.
-    pub struct ModuleInterface<vtable = ModuleInterfaceVTable>;
+    /// Interface of a module interface.
+    pub struct IModuleInterface<vtable = IModuleInterfaceVTable>;
 }
 
-impl ModuleInterface {
-    /// Casts the `ModuleInterface` to an internal object.
+impl IModuleInterface {
+    /// Casts the `IModuleInterface` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<BaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBaseInterface> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -444,7 +442,7 @@ impl ModuleInterface {
 
     /// Fetches an extension from the interface.
     #[inline]
-    pub fn extension(&self, name: &str) -> Option<&Object<BaseInterface>> {
+    pub fn extension(&self, name: &str) -> Option<&Object<IBaseInterface>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             (vtable.extension)(ptr, name.into())
@@ -455,7 +453,7 @@ impl ModuleInterface {
 
     /// Fetches the parent instance.
     #[inline]
-    pub fn instance(&self) -> ObjArc<ModuleInstance> {
+    pub fn instance(&self) -> ObjArc<IModuleInstance> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { (vtable.instance)(ptr) }
     }
@@ -467,7 +465,7 @@ impl ModuleInterface {
     ) -> std::result::Result<&T, Error> {
         // before downcasting we must ensure that the versions
         // are compatible and that all extensions are present.
-        if T::VERSION.is_compatible(&self.version()) {
+        if !T::VERSION.is_compatible(&self.version()) {
             return Err(Error::new(
                 ErrorKind::InvalidArgument,
                 format!(
@@ -489,7 +487,7 @@ impl ModuleInterface {
 
         let inner = self.as_inner();
         match inner.try_cast::<T::VTable>() {
-            Ok(i) => unsafe { Ok(&*T::from_object(i)) },
+            Ok(i) => unsafe { Ok(&*T::from_object_raw(i)) },
             Err(e) => Err(Error::new(
                 ErrorKind::InvalidArgument,
                 format!(
@@ -503,7 +501,7 @@ impl ModuleInterface {
     /// Tries to downcast the interface.
     #[inline]
     pub fn try_downcast_arc<T: ObjectWrapper + FimoInterface + ?Sized>(
-        i: ObjArc<ModuleInterface>,
+        i: ObjArc<IModuleInterface>,
     ) -> std::result::Result<ObjArc<T>, Error> {
         // the inner object always equals the original object, except for the different vtable.
         // because of that we can simply perform the casting ourselves and rebuild the arc.
@@ -514,16 +512,16 @@ impl ModuleInterface {
 }
 
 fimo_vtable! {
-    /// VTable of a module interface.
+    /// VTable of a [`IModuleInterface`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct ModuleInterfaceVTable<id = "fimo::module::interfaces::module_interface", marker = SendSyncMarker> {
+    pub struct IModuleInterfaceVTable<id = "fimo::utils::module::interfaces::module_interface", marker = SendSyncMarker> {
         /// Fetches an internal vtable for the interface.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static BaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Extracts the version of the implemented interface.
         pub version: unsafe extern "C" fn(*const ()) -> Version,
         /// Fetches an extension from the interface.
-        pub extension: unsafe extern "C" fn(*const (), StrInner<false>) -> Optional<*const Object<BaseInterface>>,
+        pub extension: unsafe extern "C" fn(*const (), StrInner<false>) -> Optional<*const Object<IBaseInterface >>,
         /// Fetches the parent instance.
-        pub instance: unsafe extern "C" fn(*const ()) -> ObjArc<ModuleInstance>,
+        pub instance: unsafe extern "C" fn(*const ()) -> ObjArc<IModuleInstance>,
     }
 }

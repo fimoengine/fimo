@@ -1,4 +1,4 @@
-use fimo_ffi::error::ToBoxedError;
+use fimo_ffi::error::{InnerError, ToBoxedError};
 use fimo_ffi::ObjBox;
 
 /// Result type for modules.
@@ -6,7 +6,7 @@ pub type Result<T> = fimo_ffi_core::Result<T, Error>;
 
 /// Error type for modules.
 #[repr(C)]
-pub struct Error<E = ObjBox<fimo_ffi::Error>> {
+pub struct Error<E = ObjBox<fimo_ffi::IError>> {
     repr: ErrorRepr<E>,
 }
 
@@ -95,6 +95,15 @@ impl<E> From<ErrorKind> for Error<E> {
     fn from(kind: ErrorKind) -> Self {
         Self {
             repr: ErrorRepr::Simple(kind),
+        }
+    }
+}
+
+impl<E: InnerError> InnerError for Error<E> {
+    fn source(&self) -> Option<&fimo_ffi::IError> {
+        match self.repr {
+            ErrorRepr::Simple(_) => None,
+            ErrorRepr::Custom(ref c) => c.error.source(),
         }
     }
 }

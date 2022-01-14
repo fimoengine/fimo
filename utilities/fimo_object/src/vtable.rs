@@ -76,6 +76,8 @@ macro_rules! fimo_vtable {
 
         impl $name {
             /// Constructs a new instance of the vtable.
+            #[allow(clippy::type_complexity)]
+            #[allow(clippy::too_many_arguments)]
             pub const fn new<T: $crate::vtable::ObjectID>($($elem: $elem_ty),*) -> Self {
                 Self {
                     __internal_drop_in_place: $crate::vtable::drop_obj_in_place::<T>,
@@ -92,7 +94,7 @@ macro_rules! fimo_vtable {
             }
         }
 
-        impl $crate::vtable::VTable for $name {
+        unsafe impl $crate::vtable::VTable for $name {
             type Marker = $marker;
             const INTERFACE_ID: &'static str = $id;
 
@@ -162,7 +164,13 @@ pub trait ObjectID: Sized {
 }
 
 /// Definition of an object vtable.
-pub trait VTable: 'static + Send + Sync + Sized {
+///
+/// # Safety
+///
+/// This trait requires that the start of the vtable conforms with the layout
+/// of an [`IBaseInterface`]. The [`fimo_vtable!`] macro automatically implements
+/// this trait.
+pub unsafe trait VTable: 'static + Send + Sync + Sized {
     /// Type used as a marker.
     type Marker;
 
@@ -187,6 +195,11 @@ pub trait VTable: 'static + Send + Sync + Sized {
 
     /// Retrieves the unique id of the interface.
     fn interface_id(&self) -> ConstStr<'static>;
+
+    /// Casts a `&Self` to a [`IBaseInterface`] reference.
+    fn as_base(&self) -> &IBaseInterface {
+        unsafe { std::mem::transmute(self) }
+    }
 }
 
 fimo_vtable! {
@@ -194,7 +207,7 @@ fimo_vtable! {
     ///
     /// Contains the data required for allocating/deallocating and casting any object.
     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-    pub struct BaseInterface<id = "__internal_fimo_object_base", marker = DefaultMarker>;
+    pub struct IBaseInterface<id = "__internal_fimo_object_base", marker = DefaultMarker>;
 }
 
 /// Default vtable marker.

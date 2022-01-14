@@ -1,12 +1,14 @@
 //! Implementation of the `ModuleRegistry` type.
 use fimo_core_interface::rust::module_registry::{
-    InterfaceCallback, InterfaceCallbackId, InterfaceId, LoaderCallback, LoaderCallbackId,
-    LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
+    IModuleRegistryInner, InterfaceCallback, InterfaceCallbackId, InterfaceId, LoaderCallback,
+    LoaderCallbackId, LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
 };
+use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
+use fimo_ffi::vtable::ObjectID;
+use fimo_ffi::ObjArc;
 use fimo_ffi_core::ArrayString;
 use fimo_module_core::{
-    rust::{ModuleInterfaceArc, ModuleLoader},
-    ModuleInterfaceDescriptor,
+    Error, ErrorKind, IModuleInterface, IModuleLoader, ModuleInterfaceDescriptor,
 };
 use fimo_version_core::Version;
 use serde::{Deserialize, Serialize};
@@ -14,97 +16,11 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::iter::Step;
-use std::ops::{Deref, DerefMut, RangeFrom};
+use std::ops::RangeFrom;
 use std::path::Path;
 
 /// Path from module root to manifest file.
 pub const MODULE_MANIFEST_PATH: &str = "module.json";
-
-const VTABLE: ModuleRegistryVTable = ModuleRegistryVTable::new(|ptr, f| {
-    let registry = unsafe { &*(ptr as *const ModuleRegistry) };
-    let mut inner = registry.inner.lock();
-    let inner = &mut **inner;
-    unsafe { f.call_once((inner,)) }
-});
-
-const INNER_VTABLE: ModuleRegistryInnerVTable = ModuleRegistryInnerVTable::new(
-    |ptr, r#type, loader| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        let r#type = unsafe { &*r#type };
-        registry
-            .register_loader(r#type, loader)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, id| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        registry.unregister_loader(id).map_err(|e| Box::new(e) as _)
-    },
-    |ptr, r#type, callback| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        let r#type = unsafe { &*r#type };
-        registry
-            .register_loader_callback(r#type, callback)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, id| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        registry
-            .unregister_loader_callback(id)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, r#type| {
-        let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-        let r#type = unsafe { &*r#type };
-        registry
-            .get_loader_from_type(r#type)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, descriptor, interface| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        let descriptor = unsafe { &*descriptor };
-        registry
-            .register_interface(descriptor, interface)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, id| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        registry
-            .unregister_interface(id)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, descriptor, callback| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        let descriptor = unsafe { &*descriptor };
-        registry
-            .register_interface_callback(descriptor, callback)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, id| {
-        let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-        registry
-            .unregister_interface_callback(id)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, descriptor| {
-        let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-        let descriptor = unsafe { &*descriptor };
-        registry
-            .get_interface_from_descriptor(descriptor)
-            .map_err(|e| Box::new(e) as _)
-    },
-    |ptr, name| {
-        let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-        let name = unsafe { &*name };
-        registry.get_interface_descriptors_from_name(name)
-    },
-    |ptr, name, version, extensions| {
-        let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-        let name = unsafe { &*name };
-        let version = unsafe { &*version };
-        let extensions = unsafe { &*extensions };
-        registry.get_compatible_interface_descriptors(name, version, extensions)
-    },
-);
 
 /// The module registry.
 pub struct ModuleRegistry {
@@ -121,11 +37,14 @@ impl ModuleRegistry {
             inner: parking_lot::Mutex::new(ModuleRegistryInner::new()),
         };
 
+        use fimo_core_interface::rust::module_registry::IModuleRegistry;
+        let i_registry = IModuleRegistry::from_object(registry.coerce_obj());
+
         if cfg!(feature = "rust_module_loader") {
-            let handle = registry
+            let handle = i_registry
                 .register_loader(
-                    fimo_module_core::rust::module_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::rust::module_loader::RustLoader::new(),
+                    fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
+                    fimo_module_core::rust_loader::RustLoader::new(),
                 )
                 .unwrap();
             std::mem::forget(handle);
@@ -141,18 +60,21 @@ impl Default for ModuleRegistry {
     }
 }
 
-impl Deref for ModuleRegistry {
-    type Target = fimo_core_interface::rust::module_registry::ModuleRegistry;
+impl ObjectID for ModuleRegistry {
+    const OBJECT_ID: &'static str = "fimo::modules::core::module::module_registry";
+}
 
-    fn deref(&self) -> &Self::Target {
-        let self_ptr = self as *const _ as *const ();
-        let vtable = &VTABLE;
-
-        unsafe {
-            &*fimo_core_interface::rust::module_registry::ModuleRegistry::from_raw_parts(
-                self_ptr, vtable,
-            )
-        }
+impl CoerceObject<ModuleRegistryVTable> for ModuleRegistry {
+    fn get_vtable() -> &'static ModuleRegistryVTable {
+        static VTABLE: ModuleRegistryVTable =
+            ModuleRegistryVTable::new::<ModuleRegistry>(|ptr, f| {
+                let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+                let mut inner = registry.inner.lock();
+                let inner = inner.coerce_obj_mut();
+                let inner = IModuleRegistryInner::from_object_mut(inner);
+                unsafe { f.call_once((inner,)) }
+            });
+        &VTABLE
     }
 }
 
@@ -176,12 +98,12 @@ struct ModuleRegistryInner {
 }
 
 struct LoaderCollection {
-    loader: &'static ModuleLoader,
+    loader: &'static IModuleLoader,
     callbacks: BTreeMap<LoaderCallbackId, LoaderCallback>,
 }
 
 struct InterfaceCollection {
-    interface: ModuleInterfaceArc,
+    interface: ObjArc<IModuleInterface>,
     callbacks: BTreeMap<InterfaceCallbackId, InterfaceCallback>,
 }
 
@@ -214,7 +136,7 @@ impl ModuleRegistryInner {
     fn register_loader(
         &mut self,
         r#type: &str,
-        loader: &'static ModuleLoader,
+        loader: &'static IModuleLoader,
     ) -> Result<LoaderId, ModuleRegistryError> {
         if self.loader_type_map.contains_key(r#type) {
             return Err(ModuleRegistryError::DuplicateLoaderType(String::from(
@@ -242,7 +164,7 @@ impl ModuleRegistryInner {
     fn unregister_loader(
         &mut self,
         id: LoaderId,
-    ) -> Result<&'static ModuleLoader, ModuleRegistryError> {
+    ) -> Result<&'static IModuleLoader, ModuleRegistryError> {
         let loader = self.loaders.remove(&id);
 
         if loader.is_none() {
@@ -252,9 +174,9 @@ impl ModuleRegistryInner {
         let LoaderCollection { loader, callbacks } = loader.unwrap();
         self.loader_type_map.retain(|_, l_id| *l_id != id);
 
-        let inner_registry = &mut **self;
+        let i_registry = IModuleRegistryInner::from_object_mut(self.coerce_obj_mut());
         for (_, callback) in callbacks {
-            callback(inner_registry, loader)
+            callback(i_registry, loader)
         }
 
         Ok(loader)
@@ -303,7 +225,7 @@ impl ModuleRegistryInner {
     fn get_loader_from_type(
         &self,
         r#type: &str,
-    ) -> Result<&'static ModuleLoader, ModuleRegistryError> {
+    ) -> Result<&'static IModuleLoader, ModuleRegistryError> {
         let LoaderCollection { loader, .. } = self.get_loader_from_type_inner(r#type)?;
         Ok(*loader)
     }
@@ -336,7 +258,7 @@ impl ModuleRegistryInner {
     fn register_interface(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: ModuleInterfaceArc,
+        interface: ObjArc<IModuleInterface>,
     ) -> Result<InterfaceId, ModuleRegistryError> {
         if self.interface_map.contains_key(descriptor) {
             return Err(ModuleRegistryError::DuplicateInterface(*descriptor));
@@ -362,7 +284,7 @@ impl ModuleRegistryInner {
     fn unregister_interface(
         &mut self,
         id: InterfaceId,
-    ) -> Result<ModuleInterfaceArc, ModuleRegistryError> {
+    ) -> Result<ObjArc<IModuleInterface>, ModuleRegistryError> {
         let interface = self.interfaces.remove(&id);
 
         if interface.is_none() {
@@ -375,9 +297,9 @@ impl ModuleRegistryInner {
         } = interface.unwrap();
         self.interface_map.retain(|_, i_id| *i_id != id);
 
-        let inner_registry = &mut **self;
+        let i_registry = IModuleRegistryInner::from_object_mut(self.coerce_obj_mut());
         for (_, callback) in callbacks {
-            callback(inner_registry, interface.clone())
+            callback(i_registry, interface.clone())
         }
 
         Ok(interface)
@@ -428,7 +350,7 @@ impl ModuleRegistryInner {
     fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<ModuleInterfaceArc, ModuleRegistryError> {
+    ) -> Result<ObjArc<IModuleInterface>, ModuleRegistryError> {
         let InterfaceCollection { interface, .. } =
             self.get_interface_from_descriptor_inner(descriptor)?;
         Ok(interface.clone())
@@ -472,7 +394,7 @@ impl ModuleRegistryInner {
         &self,
         name: &str,
         version: &Version,
-        extensions: &[ArrayString<32>],
+        extensions: &[ArrayString<128>],
     ) -> Vec<ModuleInterfaceDescriptor> {
         self.interface_map
             .keys()
@@ -489,33 +411,98 @@ impl ModuleRegistryInner {
     }
 }
 
-impl Deref for ModuleRegistryInner {
-    type Target = fimo_core_interface::rust::module_registry::ModuleRegistryInner;
+impl ObjectID for ModuleRegistryInner {
+    const OBJECT_ID: &'static str = "fimo::modules::core::module::module_registry_inner";
+}
 
-    fn deref(&self) -> &Self::Target {
-        let self_ptr = self as *const _ as *const ();
-        let vtable = &INNER_VTABLE;
-
-        unsafe {
-            &*fimo_core_interface::rust::module_registry::ModuleRegistryInner::from_raw_parts(
-                self_ptr, vtable,
-            )
-        }
+impl CoerceObject<ModuleRegistryInnerVTable> for ModuleRegistryInner {
+    fn get_vtable() -> &'static ModuleRegistryInnerVTable {
+        static VTABLE: ModuleRegistryInnerVTable =
+            ModuleRegistryInnerVTable::new::<ModuleRegistryInner>(
+                |ptr, r#type, loader| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    let r#type = unsafe { &*r#type };
+                    registry
+                        .register_loader(r#type, loader)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, id| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    registry
+                        .unregister_loader(id)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, r#type, callback| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    let r#type = unsafe { &*r#type };
+                    registry
+                        .register_loader_callback(r#type, callback)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, id| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    registry
+                        .unregister_loader_callback(id)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, r#type| {
+                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+                    let r#type = unsafe { &*r#type };
+                    registry
+                        .get_loader_from_type(r#type)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, descriptor, interface| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    let descriptor = unsafe { &*descriptor };
+                    registry
+                        .register_interface(descriptor, interface)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, id| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    registry
+                        .unregister_interface(id)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, descriptor, callback| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    let descriptor = unsafe { &*descriptor };
+                    registry
+                        .register_interface_callback(descriptor, callback)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, id| {
+                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+                    registry
+                        .unregister_interface_callback(id)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, descriptor| {
+                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+                    let descriptor = unsafe { &*descriptor };
+                    registry
+                        .get_interface_from_descriptor(descriptor)
+                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
+                },
+                |ptr, name| {
+                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+                    let name = unsafe { &*name };
+                    registry.get_interface_descriptors_from_name(name)
+                },
+                |ptr, name, version, extensions| {
+                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+                    let name = unsafe { &*name };
+                    let version = unsafe { &*version };
+                    let extensions = unsafe { &*extensions };
+                    registry.get_compatible_interface_descriptors(name, version, extensions)
+                },
+            );
+        &VTABLE
     }
 }
 
-impl DerefMut for ModuleRegistryInner {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        let self_ptr = self as *mut _ as *mut ();
-        let vtable = &INNER_VTABLE;
-
-        unsafe {
-            &mut *fimo_core_interface::rust::module_registry::ModuleRegistryInner::from_raw_parts_mut(
-                self_ptr, vtable,
-            )
-        }
-    }
-}
+impl CoerceObjectMut<ModuleRegistryInnerVTable> for ModuleRegistryInner {}
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 struct IdWrapper<T> {

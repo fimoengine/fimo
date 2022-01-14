@@ -1,33 +1,30 @@
-use crate::module::{construct_module_info, TaskInterface, INTERFACE_VTABLE};
+use crate::module::{construct_module_info, TaskInterface};
 use crate::TaskRuntime;
 use fimo_core_interface::rust::{
     build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
+    FimoCore,
 };
+use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
-use fimo_module_core::rust::module_loader::{RustModule, RustModuleInnerArc};
-use fimo_module_core::rust::ModuleInterfaceCaster;
-use fimo_module_core::{
-    rust::{ModuleInterfaceArc, ModuleInterfaceWeak},
-    ModuleInterfaceDescriptor,
-};
+use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleParent};
+use fimo_module_core::{Error, ErrorKind, IModuleInterface, ModuleInterfaceDescriptor};
 use fimo_tasks_interface::rust::build_interface_descriptor as tasks_descriptor;
 use std::collections::HashMap;
-use std::error::Error;
-use std::io::ErrorKind;
-use std::sync::Arc;
 
-fimo_module_core::export_rust_module! {construct_module}
+fimo_module_core::rust_module! {construct_module}
 
 #[allow(dead_code, improper_ctypes_definitions)]
-extern "C" fn construct_module() -> Result<RustModuleInnerArc, Box<dyn Error>> {
+extern "C" fn construct_module() -> Result<ObjArc<IRustModuleInner>, Error> {
     Ok(GenericModule::new_inner(
         construct_module_info(),
         build_instance,
     ))
 }
 
-fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>, Box<dyn Error>> {
+fn build_instance(
+    parent: ObjArc<IRustModuleParent>,
+) -> Result<ObjArc<GenericModuleInstance>, Error> {
     let core_desc = tasks_descriptor();
 
     let mut interfaces = HashMap::new();
@@ -40,22 +37,22 @@ fn build_instance(parent: Arc<RustModule>) -> Result<Arc<GenericModuleInstance>,
 }
 
 fn build_tasks_interface(
-    instance: Arc<GenericModuleInstance>,
-    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ModuleInterfaceWeak>>,
-) -> Result<ModuleInterfaceArc, Box<dyn Error>> {
+    instance: ObjArc<GenericModuleInstance>,
+    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<IModuleInterface>>>,
+) -> Result<ObjArc<IModuleInterface>, Error> {
     let core_interface = dep_map
         .get(&core_descriptor())
         .map(|i| i.as_ref().unwrap().upgrade());
 
     if core_interface.is_none() || core_interface.as_ref().unwrap().is_none() {
-        return Err(Box::new(std::io::Error::new(
+        return Err(Error::new(
             ErrorKind::NotFound,
             "fimo-core interface not found",
-        )));
+        ));
     }
 
-    let core_interface =
-        unsafe { fimo_core_interface::rust::cast_interface(core_interface.unwrap().unwrap())? };
+    let core_interface = core_interface.unwrap().unwrap();
+    let core_interface: ObjArc<FimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
 
     #[allow(non_snake_case)]
     let NUM_CORES = num_cpus::get();
@@ -93,11 +90,10 @@ fn build_tasks_interface(
         .unwrap()
         .unwrap_or(ALLOCATED_TASKS);
 
-    let base = Arc::new(TaskInterface {
+    let base = ObjArc::new(TaskInterface {
         runtime: TaskRuntime::new(num_cores, max_tasks, allocated_tasks),
-        parent: GenericModuleInstance::as_module_instance_arc(instance),
+        parent: ObjArc::coerce_object(instance),
     });
 
-    let caster = ModuleInterfaceCaster::new(&INTERFACE_VTABLE);
-    unsafe { Ok(ModuleInterfaceArc::from_inner((base, caster))) }
+    Ok(ObjArc::coerce_object(base))
 }
