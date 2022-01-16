@@ -1,6 +1,5 @@
 //! Implementation of the `fimo-core` interface.
 #![feature(const_fn_trait_bound)]
-#![feature(maybe_uninit_extra)]
 #![feature(allocator_api)]
 #![feature(c_unwind)]
 #![feature(step_trait)]
