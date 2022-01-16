@@ -1,6 +1,4 @@
 //! Implementation of a generic rust module.
-#![feature(maybe_uninit_extra)]
-
 use fimo_ffi::error::InnerError;
 use fimo_ffi::object::CoerceObject;
 use fimo_ffi::vtable::{IBaseInterface, ObjectID};
@@ -60,7 +58,7 @@ impl GenericModule {
 }
 
 impl ObjectID for GenericModule {
-    const OBJECT_ID: &'static str = "fimo::utils::generic_module::generic_module";
+    const OBJECT_NAME: &'static str = "fimo::utils::generic_module::generic_module";
 }
 
 impl CoerceObject<IModuleVTable> for GenericModule {
@@ -252,7 +250,7 @@ impl GenericModuleInstance {
 }
 
 impl ObjectID for GenericModuleInstance {
-    const OBJECT_ID: &'static str = "fimo::utils::generic_module::generic_module_instance";
+    const OBJECT_NAME: &'static str = "fimo::utils::generic_module::generic_module_instance";
 }
 
 impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
