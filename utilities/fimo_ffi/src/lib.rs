@@ -6,11 +6,19 @@
     rustdoc::broken_intra_doc_links
 )]
 #![allow(incomplete_features)]
-#![feature(specialization)]
 #![feature(const_fn_trait_bound)]
 #![feature(const_fn_fn_ptr_basics)]
+#![feature(try_reserve_kind)]
+#![feature(dropck_eyepatch)]
+#![feature(specialization)]
+#![feature(allocator_api)]
+#![feature(slice_range)]
+#![feature(new_uninit)]
+#![feature(trusted_len)]
+#![feature(slice_ptr_len)]
 
 pub mod error;
+pub mod vec;
 
 pub use fimo_object::obj_arc;
 pub use fimo_object::obj_box;
