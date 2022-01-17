@@ -1021,6 +1021,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     ///
     /// Note that this requires locking the weak ref count.
     #[inline]
+    #[allow(clippy::wrong_self_convention)]
     fn is_unique(&mut self) -> bool {
         // lock the weak pointer count if we appear to be the sole weak pointer
         // holder.
