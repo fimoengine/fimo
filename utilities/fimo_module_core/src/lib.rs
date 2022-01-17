@@ -14,7 +14,7 @@ mod interfaces;
 pub mod rust_loader;
 
 pub use error::{Error, ErrorKind, Result};
-pub use fimo_ffi::{fimo_object, fimo_vtable, impl_vtable, is_object};
+pub use fimo_ffi::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object};
 pub use interfaces::*;
 
 use std::fmt::Debug;
@@ -61,6 +61,9 @@ pub type PathChar = u8;
 #[cfg(windows)]
 pub type PathChar = u16;
 
-/// Marker type that implements `Send` and `Sync`.
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct SendSyncMarker;
+fimo_marker! {
+    /// Marker type that implements `Send` and `Sync`.
+    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    #![requires(Send, Sync)]
+    pub marker SendSyncMarker;
+}

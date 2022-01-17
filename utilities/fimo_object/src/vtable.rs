@@ -208,6 +208,55 @@ macro_rules! is_object {
     };
 }
 
+/// Defines a new marker type.
+#[macro_export]
+macro_rules! fimo_marker {
+    (
+        $(#[$attr:meta])*
+        $(#![requires($($marker:ident),+)])?
+        $vis:vis marker $name:ident {
+            $(
+                $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$attr])*
+        $vis struct $name {
+            $(
+                $(#[$elem_attr])*
+                $elem_vis $elem:$elem_ty
+            ),*
+        }
+
+        $crate::fimo_marker! {
+            $name $($($marker)+)?
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        $(#![requires($($marker:ident),+)])?
+        $vis:vis marker $name:ident;
+    ) => {
+        $crate::fimo_marker! {
+            $(#[$attr])*
+            $(#![requires($($marker),+)])?
+            $vis marker $name {}
+        }
+    };
+    ($name:ident) => {
+        impl $name {
+            /// Checks whether `T` is compatible with the marker.
+            pub fn type_is_compatible<T>() {}
+        }
+    };
+    ($name:ident $($marker:ident)+) => {
+        impl $name {
+            /// Checks whether `T` is compatible with the marker.
+            pub fn type_is_compatible<T>() where $(T: $marker),+ {}
+        }
+    };
+}
+
 pub use uuid::Uuid;
 
 /// Definition of an Object.
@@ -282,9 +331,13 @@ fimo_vtable! {
     pub struct IBaseInterface;
 }
 
-/// Default vtable marker.
-#[allow(missing_debug_implementations)]
-pub struct DefaultMarker(PhantomData<*const ()>);
+fimo_marker! {
+    /// Default vtable marker.
+    #[allow(missing_debug_implementations)]
+    pub marker DefaultMarker {
+        _phantom: PhantomData<*const ()>
+    }
+}
 
 /// Drops the pointed to value.
 ///
