@@ -37,7 +37,9 @@ impl IFimoCore {
 fimo_vtable! {
     /// VTable of an [`IFimoCore`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IFimoCoreVTable<id = "fimo::interfaces::core::fimo_core", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0xc2173cd4, 0x767c, 0x4ac2, 0xa8ac, 0x52a2cbebda0a)]
+    pub struct IFimoCoreVTable {
         /// Fetches the module registry.
         pub get_module_registry: fn(*const ()) -> *const module_registry::IModuleRegistry,
         /// Fetches the settings registry.

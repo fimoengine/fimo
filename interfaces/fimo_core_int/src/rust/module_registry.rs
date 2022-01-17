@@ -300,8 +300,15 @@ impl IModuleRegistry {
 fimo_vtable! {
     /// VTable of the [`IModuleRegistry`] type.
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct ModuleRegistryVTable<id = "fimo::interfaces::core::module::module_registry", marker = SendSyncMarker> {
-        enter_inner: fn(*const (), RawFnOnce<(*mut IModuleRegistryInner,), ()>),
+    #![marker = SendSyncMarker]
+    #![uuid(0x1eb872f8, 0xa966, 0x40a6, 0x844d, 0x9db4b08bf6db)]
+    pub struct ModuleRegistryVTable {
+        /// Enters the inner registry.
+        ///
+        /// # Deadlock
+        ///
+        /// The function may only call into the registry with the provided inner pointer.
+        pub enter_inner: fn(*const (), RawFnOnce<(*mut IModuleRegistryInner,), ()>),
     }
 }
 
@@ -470,7 +477,9 @@ fimo_vtable! {
     /// VTable of the [`IModuleRegistryInner`] type.
     #[allow(clippy::type_complexity)]
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct ModuleRegistryInnerVTable<id = "fimo::interfaces::core::module::module_registry", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x45506755, 0xddc2, 0x40d0, 0xac73, 0x12a1a81beeaf)]
+    pub struct ModuleRegistryInnerVTable {
         /// Registers a new module loader to the `ModuleRegistry`.
         ///
         /// The registered loader will be available to the rest of the `ModuleRegistry`.

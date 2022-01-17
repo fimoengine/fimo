@@ -29,7 +29,9 @@ impl<T: VTable> Debug for RawObject<T> {
             .field("object", &self.object)
             .field("vtable", &format!("{:p}", self.vtable))
             .field("object_id", &self.vtable.object_id())
+            .field("object_name", &self.vtable.object_name())
             .field("interface_id", &self.vtable.interface_id())
+            .field("interface_name", &self.vtable.interface_name())
             .finish()
     }
 }
@@ -67,7 +69,9 @@ impl<T: VTable> Debug for RawObjectMut<T> {
             .field("object", &self.object)
             .field("vtable", &format!("{:p}", self.vtable))
             .field("object_id", &self.vtable.object_id())
+            .field("object_name", &self.vtable.object_name())
             .field("interface_id", &self.vtable.interface_id())
+            .field("interface_name", &self.vtable.interface_name())
             .finish()
     }
 }
@@ -92,10 +96,14 @@ impl<T: VTable> From<RawObjectMut<T>> for RawObject<T> {
 pub struct CastError<T> {
     /// Object.
     pub obj: T,
-    /// Required id.
+    /// Required name.
     pub required: &'static str,
-    /// Available id.
+    /// Required id.
+    pub required_id: crate::vtable::Uuid,
+    /// Available name.
     pub available: &'static str,
+    /// Available id.
+    pub available_id: crate::vtable::Uuid,
 }
 
 /// Casts an object to the base object.
@@ -117,13 +125,15 @@ pub fn try_cast<T: VTable, U: VTable>(
     if obj.vtable.interface_id() == T::INTERFACE_ID {
         // safety: the interface id's are unique, so we can ensure that the object
         // contains a reference to a `T`.
-        let obj = unsafe { std::mem::transmute(obj) };
+        let obj: RawObject<T> = unsafe { std::mem::transmute(obj) };
         Ok(obj)
     } else {
         Err(CastError {
             obj,
-            required: T::INTERFACE_ID,
-            available: obj.vtable.interface_id().into(),
+            required: T::INTERFACE_NAME,
+            required_id: T::INTERFACE_ID,
+            available: obj.vtable.interface_name(),
+            available_id: obj.vtable.interface_id(),
         })
     }
 }
@@ -135,15 +145,15 @@ pub fn try_cast_mut<T: VTable, U: VTable>(
     if obj.vtable.interface_id() == T::INTERFACE_ID {
         // safety: the interface id's are unique, so we can ensure that the object
         // contains a reference to a `T`.
-        let obj = unsafe { std::mem::transmute(obj) };
+        let obj: RawObjectMut<T> = unsafe { std::mem::transmute(obj) };
         Ok(obj)
     } else {
-        let id: &'static str = obj.vtable.interface_id().into();
-
         Err(CastError {
             obj,
-            required: T::INTERFACE_ID,
-            available: id,
+            required: T::INTERFACE_NAME,
+            required_id: T::INTERFACE_ID,
+            available: obj.vtable.interface_name(),
+            available_id: obj.vtable.interface_id(),
         })
     }
 }
@@ -158,8 +168,10 @@ pub fn try_cast_obj<T: VTable, O: ObjectID>(
     } else {
         Err(CastError {
             obj,
-            required: O::OBJECT_ID,
-            available: obj.vtable.object_id().into(),
+            required: O::OBJECT_NAME,
+            required_id: O::OBJECT_ID,
+            available: obj.vtable.object_name(),
+            available_id: obj.vtable.object_id(),
         })
     }
 }
@@ -172,12 +184,12 @@ pub fn try_cast_obj_mut<T: VTable, O: ObjectID>(
         let obj = obj.object as *mut O;
         Ok(obj)
     } else {
-        let id: &'static str = obj.vtable.object_id().into();
-
         Err(CastError {
             obj,
-            required: O::OBJECT_ID,
-            available: id,
+            required: O::OBJECT_NAME,
+            required_id: O::OBJECT_ID,
+            available: obj.vtable.object_name(),
+            available_id: obj.vtable.object_id(),
         })
     }
 }

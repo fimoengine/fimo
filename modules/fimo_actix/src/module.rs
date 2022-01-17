@@ -6,8 +6,8 @@ use fimo_core_int::rust::settings_registry::{
 };
 use fimo_core_int::rust::IFimoCore;
 use fimo_ffi::object::CoerceObject;
-use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
-use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
+use fimo_ffi::vtable::{IBaseInterface, VTable};
+use fimo_ffi::{is_object, ArrayString, ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
 use fimo_version_core::Version;
 
@@ -28,9 +28,7 @@ struct FimoActixInterface {
 
 sa::assert_impl_all!(FimoActixInterface: Send, Sync);
 
-impl ObjectID for FimoActixInterface {
-    const OBJECT_ID: &'static str = "fimo::modules::actix::actix";
-}
+is_object! { #![uuid(0xd7eeb555, 0x6cdc, 0x412e, 0x9d2b, 0xb10f3069c298)] FimoActixInterface }
 
 impl CoerceObject<IFimoActixVTable> for FimoActixInterface {
     fn get_vtable() -> &'static IFimoActixVTable {

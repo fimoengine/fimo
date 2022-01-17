@@ -1,5 +1,4 @@
 //! Object vtable utilities.
-use crate::ConstStr;
 use std::marker::PhantomData;
 
 /// Makes a struct usable as a vtable.
@@ -7,9 +6,10 @@ use std::marker::PhantomData;
 /// The `fimo_vtable` macro adds a set of predefined fields
 /// to the struct, to make it's layout compatible with a fimo-object vtable.
 /// Furthermore it implements the `VTable` trait for the given struct.
-/// The attribute items are specified inside the `< >` brackets following the struct name.
-/// The 'id' key is the unique id of the interface. The 'marker' key is an optional value which
-/// specifies a path to a marker type to use when implementing the `VTable` trait.
+/// The attribute items are specified inside the `#![ ]` brackets preceding the struct definition.
+/// The 'uuid' key is the unique id of the interface. The 'marker' key is an optional value which
+/// specifies a path to a marker type to use when implementing the `VTable` trait and must
+/// precede the 'uuid' key.
 ///
 /// # Struct Layout
 ///
@@ -28,7 +28,8 @@ use std::marker::PhantomData;
 /// fimo_vtable! {
 ///     // VTable with default Marker
 ///     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-///     struct InterfaceDefMar<id = "default_marker_interface"> {
+///     #![uuid(0x39ac803c, 0x6c11, 0x45b0, 0x9755, 0x91cb71070db5)]
+///     struct InterfaceDefMar {
 ///         pub get_name: for<'a> fn(*const ()) -> *const str
 ///     }
 /// }
@@ -39,7 +40,9 @@ use std::marker::PhantomData;
 /// fimo_vtable! {
 ///     // VTable with custom Marker
 ///     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-///     struct InterfaceCusMar<id = "default_marker_interface", marker = Marker> {
+///     #![marker = Marker]
+///     #![uuid(0xed6cfc9c, 0xb824, 0x41d4, 0xbef4, 0xe8da13b4e1e5)]
+///     struct InterfaceCusMar {
 ///         pub get_name: fn(*const ()) -> *const str
 ///     }
 /// }
@@ -50,7 +53,9 @@ macro_rules! fimo_vtable {
     // struct with named fields
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<id = $id:literal, marker = $marker:ty>{
+        #![marker = $marker:ty]
+        #![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)]
+        $vis:vis struct $name:ident{
             $(
                 $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
             ),* $(,)?
@@ -67,10 +72,14 @@ macro_rules! fimo_vtable {
             pub __internal_object_size: usize,
             /// Alignment of the object.
             pub __internal_object_alignment: usize,
-            /// Unique id of the object type.
-            pub __internal_object_id: $crate::ConstStr<'static>,
-            /// Unique id of the interface type.
-            pub __internal_interface_id: $crate::ConstStr<'static>,
+            /// Unique object id.
+            pub __internal_object_id: [u8; 16],
+            /// Name of the underlying object type.
+            pub __internal_object_name: $crate::ConstStr<'static>,
+            /// Unique interface id.
+            pub __internal_interface_id: [u8; 16],
+            /// Name of the interface type.
+            pub __internal_interface_name: $crate::ConstStr<'static>,
             $($(#[$elem_attr])* $elem_vis $elem: $elem_ty),*
         }
 
@@ -83,11 +92,13 @@ macro_rules! fimo_vtable {
                     __internal_drop_in_place: $crate::vtable::drop_obj_in_place::<T>,
                     __internal_object_size: std::mem::size_of::<T>(),
                     __internal_object_alignment: std::mem::align_of::<T>(),
-                    __internal_object_id: unsafe { $crate::str::from_utf8_unchecked(
-                        <T as $crate::vtable::ObjectID>::OBJECT_ID.as_bytes(),
+                    __internal_object_id: *<T as $crate::vtable::ObjectID>::OBJECT_ID.as_bytes(),
+                    __internal_object_name: unsafe { $crate::str::from_utf8_unchecked(
+                        <T as $crate::vtable::ObjectID>::OBJECT_NAME.as_bytes(),
                     ) },
-                    __internal_interface_id: unsafe { $crate::str::from_utf8_unchecked(
-                        <Self as $crate::vtable::VTable>::INTERFACE_ID.as_bytes(),
+                    __internal_interface_id: *<Self as $crate::vtable::VTable>::INTERFACE_ID.as_bytes(),
+                    __internal_interface_name: unsafe { $crate::str::from_utf8_unchecked(
+                        <Self as $crate::vtable::VTable>::INTERFACE_NAME.as_bytes(),
                     ) },
                     $($elem),*
                 }
@@ -96,7 +107,8 @@ macro_rules! fimo_vtable {
 
         unsafe impl $crate::vtable::VTable for $name {
             type Marker = $marker;
-            const INTERFACE_ID: &'static str = $id;
+            const INTERFACE_ID: $crate::vtable::Uuid = $crate::vtable::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
+            const INTERFACE_NAME: &'static str = $crate::vtable::type_name::<$name>();
 
             unsafe fn drop_in_place(&self, obj: *mut ()) {
                 (self.__internal_drop_in_place)(obj)
@@ -110,19 +122,28 @@ macro_rules! fimo_vtable {
                 self.__internal_object_alignment
             }
 
-            fn object_id(&self) -> $crate::ConstStr<'static> {
-                self.__internal_object_id
+            fn object_id(&self) -> $crate::vtable::Uuid {
+                $crate::vtable::Uuid::from_bytes(self.__internal_object_id)
             }
 
-            fn interface_id(&self) -> $crate::ConstStr<'static> {
-                self.__internal_interface_id
+            fn object_name(&self) -> &'static str {
+                self.__internal_object_name.into()
+            }
+
+            fn interface_id(&self) -> $crate::vtable::Uuid {
+                $crate::vtable::Uuid::from_bytes(self.__internal_interface_id)
+            }
+
+            fn interface_name(&self) -> &'static str {
+                self.__internal_interface_name.into()
             }
         }
     };
     // struct with named fields and default marker
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<id = $id:literal>{
+        #![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)]
+        $vis:vis struct $name:ident{
             $(
                 $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
             ),* $(,)?
@@ -130,7 +151,9 @@ macro_rules! fimo_vtable {
     ) => {
         $crate::fimo_vtable!{
             $(#[$attr])*
-            $vis struct $name<id=$id,marker=$crate::vtable::DefaultMarker> {
+            #![marker=$crate::vtable::DefaultMarker]
+            #![uuid($u1,$u2,$u3,$u4,$u5)]
+            $vis struct $name {
                 $($(#[$elem_attr])* $elem_vis $elem: $elem_ty),*
             }
         }
@@ -138,29 +161,67 @@ macro_rules! fimo_vtable {
     // unit struct
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<id = $id:literal, marker = $marker:ty>;
+        #![marker = $marker:ty]
+        #![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)]
+        $vis:vis struct $name:ident;
     ) => {
         $crate::fimo_vtable!{
             $(#[$attr])*
-            $vis struct $name<id=$id, marker=$marker> {}
+            #![marker=$marker]
+            #![uuid($u1,$u2,$u3,$u4,$u5)]
+            $vis struct $name {}
         }
     };
     // unit struct with default marker
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<id = $id:literal>;
+        #![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)]
+        $vis:vis struct $name:ident;
     ) => {
         $crate::fimo_vtable!{
             $(#[$attr])*
-            $vis struct $name<id=$id,marker=$crate::vtable::DefaultMarker>;
+            #![marker=$crate::vtable::DefaultMarker]
+            #![uuid($u1,$u2,$u3,$u4,$u5)]
+            $vis struct $name;
         }
     };
 }
 
-/// Definition of an Object id.
-pub trait ObjectID: Sized {
+/// Marks that a type is an object.
+///
+/// # Examples
+///
+/// ```
+/// use fimo_object::is_object;
+///
+/// struct Obj;
+/// is_object!{ #![uuid(0x6cf7178d, 0x472f, 0x454a, 0x9b52, 0x5f67b546fd92)] Obj }
+/// ```
+#[macro_export]
+macro_rules! is_object {
+    (#![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)] $name:ty) => {
+        unsafe impl $crate::vtable::ObjectID for $name {
+            const OBJECT_ID: $crate::vtable::Uuid =
+                $crate::vtable::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
+            const OBJECT_NAME: &'static str = $crate::vtable::type_name::<$name>();
+        }
+    };
+}
+
+pub use uuid::Uuid;
+
+/// Definition of an Object.
+///
+/// # Safety
+///
+/// This trait requires that the id of the object is unique.
+/// The [`is_object!`] macro automatically implements this trait.
+pub unsafe trait ObjectID: Sized {
     /// Unique object id.
-    const OBJECT_ID: &'static str;
+    const OBJECT_ID: Uuid = Uuid::nil();
+
+    /// Name of the Object.
+    const OBJECT_NAME: &'static str;
 }
 
 /// Definition of an object vtable.
@@ -168,14 +229,17 @@ pub trait ObjectID: Sized {
 /// # Safety
 ///
 /// This trait requires that the start of the vtable conforms with the layout
-/// of an [`IBaseInterface`]. The [`fimo_vtable!`] macro automatically implements
-/// this trait.
+/// of an [`IBaseInterface`] and that the id of the interface is unique.
+/// The [`fimo_vtable!`] macro automatically implements this trait.
 pub unsafe trait VTable: 'static + Send + Sync + Sized {
     /// Type used as a marker.
     type Marker;
 
     /// Unique interface id.
-    const INTERFACE_ID: &'static str;
+    const INTERFACE_ID: Uuid = Uuid::nil();
+
+    /// Name of the interface.
+    const INTERFACE_NAME: &'static str;
 
     /// Drops an object, consuming the pointer in the process.
     ///
@@ -190,11 +254,17 @@ pub unsafe trait VTable: 'static + Send + Sync + Sized {
     /// Retrieves the alignment of the object.
     fn align_of(&self) -> usize;
 
-    /// Retrieves the unique id of the object.
-    fn object_id(&self) -> ConstStr<'static>;
+    /// Retrieves the unique id of the underlying object.
+    fn object_id(&self) -> Uuid;
+
+    /// Retrieves the name of the underlying object.
+    fn object_name(&self) -> &'static str;
 
     /// Retrieves the unique id of the interface.
-    fn interface_id(&self) -> ConstStr<'static>;
+    fn interface_id(&self) -> Uuid;
+
+    /// Retrieves the name of the interface.
+    fn interface_name(&self) -> &'static str;
 
     /// Casts a `&Self` to a [`IBaseInterface`] reference.
     fn as_base(&self) -> &IBaseInterface {
@@ -207,7 +277,9 @@ fimo_vtable! {
     ///
     /// Contains the data required for allocating/deallocating and casting any object.
     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-    pub struct IBaseInterface<id = "__internal_fimo_object_base", marker = DefaultMarker>;
+    #![marker = DefaultMarker]
+    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
+    pub struct IBaseInterface;
 }
 
 /// Default vtable marker.
@@ -221,4 +293,15 @@ pub struct DefaultMarker(PhantomData<*const ()>);
 /// See [std::ptr::drop_in_place].
 pub unsafe extern "C" fn drop_obj_in_place<T: ObjectID>(ptr: *mut ()) {
     std::ptr::drop_in_place::<T>(ptr as *mut T)
+}
+
+/// Returns the name of a type as a string slice.
+pub const fn type_name<T: ?Sized>() -> &'static str {
+    std::any::type_name::<T>()
+}
+
+/// Constructs a new [`Uuid`].
+pub const fn new_uuid(d1: u32, d2: u16, d3: u16, d4: u64) -> Uuid {
+    let d4 = d4.to_be_bytes();
+    Uuid::from_fields(d1, d2, d3, &d4)
 }

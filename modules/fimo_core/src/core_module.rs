@@ -4,9 +4,11 @@ use fimo_core_int::rust::module_registry::IModuleRegistry;
 use fimo_core_int::rust::settings_registry::SettingsRegistry;
 use fimo_core_int::rust::{IFimoCore, IFimoCoreVTable};
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
+use fimo_ffi::vtable::{IBaseInterface, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
-use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
+use fimo_module_core::{
+    is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
+};
 use fimo_version_core::Version;
 
 #[cfg(feature = "rust_module")]
@@ -22,9 +24,7 @@ struct CoreWrapper {
 
 sa::assert_impl_all!(CoreWrapper: Send, Sync);
 
-impl ObjectID for CoreWrapper {
-    const OBJECT_ID: &'static str = "fimo::modules::core::core_wrapper";
-}
+is_object! { #![uuid(0x8e68e497, 0x4dd1, 0x481c, 0xafe2, 0xdb7c063ae9f4)] CoreWrapper }
 
 impl CoerceObject<IFimoCoreVTable> for CoreWrapper {
     fn get_vtable() -> &'static IFimoCoreVTable {

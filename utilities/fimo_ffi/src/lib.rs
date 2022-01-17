@@ -27,7 +27,7 @@ pub use fimo_object::raw;
 pub use fimo_object::span;
 pub use fimo_object::str;
 pub use fimo_object::vtable;
-pub use fimo_object::{fimo_object, fimo_vtable};
+pub use fimo_object::{fimo_object, fimo_vtable, is_object};
 
 pub use fimo_ffi_core::array_string;
 pub use fimo_ffi_core::fn_wrapper;

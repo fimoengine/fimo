@@ -4,10 +4,9 @@ use fimo_core_int::rust::module_registry::{
     LoaderCallback, LoaderCallbackId, LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
 };
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
-use fimo_ffi::vtable::ObjectID;
 use fimo_ffi::{ArrayString, ObjArc};
 use fimo_module_core::{
-    Error, ErrorKind, IModuleInterface, IModuleLoader, ModuleInterfaceDescriptor,
+    is_object, Error, ErrorKind, IModuleInterface, IModuleLoader, ModuleInterfaceDescriptor,
 };
 use fimo_version_core::Version;
 use serde::{Deserialize, Serialize};
@@ -57,9 +56,7 @@ impl Default for ModuleRegistry {
     }
 }
 
-impl ObjectID for ModuleRegistry {
-    const OBJECT_ID: &'static str = "fimo::modules::core::module::module_registry";
-}
+is_object! { #![uuid(0x43cdc830, 0x1706, 0x4234, 0xbedc, 0x29a51e751dc7)] ModuleRegistry }
 
 impl CoerceObject<ModuleRegistryVTable> for ModuleRegistry {
     fn get_vtable() -> &'static ModuleRegistryVTable {
@@ -408,9 +405,7 @@ impl ModuleRegistryInner {
     }
 }
 
-impl ObjectID for ModuleRegistryInner {
-    const OBJECT_ID: &'static str = "fimo::modules::core::module::module_registry_inner";
-}
+is_object! { #![uuid(0xf9077e25, 0x43e1, 0x4857, 0xbe2b, 0xfcd430802e46)] ModuleRegistryInner }
 
 impl CoerceObject<ModuleRegistryInnerVTable> for ModuleRegistryInner {
     fn get_vtable() -> &'static ModuleRegistryInnerVTable {

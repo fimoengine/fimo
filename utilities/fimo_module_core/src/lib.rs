@@ -14,7 +14,7 @@ mod interfaces;
 pub mod rust_loader;
 
 pub use error::{Error, ErrorKind, Result};
-pub use fimo_ffi::{fimo_object, fimo_vtable};
+pub use fimo_ffi::{fimo_object, fimo_vtable, is_object};
 pub use interfaces::*;
 
 use std::fmt::Debug;

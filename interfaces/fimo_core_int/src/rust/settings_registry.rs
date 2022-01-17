@@ -218,7 +218,9 @@ fimo_vtable! {
     /// VTable of the [`SettingsRegistry`] type.
     #[allow(clippy::type_complexity)]
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct SettingsRegistryVTable<id = "fimo::interfaces::core::settings::settings_registry", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x824e6374, 0xcb96, 0x4177, 0xa08b, 0x03aee57ad246)]
+    pub struct SettingsRegistryVTable {
         /// Checks whether an item is contained.
         pub contains: fn(
             *const (),

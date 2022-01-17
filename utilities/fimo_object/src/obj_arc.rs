@@ -231,22 +231,21 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
     /// // Define a custom interface vtable.
     /// fimo_vtable! {
-    ///     struct ObjVTable<id = "test_vtable"> {
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     struct ObjVTable {
     ///         add: fn(*const (), usize) -> usize
     ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
-    /// impl ObjectID for MyObj {
-    ///     const OBJECT_ID: &'static str = "test_obj";
-    /// }
+    /// is_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] MyObj }
     /// impl CoerceObject<ObjVTable> for MyObj {
     ///     fn get_vtable() -> &'static ObjVTable {
     ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
@@ -304,23 +303,20 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     ///
     /// // Define a custom interface vtable.
     /// fimo_vtable! {
-    ///     struct ObjVTable<id = "test_vtable">;
+    ///     #![uuid(0x07b2f853, 0x3beb, 0x4abf, 0xb782, 0xd502fcb2ea7b)]
+    ///     struct ObjVTable;
     /// }
     ///
     /// // Define custom objects implementing the interface.
     /// struct FirstObj(usize);
     /// struct SecondObj;
-    /// impl ObjectID for FirstObj {
-    ///     const OBJECT_ID: &'static str = "first_obj";
-    /// }
-    /// impl ObjectID for SecondObj {
-    ///     const OBJECT_ID: &'static str = "second_obj";
-    /// }
+    /// is_object! { #![uuid(0xe98df5c9, 0x1d0e, 0x4289, 0x8f93, 0x55037e65c725)] FirstObj }
+    /// is_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] SecondObj }
     /// impl CoerceObject<ObjVTable> for FirstObj {
     ///     fn get_vtable() -> &'static ObjVTable {
     ///         static VTABLE: ObjVTable = ObjVTable::new::<FirstObj>();
@@ -353,7 +349,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
                 Err(err) => Err(CastError {
                     obj: ObjArc::from_raw_parts(ptr, alloc),
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 }),
             }
         }
@@ -367,22 +365,21 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
     /// // Define a custom interface vtable.
     /// fimo_vtable! {
-    ///     struct ObjVTable<id = "test_vtable"> {
+    ///     #![uuid(0x0f42329a, 0x9abd, 0x44b6, 0xb03f, 0x70d2f82c809f)]
+    ///     struct ObjVTable {
     ///         add: fn(*const (), usize) -> usize
     ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
-    /// impl ObjectID for MyObj {
-    ///     const OBJECT_ID: &'static str = "test_obj";
-    /// }
+    /// is_object! { #![uuid(0x9558d810, 0x0053, 0x41a3, 0xa520, 0x9745f965567c)] MyObj }
     /// impl CoerceObject<ObjVTable> for MyObj {
     ///     fn get_vtable() -> &'static ObjVTable {
     ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
@@ -438,7 +435,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
                 Err(err) => Err(CastError {
                     obj: ObjArc::from_raw_parts(ptr, alloc),
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 }),
             }
         }
@@ -452,22 +451,21 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
     /// // Define a custom interface vtable.
     /// fimo_vtable! {
-    ///     struct ObjVTable<id = "test_vtable"> {
+    ///     #![uuid(0x93f88692, 0xceca, 0x4dc5, 0x813e, 0x8b008a0bb132)]
+    ///     struct ObjVTable {
     ///         add: fn(*const (), usize) -> usize
     ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
-    /// impl ObjectID for MyObj {
-    ///     const OBJECT_ID: &'static str = "test_obj";
-    /// }
+    /// is_object! { #![uuid(0xe0497698, 0xa0f1, 0x480e, 0xb158, 0x9cdbd7de426d)] MyObj }
     /// impl CoerceObject<ObjVTable> for MyObj {
     ///     fn get_vtable() -> &'static ObjVTable {
     ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
@@ -1466,7 +1464,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
                 Err(err) => Err(CastError {
                     obj: ObjWeak::from_raw_parts(ptr, alloc),
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 }),
             }
         }
@@ -1485,7 +1485,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
                 Err(err) => Err(CastError {
                     obj: ObjWeak::from_raw_parts(ptr, alloc),
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 }),
             }
         }

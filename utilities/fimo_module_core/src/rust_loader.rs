@@ -4,8 +4,8 @@ use crate::{
     ModuleInfo, PathChar, SendSyncMarker,
 };
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::vtable::{IBaseInterface, ObjectID};
-use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, ObjWeak, SpanInner};
+use fimo_ffi::vtable::IBaseInterface;
+use fimo_ffi::{fimo_object, fimo_vtable, is_object, ObjArc, ObjWeak, SpanInner};
 use libloading::Library;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -120,9 +120,7 @@ impl RustLoader {
     }
 }
 
-impl ObjectID for RustLoader {
-    const OBJECT_ID: &'static str = "fimo::utils::module::loader::rust::rust_loader";
-}
+is_object! { #![uuid(0x1aef7722, 0xf3a9, 0x43e9, 0xa27b, 0x753510e42700)] RustLoader }
 
 impl CoerceObject<IModuleLoaderVTable> for RustLoader {
     fn get_vtable() -> &'static IModuleLoaderVTable {
@@ -306,9 +304,7 @@ impl RustModule {
     }
 }
 
-impl ObjectID for RustModule {
-    const OBJECT_ID: &'static str = "fimo::utils::module::loader::rust::rust_module";
-}
+is_object! { #![uuid(0xb61d9c2c, 0xc739, 0x426f, 0x8ba7, 0xb8e2acb4cbbd)] RustModule }
 
 impl CoerceObject<IRustModuleParentVTable> for RustModule {
     #[inline]
@@ -399,7 +395,9 @@ impl IRustModuleParent {
 fimo_vtable! {
     /// VTable of a [`IRustModuleParent`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IRustModuleParentVTable<id = "fimo::utils::module::loader::rust::module_parent", marker =  SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x84adcffb, 0x0aea, 0x4181, 0xa0bb, 0x32b78e14c882)]
+    pub struct IRustModuleParentVTable {
         /// Fetches the module interface for the rust module.
         pub as_module: unsafe fn(*const ()) -> &'static IModuleVTable,
         /// Fetches the path to the module root.
@@ -452,7 +450,9 @@ impl Deref for IRustModuleInner {
 fimo_vtable! {
     /// VTable of a [`IRustModuleInner`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IRustModuleInnerVTable<id = "fimo::utils::module::loader::rust::module_inner", marker =  SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x9068933c, 0xec51, 0x4146, 0x9b03, 0x68ea717494f4)]
+    pub struct IRustModuleInnerVTable {
         // The functions don't need the C ABI, as by this point we already ensured
         // that the module was compiled with the same version of the compiler.
         /// Fetches the module interface for the rust module.

@@ -5,7 +5,7 @@ use fimo_core_int::rust::settings_registry::{
     SettingsRegistryPathBuf, SettingsRegistryVTable,
 };
 use fimo_ffi::object::CoerceObject;
-use fimo_ffi::vtable::ObjectID;
+use fimo_module_core::is_object;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -35,9 +35,7 @@ impl Default for SettingsRegistry {
     }
 }
 
-impl ObjectID for SettingsRegistry {
-    const OBJECT_ID: &'static str = "fimo::modules::core::settings::settings_registry";
-}
+is_object! { #![uuid(0x4b43ec0b, 0x04b6, 0x4a2f, 0xaa05, 0x012b8be7dd2a)] SettingsRegistry }
 
 impl CoerceObject<SettingsRegistryVTable> for SettingsRegistry {
     fn get_vtable() -> &'static SettingsRegistryVTable {

@@ -182,7 +182,9 @@ fimo_vtable! {
     /// VTable of a [`IFimoActix`].
     #[allow(clippy::type_complexity)]
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IFimoActixVTable<id = "fimo::interfaces::actix::fimo_actix", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x85fa7a5f, 0x959d, 0x40c6, 0x8d7a, 0xccd4dea654cf)]
+    pub struct IFimoActixVTable {
         /// Starts the server if it is not running.
         pub start: unsafe fn(*const ()) -> ServerStatus,
         /// Stops the server if it is running.

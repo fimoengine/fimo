@@ -1,7 +1,7 @@
 //! Error type.
 use crate::object::{CoerceObject, CoerceObjectMut};
-use crate::vtable::ObjectID;
 use crate::{fimo_object, fimo_vtable, ObjBox, Optional, StrInner};
+use fimo_object::is_object;
 use fimo_object::object::{ObjPtrCompat, ObjectWrapper};
 use std::fmt::Write;
 
@@ -53,7 +53,9 @@ pub struct SendSync;
 fimo_vtable! {
     /// VTable of an [`IError`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IErrorVTable<id = "fimo::utils::ffi::error", marker = SendSync> {
+    #![marker = SendSync]
+    #![uuid(0xe7af13dd, 0xadfd, 0x4541, 0xa0fa, 0x173b2f200e65)]
+    pub struct IErrorVTable {
         /// Lower-level source, if it exists.
         pub source: unsafe extern "C" fn(*const ()) -> Optional<*const IError>,
         /// Debug formatted error info.
@@ -95,7 +97,8 @@ impl IWriter {
 fimo_vtable! {
     /// VTable of an [`IWriter`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IWriterVTable<id = "fimo::ffi::writer"> {
+    #![uuid(0x75cff6a6, 0xf163, 0x4578, 0x8290, 0x20a4d157c338)]
+    pub struct IWriterVTable {
         /// Writes a string into the buffer/stream.
         pub write_str: unsafe extern "C" fn(*mut (), StrInner<false>) -> crate::Result<(), WriteError>,
         /// Writes a character into the buffer/stream.
@@ -122,9 +125,7 @@ impl std::fmt::Write for FormatterWrapper<'_, '_> {
     }
 }
 
-impl ObjectID for FormatterWrapper<'_, '_> {
-    const OBJECT_ID: &'static str = "rust::fmt::formatter";
-}
+is_object! { #![uuid(0x86f338ae, 0x9c3d, 0x4ec7, 0xb9e4, 0x92c3deb010dd)] FormatterWrapper<'_, '_> }
 
 impl CoerceObject<IWriterVTable> for FormatterWrapper<'_, '_> {
     fn get_vtable() -> &'static IWriterVTable {
@@ -224,9 +225,7 @@ struct SimpleErrorWrapper {
     e: Box<dyn DisplayDebug>,
 }
 
-impl ObjectID for SimpleErrorWrapper {
-    const OBJECT_ID: &'static str = "fimo::utils::ffi::error::simple_error_wrapper";
-}
+is_object! { #![uuid(0xf1aa569c, 0xdf5c, 0x4eb6, 0xa726, 0x1f717e1413f8)] SimpleErrorWrapper }
 
 impl CoerceObject<IErrorVTable> for SimpleErrorWrapper {
     fn get_vtable() -> &'static IErrorVTable {
@@ -267,9 +266,7 @@ struct ErrorWrapper {
     e: Box<dyn InnerError>,
 }
 
-impl ObjectID for ErrorWrapper {
-    const OBJECT_ID: &'static str = "fimo::utils::ffi::error::error_wrapper";
-}
+is_object! { #![uuid(0x02c27279, 0xfdc1, 0x4e15, 0x8e6b, 0xe4e0b5be2a7b)] ErrorWrapper }
 
 impl CoerceObject<IErrorVTable> for ErrorWrapper {
     fn get_vtable() -> &'static IErrorVTable {
