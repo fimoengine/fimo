@@ -2,7 +2,7 @@
 use crate::object::CoerceObjectMut;
 use crate::{fimo_object, fimo_vtable, ObjBox, Optional, StrInner};
 use fimo_object::object::{ObjPtrCompat, ObjectWrapper};
-use fimo_object::{impl_vtable, is_object};
+use fimo_object::{fimo_marker, impl_vtable, is_object};
 use std::fmt::Write;
 
 fimo_object! {
@@ -46,9 +46,12 @@ impl std::fmt::Display for IError {
     }
 }
 
-/// `Send` and `Sync` marker.
-#[derive(Debug)]
-pub struct SendSync;
+fimo_marker! {
+    /// `Send` and `Sync` marker.
+    #[derive(Debug)]
+    #![requires(Send, Sync)]
+    pub marker SendSync;
+}
 
 fimo_vtable! {
     /// VTable of an [`IError`].
@@ -152,7 +155,7 @@ pub trait ToBoxedError<B> {
 }
 
 /// Trait for complex errors wrapping an internal error.
-pub trait InnerError: std::fmt::Debug + std::fmt::Display {
+pub trait InnerError: std::fmt::Debug + std::fmt::Display + Send + Sync {
     /// Returns a reference to the internal error.
     fn source(&self) -> Option<&IError>;
 }
@@ -198,9 +201,9 @@ impl<'a> ToBoxedError<Box<dyn std::error::Error + Send + Sync>> for &'a str {
     }
 }
 
-trait DisplayDebug: std::fmt::Display + std::fmt::Debug {}
+trait DisplayDebug: std::fmt::Display + std::fmt::Debug + Send + Sync {}
 
-impl<T: std::fmt::Display + std::fmt::Debug + ?Sized> DisplayDebug for T {}
+impl<T: std::fmt::Display + std::fmt::Debug + Send + Sync + ?Sized> DisplayDebug for T {}
 
 impl<T: DisplayDebug + 'static> ToBoxedError<ObjBox<IError>> for T {
     default fn to_error(self) -> ObjBox<IError> {

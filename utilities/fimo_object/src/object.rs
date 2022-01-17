@@ -105,6 +105,8 @@ macro_rules! impl_vtable {
         $(#[$attr])*
         impl $crate::object::CoerceObject<$vtable> for $name {
             fn get_vtable() -> &'static $vtable {
+                <$vtable as $crate::vtable::VTable>::Marker::type_is_compatible::<$name>();
+
                 $crate::impl_vtable!{
                     $vtable; $name;;
                     $($rest)*
@@ -136,6 +138,8 @@ macro_rules! impl_vtable {
         $(#[$attr])*
         impl $crate::object::CoerceObject<$vtable> for $name {
             fn get_vtable() -> &'static $vtable {
+                <$vtable as $crate::vtable::VTable>::Marker::type_is_compatible::<$name>();
+
                 static __VTABLE: $vtable = <$vtable>::new::<$name>(
                     $($closures)*
                 );

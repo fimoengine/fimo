@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-pub fn core_module_path() -> Result<PathBuf, Box<dyn Error>> {
+pub fn core_module_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
     let artifact_dir = PathBuf::from(std::env::current_exe()?.parent().unwrap().parent().unwrap());
 
     let core_path = if cfg!(target_os = "windows") {
@@ -18,7 +18,7 @@ pub fn core_module_path() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 #[cfg(feature = "tasks_module")]
-pub fn tasks_module_path() -> Result<PathBuf, Box<dyn Error>> {
+pub fn tasks_module_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
     let artifact_dir = PathBuf::from(std::env::current_exe()?.parent().unwrap().parent().unwrap());
 
     let tasks_path = if cfg!(target_os = "windows") {
@@ -35,7 +35,7 @@ pub fn tasks_module_path() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 #[cfg(feature = "actix_module")]
-pub fn actix_module_path() -> Result<PathBuf, Box<dyn Error>> {
+pub fn actix_module_path() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
     let artifact_dir = PathBuf::from(std::env::current_exe()?.parent().unwrap().parent().unwrap());
 
     let core_path = if cfg!(target_os = "windows") {
