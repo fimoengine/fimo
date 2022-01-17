@@ -1,8 +1,8 @@
 //! Error type.
-use crate::object::{CoerceObject, CoerceObjectMut};
+use crate::object::CoerceObjectMut;
 use crate::{fimo_object, fimo_vtable, ObjBox, Optional, StrInner};
-use fimo_object::is_object;
 use fimo_object::object::{ObjPtrCompat, ObjectWrapper};
+use fimo_object::{impl_vtable, is_object};
 use std::fmt::Write;
 
 fimo_object! {
@@ -127,8 +127,8 @@ impl std::fmt::Write for FormatterWrapper<'_, '_> {
 
 is_object! { #![uuid(0x86f338ae, 0x9c3d, 0x4ec7, 0xb9e4, 0x92c3deb010dd)] FormatterWrapper<'_, '_> }
 
-impl CoerceObject<IWriterVTable> for FormatterWrapper<'_, '_> {
-    fn get_vtable() -> &'static IWriterVTable {
+impl_vtable! {
+    impl mut IWriterVTable => FormatterWrapper<'_, '_> {
         unsafe extern "C" fn write_str(
             ptr: *mut (),
             s: StrInner<false>,
@@ -136,19 +136,14 @@ impl CoerceObject<IWriterVTable> for FormatterWrapper<'_, '_> {
             let w = &mut *(ptr as *mut FormatterWrapper<'_, '_>);
             w.write_str(s.into()).map_err(|_| WriteError).into()
         }
+
         unsafe extern "C" fn write_char(ptr: *mut (), c: u32) -> crate::Result<(), WriteError> {
             let w = &mut *(ptr as *mut FormatterWrapper<'_, '_>);
             let c = char::from_u32_unchecked(c);
             w.write_char(c).map_err(|_| WriteError).into()
         }
-
-        static VTABLE: IWriterVTable =
-            IWriterVTable::new::<FormatterWrapper<'_, '_>>(write_str, write_char);
-        &VTABLE
     }
 }
-
-impl CoerceObjectMut<IWriterVTable> for FormatterWrapper<'_, '_> {}
 
 /// Trait for casting a type to a boxed error.
 pub trait ToBoxedError<B> {
@@ -204,6 +199,7 @@ impl<'a> ToBoxedError<Box<dyn std::error::Error + Send + Sync>> for &'a str {
 }
 
 trait DisplayDebug: std::fmt::Display + std::fmt::Debug {}
+
 impl<T: std::fmt::Display + std::fmt::Debug + ?Sized> DisplayDebug for T {}
 
 impl<T: DisplayDebug + 'static> ToBoxedError<ObjBox<IError>> for T {
@@ -227,12 +223,13 @@ struct SimpleErrorWrapper {
 
 is_object! { #![uuid(0xf1aa569c, 0xdf5c, 0x4eb6, 0xa726, 0x1f717e1413f8)] SimpleErrorWrapper }
 
-impl CoerceObject<IErrorVTable> for SimpleErrorWrapper {
-    fn get_vtable() -> &'static IErrorVTable {
+impl_vtable! {
+    impl mut IErrorVTable => SimpleErrorWrapper {
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn source(_e: *const ()) -> Optional<*const IError> {
             Optional::None
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn debug(e: *const (), w: *mut IWriter) -> crate::Result<(), WriteError> {
             let e = &*(e as *const SimpleErrorWrapper);
@@ -241,6 +238,7 @@ impl CoerceObject<IErrorVTable> for SimpleErrorWrapper {
             let s = format!("{:?}", e.e);
             w.write_str(s.as_str()).into()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn display(
             e: *const (),
@@ -252,14 +250,8 @@ impl CoerceObject<IErrorVTable> for SimpleErrorWrapper {
             let s = format!("{}", e.e);
             w.write_str(s.as_str()).into()
         }
-
-        static VTABLE: IErrorVTable =
-            IErrorVTable::new::<SimpleErrorWrapper>(source, debug, display);
-        &VTABLE
     }
 }
-
-impl CoerceObjectMut<IErrorVTable> for SimpleErrorWrapper {}
 
 #[allow(missing_debug_implementations)]
 struct ErrorWrapper {
@@ -268,13 +260,14 @@ struct ErrorWrapper {
 
 is_object! { #![uuid(0x02c27279, 0xfdc1, 0x4e15, 0x8e6b, 0xe4e0b5be2a7b)] ErrorWrapper }
 
-impl CoerceObject<IErrorVTable> for ErrorWrapper {
-    fn get_vtable() -> &'static IErrorVTable {
+impl_vtable! {
+    impl mut IErrorVTable => ErrorWrapper {
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn source(e: *const ()) -> Optional<*const IError> {
             let e = &*(e as *const ErrorWrapper);
             e.e.source().map(|i| i as _).into()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn debug(e: *const (), w: *mut IWriter) -> crate::Result<(), WriteError> {
             let e = &*(e as *const ErrorWrapper);
@@ -283,6 +276,7 @@ impl CoerceObject<IErrorVTable> for ErrorWrapper {
             let s = format!("{:?}", e.e);
             w.write_str(s.as_str()).into()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn display(
             e: *const (),
@@ -294,10 +288,5 @@ impl CoerceObject<IErrorVTable> for ErrorWrapper {
             let s = format!("{}", e.e);
             w.write_str(s.as_str()).into()
         }
-
-        static VTABLE: IErrorVTable = IErrorVTable::new::<ErrorWrapper>(source, debug, display);
-        &VTABLE
     }
 }
-
-impl CoerceObjectMut<IErrorVTable> for ErrorWrapper {}

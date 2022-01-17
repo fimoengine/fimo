@@ -3,9 +3,9 @@ use crate::{
     Error, ErrorKind, IModule, IModuleInstance, IModuleLoader, IModuleLoaderVTable, IModuleVTable,
     ModuleInfo, PathChar, SendSyncMarker,
 };
-use fimo_ffi::object::{CoerceObject, ObjectWrapper};
+use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::vtable::IBaseInterface;
-use fimo_ffi::{fimo_object, fimo_vtable, is_object, ObjArc, ObjWeak, SpanInner};
+use fimo_ffi::{fimo_object, fimo_vtable, impl_vtable, is_object, ObjArc, ObjWeak, SpanInner};
 use libloading::Library;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -122,15 +122,17 @@ impl RustLoader {
 
 is_object! { #![uuid(0x1aef7722, 0xf3a9, 0x43e9, 0xa27b, 0x753510e42700)] RustLoader }
 
-impl CoerceObject<IModuleLoaderVTable> for RustLoader {
-    fn get_vtable() -> &'static IModuleLoaderVTable {
+impl_vtable! {
+    impl IModuleLoaderVTable => RustLoader {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            &*(&VTABLE as *const _ as *const IBaseInterface)
+            &*(&__VTABLE as *const _ as *const IBaseInterface)
         }
+
         unsafe extern "C" fn evict(ptr: *const ()) {
             let this = &*(ptr as *const RustLoader);
             this.evict_module_cache()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn load_module(
             ptr: *const (),
@@ -143,6 +145,7 @@ impl CoerceObject<IModuleLoaderVTable> for RustLoader {
             let m = m.map(ObjArc::coerce_object);
             From::from(m)
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn load_module_raw(
             ptr: *const (),
@@ -155,10 +158,6 @@ impl CoerceObject<IModuleLoaderVTable> for RustLoader {
             let m = m.map(ObjArc::coerce_object);
             From::from(m)
         }
-
-        static VTABLE: IModuleLoaderVTable =
-            IModuleLoaderVTable::new::<RustLoader>(inner, evict, load_module, load_module_raw);
-        &VTABLE
     }
 }
 
@@ -306,42 +305,42 @@ impl RustModule {
 
 is_object! { #![uuid(0xb61d9c2c, 0xc739, 0x426f, 0x8ba7, 0xb8e2acb4cbbd)] RustModule }
 
-impl CoerceObject<IRustModuleParentVTable> for RustModule {
-    #[inline]
-    fn get_vtable() -> &'static IRustModuleParentVTable {
-        static VTABLE: IRustModuleParentVTable = IRustModuleParentVTable::new::<RustModule>(
-            |_ptr| RustModule::get_vtable(),
-            |ptr| {
-                let this = unsafe { &*(ptr as *const RustModule) };
-                this.module_path().into()
-            },
-            |ptr| unsafe {
-                let this = &*(ptr as *const RustModule);
-                IModuleLoader::from_object(this.module_loader().coerce_obj())
-            },
-        );
-        &VTABLE
+impl_vtable! {
+    impl inline IRustModuleParentVTable => RustModule {
+        |_ptr| RustModule::get_vtable(),
+        |ptr| {
+            let this = unsafe { &*(ptr as *const RustModule) };
+            this.module_path().into()
+        },
+        |ptr| unsafe {
+            let this = &*(ptr as *const RustModule);
+            IModuleLoader::from_object(this.module_loader().coerce_obj())
+        },
     }
 }
 
-impl CoerceObject<IModuleVTable> for RustModule {
-    fn get_vtable() -> &'static IModuleVTable {
+impl_vtable! {
+    impl IModuleVTable => RustModule {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            &*(&VTABLE as *const _ as *const IBaseInterface)
+            &*(&__VTABLE as *const _ as *const IBaseInterface)
         }
+
         unsafe extern "C" fn module_path(ptr: *const ()) -> SpanInner<PathChar, false> {
             let this = &*(ptr as *const RustModule);
             this.module_path().into()
         }
+
         unsafe extern "C" fn module_info(ptr: *const ()) -> *const ModuleInfo {
             let this = &*(ptr as *const RustModule);
             this.module_info()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn module_loader(ptr: *const ()) -> &'static IModuleLoader {
             let this = &*(ptr as *const RustModule);
             IModuleLoader::from_object(this.module_loader().coerce_obj())
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn new_instance(
             ptr: *const (),
@@ -349,15 +348,6 @@ impl CoerceObject<IModuleVTable> for RustModule {
             let this = &*(ptr as *const RustModule);
             this.new_instance().into()
         }
-
-        static VTABLE: IModuleVTable = IModuleVTable::new::<RustModule>(
-            inner,
-            module_path,
-            module_info,
-            module_loader,
-            new_instance,
-        );
-        &VTABLE
     }
 }
 

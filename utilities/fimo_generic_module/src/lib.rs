@@ -1,12 +1,12 @@
 //! Implementation of a generic rust module.
 use fimo_ffi::error::InnerError;
-use fimo_ffi::object::CoerceObject;
 use fimo_ffi::vtable::IBaseInterface;
 use fimo_ffi::{ObjArc, ObjWeak, SpanInner};
 use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleInnerVTable, IRustModuleParent};
 use fimo_module_core::{
-    is_object, Error, ErrorKind, IModule, IModuleInstance, IModuleInstanceVTable, IModuleInterface,
-    IModuleLoader, IModuleVTable, ModuleInfo, ModuleInterfaceDescriptor, PathChar,
+    impl_vtable, is_object, Error, ErrorKind, IModule, IModuleInstance, IModuleInstanceVTable,
+    IModuleInterface, IModuleLoader, IModuleVTable, ModuleInfo, ModuleInterfaceDescriptor,
+    PathChar,
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -59,27 +59,31 @@ impl GenericModule {
 
 is_object! { #![uuid(0x73a946f0, 0x4fdf, 0x43b6, 0x8c0d, 0xfcc8bd039cea)] GenericModule }
 
-impl CoerceObject<IModuleVTable> for GenericModule {
-    fn get_vtable() -> &'static IModuleVTable {
+impl_vtable! {
+    impl IModuleVTable => GenericModule {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
             let i: &IRustModuleInnerVTable = GenericModule::get_vtable();
             std::mem::transmute(i)
         }
+
         unsafe extern "C" fn module_path(ptr: *const ()) -> SpanInner<PathChar, false> {
             let this = &*(ptr as *const GenericModule);
             let parent = this.parent.assume_init_ref().upgrade().unwrap();
             parent.module_path()
         }
+
         unsafe extern "C" fn module_info(ptr: *const ()) -> *const ModuleInfo {
             let this = &*(ptr as *const GenericModule);
             &this.module_info
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn module_loader(ptr: *const ()) -> &'static IModuleLoader {
             let this = &*(ptr as *const GenericModule);
             let parent = this.parent.assume_init_ref().upgrade().unwrap();
             parent.module_loader()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn new_instance(
             ptr: *const (),
@@ -90,28 +94,16 @@ impl CoerceObject<IModuleVTable> for GenericModule {
                 .map(ObjArc::<IModuleInstance>::coerce_object)
                 .into()
         }
-
-        static VTABLE: IModuleVTable = IModuleVTable::new::<GenericModule>(
-            inner,
-            module_path,
-            module_info,
-            module_loader,
-            new_instance,
-        );
-        &VTABLE
     }
 }
 
-impl CoerceObject<IRustModuleInnerVTable> for GenericModule {
-    fn get_vtable() -> &'static IRustModuleInnerVTable {
-        static VTABLE: IRustModuleInnerVTable = IRustModuleInnerVTable::new::<GenericModule>(
-            |_ptr| GenericModule::get_vtable(),
-            |ptr, parent| unsafe {
-                let this = &mut *(ptr as *mut GenericModule);
-                this.parent = MaybeUninit::new(parent);
-            },
-        );
-        &VTABLE
+impl_vtable! {
+    impl inline IRustModuleInnerVTable => GenericModule {
+        |_ptr| GenericModule::get_vtable(),
+        |ptr, parent| unsafe {
+            let this = &mut *(ptr as *mut GenericModule);
+            this.parent = MaybeUninit::new(parent);
+        },
     }
 }
 
@@ -249,12 +241,13 @@ impl GenericModuleInstance {
 
 is_object! { #![uuid(0xda5d5297, 0x2b5a, 0x4fe5, 0x8af1, 0xc8420d4d1edc)] GenericModuleInstance }
 
-impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
-    fn get_vtable() -> &'static IModuleInstanceVTable {
+impl_vtable! {
+    impl IModuleInstanceVTable => GenericModuleInstance {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
             let i: &IModuleInstanceVTable = GenericModuleInstance::get_vtable();
             std::mem::transmute(i)
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn module(ptr: *const ()) -> ObjArc<IModule> {
             let this = &*(ptr as *const GenericModuleInstance);
@@ -263,12 +256,14 @@ impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
             let module = (*parent).as_module();
             ObjArc::from_raw_parts(module, alloc)
         }
+
         unsafe extern "C" fn available_interfaces(
             ptr: *const (),
         ) -> SpanInner<ModuleInterfaceDescriptor, false> {
             let this = &*(ptr as *const GenericModuleInstance);
             this.get_available_interfaces().into()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn interface(
             ptr: *const (),
@@ -279,6 +274,7 @@ impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
                 .map_err(|e| Error::new(ErrorKind::Internal, e))
                 .into()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn dependencies(
             ptr: *const (),
@@ -290,6 +286,7 @@ impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
                 |d| fimo_module_core::Result::Ok(d.into()),
             )
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn set_core(
             ptr: *const (),
@@ -301,16 +298,6 @@ impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
                 .map_err(|e| Error::new(ErrorKind::NotFound, e))
                 .into()
         }
-
-        static VTABLE: IModuleInstanceVTable = IModuleInstanceVTable::new::<GenericModuleInstance>(
-            inner,
-            module,
-            available_interfaces,
-            interface,
-            dependencies,
-            set_core,
-        );
-        &VTABLE
     }
 }
 

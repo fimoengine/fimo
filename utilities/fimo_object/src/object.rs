@@ -93,6 +93,111 @@ macro_rules! fimo_object {
     };
 }
 
+/// Implements a vtable for an object.
+#[macro_export]
+macro_rules! impl_vtable {
+    (
+        $(#[$attr:meta])*
+        impl $vtable:ty => $name:ty {
+            $($rest:tt)*
+        }
+    ) => {
+        $(#[$attr])*
+        impl $crate::object::CoerceObject<$vtable> for $name {
+            fn get_vtable() -> &'static $vtable {
+                $crate::impl_vtable!{
+                    $vtable; $name;;
+                    $($rest)*
+                }
+            }
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        impl mut $vtable:ty => $name:ty {
+            $($rest:tt)*
+        }
+    ) => {
+        $crate::impl_vtable! {
+            $(#[$attr])*
+            impl $vtable => $name {
+                $($rest)*
+            }
+        }
+
+        impl $crate::object::CoerceObjectMut<$vtable> for $name {}
+    };
+    (
+        $(#[$attr:meta])*
+        impl inline $vtable:ty => $name:ty {
+            $($closures:tt)*
+        }
+    ) => {
+        $(#[$attr])*
+        impl $crate::object::CoerceObject<$vtable> for $name {
+            fn get_vtable() -> &'static $vtable {
+                static __VTABLE: $vtable = <$vtable>::new::<$name>(
+                    $($closures)*
+                );
+                &__VTABLE
+            }
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        impl inline mut $vtable:ty => $name:ty {
+            $($rest:tt)*
+        }
+    ) => {
+        $crate::impl_vtable! {
+            $(#[$attr])*
+            impl inline $vtable => $name {
+                $($rest)*
+            }
+        }
+
+        impl $crate::object::CoerceObjectMut<$vtable> for $name {}
+    };
+    ($vtable:ty; $name:ty; $($ident:ident)*;) => {
+        static __VTABLE: $vtable = <$vtable>::new::<$name>(
+            $($ident),*
+        );
+        &__VTABLE
+    };
+    (
+        $vtable:ty; $name:ty; $($ident:ident)*;
+
+        $(#[$func_meta:meta])*
+        unsafe $(extern $func_abi:literal)? fn $func_name:ident($($arg_name:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $func_block:block
+
+        $($rest:tt)*
+    ) => {
+        $(#[$func_meta])*
+        unsafe $(extern $func_abi)? fn $func_name( $($arg_name: $arg_ty),* ) $(-> $ret)? $func_block
+
+        $crate::impl_vtable!{
+            $vtable; $name; $($ident)* $func_name;
+            $($rest)*
+        }
+    };
+    (
+        $vtable:ty; $name:ty; $($ident:ident)*;
+
+        $(#[$func_meta:meta])*
+        $(extern $func_abi:literal)? fn $func_name:ident($($arg_name:ident : $arg_ty:ty),* $(,)?) $(-> $ret:ty)? $func_block:block
+
+        $($rest:tt)*
+    ) => {
+        $(#[$func_meta])*
+        $(extern $func_abi)? fn $func_name( $($arg_name: $arg_ty),* ) $(-> $ret)? $func_block
+
+        $crate::impl_vtable!{
+            $vtable; $name; $($ident)* $func_name;
+            $($rest)*
+        }
+    };
+}
+
 /// Used for coercing a type to an Object reference.
 pub trait CoerceObject<T: VTable>: ObjectID {
     /// Fetches a static reference to the vtable.

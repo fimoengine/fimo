@@ -1,10 +1,9 @@
 //! Implementation of the module.
 use crate::TaskRuntime;
-use fimo_ffi::object::CoerceObject;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{
-    is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
+    impl_vtable, is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
 };
 use fimo_tasks_int::rust::{IFimoTasksVTable, TaskRuntimeInner};
 use fimo_version_core::Version;
@@ -22,16 +21,18 @@ struct TaskInterface {
 
 is_object! { #![uuid(0xebf605a4, 0xa3e1, 0x47d7, 0x9533, 0xef1105a99992)] TaskInterface }
 
-impl CoerceObject<IModuleInterfaceVTable> for TaskInterface {
-    fn get_vtable() -> &'static IModuleInterfaceVTable {
+impl_vtable! {
+    impl IModuleInterfaceVTable => TaskInterface {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
             let i: &IFimoTasksVTable = TaskInterface::get_vtable();
             i.as_base()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn version(_ptr: *const ()) -> Version {
             fimo_tasks_int::rust::IFimoTasks::VERSION
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn extension(
             _ptr: *const (),
@@ -39,25 +40,21 @@ impl CoerceObject<IModuleInterfaceVTable> for TaskInterface {
         ) -> Optional<*const Object<IBaseInterface>> {
             Optional::None
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn instance(ptr: *const ()) -> ObjArc<IModuleInstance> {
             let this = &*(ptr as *const TaskInterface);
             this.parent.clone()
         }
-
-        static VTABLE: IModuleInterfaceVTable =
-            IModuleInterfaceVTable::new::<TaskInterface>(inner, version, extension, instance);
-        &VTABLE
     }
 }
 
-impl CoerceObject<IFimoTasksVTable> for TaskInterface {
-    fn get_vtable() -> &'static IFimoTasksVTable {
-        static VTABLE: IFimoTasksVTable = IFimoTasksVTable::new::<TaskInterface>(|ptr| unsafe {
+impl_vtable! {
+    impl inline IFimoTasksVTable => TaskInterface {
+        |ptr| unsafe {
             &(*(ptr as *const TaskInterface)).runtime as &dyn TaskRuntimeInner as *const _
                 as *const fimo_tasks_int::rust::TaskRuntime
-        });
-        &VTABLE
+        }
     }
 }
 

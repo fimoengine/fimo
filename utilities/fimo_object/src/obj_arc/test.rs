@@ -1,5 +1,5 @@
 use crate::vtable::IBaseInterface;
-use crate::{is_object, CoerceObject, ObjArc, ObjWeak, Object};
+use crate::{impl_vtable, is_object, ObjArc, ObjWeak, Object};
 use std::cell::RefCell;
 
 #[test]
@@ -90,12 +90,7 @@ fn drop_obj() {
         }
     }
     is_object! { #![uuid(0x6e3178d1, 0xad1e, 0x4071, 0xaa82, 0xd732eefe118f)] TestObj<'_> }
-    impl CoerceObject<IBaseInterface> for TestObj<'_> {
-        fn get_vtable() -> &'static IBaseInterface {
-            static VTABLE: IBaseInterface = IBaseInterface::new::<TestObj<'_>>();
-            &VTABLE
-        }
-    }
+    impl_vtable! { impl IBaseInterface => TestObj<'_> {} }
 
     let val = RefCell::new(0);
     let x = ObjArc::new(TestObj(&val));

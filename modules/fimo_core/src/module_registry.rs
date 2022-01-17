@@ -6,7 +6,8 @@ use fimo_core_int::rust::module_registry::{
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::{ArrayString, ObjArc};
 use fimo_module_core::{
-    is_object, Error, ErrorKind, IModuleInterface, IModuleLoader, ModuleInterfaceDescriptor,
+    impl_vtable, is_object, Error, ErrorKind, IModuleInterface, IModuleLoader,
+    ModuleInterfaceDescriptor,
 };
 use fimo_version_core::Version;
 use serde::{Deserialize, Serialize};
@@ -58,17 +59,15 @@ impl Default for ModuleRegistry {
 
 is_object! { #![uuid(0x43cdc830, 0x1706, 0x4234, 0xbedc, 0x29a51e751dc7)] ModuleRegistry }
 
-impl CoerceObject<ModuleRegistryVTable> for ModuleRegistry {
-    fn get_vtable() -> &'static ModuleRegistryVTable {
-        static VTABLE: ModuleRegistryVTable =
-            ModuleRegistryVTable::new::<ModuleRegistry>(|ptr, f| {
-                let registry = unsafe { &*(ptr as *const ModuleRegistry) };
-                let mut inner = registry.inner.lock();
-                let inner = inner.coerce_obj_mut();
-                let inner = IModuleRegistryInner::from_object_mut(inner);
-                unsafe { f.call_once((inner,)) }
-            });
-        &VTABLE
+impl_vtable! {
+    impl inline ModuleRegistryVTable => ModuleRegistry {
+        |ptr, f| {
+            let registry = unsafe { &*(ptr as *const ModuleRegistry) };
+            let mut inner = registry.inner.lock();
+            let inner = inner.coerce_obj_mut();
+            let inner = IModuleRegistryInner::from_object_mut(inner);
+            unsafe { f.call_once((inner,)) }
+        }
     }
 }
 
@@ -407,94 +406,88 @@ impl ModuleRegistryInner {
 
 is_object! { #![uuid(0xf9077e25, 0x43e1, 0x4857, 0xbe2b, 0xfcd430802e46)] ModuleRegistryInner }
 
-impl CoerceObject<ModuleRegistryInnerVTable> for ModuleRegistryInner {
-    fn get_vtable() -> &'static ModuleRegistryInnerVTable {
-        static VTABLE: ModuleRegistryInnerVTable =
-            ModuleRegistryInnerVTable::new::<ModuleRegistryInner>(
-                |ptr, r#type, loader| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    let r#type = unsafe { &*r#type };
-                    registry
-                        .register_loader(r#type, loader)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, id| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    registry
-                        .unregister_loader(id)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, r#type, callback| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    let r#type = unsafe { &*r#type };
-                    registry
-                        .register_loader_callback(r#type, callback)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, id| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    registry
-                        .unregister_loader_callback(id)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, r#type| {
-                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-                    let r#type = unsafe { &*r#type };
-                    registry
-                        .get_loader_from_type(r#type)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, descriptor, interface| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    let descriptor = unsafe { &*descriptor };
-                    registry
-                        .register_interface(descriptor, interface)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, id| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    registry
-                        .unregister_interface(id)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, descriptor, callback| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    let descriptor = unsafe { &*descriptor };
-                    registry
-                        .register_interface_callback(descriptor, callback)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, id| {
-                    let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-                    registry
-                        .unregister_interface_callback(id)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, descriptor| {
-                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-                    let descriptor = unsafe { &*descriptor };
-                    registry
-                        .get_interface_from_descriptor(descriptor)
-                        .map_err(|e| Error::new(ErrorKind::Unknown, e))
-                },
-                |ptr, name| {
-                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-                    let name = unsafe { &*name };
-                    registry.get_interface_descriptors_from_name(name)
-                },
-                |ptr, name, version, extensions| {
-                    let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-                    let name = unsafe { &*name };
-                    let version = unsafe { &*version };
-                    let extensions = unsafe { &*extensions };
-                    registry.get_compatible_interface_descriptors(name, version, extensions)
-                },
-            );
-        &VTABLE
+impl_vtable! {
+    impl inline mut ModuleRegistryInnerVTable => ModuleRegistryInner {
+        |ptr, r#type, loader| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            let r#type = unsafe { &*r#type };
+            registry
+                .register_loader(r#type, loader)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, id| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            registry
+                .unregister_loader(id)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, r#type, callback| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            let r#type = unsafe { &*r#type };
+            registry
+                .register_loader_callback(r#type, callback)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, id| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            registry
+                .unregister_loader_callback(id)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, r#type| {
+            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+            let r#type = unsafe { &*r#type };
+            registry
+                .get_loader_from_type(r#type)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, descriptor, interface| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            let descriptor = unsafe { &*descriptor };
+            registry
+                .register_interface(descriptor, interface)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, id| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            registry
+                .unregister_interface(id)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, descriptor, callback| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            let descriptor = unsafe { &*descriptor };
+            registry
+                .register_interface_callback(descriptor, callback)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, id| {
+            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
+            registry
+                .unregister_interface_callback(id)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, descriptor| {
+            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+            let descriptor = unsafe { &*descriptor };
+            registry
+                .get_interface_from_descriptor(descriptor)
+                .map_err(|e| Error::new(ErrorKind::Unknown, e))
+        },
+        |ptr, name| {
+            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+            let name = unsafe { &*name };
+            registry.get_interface_descriptors_from_name(name)
+        },
+        |ptr, name, version, extensions| {
+            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
+            let name = unsafe { &*name };
+            let version = unsafe { &*version };
+            let extensions = unsafe { &*extensions };
+            registry.get_compatible_interface_descriptors(name, version, extensions)
+        },
     }
 }
-
-impl CoerceObjectMut<ModuleRegistryInnerVTable> for ModuleRegistryInner {}
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 struct IdWrapper<T> {
