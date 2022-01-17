@@ -4,8 +4,7 @@ use fimo_core_int::rust::settings_registry::{
     SettingsItemMetadata, SettingsItemType, SettingsRegistryInvalidPathError, SettingsRegistryPath,
     SettingsRegistryPathBuf, SettingsRegistryVTable,
 };
-use fimo_ffi::object::CoerceObject;
-use fimo_module_core::is_object;
+use fimo_module_core::{impl_vtable, is_object};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -37,50 +36,47 @@ impl Default for SettingsRegistry {
 
 is_object! { #![uuid(0x4b43ec0b, 0x04b6, 0x4a2f, 0xaa05, 0x012b8be7dd2a)] SettingsRegistry }
 
-impl CoerceObject<SettingsRegistryVTable> for SettingsRegistry {
-    fn get_vtable() -> &'static SettingsRegistryVTable {
-        static VTABLE: SettingsRegistryVTable = SettingsRegistryVTable::new::<SettingsRegistry>(
-            |ptr, path| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().contains(path)
-            },
-            |ptr, path| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().item_type(path)
-            },
-            |ptr, path| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().read(path)
-            },
-            |ptr, path, value| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().write(path, value)
-            },
-            |ptr, path, value| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().read_or(path, value)
-            },
-            |ptr, path| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().remove(path)
-            },
-            |ptr, path, f| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                let path = unsafe { &*path };
-                registry.inner.lock().register_callback(path, f)
-            },
-            |ptr, id| {
-                let registry = unsafe { &*(ptr as *const SettingsRegistry) };
-                registry.inner.lock().unregister_callback(id)
-            },
-        );
-        &VTABLE
+impl_vtable! {
+    impl inline SettingsRegistryVTable => SettingsRegistry {
+        |ptr, path| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().contains(path)
+        },
+        |ptr, path| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().item_type(path)
+        },
+        |ptr, path| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().read(path)
+        },
+        |ptr, path, value| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().write(path, value)
+        },
+        |ptr, path, value| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().read_or(path, value)
+        },
+        |ptr, path| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().remove(path)
+        },
+        |ptr, path, f| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            let path = unsafe { &*path };
+            registry.inner.lock().register_callback(path, f)
+        },
+        |ptr, id| {
+            let registry = unsafe { &*(ptr as *const SettingsRegistry) };
+            registry.inner.lock().unregister_callback(id)
+        },
     }
 }
 

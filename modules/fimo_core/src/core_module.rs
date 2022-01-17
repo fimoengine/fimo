@@ -3,11 +3,11 @@ use crate::CoreInterface;
 use fimo_core_int::rust::module_registry::IModuleRegistry;
 use fimo_core_int::rust::settings_registry::SettingsRegistry;
 use fimo_core_int::rust::{IFimoCore, IFimoCoreVTable};
-use fimo_ffi::object::{CoerceObject, ObjectWrapper};
+use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{
-    is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
+    impl_vtable, is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
 };
 use fimo_version_core::Version;
 
@@ -26,32 +26,31 @@ sa::assert_impl_all!(CoreWrapper: Send, Sync);
 
 is_object! { #![uuid(0x8e68e497, 0x4dd1, 0x481c, 0xafe2, 0xdb7c063ae9f4)] CoreWrapper }
 
-impl CoerceObject<IFimoCoreVTable> for CoreWrapper {
-    fn get_vtable() -> &'static IFimoCoreVTable {
-        static VTABLE: IFimoCoreVTable = IFimoCoreVTable::new::<CoreWrapper>(
-            |ptr| {
-                let this = unsafe { &*(ptr as *const CoreWrapper) };
-                IModuleRegistry::from_object(this.interface.as_module_registry().coerce_obj())
-            },
-            |ptr| {
-                let this = unsafe { &*(ptr as *const CoreWrapper) };
-                SettingsRegistry::from_object(this.interface.as_settings_registry().coerce_obj())
-            },
-        );
-        &VTABLE
+impl_vtable! {
+    impl inline IFimoCoreVTable => CoreWrapper {
+        |ptr| {
+            let this = unsafe { &*(ptr as *const CoreWrapper) };
+            IModuleRegistry::from_object(this.interface.as_module_registry().coerce_obj())
+        },
+        |ptr| {
+            let this = unsafe { &*(ptr as *const CoreWrapper) };
+            SettingsRegistry::from_object(this.interface.as_settings_registry().coerce_obj())
+        },
     }
 }
 
-impl CoerceObject<IModuleInterfaceVTable> for CoreWrapper {
-    fn get_vtable() -> &'static IModuleInterfaceVTable {
+impl_vtable! {
+    impl IModuleInterfaceVTable => CoreWrapper {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
             let i: &IFimoCoreVTable = CoreWrapper::get_vtable();
             i.as_base()
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn version(_ptr: *const ()) -> Version {
             IFimoCore::VERSION
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn extension(
             _ptr: *const (),
@@ -59,15 +58,12 @@ impl CoerceObject<IModuleInterfaceVTable> for CoreWrapper {
         ) -> Optional<*const Object<IBaseInterface>> {
             Optional::None
         }
+
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn instance(ptr: *const ()) -> ObjArc<IModuleInstance> {
             let this = &*(ptr as *const CoreWrapper);
             this.parent.clone()
         }
-
-        static VTABLE: IModuleInterfaceVTable =
-            IModuleInterfaceVTable::new::<CoreWrapper>(inner, version, extension, instance);
-        &VTABLE
     }
 }
 

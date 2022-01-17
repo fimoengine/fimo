@@ -231,7 +231,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
@@ -246,12 +246,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
     /// is_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] MyObj }
-    /// impl CoerceObject<ObjVTable> for MyObj {
-    ///     fn get_vtable() -> &'static ObjVTable {
-    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
-    ///             |ptr, num| unsafe { (*(ptr as *const MyObj)).0 + num }
-    ///         );
-    ///         &VTABLE
+    /// impl_vtable! {
+    ///     impl inline ObjVTable => MyObj {
+    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
     ///     }
     /// }
     ///
@@ -303,7 +300,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     ///
     /// // Define a custom interface vtable.
@@ -317,18 +314,8 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// struct SecondObj;
     /// is_object! { #![uuid(0xe98df5c9, 0x1d0e, 0x4289, 0x8f93, 0x55037e65c725)] FirstObj }
     /// is_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] SecondObj }
-    /// impl CoerceObject<ObjVTable> for FirstObj {
-    ///     fn get_vtable() -> &'static ObjVTable {
-    ///         static VTABLE: ObjVTable = ObjVTable::new::<FirstObj>();
-    ///         &VTABLE
-    ///     }
-    /// }
-    /// impl CoerceObject<ObjVTable> for SecondObj {
-    ///     fn get_vtable() -> &'static ObjVTable {
-    ///         static VTABLE: ObjVTable = ObjVTable::new::<SecondObj>();
-    ///         &VTABLE
-    ///     }
-    /// }
+    /// impl_vtable! { impl ObjVTable => FirstObj {} }
+    /// impl_vtable! { impl ObjVTable => SecondObj {} }
     ///
     /// let x = ObjArc::new(FirstObj(5));
     /// let obj: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
@@ -365,7 +352,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
@@ -380,12 +367,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
     /// is_object! { #![uuid(0x9558d810, 0x0053, 0x41a3, 0xa520, 0x9745f965567c)] MyObj }
-    /// impl CoerceObject<ObjVTable> for MyObj {
-    ///     fn get_vtable() -> &'static ObjVTable {
-    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
-    ///             |ptr, num| unsafe { (*(ptr as *const MyObj)).0 + num }
-    ///         );
-    ///         &VTABLE
+    /// impl_vtable! {
+    ///     impl inline ObjVTable => MyObj {
+    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
     ///     }
     /// }
     ///
@@ -451,7 +435,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, ObjArc, Object};
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
     /// use fimo_object::vtable::ObjectID;
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
@@ -466,12 +450,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
     /// is_object! { #![uuid(0xe0497698, 0xa0f1, 0x480e, 0xb158, 0x9cdbd7de426d)] MyObj }
-    /// impl CoerceObject<ObjVTable> for MyObj {
-    ///     fn get_vtable() -> &'static ObjVTable {
-    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(
-    ///             |ptr, num| unsafe { (*(ptr as *const MyObj)).0 + num }
-    ///         );
-    ///         &VTABLE
+    /// impl_vtable! {
+    ///     impl inline ObjVTable => MyObj {
+    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
     ///     }
     /// }
     ///
