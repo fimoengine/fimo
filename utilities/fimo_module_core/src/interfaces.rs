@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 /// use fimo_module_core::{fimo_vtable, fimo_interface};
 ///
 /// fimo_vtable! {
-///     struct VTable<id = "unique id">;
+///     #![uuid(0xa0fe4d60, 0xa526, 0x4e9e, 0x97e2, 0x4c675aa6b324)]
+///     struct VTable;
 /// }
 ///
 /// // interface without extensions.
@@ -170,7 +171,9 @@ impl IModuleLoader {
 fimo_vtable! {
     /// VTable of a [`IModuleLoader`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IModuleLoaderVTable<id = "fimo::utils::module::interfaces::module_loader", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x6533e721, 0x5402, 0x46bc, 0x91e5, 0x882b0e4ffec9)]
+    pub struct IModuleLoaderVTable {
         /// Fetches an internal vtable for the loader.
         pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Removes all modules that aren't referenced by anyone from the cache,
@@ -274,7 +277,9 @@ impl IModule {
 fimo_vtable! {
     /// VTable of a [`IModule`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IModuleVTable<id = "fimo::utils::module::interfaces::module", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0xccca2ad2, 0x38e4, 0x4c0d, 0x9975, 0x8f8e472ab03a)]
+    pub struct IModuleVTable {
         /// Fetches an internal vtable for the module.
         pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Fetches the path to the module root.
@@ -368,7 +373,9 @@ impl IModuleInstance {
 fimo_vtable! {
     /// VTable of a [`IModuleInstance`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IModuleInstanceVTable<id = "fimo::utils::module::interfaces::module_instance", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0xe0c7335e, 0x4cfe, 0x44fc, 0x909b, 0x2e02f3f139b1)]
+    pub struct IModuleInstanceVTable {
         /// Fetches an internal vtable for the instance.
         pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Fetches the parent module.
@@ -514,7 +521,9 @@ impl IModuleInterface {
 fimo_vtable! {
     /// VTable of a [`IModuleInterface`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    pub struct IModuleInterfaceVTable<id = "fimo::utils::module::interfaces::module_interface", marker = SendSyncMarker> {
+    #![marker = SendSyncMarker]
+    #![uuid(0x9b0e35ac, 0xb20d, 0x4c75, 0x8b42, 0x16d99a8cf182)]
+    pub struct IModuleInterfaceVTable {
         /// Fetches an internal vtable for the interface.
         pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
         /// Extracts the version of the implemented interface.

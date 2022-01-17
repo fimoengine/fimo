@@ -1,11 +1,11 @@
 //! Implementation of a generic rust module.
 use fimo_ffi::error::InnerError;
 use fimo_ffi::object::CoerceObject;
-use fimo_ffi::vtable::{IBaseInterface, ObjectID};
+use fimo_ffi::vtable::IBaseInterface;
 use fimo_ffi::{ObjArc, ObjWeak, SpanInner};
 use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleInnerVTable, IRustModuleParent};
 use fimo_module_core::{
-    Error, ErrorKind, IModule, IModuleInstance, IModuleInstanceVTable, IModuleInterface,
+    is_object, Error, ErrorKind, IModule, IModuleInstance, IModuleInstanceVTable, IModuleInterface,
     IModuleLoader, IModuleVTable, ModuleInfo, ModuleInterfaceDescriptor, PathChar,
 };
 use parking_lot::Mutex;
@@ -57,9 +57,7 @@ impl GenericModule {
     }
 }
 
-impl ObjectID for GenericModule {
-    const OBJECT_NAME: &'static str = "fimo::utils::generic_module::generic_module";
-}
+is_object! { #![uuid(0x73a946f0, 0x4fdf, 0x43b6, 0x8c0d, 0xfcc8bd039cea)] GenericModule }
 
 impl CoerceObject<IModuleVTable> for GenericModule {
     fn get_vtable() -> &'static IModuleVTable {
@@ -249,9 +247,7 @@ impl GenericModuleInstance {
     }
 }
 
-impl ObjectID for GenericModuleInstance {
-    const OBJECT_NAME: &'static str = "fimo::utils::generic_module::generic_module_instance";
-}
+is_object! { #![uuid(0xda5d5297, 0x2b5a, 0x4fe5, 0x8af1, 0xc8420d4d1edc)] GenericModuleInstance }
 
 impl CoerceObject<IModuleInstanceVTable> for GenericModuleInstance {
     fn get_vtable() -> &'static IModuleInstanceVTable {

@@ -15,8 +15,9 @@
 #![feature(const_fn_trait_bound)]
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(alloc_layout_extra)]
-#![feature(cfg_sanitize)]
+#![feature(const_type_name)]
 #![feature(set_ptr_value)]
+#![feature(cfg_sanitize)]
 
 pub mod obj_arc;
 pub mod obj_box;

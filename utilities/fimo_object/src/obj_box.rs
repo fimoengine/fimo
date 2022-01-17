@@ -127,7 +127,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
                 Err(err) => Err(CastError {
                     obj: ObjBox::from_raw_parts(ptr, alloc),
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 }),
             }
         }
@@ -149,7 +151,9 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
                 Err(err) => Err(CastError {
                     obj: ObjBox::from_raw_parts(ptr, alloc),
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 }),
             }
         }

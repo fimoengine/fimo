@@ -37,7 +37,10 @@ impl IFimoTasks {
 
 fimo_vtable! {
     /// VTable of an [`IFimoTasks`].
-    pub struct IFimoTasksVTable<id = "fimo::interfaces::tasks::fimo_tasks", marker = SendSyncMarker> {
+    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    #![marker = SendSyncMarker]
+    #![uuid(0x0d3b96a5, 0xdc04, 0x4a04, 0xacec, 0xfc1910e3af8a)]
+    pub struct IFimoTasksVTable {
         /// Extracts a reference to the task runtime.
         pub as_task_runtime: fn(*const ()) -> *const TaskRuntime
     }

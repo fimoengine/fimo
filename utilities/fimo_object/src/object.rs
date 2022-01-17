@@ -15,7 +15,8 @@ use std::marker::PhantomData;
 /// use fimo_object::{fimo_vtable, fimo_object};
 ///
 /// fimo_vtable! {
-///     struct VTable<id = "unique id">;
+///     #![uuid(0xb483a78e, 0xbc1f, 0x40bb, 0x9df4, 0x4c0939a0dd09)]
+///     struct VTable;
 /// }
 ///
 /// fimo_object!(struct Obj<vtable = VTable>;);
@@ -284,7 +285,9 @@ impl<T: VTable> Object<T> {
                 Err(CastError {
                     obj: self,
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 })
             },
             |obj| unsafe { Ok(&*obj) },
@@ -302,7 +305,9 @@ impl<T: VTable> Object<T> {
                 Err(CastError {
                     obj: o,
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 })
             },
             |obj| Ok(from_raw(obj)),
@@ -317,7 +322,9 @@ impl<T: VTable> Object<T> {
                 Err(CastError {
                     obj: self,
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 })
             },
             |obj| unsafe { Ok(&mut *obj) },
@@ -335,7 +342,9 @@ impl<T: VTable> Object<T> {
                 Err(CastError {
                     obj: o,
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 })
             },
             |obj| Ok(from_raw_mut(obj)),
@@ -350,7 +359,9 @@ impl<T: VTable> Object<T> {
                 Err(CastError {
                     obj: self,
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 })
             },
             |obj| unsafe { Ok(&*obj) },
@@ -365,7 +376,9 @@ impl<T: VTable> Object<T> {
         crate::raw::try_cast_obj::<T, O>(raw).map_err(|e| CastError {
             obj: o,
             required: e.required,
+            required_id: e.required_id,
             available: e.available,
+            available_id: e.available_id,
         })
     }
 
@@ -378,7 +391,9 @@ impl<T: VTable> Object<T> {
                 Err(CastError {
                     obj: self,
                     required: err.required,
+                    required_id: err.required_id,
                     available: err.available,
+                    available_id: err.available_id,
                 })
             },
             |obj| unsafe { Ok(&mut *obj) },
@@ -391,7 +406,9 @@ impl<T: VTable> Object<T> {
         crate::raw::try_cast_obj_mut::<T, O>(raw).map_err(|e| CastError {
             obj: o,
             required: e.required,
+            required_id: e.required_id,
             available: e.available,
+            available_id: e.available_id,
         })
     }
 }
@@ -419,7 +436,9 @@ impl<T: VTable> Debug for Object<T> {
             .field("ptr", &ptr)
             .field("vtable", &format!("{:p}", vtable))
             .field("object_id", &vtable.object_id())
+            .field("object_name", &vtable.object_name())
             .field("interface_id", &vtable.interface_id())
+            .field("interface_name", &vtable.interface_name())
             .finish()
     }
 }
@@ -516,16 +535,28 @@ pub fn align_of_val<T: VTable>(obj: *const Object<T>) -> usize {
     vtable.align_of()
 }
 
-/// Retrieves the unique id of the object.
-pub fn object_id<T: VTable>(obj: *const Object<T>) -> &'static str {
+/// Retrieves the unique id of the underlying object.
+pub fn object_id<T: VTable>(obj: *const Object<T>) -> crate::vtable::Uuid {
     let (_, vtable) = into_raw_parts(obj);
-    vtable.object_id().into()
+    vtable.object_id()
+}
+
+/// Retrieves the name of the underlying object.
+pub fn object_name<T: VTable>(obj: *const Object<T>) -> &'static str {
+    let (_, vtable) = into_raw_parts(obj);
+    vtable.object_name()
 }
 
 /// Retrieves the unique id of the interface.
-pub fn interface_id<T: VTable>(obj: *const Object<T>) -> &'static str {
+pub fn interface_id<T: VTable>(obj: *const Object<T>) -> crate::vtable::Uuid {
     let (_, vtable) = into_raw_parts(obj);
-    vtable.interface_id().into()
+    vtable.interface_id()
+}
+
+/// Retrieves the name of the interface.
+pub fn interface_name<T: VTable>(obj: *const Object<T>) -> &'static str {
+    let (_, vtable) = into_raw_parts(obj);
+    vtable.interface_name()
 }
 
 #[cfg(test)]

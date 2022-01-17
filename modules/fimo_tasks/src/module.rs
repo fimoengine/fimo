@@ -1,9 +1,11 @@
 //! Implementation of the module.
 use crate::TaskRuntime;
 use fimo_ffi::object::CoerceObject;
-use fimo_ffi::vtable::{IBaseInterface, ObjectID, VTable};
+use fimo_ffi::vtable::{IBaseInterface, VTable};
 use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
-use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
+use fimo_module_core::{
+    is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
+};
 use fimo_tasks_int::rust::{IFimoTasksVTable, TaskRuntimeInner};
 use fimo_version_core::Version;
 
@@ -18,9 +20,7 @@ struct TaskInterface {
     parent: ObjArc<IModuleInstance>,
 }
 
-impl ObjectID for TaskInterface {
-    const OBJECT_ID: &'static str = "fimo::modules::tasks::task_interface";
-}
+is_object! { #![uuid(0xebf605a4, 0xa3e1, 0x47d7, 0x9533, 0xef1105a99992)] TaskInterface }
 
 impl CoerceObject<IModuleInterfaceVTable> for TaskInterface {
     fn get_vtable() -> &'static IModuleInterfaceVTable {
