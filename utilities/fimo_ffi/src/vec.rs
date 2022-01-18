@@ -3512,6 +3512,9 @@ where
     })
 }
 
+unsafe impl<T: Send, A: Allocator + Send> Send for RawVec<T, A> {}
+unsafe impl<T: Sync, A: Allocator + Sync> Sync for RawVec<T, A> {}
+
 unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawVec<T, A> {
     fn drop(&mut self) {
         if let Some((ptr, layout)) = self.current_memory() {

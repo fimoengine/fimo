@@ -18,6 +18,7 @@
 #![feature(slice_ptr_len)]
 
 pub mod error;
+pub mod string;
 pub mod vec;
 
 pub use fimo_object::obj_arc;
@@ -44,3 +45,5 @@ pub use object::Object;
 pub use optional::Optional;
 pub use result::Result;
 pub use span::{ConstSpan, MutSpan, SpanInner};
+pub use string::String;
+pub use vec::Vec;
