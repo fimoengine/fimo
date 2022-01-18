@@ -428,7 +428,11 @@ pub trait FimoInterface {
         ModuleInterfaceDescriptor {
             name: Self::NAME.into(),
             version: Self::VERSION,
-            extensions: Self::EXTENSIONS.iter().cloned().map(|ext| ext.into()).collect()
+            extensions: Self::EXTENSIONS
+                .iter()
+                .cloned()
+                .map(|ext| ext.into())
+                .collect(),
         }
     }
 }
