@@ -355,7 +355,8 @@ fimo_object! {
     /// Parent of a type-erased rust module.
     ///
     /// Implements a part of the [`Module`] interface.
-    pub struct IRustModuleParent<vtable = IRustModuleParentVTable>;
+    #![vtable = IRustModuleParentVTable]
+    pub struct IRustModuleParent;
 }
 
 impl IRustModuleParent {
@@ -399,7 +400,8 @@ fimo_vtable! {
 
 fimo_object! {
     /// A type-erased rust module.
-    pub struct IRustModuleInner<vtable = IRustModuleInnerVTable>;
+    #![vtable = IRustModuleInnerVTable]
+    pub struct IRustModuleInner;
 }
 
 impl IRustModuleInner {

@@ -19,17 +19,20 @@ use std::marker::PhantomData;
 ///     struct VTable;
 /// }
 ///
-/// fimo_object!(struct Obj<vtable = VTable>;);
+/// fimo_object!(#![vtable = VTable] struct Obj;);
 /// ```
 #[macro_export]
 macro_rules! fimo_object {
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<vtable = $vtable:ty> $(;)?
+        #![vtable = $vtable:ty]
+        $vis:vis struct $name:ident $(;)?
     ) => {
         $crate::fimo_object! {
             $(#[$attr])*
-            $vis struct $name<vtable = $vtable, no_debug>;
+            #![no_debug]
+            #![vtable = $vtable]
+            $vis struct $name;
         }
         impl std::fmt::Debug for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -39,7 +42,9 @@ macro_rules! fimo_object {
     };
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<vtable = $vtable:ty $(, no_debug)? > $(;)?
+        #![no_debug]
+        #![vtable = $vtable:ty]
+        $vis:vis struct $name:ident $(;)?
     ) => {
         $(#[$attr])*
         #[repr(transparent)]

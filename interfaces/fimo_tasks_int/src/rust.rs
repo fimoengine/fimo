@@ -18,7 +18,8 @@ fimo_interface! {
     /// Trait describing the `fimo-tasks` interface.
     ///
     /// Must be `Send` and `Sync`.
-    pub struct IFimoTasks<vtable = IFimoTasksVTable> {
+    #![vtable = IFimoTasksVTable]
+    pub struct IFimoTasks {
         name: "fimo::interfaces::tasks::fimo_tasks",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0)
     }

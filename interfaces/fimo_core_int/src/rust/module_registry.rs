@@ -15,7 +15,8 @@ fimo_object! {
     /// Interface to a module registry.
     ///
     /// The underlying type must implement `Send` and `Sync`.
-    pub struct IModuleRegistry<vtable = ModuleRegistryVTable>;
+    #![vtable = ModuleRegistryVTable]
+    pub struct IModuleRegistry;
 }
 
 impl IModuleRegistry {
@@ -316,7 +317,8 @@ fimo_object! {
     /// Type-erased module registry.
     ///
     /// The underlying type must implement `Send` and `Sync`.
-    pub struct IModuleRegistryInner<vtable = ModuleRegistryInnerVTable>;
+    #![vtable = ModuleRegistryInnerVTable]
+    pub struct IModuleRegistryInner;
 }
 
 impl IModuleRegistryInner {

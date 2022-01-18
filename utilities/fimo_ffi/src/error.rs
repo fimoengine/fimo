@@ -8,7 +8,9 @@ use std::fmt::Write;
 fimo_object! {
     /// Interface of an error.
     // Don't generate a debug implementation, as we are gonna derive it manually.
-    pub struct IError<vtable = IErrorVTable, no_debug>;
+    #![no_debug]
+    #![vtable = IErrorVTable]
+    pub struct IError;
 }
 
 impl IError {
@@ -80,7 +82,8 @@ impl std::fmt::Display for WriteError {
 
 fimo_object! {
     /// Interface for writing into a steam/buffer.
-    pub struct IWriter<vtable = IWriterVTable>;
+    #![vtable = IWriterVTable]
+    pub struct IWriter;
 }
 
 impl IWriter {

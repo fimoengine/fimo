@@ -54,7 +54,8 @@ pub enum ServerEvent {
 
 fimo_interface! {
     /// The fimo-actix interface.
-    pub struct IFimoActix<vtable = IFimoActixVTable> {
+    #![vtable = IFimoActixVTable]
+    pub struct IFimoActix {
         name: "fimo::interfaces::actix::fimo_actix",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0)
     }
