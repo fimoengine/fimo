@@ -427,6 +427,80 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
         }
     }
 
+    /// Casts between different [`ObjectWrapper`]'s with the same vtable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
+    /// use fimo_object::vtable::ObjectID;
+    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
+    ///
+    /// // Define a custom interface vtable.
+    /// fimo_vtable! {
+    ///     #![uuid(0x0f42329a, 0x9abd, 0x44b6, 0xb03f, 0x70d2f82c809f)]
+    ///     struct ObjVTable {
+    ///         add: fn(*const (), usize) -> usize
+    ///     }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// is_object! { #![uuid(0x9558d810, 0x0053, 0x41a3, 0xa520, 0x9745f965567c)] MyObj }
+    /// impl_vtable! {
+    ///     impl inline ObjVTable => MyObj {
+    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
+    ///     }
+    /// }
+    ///
+    /// // Helper type for accessing the interface.
+    /// struct Obj {
+    ///     inner: Object<ObjVTable>
+    /// }
+    /// impl Obj {
+    ///     pub fn add(&self, num: usize) -> usize {
+    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
+    ///         (vtable.add)(ptr, num)
+    ///     }
+    /// }
+    /// unsafe impl ObjPtrCompat for Obj {}
+    /// unsafe impl ObjectWrapper for Obj {
+    ///     type VTable = ObjVTable;
+    ///
+    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         ptr as *const Object<_>
+    ///     }
+    ///
+    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
+    ///         // `*const Self` and `*const Object<_>` have the same layout.
+    ///         obj as *const Self
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// assert_eq!(x.0, 5);
+    ///
+    /// let x: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
+    /// let x: ObjArc<Obj> = ObjArc::static_cast(x);
+    /// assert_eq!(x.add(0), 5);
+    /// assert_eq!(x.add(1), 6);
+    /// assert_eq!(x.add(5), 10);
+    ///
+    /// let x: ObjArc<Object<ObjVTable>> = ObjArc::static_cast(x);
+    /// ```
+    pub fn static_cast<U: ObjectWrapper<VTable = O::VTable> + ?Sized>(
+        a: ObjArc<O, A>,
+    ) -> ObjArc<U, A> {
+        let (ptr, alloc) = ObjArc::into_raw_parts(a);
+        let obj = O::as_object_raw(ptr);
+        let obj = U::from_object_raw(obj);
+        unsafe { ObjArc::from_raw_parts(obj, alloc) }
+    }
+
     /// Casts an `ObjArc<O, A>` to an `ObjArc<Object<BaseInterface>>`.
     ///
     /// # Examples
@@ -1473,6 +1547,16 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
                 }),
             }
         }
+    }
+
+    /// Casts between different [`ObjectWrapper`]'s with the same vtable.
+    pub fn static_cast<U: ObjectWrapper<VTable = O::VTable> + ?Sized>(
+        w: ObjWeak<O, A>,
+    ) -> ObjWeak<U, A> {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(w);
+        let obj = O::as_object_raw(ptr);
+        let obj = U::from_object_raw(obj);
+        unsafe { ObjWeak::from_raw_parts(obj, alloc) }
     }
 
     /// Casts an `ObjWeak<O, A>` to an `ObjWeak<Object<BaseInterface>>`.
