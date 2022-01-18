@@ -14,7 +14,8 @@ fimo_object! {
     /// Type-erased settings registry.
     ///
     /// The underlying type must implement `Send` and `Sync`.
-    pub struct SettingsRegistry<vtable = SettingsRegistryVTable>;
+    #![vtable = SettingsRegistryVTable]
+    pub struct SettingsRegistry;
 }
 
 impl SettingsRegistry {

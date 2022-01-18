@@ -9,7 +9,8 @@ fimo_interface! {
     /// Type-erased `fimo-core` interface.
     ///
     /// The underlying type must implement `Send` and `Sync`.
-    pub struct IFimoCore<vtable = IFimoCoreVTable> {
+    #![vtable = IFimoCoreVTable]
+    pub struct IFimoCore {
         name: "fimo::interfaces::core::fimo_core",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0),
     }

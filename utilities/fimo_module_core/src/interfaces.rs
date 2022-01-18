@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 ///
 /// // interface without extensions.
 /// fimo_interface! {
-///     struct Simple<vtable = VTable> {
+///     #![vtable = VTable]
+///     struct Simple {
 ///         name: "MyInterface",
 ///         version: Version::new_short(1, 1, 0),
 ///     }
@@ -33,7 +34,8 @@ use std::path::{Path, PathBuf};
 ///
 /// // interface without extensions.
 /// fimo_interface! {
-///     struct Complex<vtable = VTable> {
+///     #![vtable = VTable]
+///     struct Complex {
 ///         name: "MyInterface",
 ///         version: Version::new_short(1, 1, 0),
 ///         extensions: ["ext1", "ext2"]
@@ -45,7 +47,8 @@ use std::path::{Path, PathBuf};
 macro_rules! fimo_interface {
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<vtable = $vtable:ty> {
+        #![vtable = $vtable:ty]
+        $vis:vis struct $name:ident {
             name: $i_name:literal,
             version: $i_version:expr,
             extensions: [ $($i_ext:literal),* ] $(,)?
@@ -53,7 +56,8 @@ macro_rules! fimo_interface {
     ) => {
         $crate::fimo_object! {
             $(#[$attr])*
-            $vis struct $name<vtable = $vtable>;
+            #![vtable = $vtable]
+            $vis struct $name;
         }
         impl $crate::FimoInterface for $name {
             const NAME: &'static str = $i_name;
@@ -63,14 +67,16 @@ macro_rules! fimo_interface {
     };
     (
         $(#[$attr:meta])*
-        $vis:vis struct $name:ident<vtable = $vtable:ty> {
+        #![vtable = $vtable:ty]
+        $vis:vis struct $name:ident {
             name: $i_name:literal,
             version: $i_version:expr $(,)?
         }
     ) => {
         $crate::fimo_interface! {
             $(#[$attr])*
-            $vis struct $name<vtable = $vtable> {
+            #![vtable = $vtable]
+            $vis struct $name {
                 name: $i_name,
                 version: $i_version,
                 extensions: [],
@@ -81,7 +87,8 @@ macro_rules! fimo_interface {
 
 fimo_object! {
     /// A type-erased module loader.
-    pub struct IModuleLoader<vtable = IModuleLoaderVTable>;
+    #![vtable = IModuleLoaderVTable]
+    pub struct IModuleLoader;
 }
 
 impl IModuleLoader {
@@ -202,7 +209,8 @@ fimo_vtable! {
 
 fimo_object! {
     /// Interface of a module.
-    pub struct IModule<vtable = IModuleVTable>;
+    #![vtable = IModuleVTable]
+    pub struct IModule;
 }
 
 impl IModule {
@@ -301,7 +309,8 @@ fimo_vtable! {
 
 fimo_object! {
     /// Interface of a module instance.
-    pub struct IModuleInstance<vtable = IModuleInstanceVTable>;
+    #![vtable = IModuleInstanceVTable]
+    pub struct IModuleInstance;
 }
 
 impl IModuleInstance {
@@ -439,7 +448,8 @@ pub trait FimoInterface {
 
 fimo_object! {
     /// Interface of a module interface.
-    pub struct IModuleInterface<vtable = IModuleInterfaceVTable>;
+    #![vtable = IModuleInterfaceVTable]
+    pub struct IModuleInterface;
 }
 
 impl IModuleInterface {
