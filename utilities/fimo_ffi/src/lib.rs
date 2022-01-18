@@ -35,6 +35,8 @@ pub use fimo_ffi_core::fn_wrapper;
 pub use fimo_ffi_core::optional;
 pub use fimo_ffi_core::result;
 
+pub use fimo_version_core as version;
+
 pub use crate::str::{ConstStr, MutStr, StrInner};
 pub use array_string::ArrayString;
 pub use error::IError;
@@ -47,3 +49,4 @@ pub use result::Result;
 pub use span::{ConstSpan, MutSpan, SpanInner};
 pub use string::String;
 pub use vec::Vec;
+pub use version::{ReleaseType, Version};

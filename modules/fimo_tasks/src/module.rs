@@ -1,7 +1,7 @@
 //! Implementation of the module.
 use crate::TaskRuntime;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
-use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
+use fimo_ffi::{ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{
     impl_vtable, is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
 };
@@ -61,11 +61,7 @@ impl_vtable! {
 #[allow(dead_code)]
 fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
-        name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
-        version: unsafe {
-            ArrayString::from_utf8_unchecked(
-                String::from(&fimo_tasks_int::rust::IFimoTasks::VERSION).as_bytes(),
-            )
-        },
+        name: MODULE_NAME.into(),
+        version: fimo_tasks_int::rust::IFimoTasks::VERSION.into(),
     }
 }

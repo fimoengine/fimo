@@ -2,7 +2,9 @@
 // This is a modified implementation of the `String` type found in
 // the std library, which is dual-licensed under Apache 2.0 and MIT terms.
 // All rights go to the contributors of the Rust project.
-use crate::Vec;
+use crate::{Vec, Version};
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::alloc::{Allocator, Global};
 use std::borrow::{Borrow, BorrowMut};
 use std::char::{decode_utf16, REPLACEMENT_CHARACTER};
@@ -12,6 +14,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
+use std::marker::PhantomData;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::{
     Add, AddAssign, Deref, DerefMut, Index, IndexMut, Range, RangeBounds, RangeFrom, RangeFull,
@@ -1543,6 +1546,28 @@ impl<A: Allocator> From<Box<str, A>> for String<A> {
     }
 }
 
+impl From<&Version> for String {
+    fn from(version: &Version) -> Self {
+        let req = version.string_length_full();
+        let mut buff = Vec::with_capacity(req);
+        // Safety:
+        let mut str = unsafe {
+            buff.set_len(req);
+            String::from_utf8_unchecked(buff)
+        };
+
+        version.as_string_full(&mut str).unwrap();
+
+        str
+    }
+}
+
+impl From<Version> for String {
+    fn from(version: Version) -> Self {
+        From::from(&version)
+    }
+}
+
 impl From<String> for Box<str> {
     #[inline]
     fn from(s: String) -> Self {
@@ -1821,6 +1846,148 @@ impl<A: Allocator> Write for String<A> {
     fn write_char(&mut self, c: char) -> std::fmt::Result {
         self.push(c);
         Ok(())
+    }
+}
+
+impl<A: Allocator> Serialize for String<A> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self)
+    }
+}
+
+struct StringVisitor<A: Allocator + Default>(PhantomData<fn() -> A>);
+struct StringInPlaceVisitor<'a, A: Allocator + Default>(&'a mut String<A>);
+
+impl<'de, A: Allocator + Default> Visitor<'de> for StringVisitor<A> {
+    type Value = String<A>;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let mut s = String::new_in(Default::default());
+        s.push_str(v);
+        Ok(s)
+    }
+
+    fn visit_string<E>(self, v: std::string::String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let mut s = String::new_in(Default::default());
+        s.push_str(v.as_str());
+        Ok(s)
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match std::str::from_utf8(v) {
+            Ok(s) => {
+                let mut buf = String::new_in(Default::default());
+                buf.push_str(s);
+                Ok(buf)
+            }
+            Err(_) => Err(E::invalid_value(serde::de::Unexpected::Bytes(v), &self)),
+        }
+    }
+
+    fn visit_byte_buf<E>(self, v: std::vec::Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match std::str::from_utf8(v.as_slice()) {
+            Ok(s) => {
+                let mut buf = String::new_in(Default::default());
+                buf.push_str(s);
+                Ok(buf)
+            }
+            Err(_) => Err(E::invalid_value(
+                serde::de::Unexpected::Bytes(v.as_slice()),
+                &self,
+            )),
+        }
+    }
+}
+
+impl<'a, 'de, A: Allocator + Default> Visitor<'de> for StringInPlaceVisitor<'a, A> {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a string")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.0.clear();
+        self.0.push_str(v);
+        Ok(())
+    }
+
+    fn visit_string<E>(self, v: std::string::String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.0.clear();
+        self.0.push_str(v.as_str());
+        Ok(())
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match std::str::from_utf8(v) {
+            Ok(s) => {
+                self.0.clear();
+                self.0.push_str(s);
+                Ok(())
+            }
+            Err(_) => Err(E::invalid_value(serde::de::Unexpected::Bytes(v), &self)),
+        }
+    }
+
+    fn visit_byte_buf<E>(self, v: std::vec::Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match std::str::from_utf8(v.as_slice()) {
+            Ok(s) => {
+                self.0.clear();
+                self.0.push_str(s);
+                Ok(())
+            }
+            Err(_) => Err(E::invalid_value(
+                serde::de::Unexpected::Bytes(v.as_slice()),
+                &self,
+            )),
+        }
+    }
+}
+
+impl<'de, A: Allocator + Default> Deserialize<'de> for String<A> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_string(StringVisitor(PhantomData))
+    }
+
+    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_string(StringInPlaceVisitor(place))
     }
 }
 

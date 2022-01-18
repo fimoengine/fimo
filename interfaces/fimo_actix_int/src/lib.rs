@@ -14,10 +14,7 @@ use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
 use fimo_ffi::fn_wrapper::{HeapFn, HeapFnMut};
-use fimo_ffi::ArrayString;
-use fimo_module_core::{
-    fimo_interface, fimo_vtable, FimoInterface, ModuleInterfaceDescriptor, SendSyncMarker,
-};
+use fimo_module_core::{fimo_interface, fimo_vtable, SendSyncMarker};
 
 /// Status of the server.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -357,12 +354,3 @@ impl<F: FnMut(ServerEvent) + Send + Sync> From<Box<F>> for Callback {
 
 unsafe impl Send for Callback {}
 unsafe impl Sync for Callback {}
-
-/// Builds the [`ModuleInterfaceDescriptor`] for the interface.
-pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked(IFimoActix::NAME.as_bytes()) },
-        version: IFimoActix::VERSION,
-        extensions: Default::default(),
-    }
-}

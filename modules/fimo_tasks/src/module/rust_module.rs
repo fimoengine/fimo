@@ -1,15 +1,16 @@
 use crate::module::{construct_module_info, TaskInterface};
 use crate::TaskRuntime;
 use fimo_core_int::rust::{
-    build_interface_descriptor as core_descriptor,
     settings_registry::{SettingsItem, SettingsItemType, SettingsRegistryPath},
     IFimoCore,
 };
 use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
 use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleParent};
-use fimo_module_core::{Error, ErrorKind, IModuleInterface, ModuleInterfaceDescriptor};
-use fimo_tasks_int::rust::build_interface_descriptor as tasks_descriptor;
+use fimo_module_core::{
+    Error, ErrorKind, FimoInterface, IModuleInterface, ModuleInterfaceDescriptor,
+};
+use fimo_tasks_int::rust::IFimoTasks;
 use std::collections::HashMap;
 
 fimo_module_core::rust_module! {construct_module}
@@ -25,12 +26,15 @@ extern "C" fn construct_module() -> Result<ObjArc<IRustModuleInner>, Error> {
 fn build_instance(
     parent: ObjArc<IRustModuleParent>,
 ) -> Result<ObjArc<GenericModuleInstance>, Error> {
-    let core_desc = tasks_descriptor();
+    let core_desc = IFimoTasks::new_descriptor();
 
     let mut interfaces = HashMap::new();
     interfaces.insert(
         core_desc,
-        (build_tasks_interface as _, vec![core_descriptor()]),
+        (
+            build_tasks_interface as _,
+            vec![IFimoCore::new_descriptor()],
+        ),
     );
 
     Ok(GenericModuleInstance::new(parent, interfaces))
@@ -41,7 +45,7 @@ fn build_tasks_interface(
     dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<IModuleInterface>>>,
 ) -> Result<ObjArc<IModuleInterface>, Error> {
     let core_interface = dep_map
-        .get(&core_descriptor())
+        .get(&IFimoCore::new_descriptor())
         .map(|i| i.as_ref().unwrap().upgrade());
 
     if core_interface.is_none() || core_interface.as_ref().unwrap().is_none() {

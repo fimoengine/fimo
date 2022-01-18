@@ -7,5 +7,7 @@ license = "MIT OR Apache-2.0"
 categories = ["game-development"]
 
 [dependencies]
+serde = { version = "1.0.123", features = ["derive"] }
 fimo_object = { version = "0.1.0", path = "../fimo_object" }
 fimo_ffi_core = { version = "0.1.0", path = "../fimo_ffi_core" }
+fimo_version_core = { version = "0.1.0", path = "../fimo_version_core" }

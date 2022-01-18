@@ -18,11 +18,12 @@ pub use fimo_ffi::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object
 pub use interfaces::*;
 
 use std::fmt::Debug;
+use serde::{Serialize, Deserialize};
 
 /// Module information.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct ModuleInfo<S = fimo_ffi::ArrayString<128>> {
+#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInfo<S = fimo_ffi::String> {
     /// Module name.
     pub name: S,
     /// Module version.
@@ -37,14 +38,14 @@ impl<S: std::fmt::Display> std::fmt::Display for ModuleInfo<S> {
 
 /// A descriptor for a module interface.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct ModuleInterfaceDescriptor {
+#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInterfaceDescriptor<N = fimo_ffi::String, E = fimo_ffi::Vec<fimo_ffi::String>> {
     /// Name of the interface.
-    pub name: fimo_ffi::ArrayString<128>,
+    pub name: N,
     /// Version of the interface.
     pub version: fimo_version_core::Version,
     /// Available interface extensions.
-    pub extensions: fimo_ffi::SpanInner<fimo_ffi::ArrayString<128>, false>,
+    pub extensions: E,
 }
 
 impl std::fmt::Display for ModuleInterfaceDescriptor {
