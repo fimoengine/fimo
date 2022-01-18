@@ -1,8 +1,5 @@
 //! Definition of the Rust `fimo-tasks` interface.
-use fimo_ffi::ArrayString;
-use fimo_module_core::{
-    fimo_interface, fimo_vtable, FimoInterface, ModuleInterfaceDescriptor, SendSyncMarker,
-};
+use fimo_module_core::{fimo_interface, fimo_vtable, SendSyncMarker};
 use fimo_version_core::{ReleaseType, Version};
 
 thread_local! {static RUNTIME: std::cell::Cell<Option<&'static TaskRuntime>> = std::cell::Cell::new(None)}
@@ -80,13 +77,4 @@ pub fn initialize_local_bindings(runtime: &TaskRuntime) {
         .spawn_all(move || RUNTIME.with(|r| r.set(Some(static_runtime))), &[])
         .join()
         .unwrap()
-}
-
-/// Builds the [`ModuleInterfaceDescriptor`] for the interface.
-pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked(IFimoTasks::NAME.as_bytes()) },
-        version: IFimoTasks::VERSION,
-        extensions: Default::default(),
-    }
 }

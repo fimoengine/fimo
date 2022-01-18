@@ -5,7 +5,7 @@ use fimo_core_int::rust::settings_registry::SettingsRegistry;
 use fimo_core_int::rust::{IFimoCore, IFimoCoreVTable};
 use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
-use fimo_ffi::{ArrayString, ObjArc, Object, Optional, StrInner};
+use fimo_ffi::{ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{
     impl_vtable, is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
 };
@@ -70,9 +70,7 @@ impl_vtable! {
 #[allow(dead_code)]
 fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
-        name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
-        version: unsafe {
-            ArrayString::from_utf8_unchecked(String::from(IFimoCore::VERSION).as_bytes())
-        },
+        name: MODULE_NAME.into(),
+        version: IFimoCore::VERSION.into(),
     }
 }

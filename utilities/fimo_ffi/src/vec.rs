@@ -2,6 +2,9 @@
 // This is a modified implementation of the `Vec` type found in
 // the std library, which is dual-licensed under Apache 2.0 and MIT terms.
 // All rights go to the contributors of the Rust project.
+use serde::de::Visitor;
+use serde::ser::SerializeSeq;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp::Ordering;
@@ -2882,6 +2885,111 @@ __impl_slice_eq1! { [A: Allocator, const N: usize] Vec<T, A>, [U; N] }
 __impl_slice_eq1! { [A: Allocator, const N: usize] Vec<T, A>, &[U; N] }
 
 impl<T: Eq, A: Allocator> Eq for Vec<T, A> {}
+
+impl<T: Serialize, A: Allocator> Serialize for Vec<T, A> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for element in self {
+            seq.serialize_element(element)?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de, T: Deserialize<'de>, A: Allocator + Default> Deserialize<'de> for Vec<T, A> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct VecVisitor<T, A> {
+            marker: PhantomData<T>,
+            marker_alloc: PhantomData<A>,
+        }
+
+        impl<'de, T, Al: Allocator + Default> Visitor<'de> for VecVisitor<T, Al>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = Vec<T, Al>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a sequence")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut values = Vec::with_capacity_in(
+                    serde::__private::size_hint::cautious(seq.size_hint()),
+                    Default::default(),
+                );
+
+                while let Some(value) = seq.next_element()? {
+                    values.push(value);
+                }
+
+                Ok(values)
+            }
+        }
+
+        let visitor = VecVisitor {
+            marker: PhantomData,
+            marker_alloc: PhantomData,
+        };
+        deserializer.deserialize_seq(visitor)
+    }
+
+    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct VecInPlaceVisitor<'a, T, A: Allocator>(&'a mut Vec<T, A>);
+
+        impl<'a, 'de, T, Al: Allocator> Visitor<'de> for VecInPlaceVisitor<'a, T, Al>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = ();
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a sequence")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let hint = serde::__private::size_hint::cautious(seq.size_hint());
+                if let Some(additional) = hint.checked_sub(self.0.len()) {
+                    self.0.reserve(additional);
+                }
+
+                for i in 0..self.0.len() {
+                    let next = {
+                        let next_place = serde::__private::de::InPlaceSeed(&mut self.0[i]);
+                        seq.next_element_seed(next_place)?
+                    };
+                    if next.is_none() {
+                        self.0.truncate(i);
+                        return Ok(());
+                    }
+                }
+
+                while let Some(value) = seq.next_element()? {
+                    self.0.push(value);
+                }
+
+                Ok(())
+            }
+        }
+
+        deserializer.deserialize_seq(VecInPlaceVisitor(place))
+    }
+}
 
 /// An iterator that moves out of a vector.
 ///

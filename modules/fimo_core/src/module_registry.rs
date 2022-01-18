@@ -4,7 +4,7 @@ use fimo_core_int::rust::module_registry::{
     LoaderCallback, LoaderCallbackId, LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
 };
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
-use fimo_ffi::{ArrayString, ObjArc};
+use fimo_ffi::ObjArc;
 use fimo_module_core::{
     impl_vtable, is_object, Error, ErrorKind, IModuleInterface, IModuleLoader,
     ModuleInterfaceDescriptor,
@@ -254,7 +254,7 @@ impl ModuleRegistryInner {
         interface: ObjArc<IModuleInterface>,
     ) -> Result<InterfaceId, ModuleRegistryError> {
         if self.interface_map.contains_key(descriptor) {
-            return Err(ModuleRegistryError::DuplicateInterface(*descriptor));
+            return Err(ModuleRegistryError::DuplicateInterface(descriptor.clone()));
         }
 
         if let Some(id) = self.interface_id_gen.next() {
@@ -266,7 +266,7 @@ impl ModuleRegistryInner {
                 },
             );
 
-            self.interface_map.insert(*descriptor, id.get());
+            self.interface_map.insert(descriptor.clone(), id.get());
             Ok(id.get())
         } else {
             Err(ModuleRegistryError::IdExhaustion)
@@ -357,7 +357,7 @@ impl ModuleRegistryInner {
         if let Some(id) = self.interface_map.get(descriptor) {
             Ok(self.interfaces.get(id).unwrap())
         } else {
-            Err(ModuleRegistryError::UnknownInterface(*descriptor))
+            Err(ModuleRegistryError::UnknownInterface(descriptor.clone()))
         }
     }
 
@@ -369,7 +369,7 @@ impl ModuleRegistryInner {
         if let Some(id) = self.interface_map.get(descriptor) {
             Ok(self.interfaces.get_mut(id).unwrap())
         } else {
-            Err(ModuleRegistryError::UnknownInterface(*descriptor))
+            Err(ModuleRegistryError::UnknownInterface(descriptor.clone()))
         }
     }
 
@@ -387,7 +387,7 @@ impl ModuleRegistryInner {
         &self,
         name: &str,
         version: &Version,
-        extensions: &[ArrayString<128>],
+        extensions: &[fimo_ffi::String],
     ) -> Vec<ModuleInterfaceDescriptor> {
         self.interface_map
             .keys()

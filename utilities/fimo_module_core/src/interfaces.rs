@@ -420,6 +420,17 @@ pub trait FimoInterface {
     const VERSION: Version;
     /// Required extensions.
     const EXTENSIONS: &'static [&'static str];
+
+    /// Constructs a new [`ModuleInterfaceDescriptor`] describing the interface.
+    #[inline]
+    #[must_use]
+    fn new_descriptor() -> ModuleInterfaceDescriptor {
+        ModuleInterfaceDescriptor {
+            name: Self::NAME.into(),
+            version: Self::VERSION,
+            extensions: Self::EXTENSIONS.iter().cloned().map(|ext| ext.into()).collect()
+        }
+    }
 }
 
 fimo_object! {

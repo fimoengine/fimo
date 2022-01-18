@@ -1,7 +1,7 @@
 //! Specification of a module registry.
 use fimo_ffi::fn_wrapper::RawFnOnce;
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::{ArrayString, HeapFnOnce, ObjArc};
+use fimo_ffi::{HeapFnOnce, ObjArc};
 use fimo_module_core::{
     fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
     IModuleLoaderVTable, ModuleInterfaceDescriptor, SendSyncMarker,
@@ -282,7 +282,7 @@ impl IModuleRegistry {
         &self,
         name: &str,
         version: &Version,
-        extensions: &[ArrayString<128>],
+        extensions: &[fimo_ffi::String],
     ) -> Vec<ModuleInterfaceDescriptor> {
         let mut res = MaybeUninit::uninit();
 
@@ -466,7 +466,7 @@ impl IModuleRegistryInner {
         &self,
         name: &str,
         version: &Version,
-        extensions: &[ArrayString<128>],
+        extensions: &[fimo_ffi::String],
     ) -> Vec<ModuleInterfaceDescriptor> {
         let (ptr, vtable) = self.into_raw_parts();
         (vtable.get_compatible_interface_descriptors)(ptr, name, version, extensions)
@@ -544,7 +544,7 @@ fimo_vtable! {
             *const (),
             *const str,
             *const Version,
-            *const [ArrayString<128>],
+            *const [fimo_ffi::String],
         ) -> Vec<ModuleInterfaceDescriptor>,
     }
 }

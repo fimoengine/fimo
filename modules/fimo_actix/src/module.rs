@@ -6,7 +6,7 @@ use fimo_core_int::rust::settings_registry::{
 };
 use fimo_core_int::rust::IFimoCore;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
-use fimo_ffi::{impl_vtable, is_object, ArrayString, ObjArc, Object, Optional, StrInner};
+use fimo_ffi::{impl_vtable, is_object, ObjArc, Object, Optional, StrInner};
 use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
 use fimo_version_core::Version;
 
@@ -75,55 +75,6 @@ impl_vtable! {
     }
 }
 
-/*impl CoerceObject<IFimoActixVTable> for FimoActixInterface {
-    fn get_vtable() -> &'static IFimoActixVTable {
-        static VTABLE: IFimoActixVTable = IFimoActixVTable::new::<FimoActixInterface>(
-            |ptr| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.start()
-            },
-            |ptr| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.stop()
-            },
-            |ptr| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.pause()
-            },
-            |ptr| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.resume()
-            },
-            |ptr| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.restart()
-            },
-            |ptr| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.get_server_status()
-            },
-            |ptr, path, builder| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                let path = unsafe { &*path };
-                interface.server.register_scope(path, builder)
-            },
-            |ptr, id| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.unregister_scope(id)
-            },
-            |ptr, callback| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.register_callback(callback)
-            },
-            |ptr, id| {
-                let interface = unsafe { &*(ptr as *const FimoActixInterface) };
-                interface.server.unregister_callback(id)
-            },
-        );
-        &VTABLE
-    }
-}*/
-
 impl_vtable! {
     impl IModuleInterfaceVTable => FimoActixInterface {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
@@ -165,9 +116,7 @@ impl Drop for FimoActixInterface {
 #[allow(dead_code)]
 fn construct_module_info() -> ModuleInfo {
     ModuleInfo {
-        name: unsafe { ArrayString::from_utf8_unchecked(MODULE_NAME.as_bytes()) },
-        version: unsafe {
-            ArrayString::from_utf8_unchecked(String::from(IFimoActix::NAME).as_bytes())
-        },
+        name: MODULE_NAME.into(),
+        version: IFimoActix::NAME.into(),
     }
 }

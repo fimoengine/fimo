@@ -14,7 +14,7 @@ use std::fmt::Debug;
 use std::mem::MaybeUninit;
 
 /// Error resulting from an unknown interface.
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
 pub struct UnknownInterfaceError {
     interface: ModuleInterfaceDescriptor,
 }
@@ -132,12 +132,12 @@ impl GenericModuleInstance {
             (InterfaceBuilder, Vec<ModuleInterfaceDescriptor>),
         >,
     ) -> ObjArc<Self> {
-        let public_interfaces: Vec<_> = interfaces.keys().copied().collect();
+        let public_interfaces: Vec<_> = interfaces.keys().cloned().collect();
         let interface: HashMap<_, _> = interfaces
             .iter()
             .map(|(descriptor, &(builder, _))| {
                 let interface = Interface { builder, ptr: None };
-                (*descriptor, interface)
+                (descriptor.clone(), interface)
             })
             .collect();
 
@@ -149,7 +149,7 @@ impl GenericModuleInstance {
         let mut dependency_map: HashMap<_, _> = HashMap::new();
         for (_, dependencies) in interface_dependencies.iter() {
             for dependency in dependencies {
-                dependency_map.insert(*dependency, None);
+                dependency_map.insert(dependency.clone(), None);
             }
         }
 
@@ -176,7 +176,7 @@ impl GenericModuleInstance {
             Ok(dependencies.as_slice())
         } else {
             Err(UnknownInterfaceError {
-                interface: *interface,
+                interface: interface.clone(),
             })
         }
     }
@@ -205,7 +205,7 @@ impl GenericModuleInstance {
             (int.builder)(self_arc, &*dep_map).map_or_else(
                 |e| {
                     Err(GetInterfaceError::ConstructionError {
-                        interface: *interface,
+                        interface: interface.clone(),
                         error: e,
                     })
                 },
@@ -216,7 +216,7 @@ impl GenericModuleInstance {
             )
         } else {
             Err(GetInterfaceError::UnknownInterface(UnknownInterfaceError {
-                interface: *interface,
+                interface: interface.clone(),
             }))
         }
     }
@@ -233,7 +233,7 @@ impl GenericModuleInstance {
             Ok(())
         } else {
             Err(UnknownInterfaceError {
-                interface: *interface_desc,
+                interface: interface_desc.clone(),
             })
         }
     }

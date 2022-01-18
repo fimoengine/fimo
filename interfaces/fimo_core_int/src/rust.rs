@@ -1,8 +1,5 @@
 //! Definition of the Rust `fimo-core` interface.
-use fimo_ffi::ArrayString;
-use fimo_module_core::{
-    fimo_interface, fimo_vtable, FimoInterface, ModuleInterfaceDescriptor, SendSyncMarker,
-};
+use fimo_module_core::{fimo_interface, fimo_vtable, SendSyncMarker};
 use fimo_version_core::{ReleaseType, Version};
 
 pub mod module_registry;
@@ -44,14 +41,5 @@ fimo_vtable! {
         pub get_module_registry: fn(*const ()) -> *const module_registry::IModuleRegistry,
         /// Fetches the settings registry.
         pub get_settings_registry: fn(*const ()) -> *const settings_registry::SettingsRegistry,
-    }
-}
-
-/// Builds the [`ModuleInterfaceDescriptor`] for the interface.
-pub fn build_interface_descriptor() -> ModuleInterfaceDescriptor {
-    ModuleInterfaceDescriptor {
-        name: unsafe { ArrayString::from_utf8_unchecked(IFimoCore::NAME.as_bytes()) },
-        version: IFimoCore::VERSION,
-        extensions: Default::default(),
     }
 }
