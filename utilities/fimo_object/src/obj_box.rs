@@ -159,6 +159,16 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
         }
     }
 
+    /// Casts between different [`ObjectWrapper`]'s with the same vtable.
+    pub fn static_cast<U: ObjectWrapper<VTable = O::VTable> + ?Sized>(
+        w: ObjBox<O, A>,
+    ) -> ObjBox<U, A> {
+        let (ptr, alloc) = ObjBox::into_raw_parts(w);
+        let obj = O::as_object_mut_raw(ptr);
+        let obj = U::from_object_mut_raw(obj);
+        unsafe { ObjBox::from_raw_parts(obj, alloc) }
+    }
+
     /// Casts an `ObjBox<O, A>` to an `ObjBox<Object<BaseInterface>>`.
     pub fn cast_base(b: ObjBox<O, A>) -> ObjBox<Object<IBaseInterface>, A> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
