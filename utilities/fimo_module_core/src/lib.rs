@@ -17,8 +17,8 @@ pub use error::{Error, ErrorKind, Result};
 pub use fimo_ffi::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object};
 pub use interfaces::*;
 
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use serde::{Serialize, Deserialize};
 
 /// Module information.
 #[repr(C)]
