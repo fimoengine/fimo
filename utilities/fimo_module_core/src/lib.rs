@@ -61,10 +61,3 @@ pub type PathChar = u8;
 /// Type of a path character.
 #[cfg(windows)]
 pub type PathChar = u16;
-
-fimo_marker! {
-    /// Marker type that implements `Send` and `Sync`.
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![requires(Send, Sync)]
-    pub marker SendSyncMarker;
-}

@@ -1,20 +1,28 @@
 //! Callable wrappers.
+use crate::marker::NoneMarker;
+use fimo_object::vtable::MarkerCompatible;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::sync::Arc;
 
 #[repr(C)]
-struct RawCallable<Args, T> {
+struct RawCallable<Args, T, M> {
     ptr: *const (),
     drop: fn(*const ()),
     call: fn(*const (), Args) -> T,
+    _marker: PhantomData<M>,
 }
 
-impl<Args, T> RawCallable<Args, T> {
+impl<Args, T, M> RawCallable<Args, T, M> {
     #[inline]
     unsafe fn new(ptr: *const (), drop: fn(*const ()), call: fn(*const (), Args) -> T) -> Self {
-        Self { ptr, drop, call }
+        Self {
+            ptr,
+            drop,
+            call,
+            _marker: PhantomData,
+        }
     }
 
     #[inline]
@@ -23,14 +31,17 @@ impl<Args, T> RawCallable<Args, T> {
     }
 }
 
-impl<Args, T> Drop for RawCallable<Args, T> {
+unsafe impl<Args, T, M: Send> Send for RawCallable<Args, T, M> {}
+unsafe impl<Args, T, M: Sync> Sync for RawCallable<Args, T, M> {}
+
+impl<Args, T, M> Drop for RawCallable<Args, T, M> {
     #[inline]
     fn drop(&mut self) {
         (self.drop)(self.ptr)
     }
 }
 
-impl<Args, T> Debug for RawCallable<Args, T> {
+impl<Args, T, M> Debug for RawCallable<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawHeapFn")
             .field("ptr", &self.ptr)
@@ -42,11 +53,11 @@ impl<Args, T> Debug for RawCallable<Args, T> {
 
 /// A [`FnOnce`] reference without lifetimes.
 #[repr(C)]
-pub struct RawFnOnce<Args, T> {
-    raw: RawCallable<Args, T>,
+pub struct RawFnOnce<Args, T, M = NoneMarker> {
+    raw: RawCallable<Args, T, M>,
 }
 
-impl<Args, T> RawFnOnce<Args, T> {
+impl<Args, T, M> RawFnOnce<Args, T, M> {
     /// Constructs a new `RawFnOnce` with a callable reference.
     ///
     /// # Safety
@@ -55,7 +66,10 @@ impl<Args, T> RawFnOnce<Args, T> {
     /// Once called, `f` is owned by the `RawFnOnce` and may not be used anymore.
     /// An exception to this rule is, if the `RawFnOnce` was forgotten with [`std::mem::forget`].
     #[inline]
-    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'_ mut MaybeUninit<F>) -> Self {
+    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'_ mut MaybeUninit<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = f as *mut MaybeUninit<F>;
         Self {
             // we own `f` so we drop the value.
@@ -65,7 +79,10 @@ impl<Args, T> RawFnOnce<Args, T> {
 
     /// Constructs a new `RawFnOnce`.
     #[inline]
-    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> Self {
+    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = Box::into_raw(f);
         Self {
             raw: unsafe {
@@ -106,7 +123,7 @@ impl<Args, T> RawFnOnce<Args, T> {
     }
 }
 
-impl<Args, T> Debug for RawFnOnce<Args, T> {
+impl<Args, T, M> Debug for RawFnOnce<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -114,18 +131,21 @@ impl<Args, T> Debug for RawFnOnce<Args, T> {
 
 /// A [`FnMut`] reference without lifetimes.
 #[repr(C)]
-pub struct RawFnMut<Args, T> {
-    raw: RawCallable<Args, T>,
+pub struct RawFnMut<Args, T, M = NoneMarker> {
+    raw: RawCallable<Args, T, M>,
 }
 
-impl<Args, T> RawFnMut<Args, T> {
+impl<Args, T, M> RawFnMut<Args, T, M> {
     /// Constructs a new `RawFnMut` by wrapping `f`.
     ///
     /// # Safety
     ///
     /// The caller must ensure, that `f` outlives the `RawFnMut`.
     #[inline]
-    pub unsafe fn new<F: FnMut<Args, Output = T>>(f: &mut F) -> Self {
+    pub unsafe fn new<F: FnMut<Args, Output = T>>(f: &mut F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = f as *mut F;
         Self {
             // we wrap by reference, so we don't need to drop.
@@ -135,7 +155,10 @@ impl<Args, T> RawFnMut<Args, T> {
 
     /// Constructs a new `RawFnMut`.
     #[inline]
-    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> Self {
+    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = Box::into_raw(f);
         Self {
             // the box needs to be dropped.
@@ -174,7 +197,7 @@ impl<Args, T> RawFnMut<Args, T> {
     }
 }
 
-impl<Args, T> Debug for RawFnMut<Args, T> {
+impl<Args, T, M> Debug for RawFnMut<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -182,18 +205,21 @@ impl<Args, T> Debug for RawFnMut<Args, T> {
 
 /// A [`Fn`] reference without lifetimes.
 #[repr(C)]
-pub struct RawFn<Args, T> {
-    raw: RawCallable<Args, T>,
+pub struct RawFn<Args, T, M = NoneMarker> {
+    raw: RawCallable<Args, T, M>,
 }
 
-impl<Args, T> RawFn<Args, T> {
+impl<Args, T, M> RawFn<Args, T, M> {
     /// Constructs a new `RawFn` by wrapping `f`.
     ///
     /// # Safety
     ///
     /// The caller must ensure, that `f` outlives the `RawFn`.
     #[inline]
-    pub unsafe fn new<F: Fn<Args, Output = T>>(f: &F) -> Self {
+    pub unsafe fn new<F: Fn<Args, Output = T>>(f: &F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = f as *const F;
         Self {
             // references do not need dropping
@@ -203,7 +229,10 @@ impl<Args, T> RawFn<Args, T> {
 
     /// Constructs a new `RawFn.
     #[inline]
-    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> Self {
+    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = Box::into_raw(f);
         Self {
             raw: unsafe {
@@ -215,7 +244,10 @@ impl<Args, T> RawFn<Args, T> {
 
     /// Constructs a new `RawFn`.
     #[inline]
-    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> Self {
+    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         let raw = Arc::into_raw(f);
         Self {
             raw: unsafe {
@@ -265,7 +297,7 @@ impl<Args, T> RawFn<Args, T> {
     }
 }
 
-impl<Args, T> Debug for RawFn<Args, T> {
+impl<Args, T, M> Debug for RawFn<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -273,12 +305,12 @@ impl<Args, T> Debug for RawFn<Args, T> {
 
 /// A [`FnOnce`] wrapped by reference.
 #[repr(C)]
-pub struct RefFnOnce<'a, Args, T> {
-    raw: RawFnOnce<Args, T>,
+pub struct RefFnOnce<'a, Args, T, M = NoneMarker> {
+    raw: RawFnOnce<Args, T, M>,
     _phantom: PhantomData<fn() -> &'a mut ()>,
 }
 
-impl<'a, Args, T> RefFnOnce<'a, Args, T> {
+impl<'a, Args, T, M> RefFnOnce<'a, Args, T, M> {
     /// Constructs a new `RefFnOnce` with a callable reference.
     ///
     /// # Safety
@@ -287,7 +319,10 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
     /// Once called, `f` is owned by the `RefFnOnce` and may not be used anymore.
     /// An exception to this rule is, if the `RefFnOnce` was forgotten with [`std::mem::forget`].
     #[inline]
-    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'a mut MaybeUninit<F>) -> Self {
+    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'a mut MaybeUninit<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             raw: RawFnOnce::new(f),
             _phantom: Default::default(),
@@ -296,7 +331,10 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
 
     /// Constructs a new `RefFnOnce`.
     #[inline]
-    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> RefFnOnce<'static, Args, T> {
+    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> RefFnOnce<'static, Args, T, M>
+    where
+        M: MarkerCompatible<F>,
+    {
         RefFnOnce {
             raw: RawFnOnce::new_boxed(f),
             _phantom: Default::default(),
@@ -305,7 +343,7 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
 
     /// Extracts the raw wrapper.
     #[inline]
-    pub fn into_raw(self) -> RawFnOnce<Args, T> {
+    pub fn into_raw(self) -> RawFnOnce<Args, T, M> {
         self.raw
     }
 
@@ -316,7 +354,7 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
     /// Construction from a raw value is inherently unsafe,
     /// because that allows for the wrapped value to be moved.
     #[inline]
-    pub unsafe fn from_raw(f: RawFnOnce<Args, T>) -> Self {
+    pub unsafe fn from_raw(f: RawFnOnce<Args, T, M>) -> Self {
         RefFnOnce {
             raw: f,
             _phantom: Default::default(),
@@ -324,7 +362,7 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
     }
 }
 
-impl<Args, T> FnOnce<Args> for RefFnOnce<'_, Args, T> {
+impl<Args, T, M> FnOnce<Args> for RefFnOnce<'_, Args, T, M> {
     type Output = T;
 
     #[inline]
@@ -333,7 +371,7 @@ impl<Args, T> FnOnce<Args> for RefFnOnce<'_, Args, T> {
     }
 }
 
-impl<Args, T> Debug for RefFnOnce<'_, Args, T> {
+impl<Args, T, M> Debug for RefFnOnce<'_, Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -341,15 +379,18 @@ impl<Args, T> Debug for RefFnOnce<'_, Args, T> {
 
 /// A [`FnMut`] wrapped by reference.
 #[repr(C)]
-pub struct RefFnMut<'a, Args, T> {
-    raw: RawFnMut<Args, T>,
+pub struct RefFnMut<'a, Args, T, M = NoneMarker> {
+    raw: RawFnMut<Args, T, M>,
     _phantom: PhantomData<fn() -> &'a mut ()>,
 }
 
-impl<'a, Args, T> RefFnMut<'a, Args, T> {
+impl<'a, Args, T, M> RefFnMut<'a, Args, T, M> {
     /// Constructs a new `RefFnMut` by wrapping `f`.
     #[inline]
-    pub fn new<F: FnMut<Args, Output = T>>(f: &'a mut F) -> Self {
+    pub fn new<F: FnMut<Args, Output = T>>(f: &'a mut F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             // `f` will outlive self because of the `'a` lifetime.
             raw: unsafe { RawFnMut::new(f) },
@@ -359,7 +400,10 @@ impl<'a, Args, T> RefFnMut<'a, Args, T> {
 
     /// Constructs a new `RefFnMut`.
     #[inline]
-    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> RefFnMut<'static, Args, T> {
+    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> RefFnMut<'static, Args, T, M>
+    where
+        M: MarkerCompatible<F>,
+    {
         RefFnMut {
             raw: RawFnMut::new_boxed(f),
             _phantom: Default::default(),
@@ -368,7 +412,7 @@ impl<'a, Args, T> RefFnMut<'a, Args, T> {
 
     /// Extracts the raw wrapper.
     #[inline]
-    pub fn into_raw(self) -> RawFnMut<Args, T> {
+    pub fn into_raw(self) -> RawFnMut<Args, T, M> {
         self.raw
     }
 
@@ -379,7 +423,7 @@ impl<'a, Args, T> RefFnMut<'a, Args, T> {
     /// Construction from a raw value is inherently unsafe,
     /// because that allows for the wrapped value to be moved.
     #[inline]
-    pub unsafe fn from_raw(f: RawFnMut<Args, T>) -> Self {
+    pub unsafe fn from_raw(f: RawFnMut<Args, T, M>) -> Self {
         RefFnMut {
             raw: f,
             _phantom: Default::default(),
@@ -387,7 +431,7 @@ impl<'a, Args, T> RefFnMut<'a, Args, T> {
     }
 }
 
-impl<'a, Args, T> FnOnce<Args> for RefFnMut<'a, Args, T> {
+impl<'a, Args, T, M> FnOnce<Args> for RefFnMut<'a, Args, T, M> {
     type Output = T;
 
     #[inline]
@@ -396,14 +440,14 @@ impl<'a, Args, T> FnOnce<Args> for RefFnMut<'a, Args, T> {
     }
 }
 
-impl<'a, Args, T> FnMut<Args> for RefFnMut<'a, Args, T> {
+impl<'a, Args, T, M> FnMut<Args> for RefFnMut<'a, Args, T, M> {
     #[inline]
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
         unsafe { self.raw.call_mut(args) }
     }
 }
 
-impl<'a, Args, T> Debug for RefFnMut<'a, Args, T> {
+impl<'a, Args, T, M> Debug for RefFnMut<'a, Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -411,15 +455,18 @@ impl<'a, Args, T> Debug for RefFnMut<'a, Args, T> {
 
 /// A [`Fn`] wrapped by reference.
 #[repr(C)]
-pub struct RefFn<'a, Args, T> {
-    raw: RawFn<Args, T>,
+pub struct RefFn<'a, Args, T, M = NoneMarker> {
+    raw: RawFn<Args, T, M>,
     _phantom: PhantomData<fn() -> &'a ()>,
 }
 
-impl<'a, Args, T> RefFn<'a, Args, T> {
+impl<'a, Args, T, M> RefFn<'a, Args, T, M> {
     /// Constructs a new `RefFn` by wrapping `f`.
     #[inline]
-    pub fn new<F: Fn<Args, Output = T>>(f: &'a F) -> Self {
+    pub fn new<F: Fn<Args, Output = T>>(f: &'a F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             // `f` will outlive self because of the `'a` lifetime.
             raw: unsafe { RawFn::new(f) },
@@ -429,7 +476,10 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
 
     /// Constructs a new `RefFn.
     #[inline]
-    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> RefFn<'static, Args, T> {
+    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> RefFn<'static, Args, T, M>
+    where
+        M: MarkerCompatible<F>,
+    {
         RefFn {
             raw: RawFn::new_boxed(f),
             _phantom: Default::default(),
@@ -438,7 +488,10 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
 
     /// Constructs a new `RefFn`.
     #[inline]
-    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> RefFn<'static, Args, T> {
+    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> RefFn<'static, Args, T, M>
+    where
+        M: MarkerCompatible<F>,
+    {
         RefFn {
             raw: RawFn::new_arc(f),
             _phantom: Default::default(),
@@ -447,7 +500,7 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
 
     /// Extracts the raw wrapper.
     #[inline]
-    pub fn into_raw(self) -> RawFn<Args, T> {
+    pub fn into_raw(self) -> RawFn<Args, T, M> {
         self.raw
     }
 
@@ -458,7 +511,7 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
     /// Construction from a raw value is inherently unsafe,
     /// because that allows for the wrapped value to be moved.
     #[inline]
-    pub unsafe fn from_raw(f: RawFn<Args, T>) -> Self {
+    pub unsafe fn from_raw(f: RawFn<Args, T, M>) -> Self {
         RefFn {
             raw: f,
             _phantom: Default::default(),
@@ -466,7 +519,7 @@ impl<'a, Args, T> RefFn<'a, Args, T> {
     }
 }
 
-impl<'a, Args, T> FnOnce<Args> for RefFn<'a, Args, T> {
+impl<'a, Args, T, M> FnOnce<Args> for RefFn<'a, Args, T, M> {
     type Output = T;
 
     #[inline]
@@ -475,21 +528,21 @@ impl<'a, Args, T> FnOnce<Args> for RefFn<'a, Args, T> {
     }
 }
 
-impl<'a, Args, T> FnMut<Args> for RefFn<'a, Args, T> {
+impl<'a, Args, T, M> FnMut<Args> for RefFn<'a, Args, T, M> {
     #[inline]
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
         <Self as Fn<Args>>::call(self, args)
     }
 }
 
-impl<'a, Args, T> Fn<Args> for RefFn<'a, Args, T> {
+impl<'a, Args, T, M> Fn<Args> for RefFn<'a, Args, T, M> {
     #[inline]
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
         unsafe { self.raw.call(args) }
     }
 }
 
-impl<'a, Args, T> Debug for RefFn<'a, Args, T> {
+impl<'a, Args, T, M> Debug for RefFn<'a, Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -497,36 +550,42 @@ impl<'a, Args, T> Debug for RefFn<'a, Args, T> {
 
 /// A [`FnOnce`] allocated on the heap.
 #[repr(C)]
-pub struct HeapFnOnce<Args, T> {
-    raw: RefFnOnce<'static, Args, T>,
+pub struct HeapFnOnce<Args, T, M = NoneMarker> {
+    raw: RefFnOnce<'static, Args, T, M>,
 }
 
-impl<Args, T> HeapFnOnce<Args, T> {
+impl<Args, T, M> HeapFnOnce<Args, T, M> {
     /// Constructs a new `HeapFnOnce` by boxing the callable.
     #[inline]
-    pub fn new<F: FnOnce<Args, Output = T>>(f: F) -> Self {
+    pub fn new<F: FnOnce<Args, Output = T>>(f: F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self::new_boxed(Box::new(f))
     }
 
     /// Constructs a new `HeapFnOnce`.
     #[inline]
-    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> Self {
+    pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             raw: RefFnOnce::new_boxed(f),
         }
     }
 }
 
-impl<Args, T> FnOnce<Args> for HeapFnOnce<Args, T> {
+impl<Args, T, M> FnOnce<Args> for HeapFnOnce<Args, T, M> {
     type Output = T;
 
     #[inline]
     extern "rust-call" fn call_once(self, args: Args) -> Self::Output {
-        <RefFnOnce<'static, Args, T> as FnOnce<Args>>::call_once(self.raw, args)
+        <RefFnOnce<'static, Args, T, M> as FnOnce<Args>>::call_once(self.raw, args)
     }
 }
 
-impl<Args, T> Debug for HeapFnOnce<Args, T> {
+impl<Args, T, M> Debug for HeapFnOnce<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -534,27 +593,33 @@ impl<Args, T> Debug for HeapFnOnce<Args, T> {
 
 /// A [`FnMut`] allocated on the heap.
 #[repr(C)]
-pub struct HeapFnMut<Args, T> {
-    raw: RefFnMut<'static, Args, T>,
+pub struct HeapFnMut<Args, T, M = NoneMarker> {
+    raw: RefFnMut<'static, Args, T, M>,
 }
 
-impl<Args, T> HeapFnMut<Args, T> {
+impl<Args, T, M> HeapFnMut<Args, T, M> {
     /// Constructs a new `HeapFnMut` by boxing the callable.
     #[inline]
-    pub fn new<F: FnMut<Args, Output = T>>(f: F) -> Self {
+    pub fn new<F: FnMut<Args, Output = T>>(f: F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self::new_boxed(Box::new(f))
     }
 
     /// Constructs a new `HeapFnMut`.
     #[inline]
-    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> Self {
+    pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             raw: RefFnMut::new_boxed(f),
         }
     }
 }
 
-impl<Args, T> FnOnce<Args> for HeapFnMut<Args, T> {
+impl<Args, T, M> FnOnce<Args> for HeapFnMut<Args, T, M> {
     type Output = T;
 
     #[inline]
@@ -563,14 +628,14 @@ impl<Args, T> FnOnce<Args> for HeapFnMut<Args, T> {
     }
 }
 
-impl<Args, T> FnMut<Args> for HeapFnMut<Args, T> {
+impl<Args, T, M> FnMut<Args> for HeapFnMut<Args, T, M> {
     #[inline]
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
-        <RefFnMut<'static, Args, T> as FnMut<Args>>::call_mut(&mut self.raw, args)
+        <RefFnMut<'static, Args, T, M> as FnMut<Args>>::call_mut(&mut self.raw, args)
     }
 }
 
-impl<Args, T> Debug for HeapFnMut<Args, T> {
+impl<Args, T, M> Debug for HeapFnMut<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }
@@ -578,20 +643,26 @@ impl<Args, T> Debug for HeapFnMut<Args, T> {
 
 /// A [`Fn`] allocated on the heap.
 #[repr(C)]
-pub struct HeapFn<Args, T> {
-    raw: RefFn<'static, Args, T>,
+pub struct HeapFn<Args, T, M = NoneMarker> {
+    raw: RefFn<'static, Args, T, M>,
 }
 
-impl<Args, T> HeapFn<Args, T> {
+impl<Args, T, M> HeapFn<Args, T, M> {
     /// Constructs a new `HeapFn` by boxing the callable.
     #[inline]
-    pub fn new<F: Fn<Args, Output = T>>(f: F) -> Self {
+    pub fn new<F: Fn<Args, Output = T>>(f: F) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self::new_boxed(Box::new(f))
     }
 
     /// Constructs a new `HeapFn`.
     #[inline]
-    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> Self {
+    pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             raw: RefFn::new_boxed(f),
         }
@@ -599,14 +670,17 @@ impl<Args, T> HeapFn<Args, T> {
 
     /// Constructs a new `HeapFn`.
     #[inline]
-    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> Self {
+    pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> Self
+    where
+        M: MarkerCompatible<F>,
+    {
         Self {
             raw: RefFn::new_arc(f),
         }
     }
 }
 
-impl<Args, T> FnOnce<Args> for HeapFn<Args, T> {
+impl<Args, T, M> FnOnce<Args> for HeapFn<Args, T, M> {
     type Output = T;
 
     #[inline]
@@ -615,21 +689,21 @@ impl<Args, T> FnOnce<Args> for HeapFn<Args, T> {
     }
 }
 
-impl<Args, T> FnMut<Args> for HeapFn<Args, T> {
+impl<Args, T, M> FnMut<Args> for HeapFn<Args, T, M> {
     #[inline]
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
         <Self as Fn<Args>>::call(self, args)
     }
 }
 
-impl<Args, T> Fn<Args> for HeapFn<Args, T> {
+impl<Args, T, M> Fn<Args> for HeapFn<Args, T, M> {
     #[inline]
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
-        <RefFn<'static, Args, T> as Fn<Args>>::call(&self.raw, args)
+        <RefFn<'static, Args, T, M> as Fn<Args>>::call(&self.raw, args)
     }
 }
 
-impl<Args, T> Debug for HeapFn<Args, T> {
+impl<Args, T, M> Debug for HeapFn<Args, T, M> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.raw, f)
     }

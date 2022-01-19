@@ -246,18 +246,29 @@ macro_rules! fimo_marker {
     ($name:ident) => {
         impl $name {
             /// Checks whether `T` is compatible with the marker.
-            pub fn type_is_compatible<T>() {}
+            pub const fn type_is_compatible<T>() {}
         }
+
+        unsafe impl<T> $crate::vtable::MarkerCompatible<T> for $name {}
     };
     ($name:ident $($marker:ident)+) => {
         impl $name {
             /// Checks whether `T` is compatible with the marker.
-            pub fn type_is_compatible<T>() where $(T: $marker),+ {}
+            pub const fn type_is_compatible<T>() where $(T: $marker),+ {}
         }
+
+        unsafe impl<T> $crate::vtable::MarkerCompatible<T> for $name where $(T: $marker),+ {}
     };
 }
 
 pub use uuid::Uuid;
+
+/// Marker trait indicating that a type `T` is compatible with the marker.
+///
+/// # Safety
+///
+/// The compatability with the marker can not be ensured by the compiler.
+pub unsafe trait MarkerCompatible<T> {}
 
 /// Definition of an Object.
 ///

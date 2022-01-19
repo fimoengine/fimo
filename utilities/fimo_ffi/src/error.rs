@@ -1,8 +1,9 @@
 //! Error type.
+use crate::marker::SendSyncMarker;
 use crate::object::CoerceObjectMut;
 use crate::{fimo_object, fimo_vtable, ObjBox, Optional, StrInner};
 use fimo_object::object::{ObjPtrCompat, ObjectWrapper};
-use fimo_object::{fimo_marker, impl_vtable, is_object};
+use fimo_object::{impl_vtable, is_object};
 use std::fmt::Write;
 
 fimo_object! {
@@ -48,17 +49,10 @@ impl std::fmt::Display for IError {
     }
 }
 
-fimo_marker! {
-    /// `Send` and `Sync` marker.
-    #[derive(Debug)]
-    #![requires(Send, Sync)]
-    pub marker SendSync;
-}
-
 fimo_vtable! {
     /// VTable of an [`IError`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![marker = SendSync]
+    #![marker = SendSyncMarker]
     #![uuid(0xe7af13dd, 0xadfd, 0x4541, 0xa0fa, 0x173b2f200e65)]
     pub struct IErrorVTable {
         /// Lower-level source, if it exists.

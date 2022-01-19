@@ -1,5 +1,6 @@
 //! Definition of the Rust `fimo-tasks` interface.
-use fimo_module_core::{fimo_interface, fimo_vtable, SendSyncMarker};
+use fimo_ffi::marker::SendSyncMarker;
+use fimo_module_core::{fimo_interface, fimo_vtable};
 use fimo_version_core::{ReleaseType, Version};
 
 thread_local! {static RUNTIME: std::cell::Cell<Option<&'static TaskRuntime>> = std::cell::Cell::new(None)}

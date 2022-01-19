@@ -1,8 +1,9 @@
 //! Loader for rust modules.
 use crate::{
     Error, ErrorKind, IModule, IModuleInstance, IModuleLoader, IModuleLoaderVTable, IModuleVTable,
-    ModuleInfo, PathChar, SendSyncMarker,
+    ModuleInfo, PathChar,
 };
+use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::vtable::IBaseInterface;
 use fimo_ffi::{fimo_object, fimo_vtable, impl_vtable, is_object, ObjArc, ObjWeak, SpanInner};

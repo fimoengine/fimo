@@ -169,7 +169,7 @@ impl ModuleRegistryInner {
 
         let i_registry = IModuleRegistryInner::from_object_mut(self.coerce_obj_mut());
         for (_, callback) in callbacks {
-            callback(i_registry, loader)
+            (callback.inner)(i_registry, loader)
         }
 
         Ok(loader)
@@ -292,7 +292,7 @@ impl ModuleRegistryInner {
 
         let i_registry = IModuleRegistryInner::from_object_mut(self.coerce_obj_mut());
         for (_, callback) in callbacks {
-            callback(i_registry, interface.clone())
+            (callback.inner)(i_registry, interface.clone())
         }
 
         Ok(interface)

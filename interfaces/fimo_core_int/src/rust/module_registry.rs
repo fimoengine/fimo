@@ -1,10 +1,11 @@
 //! Specification of a module registry.
 use fimo_ffi::fn_wrapper::RawFnOnce;
+use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::{HeapFnOnce, ObjArc};
 use fimo_module_core::{
     fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
-    IModuleLoaderVTable, ModuleInterfaceDescriptor, SendSyncMarker,
+    IModuleLoaderVTable, ModuleInterfaceDescriptor,
 };
 use fimo_version_core::Version;
 use std::marker::PhantomData;
@@ -789,19 +790,8 @@ impl From<LoaderCallbackId> for usize {
 /// A loader removed callback.
 #[derive(Debug)]
 pub struct LoaderCallback {
-    inner: HeapFnOnce<(*mut IModuleRegistryInner, &'static IModuleLoader), ()>,
-}
-
-impl FnOnce<(*mut IModuleRegistryInner, &'static IModuleLoader)> for LoaderCallback {
-    type Output = ();
-
-    #[inline]
-    extern "rust-call" fn call_once(
-        self,
-        args: (*mut IModuleRegistryInner, &'static IModuleLoader),
-    ) -> Self::Output {
-        self.inner.call_once(args)
-    }
+    /// Inner callable
+    pub inner: HeapFnOnce<(*mut IModuleRegistryInner, &'static IModuleLoader), (), SendSyncMarker>,
 }
 
 impl<F: FnOnce(*mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync> From<Box<F>>
@@ -814,9 +804,6 @@ impl<F: FnOnce(*mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync>
         }
     }
 }
-
-unsafe impl Send for LoaderCallback {}
-unsafe impl Sync for LoaderCallback {}
 
 /// A RAII guard for interface callbacks.
 #[derive(Debug)]
@@ -882,19 +869,9 @@ impl From<InterfaceCallbackId> for usize {
 /// A loader removed callback.
 #[derive(Debug)]
 pub struct InterfaceCallback {
-    inner: HeapFnOnce<(*mut IModuleRegistryInner, ObjArc<IModuleInterface>), ()>,
-}
-
-impl FnOnce<(*mut IModuleRegistryInner, ObjArc<IModuleInterface>)> for InterfaceCallback {
-    type Output = ();
-
-    #[inline]
-    extern "rust-call" fn call_once(
-        self,
-        args: (*mut IModuleRegistryInner, ObjArc<IModuleInterface>),
-    ) -> Self::Output {
-        self.inner.call_once(args)
-    }
+    /// Inner callable
+    pub inner:
+        HeapFnOnce<(*mut IModuleRegistryInner, ObjArc<IModuleInterface>), (), SendSyncMarker>,
 }
 
 impl<F: FnOnce(*mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync> From<Box<F>>
@@ -907,6 +884,3 @@ impl<F: FnOnce(*mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Syn
         }
     }
 }
-
-unsafe impl Send for InterfaceCallback {}
-unsafe impl Sync for InterfaceCallback {}
