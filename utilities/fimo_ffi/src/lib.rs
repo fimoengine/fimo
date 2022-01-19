@@ -25,6 +25,7 @@ pub mod optional;
 pub mod result;
 pub mod string;
 pub mod vec;
+pub mod marker;
 
 pub use fimo_object::obj_arc;
 pub use fimo_object::obj_box;
