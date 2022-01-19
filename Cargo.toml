@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "bin/*",
     "modules/*",
     "utilities/*",
     "test_utilities/*"
