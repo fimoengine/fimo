@@ -1,6 +1,5 @@
-use crate::{
-    Error, ErrorKind, ModuleInfo, ModuleInterfaceDescriptor, PathChar, Result, SendSyncMarker,
-};
+use crate::{Error, ErrorKind, ModuleInfo, ModuleInterfaceDescriptor, PathChar, Result};
+use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::vtable::IBaseInterface;
 use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, Object, Optional, SpanInner, StrInner};

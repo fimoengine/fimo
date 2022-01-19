@@ -1,6 +1,8 @@
 //! Specification of a settings registry.
+use fimo_ffi::marker::SendMarker;
+use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::HeapFnMut;
-use fimo_module_core::{fimo_object, fimo_vtable, SendSyncMarker};
+use fimo_module_core::{fimo_object, fimo_vtable};
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 
@@ -264,10 +266,10 @@ fimo_vtable! {
         /// # Note
         ///
         /// The callback may not call into the `SettingsRegistry`.
-        pub register_callback: fn(
+        pub register_callback: for<'a, 'b> fn(
             *const (),
             *const SettingsRegistryPath,
-            SettingsEventCallback,
+            SettingsEventCallback<'a, 'b>,
         ) -> Option<SettingsEventCallbackId>,
         /// Unregisters a callback from an item.
         pub unregister_callback: fn(*const (), SettingsEventCallbackId),
@@ -372,45 +374,26 @@ impl From<SettingsEventCallbackId> for usize {
 
 /// A loader removed callback.
 #[derive(Debug)]
-pub struct SettingsEventCallback {
-    inner: HeapFnMut<(&'static SettingsRegistryPath, &'static SettingsEvent), ()>,
+pub struct SettingsEventCallback<'a, 'b> {
+    inner: HeapFnMut<(&'a SettingsRegistryPath, &'b SettingsEvent), (), SendMarker>,
 }
 
-impl FnOnce<(&'_ SettingsRegistryPath, &'_ SettingsEvent)> for SettingsEventCallback {
-    type Output = ();
-
-    #[inline]
-    extern "rust-call" fn call_once(
-        mut self,
-        args: (&'_ SettingsRegistryPath, &'_ SettingsEvent),
-    ) -> Self::Output {
-        self.call_mut(args)
-    }
-}
-
-impl FnMut<(&'_ SettingsRegistryPath, &'_ SettingsEvent)> for SettingsEventCallback {
-    #[inline]
-    extern "rust-call" fn call_mut(
+impl<'a, 'b> SettingsEventCallback<'a, 'b> {
+    /// Fetches the inner callable.
+    pub fn inner<'c, 'd>(
         &mut self,
-        args: (&'_ SettingsRegistryPath, &'_ SettingsEvent),
-    ) -> Self::Output {
-        let args = unsafe { std::mem::transmute(args) };
-        self.inner.call_mut(args)
+    ) -> &mut HeapFnMut<(&'c SettingsRegistryPath, &'d SettingsEvent), (), SendMarker> {
+        unsafe { std::mem::transmute(&mut self.inner) }
     }
 }
 
-impl<F: FnMut(&'_ SettingsRegistryPath, &'_ SettingsEvent) + Send> From<Box<F>>
-    for SettingsEventCallback
+impl<'a, 'b, F: FnMut(&'_ SettingsRegistryPath, &'_ SettingsEvent) + Send> From<Box<F>>
+    for SettingsEventCallback<'a, 'b>
 {
     #[inline]
     fn from(f: Box<F>) -> Self {
-        let inner = HeapFnMut::new_boxed(f);
-
         Self {
-            inner: unsafe { std::mem::transmute(inner) },
+            inner: HeapFnMut::new_boxed(f),
         }
     }
 }
-
-unsafe impl Send for SettingsEventCallback {}
-unsafe impl Sync for SettingsEventCallback {}
