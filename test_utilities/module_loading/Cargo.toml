@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
-fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
+fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int" }
 fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int" }
 fimo_actix_int = { version = "0.1.0", path = "../../interfaces/fimo_actix_int" }

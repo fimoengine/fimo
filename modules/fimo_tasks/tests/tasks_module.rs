@@ -1,5 +1,5 @@
 use fimo_ffi::ObjArc;
-use fimo_module_core::Error;
+use fimo_module::Error;
 use fimo_tasks_int::rust::IFimoTasks;
 use module_loading::ModuleDatabase;
 use std::alloc::System;

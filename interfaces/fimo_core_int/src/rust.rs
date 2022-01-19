@@ -1,6 +1,6 @@
 //! Definition of the Rust `fimo-core` interface.
 use fimo_ffi::marker::SendSyncMarker;
-use fimo_module_core::{fimo_interface, fimo_vtable};
+use fimo_module::{fimo_interface, fimo_vtable};
 use fimo_version_core::{ReleaseType, Version};
 
 pub mod module_registry;

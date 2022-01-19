@@ -6,14 +6,12 @@ use fimo_core_int::rust::{
 };
 use fimo_ffi::{ObjArc, ObjWeak};
 use fimo_generic_module::{GenericModule, GenericModuleInstance};
-use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleParent};
-use fimo_module_core::{
-    Error, ErrorKind, FimoInterface, IModuleInterface, ModuleInterfaceDescriptor,
-};
+use fimo_module::rust_loader::{IRustModuleInner, IRustModuleParent};
+use fimo_module::{Error, ErrorKind, FimoInterface, IModuleInterface, ModuleInterfaceDescriptor};
 use fimo_tasks_int::rust::IFimoTasks;
 use std::collections::HashMap;
 
-fimo_module_core::rust_module! {construct_module}
+fimo_module::rust_module! {construct_module}
 
 #[allow(dead_code, improper_ctypes_definitions)]
 extern "C" fn construct_module() -> Result<ObjArc<IRustModuleInner>, Error> {

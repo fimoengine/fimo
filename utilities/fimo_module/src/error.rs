@@ -16,7 +16,7 @@ impl<E> Error<E> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_module_core::{Error, ErrorKind};
+    /// use fimo_module::{Error, ErrorKind};
     ///
     /// // errors can be created from strings
     /// let custom_error = <Error>::new(ErrorKind::Unknown, "oh no!");
@@ -40,7 +40,7 @@ impl<E> Error<E> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_module_core::{Error, ErrorKind};
+    /// use fimo_module::{Error, ErrorKind};
     ///
     /// fn print_error(err: Error) {
     ///     if let Some(inner_err) = err.into_inner() {
@@ -69,7 +69,7 @@ impl<E> Error<E> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_module_core::{Error, ErrorKind};
+    /// use fimo_module::{Error, ErrorKind};
     ///
     /// fn print_error(err: Error) {
     ///     println!("{:?}", err.kind());

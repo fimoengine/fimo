@@ -3,7 +3,7 @@ use fimo_ffi::fn_wrapper::RawFnOnce;
 use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::{HeapFnOnce, ObjArc};
-use fimo_module_core::{
+use fimo_module::{
     fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
     IModuleLoaderVTable, ModuleInterfaceDescriptor,
 };

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// #![feature(const_fn_fn_ptr_basics)]
 ///
 /// use fimo_version_core::Version;
-/// use fimo_module_core::{fimo_vtable, fimo_interface};
+/// use fimo_module::{fimo_vtable, fimo_interface};
 ///
 /// fimo_vtable! {
 ///     #![uuid(0xa0fe4d60, 0xa526, 0x4e9e, 0x97e2, 0x4c675aa6b324)]

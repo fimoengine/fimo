@@ -15,7 +15,7 @@ use fimo_version_core::{ReleaseType, Version};
 pub use actix_web as actix;
 use fimo_ffi::fn_wrapper::{HeapFn, HeapFnMut};
 use fimo_ffi::marker::SendSyncMarker;
-use fimo_module_core::{fimo_interface, fimo_vtable};
+use fimo_module::{fimo_interface, fimo_vtable};
 
 /// Status of the server.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]

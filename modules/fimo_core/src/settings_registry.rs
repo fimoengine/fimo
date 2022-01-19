@@ -4,7 +4,7 @@ use fimo_core_int::rust::settings_registry::{
     SettingsItemMetadata, SettingsItemType, SettingsRegistryInvalidPathError, SettingsRegistryPath,
     SettingsRegistryPathBuf, SettingsRegistryVTable,
 };
-use fimo_module_core::{impl_vtable, is_object};
+use fimo_module::{impl_vtable, is_object};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;

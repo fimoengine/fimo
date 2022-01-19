@@ -5,7 +5,7 @@ use fimo_core_int::rust::module_registry::{
 };
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::ObjArc;
-use fimo_module_core::{
+use fimo_module::{
     impl_vtable, is_object, Error, ErrorKind, IModuleInterface, IModuleLoader,
     ModuleInterfaceDescriptor,
 };
@@ -40,8 +40,8 @@ impl ModuleRegistry {
         if cfg!(feature = "rust_module_loader") {
             let handle = i_registry
                 .register_loader(
-                    fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::rust_loader::RustLoader::new().coerce_obj(),
+                    fimo_module::rust_loader::MODULE_LOADER_TYPE,
+                    fimo_module::rust_loader::RustLoader::new().coerce_obj(),
                 )
                 .unwrap();
             std::mem::forget(handle);
