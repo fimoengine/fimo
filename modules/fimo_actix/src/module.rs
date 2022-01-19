@@ -7,7 +7,7 @@ use fimo_core_int::rust::settings_registry::{
 use fimo_core_int::rust::IFimoCore;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
 use fimo_ffi::{impl_vtable, is_object, ObjArc, Object, Optional, StrInner};
-use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
+use fimo_module::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
 use fimo_version_core::Version;
 
 #[cfg(feature = "rust_module")]

@@ -2,7 +2,7 @@
 use fimo_ffi::marker::SendMarker;
 use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::HeapFnMut;
-use fimo_module_core::{fimo_object, fimo_vtable};
+use fimo_module::{fimo_object, fimo_vtable};
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 

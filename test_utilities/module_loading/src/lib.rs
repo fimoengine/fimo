@@ -1,7 +1,7 @@
 use fimo_ffi::ObjArc;
-use fimo_module_core::rust_loader::{RustLoader, MODULE_LOADER_TYPE};
-use fimo_module_core::{Error, ErrorKind, ModuleInterfaceDescriptor};
-use fimo_module_core::{FimoInterface, IModuleInstance, IModuleInterface};
+use fimo_module::rust_loader::{RustLoader, MODULE_LOADER_TYPE};
+use fimo_module::{Error, ErrorKind, ModuleInterfaceDescriptor};
+use fimo_module::{FimoInterface, IModuleInstance, IModuleInterface};
 use std::any::TypeId;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -19,13 +19,13 @@ fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_co
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
 fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int" }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi", optional = true }
+fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module", optional = true }
 fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", optional = true }
-fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
 
 [dev-dependencies]
 module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]
 default = ["rust_module"]
-module = ["fimo_ffi", "fimo_module_core", "fimo_core_int"]
+module = ["fimo_ffi", "fimo_module", "fimo_core_int"]
 rust_module = ["module"]

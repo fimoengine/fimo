@@ -12,5 +12,5 @@ categories = ["game-development"]
 actix-web = "=4.0.0-beta.20"
 fimo_core_int = { version = "0.1.0", path = "../fimo_core_int" }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
-fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core" }
+fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core" }

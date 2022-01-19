@@ -2,8 +2,8 @@
 use fimo_ffi::error::InnerError;
 use fimo_ffi::vtable::IBaseInterface;
 use fimo_ffi::{ObjArc, ObjWeak, SpanInner};
-use fimo_module_core::rust_loader::{IRustModuleInner, IRustModuleInnerVTable, IRustModuleParent};
-use fimo_module_core::{
+use fimo_module::rust_loader::{IRustModuleInner, IRustModuleInnerVTable, IRustModuleParent};
+use fimo_module::{
     impl_vtable, is_object, Error, ErrorKind, IModule, IModuleInstance, IModuleInstanceVTable,
     IModuleInterface, IModuleLoader, IModuleVTable, ModuleInfo, ModuleInterfaceDescriptor,
     PathChar,
@@ -268,7 +268,7 @@ impl_vtable! {
         unsafe extern "C" fn interface(
             ptr: *const (),
             desc: *const ModuleInterfaceDescriptor,
-        ) -> fimo_module_core::Result<ObjArc<IModuleInterface>> {
+        ) -> fimo_module::Result<ObjArc<IModuleInterface>> {
             let this = &*(ptr as *const GenericModuleInstance);
             this.get_interface(&*desc)
                 .map_err(|e| Error::new(ErrorKind::Internal, e))
@@ -279,11 +279,11 @@ impl_vtable! {
         unsafe extern "C" fn dependencies(
             ptr: *const (),
             desc: *const ModuleInterfaceDescriptor,
-        ) -> fimo_module_core::Result<SpanInner<ModuleInterfaceDescriptor, false>> {
+        ) -> fimo_module::Result<SpanInner<ModuleInterfaceDescriptor, false>> {
             let this = &*(ptr as *const GenericModuleInstance);
             this.get_interface_dependencies(&*desc).map_or_else(
-                |e| fimo_module_core::Result::Err(Error::new(ErrorKind::NotFound, e)),
-                |d| fimo_module_core::Result::Ok(d.into()),
+                |e| fimo_module::Result::Err(Error::new(ErrorKind::NotFound, e)),
+                |d| fimo_module::Result::Ok(d.into()),
             )
         }
 
@@ -292,7 +292,7 @@ impl_vtable! {
             ptr: *const (),
             desc: *const ModuleInterfaceDescriptor,
             core: ObjArc<IModuleInterface>,
-        ) -> fimo_module_core::Result<()> {
+        ) -> fimo_module::Result<()> {
             let this = &*(ptr as *const GenericModuleInstance);
             this.set_dependency(&*desc, core)
                 .map_err(|e| Error::new(ErrorKind::NotFound, e))

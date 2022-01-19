@@ -2,7 +2,7 @@
 use crate::TaskRuntime;
 use fimo_ffi::vtable::{IBaseInterface, VTable};
 use fimo_ffi::{ObjArc, Object, Optional, StrInner};
-use fimo_module_core::{
+use fimo_module::{
     impl_vtable, is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
 };
 use fimo_tasks_int::rust::{IFimoTasksVTable, TaskRuntimeInner};
