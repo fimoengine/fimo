@@ -2,9 +2,7 @@ use ci::rust::settings_registry::{SettingsEvent, SettingsItem, SettingsRegistryP
 use fimo_core_int as ci;
 use fimo_core_int::rust::IFimoCore;
 use fimo_ffi::ObjArc;
-use fimo_module_core as module;
-use fimo_module_core::{Error, ErrorKind, FimoInterface, IModuleInterface};
-use module_paths::core_module_path;
+use fimo_module_core::{Error, FimoInterface, IModuleInterface};
 use std::alloc::System;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,10 +14,10 @@ static A: System = System;
 #[test]
 #[cfg(feature = "rust_module")]
 fn load_dynamic() -> Result<(), Error> {
-    let core_path = core_module_path().map_err(|e| Error::new(ErrorKind::Unknown, e))?;
+    let core_path = module_loading::core_path();
 
-    let module_loader = module::rust_loader::RustLoader::new();
-    let core_module = unsafe { module_loader.load_module_raw(core_path.as_path())? };
+    let module_loader = fimo_module_core::rust_loader::RustLoader::new();
+    let core_module = unsafe { module_loader.load_module_raw(core_path)? };
 
     println!(
         "Core info: {}, Path: {}",
@@ -56,7 +54,8 @@ fn load_dynamic() -> Result<(), Error> {
 #[test]
 #[cfg(feature = "rust_module")]
 fn settings_registry() -> Result<(), Error> {
-    let (_, core) = module_loading::get_core_interface()?;
+    let db = module_loading::ModuleDatabase::new()?;
+    let core = db.core_interface();
 
     let settings_registry = core.get_settings_registry();
 

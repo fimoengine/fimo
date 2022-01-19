@@ -27,9 +27,9 @@ impl IModuleRegistry {
     /// The function may only call into the registry with the provided inner reference.
     #[inline]
     pub fn enter_inner<F: FnOnce(&'_ mut IModuleRegistryInner)>(&self, f: F) {
-        let mut wrapper = move |inner: *mut IModuleRegistryInner| {
+        let mut wrapper = MaybeUninit::new(move |inner: *mut IModuleRegistryInner| {
             unsafe { f(&mut *inner) };
-        };
+        });
         let wrapper_ref = unsafe { RawFnOnce::new(&mut wrapper) };
 
         let (ptr, vtable) = self.into_raw_parts();
@@ -160,13 +160,14 @@ impl IModuleRegistry {
             let res = &mut res;
             let interface = interface.clone();
             self.enter_inner(move |inner| {
-                res.write(inner.register_interface(descriptor, interface));
+                let id = inner.register_interface(descriptor, interface);
+                res.write(id);
             });
         }
 
         unsafe {
             res.assume_init()
-                .map(|id| InterfaceHandle::from_raw_parts(id, interface, self))
+                .map(move |id| InterfaceHandle::from_raw_parts(id, interface, self))
         }
     }
 

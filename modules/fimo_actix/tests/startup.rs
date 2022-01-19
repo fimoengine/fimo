@@ -1,11 +1,14 @@
-use fimo_actix_int::ServerStatus;
+use fimo_actix_int::{IFimoActix, ServerStatus};
 use fimo_module_core::{Error, ErrorKind};
+use module_loading::ModuleDatabase;
 use reqwest::Url;
 
 #[test]
 fn startup_server() -> Result<(), Error> {
-    let (core_instance, core) = module_loading::get_core_interface()?;
-    let actix = module_loading::get_actix_interface(&core_instance, &core)?;
+    let db = ModuleDatabase::new()?;
+    let core = db.core_interface();
+    let (actix, _handle) = db.new_interface::<IFimoActix>()?;
+    //std::mem::forget(_handle);
 
     assert_eq!(actix.get_server_status(), ServerStatus::Stopped);
     assert_eq!(actix.start(), ServerStatus::Running);

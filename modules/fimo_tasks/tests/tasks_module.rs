@@ -1,7 +1,7 @@
 use fimo_ffi::ObjArc;
 use fimo_module_core::Error;
 use fimo_tasks_int::rust::IFimoTasks;
-use module_loading::{get_core_interface, get_tasks_interface};
+use module_loading::ModuleDatabase;
 use std::alloc::System;
 
 #[global_allocator]
@@ -15,6 +15,8 @@ mod sync;
 mod tasks;
 
 fn initialize() -> Result<ObjArc<IFimoTasks>, Error> {
-    let (core_instance, core_interface) = get_core_interface()?;
-    get_tasks_interface(&core_instance, &core_interface)
+    let db = ModuleDatabase::new()?;
+    let (i, handle) = db.new_interface()?;
+    std::mem::forget(handle);
+    Ok(i)
 }
