@@ -1,6 +1,6 @@
 //! Specification of a module registry.
 use fimo_ffi::fn_wrapper::RawFnOnce;
-use fimo_ffi::object::{CoerceObject, ObjectWrapper};
+use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::{HeapFnOnce, ObjArc};
 use fimo_module_core::{
     fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
@@ -40,7 +40,7 @@ impl IModuleRegistry {
     ///
     /// The registered loader will be available to the rest of the `ModuleRegistry`.
     #[inline]
-    pub fn register_loader<T: CoerceObject<IModuleLoaderVTable>>(
+    pub fn register_loader<T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized>(
         &self,
         r#type: &str,
         loader: &'static T,
@@ -64,7 +64,7 @@ impl IModuleRegistry {
     ///
     /// Notifies all registered callbacks before returning.
     #[inline]
-    pub fn unregister_loader<T: CoerceObject<IModuleLoaderVTable>>(
+    pub fn unregister_loader<T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized>(
         &self,
         loader: LoaderHandle<'_, T>,
     ) -> Result<&'static T, Error> {
@@ -149,7 +149,7 @@ impl IModuleRegistry {
 
     /// Registers a new interface to the `ModuleRegistry`.
     #[inline]
-    pub fn register_interface<T: CoerceObject<IModuleInterfaceVTable>>(
+    pub fn register_interface<T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized>(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
         interface: ObjArc<T>,
@@ -175,7 +175,7 @@ impl IModuleRegistry {
     /// This function calls the interface-remove callbacks that are registered
     /// with the interface before removing it.
     #[inline]
-    pub fn unregister_interface<T: CoerceObject<IModuleInterfaceVTable>>(
+    pub fn unregister_interface<T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized>(
         &self,
         handle: InterfaceHandle<'_, T>,
     ) -> Result<ObjArc<T>, Error> {
@@ -326,13 +326,13 @@ impl IModuleRegistryInner {
     ///
     /// The registered loader will be available to the rest of the `ModuleRegistry`.
     #[inline]
-    pub fn register_loader<T: CoerceObject<IModuleLoaderVTable>>(
+    pub fn register_loader<T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized>(
         &mut self,
         r#type: &str,
         loader: &'static T,
     ) -> Result<LoaderId, Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
-        let loader = loader.coerce_obj();
+        let loader = loader.as_object();
         let loader = IModuleLoader::from_object(loader);
         (vtable.register_loader)(ptr, r#type, loader)
     }
@@ -388,13 +388,13 @@ impl IModuleRegistryInner {
 
     /// Registers a new interface to the `ModuleRegistry`.
     #[inline]
-    pub fn register_interface<T: CoerceObject<IModuleInterfaceVTable>>(
+    pub fn register_interface<T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized>(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
         interface: ObjArc<T>,
     ) -> Result<InterfaceId, Error> {
         let (ptr, vtable) = self.into_raw_parts_mut();
-        let interface = ObjArc::coerce_object(interface);
+        let interface = ObjArc::static_cast(interface);
         (vtable.register_interface)(ptr, descriptor, interface)
     }
 
@@ -553,13 +553,13 @@ fimo_vtable! {
 
 /// Handle to a loader.
 #[derive(Debug)]
-pub struct LoaderHandle<'a, T: CoerceObject<IModuleLoaderVTable> + 'static> {
+pub struct LoaderHandle<'a, T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized + 'static> {
     id: LoaderId,
     loader: &'static T,
     registry: &'a IModuleRegistry,
 }
 
-impl<'a, T: CoerceObject<IModuleLoaderVTable> + 'static> LoaderHandle<'a, T> {
+impl<'a, T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized + 'static> LoaderHandle<'a, T> {
     /// Constructs a new `LoaderHandle` from from its raw parts.
     ///
     /// # Safety
@@ -591,7 +591,7 @@ impl<'a, T: CoerceObject<IModuleLoaderVTable> + 'static> LoaderHandle<'a, T> {
     }
 }
 
-impl<'a, T: CoerceObject<IModuleLoaderVTable>> Deref for LoaderHandle<'a, T> {
+impl<'a, T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized> Deref for LoaderHandle<'a, T> {
     type Target = T;
 
     #[inline]
@@ -600,7 +600,7 @@ impl<'a, T: CoerceObject<IModuleLoaderVTable>> Deref for LoaderHandle<'a, T> {
     }
 }
 
-impl<T: CoerceObject<IModuleLoaderVTable>> Drop for LoaderHandle<'_, T> {
+impl<T: ObjectWrapper<VTable = IModuleLoaderVTable> + ?Sized> Drop for LoaderHandle<'_, T> {
     #[inline]
     fn drop(&mut self) {
         // safety: `LoaderId` is a simple `usize`.
@@ -636,14 +636,14 @@ impl From<LoaderId> for usize {
 
 /// Handle to a interface.
 #[derive(Debug)]
-pub struct InterfaceHandle<'a, T: CoerceObject<IModuleInterfaceVTable>> {
+pub struct InterfaceHandle<'a, T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized> {
     id: InterfaceId,
     interface: ObjArc<T>,
     registry: &'a IModuleRegistry,
     _phantom: PhantomData<fn() -> *const T>,
 }
 
-impl<'a, T: CoerceObject<IModuleInterfaceVTable>> InterfaceHandle<'a, T> {
+impl<'a, T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized> InterfaceHandle<'a, T> {
     /// Constructs a new `InterfaceHandle` from its raw parts.
     ///
     /// # Safety
@@ -682,7 +682,9 @@ impl<'a, T: CoerceObject<IModuleInterfaceVTable>> InterfaceHandle<'a, T> {
     }
 }
 
-impl<'a, T: CoerceObject<IModuleInterfaceVTable>> Deref for InterfaceHandle<'a, T> {
+impl<'a, T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized> Deref
+    for InterfaceHandle<'a, T>
+{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -690,7 +692,7 @@ impl<'a, T: CoerceObject<IModuleInterfaceVTable>> Deref for InterfaceHandle<'a, 
     }
 }
 
-impl<T: CoerceObject<IModuleInterfaceVTable>> Drop for InterfaceHandle<'_, T> {
+impl<T: ObjectWrapper<VTable = IModuleInterfaceVTable> + ?Sized> Drop for InterfaceHandle<'_, T> {
     fn drop(&mut self) {
         let id = unsafe { std::ptr::read(&self.id) };
         self.registry.enter_inner(move |inner| {

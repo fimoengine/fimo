@@ -41,7 +41,7 @@ impl ModuleRegistry {
             let handle = i_registry
                 .register_loader(
                     fimo_module_core::rust_loader::MODULE_LOADER_TYPE,
-                    fimo_module_core::rust_loader::RustLoader::new(),
+                    fimo_module_core::rust_loader::RustLoader::new().coerce_obj(),
                 )
                 .unwrap();
             std::mem::forget(handle);
