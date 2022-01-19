@@ -422,7 +422,7 @@ fimo_vtable! {
 }
 
 /// Marker trait for interfaces.
-pub trait FimoInterface {
+pub trait FimoInterface: ObjectWrapper {
     /// Name of the interface.
     const NAME: &'static str;
     /// Version of the interface.
