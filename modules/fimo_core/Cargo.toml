@@ -25,7 +25,6 @@ fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_
 fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core", features = ["serde"] }
 
 [dev-dependencies]
-module_paths = { path = "../../test_utilities/module_paths" }
 module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]

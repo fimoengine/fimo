@@ -1,6 +1,7 @@
 //! Callable wrappers.
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 
 #[repr(C)]
@@ -50,12 +51,12 @@ impl<Args, T> RawFnOnce<Args, T> {
     ///
     /// # Safety
     ///
-    /// The reference `f` must outlive the `RawFnOnce`.
+    /// The reference `f` must outlive the `RawFnOnce` and properly initialized.
     /// Once called, `f` is owned by the `RawFnOnce` and may not be used anymore.
     /// An exception to this rule is, if the `RawFnOnce` was forgotten with [`std::mem::forget`].
     #[inline]
-    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'_ mut F) -> Self {
-        let raw = f as *mut F;
+    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'_ mut MaybeUninit<F>) -> Self {
+        let raw = f as *mut MaybeUninit<F>;
         Self {
             // we own `f` so we drop the value.
             raw: RawCallable::new(raw as *const (), drop_value::<F>, Self::call_ref::<F>),
@@ -96,8 +97,11 @@ impl<Args, T> RawFnOnce<Args, T> {
     }
 
     fn call_ref<F: FnOnce<Args, Output = T>>(ptr: *const (), args: Args) -> T {
-        let raw = ptr as *mut F;
-        let f = unsafe { std::ptr::read(raw) };
+        let f = unsafe {
+            let raw = ptr as *mut MaybeUninit<F>;
+            let raw = std::ptr::read(raw);
+            raw.assume_init()
+        };
         <F as FnOnce<Args>>::call_once(f, args)
     }
 }
@@ -279,10 +283,11 @@ impl<'a, Args, T> RefFnOnce<'a, Args, T> {
     ///
     /// # Safety
     ///
+    /// The function `f` must be properly initialized.
     /// Once called, `f` is owned by the `RefFnOnce` and may not be used anymore.
     /// An exception to this rule is, if the `RefFnOnce` was forgotten with [`std::mem::forget`].
     #[inline]
-    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'a mut F) -> Self {
+    pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'a mut MaybeUninit<F>) -> Self {
         Self {
             raw: RawFnOnce::new(f),
             _phantom: Default::default(),

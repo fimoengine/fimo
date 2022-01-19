@@ -23,7 +23,7 @@ fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", op
 fimo_module_core = { version = "0.1.0", path = "../../utilities/fimo_module_core", optional = true }
 
 [dev-dependencies]
-module_loading = { path = "../../test_utilities/module_loading", features = ["tasks_module"] }
+module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]
 default = ["rust_module"]
