@@ -65,8 +65,8 @@ impl<T, E> Result<T, E> {
     /// Maps the `Result<T, E>` to `Result<U, E>` by mapping the ok value.
     #[inline]
     pub fn map<U, F>(self, op: F) -> Result<U, E>
-    where
-        F: FnOnce(T) -> U,
+        where
+            F: FnOnce(T) -> U,
     {
         match self {
             Result::Ok(x) => Result::Ok(op(x)),
@@ -77,8 +77,8 @@ impl<T, E> Result<T, E> {
     /// Maps the ok value of the result by applying f or returning the default value.
     #[inline]
     pub fn map_or<U, F>(self, default: U, f: F) -> U
-    where
-        F: FnOnce(T) -> U,
+        where
+            F: FnOnce(T) -> U,
     {
         match self {
             Result::Ok(x) => f(x),
@@ -90,9 +90,9 @@ impl<T, E> Result<T, E> {
     /// applying default to the error value.
     #[inline]
     pub fn map_or_else<U, D, F>(self, default: D, f: F) -> U
-    where
-        D: FnOnce(E) -> U,
-        F: FnOnce(T) -> U,
+        where
+            D: FnOnce(E) -> U,
+            F: FnOnce(T) -> U,
     {
         match self {
             Result::Ok(x) => f(x),
@@ -103,8 +103,8 @@ impl<T, E> Result<T, E> {
     /// Maps the `Result<T, E>` to `Result<T,F>` by mapping the error value.
     #[inline]
     pub fn map_err<F, O>(self, op: O) -> Result<T, F>
-    where
-        O: FnOnce(E) -> F,
+        where
+            O: FnOnce(E) -> F,
     {
         match self {
             Result::Ok(x) => Result::Ok(x),
@@ -124,8 +124,8 @@ impl<T, E> Result<T, E> {
     /// Returns the contained ok value or computes it from a closure.
     #[inline]
     pub fn unwrap_or_else<F>(self, op: F) -> T
-    where
-        F: FnOnce(E) -> T,
+        where
+            F: FnOnce(E) -> T,
     {
         match self {
             Result::Ok(x) => x,
@@ -144,8 +144,8 @@ impl<T, E> Result<T, E> {
 }
 
 impl<T, E> Result<T, E>
-where
-    E: Debug,
+    where
+        E: Debug,
 {
     /// Returns the contained ok value.
     ///
@@ -176,8 +176,8 @@ where
 }
 
 impl<T, E> Result<T, E>
-where
-    T: Debug,
+    where
+        T: Debug,
 {
     /// Returns the contained error value.
     ///
@@ -208,9 +208,9 @@ where
 }
 
 impl<T, E> Clone for Result<T, E>
-where
-    T: Clone,
-    E: Clone,
+    where
+        T: Clone,
+        E: Clone,
 {
     #[inline]
     fn clone(&self) -> Self {
