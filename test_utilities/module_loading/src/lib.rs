@@ -29,7 +29,7 @@ macro_rules! lib_path {
 #[cfg(target_os = "macos")]
 macro_rules! lib_path {
     ($lib:literal) => {
-        std::concat!("lib", $lib, ".so")
+        std::concat!("lib", $lib, ".dylib")
     };
 }
 
