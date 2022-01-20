@@ -5,9 +5,8 @@ use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::{HeapFnOnce, ObjArc};
 use fimo_module::{
     fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
-    IModuleLoaderVTable, ModuleInterfaceDescriptor,
+    IModuleLoaderVTable, InterfaceQuery, ModuleInterfaceDescriptor,
 };
-use fimo_version_core::Version;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
@@ -261,38 +260,15 @@ impl IModuleRegistry {
         unsafe { res.assume_init() }
     }
 
-    /// Extracts all interface descriptors with the same name.
+    /// Extracts all interface descriptors that match the query.
     #[inline]
-    pub fn get_interface_descriptors_from_name(
-        &self,
-        name: &str,
-    ) -> Vec<ModuleInterfaceDescriptor> {
+    pub fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
         let mut res = MaybeUninit::uninit();
 
         {
             let res = &mut res;
             self.enter_inner(move |inner| {
-                res.write(inner.get_interface_descriptors_from_name(name));
-            });
-        }
-
-        unsafe { res.assume_init() }
-    }
-
-    /// Extracts all descriptors of compatible interfaces.
-    #[inline]
-    pub fn get_compatible_interface_descriptors(
-        &self,
-        name: &str,
-        version: &Version,
-        extensions: &[fimo_ffi::String],
-    ) -> Vec<ModuleInterfaceDescriptor> {
-        let mut res = MaybeUninit::uninit();
-
-        {
-            let res = &mut res;
-            self.enter_inner(move |inner| {
-                res.write(inner.get_compatible_interface_descriptors(name, version, extensions));
+                res.write(inner.query_interfaces(query));
             });
         }
 
@@ -454,26 +430,11 @@ impl IModuleRegistryInner {
         (vtable.get_interface_from_descriptor)(ptr, descriptor)
     }
 
-    /// Extracts all interface descriptors with the same name.
+    /// Extracts all interface descriptors that match the query.
     #[inline]
-    pub fn get_interface_descriptors_from_name(
-        &self,
-        name: &str,
-    ) -> Vec<ModuleInterfaceDescriptor> {
+    pub fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
         let (ptr, vtable) = self.into_raw_parts();
-        (vtable.get_interface_descriptors_from_name)(ptr, name)
-    }
-
-    /// Extracts all descriptors of compatible interfaces.
-    #[inline]
-    pub fn get_compatible_interface_descriptors(
-        &self,
-        name: &str,
-        version: &Version,
-        extensions: &[fimo_ffi::String],
-    ) -> Vec<ModuleInterfaceDescriptor> {
-        let (ptr, vtable) = self.into_raw_parts();
-        (vtable.get_compatible_interface_descriptors)(ptr, name, version, extensions)
+        (vtable.query_interfaces)(ptr, query)
     }
 }
 
@@ -540,16 +501,9 @@ fimo_vtable! {
             *const (),
             *const ModuleInterfaceDescriptor,
         ) -> Result<ObjArc<IModuleInterface>, Error>,
-        /// Extracts all interface descriptors with the same name.
-        pub get_interface_descriptors_from_name:
-            fn(*const (), *const str) -> Vec<ModuleInterfaceDescriptor>,
-        /// Extracts all descriptors of compatible interfaces.
-        pub get_compatible_interface_descriptors: fn(
-            *const (),
-            *const str,
-            *const Version,
-            *const [fimo_ffi::String],
-        ) -> Vec<ModuleInterfaceDescriptor>,
+        /// Extracts all interface descriptors that match the query.
+        pub query_interfaces:
+            fn(*const (), *const InterfaceQuery) -> Vec<ModuleInterfaceDescriptor>,
     }
 }
 

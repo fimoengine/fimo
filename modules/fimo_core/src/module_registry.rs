@@ -6,10 +6,9 @@ use fimo_core_int::rust::module_registry::{
 use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::ObjArc;
 use fimo_module::{
-    impl_vtable, is_object, Error, ErrorKind, IModuleInterface, IModuleLoader,
+    impl_vtable, is_object, Error, ErrorKind, IModuleInterface, IModuleLoader, InterfaceQuery,
     ModuleInterfaceDescriptor,
 };
-use fimo_version_core::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -374,31 +373,10 @@ impl ModuleRegistryInner {
     }
 
     #[inline]
-    fn get_interface_descriptors_from_name(&self, name: &str) -> Vec<ModuleInterfaceDescriptor> {
+    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
         self.interface_map
             .keys()
-            .filter(|x| x.name == name)
-            .cloned()
-            .collect()
-    }
-
-    #[inline]
-    fn get_compatible_interface_descriptors(
-        &self,
-        name: &str,
-        version: &Version,
-        extensions: &[fimo_ffi::String],
-    ) -> Vec<ModuleInterfaceDescriptor> {
-        self.interface_map
-            .keys()
-            .filter(|x| {
-                x.name == name
-                    && version.is_compatible(&x.version)
-                    && extensions
-                        .as_ref()
-                        .iter()
-                        .all(|ext| x.extensions.contains(ext))
-            })
+            .filter(|x| query.query_matches(x))
             .cloned()
             .collect()
     }
@@ -474,17 +452,10 @@ impl_vtable! {
                 .get_interface_from_descriptor(descriptor)
                 .map_err(|e| Error::new(ErrorKind::Unknown, e))
         },
-        |ptr, name| {
+        |ptr, query| {
             let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-            let name = unsafe { &*name };
-            registry.get_interface_descriptors_from_name(name)
-        },
-        |ptr, name, version, extensions| {
-            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-            let name = unsafe { &*name };
-            let version = unsafe { &*version };
-            let extensions = unsafe { &*extensions };
-            registry.get_compatible_interface_descriptors(name, version, extensions)
+            let query = unsafe { &*query };
+            registry.query_interfaces(query)
         },
     }
 }
