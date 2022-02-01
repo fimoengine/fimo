@@ -1,7 +1,7 @@
 //! Definition of an object-aware box type.
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::{IBaseInterface, VTable};
+use crate::vtable::{VTable, VTableUpcast};
 use crate::{CoerceObjectMut, Object};
 use std::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
@@ -169,11 +169,15 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
         unsafe { ObjBox::from_raw_parts(obj, alloc) }
     }
 
-    /// Casts an `ObjBox<O, A>` to an `ObjBox<Object<BaseInterface>>`.
-    pub fn cast_base(b: ObjBox<O, A>) -> ObjBox<Object<IBaseInterface>, A> {
+    /// Casts an `ObjBox<O, A>` to a super object.
+    pub fn cast_super<U: ObjectWrapper + ?Sized>(b: ObjBox<O, A>) -> ObjBox<U, A>
+    where
+        O::VTable: VTableUpcast<U::VTable>,
+    {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         let obj = O::as_object_mut_raw(ptr);
-        let obj = Object::<O::VTable>::cast_base_mut_raw(obj);
+        let obj = Object::<O::VTable>::cast_super_mut_raw(obj);
+        let obj = U::from_object_mut_raw(obj);
         unsafe { ObjBox::from_raw_parts(obj, alloc) }
     }
 }

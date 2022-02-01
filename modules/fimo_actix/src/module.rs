@@ -79,7 +79,7 @@ impl_vtable! {
     impl IModuleInterfaceVTable => FimoActixInterface {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
             let i: &IFimoActixVTable = FimoActixInterface::get_vtable();
-            i.as_base()
+            i.as_super()
         }
 
         #[allow(improper_ctypes_definitions)]

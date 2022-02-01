@@ -43,7 +43,7 @@ impl_vtable! {
     impl IModuleInterfaceVTable => CoreWrapper {
         unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
             let i: &IFimoCoreVTable = CoreWrapper::get_vtable();
-            i.as_base()
+            i.as_super()
         }
 
         #[allow(improper_ctypes_definitions)]
