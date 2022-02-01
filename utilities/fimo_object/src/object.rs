@@ -1,6 +1,6 @@
 //! Object utilities.
 use crate::raw::{CastError, RawObject, RawObjectMut};
-use crate::vtable::{IBaseInterface, ObjectID, VTable};
+use crate::vtable::{IBaseInterface, ObjectID, VTable, VTableUpcast};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -369,26 +369,42 @@ pub struct Object<T: VTable> {
 }
 
 impl<T: VTable> Object<T> {
-    /// Casts an object to the base object.
-    pub fn cast_base(&self) -> &Object<IBaseInterface> {
-        unsafe { &*Self::cast_base_raw(self) }
+    /// Casts an object to the super object.
+    #[inline]
+    pub fn cast_super<U: VTable>(&self) -> &Object<U>
+    where
+        T: VTableUpcast<U>,
+    {
+        unsafe { &*Self::cast_super_raw(self) }
     }
 
-    /// Casts a `*const Object<T>` to a `*const Object<BaseInterface>`.
-    pub fn cast_base_raw(o: *const Self) -> *const Object<IBaseInterface> {
-        // safety: transmuting to the base interface is always sound.
-        o as _
+    /// Casts a `*const Object<T>` to a pointer to a super Object.
+    #[inline]
+    pub fn cast_super_raw<U: VTable>(o: *const Self) -> *const Object<U>
+    where
+        T: VTableUpcast<U>,
+    {
+        let (p, v) = into_raw_parts(o);
+        unsafe { from_raw_parts(p, v.upcast()) }
     }
 
-    /// Casts an object to the base object.
-    pub fn cast_base_mut(&mut self) -> &mut Object<IBaseInterface> {
-        unsafe { &mut *Self::cast_base_mut_raw(self) }
+    /// Casts an object to the super object.
+    #[inline]
+    pub fn cast_super_mut<U: VTable>(&mut self) -> &mut Object<U>
+    where
+        T: VTableUpcast<U>,
+    {
+        unsafe { &mut *Self::cast_super_mut_raw(self) }
     }
 
-    /// Casts a `*mut Object<T>` to a `*mut Object<BaseInterface>`.
-    pub fn cast_base_mut_raw(o: *mut Self) -> *mut Object<IBaseInterface> {
-        // safety: transmuting to the base interface is always sound.
-        o as _
+    /// Casts a `*const Object<T>` to a pointer to a super Object.
+    #[inline]
+    pub fn cast_super_mut_raw<U: VTable>(o: *mut Self) -> *mut Object<U>
+    where
+        T: VTableUpcast<U>,
+    {
+        let (p, v) = into_raw_parts_mut(o);
+        unsafe { from_raw_parts_mut(p, v.upcast()) }
     }
 
     /// Casts the `&Object<T>` to a `&Object<U>`.
@@ -532,13 +548,13 @@ unsafe impl<T: VTable> Sync for Object<T> where <T as VTable>::Marker: Sync {}
 
 impl<T: VTable> AsRef<Object<IBaseInterface>> for Object<T> {
     fn as_ref(&self) -> &Object<IBaseInterface> {
-        self.cast_base()
+        self.cast_super()
     }
 }
 
 impl<T: VTable> AsMut<Object<IBaseInterface>> for Object<T> {
     fn as_mut(&mut self) -> &mut Object<IBaseInterface> {
-        self.cast_base_mut()
+        self.cast_super_mut()
     }
 }
 

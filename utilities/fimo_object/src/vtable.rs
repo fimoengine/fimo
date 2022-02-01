@@ -326,8 +326,41 @@ pub unsafe trait VTable: 'static + Send + Sync + Sized {
     /// Retrieves the name of the interface.
     fn interface_name(&self) -> &'static str;
 
-    /// Casts a `&Self` to a [`IBaseInterface`] reference.
-    fn as_base(&self) -> &IBaseInterface {
+    /// Casts a `&Self` to a reference of a super vtable.
+    fn as_super<T: VTable>(&self) -> &T
+    where
+        Self: VTableUpcast<T>,
+    {
+        self.upcast()
+    }
+}
+
+/// Trait for casting between vtables.
+pub trait VTableUpcast<T: VTable>: VTable {
+    /// Casts the vtable to a super vtable.
+    fn upcast(&self) -> &T;
+}
+
+impl<T: VTable> VTableUpcast<IBaseInterface> for T {
+    fn upcast(&self) -> &IBaseInterface {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl<T: VTable + Send> VTableUpcast<IBaseInterfaceSend> for T {
+    fn upcast(&self) -> &IBaseInterfaceSend {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl<T: VTable + Sync> VTableUpcast<IBaseInterfaceSync> for T {
+    fn upcast(&self) -> &IBaseInterfaceSync {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl<T: VTable + Send + Sync> VTableUpcast<IBaseInterfaceSendSync> for T {
+    fn upcast(&self) -> &IBaseInterfaceSendSync {
         unsafe { std::mem::transmute(self) }
     }
 }
@@ -342,12 +375,71 @@ fimo_vtable! {
     pub struct IBaseInterface;
 }
 
+fimo_vtable! {
+    /// Layout of the minimal object vtable.
+    ///
+    /// Contains the data required for allocating/deallocating and casting any object.
+    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+    #![marker = SendMarker]
+    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
+    pub struct IBaseInterfaceSend;
+}
+
+fimo_vtable! {
+    /// Layout of the minimal object vtable.
+    ///
+    /// Contains the data required for allocating/deallocating and casting any object.
+    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+    #![marker = SyncMarker]
+    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
+    pub struct IBaseInterfaceSync;
+}
+
+fimo_vtable! {
+    /// Layout of the minimal object vtable.
+    ///
+    /// Contains the data required for allocating/deallocating and casting any object.
+    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+    #![marker = SendSyncMarker]
+    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
+    pub struct IBaseInterfaceSendSync;
+}
+
 fimo_marker! {
     /// Default vtable marker.
     #[allow(missing_debug_implementations)]
     pub marker DefaultMarker {
         _phantom: PhantomData<*const ()>
     }
+}
+
+fimo_marker! {
+    /// A marker which implements `Send`.
+    #[allow(missing_debug_implementations)]
+    #![requires(Send)]
+    pub marker SendMarker {
+        _inner: DefaultMarker,
+    }
+}
+
+unsafe impl Send for SendMarker {}
+
+fimo_marker! {
+    /// A marker which implements `Sync`.
+    #[allow(missing_debug_implementations)]
+    #![requires(Sync)]
+    pub marker SyncMarker {
+        _inner: DefaultMarker,
+    }
+}
+
+unsafe impl Sync for SyncMarker {}
+
+fimo_marker! {
+    /// A marker which implements both `Send` and `Sync`.
+    #[allow(missing_debug_implementations)]
+    #![requires(Send, Sync)]
+    pub marker SendSyncMarker;
 }
 
 /// Drops the pointed to value.

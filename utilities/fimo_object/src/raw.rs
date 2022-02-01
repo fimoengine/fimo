@@ -1,5 +1,5 @@
 //! Definition of raw objects.
-use crate::vtable::{IBaseInterface, ObjectID, VTable};
+use crate::vtable::{ObjectID, VTable, VTableUpcast};
 use std::fmt::{Debug, Formatter, Pointer};
 
 /// Raw representation of an immutable object.
@@ -106,16 +106,22 @@ pub struct CastError<T> {
     pub available_id: crate::vtable::Uuid,
 }
 
-/// Casts an object to the base object.
-pub fn cast_base<T: VTable>(obj: RawObject<T>) -> RawObject<IBaseInterface> {
-    // safety: we assume that the start of `T` matches with `BaseInterface`.
-    unsafe { std::mem::transmute(obj) }
+/// Casts an object to the super object.
+#[inline]
+pub fn upcast<T: VTable + VTableUpcast<U>, U: VTable>(obj: RawObject<T>) -> RawObject<U> {
+    RawObject {
+        object: obj.object,
+        vtable: obj.vtable.upcast(),
+    }
 }
 
-/// Casts an object to the base object.
-pub fn cast_base_mut<T: VTable>(obj: RawObjectMut<T>) -> RawObjectMut<IBaseInterface> {
-    // safety: we assume that the start of `T` matches with `BaseInterface`.
-    unsafe { std::mem::transmute(obj) }
+/// Casts an object to the super object.
+#[inline]
+pub fn upcast_mut<T: VTable + VTableUpcast<U>, U: VTable>(obj: RawObjectMut<T>) -> RawObjectMut<U> {
+    RawObjectMut {
+        object: obj.object,
+        vtable: obj.vtable.upcast(),
+    }
 }
 
 /// Casts the interface of the object.

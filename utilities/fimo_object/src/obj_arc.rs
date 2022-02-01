@@ -6,7 +6,7 @@
 use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::IBaseInterface;
+use crate::vtable::VTableUpcast;
 use crate::{CoerceObject, Object};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
@@ -510,7 +510,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
     /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::ObjectID;
+    /// use fimo_object::vtable::{IBaseInterface, ObjectID};
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
     /// // Define a custom interface vtable.
@@ -559,16 +559,20 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// assert_eq!(x.0, 5);
     ///
     /// let x: ObjArc<Obj> = ObjArc::coerce_object(x);
-    /// let x = ObjArc::cast_base(x);
+    /// let x: ObjArc<Object<IBaseInterface>> = ObjArc::cast_super(x);
     /// let x: ObjArc<Obj> = ObjArc::try_cast(x).unwrap();
     /// assert_eq!(x.add(0), 5);
     /// assert_eq!(x.add(1), 6);
     /// assert_eq!(x.add(5), 10);
     /// ```
-    pub fn cast_base(a: ObjArc<O, A>) -> ObjArc<Object<IBaseInterface>, A> {
+    pub fn cast_super<U: ObjectWrapper + ?Sized>(a: ObjArc<O, A>) -> ObjArc<U, A>
+    where
+        O::VTable: VTableUpcast<U::VTable>,
+    {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let obj = O::as_object_raw(ptr);
-        let obj = Object::<O::VTable>::cast_base_raw(obj);
+        let obj = Object::<O::VTable>::cast_super_raw(obj);
+        let obj = U::from_object_raw(obj);
         unsafe { ObjArc::from_raw_parts(obj, alloc) }
     }
 }
@@ -1559,11 +1563,15 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
         unsafe { ObjWeak::from_raw_parts(obj, alloc) }
     }
 
-    /// Casts an `ObjWeak<O, A>` to an `ObjWeak<Object<BaseInterface>>`.
-    pub fn cast_base(w: ObjWeak<O, A>) -> ObjWeak<Object<IBaseInterface>, A> {
+    /// Casts an `ObjWeak<O, A>` to a super object.
+    pub fn cast_super<U: ObjectWrapper + ?Sized>(w: ObjWeak<O, A>) -> ObjWeak<U, A>
+    where
+        O::VTable: VTableUpcast<U::VTable>,
+    {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         let obj = O::as_object_raw(ptr);
-        let obj = Object::<O::VTable>::cast_base_raw(obj);
+        let obj = Object::<O::VTable>::cast_super_raw(obj);
+        let obj = U::from_object_raw(obj);
         unsafe { ObjWeak::from_raw_parts(obj, alloc) }
     }
 }
