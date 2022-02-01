@@ -10,7 +10,6 @@ use fimo_core_int::rust::module_registry::InterfaceHandle;
 use fimo_core_int::rust::IFimoCore;
 
 use fimo_actix_int::IFimoActix;
-use fimo_tasks_int::rust::IFimoTasks;
 
 #[cfg(target_os = "windows")]
 macro_rules! lib_path {
@@ -52,10 +51,6 @@ impl ModuleDatabase {
         paths.insert(
             IFimoCore::new_descriptor(),
             new_path(lib_path!("fimo_core"))?,
-        );
-        paths.insert(
-            IFimoTasks::new_descriptor(),
-            new_path(lib_path!("fimo_tasks"))?,
         );
         paths.insert(
             IFimoActix::new_descriptor(),
