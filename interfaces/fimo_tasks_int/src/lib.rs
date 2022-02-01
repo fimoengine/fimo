@@ -1,4 +1,4 @@
-//! Definition of the `fimo-core` interface.
+//! Definition of the `fimo-tasks` interface.
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -8,4 +8,3 @@
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
 #![feature(negative_impls)]
-pub mod rust;

@@ -10,22 +10,6 @@ categories = ["game-development"]
 crate-type = ["lib", "dylib"]
 
 [dependencies]
-atomic = "0.5"
-context = "2.0"
-num_cpus = "1.13"
-parking_lot = "0.11"
-crossbeam-deque = "0.8"
-fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core" }
-fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
-fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int" }
-fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi", optional = true }
-fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module", optional = true }
-fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", optional = true }
 
 [dev-dependencies]
 module_loading = { path = "../../test_utilities/module_loading" }
-
-[features]
-default = ["rust_module"]
-module = ["fimo_ffi", "fimo_module", "fimo_core_int"]
-rust_module = ["module"]
