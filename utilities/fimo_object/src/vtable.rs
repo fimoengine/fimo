@@ -87,7 +87,9 @@ macro_rules! fimo_vtable {
             /// Constructs a new instance of the vtable.
             #[allow(clippy::type_complexity)]
             #[allow(clippy::too_many_arguments)]
-            pub const fn new<T: $crate::vtable::ObjectID>($($elem: $elem_ty),*) -> Self {
+            pub const fn new<T: $crate::vtable::ObjectID>($($elem: $elem_ty),*) -> Self
+            where $marker: $crate::vtable::MarkerCompatible<T>,
+            {
                 Self {
                     __internal_drop_in_place: $crate::vtable::drop_obj_in_place::<T>,
                     __internal_object_size: std::mem::size_of::<T>(),
@@ -109,6 +111,101 @@ macro_rules! fimo_vtable {
             type Marker = $marker;
             const INTERFACE_ID: $crate::vtable::Uuid = $crate::vtable::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
             const INTERFACE_NAME: &'static str = $crate::vtable::type_name::<$name>();
+
+            unsafe fn drop_in_place(&self, obj: *mut ()) {
+                (self.__internal_drop_in_place)(obj)
+            }
+
+            fn size_of(&self) -> usize {
+                self.__internal_object_size
+            }
+
+            fn align_of(&self) -> usize {
+                self.__internal_object_alignment
+            }
+
+            fn object_id(&self) -> $crate::vtable::Uuid {
+                $crate::vtable::Uuid::from_bytes(self.__internal_object_id)
+            }
+
+            fn object_name(&self) -> &'static str {
+                self.__internal_object_name.into()
+            }
+
+            fn interface_id(&self) -> $crate::vtable::Uuid {
+                $crate::vtable::Uuid::from_bytes(self.__internal_interface_id)
+            }
+
+            fn interface_name(&self) -> &'static str {
+                self.__internal_interface_name.into()
+            }
+        }
+    };
+    // struct with named fields and generic marker
+    (
+        $(#[$attr:meta])*
+        #![generic_marker]
+        $(#![default_marker = $default_marker_ty:ty])?
+        #![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)]
+        $vis:vis struct $name:ident{
+            $(
+                $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$attr])*
+        #[repr(C)]
+        $vis struct $name<M: 'static $(= $default_marker_ty)?> {
+            /// Dropping procedure for the object.
+            ///
+            /// Consumes the pointer.
+            pub __internal_drop_in_place: unsafe extern "C" fn(*mut ()),
+            /// Size of the object.
+            pub __internal_object_size: usize,
+            /// Alignment of the object.
+            pub __internal_object_alignment: usize,
+            /// Unique object id.
+            pub __internal_object_id: [u8; 16],
+            /// Name of the underlying object type.
+            pub __internal_object_name: $crate::ConstStr<'static>,
+            /// Unique interface id.
+            pub __internal_interface_id: [u8; 16],
+            /// Name of the interface type.
+            pub __internal_interface_name: $crate::ConstStr<'static>,
+            /// Phantom for marker type.
+            pub __internal_phantom_marker: std::marker::PhantomData<fn() -> M>,
+            $($(#[$elem_attr])* $elem_vis $elem: $elem_ty),*
+        }
+
+        impl<M: 'static> $name<M> {
+            /// Constructs a new instance of the vtable.
+            #[allow(clippy::type_complexity)]
+            #[allow(clippy::too_many_arguments)]
+            pub const fn new<T: $crate::vtable::ObjectID>($($elem: $elem_ty),*) -> Self
+            where M: $crate::vtable::MarkerCompatible<T>,
+            {
+                Self {
+                    __internal_drop_in_place: $crate::vtable::drop_obj_in_place::<T>,
+                    __internal_object_size: std::mem::size_of::<T>(),
+                    __internal_object_alignment: std::mem::align_of::<T>(),
+                    __internal_object_id: *<T as $crate::vtable::ObjectID>::OBJECT_ID.as_bytes(),
+                    __internal_object_name: unsafe { $crate::str::from_utf8_unchecked(
+                        <T as $crate::vtable::ObjectID>::OBJECT_NAME.as_bytes(),
+                    ) },
+                    __internal_interface_id: *<Self as $crate::vtable::VTable>::INTERFACE_ID.as_bytes(),
+                    __internal_interface_name: unsafe { $crate::str::from_utf8_unchecked(
+                        <Self as $crate::vtable::VTable>::INTERFACE_NAME.as_bytes(),
+                    ) },
+                    __internal_phantom_marker: std::marker::PhantomData,
+                    $($elem),*
+                }
+            }
+        }
+
+        unsafe impl<M: 'static> $crate::vtable::VTable for $name<M> {
+            type Marker = M;
+            const INTERFACE_ID: $crate::vtable::Uuid = $crate::vtable::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
+            const INTERFACE_NAME: &'static str = $crate::vtable::type_name::<$name<M>>();
 
             unsafe fn drop_in_place(&self, obj: *mut ()) {
                 (self.__internal_drop_in_place)(obj)
@@ -183,6 +280,22 @@ macro_rules! fimo_vtable {
             #![marker=$crate::vtable::DefaultMarker]
             #![uuid($u1,$u2,$u3,$u4,$u5)]
             $vis struct $name;
+        }
+    };
+    // unit struct with generic marker
+    (
+        $(#[$attr:meta])*
+        #![generic_marker]
+        $(#![default_marker = $default_marker_ty:ty])?
+        #![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)]
+        $vis:vis struct $name:ident;
+    ) => {
+        $crate::fimo_vtable!{
+            $(#[$attr])*
+            #![generic_marker]
+            $(#![default_marker = $default_marker_ty])?
+            #![uuid($u1,$u2,$u3,$u4,$u5)]
+            $vis struct $name {}
         }
     };
 }
@@ -289,7 +402,7 @@ pub unsafe trait ObjectID: Sized {
 /// # Safety
 ///
 /// This trait requires that the start of the vtable conforms with the layout
-/// of an [`IBaseInterface`] and that the id of the interface is unique.
+/// of an [`IBase`] and that the id of the interface is unique.
 /// The [`fimo_vtable!`] macro automatically implements this trait.
 pub unsafe trait VTable: 'static + Send + Sync + Sized {
     /// Type used as a marker.
@@ -341,26 +454,60 @@ pub trait VTableUpcast<T: VTable>: VTable {
     fn upcast(&self) -> &T;
 }
 
-impl<T: VTable> VTableUpcast<IBaseInterface> for T {
-    fn upcast(&self) -> &IBaseInterface {
-        unsafe { std::mem::transmute(self) }
-    }
-}
-
-impl<T: VTable + Send> VTableUpcast<IBaseInterfaceSend> for T {
-    fn upcast(&self) -> &IBaseInterfaceSend {
-        unsafe { std::mem::transmute(self) }
-    }
-}
-
-impl<T: VTable + Sync> VTableUpcast<IBaseInterfaceSync> for T {
-    fn upcast(&self) -> &IBaseInterfaceSync {
-        unsafe { std::mem::transmute(self) }
-    }
-}
-
-impl<T: VTable + Send + Sync> VTableUpcast<IBaseInterfaceSendSync> for T {
-    fn upcast(&self) -> &IBaseInterfaceSendSync {
+impl<T: VTable, M: 'static> VTableUpcast<IBase<M>> for T
+where
+    M: MarkerCompatible<T::Marker>,
+{
+    /// Casts the vtable to the generic [`IBase`] vtable.
+    ///
+    /// # Examples
+    ///
+    /// The cast only works if the marker of the current vtable is compatible with M.
+    ///
+    /// This compiles:
+    ///
+    /// ```
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{is_object, impl_vtable, fimo_vtable};
+    /// use fimo_object::vtable::{IBase, SendSyncMarker, VTableUpcast};
+    ///
+    /// struct Obj;
+    /// fimo_vtable! {
+    ///     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+    ///     #![marker = SendSyncMarker]
+    ///     #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
+    ///     struct I;
+    /// }
+    /// is_object!{ #![uuid(0x6cf7178d, 0x472f, 0x454a, 0x9b52, 0x5f67b546fd92)] Obj }
+    ///
+    /// let i_vtable = I::new::<Obj>();
+    /// let ss_base: &IBase<SendSyncMarker> = i_vtable.upcast();
+    /// let base: &IBase = i_vtable.upcast();
+    /// ```
+    ///
+    /// This doesn't because the marker for I doesn't implement Send and Sync:
+    ///
+    /// ```compile_fail
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(const_fn_fn_ptr_basics)]
+    ///
+    /// use fimo_object::{is_object, impl_vtable, fimo_vtable};
+    /// use fimo_object::vtable::{IBase, SendSyncMarker, VTableUpcast};
+    ///
+    /// struct Obj;
+    /// fimo_vtable! {
+    ///     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+    ///     #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
+    ///     struct I;
+    /// }
+    /// is_object!{ #![uuid(0x6cf7178d, 0x472f, 0x454a, 0x9b52, 0x5f67b546fd92)] Obj }
+    ///
+    /// let i_vtable = I::new::<Obj>();
+    /// let ss_base: &IBase<SendSyncMarker> = i_vtable.upcast();
+    /// ```
+    fn upcast(&self) -> &IBase<M> {
         unsafe { std::mem::transmute(self) }
     }
 }
@@ -370,39 +517,10 @@ fimo_vtable! {
     ///
     /// Contains the data required for allocating/deallocating and casting any object.
     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-    #![marker = DefaultMarker]
+    #![generic_marker]
+    #![default_marker = DefaultMarker]
     #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
-    pub struct IBaseInterface;
-}
-
-fimo_vtable! {
-    /// Layout of the minimal object vtable.
-    ///
-    /// Contains the data required for allocating/deallocating and casting any object.
-    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-    #![marker = SendMarker]
-    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
-    pub struct IBaseInterfaceSend;
-}
-
-fimo_vtable! {
-    /// Layout of the minimal object vtable.
-    ///
-    /// Contains the data required for allocating/deallocating and casting any object.
-    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-    #![marker = SyncMarker]
-    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
-    pub struct IBaseInterfaceSync;
-}
-
-fimo_vtable! {
-    /// Layout of the minimal object vtable.
-    ///
-    /// Contains the data required for allocating/deallocating and casting any object.
-    #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
-    #![marker = SendSyncMarker]
-    #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
-    pub struct IBaseInterfaceSendSync;
+    pub struct IBase;
 }
 
 fimo_marker! {

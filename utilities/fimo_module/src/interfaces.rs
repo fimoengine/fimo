@@ -1,7 +1,7 @@
 use crate::{Error, ErrorKind, ModuleInfo, ModuleInterfaceDescriptor, PathChar, Result};
 use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
-use fimo_ffi::vtable::IBaseInterface;
+use fimo_ffi::vtable::{IBase, MarkerCompatible, VTable};
 use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, Object, Optional, SpanInner, StrInner};
 use fimo_version_core::Version;
 use std::path::{Path, PathBuf};
@@ -93,7 +93,7 @@ fimo_object! {
 impl IModuleLoader {
     /// Casts the `IModuleLoader` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<IBaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBase<SendSyncMarker>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -181,7 +181,7 @@ fimo_vtable! {
     #![uuid(0x6533e721, 0x5402, 0x46bc, 0x91e5, 0x882b0e4ffec9)]
     pub struct IModuleLoaderVTable {
         /// Fetches an internal vtable for the loader.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBase<SendSyncMarker>,
         /// Removes all modules that aren't referenced by anyone from the cache,
         /// unloading them in the process.
         pub evict_module_cache: unsafe extern "C" fn(*const ()),
@@ -215,7 +215,7 @@ fimo_object! {
 impl IModule {
     /// Casts the `IModule` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<IBaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBase<SendSyncMarker>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -288,7 +288,7 @@ fimo_vtable! {
     #![uuid(0xccca2ad2, 0x38e4, 0x4c0d, 0x9975, 0x8f8e472ab03a)]
     pub struct IModuleVTable {
         /// Fetches an internal vtable for the module.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBase<SendSyncMarker>,
         /// Fetches the path to the module root.
         pub module_path: unsafe extern "C" fn(*const ()) -> SpanInner<PathChar, false>,
         /// Fetches a pointer to the modules [`ModuleInfo`].
@@ -315,7 +315,7 @@ fimo_object! {
 impl IModuleInstance {
     /// Casts the `IModuleInstance` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<IBaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBase<SendSyncMarker>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -385,7 +385,7 @@ fimo_vtable! {
     #![uuid(0xe0c7335e, 0x4cfe, 0x44fc, 0x909b, 0x2e02f3f139b1)]
     pub struct IModuleInstanceVTable {
         /// Fetches an internal vtable for the instance.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBase<SendSyncMarker>,
         /// Fetches the parent module.
         pub module: unsafe extern "C" fn(*const ()) -> ObjArc<IModule>,
         /// Fetches a span of the available interfaces.
@@ -454,7 +454,7 @@ fimo_object! {
 impl IModuleInterface {
     /// Casts the `IModuleInterface` to an internal object.
     #[inline]
-    pub fn as_inner(&self) -> &Object<IBaseInterface> {
+    pub fn as_inner(&self) -> &Object<IBase<SendSyncMarker>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             let vtable = (vtable.inner)(ptr);
@@ -473,7 +473,7 @@ impl IModuleInterface {
 
     /// Fetches an extension from the interface.
     #[inline]
-    pub fn extension(&self, name: &str) -> Option<&Object<IBaseInterface>> {
+    pub fn extension(&self, name: &str) -> Option<&Object<IBase<SendSyncMarker>>> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe {
             (vtable.extension)(ptr, name.into())
@@ -493,7 +493,10 @@ impl IModuleInterface {
     #[inline]
     pub fn try_downcast<T: ObjectWrapper + FimoInterface + ?Sized>(
         &self,
-    ) -> std::result::Result<&T, Error> {
+    ) -> std::result::Result<&T, Error>
+    where
+        <<T as ObjectWrapper>::VTable as VTable>::Marker: MarkerCompatible<SendSyncMarker>,
+    {
         // before downcasting we must ensure that the versions
         // are compatible and that all extensions are present.
         if !T::VERSION.is_compatible(&self.version()) {
@@ -533,7 +536,10 @@ impl IModuleInterface {
     #[inline]
     pub fn try_downcast_arc<T: ObjectWrapper + FimoInterface + ?Sized>(
         i: ObjArc<IModuleInterface>,
-    ) -> std::result::Result<ObjArc<T>, Error> {
+    ) -> std::result::Result<ObjArc<T>, Error>
+    where
+        <<T as ObjectWrapper>::VTable as VTable>::Marker: MarkerCompatible<SendSyncMarker>,
+    {
         // the inner object always equals the original object, except for the different vtable.
         // because of that we can simply perform the casting ourselves and rebuild the arc.
         let inner = i.try_downcast::<T>()? as *const _;
@@ -549,11 +555,11 @@ fimo_vtable! {
     #![uuid(0x9b0e35ac, 0xb20d, 0x4c75, 0x8b42, 0x16d99a8cf182)]
     pub struct IModuleInterfaceVTable {
         /// Fetches an internal vtable for the interface.
-        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBaseInterface,
+        pub inner: unsafe extern "C" fn(*const ()) -> &'static IBase<SendSyncMarker>,
         /// Extracts the version of the implemented interface.
         pub version: unsafe extern "C" fn(*const ()) -> Version,
         /// Fetches an extension from the interface.
-        pub extension: unsafe extern "C" fn(*const (), StrInner<false>) -> Optional<*const Object<IBaseInterface >>,
+        pub extension: unsafe extern "C" fn(*const (), StrInner<false>) -> Optional<*const Object<IBase<SendSyncMarker>>>,
         /// Fetches the parent instance.
         pub instance: unsafe extern "C" fn(*const ()) -> ObjArc<IModuleInstance>,
     }

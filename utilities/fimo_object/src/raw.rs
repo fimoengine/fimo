@@ -1,5 +1,5 @@
 //! Definition of raw objects.
-use crate::vtable::{ObjectID, VTable, VTableUpcast};
+use crate::vtable::{MarkerCompatible, ObjectID, VTable, VTableUpcast};
 use std::fmt::{Debug, Formatter, Pointer};
 
 /// Raw representation of an immutable object.
@@ -127,7 +127,10 @@ pub fn upcast_mut<T: VTable + VTableUpcast<U>, U: VTable>(obj: RawObjectMut<T>) 
 /// Casts the interface of the object.
 pub fn try_cast<T: VTable, U: VTable>(
     obj: RawObject<U>,
-) -> Result<RawObject<T>, CastError<RawObject<U>>> {
+) -> Result<RawObject<T>, CastError<RawObject<U>>>
+where
+    T::Marker: MarkerCompatible<U::Marker>,
+{
     if obj.vtable.interface_id() == T::INTERFACE_ID {
         // safety: the interface id's are unique, so we can ensure that the object
         // contains a reference to a `T`.
@@ -147,7 +150,10 @@ pub fn try_cast<T: VTable, U: VTable>(
 /// Casts the interface of the object.
 pub fn try_cast_mut<T: VTable, U: VTable>(
     obj: RawObjectMut<U>,
-) -> Result<RawObjectMut<T>, CastError<RawObjectMut<U>>> {
+) -> Result<RawObjectMut<T>, CastError<RawObjectMut<U>>>
+where
+    T::Marker: MarkerCompatible<U::Marker>,
+{
     if obj.vtable.interface_id() == T::INTERFACE_ID {
         // safety: the interface id's are unique, so we can ensure that the object
         // contains a reference to a `T`.

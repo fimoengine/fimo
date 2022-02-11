@@ -5,7 +5,7 @@ use crate::{
 };
 use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
-use fimo_ffi::vtable::IBaseInterface;
+use fimo_ffi::vtable::{IBase, VTable};
 use fimo_ffi::{fimo_object, fimo_vtable, impl_vtable, is_object, ObjArc, ObjWeak, SpanInner};
 use libloading::Library;
 use parking_lot::Mutex;
@@ -125,8 +125,8 @@ is_object! { #![uuid(0x1aef7722, 0xf3a9, 0x43e9, 0xa27b, 0x753510e42700)] RustLo
 
 impl_vtable! {
     impl IModuleLoaderVTable => RustLoader {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            &*(&__VTABLE as *const _ as *const IBaseInterface)
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
+            __VTABLE.as_super()
         }
 
         unsafe extern "C" fn evict(ptr: *const ()) {
@@ -322,8 +322,8 @@ impl_vtable! {
 
 impl_vtable! {
     impl IModuleVTable => RustModule {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
-            &*(&__VTABLE as *const _ as *const IBaseInterface)
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
+            __VTABLE.as_super()
         }
 
         unsafe extern "C" fn module_path(ptr: *const ()) -> SpanInner<PathChar, false> {

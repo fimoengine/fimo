@@ -1,6 +1,7 @@
 //! Implementation of a generic rust module.
 use fimo_ffi::error::InnerError;
-use fimo_ffi::vtable::IBaseInterface;
+use fimo_ffi::marker::SendSyncMarker;
+use fimo_ffi::vtable::{IBase, VTable};
 use fimo_ffi::{ObjArc, ObjWeak, SpanInner};
 use fimo_module::rust_loader::{IRustModuleInner, IRustModuleInnerVTable, IRustModuleParent};
 use fimo_module::{
@@ -61,9 +62,9 @@ is_object! { #![uuid(0x73a946f0, 0x4fdf, 0x43b6, 0x8c0d, 0xfcc8bd039cea)] Generi
 
 impl_vtable! {
     impl IModuleVTable => GenericModule {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
             let i: &IRustModuleInnerVTable = GenericModule::get_vtable();
-            std::mem::transmute(i)
+            i.as_super()
         }
 
         unsafe extern "C" fn module_path(ptr: *const ()) -> SpanInner<PathChar, false> {
@@ -243,9 +244,9 @@ is_object! { #![uuid(0xda5d5297, 0x2b5a, 0x4fe5, 0x8af1, 0xc8420d4d1edc)] Generi
 
 impl_vtable! {
     impl IModuleInstanceVTable => GenericModuleInstance {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
             let i: &IModuleInstanceVTable = GenericModuleInstance::get_vtable();
-            std::mem::transmute(i)
+            i.as_super()
         }
 
         #[allow(improper_ctypes_definitions)]

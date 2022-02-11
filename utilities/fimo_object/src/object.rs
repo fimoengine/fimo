@@ -1,6 +1,7 @@
 //! Object utilities.
 use crate::raw::{CastError, RawObject, RawObjectMut};
-use crate::vtable::{IBaseInterface, ObjectID, VTable, VTableUpcast};
+use crate::vtable;
+use crate::vtable::{IBase, MarkerCompatible, ObjectID, VTable, VTableUpcast};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -408,7 +409,10 @@ impl<T: VTable> Object<T> {
     }
 
     /// Casts the `&Object<T>` to a `&Object<U>`.
-    pub fn try_cast<U: VTable>(&self) -> Result<&Object<U>, CastError<&Self>> {
+    pub fn try_cast<U: VTable>(&self) -> Result<&Object<U>, CastError<&Self>>
+    where
+        U::Marker: MarkerCompatible<T::Marker>,
+    {
         let casted = Self::try_cast_raw(self);
         casted.map_or_else(
             |err| {
@@ -427,7 +431,10 @@ impl<T: VTable> Object<T> {
     /// Casts the `*const Object<T>` to a `*const Object<U>`.
     pub fn try_cast_raw<U: VTable>(
         o: *const Self,
-    ) -> Result<*const Object<U>, CastError<*const Self>> {
+    ) -> Result<*const Object<U>, CastError<*const Self>>
+    where
+        U::Marker: MarkerCompatible<T::Marker>,
+    {
         let raw = into_raw(o);
         let casted = crate::raw::try_cast(raw);
         casted.map_or_else(
@@ -445,7 +452,10 @@ impl<T: VTable> Object<T> {
     }
 
     /// Casts the `&mut Object<T>` to a `&mut Object<U>`.
-    pub fn try_cast_mut<U: VTable>(&mut self) -> Result<&mut Object<U>, CastError<&mut Self>> {
+    pub fn try_cast_mut<U: VTable>(&mut self) -> Result<&mut Object<U>, CastError<&mut Self>>
+    where
+        <U as VTable>::Marker: MarkerCompatible<<T as VTable>::Marker>,
+    {
         let casted = Self::try_cast_mut_raw(self);
         casted.map_or_else(
             |err| {
@@ -462,9 +472,10 @@ impl<T: VTable> Object<T> {
     }
 
     /// Casts the `*mut Object<T>` to a `*mut Object<U>`.
-    pub fn try_cast_mut_raw<U: VTable>(
-        o: *mut Self,
-    ) -> Result<*mut Object<U>, CastError<*mut Self>> {
+    pub fn try_cast_mut_raw<U: VTable>(o: *mut Self) -> Result<*mut Object<U>, CastError<*mut Self>>
+    where
+        <U as VTable>::Marker: MarkerCompatible<<T as VTable>::Marker>,
+    {
         let raw = into_raw_mut(o);
         let casted = crate::raw::try_cast_mut(raw);
         casted.map_or_else(
@@ -546,14 +557,18 @@ impl<T: VTable> Object<T> {
 unsafe impl<T: VTable> Send for Object<T> where <T as VTable>::Marker: Send {}
 unsafe impl<T: VTable> Sync for Object<T> where <T as VTable>::Marker: Sync {}
 
-impl<T: VTable> AsRef<Object<IBaseInterface>> for Object<T> {
-    fn as_ref(&self) -> &Object<IBaseInterface> {
+impl<T: VTable, M: 'static + vtable::MarkerCompatible<<T as vtable::VTable>::Marker>>
+    AsRef<Object<IBase<M>>> for Object<T>
+{
+    fn as_ref(&self) -> &Object<IBase<M>> {
         self.cast_super()
     }
 }
 
-impl<T: VTable> AsMut<Object<IBaseInterface>> for Object<T> {
-    fn as_mut(&mut self) -> &mut Object<IBaseInterface> {
+impl<T: VTable, M: 'static + vtable::MarkerCompatible<<T as vtable::VTable>::Marker>>
+    AsMut<Object<IBase<M>>> for Object<T>
+{
+    fn as_mut(&mut self) -> &mut Object<IBase<M>> {
         self.cast_super_mut()
     }
 }
@@ -693,21 +708,21 @@ pub fn interface_name<T: VTable>(obj: *const Object<T>) -> &'static str {
 mod tests {
     use crate::object::Object;
     use crate::raw::{RawObject, RawObjectMut};
-    use crate::vtable::IBaseInterface;
+    use crate::vtable::IBase;
 
     #[test]
     fn layout() {
-        let object_size = std::mem::size_of::<*const Object<IBaseInterface>>();
-        let object_mut_size = std::mem::size_of::<*mut Object<IBaseInterface>>();
-        let raw_object_size = std::mem::size_of::<RawObject<IBaseInterface>>();
-        let raw_object_mut_size = std::mem::size_of::<RawObjectMut<IBaseInterface>>();
+        let object_size = std::mem::size_of::<*const Object<IBase>>();
+        let object_mut_size = std::mem::size_of::<*mut Object<IBase>>();
+        let raw_object_size = std::mem::size_of::<RawObject<IBase>>();
+        let raw_object_mut_size = std::mem::size_of::<RawObjectMut<IBase>>();
         assert_eq!(object_size, raw_object_size);
         assert_eq!(object_mut_size, raw_object_mut_size);
 
-        let object_align = std::mem::align_of::<*const Object<IBaseInterface>>();
-        let object_mut_align = std::mem::align_of::<*mut Object<IBaseInterface>>();
-        let raw_object_align = std::mem::align_of::<RawObject<IBaseInterface>>();
-        let raw_object_mut_align = std::mem::align_of::<RawObjectMut<IBaseInterface>>();
+        let object_align = std::mem::align_of::<*const Object<IBase>>();
+        let object_mut_align = std::mem::align_of::<*mut Object<IBase>>();
+        let raw_object_align = std::mem::align_of::<RawObject<IBase>>();
+        let raw_object_mut_align = std::mem::align_of::<RawObjectMut<IBase>>();
         assert_eq!(object_align, raw_object_align);
         assert_eq!(object_mut_align, raw_object_mut_align);
     }

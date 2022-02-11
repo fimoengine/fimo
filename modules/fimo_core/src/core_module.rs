@@ -3,8 +3,9 @@ use crate::CoreInterface;
 use fimo_core_int::rust::module_registry::IModuleRegistry;
 use fimo_core_int::rust::settings_registry::SettingsRegistry;
 use fimo_core_int::rust::{IFimoCore, IFimoCoreVTable};
+use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
-use fimo_ffi::vtable::{IBaseInterface, VTable};
+use fimo_ffi::vtable::{IBase, VTable};
 use fimo_ffi::{ObjArc, Object, Optional, StrInner};
 use fimo_module::{
     impl_vtable, is_object, FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo,
@@ -41,7 +42,7 @@ impl_vtable! {
 
 impl_vtable! {
     impl IModuleInterfaceVTable => CoreWrapper {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
             let i: &IFimoCoreVTable = CoreWrapper::get_vtable();
             i.as_super()
         }
@@ -55,7 +56,7 @@ impl_vtable! {
         unsafe extern "C" fn extension(
             _ptr: *const (),
             _ext: StrInner<false>,
-        ) -> Optional<*const Object<IBaseInterface>> {
+        ) -> Optional<*const Object<IBase<SendSyncMarker>>> {
             Optional::None
         }
 
