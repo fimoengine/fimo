@@ -284,13 +284,13 @@ impl<T> DerefMut for SpanInner<T, true> {
 
 impl<T, const MUT: bool> Borrow<[T]> for SpanInner<T, MUT> {
     fn borrow(&self) -> &[T] {
-        (&**self).borrow()
+        (**self).borrow()
     }
 }
 
 impl<T> BorrowMut<[T]> for SpanInner<T, true> {
     fn borrow_mut(&mut self) -> &mut [T] {
-        (&mut **self).borrow_mut()
+        (**self).borrow_mut()
     }
 }
 
@@ -355,7 +355,7 @@ impl<T> AsMut<[T]> for SpanInner<T, true> {
 
 impl<T: Debug, const MUT: bool> Debug for SpanInner<T, MUT> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        (&**self).fmt(f)
+        (**self).fmt(f)
     }
 }
 
@@ -370,7 +370,7 @@ impl<T, const MUT: bool> Default for SpanInner<T, MUT> {
 
 impl<T: Hash, const MUT: bool> Hash for SpanInner<T, MUT> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (&**self).hash(state)
+        (**self).hash(state)
     }
 }
 
@@ -378,13 +378,13 @@ impl<T: PartialEq<U>, U, const MUT: bool, const MUT_U: bool> PartialEq<SpanInner
     for SpanInner<T, MUT>
 {
     fn eq(&self, other: &SpanInner<U, MUT_U>) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 
 impl<T: PartialEq<U>, U, const MUT: bool, const N: usize> PartialEq<[U; N]> for SpanInner<T, MUT> {
     fn eq(&self, other: &[U; N]) -> bool {
-        (&**self).eq(other)
+        (**self).eq(other)
     }
 }
 
@@ -394,13 +394,13 @@ impl<T: PartialOrd<T>, const MUT: bool, const MUT_2: bool> PartialOrd<SpanInner<
     for SpanInner<T, MUT>
 {
     fn partial_cmp(&self, other: &SpanInner<T, MUT_2>) -> Option<Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
 impl<T: Ord, const MUT: bool> Ord for SpanInner<T, MUT> {
     fn cmp(&self, other: &Self) -> Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 

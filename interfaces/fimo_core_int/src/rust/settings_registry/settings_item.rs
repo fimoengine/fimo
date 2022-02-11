@@ -525,8 +525,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
                     Ok(None) | Err(_) => {
                         // safety: the compiler can't figure out, that there aren't two
                         // distinct mutable borrows.
-                        let _ =
-                            unsafe { (&mut *self_ptr).get_inner_mut(parent, parent.iter(), f_err) };
+                        let _ = unsafe { (*self_ptr).get_inner_mut(parent, parent.iter(), f_err) };
                         Err(SettingsRegistryInvalidPathError::new(path))
                     }
                     Ok(Some(i)) => Ok((i, component)),

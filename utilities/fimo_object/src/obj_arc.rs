@@ -1983,7 +1983,7 @@ unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjWe
             acquire!(inner.weak);
             unsafe {
                 self.alloc
-                    .deallocate(self.ptr.cast(), (&*self.ptr.as_ptr()).get_layout())
+                    .deallocate(self.ptr.cast(), (*self.ptr.as_ptr()).get_layout())
             }
         }
     }

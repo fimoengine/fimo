@@ -361,7 +361,7 @@ impl<Args, F: FnOnce<Args>, A: Allocator> FnOnce<Args> for ObjBox<F, A> {
         let (ptr, alloc) = ObjBox::into_raw_parts(self);
         let uninit = unsafe { ObjBox::from_raw_parts(ptr as *mut MaybeUninit<F>, alloc) };
 
-        let f = unsafe { std::ptr::read((&*uninit).as_ptr()) };
+        let f = unsafe { std::ptr::read((*uninit).as_ptr()) };
         <F as FnOnce<Args>>::call_once(f, args)
     }
 }
