@@ -5,7 +5,8 @@ use fimo_core_int::rust::settings_registry::{
     SettingsEventCallbackHandle, SettingsEventCallbackId,
 };
 use fimo_core_int::rust::IFimoCore;
-use fimo_ffi::vtable::{IBaseInterface, VTable};
+use fimo_ffi::marker::SendSyncMarker;
+use fimo_ffi::vtable::{IBase, VTable};
 use fimo_ffi::{impl_vtable, is_object, ObjArc, Object, Optional, StrInner};
 use fimo_module::{FimoInterface, IModuleInstance, IModuleInterfaceVTable, ModuleInfo};
 use fimo_version_core::Version;
@@ -77,7 +78,7 @@ impl_vtable! {
 
 impl_vtable! {
     impl IModuleInterfaceVTable => FimoActixInterface {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBaseInterface {
+        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
             let i: &IFimoActixVTable = FimoActixInterface::get_vtable();
             i.as_super()
         }
@@ -91,7 +92,7 @@ impl_vtable! {
         unsafe extern "C" fn extension(
             _ptr: *const (),
             _ext: StrInner<false>,
-        ) -> Optional<*const Object<IBaseInterface>> {
+        ) -> Optional<*const Object<IBase<SendSyncMarker>>> {
             Optional::None
         }
 

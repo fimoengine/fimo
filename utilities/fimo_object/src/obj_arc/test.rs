@@ -1,4 +1,4 @@
-use crate::vtable::IBaseInterface;
+use crate::vtable::IBase;
 use crate::{impl_vtable, is_object, ObjArc, ObjWeak, Object};
 use std::cell::RefCell;
 
@@ -90,13 +90,13 @@ fn drop_obj() {
         }
     }
     is_object! { #![uuid(0x6e3178d1, 0xad1e, 0x4071, 0xaa82, 0xd732eefe118f)] TestObj<'_> }
-    impl_vtable! { impl IBaseInterface => TestObj<'_> {} }
+    impl_vtable! { impl IBase => TestObj<'_> {} }
 
     let val = RefCell::new(0);
     let x = ObjArc::new(TestObj(&val));
     assert_eq!(*x.0.borrow(), 0);
 
-    let x: ObjArc<Object<IBaseInterface>> = ObjArc::coerce_object(x);
+    let x: ObjArc<Object<IBase>> = ObjArc::coerce_object(x);
     assert_eq!(*val.borrow(), 0);
 
     std::mem::drop(x);

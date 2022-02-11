@@ -6,7 +6,7 @@
 use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::VTableUpcast;
+use crate::vtable::{MarkerCompatible, VTable, VTableUpcast};
 use crate::{CoerceObject, Object};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
@@ -409,7 +409,11 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// ```
     pub fn try_cast<U: ObjectWrapper + ?Sized>(
         a: ObjArc<O, A>,
-    ) -> Result<ObjArc<U, A>, CastError<ObjArc<O, A>>> {
+    ) -> Result<ObjArc<U, A>, CastError<ObjArc<O, A>>>
+    where
+        <<U as ObjectWrapper>::VTable as VTable>::Marker:
+            MarkerCompatible<<<O as ObjectWrapper>::VTable as VTable>::Marker>,
+    {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let obj = O::as_object_raw(ptr);
 
@@ -510,7 +514,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// #![feature(const_fn_fn_ptr_basics)]
     ///
     /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::{IBaseInterface, ObjectID};
+    /// use fimo_object::vtable::{IBase, ObjectID};
     /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
     ///
     /// // Define a custom interface vtable.
@@ -559,7 +563,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// assert_eq!(x.0, 5);
     ///
     /// let x: ObjArc<Obj> = ObjArc::coerce_object(x);
-    /// let x: ObjArc<Object<IBaseInterface>> = ObjArc::cast_super(x);
+    /// let x: ObjArc<Object<IBase>> = ObjArc::cast_super(x);
     /// let x: ObjArc<Obj> = ObjArc::try_cast(x).unwrap();
     /// assert_eq!(x.add(0), 5);
     /// assert_eq!(x.add(1), 6);
@@ -1535,7 +1539,11 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
     /// Tries casting the object to another object.
     pub fn try_cast<U: ObjectWrapper + ?Sized>(
         w: ObjWeak<O, A>,
-    ) -> Result<ObjWeak<U, A>, CastError<ObjWeak<O, A>>> {
+    ) -> Result<ObjWeak<U, A>, CastError<ObjWeak<O, A>>>
+    where
+        <<U as ObjectWrapper>::VTable as VTable>::Marker:
+            MarkerCompatible<<<O as ObjectWrapper>::VTable as VTable>::Marker>,
+    {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         let obj = O::as_object_raw(ptr);
 

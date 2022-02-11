@@ -10,6 +10,9 @@ use fimo_core_int::rust::module_registry::InterfaceHandle;
 use fimo_core_int::rust::IFimoCore;
 
 use fimo_actix_int::IFimoActix;
+use fimo_ffi::marker::SendSyncMarker;
+use fimo_ffi::object::ObjectWrapper;
+use fimo_ffi::vtable::{MarkerCompatible, VTable};
 
 #[cfg(target_os = "windows")]
 macro_rules! lib_path {
@@ -89,7 +92,10 @@ impl ModuleDatabase {
 
     pub fn new_interface<I: 'static + FimoInterface + ?Sized>(
         &self,
-    ) -> Result<(ObjArc<I>, InterfaceHandle<IModuleInterface>), Error> {
+    ) -> Result<(ObjArc<I>, InterfaceHandle<IModuleInterface>), Error>
+    where
+        <<I as ObjectWrapper>::VTable as VTable>::Marker: MarkerCompatible<SendSyncMarker>,
+    {
         if TypeId::of::<I>() == TypeId::of::<IFimoCore>() {
             panic!("Can not create core")
         }
