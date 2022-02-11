@@ -336,13 +336,13 @@ impl DerefMut for StrInner<true> {
 
 impl<const MUT: bool> Borrow<str> for StrInner<MUT> {
     fn borrow(&self) -> &str {
-        (&**self).borrow()
+        (**self).borrow()
     }
 }
 
 impl BorrowMut<str> for StrInner<true> {
     fn borrow_mut(&mut self) -> &mut str {
-        (&mut **self).borrow_mut()
+        (**self).borrow_mut()
     }
 }
 
@@ -410,31 +410,31 @@ impl<const MUT: bool> Default for StrInner<MUT> {
 
 impl<const MUT: bool> Hash for StrInner<MUT> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (&**self).hash(state)
+        (**self).hash(state)
     }
 }
 
 impl<const MUT: bool, const MUT_2: bool> PartialEq<StrInner<MUT_2>> for StrInner<MUT> {
     fn eq(&self, other: &StrInner<MUT_2>) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 
 impl<const MUT: bool> PartialEq<str> for StrInner<MUT> {
     fn eq(&self, other: &str) -> bool {
-        (&**self).eq(other)
+        (**self).eq(other)
     }
 }
 
 impl<const MUT: bool> PartialEq<&str> for StrInner<MUT> {
     fn eq(&self, other: &&str) -> bool {
-        (&**self).eq(*other)
+        (**self).eq(*other)
     }
 }
 
 impl<const MUT: bool> PartialEq<&mut str> for StrInner<MUT> {
     fn eq(&self, other: &&mut str) -> bool {
-        (&**self).eq(*other)
+        (**self).eq(*other)
     }
 }
 
@@ -442,31 +442,31 @@ impl<const MUT: bool> Eq for StrInner<MUT> {}
 
 impl<const MUT: bool, const MUT_2: bool> PartialOrd<StrInner<MUT_2>> for StrInner<MUT> {
     fn partial_cmp(&self, other: &StrInner<MUT_2>) -> Option<Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
 impl<const MUT: bool> PartialOrd<str> for StrInner<MUT> {
     fn partial_cmp(&self, other: &str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl<const MUT: bool> PartialOrd<&str> for StrInner<MUT> {
     fn partial_cmp(&self, other: &&str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl<const MUT: bool> PartialOrd<&mut str> for StrInner<MUT> {
     fn partial_cmp(&self, other: &&mut str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl<const MUT: bool> Ord for StrInner<MUT> {
     fn cmp(&self, other: &Self) -> Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 

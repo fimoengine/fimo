@@ -1831,7 +1831,7 @@ impl<A: Allocator> ToSocketAddrs for String<A> {
 
     #[inline]
     fn to_socket_addrs(&self) -> std::io::Result<Self::Iter> {
-        (&**self).to_socket_addrs()
+        (**self).to_socket_addrs()
     }
 }
 
