@@ -117,6 +117,7 @@ macro_rules! impl_vtable {
                     $vtable; $name;;
                     $($rest)*
                 }
+                &__VTABLE
             }
         }
     };
@@ -134,6 +135,43 @@ macro_rules! impl_vtable {
         }
 
         impl $crate::object::CoerceObjectMut<$vtable> for $name {}
+    };
+    (
+        $(#[$attr:meta])*
+        impl generic $vtable:tt => $name:ty {
+            $($rest:tt)*
+        }
+    ) => {
+        $(#[$attr])*
+        impl<T> $crate::object::CoerceObject<$vtable<T>> for $name
+        where T: $crate::vtable::MarkerCompatible<$name>
+        {
+            fn get_vtable() -> &'static $vtable<T> {
+                $crate::impl_vtable!{
+                    $vtable<$crate::vtable::DefaultMarker>; $name;;
+                    $($rest)*
+                }
+                unsafe { std::mem::transmute(&__VTABLE) }
+            }
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        impl generic mut $vtable:tt => $name:ty {
+            $($rest:tt)*
+        }
+    ) => {
+        $crate::impl_vtable! {
+            $(#[$attr])*
+            impl generic $vtable => $name {
+                $($rest)*
+            }
+        }
+
+        impl<T> $crate::object::CoerceObjectMut<$vtable<T>> for $name
+        where T: $crate::vtable::MarkerCompatible<$name>
+        {
+        }
     };
     (
         $(#[$attr:meta])*
@@ -168,11 +206,47 @@ macro_rules! impl_vtable {
 
         impl $crate::object::CoerceObjectMut<$vtable> for $name {}
     };
+    //
+    (
+        $(#[$attr:meta])*
+        impl generic inline $vtable:tt => $name:ty {
+            $($closures:tt)*
+        }
+    ) => {
+        $(#[$attr])*
+        impl<T> $crate::object::CoerceObject<$vtable<T>> for $name
+        where T: $crate::vtable::MarkerCompatible<$name>
+        {
+            fn get_vtable() -> &'static $vtable<T> {
+                static __VTABLE: $vtable<$crate::vtable::DefaultMarker> = <$vtable<$crate::vtable::DefaultMarker>>::new::<$name>(
+                    $($closures)*
+                );
+                unsafe { std::mem::transmute(&__VTABLE) }
+            }
+        }
+    };
+    (
+        $(#[$attr:meta])*
+        impl generic inline mut $vtable:tt => $name:ty {
+            $($rest:tt)*
+        }
+    ) => {
+        $crate::impl_vtable! {
+            $(#[$attr])*
+            impl generic inline $vtable => $name {
+                $($rest)*
+            }
+        }
+
+        impl<T> $crate::object::CoerceObjectMut<$vtable<T>> for $name
+        where T: $crate::vtable::MarkerCompatible<$name>
+        {
+        }
+    };
     ($vtable:ty; $name:ty; $($ident:ident)*;) => {
         static __VTABLE: $vtable = <$vtable>::new::<$name>(
             $($ident),*
         );
-        &__VTABLE
     };
     (
         $vtable:ty; $name:ty; $($ident:ident)*;
