@@ -8,3 +8,6 @@
 #![feature(const_fn_fn_ptr_basics)]
 #![feature(const_fn_trait_bound)]
 #![feature(negative_impls)]
+#![feature(c_unwind)]
+
+pub mod raw;

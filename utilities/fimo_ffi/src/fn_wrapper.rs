@@ -9,14 +9,18 @@ use std::sync::Arc;
 #[repr(C)]
 struct RawCallable<Args, T, M> {
     ptr: *const (),
-    drop: fn(*const ()),
-    call: fn(*const (), Args) -> T,
+    drop: extern "C" fn(*const ()),
+    call: extern "C" fn(*const (), Args) -> T,
     _marker: PhantomData<M>,
 }
 
 impl<Args, T, M> RawCallable<Args, T, M> {
     #[inline]
-    unsafe fn new(ptr: *const (), drop: fn(*const ()), call: fn(*const (), Args) -> T) -> Self {
+    unsafe fn new(
+        ptr: *const (),
+        drop: extern "C" fn(*const ()),
+        call: extern "C" fn(*const (), Args) -> T,
+    ) -> Self {
         Self {
             ptr,
             drop,
@@ -52,7 +56,7 @@ impl<Args, T, M> Debug for RawCallable<Args, T, M> {
 }
 
 /// A [`FnOnce`] reference without lifetimes.
-#[repr(C)]
+#[repr(transparent)]
 pub struct RawFnOnce<Args, T, M = NoneMarker> {
     raw: RawCallable<Args, T, M>,
 }
@@ -65,6 +69,28 @@ impl<Args, T, M> RawFnOnce<Args, T, M> {
     /// The reference `f` must outlive the `RawFnOnce` and properly initialized.
     /// Once called, `f` is owned by the `RawFnOnce` and may not be used anymore.
     /// An exception to this rule is, if the `RawFnOnce` was forgotten with [`std::mem::forget`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnOnce;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::mem::MaybeUninit;
+    ///
+    /// let mut n = 0;
+    /// let mut f = MaybeUninit::new(|| n = 5);
+    ///
+    /// unsafe {
+    ///     // transfer ownership to the raw callable.
+    ///     let raw = RawFnOnce::<_, _, NoneMarker>::new(&mut f);
+    ///     // we know that f is still valid so we can call it.
+    ///     raw.assume_valid()();
+    ///     // at this point we are not allowed to access f anymore.
+    ///     std::mem::forget(f);
+    /// }
+    ///
+    /// assert_eq!(n, 5);
+    /// ```
     #[inline]
     pub unsafe fn new<F: FnOnce<Args, Output = T>>(f: &'_ mut MaybeUninit<F>) -> Self
     where
@@ -78,6 +104,25 @@ impl<Args, T, M> RawFnOnce<Args, T, M> {
     }
 
     /// Constructs a new `RawFnOnce`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnOnce;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|| n = 5);
+    /// // transfer ownership to the raw callable.
+    /// let raw = RawFnOnce::<_, _, NoneMarker>::new_boxed(f);
+    ///
+    /// unsafe {
+    ///     // the raw callable took ownership of the box, so it is always valid.
+    ///     raw.assume_valid()();
+    /// }
+    ///
+    /// assert_eq!(n, 5);
+    /// ```
     #[inline]
     pub fn new_boxed<F: FnOnce<Args, Output = T>>(f: Box<F>) -> Self
     where
@@ -98,6 +143,25 @@ impl<Args, T, M> RawFnOnce<Args, T, M> {
     ///
     /// This function is unsafe, because one must ensure, that the wrapped function
     /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnOnce;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|num| n = num);
+    /// // transfer ownership to the raw callable.
+    /// let raw = RawFnOnce::<_, _, NoneMarker>::new_boxed(f);
+    ///
+    /// unsafe {
+    ///     // the raw callable took ownership of the box, so it is always valid.
+    ///     raw.call_once((5,));
+    /// }
+    ///
+    /// assert_eq!(n, 5);
+    /// ```
     #[inline]
     pub unsafe extern "rust-call" fn call_once(self, args: Args) -> T {
         let res = self.raw.call(args);
@@ -107,13 +171,43 @@ impl<Args, T, M> RawFnOnce<Args, T, M> {
         res
     }
 
-    fn call_boxed<F: FnOnce<Args, Output = T>>(ptr: *const (), args: Args) -> T {
+    /// Returns the callable.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnOnce;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|num| n = num);
+    /// // transfer ownership to the raw callable.
+    /// let raw = RawFnOnce::<_, _, NoneMarker>::new_boxed(f);
+    ///
+    /// unsafe {
+    ///     // the raw callable took ownership of the box, so it is always valid.
+    ///     raw.assume_valid()(5);
+    /// }
+    ///
+    /// assert_eq!(n, 5);
+    /// ```
+    #[inline]
+    pub unsafe fn assume_valid(self) -> impl FnOnce<Args, Output = T> {
+        std::mem::transmute::<_, RefFnOnce<'_, Args, T, M>>(self)
+    }
+
+    extern "C" fn call_boxed<F: FnOnce<Args, Output = T>>(ptr: *const (), args: Args) -> T {
         let raw = ptr as *mut F;
         let boxed = unsafe { Box::from_raw(raw) };
         <Box<F> as FnOnce<Args>>::call_once(boxed, args)
     }
 
-    fn call_ref<F: FnOnce<Args, Output = T>>(ptr: *const (), args: Args) -> T {
+    extern "C" fn call_ref<F: FnOnce<Args, Output = T>>(ptr: *const (), args: Args) -> T {
         let f = unsafe {
             let raw = ptr as *mut MaybeUninit<F>;
             let raw = std::ptr::read(raw);
@@ -130,7 +224,7 @@ impl<Args, T, M> Debug for RawFnOnce<Args, T, M> {
 }
 
 /// A [`FnMut`] reference without lifetimes.
-#[repr(C)]
+#[repr(transparent)]
 pub struct RawFnMut<Args, T, M = NoneMarker> {
     raw: RawCallable<Args, T, M>,
 }
@@ -141,6 +235,30 @@ impl<Args, T, M> RawFnMut<Args, T, M> {
     /// # Safety
     ///
     /// The caller must ensure, that `f` outlives the `RawFnMut`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnMut;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = || n = n + 1;
+    ///
+    /// unsafe {
+    ///     // borrow the callable.
+    ///     let mut raw = RawFnMut::<_, _, NoneMarker>::new(&mut f);
+    ///     // we know that f is still valid so we can call it.
+    ///     let raw = raw.assume_valid_ref_mut();
+    ///     raw();
+    ///     raw();
+    /// }
+    ///
+    /// // we can still use f.
+    /// f();
+    ///
+    /// assert_eq!(n, 3);
+    /// ```
     #[inline]
     pub unsafe fn new<F: FnMut<Args, Output = T>>(f: &mut F) -> Self
     where
@@ -154,6 +272,30 @@ impl<Args, T, M> RawFnMut<Args, T, M> {
     }
 
     /// Constructs a new `RawFnMut`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnMut;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|| n = n + 1);
+    ///
+    /// unsafe {
+    ///     // transfer ownership of f.
+    ///     let mut raw = RawFnMut::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that the raw owns a valid FnMut.
+    ///     let f = raw.assume_valid_ref_mut();
+    ///     f();
+    ///     f();
+    ///
+    ///     let mut f = raw.assume_valid();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n, 3);
+    /// ```
     #[inline]
     pub fn new_boxed<F: FnMut<Args, Output = T>>(f: Box<F>) -> Self
     where
@@ -174,6 +316,25 @@ impl<Args, T, M> RawFnMut<Args, T, M> {
     ///
     /// This function is unsafe, because one must ensure, that the wrapped function
     /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnMut;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|num| n = num);
+    ///
+    /// unsafe {
+    ///     // transfer ownership of f.
+    ///     let mut raw = RawFnMut::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that the raw owns a valid FnMut.
+    ///     raw.call_once((5,));
+    /// }
+    ///
+    /// assert_eq!(n, 5);
+    /// ```
     #[inline]
     pub unsafe extern "rust-call" fn call_once(mut self, args: Args) -> T {
         self.call_mut(args)
@@ -185,12 +346,94 @@ impl<Args, T, M> RawFnMut<Args, T, M> {
     ///
     /// This function is unsafe, because one must ensure, that the wrapped function
     /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnMut;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|num| n += num);
+    ///
+    /// unsafe {
+    ///     // transfer ownership of f.
+    ///     let mut raw = RawFnMut::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that the raw owns a valid FnMut.
+    ///     raw.call_mut((5,));
+    ///     raw.call_mut((5,));
+    /// }
+    ///
+    /// assert_eq!(n, 10);
+    /// ```
     #[inline]
     pub unsafe extern "rust-call" fn call_mut(&mut self, args: Args) -> T {
         self.raw.call(args)
     }
 
-    fn call_ref<F: FnMut<Args, Output = T>>(ptr: *const (), args: Args) -> T {
+    /// Returns the callable.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnMut;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|| n = n + 1);
+    ///
+    /// unsafe {
+    ///     // transfer ownership of f.
+    ///     let mut raw = RawFnMut::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that the raw owns a valid FnMut.
+    ///     let mut f = raw.assume_valid();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n, 1);
+    /// ```
+    #[inline]
+    pub unsafe fn assume_valid(self) -> impl FnMut<Args, Output = T> {
+        std::mem::transmute::<_, RefFnMut<'_, Args, T, M>>(self)
+    }
+
+    /// Returns the callable reference.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFnMut;
+    /// use fimo_ffi::marker::NoneMarker;
+    ///
+    /// let mut n = 0;
+    /// let mut f = Box::new(|| n = n + 1);
+    ///
+    /// unsafe {
+    ///     // transfer ownership of f.
+    ///     let mut raw = RawFnMut::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that the raw owns a valid FnMut.
+    ///     let f = raw.assume_valid_ref_mut();
+    ///     f();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n, 2);
+    /// ```
+    pub unsafe fn assume_valid_ref_mut(&mut self) -> &mut impl FnMut<Args, Output = T> {
+        &mut *(self as *mut _ as *mut RefFnMut<'_, Args, T, M>)
+    }
+
+    extern "C" fn call_ref<F: FnMut<Args, Output = T>>(ptr: *const (), args: Args) -> T {
         let raw = ptr as *mut F;
         let f = unsafe { &mut *raw };
         <F as FnMut<Args>>::call_mut(f, args)
@@ -204,7 +447,7 @@ impl<Args, T, M> Debug for RawFnMut<Args, T, M> {
 }
 
 /// A [`Fn`] reference without lifetimes.
-#[repr(C)]
+#[repr(transparent)]
 pub struct RawFn<Args, T, M = NoneMarker> {
     raw: RawCallable<Args, T, M>,
 }
@@ -215,6 +458,31 @@ impl<Args, T, M> RawFn<Args, T, M> {
     /// # Safety
     ///
     /// The caller must ensure, that `f` outlives the `RawFn`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = || n.set(n.get() + 1);
+    ///
+    /// unsafe {
+    ///     // borrow the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new(&f);
+    ///     // we know that f is still valid so we can call it.
+    ///     let f = raw.assume_valid_ref();
+    ///     f();
+    ///     f();
+    /// }
+    ///
+    /// // we can still use f.
+    /// f();
+    ///
+    /// assert_eq!(n.get(), 3);
+    /// ```
     #[inline]
     pub unsafe fn new<F: Fn<Args, Output = T>>(f: &F) -> Self
     where
@@ -228,6 +496,31 @@ impl<Args, T, M> RawFn<Args, T, M> {
     }
 
     /// Constructs a new `RawFn.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|| n.set(n.get() + 1));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     let f = raw.assume_valid_ref();
+    ///     f();
+    ///     f();
+    ///
+    ///     let f = raw.assume_valid();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n.get(), 3);
+    /// ```
     #[inline]
     pub fn new_boxed<F: Fn<Args, Output = T>>(f: Box<F>) -> Self
     where
@@ -243,6 +536,32 @@ impl<Args, T, M> RawFn<Args, T, M> {
     }
 
     /// Constructs a new `RawFn`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    /// use std::sync::Arc;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Arc::new(|| n.set(n.get() + 1));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new_arc(f.clone());
+    ///     // we know that raw owns the callable so we can call it.
+    ///     let f = raw.assume_valid_ref();
+    ///     f();
+    ///     f();
+    /// }
+    ///
+    /// f();
+    ///
+    /// assert_eq!(n.get(), 3);
+    /// assert_eq!(Arc::strong_count(&f), 1);
+    /// ```
     #[inline]
     pub fn new_arc<F: Fn<Args, Output = T>>(f: Arc<F>) -> Self
     where
@@ -263,6 +582,26 @@ impl<Args, T, M> RawFn<Args, T, M> {
     ///
     /// This function is unsafe, because one must ensure, that the wrapped function
     /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|num| n.set(n.get() + num));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     raw.call_once((5,));
+    /// }
+    ///
+    /// assert_eq!(n.get(), 5);
+    /// ```
     #[inline]
     pub unsafe extern "rust-call" fn call_once(mut self, args: Args) -> T {
         self.call_mut(args)
@@ -274,6 +613,27 @@ impl<Args, T, M> RawFn<Args, T, M> {
     ///
     /// This function is unsafe, because one must ensure, that the wrapped function
     /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|num| n.set(n.get() + num));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let mut raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     raw.call_mut((5,));
+    ///     raw.call_mut((5,));
+    /// }
+    ///
+    /// assert_eq!(n.get(), 10);
+    /// ```
     #[inline]
     pub unsafe extern "rust-call" fn call_mut(&mut self, args: Args) -> T {
         self.call(args)
@@ -285,12 +645,130 @@ impl<Args, T, M> RawFn<Args, T, M> {
     ///
     /// This function is unsafe, because one must ensure, that the wrapped function
     /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|num| n.set(n.get() + num));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     raw.call((5,));
+    ///     raw.call((5,));
+    /// }
+    ///
+    /// assert_eq!(n.get(), 10);
+    /// ```
     #[inline]
     pub unsafe extern "rust-call" fn call(&self, args: Args) -> T {
         self.raw.call(args)
     }
 
-    fn call_ref<F: Fn<Args, Output = T>>(ptr: *const (), args: Args) -> T {
+    /// Returns the callable.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|| n.set(n.get() + 1));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     let f = raw.assume_valid();
+    ///     f();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n.get(), 2);
+    /// ```
+    #[inline]
+    pub unsafe fn assume_valid(self) -> impl Fn<Args, Output = T> {
+        std::mem::transmute::<_, RefFn<'_, Args, T, M>>(self)
+    }
+
+    /// Returns the callable reference.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|| n.set(n.get() + 1));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     let f = raw.assume_valid_ref();
+    ///     f();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n.get(), 2);
+    /// ```
+    pub unsafe fn assume_valid_ref(&self) -> &impl Fn<Args, Output = T> {
+        &*(self as *const _ as *const RefFn<'_, Args, T, M>)
+    }
+
+    /// Returns the callable reference.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe, because one must ensure, that the wrapped function
+    /// has not been dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::fn_wrapper::RawFn;
+    /// use fimo_ffi::marker::NoneMarker;
+    /// use std::cell::Cell;
+    ///
+    /// let mut n = Cell::new(0);
+    /// let f = Box::new(|| n.set(n.get() + 1));
+    ///
+    /// unsafe {
+    ///     // transfer the callable.
+    ///     let mut raw = RawFn::<_, _, NoneMarker>::new_boxed(f);
+    ///     // we know that raw owns the callable so we can call it.
+    ///     let f = raw.assume_valid_ref_mut();
+    ///     f();
+    ///     f();
+    /// }
+    ///
+    /// assert_eq!(n.get(), 2);
+    /// ```
+    pub unsafe fn assume_valid_ref_mut(&mut self) -> &mut impl Fn<Args, Output = T> {
+        &mut *(self as *mut _ as *mut RefFn<'_, Args, T, M>)
+    }
+
+    extern "C" fn call_ref<F: Fn<Args, Output = T>>(ptr: *const (), args: Args) -> T {
         let raw = ptr as *const F;
         let f = unsafe { &*raw };
         <F as Fn<Args>>::call(f, args)
@@ -304,7 +782,7 @@ impl<Args, T, M> Debug for RawFn<Args, T, M> {
 }
 
 /// A [`FnOnce`] wrapped by reference.
-#[repr(C)]
+#[repr(transparent)]
 pub struct RefFnOnce<'a, Args, T, M = NoneMarker> {
     raw: RawFnOnce<Args, T, M>,
     _phantom: PhantomData<fn() -> &'a mut ()>,
@@ -378,7 +856,7 @@ impl<Args, T, M> Debug for RefFnOnce<'_, Args, T, M> {
 }
 
 /// A [`FnMut`] wrapped by reference.
-#[repr(C)]
+#[repr(transparent)]
 pub struct RefFnMut<'a, Args, T, M = NoneMarker> {
     raw: RawFnMut<Args, T, M>,
     _phantom: PhantomData<fn() -> &'a mut ()>,
@@ -454,7 +932,7 @@ impl<'a, Args, T, M> Debug for RefFnMut<'a, Args, T, M> {
 }
 
 /// A [`Fn`] wrapped by reference.
-#[repr(C)]
+#[repr(transparent)]
 pub struct RefFn<'a, Args, T, M = NoneMarker> {
     raw: RawFn<Args, T, M>,
     _phantom: PhantomData<fn() -> &'a ()>,
@@ -549,7 +1027,7 @@ impl<'a, Args, T, M> Debug for RefFn<'a, Args, T, M> {
 }
 
 /// A [`FnOnce`] allocated on the heap.
-#[repr(C)]
+#[repr(transparent)]
 pub struct HeapFnOnce<Args, T, M = NoneMarker> {
     raw: RefFnOnce<'static, Args, T, M>,
 }
@@ -592,7 +1070,7 @@ impl<Args, T, M> Debug for HeapFnOnce<Args, T, M> {
 }
 
 /// A [`FnMut`] allocated on the heap.
-#[repr(C)]
+#[repr(transparent)]
 pub struct HeapFnMut<Args, T, M = NoneMarker> {
     raw: RefFnMut<'static, Args, T, M>,
 }
@@ -642,7 +1120,7 @@ impl<Args, T, M> Debug for HeapFnMut<Args, T, M> {
 }
 
 /// A [`Fn`] allocated on the heap.
-#[repr(C)]
+#[repr(transparent)]
 pub struct HeapFn<Args, T, M = NoneMarker> {
     raw: RefFn<'static, Args, T, M>,
 }
@@ -709,21 +1187,21 @@ impl<Args, T, M> Debug for HeapFn<Args, T, M> {
     }
 }
 
-fn drop_forget(_ptr: *const ()) {}
+extern "C" fn drop_forget(_ptr: *const ()) {}
 
-fn drop_value<F>(ptr: *const ()) {
+extern "C" fn drop_value<F>(ptr: *const ()) {
     let raw = ptr as *mut F;
     let f = unsafe { std::ptr::read(raw) };
     drop(f);
 }
 
-fn drop_boxed<F>(ptr: *const ()) {
+extern "C" fn drop_boxed<F>(ptr: *const ()) {
     let raw = ptr as *mut F;
     let boxed = unsafe { Box::from_raw(raw) };
     drop(boxed);
 }
 
-fn drop_arc<F>(ptr: *const ()) {
+extern "C" fn drop_arc<F>(ptr: *const ()) {
     let raw = ptr as *const F;
     let arc = unsafe { Arc::from_raw(raw) };
     drop(arc);
