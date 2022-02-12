@@ -38,6 +38,13 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
+      - name: Add lld to $PATH env
+        shell: bash
+        if: runner.os == 'Windows'
+        run: |
+          echo "PATH=$PATH:C:\msys64\mingw64\bin" >> $GITHUB_ENV
+          mkdir .cargo
+          cp .github/workflows/cargo_config_test.toml .cargo/config.toml
       - uses: actions-rs/cargo@v1
         with:
           command: test
