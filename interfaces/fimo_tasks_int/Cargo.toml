@@ -9,3 +9,7 @@ categories = ["game-development"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+log = "0.4.14"
+atomic = "0.5.1"
+fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
+fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }

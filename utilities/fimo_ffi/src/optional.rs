@@ -336,6 +336,51 @@ impl<T> Optional<T> {
         }
     }
 
+    /// Takes the value out of the optional, leaving a [`None`] in its place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::{Optional, Result};
+    ///
+    /// let mut x = Optional::Some(2);
+    /// let y = x.take();
+    /// assert_eq!(x, Optional::None);
+    /// assert_eq!(y, Optional::Some(2));
+    ///
+    /// let mut x: Optional<u32> = Optional::None;
+    /// let y = x.take();
+    /// assert_eq!(x, Optional::None);
+    /// assert_eq!(y, Optional::None);
+    /// ```
+    #[inline]
+    pub fn take(&mut self) -> Optional<T> {
+        std::mem::take(self)
+    }
+
+    /// Replaces the actual value in the option by the value given in parameter, returning
+    /// the old value if present, leaving a [`Some`] in its place without deinitializing either one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::{Optional, Result};
+    ///
+    /// let mut x = Optional::Some(2);
+    /// let y = x.replace(5);
+    /// assert_eq!(x, Optional::Some(5));
+    /// assert_eq!(y, Optional::Some(2));
+    ///
+    /// let mut x: Optional<u32> = Optional::None;
+    /// let y = x.replace(3);
+    /// assert_eq!(x, Optional::Some(3));
+    /// assert_eq!(y, Optional::None);
+    /// ```
+    #[inline]
+    pub fn replace(&mut self, value: T) -> Optional<T> {
+        std::mem::replace(self, Optional::Some(value))
+    }
+
     /// Maps the `Optional<T>` to the native `Option<T>`.
     ///
     /// # Examples
