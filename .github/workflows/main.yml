@@ -1,6 +1,9 @@
+name: CI
+
 on: [ push, pull_request ]
 
-name: CI
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   check:
@@ -38,12 +41,6 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
-      - name: Use lld-link as linker
-        shell: bash
-        if: runner.os == 'Windows'
-        run: |
-          mkdir .cargo
-          cp .github/workflows/cargo_config_test.toml .cargo/config.toml
       - uses: actions-rs/cargo@v1
         with:
           command: test
