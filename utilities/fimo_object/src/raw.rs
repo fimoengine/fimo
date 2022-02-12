@@ -212,6 +212,7 @@ pub fn try_cast_obj_mut<T: VTable, O: ObjectID>(
 ///
 /// - The vtable must have a compatible layout.
 /// - The object pointer must be compatible with the vtable.
+#[inline]
 pub unsafe fn from_raw_parts<T: VTable>(obj: *const (), vtable: &'static T) -> RawObject<T> {
     RawObject {
         object: obj,
@@ -225,6 +226,7 @@ pub unsafe fn from_raw_parts<T: VTable>(obj: *const (), vtable: &'static T) -> R
 ///
 /// - The vtable must have a compatible layout.
 /// - The object pointer must be compatible with the vtable.
+#[inline]
 pub unsafe fn from_raw_parts_mut<T: VTable>(obj: *mut (), vtable: &'static T) -> RawObjectMut<T> {
     RawObjectMut {
         object: obj,
@@ -233,11 +235,13 @@ pub unsafe fn from_raw_parts_mut<T: VTable>(obj: *mut (), vtable: &'static T) ->
 }
 
 /// Splits an object into it's raw parts.
+#[inline]
 pub fn into_raw_parts<T: VTable>(obj: RawObject<T>) -> (*const (), &'static T) {
     (obj.object, obj.vtable)
 }
 
 /// Splits an object into it's raw parts.
+#[inline]
 pub fn into_raw_parts_mut<T: VTable>(obj: RawObjectMut<T>) -> (*mut (), &'static T) {
     (obj.object, obj.vtable)
 }
