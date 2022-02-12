@@ -18,6 +18,7 @@ use std::ptr::NonNull;
 #[repr(C)]
 pub struct ObjBox<T: ObjPtrCompat + ?Sized, A: Allocator = Global>(Unique<T>, A);
 
+#[repr(transparent)]
 #[allow(missing_debug_implementations)]
 struct Unique<T: ObjPtrCompat + ?Sized>(NonNull<T>, PhantomData<T>);
 
