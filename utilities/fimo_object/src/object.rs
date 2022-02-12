@@ -677,39 +677,57 @@ unsafe impl<T: VTable> ObjectWrapper for Object<T> {
 unsafe impl<T: VTable> ObjPtrCompat for Object<T> {}
 
 /// Casts the object into it's raw representation.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[inline]
 pub fn into_raw<T: VTable>(obj: *const Object<T>) -> RawObject<T> {
-    // safety: we assume, that `*const Object<T>` has the same layout as `RawObject<T>`.
-    unsafe { std::mem::transmute(obj) }
+    let (ptr, vtable) = into_raw_parts(obj);
+
+    // safety: a `Object` must always contain a valid vtable.
+    unsafe { crate::raw::from_raw_parts(ptr, vtable) }
 }
 
 /// Casts the object into it's raw representation.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[inline]
 pub fn into_raw_mut<T: VTable>(obj: *mut Object<T>) -> RawObjectMut<T> {
-    // safety: we assume, that `*mut Object<T>` has the same layout as `RawObjectMut<T>`.
-    unsafe { std::mem::transmute(obj) }
+    let (ptr, vtable) = into_raw_parts_mut(obj);
+
+    // safety: a `Object` must always contain a valid vtable.
+    unsafe { crate::raw::from_raw_parts_mut(ptr, vtable) }
 }
 
 /// Constructs the object from it's raw representation.
+#[inline]
 pub fn from_raw<T: VTable>(obj: RawObject<T>) -> *const Object<T> {
-    // safety: we assume, that `*const Object<T>` has the same layout as `RawObject<T>`.
-    unsafe { std::mem::transmute(obj) }
+    let (ptr, vtable) = crate::raw::into_raw_parts(obj);
+
+    // safety: a `RawObject` must always contain a valid vtable.
+    unsafe { from_raw_parts(ptr, vtable) }
 }
 
 /// Constructs the object from it's raw representation.
+#[inline]
 pub fn from_raw_mut<T: VTable>(obj: RawObjectMut<T>) -> *mut Object<T> {
-    // safety: we assume, that `*mut Object<T>` has the same layout as `RawObjectMut<T>`.
-    unsafe { std::mem::transmute(obj) }
+    let (ptr, vtable) = crate::raw::into_raw_parts_mut(obj);
+
+    // safety: a `RawObjectMut` must always contain a valid vtable.
+    unsafe { from_raw_parts_mut(ptr, vtable) }
 }
 
 /// Casts the object into it's raw parts.
+#[inline]
 pub fn into_raw_parts<T: VTable>(obj: *const Object<T>) -> (*const (), &'static T) {
-    crate::raw::into_raw_parts(into_raw(obj))
+    let (ptr, vtable) = obj.to_raw_parts();
+
+    // safety: we assume, that the vtable is always valid.
+    unsafe { (ptr, &*(vtable as *const T)) }
 }
 
 /// Casts the object into it's raw parts.
+#[inline]
 pub fn into_raw_parts_mut<T: VTable>(obj: *mut Object<T>) -> (*mut (), &'static T) {
-    crate::raw::into_raw_parts_mut(into_raw_mut(obj))
+    let (ptr, vtable) = obj.to_raw_parts();
+
+    // safety: we assume, that the vtable is always valid.
+    unsafe { (ptr, &*(vtable as *const T)) }
 }
 
 /// Constructs an object from it's raw parts.
@@ -718,8 +736,9 @@ pub fn into_raw_parts_mut<T: VTable>(obj: *mut Object<T>) -> (*mut (), &'static 
 ///
 /// - The vtable must have a compatible layout.
 /// - The object pointer must be compatible with the vtable.
+#[inline]
 pub unsafe fn from_raw_parts<T: VTable>(obj: *const (), vtable: &'static T) -> *const Object<T> {
-    from_raw(crate::raw::from_raw_parts(obj, vtable))
+    std::ptr::from_raw_parts(obj, vtable as *const _ as usize)
 }
 
 /// Constructs an object from it's raw parts.
@@ -728,8 +747,9 @@ pub unsafe fn from_raw_parts<T: VTable>(obj: *const (), vtable: &'static T) -> *
 ///
 /// - The vtable must have a compatible layout.
 /// - The object pointer must be compatible with the vtable.
+#[inline]
 pub unsafe fn from_raw_parts_mut<T: VTable>(obj: *mut (), vtable: &'static T) -> *mut Object<T> {
-    from_raw_mut(crate::raw::from_raw_parts_mut(obj, vtable))
+    std::ptr::from_raw_parts_mut(obj, vtable as *const _ as usize)
 }
 
 /// Drops an object, consuming the object in the process.

@@ -18,6 +18,7 @@
 #![feature(const_type_name)]
 #![feature(set_ptr_value)]
 #![feature(cfg_sanitize)]
+#![feature(ptr_metadata)]
 
 pub mod obj_arc;
 pub mod obj_box;
