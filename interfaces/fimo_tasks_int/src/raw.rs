@@ -7,7 +7,9 @@ use fimo_ffi::object::{CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::vtable::IBase;
 use fimo_ffi::{fimo_object, fimo_vtable, impl_vtable, is_object, Optional, StrInner};
 use fimo_ffi::{ConstStr, ObjBox, Object};
+use std::any::Any;
 use std::cell::UnsafeCell;
+use std::fmt::{Display, Formatter};
 use std::marker::PhantomPinned;
 use std::mem::MaybeUninit;
 use std::ptr::NonNull;
@@ -24,10 +26,22 @@ pub struct TaskHandle {
     pub generation: usize,
 }
 
+impl Display for TaskHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.id, self.generation)
+    }
+}
+
 /// Priority of a task.
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
 pub struct TaskPriority(pub isize);
+
+impl Display for TaskPriority {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
 
 /// Id of a worker.
 #[repr(transparent)]
@@ -47,6 +61,12 @@ impl WorkerId {
         } else {
             Some(WorkerId(id))
         }
+    }
+}
+
+impl Display for WorkerId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -96,7 +116,7 @@ impl_vtable! {
     impl IRawTaskVTable => RawTaskInner {
         unsafe extern "C" fn name(this: *const ()) -> Optional<StrInner<false>> {
             let this = &*(this as *const RawTaskInner);
-            this.info.name.as_ref().map(|v| (v as &str).into())
+            this.info.name.as_ref().map(|v| (v as &str).into()).into()
         }
 
         unsafe extern "C" fn priority(this: *const ()) -> TaskPriority {
@@ -106,7 +126,7 @@ impl_vtable! {
 
         unsafe extern "C" fn spawn_location(this: *const ()) -> Optional<Location<'static>> {
             let this = &*(this as *const RawTaskInner);
-            this.info.spawn_location
+            this.info.spawn_location.map(Location::from_std).into()
         }
 
         #[allow(improper_ctypes_definitions)]
@@ -126,8 +146,110 @@ impl_vtable! {
 #[derive(Debug, Clone)]
 pub(crate) struct TaskInfo {
     priority: TaskPriority,
-    name: Optional<fimo_ffi::String>,
-    spawn_location: Optional<Location<'static>>,
+    name: Option<String>,
+    spawn_location: Option<&'static std::panic::Location<'static>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Builder {
+    info: TaskInfo,
+    start_time: SystemTime,
+    worker: Option<WorkerId>,
+    status: StatusRequest,
+}
+
+impl Builder {
+    #[inline]
+    #[track_caller]
+    pub fn new() -> Self {
+        Self {
+            info: TaskInfo {
+                priority: TaskPriority(0),
+                name: Default::default(),
+                spawn_location: Some(std::panic::Location::caller()),
+            },
+            start_time: SystemTime::now(),
+            worker: None,
+            status: StatusRequest::None,
+        }
+    }
+
+    #[inline]
+    pub fn with_name(mut self, name: String) -> Self {
+        self.info.name = Some(name);
+        self
+    }
+
+    #[inline]
+    pub fn with_priority(mut self, priority: TaskPriority) -> Self {
+        self.info.priority = priority;
+        self
+    }
+
+    #[inline]
+    pub fn with_start_time(mut self, start_time: SystemTime) -> Self {
+        if self.start_time < start_time {
+            self.start_time = start_time;
+        }
+        self
+    }
+
+    #[inline]
+    pub unsafe fn with_worker(mut self, worker: WorkerId) -> Self {
+        self.worker = Some(worker);
+        self
+    }
+
+    #[inline]
+    pub fn blocked(mut self) -> Self {
+        self.status = StatusRequest::Block;
+        self
+    }
+
+    #[inline]
+    pub fn build(
+        self,
+        f: Option<EntryFunc>,
+        cleanup: Option<CleanupFunc>,
+        data: Option<UserData>,
+    ) -> RawTaskInner {
+        RawTaskInner {
+            info: self.info,
+            data: UnsafeCell::new(SchedulerContextInner {
+                panicking: Atomic::new(false),
+                registered: Atomic::new(false),
+                handle: MaybeUninit::uninit(),
+                resume_time: Atomic::new(
+                    self.start_time
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_nanos(),
+                ),
+                worker: Atomic::new(
+                    self.worker
+                        .map(|w| w.0)
+                        .unwrap_or(WorkerId::INVALID_WORKER_ID),
+                ),
+                request: Atomic::new(self.status),
+                run_status: Atomic::new(TaskRunStatus::Idle),
+                schedule_status: Atomic::new(TaskScheduleStatus::Runnable),
+                cleanup_func: cleanup.into(),
+                entry_func: f.into(),
+                user_data: data.into(),
+                panic_data: Optional::None,
+                scheduler_data: Optional::None,
+                _pinned: Default::default(),
+            }),
+        }
+    }
+}
+
+impl Default for Builder {
+    #[inline]
+    #[track_caller]
+    fn default() -> Self {
+        Builder::new()
+    }
 }
 
 fimo_object! {
@@ -142,6 +264,12 @@ impl IRawTask {
     pub fn name(&self) -> Option<&str> {
         let (ptr, vtable) = self.into_raw_parts();
         unsafe { (vtable.name)(ptr).into_rust().map(|n| n.into()) }
+    }
+
+    /// Shorthand for `self.name().unwrap_or("unnamed")`.
+    #[inline]
+    pub fn resolved_name(&self) -> &str {
+        self.name().unwrap_or("unnamed")
     }
 
     /// Extracts the starting priority of the task.
@@ -240,10 +368,16 @@ impl<'a> Location<'a> {
     #[track_caller]
     pub fn caller() -> Location<'static> {
         let l = std::panic::Location::caller();
+        Location::from_std(l)
+    }
+
+    /// Constructs a location from a [`std::panic::Location`].
+    #[must_use]
+    pub fn from_std(loc: &'a std::panic::Location<'a>) -> Location<'a> {
         Location {
-            file: l.file().into(),
-            line: l.line(),
-            col: l.column(),
+            file: loc.file().into(),
+            line: loc.line(),
+            col: loc.column(),
         }
     }
 
@@ -278,7 +412,8 @@ pub enum StatusRequest {
     Abort,
 }
 
-type CleanupFunc = RawFnOnce<(NonNull<Optional<UserData>>,), (), SendSyncMarker>;
+type EntryFunc = RawFnOnce<(), (), SendMarker>;
+type CleanupFunc = RawFnOnce<(NonNull<Optional<UserData>>,), (), SendMarker>;
 type UserData = ObjBox<Object<IBase<SendSyncMarker>>>;
 type PanicData = ObjBox<Object<IBase<SendMarker>>>;
 type SchedulerData = ObjBox<Object<IBase<SendSyncMarker>>>;
@@ -287,13 +422,14 @@ pub(crate) struct SchedulerContextInner {
     panicking: Atomic<bool>,
     registered: Atomic<bool>,
     handle: MaybeUninit<TaskHandle>,
-    resume_time: u128,
+    // may use locks on some architectures
+    resume_time: Atomic<u128>,
     worker: Atomic<usize>,
     request: Atomic<StatusRequest>,
     run_status: Atomic<TaskRunStatus>,
     schedule_status: Atomic<TaskScheduleStatus>,
     cleanup_func: Optional<CleanupFunc>,
-    entry_func: Optional<RawFnOnce<(), (), SendSyncMarker>>,
+    entry_func: Optional<EntryFunc>,
     user_data: Optional<UserData>,
     panic_data: Optional<PanicData>,
     scheduler_data: Optional<SchedulerData>,
@@ -356,14 +492,18 @@ impl_vtable! {
 
         unsafe extern "C" fn resume_timestamp(this: *const ()) -> Timestamp {
             let this = &*(this as *const SchedulerContextInner);
-            this.resume_time.into()
+            this.resume_time.load(Ordering::Acquire).into()
         }
 
         unsafe extern "C" fn set_resume_timestamp(this: *mut (), timestamp: Timestamp) {
             let this = &mut *(this as *mut SchedulerContextInner);
             let timestamp = timestamp.into();
-            if this.resume_time <= timestamp {
-                this.resume_time = timestamp;
+            let mut time = this.resume_time.load(Ordering::Relaxed);
+            while time <= timestamp {
+                match this.resume_time.compare_exchange_weak(time, timestamp, Ordering::AcqRel, Ordering::Relaxed) {
+                    Ok(_) => return,
+                    Err(t) => time = t
+                }
             }
         }
 
@@ -426,7 +566,7 @@ impl_vtable! {
 
         unsafe extern "C" fn take_entry_function(
             this: *mut (),
-        ) -> Optional<RawFnOnce<(), (), SendSyncMarker>> {
+        ) -> Optional<EntryFunc> {
             let this = &mut *(this as *mut SchedulerContextInner);
             this.entry_func.take()
         }
@@ -661,7 +801,7 @@ impl ISchedulerContext {
     ///
     /// Behavior is undefined if not called from a task scheduler.
     #[inline]
-    pub unsafe fn take_entry_function(&mut self) -> Option<RawFnOnce<(), (), SendSyncMarker>> {
+    pub unsafe fn take_entry_function(&mut self) -> Option<EntryFunc> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.take_entry_function)(ptr).into_rust()
     }
@@ -835,7 +975,7 @@ fimo_vtable! {
         /// # Safety
         ///
         /// Behavior is undefined if not called from a task scheduler.
-        pub take_entry_function: unsafe extern "C" fn(*mut ()) -> Optional<RawFnOnce<(), (), SendSyncMarker>>,
+        pub take_entry_function: unsafe extern "C" fn(*mut ()) -> Optional<EntryFunc>,
         /// Checks whether the task is panicking.
         pub is_panicking: unsafe extern "C" fn(*const ()) -> bool,
         /// Sets the panicking flag.
@@ -880,5 +1020,34 @@ fimo_vtable! {
         ///
         /// Behavior is undefined if not called from a task scheduler.
         pub scheduler_data_mut: unsafe extern "C" fn(*mut ()) -> Optional<*mut Object<IBase<SendSyncMarker>>>,
+    }
+}
+
+fimo_object! {
+    /// Interface of rust panics.
+    #![vtable = IRustPanicDataVTable]
+    pub struct IRustPanicData;
+}
+
+impl IRustPanicData {
+    /// Takes the rust panic data.
+    pub fn take_rust_panic(mut panic: ObjBox<Self>) -> Box<dyn Any + Send + 'static> {
+        let (ptr, vtable) = panic.into_raw_parts_mut();
+        unsafe { (vtable.take_rust_panic)(ptr) }
+    }
+}
+
+fimo_vtable! {
+    /// VTable of a [`IRustPanicData`].
+    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    #![marker = SendMarker]
+    #![uuid(0xc16e06dc, 0x1558, 0x47a2, 0x912e, 0xee59a3d1375e)]
+    pub struct IRustPanicDataVTable {
+        /// Takes the rust panic data.
+        ///
+        /// # Safety
+        ///
+        /// May only be called once.
+        pub take_rust_panic: unsafe fn(*mut ()) -> Box<dyn Any + Send + 'static>
     }
 }
