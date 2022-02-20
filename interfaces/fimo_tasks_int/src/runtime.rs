@@ -4,20 +4,21 @@ use crate::raw::{IRawTask, RawTaskInner, TaskHandle, TaskPriority, TaskScheduleS
 use fimo_ffi::fn_wrapper::RawFnOnce;
 use fimo_ffi::marker::{SendMarker, SendSyncMarker};
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::vtable::IBase;
+use fimo_ffi::vtable::{IBase, VTableUpcast};
 use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, ObjBox, Object, Optional, SpanInner};
 use fimo_module::Error;
 use log::Level::Trace;
 use log::{log_enabled, trace};
 use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-thread_local! {static RUNTIME: std::cell::Cell<Option<&'static IRuntime>> = std::cell::Cell::new(None)}
+#[thread_local]
+static RUNTIME: std::cell::Cell<Option<*const IRuntime>> = std::cell::Cell::new(None);
 
 /// An owned permission to join on a task (block on its termination).
 ///
@@ -138,13 +139,14 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     /// Once finished, extracts a reference to the result.
     /// If the task was aborted this function returns [`None`].
     pub fn wait(&self) -> Option<&T> {
+        debug_assert!(is_worker());
         trace!(
             "Waiting on task-id {}, name {}",
             self.handle(),
             self.as_raw().resolved_name()
         );
 
-        let runtime = get_runtime();
+        let runtime = unsafe { get_runtime() };
         assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
 
         let context = self.as_raw().scheduler_context();
@@ -160,13 +162,14 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     /// Once finished, extracts a mutable reference to the result.
     /// If the task was aborted this function returns [`None`].
     pub fn wait_mut(&mut self) -> Option<&mut T> {
+        debug_assert!(is_worker());
         trace!(
             "Waiting on task-id {}, name {}",
             self.handle(),
             self.as_raw().resolved_name()
         );
 
-        let runtime = get_runtime();
+        let runtime = unsafe { get_runtime() };
         assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
 
         let context = self.as_raw().scheduler_context();
@@ -179,13 +182,14 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
 
     /// Unblocks the task.
     pub fn unblock(&mut self) -> Result<(), Error> {
+        debug_assert!(is_worker());
         trace!(
             "Unblocking task-id {}, name {}",
             self.handle(),
             self.as_raw().resolved_name()
         );
 
-        let runtime = get_runtime();
+        let runtime = unsafe { get_runtime() };
         runtime.enter_scheduler(|s, _| s.unblock_task(self.as_raw()))
     }
 
@@ -372,14 +376,15 @@ impl Builder {
     /// # Panics
     ///
     /// This function panics if the provided function panics.
+    /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
     pub fn block_on<F: FnOnce() -> R + Send, R: Send>(
         self,
-        runtime: &IRuntime,
         f: F,
         wait_on: &[TaskHandle],
     ) -> Result<R, Error> {
+        assert!(is_worker());
         trace!("Blocking on new task");
 
         let mut task: MaybeUninit<Task<R>> = MaybeUninit::uninit();
@@ -415,6 +420,7 @@ impl Builder {
         let task = unsafe { task.assume_init() };
         let handle = &task;
 
+        let runtime = unsafe { get_runtime() };
         let handle = runtime.enter_scheduler(move |s, _| unsafe {
             trace!("Register task with the runtime");
             s.register_task(handle.as_raw(), wait_on)
@@ -441,17 +447,128 @@ impl Builder {
         }
     }
 
+    /// Runs a task to completion on the task runtime.
+    ///
+    /// Blocks the current task until the new task has been completed.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the provided function panics.
+    #[inline]
+    #[track_caller]
+    pub fn block_on_complex<
+        F: FnOnce() -> R + Send,
+        R: Send,
+        C: FnOnce(Option<NonNull<O>>) + Send + 'static,
+        O: CoerceObject<V> + 'static,
+        V: VTableUpcast<IBase<SendSyncMarker>>,
+        J: FnOnce(
+            &IRawTask,
+            &UnsafeCell<MaybeUninit<R>>,
+        ) -> Result<R, Option<ObjBox<Object<IBase<SendMarker>>>>>,
+    >(
+        self,
+        f: F,
+        cleanup: C,
+        data: NonNull<O>,
+        wait_on: &[TaskHandle],
+        join: J,
+    ) -> Result<R, Error> {
+        assert!(is_worker());
+        trace!("Blocking on new task");
+
+        let mut task: MaybeUninit<Task<R>> = MaybeUninit::uninit();
+
+        // fetch the addresses to the inner members, so we can initialize them.
+        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
+        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+
+        struct AssertSync<T>(*mut MaybeUninit<T>);
+        // we know that `T` won't be shared only written, so we can mark it as `Send`.
+        unsafe impl<T: Send> Send for AssertSync<T> {}
+
+        let res = unsafe {
+            // initialize res and fetch a pointer to the inner result.
+            res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
+            AssertSync(&mut *(*res_ptr).get())
+        };
+
+        let f = move || {
+            // write the result directly into the address, knowing that it will live
+            // at least as long as the task itself.
+            unsafe { res.0.write(MaybeUninit::new(f())) };
+        };
+        let mut f = MaybeUninit::new(f);
+        // safety: we know that f is valid until the raw fn is called.
+        let f = unsafe { RawFnOnce::new(&mut f) };
+
+        let cleanup = move |data: Optional<NonNull<Object<IBase<SendSyncMarker>>>>| {
+            if let Some(data) = data.into_rust() {
+                let data: *const O = Object::try_cast_obj_raw(data.as_ptr()).unwrap();
+                let data: NonNull<O> = unsafe { NonNull::new_unchecked(data as *mut _) };
+                cleanup(Some(data));
+            } else {
+                cleanup(None);
+            }
+        };
+        let mut cleanup = MaybeUninit::new(cleanup);
+        let cleanup = unsafe { RawFnOnce::new(&mut cleanup) };
+
+        let data = O::coerce_obj_raw(data.as_ptr());
+        let data = Object::cast_super_raw(data);
+        let data = unsafe { NonNull::new_unchecked(data as *mut _) };
+
+        // initialize the raw field.
+        let raw_task = self.inner.build(Some(f), Some(cleanup), Some(data));
+        unsafe { raw_ptr.write(raw_task) };
+
+        // safety: all fields have been initialized.
+        let task = unsafe { task.assume_init() };
+        let handle = &task;
+
+        let runtime = unsafe { get_runtime() };
+        let handle = runtime.enter_scheduler(move |s, _| unsafe {
+            trace!("Register task with the runtime");
+            s.register_task(handle.as_raw(), wait_on)
+                .map(|_| JoinHandle { handle })
+        })?;
+        let handle = ManuallyDrop::new(handle);
+
+        match join(handle.as_raw(), &handle.handle.res) {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                // empty errors indicate an aborted task.
+                if let Some(err) = err {
+                    use crate::raw::IRustPanicData;
+
+                    // a runtime written in rust can choose to wrap the native
+                    // panic into a `IRustPanicData`.
+                    if let Ok(err) = ObjBox::try_cast::<IRustPanicData>(err) {
+                        let err = IRustPanicData::take_rust_panic(err);
+                        std::panic::resume_unwind(err)
+                    }
+                }
+
+                panic!("Unknown panic!")
+            }
+        }
+    }
+
     /// Spawns a task onto the task runtime.
     ///
     /// Spawns a task on any of the available workers, where it will run to completion.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
     pub fn spawn<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(
         self,
-        runtime: &IRuntime,
         f: F,
         wait_on: &[TaskHandle],
     ) -> Result<JoinHandle<R, impl RawTaskWrapper<Output = R> + 'static>, Error> {
+        assert!(is_worker());
         trace!("Spawning new task");
 
         let mut task: ObjBox<MaybeUninit<Task<R>>> = ObjBox::new_uninit();
@@ -484,6 +601,80 @@ impl Builder {
         // safety: all fields have been initialized.
         let task = unsafe { Pin::new_unchecked(task.assume_init()) };
 
+        let runtime = unsafe { get_runtime() };
+        runtime.enter_scheduler(move |s, _| unsafe {
+            trace!("Register task with the runtime");
+            s.register_task(task.as_raw(), wait_on)
+                .map(|_| JoinHandle { handle: task })
+        })
+    }
+
+    /// Spawns a task onto the task runtime.
+    ///
+    /// Spawns a task on any of the available workers, where it will run to completion.
+    #[inline]
+    #[track_caller]
+    pub fn spawn_complex<
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+        C: FnOnce(Option<NonNull<O>>) + Send + 'static,
+        O: CoerceObject<V> + 'static,
+        V: VTableUpcast<IBase<SendSyncMarker>>,
+    >(
+        self,
+        runtime: &IRuntime,
+        f: F,
+        cleanup: C,
+        data: NonNull<O>,
+        wait_on: &[TaskHandle],
+    ) -> Result<JoinHandle<R, impl RawTaskWrapper<Output = R> + 'static>, Error> {
+        trace!("Spawning new task");
+
+        let mut task: ObjBox<MaybeUninit<Task<R>>> = ObjBox::new_uninit();
+
+        // fetch the addresses to the inner members, so we can initialize them.
+        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
+        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+
+        struct AssertSync<T>(*mut MaybeUninit<T>);
+        // we know that `T` won't be shared only written, so we can mark it as `Send`.
+        unsafe impl<T: Send> Send for AssertSync<T> {}
+
+        let res = unsafe {
+            // initialize res and fetch a pointer to the inner result.
+            res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
+            AssertSync(&mut *(*res_ptr).get())
+        };
+
+        let f = move || {
+            // write the result directly into the address, knowing that it will live
+            // at least as long as the task itself.
+            unsafe { res.0.write(MaybeUninit::new(f())) };
+        };
+        let f = RawFnOnce::new_boxed(Box::new(f));
+
+        let cleanup = move |data: Optional<NonNull<Object<IBase<SendSyncMarker>>>>| {
+            if let Some(data) = data.into_rust() {
+                let data: *const O = Object::try_cast_obj_raw(data.as_ptr()).unwrap();
+                let data: NonNull<O> = unsafe { NonNull::new_unchecked(data as *mut _) };
+                cleanup(Some(data));
+            } else {
+                cleanup(None);
+            }
+        };
+        let cleanup = RawFnOnce::new_boxed(Box::new(cleanup));
+
+        let data = O::coerce_obj_raw(data.as_ptr());
+        let data = Object::cast_super_raw(data);
+        let data = unsafe { NonNull::new_unchecked(data as *mut _) };
+
+        // initialize the raw field.
+        let raw_task = self.inner.build(Some(f), Some(cleanup), Some(data));
+        unsafe { raw_ptr.write(raw_task) };
+
+        // safety: all fields have been initialized.
+        let task = unsafe { Pin::new_unchecked(task.assume_init()) };
+
         runtime.enter_scheduler(move |s, _| unsafe {
             trace!("Register task with the runtime");
             s.register_task(task.as_raw(), wait_on)
@@ -500,7 +691,8 @@ impl Default for Builder {
     }
 }
 
-type SchedulerResult<T> = fimo_ffi::Result<T, Error>;
+/// Result type for the [`ISchedulerVTable`].
+pub type ISchedulerResult<T> = fimo_ffi::Result<T, Error>;
 
 fimo_object! {
     /// Interface of a task runtime.
@@ -525,6 +717,7 @@ impl IRuntime {
     /// # Panics
     ///
     /// This function panics if the provided function panics.
+    /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
     pub fn block_on<F: FnOnce() -> R + Send, R: Send>(
@@ -532,12 +725,16 @@ impl IRuntime {
         f: F,
         wait_on: &[TaskHandle],
     ) -> Result<R, Error> {
-        Builder::new().block_on(self, f, wait_on)
+        Builder::new().block_on(f, wait_on)
     }
 
     /// Spawns a task onto the task runtime.
     ///
     /// Spawns a task on any of the available workers, where it will run to completion.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
     pub fn spawn<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(
@@ -545,22 +742,18 @@ impl IRuntime {
         f: F,
         wait_on: &[TaskHandle],
     ) -> Result<JoinHandle<R, impl RawTaskWrapper<Output = R> + 'static>, Error> {
-        Builder::new().spawn(self, f, wait_on)
+        Builder::new().spawn(f, wait_on)
     }
 
     /// Retrieves the id of the current worker.
-    ///
-    /// # Panics
-    ///
-    /// Can only be called from a worker thread.
     #[inline]
-    pub fn worker_id(&self) -> WorkerId {
+    pub fn worker_id(&self) -> Option<WorkerId> {
         trace!("Retrieving id of current worker");
 
         let (ptr, vtable) = self.into_raw_parts();
-        let id = unsafe { (vtable.worker_id)(ptr) };
+        let id = unsafe { (vtable.worker_id)(ptr).into_rust() };
 
-        trace!("Current worker id: {}", id);
+        trace!("Current worker id: {:?}", id);
 
         id
     }
@@ -574,15 +767,18 @@ impl IRuntime {
     /// Trying to access the scheduler by other means than
     /// the provided reference may result in a deadlock.
     #[inline]
-    pub fn enter_scheduler<F: FnOnce(&mut IScheduler, &IRawTask) -> R, R>(&self, f: F) -> R {
+    pub fn enter_scheduler<F: FnOnce(&mut IScheduler, Option<&IRawTask>) -> R, R>(
+        &self,
+        f: F,
+    ) -> R {
         trace!("Entering scheduler");
         let mut res = MaybeUninit::uninit();
 
         {
             let res = &mut res;
-            let wrapper = move |s: NonNull<IScheduler>, t: NonNull<IRawTask>| unsafe {
+            let wrapper = move |s: NonNull<IScheduler>, t: Optional<NonNull<IRawTask>>| unsafe {
                 trace!("Scheduler entered");
-                res.write(f(&mut *s.as_ptr(), t.as_ref()));
+                res.write(f(&mut *s.as_ptr(), t.into_rust().map(|t| t.as_ref())));
                 trace!("Exiting scheduler");
             };
             let mut wrapper = MaybeUninit::new(wrapper);
@@ -602,6 +798,10 @@ impl IRuntime {
     ///
     /// Yields the current task to the runtime, allowing other tasks to be
     /// run on the current worker.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     pub fn yield_now(&self) {
         self.yield_and_enter(|_, _| {})
@@ -612,6 +812,10 @@ impl IRuntime {
     /// Yields the current task to the runtime, allowing other tasks to be
     /// run on the current worker. The task won't resume until the instant
     /// `until` has passed.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     pub fn yield_until(&self, until: SystemTime) {
         self.yield_and_enter(move |_, curr| {
@@ -626,11 +830,16 @@ impl IRuntime {
     /// Yields the current task to the runtime, allowing other tasks to be
     /// run on the current worker. On the next run of the scheduler it will call
     /// the provided function.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     pub fn yield_and_enter<F: FnOnce(&mut IScheduler, &IRawTask) -> R + Send, R: Send>(
         &self,
         f: F,
     ) -> R {
+        assert!(is_worker());
         trace!("Yielding to scheduler");
         let mut res = MaybeUninit::uninit();
 
@@ -655,6 +864,10 @@ impl IRuntime {
     }
 
     /// Blocks the current task indefinitely.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     pub fn block_now(&self) {
         trace!("Requesting block of current task");
@@ -673,6 +886,10 @@ impl IRuntime {
     ///
     /// Abortion of tasks is currently implemented by unwinding the stack.
     /// Future implementations my implemented by other means than unwinding.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     pub unsafe fn abort_now(&self) -> ! {
         trace!("Aborting current task");
@@ -685,7 +902,11 @@ impl IRuntime {
     /// The current task will yield it's execution, until the other task completes.
     /// Returns whether the task waited on the other task.
     /// Passing the handle to the current task will always return `Ok(WaitStatus::Skipped)`.
-    /// This function always guarantees, that the other task has completed.
+    /// Otherwise this function always guarantees, that the other task has completed.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
     pub fn wait_on(&self, handle: TaskHandle) -> Result<WaitStatus, Error> {
         trace!("Wait until task-id {} completes", handle);
@@ -716,7 +937,7 @@ fimo_vtable! {
     #![uuid(0x095a88ff, 0xf45a, 0x4cf8, 0xa8f2, 0xe18eb028a7de)]
     pub struct IRuntimeVTable {
         /// Retrieves the id of the current worker.
-        pub worker_id: unsafe extern "C" fn(*const ()) -> WorkerId,
+        pub worker_id: unsafe extern "C" fn(*const ()) -> Optional<WorkerId>,
         /// Acquires a reference to the scheduler.
         ///
         /// The task will block, until the scheduler can be acquired.
@@ -725,9 +946,10 @@ fimo_vtable! {
         ///
         /// Trying to access the scheduler by other means than
         /// the provided reference may result in a deadlock.
+        #[allow(clippy::type_complexity)]
         pub enter_scheduler: unsafe extern "C" fn(
             *const (),
-            RawFnOnce<(NonNull<IScheduler>, NonNull<IRawTask>), ()>
+            RawFnOnce<(NonNull<IScheduler>, Optional<NonNull<IRawTask>>), ()>
         ),
         /// Yields the current task to the runtime.
         ///
@@ -847,6 +1069,10 @@ impl IScheduler {
     /// Registers a block for a task until the dependency completes.
     ///
     /// A task may not wait on itself.
+    ///
+    /// # Note
+    ///
+    /// Does not guarantee that the task will wait immediately if it is already scheduled.
     #[inline]
     pub fn wait_task_on(&mut self, task: &IRawTask, wait_on: &IRawTask) -> Result<(), Error> {
         trace!(
@@ -959,7 +1185,7 @@ impl IScheduler {
 fimo_vtable! {
     /// VTable of a [`IScheduler`].
     #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![marker = SendSyncMarker]
+    #![marker = SendMarker]
     #![uuid(0x095a88ff, 0xf45a, 0x4cf8, 0xa8f2, 0xe18eb028a7de)]
     pub struct ISchedulerVTable {
         /// Fetches the id's of all available workers.
@@ -970,7 +1196,7 @@ fimo_vtable! {
         ///
         /// The task may be destroyed upon exiting the scheduler.
         pub find_task:
-            unsafe extern "C" fn(*const (), TaskHandle) -> SchedulerResult<NonNull<IRawTask>>,
+            unsafe extern "C" fn(*const (), TaskHandle) -> ISchedulerResult<NonNull<IRawTask>>,
         /// Registers a task with the runtime for execution.
         ///
         /// # Safety
@@ -980,17 +1206,21 @@ fimo_vtable! {
             *mut (),
             NonNull<IRawTask>,
             SpanInner<TaskHandle, false>,
-        ) -> SchedulerResult<()>,
+        ) -> ISchedulerResult<()>,
         /// Unregisters a task from the task runtime.
         pub unregister_task: unsafe extern "C" fn(
             *mut (),
             NonNull<IRawTask>,
-        ) -> SchedulerResult<()>,
+        ) -> ISchedulerResult<()>,
         /// Blocks a task until the dependency completes.
         ///
         /// A task may not wait on itself.
+        ///
+        /// # Note
+        ///
+        /// Does not guarantee that the task will wait immediately if it is already scheduled.
         pub wait_task_on:
-            unsafe extern "C" fn(*mut (), NonNull<IRawTask>, NonNull<IRawTask>) -> SchedulerResult<()>,
+            unsafe extern "C" fn(*mut (), NonNull<IRawTask>, NonNull<IRawTask>) -> ISchedulerResult<()>,
         /// Wakes up one task.
         ///
         /// Wakes up the task with the highest priority, that is waiting on provided task to finish.
@@ -1003,7 +1233,7 @@ fimo_vtable! {
         /// resuming execution. This function is mainly intended to be
         /// used for the implementation of condition variables.
         pub notify_one:
-            unsafe extern "C" fn(*mut (), NonNull<IRawTask>) -> SchedulerResult<Optional<usize>>,
+            unsafe extern "C" fn(*mut (), NonNull<IRawTask>) -> ISchedulerResult<Optional<usize>>,
         /// Wakes up all tasks.
         ///
         /// Wakes up all waiting tasks. Returns the number of tasks that were woken up.
@@ -1014,27 +1244,37 @@ fimo_vtable! {
         /// resuming execution. This function is mainly intended to be
         /// used for the implementation of condition variables.
         pub notify_all:
-            unsafe extern "C" fn(*mut(), NonNull<IRawTask>) -> SchedulerResult<usize>,
+            unsafe extern "C" fn(*mut(), NonNull<IRawTask>) -> ISchedulerResult<usize>,
         /// Unblocks a blocked task.
         pub unblock_task:
-            unsafe extern "C" fn(*mut (), NonNull<IRawTask>) -> SchedulerResult<()>,
+            unsafe extern "C" fn(*mut (), NonNull<IRawTask>) -> ISchedulerResult<()>,
     }
 }
 
 /// Returns whether a thread is a managed by a runtime.
 #[inline]
 pub fn is_worker() -> bool {
-    RUNTIME.with(|runtime| runtime.get().is_some())
+    RUNTIME.get().is_some()
 }
 
 /// Returns a reference to the [`IRuntime`] that owns the worker.
 ///
 /// The reference remains valid as long as the worker thread is kept alive.
 ///
-/// # Panics
+/// # Safety
 ///
-/// **Must** be run from within a task.
+/// **Must** be run from within a worker after a call to [`init_runtime()`].
 #[inline]
-pub fn get_runtime() -> &'static IRuntime {
-    RUNTIME.with(|runtime| runtime.get().unwrap())
+pub unsafe fn get_runtime() -> &'static IRuntime {
+    &*RUNTIME.get().unwrap_unchecked()
+}
+
+/// Provides the runtime to the current worker.
+///
+/// # Safety
+///
+/// May only be called once from a worker.
+pub unsafe fn init_runtime(runtime: *const IRuntime) {
+    debug_assert!(!is_worker());
+    RUNTIME.set(Some(runtime))
 }
