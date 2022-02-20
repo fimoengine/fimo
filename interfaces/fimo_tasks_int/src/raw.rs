@@ -102,8 +102,9 @@ pub enum TaskScheduleStatus {
     Finished,
 }
 
+/// Representation of a raw task.
 #[derive(Debug)]
-pub(crate) struct RawTaskInner {
+pub struct RawTaskInner {
     info: TaskInfo,
     data: UnsafeCell<SchedulerContextInner>,
 }
@@ -150,8 +151,9 @@ pub(crate) struct TaskInfo {
     spawn_location: Option<&'static std::panic::Location<'static>>,
 }
 
+/// A builder for raw tasks.
 #[derive(Debug)]
-pub(crate) struct Builder {
+pub struct Builder {
     info: TaskInfo,
     start_time: SystemTime,
     worker: Option<WorkerId>,
@@ -159,6 +161,7 @@ pub(crate) struct Builder {
 }
 
 impl Builder {
+    /// Constructs a new `Builder`.
     #[inline]
     #[track_caller]
     pub fn new() -> Self {
@@ -174,18 +177,24 @@ impl Builder {
         }
     }
 
+    /// Names the task.
     #[inline]
     pub fn with_name(mut self, name: String) -> Self {
         self.info.name = Some(name);
         self
     }
 
+    /// Assigns a priority to the task.
+    ///
+    /// A lower [`TaskPriority`] value will lead to a higher priority.
+    /// The default priority is `TaskPriority(0)`.
     #[inline]
     pub fn with_priority(mut self, priority: TaskPriority) -> Self {
         self.info.priority = priority;
         self
     }
 
+    /// Assigns a start time to the task.
     #[inline]
     pub fn with_start_time(mut self, start_time: SystemTime) -> Self {
         if self.start_time < start_time {
@@ -194,18 +203,25 @@ impl Builder {
         self
     }
 
+    /// Assigns a worker to the task.
+    ///
+    /// # Safety
+    ///
+    /// Behavior is undefined if the worker does not exist.
     #[inline]
     pub unsafe fn with_worker(mut self, worker: WorkerId) -> Self {
         self.worker = Some(worker);
         self
     }
 
+    /// Marks the task as blocked.
     #[inline]
     pub fn blocked(mut self) -> Self {
         self.status = StatusRequest::Block;
         self
     }
 
+    /// Builds the [`RawTaskInner`].
     #[inline]
     pub fn build(
         self,
@@ -413,8 +429,8 @@ pub enum StatusRequest {
 }
 
 type EntryFunc = RawFnOnce<(), (), SendMarker>;
-type CleanupFunc = RawFnOnce<(NonNull<Optional<UserData>>,), (), SendMarker>;
-type UserData = ObjBox<Object<IBase<SendSyncMarker>>>;
+type CleanupFunc = RawFnOnce<(Optional<UserData>,), (), SendMarker>;
+type UserData = NonNull<Object<IBase<SendSyncMarker>>>;
 type PanicData = ObjBox<Object<IBase<SendMarker>>>;
 type SchedulerData = ObjBox<Object<IBase<SendSyncMarker>>>;
 
@@ -436,7 +452,14 @@ pub(crate) struct SchedulerContextInner {
     _pinned: PhantomPinned,
 }
 
+unsafe impl Send for SchedulerContextInner {}
 unsafe impl Sync for SchedulerContextInner {}
+
+impl Drop for SchedulerContextInner {
+    fn drop(&mut self) {
+        ISchedulerContext::from_object_mut(self.coerce_obj_mut()).cleanup()
+    }
+}
 
 #[repr(C)]
 #[doc(hidden)]
@@ -594,20 +617,20 @@ impl_vtable! {
         unsafe extern "C" fn cleanup(this: *mut ()) {
             let this = &mut *(this as *mut SchedulerContextInner);
             if let Some(f) = this.cleanup_func.take().into_rust() {
-                f.assume_valid()(NonNull::from(&mut this.user_data))
+                f.assume_valid()(this.user_data.take())
             }
         }
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn user_data(this: *const ()) -> Optional<*const Object<IBase<SendSyncMarker>>> {
             let this = &*(this as *const SchedulerContextInner);
-            this.user_data.as_ref().map(|d| &**d as _)
+            this.user_data.map(|d| d.as_ptr() as *const _)
         }
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn user_data_mut(this: *mut ()) -> Optional<*mut Object<IBase<SendSyncMarker>>> {
             let this = &mut *(this as *mut SchedulerContextInner);
-            this.user_data.as_mut().map(|d| &mut **d as _)
+            this.user_data.map(|d| d.as_ptr())
         }
 
         #[allow(improper_ctypes_definitions)]
@@ -844,14 +867,10 @@ impl ISchedulerContext {
     }
 
     /// Calls the cleanup function.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
     #[inline]
-    pub unsafe fn cleanup(&mut self) {
+    pub fn cleanup(&mut self) {
         let (ptr, vtable) = self.into_raw_parts_mut();
-        (vtable.cleanup)(ptr)
+        unsafe { (vtable.cleanup)(ptr) }
     }
 
     /// Fetches a reference to the user data.
@@ -999,10 +1018,6 @@ fimo_vtable! {
         /// Behavior is undefined if the task has not completed or aborted it's execution.
         pub take_panic_data: unsafe extern "C" fn(*mut ()) -> Optional<PanicData>,
         /// Calls the cleanup function.
-        ///
-        /// # Safety
-        ///
-        /// Behavior is undefined if not called from a task scheduler.
         pub cleanup: unsafe extern "C" fn(*mut ()),
         /// Fetches a reference to the user data.
         pub user_data: unsafe extern "C" fn(*const ()) -> Optional<*const Object<IBase<SendSyncMarker>>>,

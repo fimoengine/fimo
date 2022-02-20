@@ -14,8 +14,9 @@ mod interfaces;
 pub mod rust_loader;
 
 pub use error::{Error, ErrorKind, Result};
-pub use fimo_ffi::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object};
+pub use fimo_ffi::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object, version};
 pub use interfaces::*;
+pub use version::{ReleaseType, Version};
 
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;

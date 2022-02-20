@@ -6,7 +6,7 @@
 use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::{MarkerCompatible, VTable, VTableUpcast};
+use crate::vtable::{MarkerCompatible, ObjectID, VTable, VTableUpcast};
 use crate::{CoerceObject, Object};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
@@ -324,7 +324,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
     /// assert!(ObjArc::try_object_cast::<SecondObj>(also_obj).is_err());
     ///
     /// ```
-    pub fn try_object_cast<T: CoerceObject<O::VTable>>(
+    pub fn try_object_cast<T: ObjectID>(
         a: ObjArc<O, A>,
     ) -> Result<ObjArc<T, A>, CastError<ObjArc<O, A>>> {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
@@ -1516,7 +1516,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
     }
 
     /// Tries to revert from an `ObjWeak<O, A>` to an `ObjWeak<T, A>`.
-    pub fn try_object_cast<T: CoerceObject<O::VTable>>(
+    pub fn try_object_cast<T: ObjectID>(
         w: ObjWeak<O, A>,
     ) -> Result<ObjWeak<T, A>, CastError<ObjWeak<O, A>>> {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);

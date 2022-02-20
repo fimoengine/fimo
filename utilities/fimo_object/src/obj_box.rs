@@ -1,7 +1,7 @@
 //! Definition of an object-aware box type.
 use crate::object::{ObjPtrCompat, ObjectWrapper};
 use crate::raw::CastError;
-use crate::vtable::{MarkerCompatible, VTable, VTableUpcast};
+use crate::vtable::{MarkerCompatible, ObjectID, VTable, VTableUpcast};
 use crate::{CoerceObjectMut, Object};
 use std::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
@@ -116,7 +116,7 @@ impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
     }
 
     /// Tries to revert from an `ObjBox<O, A>` to an `ObjBox<T, A>`.
-    pub fn try_object_cast<T: CoerceObjectMut<O::VTable>>(
+    pub fn try_object_cast<T: ObjectID>(
         b: ObjBox<O, A>,
     ) -> Result<ObjBox<T, A>, CastError<ObjBox<O, A>>> {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);

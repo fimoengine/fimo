@@ -60,7 +60,7 @@ macro_rules! fimo_interface {
         }
         impl $crate::FimoInterface for $name {
             const NAME: &'static str = $i_name;
-            const VERSION: fimo_version_core::Version = $i_version;
+            const VERSION: $crate::Version = $i_version;
             const EXTENSIONS: &'static [&'static str] = &[ $($i_ext),* ];
         }
     };
