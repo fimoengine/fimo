@@ -3,6 +3,7 @@ use crate::rust::settings_registry::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
 
 /// Metadata of a `SettingsItem`.
 pub trait SettingsItemMetadata: Default + Clone {
@@ -90,6 +91,10 @@ impl<T, M: SettingsItemMetadata> SettingsItemVal<T, M> {
         &mut self.v
     }
 
+    /// Consumes `self` and returns the contained data.
+    #[inline]
+    pub fn into_val(self) -> T { self.v }
+
     /// Extracts a reference to the contained metadata.
     #[inline]
     pub fn as_metadata(&self) -> &M {
@@ -150,6 +155,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         }
     }
 
+    /// Extracts a `bool`, if it is contained.
+    #[inline]
+    pub fn into_bool(self) -> Option<bool> {
+        match self {
+            SettingsItem::Bool(v) => Some(v.into_val()),
+            _ => None
+        }
+    }
+
     /// Extracts a reference to a `u64`, if it is contained.
     #[inline]
     pub fn as_u64(&self) -> Option<&u64> {
@@ -165,6 +179,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         match self {
             SettingsItem::U64(v) => Some(v.as_val_mut()),
             _ => None,
+        }
+    }
+
+    /// Extracts a `u64`, if it is contained.
+    #[inline]
+    pub fn into_u64(self) -> Option<u64> {
+        match self {
+            SettingsItem::U64(v) => Some(v.into_val()),
+            _ => None
         }
     }
 
@@ -186,6 +209,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         }
     }
 
+    /// Extracts a `f64`, if it is contained.
+    #[inline]
+    pub fn into_f64(self) -> Option<f64> {
+        match self {
+            SettingsItem::F64(v) => Some(v.into_val()),
+            _ => None
+        }
+    }
+
     /// Extracts a reference to a [`String`], if it is contained.
     #[inline]
     pub fn as_string(&self) -> Option<&String> {
@@ -201,6 +233,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         match self {
             SettingsItem::String(v) => Some(v.as_val_mut()),
             _ => None,
+        }
+    }
+
+    /// Extracts a [`String`], if it is contained.
+    #[inline]
+    pub fn into_string(self) -> Option<String> {
+        match self {
+            SettingsItem::String(v) => Some(v.into_val()),
+            _ => None
         }
     }
 
@@ -222,6 +263,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         }
     }
 
+    /// Extracts a [`Vec`], if it is contained.
+    #[inline]
+    pub fn into_vec(self) -> Option<Vec<Self>> {
+        match self {
+            SettingsItem::Array(v) => Some(v.into_val()),
+            _ => None
+        }
+    }
+
     /// Extracts a reference to a [`BTreeMap`], if it is contained.
     #[inline]
     pub fn as_map(&self) -> Option<&BTreeMap<String, Self>> {
@@ -237,6 +287,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         match self {
             SettingsItem::Object(v) => Some(v.as_val_mut()),
             _ => None,
+        }
+    }
+
+    /// Extracts a [`BTreeMap`], if it is contained.
+    #[inline]
+    pub fn into_map(self) -> Option<BTreeMap<String, Self>> {
+        match self {
+            SettingsItem::Object(v) => Some(v.into_val()),
+            _ => None
         }
     }
 
@@ -931,6 +990,14 @@ impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>> for BTreeMap<String, Sett
 pub enum SettingsItemTryFromError {
     /// Type does not match with the item type.
     InvalidType,
+}
+
+impl Display for SettingsItemTryFromError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SettingsItemTryFromError::InvalidType => write!(f, "Invalid type conversion"),
+        }
+    }
 }
 
 /// A item type from the settings registry.

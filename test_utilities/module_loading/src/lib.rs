@@ -13,6 +13,7 @@ use fimo_actix_int::IFimoActix;
 use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
 use fimo_ffi::vtable::{MarkerCompatible, VTable};
+use fimo_tasks_int::IFimoTasks;
 
 #[cfg(target_os = "windows")]
 macro_rules! lib_path {
@@ -58,6 +59,10 @@ impl ModuleDatabase {
         paths.insert(
             IFimoActix::new_descriptor(),
             new_path(lib_path!("fimo_actix"))?,
+        );
+        paths.insert(
+            IFimoTasks::new_descriptor(),
+            new_path(lib_path!("fimo_tasks"))?,
         );
 
         let module_loader = RustLoader::new();
