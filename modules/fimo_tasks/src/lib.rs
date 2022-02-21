@@ -15,5 +15,5 @@ mod stack_allocator;
 mod task_manager;
 mod worker_pool;
 
-pub use runtime::Runtime;
+pub use runtime::{Builder, Runtime};
 pub use scheduler::TaskScheduler;

@@ -1,6 +1,5 @@
-use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_module::Error;
-use fimo_tasks::Runtime;
+use fimo_tasks::Builder;
 use fimo_tasks_int::runtime::{init_runtime, is_worker, IRuntime};
 use std::sync::Once;
 
@@ -9,13 +8,8 @@ static INIT: Once = Once::new();
 fn new_runtime(f: impl FnOnce(&IRuntime) -> Result<(), Error>) -> Result<(), Error> {
     INIT.call_once(pretty_env_logger::init);
 
-    let stack_size = 1024 * 1024 * 4; // 4 MiB
-    let allocated_tasks = 128;
-    let preferred_num_tasks = 128;
-    let workers = None;
-
-    let runtime = Runtime::new(stack_size, allocated_tasks, preferred_num_tasks, workers)?;
-    f(IRuntime::from_object(runtime.coerce_obj()))
+    let runtime = Builder::new().build()?;
+    f(&*runtime)
 }
 
 #[test]
