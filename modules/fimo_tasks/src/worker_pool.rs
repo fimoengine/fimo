@@ -333,8 +333,8 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
                         .collect();
                     s
                 })
-                    .find(|s| !s.is_retry())
-                    .and_then(|s| s.success())
+                .find(|s| !s.is_retry())
+                .and_then(|s| s.success())
             })
         });
 

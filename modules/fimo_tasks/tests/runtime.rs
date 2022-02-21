@@ -10,8 +10,8 @@ fn new_runtime(f: impl FnOnce(&IRuntime) -> Result<(), Error>) -> Result<(), Err
     INIT.call_once(pretty_env_logger::init);
 
     let stack_size = 1024 * 1024 * 4; // 4 MiB
-    let allocated_tasks = 1024;
-    let preferred_num_tasks = 1024;
+    let allocated_tasks = 128;
+    let preferred_num_tasks = 128;
     let workers = None;
 
     let runtime = Runtime::new(stack_size, allocated_tasks, preferred_num_tasks, workers)?;

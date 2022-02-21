@@ -1086,7 +1086,11 @@ impl IScheduler {
 
         if log_enabled!(Trace) {
             match &res {
-                Ok(task) => trace!("Found task name: {:?}, id: {}", task.resolved_name(), handle),
+                Ok(task) => trace!(
+                    "Found task name: {:?}, id: {}",
+                    task.resolved_name(),
+                    handle
+                ),
                 Err(err) => trace!("No task found with error: {}", err),
             }
         }
@@ -1255,7 +1259,11 @@ impl IScheduler {
         if log_enabled!(Trace) {
             match &res {
                 Ok(_) => trace!("Task {:?} unblocked", task.resolved_name()),
-                Err(err) => trace!("Unblock of {:?} failed, error: {}", task.resolved_name(), err),
+                Err(err) => trace!(
+                    "Unblock of {:?} failed, error: {}",
+                    task.resolved_name(),
+                    err
+                ),
             }
         }
 
