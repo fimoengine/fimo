@@ -131,12 +131,12 @@ impl TaskManager {
         task: &'static IRawTask,
         wait_on: &[TaskHandle],
     ) -> Result<(), Error> {
-        trace!("Registering new task {}", task.resolved_name());
+        trace!("Registering new task {:?}", task.resolved_name());
 
         let context = unsafe { task.scheduler_context_mut() };
         if context.is_registered() {
-            error!("Task {} already registered", task.resolved_name());
-            let err = format!("The task {} is already registered", task.resolved_name());
+            error!("Task {:?} already registered", task.resolved_name());
+            let err = format!("The task {:?} is already registered", task.resolved_name());
             return Err(Error::new(ErrorKind::InvalidArgument, err));
         }
 
@@ -172,7 +172,7 @@ impl TaskManager {
                 let data = unsafe { context.scheduler_data() };
                 if data.dependencies.is_empty() {
                     trace!(
-                        "Registered task {} with id {:?} as runnable",
+                        "Registered task {:?} with id {} as runnable",
                         task.resolved_name(),
                         context.handle()
                     );
@@ -180,7 +180,7 @@ impl TaskManager {
                     unsafe { self.enqueue(task) };
                 } else {
                     trace!(
-                        "Registered task {} with id {:?} as waiting",
+                        "Registered task {:?} with id {} as waiting",
                         task.resolved_name(),
                         context.handle()
                     );
@@ -189,7 +189,7 @@ impl TaskManager {
             }
             StatusRequest::Block => {
                 trace!(
-                    "Registered task {} with id {:?} as blocked",
+                    "Registered task {:?} with id {} as blocked",
                     task.resolved_name(),
                     context.handle()
                 );
@@ -197,11 +197,11 @@ impl TaskManager {
             }
             StatusRequest::Abort => {
                 error!(
-                    "Tries to register the task {} as aborted",
+                    "Tries to register the task {:?} as aborted",
                     task.resolved_name()
                 );
                 let err = format!(
-                    "A task may not request an abort upon registration, name {}",
+                    "A task may not request an abort upon registration, name {:?}",
                     task.resolved_name()
                 );
                 let (handle, _) = unsafe { context.unregister() };

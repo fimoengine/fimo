@@ -6,7 +6,7 @@ use fimo_ffi::marker::{SendMarker, SendSyncMarker};
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_ffi::vtable::{IBase, VTableUpcast};
 use fimo_ffi::{fimo_object, fimo_vtable, ObjArc, ObjBox, Object, Optional, SpanInner};
-use fimo_module::Error;
+use fimo_module::{impl_vtable, is_object, Error};
 use log::Level::Trace;
 use log::{log_enabled, trace};
 use std::cell::UnsafeCell;
@@ -14,7 +14,7 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::ptr::NonNull;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::SystemTime;
 
 #[thread_local]
@@ -92,7 +92,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     /// This function may panic if a task tries to join itself.
     pub fn join(mut self) -> Result<T, Option<ObjBox<Object<IBase<SendMarker>>>>> {
         trace!(
-            "Joining task-id {}, name {}",
+            "Joining task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -141,7 +141,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     pub fn wait(&self) -> Option<&T> {
         debug_assert!(is_worker());
         trace!(
-            "Waiting on task-id {}, name {}",
+            "Waiting on task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -164,7 +164,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     pub fn wait_mut(&mut self) -> Option<&mut T> {
         debug_assert!(is_worker());
         trace!(
-            "Waiting on task-id {}, name {}",
+            "Waiting on task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -184,7 +184,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     pub fn unblock(&mut self) -> Result<(), Error> {
         debug_assert!(is_worker());
         trace!(
-            "Unblocking task-id {}, name {}",
+            "Unblocking task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -201,7 +201,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     #[inline]
     pub fn request_block(&mut self) {
         trace!(
-            "Requesting block for task-id {}, name {}",
+            "Requesting block for task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -221,7 +221,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     #[inline]
     pub unsafe fn request_abort(&mut self) {
         trace!(
-            "Requesting abort for task-id {}, name {}",
+            "Requesting abort for task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -233,7 +233,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
 impl<T, R: RawTaskWrapper<Output = T>> Drop for JoinHandle<T, R> {
     fn drop(&mut self) {
         trace!(
-            "Dropping task-id {}, name {}",
+            "Dropping task-id {}, name {:?}",
             self.handle(),
             self.as_raw().resolved_name()
         );
@@ -473,8 +473,8 @@ impl Builder {
         data: NonNull<O>,
         wait_on: &[TaskHandle],
         join: J,
+        runtime: &IRuntime,
     ) -> Result<R, Error> {
-        assert!(is_worker());
         trace!("Blocking on new task");
 
         let mut task: MaybeUninit<Task<R>> = MaybeUninit::uninit();
@@ -526,7 +526,6 @@ impl Builder {
         let task = unsafe { task.assume_init() };
         let handle = &task;
 
-        let runtime = unsafe { get_runtime() };
         let handle = runtime.enter_scheduler(move |s, _| unsafe {
             trace!("Register task with the runtime");
             s.register_task(handle.as_raw(), wait_on)
@@ -728,6 +727,88 @@ impl IRuntime {
         Builder::new().block_on(f, wait_on)
     }
 
+    /// Runs a task to completion on the task runtime.
+    ///
+    /// Blocks the current task until the new task has been completed.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the provided function panics.
+    #[inline]
+    #[track_caller]
+    pub fn block_on_and_enter<F: FnOnce(&IRuntime) -> R + Send, R: Send>(
+        &self,
+        f: F,
+        wait_on: &[TaskHandle],
+    ) -> Result<R, Error> {
+        // if we are already owned by the runtime we can reuse the existing implementation.
+        // otherwise we must implement the join functionality.
+        if is_worker() {
+            self.block_on(move || f(self), wait_on)
+        } else {
+            trace!("Entering the runtime");
+
+            // task synchronisation is implemented with condition variables.
+            struct CleanupData {
+                condvar: Condvar,
+                completed: Mutex<bool>,
+            }
+            is_object! { #![uuid(0x47c0e60c, 0x8cd9, 0x4dd1, 0x8b21, 0x79037a93278c)] CleanupData }
+            fimo_vtable! {
+                #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+                #![marker = SendSyncMarker]
+                #![uuid(0x90e5fb0b, 0x8186, 0x4593, 0xb79d, 0x262d145238f2)]
+                struct CleanupVTable;
+            }
+            impl_vtable! { impl CleanupVTable => CleanupData {} }
+
+            // initialize the condvar and hold the mutex until we try to join.
+            let data = CleanupData {
+                condvar: Default::default(),
+                completed: Mutex::new(false),
+            };
+            let mut completed = data.completed.lock().unwrap();
+
+            let f = move || f(self);
+            let cleanup = move |data: Option<NonNull<CleanupData>>| unsafe {
+                trace!("Notify owner thread");
+
+                // after locking the mutex we are guaranteed that the owner
+                // thread is waiting on the condvar, so we set the flag and notify it.
+                let data: &CleanupData = data.unwrap().as_ref();
+                let mut completed = data.completed.lock().unwrap();
+                *completed = true;
+                data.condvar.notify_all();
+            };
+            let join = |task: &IRawTask, value: &UnsafeCell<MaybeUninit<R>>| {
+                trace!("Joining task on owner thread");
+
+                // check if the task has been completed...
+                while !*completed {
+                    // ... if it isn't the case, wait.
+                    completed = data.condvar.wait(completed).unwrap();
+                }
+
+                // by this point the task has finished so we can unregister it.
+                self.enter_scheduler(|s, _| {
+                    assert!(matches!(s.unregister_task(task), Ok(_)));
+                });
+
+                // safety: the task is unowned.
+                unsafe {
+                    let context = task.scheduler_context_mut();
+                    match context.schedule_status() {
+                        TaskScheduleStatus::Aborted => Err(context.take_panic_data()),
+                        TaskScheduleStatus::Finished => Ok(value.get().read().assume_init()),
+                        _ => unreachable!(),
+                    }
+                }
+            };
+
+            Builder::new().block_on_complex(f, cleanup, NonNull::from(&data), wait_on, join, self)
+        }
+    }
+
     /// Spawns a task onto the task runtime.
     ///
     /// Spawns a task on any of the available workers, where it will run to completion.
@@ -819,7 +900,7 @@ impl IRuntime {
     #[inline]
     pub fn yield_until(&self, until: SystemTime) {
         self.yield_and_enter(move |_, curr| {
-            trace!("Yielding task {} until {:?}", curr.resolved_name(), until);
+            trace!("Yielding task {:?} until {:?}", curr.resolved_name(), until);
             // safety: we are inside the scheduler so it is safe.
             unsafe { curr.scheduler_context_mut().set_resume_time(until) }
         })
@@ -874,7 +955,7 @@ impl IRuntime {
 
         self.yield_and_enter(|_, curr| {
             curr.scheduler_context().request_block();
-            trace!("Requested block for task {}", curr.resolved_name())
+            trace!("Requested block for task {:?}", curr.resolved_name())
         })
     }
 
@@ -1005,7 +1086,7 @@ impl IScheduler {
 
         if log_enabled!(Trace) {
             match &res {
-                Ok(task) => trace!("Found task name: {}, id: {}", task.resolved_name(), handle),
+                Ok(task) => trace!("Found task name: {:?}, id: {}", task.resolved_name(), handle),
                 Err(err) => trace!("No task found with error: {}", err),
             }
         }
@@ -1024,7 +1105,7 @@ impl IScheduler {
         task: &IRawTask,
         deps: &[TaskHandle],
     ) -> Result<(), Error> {
-        trace!("Registering task: {}", task.resolved_name());
+        trace!("Registering task: {:?}", task.resolved_name());
 
         let (ptr, vtable) = self.into_raw_parts_mut();
         let res = (vtable.register_task)(ptr, task.into(), deps.into()).into_rust();
@@ -1035,7 +1116,7 @@ impl IScheduler {
             match &res {
                 Ok(_) => {
                     trace!(
-                        "Task {} assigned to id: {}",
+                        "Task {:?} assigned to id: {}",
                         name,
                         task.scheduler_context().handle().assume_init()
                     )
@@ -1049,7 +1130,7 @@ impl IScheduler {
 
     /// Unregisters a task from the task runtime.
     pub fn unregister_task(&mut self, task: &IRawTask) -> Result<(), Error> {
-        trace!("Unregistering task: {}", task.resolved_name());
+        trace!("Unregistering task: {:?}", task.resolved_name());
 
         let (ptr, vtable) = self.into_raw_parts_mut();
         let res = unsafe { (vtable.unregister_task)(ptr, task.into()).into_rust() };
@@ -1058,7 +1139,7 @@ impl IScheduler {
             let name = task.resolved_name();
 
             match &res {
-                Ok(_) => trace!("Task {} unregistered", name),
+                Ok(_) => trace!("Task {:?} unregistered", name),
                 Err(err) => trace!("Task not unregistered, error: {}", err),
             }
         }
@@ -1076,7 +1157,7 @@ impl IScheduler {
     #[inline]
     pub fn wait_task_on(&mut self, task: &IRawTask, wait_on: &IRawTask) -> Result<(), Error> {
         trace!(
-            "Task {} registering wait on {}",
+            "Task {:?} registering wait on {:?}",
             task.resolved_name(),
             wait_on.resolved_name()
         );
@@ -1088,7 +1169,7 @@ impl IScheduler {
             match &res {
                 Ok(_) => {
                     trace!(
-                        "Task {} waiting on {}",
+                        "Task {:?} waiting on {:?}",
                         task.resolved_name(),
                         wait_on.resolved_name()
                     );
@@ -1113,7 +1194,7 @@ impl IScheduler {
     /// used for the implementation of condition variables.
     #[inline]
     pub unsafe fn notify_one(&mut self, task: &IRawTask) -> Result<Option<usize>, Error> {
-        trace!("Notifying one waiter of task: {}", task.resolved_name());
+        trace!("Notifying one waiter of task: {:?}", task.resolved_name());
 
         let (ptr, vtable) = self.into_raw_parts_mut();
         let res = (vtable.notify_one)(ptr, task.into())
@@ -1122,10 +1203,10 @@ impl IScheduler {
 
         if log_enabled!(Trace) {
             match &res {
-                Ok(None) => trace!("No task is waiting on task: {}", task.resolved_name()),
+                Ok(None) => trace!("No task is waiting on task: {:?}", task.resolved_name()),
                 Ok(Some(n)) => {
                     trace!(
-                        "Notified one task from {}, {} waiters remaining",
+                        "Notified one task from {:?}, {} waiters remaining",
                         task.resolved_name(),
                         n
                     )
@@ -1148,14 +1229,14 @@ impl IScheduler {
     /// used for the implementation of condition variables.
     #[inline]
     pub unsafe fn notify_all(&mut self, task: &IRawTask) -> Result<usize, Error> {
-        trace!("Notifying all waiters of task: {}", task.resolved_name());
+        trace!("Notifying all waiters of task: {:?}", task.resolved_name());
 
         let (ptr, vtable) = self.into_raw_parts_mut();
         let res = (vtable.notify_all)(ptr, task.into()).into_rust();
 
         if log_enabled!(Trace) {
             match &res {
-                Ok(n) => trace!("Notified {} tasks from {}", n, task.resolved_name()),
+                Ok(n) => trace!("Notified {} tasks from {:?}", n, task.resolved_name()),
                 Err(err) => trace!("Notify failed, error: {}", err),
             }
         }
@@ -1166,15 +1247,15 @@ impl IScheduler {
     /// Unblocks a blocked task.
     #[inline]
     pub fn unblock_task(&mut self, task: &IRawTask) -> Result<(), Error> {
-        trace!("Unblocking task {}", task.resolved_name());
+        trace!("Unblocking task {:?}", task.resolved_name());
 
         let (ptr, vtable) = self.into_raw_parts_mut();
         let res = unsafe { (vtable.unblock_task)(ptr, task.into()).into_rust() };
 
         if log_enabled!(Trace) {
             match &res {
-                Ok(_) => trace!("Task {} unblocked", task.resolved_name()),
-                Err(err) => trace!("Unblock of {} failed, error: {}", task.resolved_name(), err),
+                Ok(_) => trace!("Task {:?} unblocked", task.resolved_name()),
+                Err(err) => trace!("Unblock of {:?} failed, error: {}", task.resolved_name(), err),
             }
         }
 
@@ -1273,8 +1354,7 @@ pub unsafe fn get_runtime() -> &'static IRuntime {
 ///
 /// # Safety
 ///
-/// May only be called once from a worker.
+/// May not be called with multiple runtimes.
 pub unsafe fn init_runtime(runtime: *const IRuntime) {
-    debug_assert!(!is_worker());
     RUNTIME.set(Some(runtime))
 }

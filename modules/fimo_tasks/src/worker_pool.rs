@@ -3,12 +3,12 @@ use crate::task_manager::{Msg, MsgData, PanicData, RawTask};
 use crate::{Runtime, TaskScheduler};
 use context::stack::ProtectedFixedSizeStack;
 use context::{Context, Transfer};
-use crossbeam_deque::{Injector, Stealer, Worker};
+use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{TaskScheduleStatus, WorkerId};
 use fimo_tasks_int::runtime::{init_runtime, IRuntime};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -23,7 +23,6 @@ use std::thread::JoinHandle;
 pub(crate) struct WorkerPool {
     runtime: Weak<Runtime>,
     worker_ids: Vec<WorkerId>,
-    tasks_available: Arc<Condvar>,
     global_queue: Arc<Injector<&'static RawTask>>,
     workers: BTreeMap<WorkerId, (Arc<TaskWorker>, Stealer<&'static RawTask>)>,
 }
@@ -33,7 +32,6 @@ impl WorkerPool {
         Self {
             runtime: Weak::new(),
             worker_ids: vec![],
-            tasks_available: Arc::new(Condvar::new()),
             workers: Default::default(),
             global_queue: Arc::new(Injector::new()),
         }
@@ -71,7 +69,6 @@ impl WorkerPool {
                 id,
                 msg_sender.clone(),
                 runtime.clone(),
-                self.tasks_available.clone(),
                 self.global_queue.clone(),
             )?;
             self.worker_ids.push(id);
@@ -99,15 +96,44 @@ impl WorkerPool {
     pub fn schedule_task(&mut self, task: &'static RawTask) {
         let context = task.scheduler_context();
 
-        let id = context.worker().unwrap_or(self.worker_ids[0]);
-        let (worker, _) = self
-            .workers
-            .get(&id)
-            .unwrap_or_else(|| self.workers.values().next().unwrap());
+        if let Some(id) = context.worker() {
+            trace!(
+                "Assigning task {} to worker {}",
+                task.scheduler_context().handle(),
+                id
+            );
 
-        unsafe { context.set_schedule_status(TaskScheduleStatus::Scheduled) };
-        worker.owned_queue.push(task);
-        self.tasks_available.notify_all();
+            let (worker, _) = self.workers.get(&id).unwrap_or_else(|| {
+                warn!(
+                    "Worker id {} not found, assigning {} to random worker",
+                    id,
+                    task.scheduler_context().handle()
+                );
+                self.workers.values().next().unwrap()
+            });
+
+            unsafe { context.set_schedule_status(TaskScheduleStatus::Scheduled) };
+            worker.owned_queue.push(task);
+
+            trace!("Notifying worker {}", worker.id);
+            worker.tasks_available.notify_all();
+        } else {
+            trace!(
+                "Assigning task {} to the global queue",
+                task.scheduler_context().handle()
+            );
+            unsafe { context.set_schedule_status(TaskScheduleStatus::Scheduled) };
+            self.global_queue.push(task);
+            self.wake_all_workers();
+        }
+    }
+
+    #[inline]
+    pub fn wake_all_workers(&mut self) {
+        trace!("Waking all workers");
+        for (worker, _) in self.workers.values() {
+            worker.tasks_available.notify_all();
+        }
     }
 }
 
@@ -117,6 +143,7 @@ pub(crate) struct TaskWorker {
     thread: JoinHandle<()>,
     runtime: Weak<Runtime>,
     should_run: AtomicBool,
+    tasks_available: Condvar,
     owned_queue: Injector<&'static RawTask>,
     global_queue: Arc<Injector<&'static RawTask>>,
     task_stealer: Mutex<Vec<Stealer<&'static RawTask>>>,
@@ -125,7 +152,6 @@ pub(crate) struct TaskWorker {
 pub(crate) struct WorkerInner {
     sender: Sender<Msg>,
     worker: Arc<TaskWorker>,
-    tasks_available: Arc<Condvar>,
     local_queue: Worker<&'static RawTask>,
     current_task: Cell<Option<&'static RawTask>>,
 }
@@ -143,7 +169,24 @@ impl WorkerInner {
 
     #[inline]
     pub fn wait_on_tasks(&self, lock: &mut MutexGuard<'_, TaskScheduler>) {
-        self.tasks_available.wait(lock)
+        // wait only if there are no more tasks available.
+        if self.local_queue.is_empty()
+            && self.shared_data().owned_queue.is_empty()
+            && self.shared_data().global_queue.is_empty()
+            && self.shared_data().should_run()
+        {
+            info!("No more tasks. Worker {} going to sleep", self.worker.id);
+            self.worker.tasks_available.wait(lock);
+            info!("Woke up worker {} from sleep", self.worker.id);
+        }
+    }
+}
+
+impl Drop for WorkerPool {
+    fn drop(&mut self) {
+        for (worker, _) in self.workers.values() {
+            worker.signal_shutdown();
+        }
     }
 }
 
@@ -155,7 +198,6 @@ impl TaskWorker {
         id: WorkerId,
         sender: Sender<Msg>,
         runtime: Weak<Runtime>,
-        tasks_available: Arc<Condvar>,
         global_queue: Arc<Injector<&'static RawTask>>,
     ) -> Result<(Arc<Self>, Stealer<&'static RawTask>), Error> {
         let (sen, rec) = channel();
@@ -182,7 +224,6 @@ impl TaskWorker {
                     let inner = Box::new(WorkerInner {
                         sender,
                         worker,
-                        tasks_available,
                         local_queue,
                         current_task: Cell::new(None),
                     });
@@ -219,6 +260,7 @@ impl TaskWorker {
         let runtime_ptr = unsafe { addr_of_mut!((*uninit_worker).runtime) };
         let thread_ptr = unsafe { addr_of_mut!((*uninit_worker).thread) };
         let should_run_ptr = unsafe { addr_of_mut!((*uninit_worker).should_run) };
+        let tasks_available_ptr = unsafe { addr_of_mut!((*uninit_worker).tasks_available) };
         let owned_queue_ptr = unsafe { addr_of_mut!((*uninit_worker).owned_queue) };
         let global_queue_ptr = unsafe { addr_of_mut!((*uninit_worker).global_queue) };
         let task_stealer_ptr = unsafe { addr_of_mut!((*uninit_worker).task_stealer) };
@@ -229,6 +271,7 @@ impl TaskWorker {
             runtime_ptr.write(runtime);
             thread_ptr.write(thread);
             should_run_ptr.write(AtomicBool::new(false));
+            tasks_available_ptr.write(Condvar::new());
             owned_queue_ptr.write(Injector::new());
             global_queue_ptr.write(global_queue);
             task_stealer_ptr.write(Mutex::new(Vec::new()));
@@ -254,64 +297,60 @@ impl TaskWorker {
     pub fn id(&self) -> WorkerId {
         self.id
     }
-}
 
-impl Drop for TaskWorker {
-    fn drop(&mut self) {
+    #[inline]
+    pub fn signal_shutdown(&self) {
+        trace!("Notifying worker {} for shutdown", self.id);
         self.should_run
             .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    #[inline]
+    pub fn should_run(&self) -> bool {
+        self.should_run.load(std::sync::atomic::Ordering::Acquire)
     }
 }
 
 pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
     let worker = WORKER.get().unwrap();
 
-    let mut sleep = false;
     let mut spin_wait = SpinWait::new();
 
-    while worker
-        .worker
-        .should_run
-        .load(std::sync::atomic::Ordering::Acquire)
-    {
+    while worker.shared_data().should_run() {
+        // steal some tasks from the global queue.
+        let _ = worker.worker.global_queue.steal_batch(&worker.local_queue);
+
         // first try the owned queue.
         let task = worker.worker.owned_queue.steal().success().or_else(|| {
             // then try the local queue.
             worker.local_queue.pop().or_else(|| {
+                // then try stealing from other tasks.
                 std::iter::repeat_with(|| {
-                    // if both are empty steal from global queue.
-                    worker
-                        .worker
-                        .global_queue
-                        .steal_batch_and_pop(&worker.local_queue)
-                        .or_else(|| {
-                            // otherwise steal from other tasks.
-                            let s = worker.worker.task_stealer.lock();
-                            s.iter()
-                                .map(|s| s.steal_batch_and_pop(&worker.local_queue))
-                                .collect()
-                        })
+                    let s = worker.worker.task_stealer.lock();
+                    let s: Steal<_> = s
+                        .iter()
+                        .map(|s| s.steal_batch_and_pop(&worker.local_queue))
+                        .collect();
+                    s
                 })
-                .find(|s| !s.is_retry())
-                .and_then(|s| s.success())
+                    .find(|s| !s.is_retry())
+                    .and_then(|s| s.success())
             })
         });
 
         if task.is_none() {
+            trace!(
+                "Worker {} found no tasks, trying to enter scheduler",
+                worker.worker.id
+            );
             if let Some(runtime) = worker.worker.runtime.upgrade() {
                 // schedule available tasks or wait.
-                match runtime.schedule_tasks(&mut spin_wait, sleep) {
+                match Runtime::schedule_tasks(runtime, &mut spin_wait) {
                     None => {}
-                    Some(false) => {
-                        sleep = true;
-                    }
-                    Some(true) => {
+                    Some(_) => {
                         spin_wait.reset();
-                        sleep = false;
                     }
                 }
-
-                runtime.schedule_tasks(&mut spin_wait, false);
             } else {
                 // the runtime is being dropped, wait.
                 std::thread::yield_now();
@@ -323,6 +362,11 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
 
         // publish the current task
         let task = task.unwrap();
+        trace!(
+            "Worker {} set to run task {}",
+            worker.worker.id,
+            task.scheduler_context().handle()
+        );
         worker.current_task.set(Some(task));
 
         // safety: the task is managed by us.
@@ -352,12 +396,15 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
                 MsgData::Completed { aborted: false }
             };
 
+        // Mark the status as processing.
+        unsafe { scheduler_data.set_schedule_status(TaskScheduleStatus::Processing) };
+
         // send back message.
         let msg = Msg {
             task,
             data: msg_data,
         };
-        worker.sender.send(msg).unwrap()
+        worker.sender.send(msg).unwrap();
     }
 
     // resume main function.
@@ -385,6 +432,12 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData) {
         .take()
         .unwrap_unchecked();
 
+    trace!(
+        "Yielding task {} to worker {}",
+        task.scheduler_context().handle(),
+        worker.worker.id
+    );
+
     // pass the pointer to the data back to the worker function.
     // the worker will read the data, so we must make sure that it won't be dropped by us.
     let msg_data = MaybeUninit::new(msg_data);
@@ -400,6 +453,12 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData) {
         .scheduler_data_mut()
         .context
         .insert(context);
+
+    trace!(
+        "Resumed task {} to worker {}",
+        task.scheduler_context().handle(),
+        worker.worker.id
+    );
 }
 
 pub(crate) extern "C" fn task_main(thread_context: Transfer) -> ! {
