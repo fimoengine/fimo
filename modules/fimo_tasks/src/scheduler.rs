@@ -331,8 +331,6 @@ impl TaskScheduler {
 
     #[inline]
     pub(crate) fn shutdown_worker_pool(&mut self) {
-        info!("Shutting down worker pool");
-        self.worker_pool.wake_all_workers();
         unsafe { ManuallyDrop::drop(&mut self.worker_pool) };
     }
 

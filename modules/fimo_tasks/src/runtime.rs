@@ -4,7 +4,7 @@ use crate::worker_pool::{yield_to_worker, WORKER};
 use crate::TaskScheduler;
 use fimo_ffi::fn_wrapper::RawFnOnce;
 use fimo_ffi::marker::SendMarker;
-use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
+use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_ffi::Optional;
 use fimo_module::{impl_vtable, is_object, Error};
 use fimo_tasks_int::raw::{IRawTask, WorkerId};
@@ -17,6 +17,91 @@ use std::ptr::NonNull;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
+/// A builder for a [`Runtime`].
+#[derive(Debug)]
+pub struct Builder {
+    stack_size: usize,
+    allocated_stacks: usize,
+    preferred_num_allocations: usize,
+    workers: Option<usize>,
+}
+
+impl Builder {
+    /// Default stack size for new tasks.
+    ///
+    /// Is currently set to 2 MiB.
+    pub const DEFAULT_STACK_SIZE: usize = 1024 * 1024 * 2; // 2 MiB
+
+    /// Number of tasks allocated at startup.
+    pub const DEFAULT_PRE_ALLOCATED_TASKS: usize = 128;
+
+    /// Threshold at which the stack of tasks is deallocated.
+    pub const DEFAULT_TASK_FREE_THRESHOLD: usize = 256;
+
+    /// Default number of worker created by the runtime.
+    ///
+    /// Defaults to the number of available threads on the core.
+    pub const DEFAULT_NUM_WORKERS: Option<usize> = None;
+
+    /// Creates a new builder with the default settings.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            stack_size: Self::DEFAULT_STACK_SIZE,
+            allocated_stacks: Self::DEFAULT_PRE_ALLOCATED_TASKS,
+            preferred_num_allocations: Self::DEFAULT_TASK_FREE_THRESHOLD,
+            workers: Self::DEFAULT_NUM_WORKERS,
+        }
+    }
+
+    /// Changes the stack size for new tasks.
+    #[inline]
+    pub fn stack_size(mut self, size: usize) -> Self {
+        self.stack_size = size;
+        self
+    }
+
+    /// Changes the number of tasks to allocate at startup.
+    #[inline]
+    pub fn allocated_tasks(mut self, allocated: usize) -> Self {
+        self.allocated_stacks = allocated;
+        self
+    }
+
+    /// Changes the threshold at which the memory of a completed task is freed.
+    #[inline]
+    pub fn free_threshold(mut self, threshold: usize) -> Self {
+        self.preferred_num_allocations = threshold;
+        self
+    }
+
+    /// Changes the number of workers.
+    ///
+    /// Setting `None` creates a worker per available thread.
+    #[inline]
+    pub fn workers(mut self, workers: Option<usize>) -> Self {
+        self.workers = workers;
+        self
+    }
+
+    /// Builds the Runtime with the provided settings.
+    #[inline]
+    pub fn build(self) -> Result<Arc<Runtime>, Error> {
+        Runtime::new(
+            self.stack_size,
+            self.allocated_stacks,
+            self.preferred_num_allocations,
+            self.workers,
+        )
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A runtime for running tasks.
 #[derive(Debug)]
 pub struct Runtime {
@@ -24,8 +109,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Constructs a new `Runtime`.
-    pub fn new(
+    fn new(
         stack_size: usize,
         pre_allocated: usize,
         preferred_num_allocations: usize,
@@ -153,8 +237,7 @@ impl Runtime {
             let mut scheduler = self.scheduler.lock();
 
             // call the function, then schedule the remaining tasks.
-            let s = IScheduler::from_object_mut(scheduler.coerce_obj_mut());
-            f(s.into(), Optional::None);
+            f((&mut **scheduler).into(), Optional::None);
             scheduler.schedule_tasks();
         } else {
             let mut spin_wait = SpinWait::new();
@@ -170,8 +253,9 @@ impl Runtime {
                             .as_i_raw()
                     };
 
-                    let scheduler = IScheduler::from_object_mut(scheduler.coerce_obj_mut());
-                    f(scheduler.into(), Optional::Some(current.into()));
+                    // call the function, then schedule the remaining tasks.
+                    f((&mut **scheduler).into(), Optional::Some(current.into()));
+                    scheduler.schedule_tasks();
                     return;
                 }
 

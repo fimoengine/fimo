@@ -12,7 +12,7 @@ use log::{debug, error, info, trace, warn};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::mem::MaybeUninit;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ptr::addr_of_mut;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{channel, Sender};
@@ -140,10 +140,10 @@ impl WorkerPool {
 #[derive(Debug)]
 pub(crate) struct TaskWorker {
     id: WorkerId,
-    thread: JoinHandle<()>,
     runtime: Weak<Runtime>,
     should_run: AtomicBool,
     tasks_available: Condvar,
+    thread: ManuallyDrop<JoinHandle<()>>,
     owned_queue: Injector<&'static RawTask>,
     global_queue: Arc<Injector<&'static RawTask>>,
     task_stealer: Mutex<Vec<Stealer<&'static RawTask>>>,
@@ -184,8 +184,19 @@ impl WorkerInner {
 
 impl Drop for WorkerPool {
     fn drop(&mut self) {
+        info!("Shutting down worker pool");
+
+        // signal the shutdown
         for (worker, _) in self.workers.values() {
             worker.signal_shutdown();
+        }
+
+        // wake the workers.
+        self.wake_all_workers();
+
+        // wait for the tasks to finish
+        for (worker, _) in self.workers.values_mut() {
+            unsafe { worker.join() };
         }
     }
 }
@@ -269,7 +280,7 @@ impl TaskWorker {
         unsafe {
             id_ptr.write(id);
             runtime_ptr.write(runtime);
-            thread_ptr.write(thread);
+            thread_ptr.write(ManuallyDrop::new(thread));
             should_run_ptr.write(AtomicBool::new(false));
             tasks_available_ptr.write(Condvar::new());
             owned_queue_ptr.write(Injector::new());
@@ -296,6 +307,15 @@ impl TaskWorker {
     #[inline]
     pub fn id(&self) -> WorkerId {
         self.id
+    }
+
+    /// # Safety
+    ///
+    /// Called only from the worker pool.
+    #[inline]
+    pub unsafe fn join(&self) {
+        let mut thread = std::ptr::read(&self.thread);
+        ManuallyDrop::drop(&mut thread)
     }
 
     #[inline]
@@ -333,8 +353,8 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
                         .collect();
                     s
                 })
-                .find(|s| !s.is_retry())
-                .and_then(|s| s.success())
+                    .find(|s| !s.is_retry())
+                    .and_then(|s| s.success())
             })
         });
 
