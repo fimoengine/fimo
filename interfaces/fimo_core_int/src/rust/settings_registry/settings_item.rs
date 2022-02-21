@@ -93,7 +93,9 @@ impl<T, M: SettingsItemMetadata> SettingsItemVal<T, M> {
 
     /// Consumes `self` and returns the contained data.
     #[inline]
-    pub fn into_val(self) -> T { self.v }
+    pub fn into_val(self) -> T {
+        self.v
+    }
 
     /// Extracts a reference to the contained metadata.
     #[inline]
@@ -160,7 +162,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     pub fn into_bool(self) -> Option<bool> {
         match self {
             SettingsItem::Bool(v) => Some(v.into_val()),
-            _ => None
+            _ => None,
         }
     }
 
@@ -187,7 +189,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     pub fn into_u64(self) -> Option<u64> {
         match self {
             SettingsItem::U64(v) => Some(v.into_val()),
-            _ => None
+            _ => None,
         }
     }
 
@@ -214,7 +216,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     pub fn into_f64(self) -> Option<f64> {
         match self {
             SettingsItem::F64(v) => Some(v.into_val()),
-            _ => None
+            _ => None,
         }
     }
 
@@ -241,7 +243,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     pub fn into_string(self) -> Option<String> {
         match self {
             SettingsItem::String(v) => Some(v.into_val()),
-            _ => None
+            _ => None,
         }
     }
 
@@ -268,7 +270,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     pub fn into_vec(self) -> Option<Vec<Self>> {
         match self {
             SettingsItem::Array(v) => Some(v.into_val()),
-            _ => None
+            _ => None,
         }
     }
 
@@ -295,7 +297,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     pub fn into_map(self) -> Option<BTreeMap<String, Self>> {
         match self {
             SettingsItem::Object(v) => Some(v.into_val()),
-            _ => None
+            _ => None,
         }
     }
 
