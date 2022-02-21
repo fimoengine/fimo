@@ -15,5 +15,8 @@ mod stack_allocator;
 mod task_manager;
 mod worker_pool;
 
+#[cfg(feature = "module")]
+mod module;
+
 pub use runtime::{Builder, Runtime};
 pub use scheduler::TaskScheduler;

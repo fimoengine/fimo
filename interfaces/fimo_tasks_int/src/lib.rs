@@ -23,7 +23,7 @@ fimo_interface! {
     /// Type-erased `fimo-tasks` interface.
     #![vtable = IFimoTasksVTable]
     pub struct IFimoTasks {
-        name: "fimo::interfaces::core::fimo_core",
+        name: "fimo::interfaces::core::fimo_tasks",
         version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0),
     }
 }
