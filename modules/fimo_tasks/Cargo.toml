@@ -20,4 +20,5 @@ fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int" }
 
 [dev-dependencies]
+pretty_env_logger = "0.4.0"
 module_loading = { path = "../../test_utilities/module_loading" }

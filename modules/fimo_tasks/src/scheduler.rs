@@ -203,16 +203,19 @@ impl TaskScheduler {
         }
     }
 
-    fn process_msg(&mut self) {
+    fn process_msg(&mut self) -> bool {
         trace!("Processing scheduler messages");
 
         let msgs = self.task_manager.take_messages();
+        let stale = msgs.is_empty();
+
+        trace!("Processing {} scheduler messages", msgs.len());
         for Msg { task, data } in msgs {
             let context = unsafe { task.scheduler_context_mut() };
             let scheduler_data = unsafe { context.scheduler_data() };
 
             trace!(
-                "Message for task-id {}, name: {}",
+                "Message for task-id {}, name: {:?}",
                 context.handle(),
                 task.resolved_name()
             );
@@ -322,18 +325,26 @@ impl TaskScheduler {
                 }
             }
         }
+
+        stale
+    }
+
+    #[inline]
+    pub(crate) fn shutdown_worker_pool(&mut self) {
+        info!("Shutting down worker pool");
+        self.worker_pool.wake_all_workers();
+        unsafe { ManuallyDrop::drop(&mut self.worker_pool) };
     }
 
     pub(crate) fn schedule_tasks(&mut self) -> bool {
         trace!("Running scheduler");
-        self.process_msg();
+        let stale = self.process_msg();
 
         let time = SystemTime::now();
         let queue = self.task_manager.clear_queue();
         trace!("Scheduling {} tasks", queue.len());
 
-        let mut new_task = false;
-
+        let stale = stale && queue.is_empty();
         for Reverse(task) in queue.into_sorted_vec() {
             let context = unsafe { task.scheduler_context_mut() };
 
@@ -344,7 +355,11 @@ impl TaskScheduler {
             let schedule_status = context.schedule_status();
             let scheduler_data = unsafe { context.scheduler_data_mut() };
 
-            trace!("Scheduling task {}, name {}", handle, task.resolved_name());
+            trace!(
+                "Scheduling task {}, name {:?}",
+                handle,
+                task.resolved_name()
+            );
             debug!("Task run status: {:?}", run_status);
             debug!("Task schedule status: {:?}", schedule_status);
             debug!("Number of waiters: {}", scheduler_data.waiters.len());
@@ -362,7 +377,7 @@ impl TaskScheduler {
             }
 
             // check that the requested time has passed.
-            if resume_time < time {
+            if time < resume_time {
                 info!(
                     "Task resume time {:?} not reached, time {:?}, skipping.",
                     resume_time, time
@@ -391,20 +406,20 @@ impl TaskScheduler {
             }
 
             // schedule task on worker
-            new_task = true;
             self.worker_pool.schedule_task(task);
         }
 
-        new_task
+        stale
     }
 }
 
 impl Drop for TaskScheduler {
     fn drop(&mut self) {
+        info!("Shutting down task scheduler");
+
         unsafe {
-            // first drop the worker pool so that there remain no running tasks.
-            // then the task and finally the stacks with the allocated memory.
-            ManuallyDrop::drop(&mut self.worker_pool);
+            // the worker pool is already shut down at this point, so
+            // drop the task and the stacks with the allocated memory.
             ManuallyDrop::drop(&mut self.task_manager);
             ManuallyDrop::drop(&mut self.stacks);
         }

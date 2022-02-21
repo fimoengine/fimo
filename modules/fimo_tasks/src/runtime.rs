@@ -9,7 +9,7 @@ use fimo_ffi::Optional;
 use fimo_module::{impl_vtable, is_object, Error};
 use fimo_tasks_int::raw::{IRawTask, WorkerId};
 use fimo_tasks_int::runtime::{IRuntime, IRuntimeVTable, IScheduler};
-use log::{error, trace};
+use log::{error, info, trace};
 use parking_lot::Mutex;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// A runtime for running tasks.
 #[derive(Debug)]
 pub struct Runtime {
-    scheduler: Mutex<TaskScheduler>,
+    scheduler: Arc<Mutex<TaskScheduler>>,
 }
 
 impl Runtime {
@@ -34,12 +34,12 @@ impl Runtime {
         let (msg_send, msg_rcv) = channel();
 
         let this = Self {
-            scheduler: Mutex::new(TaskScheduler::new(
+            scheduler: Arc::new(Mutex::new(TaskScheduler::new(
                 stack_size,
                 pre_allocated,
                 preferred_num_allocations,
                 msg_rcv,
-            )?),
+            )?)),
         };
 
         let this = Arc::new(this);
@@ -73,7 +73,11 @@ impl Runtime {
         if WORKER.get().is_none() {
             // outside worker.
             let mut scheduler = self.scheduler.lock();
-            f(&mut *scheduler, None)
+
+            // call the function, then schedule the remaining tasks.
+            let res = f(&mut *scheduler, None);
+            scheduler.schedule_tasks();
+            res
         } else {
             let mut spin_wait = SpinWait::new();
             loop {
@@ -108,29 +112,30 @@ impl Runtime {
     }
 
     #[inline]
-    pub(crate) fn schedule_tasks(&self, spin_wait: &mut SpinWait, sleep: bool) -> Option<bool> {
+    pub(crate) fn schedule_tasks(this: Arc<Self>, spin_wait: &mut SpinWait) -> Option<bool> {
         debug_assert!(WORKER.get().is_some());
 
+        let s = this.scheduler.clone();
+        drop(this);
         let scheduler = {
             // try to lock the scheduler.
-            if let Some(scheduler) = self.scheduler.try_lock() {
+            if let Some(scheduler) = s.try_lock() {
                 Some(scheduler)
             } else if spin_wait.spin_yield_thread() {
                 None
             } else {
-                Some(self.scheduler.lock())
+                Some(s.lock())
             }
         };
 
         if let Some(mut scheduler) = scheduler {
-            let new_tasks = scheduler.schedule_tasks();
-
-            if (!new_tasks) && sleep {
+            let stale = scheduler.schedule_tasks();
+            if stale {
                 let worker = unsafe { WORKER.get().unwrap_unchecked() };
                 worker.wait_on_tasks(&mut scheduler);
             }
 
-            Some(new_tasks)
+            Some(stale)
         } else {
             None
         }
@@ -146,8 +151,11 @@ impl Runtime {
         if WORKER.get().is_none() {
             // outside worker.
             let mut scheduler = self.scheduler.lock();
-            let scheduler = IScheduler::from_object_mut(scheduler.coerce_obj_mut());
-            f(scheduler.into(), Optional::None)
+
+            // call the function, then schedule the remaining tasks.
+            let s = IScheduler::from_object_mut(scheduler.coerce_obj_mut());
+            f(s.into(), Optional::None);
+            scheduler.schedule_tasks();
         } else {
             let mut spin_wait = SpinWait::new();
             loop {
@@ -242,6 +250,13 @@ impl Deref for Runtime {
     #[inline]
     fn deref(&self) -> &Self::Target {
         IRuntime::from_object(self.coerce_obj())
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        info!("Shutting down task runtime");
+        self.scheduler.lock().shutdown_worker_pool();
     }
 }
 
