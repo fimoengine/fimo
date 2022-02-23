@@ -14,6 +14,7 @@ fn new_runtime(f: impl FnOnce(&IRuntime) -> Result<(), Error>) -> Result<(), Err
 }
 
 #[test]
+#[ignore]
 fn enter_scheduler() {
     new_runtime(|r| {
         r.enter_scheduler(|_s, c| {
@@ -36,6 +37,7 @@ fn enter_scheduler() {
 }
 
 #[test]
+#[ignore]
 fn worker_id() {
     new_runtime(|r| {
         assert!(!is_worker());
@@ -60,6 +62,7 @@ fn worker_id() {
 }
 
 #[test]
+#[ignore]
 fn unique_worker_ids() {
     new_runtime(|r| {
         r.block_on_and_enter(
@@ -85,6 +88,7 @@ fn unique_worker_ids() {
 }
 
 #[test]
+#[ignore]
 fn block_on_multiple_unique() {
     new_runtime(|r| {
         r.block_on_and_enter(
