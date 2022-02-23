@@ -93,6 +93,11 @@ impl WorkerPool {
     }
 
     #[inline]
+    pub fn workers(&self) -> &[WorkerId] {
+        &self.worker_ids
+    }
+    
+    #[inline]
     pub fn schedule_task(&mut self, task: &'static RawTask) {
         let context = task.scheduler_context();
 

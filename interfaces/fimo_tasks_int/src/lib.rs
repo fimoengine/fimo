@@ -18,6 +18,7 @@ use std::ptr::NonNull;
 
 pub mod raw;
 pub mod runtime;
+pub mod task;
 
 fimo_interface! {
     /// Type-erased `fimo-tasks` interface.
