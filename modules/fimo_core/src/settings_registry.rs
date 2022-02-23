@@ -82,7 +82,7 @@ impl_vtable! {
 
 #[derive(Debug, Default)]
 struct Metadata {
-    callbacks: RefCell<HashMap<usize, SettingsEventCallback<'static, 'static>>>,
+    callbacks: RefCell<HashMap<usize, SettingsEventCallback>>,
 }
 
 impl Metadata {
@@ -244,7 +244,7 @@ impl SettingsRegistryInner {
     fn register_callback(
         &mut self,
         path: &SettingsRegistryPath,
-        f: SettingsEventCallback<'_, '_>,
+        f: SettingsEventCallback,
     ) -> Option<SettingsEventCallbackId> {
         let item = if path.is_root() {
             Some(&mut self.root)

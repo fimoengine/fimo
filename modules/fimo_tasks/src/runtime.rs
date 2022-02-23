@@ -2,8 +2,7 @@ use crate::spin_wait::SpinWait;
 use crate::task_manager::MsgData;
 use crate::worker_pool::{yield_to_worker, WORKER};
 use crate::TaskScheduler;
-use fimo_ffi::fn_wrapper::RawFnOnce;
-use fimo_ffi::marker::SendMarker;
+use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_ffi::Optional;
 use fimo_module::{impl_vtable, is_object, Error};
@@ -13,7 +12,6 @@ use log::{error, info, trace};
 use parking_lot::Mutex;
 use std::mem::MaybeUninit;
 use std::ops::Deref;
-use std::ptr::NonNull;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
@@ -228,7 +226,7 @@ impl Runtime {
     #[inline]
     fn enter_scheduler_inner(
         &self,
-        f: RawFnOnce<(NonNull<IScheduler>, Optional<NonNull<IRawTask>>), ()>,
+        f: RawFfiFn<dyn FnOnce(&mut IScheduler, Optional<&IRawTask>) + '_>,
     ) {
         let f = unsafe { f.assume_valid() };
 
@@ -298,15 +296,15 @@ impl Runtime {
 
             {
                 let res = &mut res;
-                let wrapper = move |s: NonNull<IScheduler>, t: NonNull<IRawTask>| unsafe {
+                let wrapper = move |s: &mut IScheduler, t: &IRawTask| unsafe {
                     trace!("Yielded to scheduler");
-                    let obj = IScheduler::as_object_mut(&mut *s.as_ptr());
+                    let obj = IScheduler::as_object_mut(s);
                     let scheduler = obj.try_cast_obj_mut().unwrap_unchecked();
-                    res.write(f(scheduler, t.as_ref()));
+                    res.write(f(scheduler, t));
                     trace!("Resuming task");
                 };
                 let mut wrapper = MaybeUninit::new(wrapper);
-                let wrapper = unsafe { RawFnOnce::new(&mut wrapper) };
+                let wrapper = unsafe { RawFfiFn::new_value(&mut wrapper) };
 
                 self.yield_and_enter_inner(wrapper);
             }
@@ -319,7 +317,7 @@ impl Runtime {
     #[inline]
     fn yield_and_enter_inner(
         &self,
-        f: RawFnOnce<(NonNull<IScheduler>, NonNull<IRawTask>), (), SendMarker>,
+        f: RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + '_>,
     ) {
         let msg_data = MsgData::Yield { f };
         unsafe { yield_to_worker(msg_data) }
@@ -354,7 +352,7 @@ impl_vtable! {
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn enter_scheduler(
             this: *const (),
-            f: RawFnOnce<(NonNull<IScheduler>, Optional<NonNull<IRawTask>>), ()>
+            f: RawFfiFn<dyn FnOnce(&mut IScheduler, Optional<&IRawTask>) + '_>
         ) {
             let this = &*(this as *const Runtime);
             Runtime::enter_scheduler_inner(this, f)
@@ -363,7 +361,7 @@ impl_vtable! {
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn yield_and_enter(
             this: *const (),
-            f: RawFnOnce<(NonNull<IScheduler>, NonNull<IRawTask>), (), SendMarker>
+            f: RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + '_>
         ) {
             let this = &*(this as *const Runtime);
             Runtime::yield_and_enter_inner(this, f)

@@ -1,7 +1,7 @@
 use crate::stack_allocator::TaskSlot;
 use context::Context;
-use fimo_ffi::fn_wrapper::RawFnOnce;
-use fimo_ffi::marker::{SendMarker, SendSyncMarker};
+use fimo_ffi::ffi_fn::RawFfiFn;
+use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::vtable::IBase;
 use fimo_ffi::ObjBox;
 use fimo_module::{impl_vtable, is_object, Error, ErrorKind};
@@ -15,13 +15,12 @@ use std::any::Any;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::ops::RangeFrom;
-use std::ptr::NonNull;
 use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
 #[derive(Debug)]
 pub(crate) struct TaskManager {
-    msg_receiver: Receiver<Msg>,
+    msg_receiver: Receiver<Msg<'static>>,
     handle_iter: RangeFrom<usize>,
     free_handles: VecDeque<TaskHandle>,
     tasks: BTreeMap<TaskHandle, &'static RawTask>,
@@ -29,7 +28,7 @@ pub(crate) struct TaskManager {
 }
 
 impl TaskManager {
-    pub fn new(msg_receiver: Receiver<Msg>) -> Self {
+    pub fn new(msg_receiver: Receiver<Msg<'static>>) -> Self {
         trace!("Initializing the task manager");
         Self {
             msg_receiver,
@@ -87,7 +86,7 @@ impl TaskManager {
     }
 
     #[inline]
-    pub fn take_messages(&mut self) -> Vec<Msg> {
+    pub fn take_messages(&mut self) -> Vec<Msg<'static>> {
         self.msg_receiver.try_iter().collect()
     }
 
@@ -482,22 +481,22 @@ impl TaskManager {
 }
 
 #[derive(Debug)]
-pub(crate) struct Msg {
+pub(crate) struct Msg<'a> {
     pub task: &'static RawTask,
-    pub data: MsgData,
+    pub data: MsgData<'a>,
 }
 
 #[derive(Debug)]
-pub(crate) enum MsgData {
+pub(crate) enum MsgData<'a> {
     Completed {
         aborted: bool,
     },
     Yield {
-        f: RawFnOnce<(NonNull<IScheduler>, NonNull<IRawTask>), (), SendMarker>,
+        f: RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + 'a>,
     },
 }
 
-impl MsgData {
+impl MsgData<'_> {
     #[inline]
     pub fn msg_type(&self) -> &str {
         match &self {
@@ -701,7 +700,7 @@ impl SchedulerContext {
     ///
     /// Behavior is undefined if not called from a task scheduler.
     #[inline]
-    pub unsafe fn take_entry_function(&mut self) -> Option<RawFnOnce<(), (), SendMarker>> {
+    pub unsafe fn take_entry_function<'a>(&mut self) -> Option<RawFfiFn<dyn FnOnce() + Send + 'a>> {
         self.0.take_entry_function()
     }
 

@@ -23,7 +23,6 @@
 pub mod error;
 pub mod ffi_fn;
 pub mod tuple;
-pub mod fn_wrapper;
 pub mod marker;
 pub mod optional;
 pub mod result;
@@ -43,7 +42,7 @@ pub use fimo_version_core as version;
 
 pub use crate::str::{ConstStr, MutStr, StrInner};
 pub use error::IError;
-pub use fn_wrapper::{HeapFn, HeapFnMut, HeapFnOnce};
+pub use ffi_fn::FfiFn;
 pub use obj_arc::{ObjArc, ObjWeak};
 pub use obj_box::ObjBox;
 pub use object::Object;

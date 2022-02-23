@@ -2,7 +2,7 @@
 
 use crate::raw::{IRawTask, TaskHandle, TaskScheduleStatus, WorkerId};
 use crate::task::{Builder, JoinHandle, RawTaskWrapper};
-use fimo_ffi::fn_wrapper::RawFnOnce;
+use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::marker::{SendMarker, SendSyncMarker};
 use fimo_ffi::{fimo_object, fimo_vtable, Optional, SpanInner};
 use fimo_module::{impl_vtable, is_object, Error};
@@ -184,17 +184,17 @@ impl IRuntime {
 
         {
             let res = &mut res;
-            let wrapper = move |s: NonNull<IScheduler>, t: Optional<NonNull<IRawTask>>| unsafe {
+            let f = move |s: &mut IScheduler, t: Optional<&IRawTask>| {
                 trace!("Scheduler entered");
-                res.write(f(&mut *s.as_ptr(), t.into_rust().map(|t| t.as_ref())));
+                res.write(f(s, t.into_rust()));
                 trace!("Exiting scheduler");
             };
-            let mut wrapper = MaybeUninit::new(wrapper);
+            let mut f = MaybeUninit::new(f);
 
             unsafe {
-                let wrapper = RawFnOnce::new(&mut wrapper);
+                let f = RawFfiFn::new_value(&mut f);
                 let (ptr, vtable) = self.into_raw_parts();
-                (vtable.enter_scheduler)(ptr, wrapper);
+                (vtable.enter_scheduler)(ptr, f);
             }
         }
 
@@ -253,17 +253,18 @@ impl IRuntime {
 
         {
             let res = &mut res;
-            let wrapper = move |s: NonNull<IScheduler>, t: NonNull<IRawTask>| unsafe {
+            let f = move |s: &mut IScheduler, t: &IRawTask| {
                 trace!("Yielded to scheduler");
-                res.write(f(&mut *s.as_ptr(), t.as_ref()));
+                res.write(f(s, t));
                 trace!("Resuming task");
             };
-            let mut wrapper = MaybeUninit::new(wrapper);
+            let mut f = MaybeUninit::new(f);
 
             unsafe {
-                let wrapper = RawFnOnce::new(&mut wrapper);
+                let f = RawFfiFn::new_value(&mut f);
+
                 let (ptr, vtable) = self.into_raw_parts();
-                (vtable.yield_and_enter)(ptr, wrapper);
+                (vtable.yield_and_enter)(ptr, f);
             }
         }
 
@@ -340,7 +341,7 @@ impl IRuntime {
 
 fimo_vtable! {
     /// VTable of a [`IRuntime`].
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    #[derive(Copy, Clone)]
     #![marker = SendSyncMarker]
     #![uuid(0x095a88ff, 0xf45a, 0x4cf8, 0xa8f2, 0xe18eb028a7de)]
     pub struct IRuntimeVTable {
@@ -357,7 +358,7 @@ fimo_vtable! {
         #[allow(clippy::type_complexity)]
         pub enter_scheduler: unsafe extern "C" fn(
             *const (),
-            RawFnOnce<(NonNull<IScheduler>, Optional<NonNull<IRawTask>>), ()>
+            RawFfiFn<dyn FnOnce(&mut IScheduler, Optional<&IRawTask>) + '_>,
         ),
         /// Yields the current task to the runtime.
         ///
@@ -366,7 +367,7 @@ fimo_vtable! {
         /// the provided function.
         pub yield_and_enter: unsafe extern "C" fn(
             *const (),
-            RawFnOnce<(NonNull<IScheduler>, NonNull<IRawTask>), (), SendMarker>
+            RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + '_>,
         )
     }
 }

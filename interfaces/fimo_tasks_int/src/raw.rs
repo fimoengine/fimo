@@ -1,7 +1,7 @@
 //! Raw tasks primitives.
 
 use atomic::Atomic;
-use fimo_ffi::fn_wrapper::RawFnOnce;
+use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::marker::{SendMarker, SendSyncMarker};
 use fimo_ffi::object::{CoerceObjectMut, ObjectWrapper};
 use fimo_ffi::vtable::IBase;
@@ -104,41 +104,41 @@ pub enum TaskScheduleStatus {
 
 /// Representation of a raw task.
 #[derive(Debug)]
-pub struct RawTaskInner {
+pub struct RawTaskInner<'a> {
     info: TaskInfo,
-    data: UnsafeCell<SchedulerContextInner>,
+    data: UnsafeCell<SchedulerContextInner<'a>>,
 }
 
-unsafe impl Sync for RawTaskInner where SchedulerContextInner: Sync {}
+unsafe impl<'a> Sync for RawTaskInner<'a> where SchedulerContextInner<'a>: Sync {}
 
-is_object! { #![uuid(0xeb91ee4a, 0x22d2, 0x4b91, 0x9e06, 0x0994f0d79b0f)] RawTaskInner }
+is_object! { #![uuid(0xeb91ee4a, 0x22d2, 0x4b91, 0x9e06, 0x0994f0d79b0f)] RawTaskInner<'_> }
 
 impl_vtable! {
-    impl IRawTaskVTable => RawTaskInner {
+    impl IRawTaskVTable => RawTaskInner<'_> {
         unsafe extern "C" fn name(this: *const ()) -> Optional<StrInner<false>> {
-            let this = &*(this as *const RawTaskInner);
+            let this = &*(this as *const RawTaskInner<'_>);
             this.info.name.as_ref().map(|v| (v as &str).into()).into()
         }
 
         unsafe extern "C" fn priority(this: *const ()) -> TaskPriority {
-            let this = &*(this as *const RawTaskInner);
+            let this = &*(this as *const RawTaskInner<'_>);
             this.info.priority
         }
 
         unsafe extern "C" fn spawn_location(this: *const ()) -> Optional<Location<'static>> {
-            let this = &*(this as *const RawTaskInner);
+            let this = &*(this as *const RawTaskInner<'_>);
             this.info.spawn_location.map(Location::from_std).into()
         }
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn scheduler_context(this: *const ()) -> *const ISchedulerContext {
-            let this = &*(this as *const RawTaskInner);
+            let this = &*(this as *const RawTaskInner<'_>);
             ISchedulerContext::from_object((*this.data.get()).coerce_obj())
         }
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn scheduler_context_mut(this: *const ()) -> *mut ISchedulerContext {
-            let this = &*(this as *const RawTaskInner);
+            let this = &*(this as *const RawTaskInner<'_>);
             ISchedulerContext::from_object_mut((*this.data.get()).coerce_obj_mut())
         }
     }
@@ -232,12 +232,12 @@ impl Builder {
 
     /// Builds the [`RawTaskInner`].
     #[inline]
-    pub fn build(
+    pub fn build<'a>(
         self,
-        f: Option<EntryFunc>,
-        cleanup: Option<CleanupFunc>,
+        f: Option<EntryFunc<'a>>,
+        cleanup: Option<CleanupFunc<'a>>,
         data: Option<UserData>,
-    ) -> RawTaskInner {
+    ) -> RawTaskInner<'a> {
         RawTaskInner {
             info: self.info,
             data: UnsafeCell::new(SchedulerContextInner {
@@ -437,13 +437,13 @@ pub enum StatusRequest {
     Abort,
 }
 
-type EntryFunc = RawFnOnce<(), (), SendMarker>;
-type CleanupFunc = RawFnOnce<(Optional<UserData>,), (), SendMarker>;
+type EntryFunc<'a> = RawFfiFn<dyn FnOnce() + Send + 'a>;
+type CleanupFunc<'a> = RawFfiFn<dyn FnOnce(Optional<UserData>) + Send + 'a>;
 type UserData = NonNull<Object<IBase<SendSyncMarker>>>;
 type PanicData = ObjBox<Object<IBase<SendMarker>>>;
 type SchedulerData = ObjBox<Object<IBase<SendSyncMarker>>>;
 
-pub(crate) struct SchedulerContextInner {
+pub(crate) struct SchedulerContextInner<'a> {
     panicking: Atomic<bool>,
     registered: Atomic<bool>,
     handle: MaybeUninit<TaskHandle>,
@@ -453,18 +453,18 @@ pub(crate) struct SchedulerContextInner {
     request: Atomic<StatusRequest>,
     run_status: Atomic<TaskRunStatus>,
     schedule_status: Atomic<TaskScheduleStatus>,
-    cleanup_func: Optional<CleanupFunc>,
-    entry_func: Optional<EntryFunc>,
+    cleanup_func: Optional<CleanupFunc<'a>>,
+    entry_func: Optional<EntryFunc<'a>>,
     user_data: Optional<UserData>,
     panic_data: Optional<PanicData>,
     scheduler_data: Optional<SchedulerData>,
     _pinned: PhantomPinned,
 }
 
-unsafe impl Send for SchedulerContextInner {}
-unsafe impl Sync for SchedulerContextInner {}
+unsafe impl Send for SchedulerContextInner<'_> {}
+unsafe impl Sync for SchedulerContextInner<'_> {}
 
-impl Drop for SchedulerContextInner {
+impl Drop for SchedulerContextInner<'_> {
     fn drop(&mut self) {
         ISchedulerContext::from_object_mut(self.coerce_obj_mut()).cleanup()
     }
@@ -478,17 +478,17 @@ pub struct UnregisterResult {
     pub scheduler_data: Optional<SchedulerData>,
 }
 
-is_object! { #![uuid(0x9424aef3, 0xbc9a, 0x4b0d, 0xa877, 0x68a6c76f08ae)] SchedulerContextInner }
+is_object! { #![uuid(0x9424aef3, 0xbc9a, 0x4b0d, 0xa877, 0x68a6c76f08ae)] SchedulerContextInner<'_> }
 
 impl_vtable! {
-    impl mut ISchedulerContextVTable => SchedulerContextInner {
+    impl mut ISchedulerContextVTable => SchedulerContextInner<'_> {
         unsafe extern "C" fn handle(this: *const ()) -> MaybeUninit<TaskHandle> {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.handle
         }
 
         unsafe extern "C" fn is_registered(this: *const ()) -> bool {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.registered.load(Ordering::Acquire)
         }
 
@@ -500,7 +500,7 @@ impl_vtable! {
         ) {
             assert!(!is_registered(this));
 
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             this.handle.write(handle);
             this.scheduler_data = sched_data;
             this.registered.store(true, Ordering::Release);
@@ -512,7 +512,7 @@ impl_vtable! {
         ) -> UnregisterResult {
             assert!(is_registered(this));
 
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             let handle = this.handle.assume_init();
             let data = this.scheduler_data.take();
             this.registered.store(false, Ordering::Release);
@@ -523,12 +523,12 @@ impl_vtable! {
         }
 
         unsafe extern "C" fn resume_timestamp(this: *const ()) -> Timestamp {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.resume_time.load(Ordering::Acquire).into()
         }
 
         unsafe extern "C" fn set_resume_timestamp(this: *mut (), timestamp: Timestamp) {
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             let timestamp = timestamp.into();
             let mut time = this.resume_time.load(Ordering::Relaxed);
             while time <= timestamp {
@@ -540,18 +540,18 @@ impl_vtable! {
         }
 
         unsafe extern "C" fn worker(this: *const ()) -> Optional<WorkerId> {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             WorkerId::new(this.worker.load(Ordering::Acquire)).into()
         }
 
         unsafe extern "C" fn set_worker(this: *const (), worker: Optional<WorkerId>) {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             let worker = worker.map_or(WorkerId::INVALID_WORKER_ID, |w| w.0);
             this.worker.store(worker, Ordering::Release);
         }
 
         unsafe extern "C" fn request_block(this: *const ()) {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             let _ = this.request.compare_exchange(
                 StatusRequest::None,
                 StatusRequest::Block,
@@ -561,50 +561,51 @@ impl_vtable! {
         }
 
         unsafe extern "C" fn request_abort(this: *const ()) {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             // Abort overwrites all other requests.
             this.request.store(StatusRequest::Abort, Ordering::Release);
         }
 
         unsafe extern "C" fn clear_requests(this: *const ()) -> StatusRequest {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.request.swap(StatusRequest::None, Ordering::AcqRel)
         }
 
         unsafe extern "C" fn run_status(this: *const ()) -> TaskRunStatus {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.run_status.load(Ordering::Acquire)
         }
 
         unsafe extern "C" fn set_run_status(this: *const (), status: TaskRunStatus) {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.run_status.store(status, Ordering::Release)
         }
 
         unsafe extern "C" fn schedule_status(this: *const ()) -> TaskScheduleStatus {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.schedule_status.load(Ordering::Acquire)
         }
 
         unsafe extern "C" fn set_schedule_status(this: *const (), status: TaskScheduleStatus) {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.schedule_status.store(status, Ordering::Release)
         }
 
         unsafe extern "C" fn is_empty_task(this: *const ()) -> bool {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.entry_func.is_none()
         }
 
+        #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn take_entry_function(
             this: *mut (),
-        ) -> Optional<EntryFunc> {
-            let this = &mut *(this as *mut SchedulerContextInner);
+        ) -> Optional<EntryFunc<'static>> {
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             this.entry_func.take()
         }
 
         unsafe extern "C" fn is_panicking(this: *const ()) -> bool {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.panicking.load(Ordering::Acquire)
         }
 
@@ -612,19 +613,19 @@ impl_vtable! {
         unsafe extern "C" fn set_panic(this: *mut (), panic: Optional<PanicData>) {
             assert!(!is_panicking(this));
 
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             this.panic_data = panic;
             this.panicking.store(true, Ordering::Release)
         }
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn take_panic_data(this: *mut ()) -> Optional<PanicData> {
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             this.panic_data.take()
         }
 
         unsafe extern "C" fn cleanup(this: *mut ()) {
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             if let Some(f) = this.cleanup_func.take().into_rust() {
                 f.assume_valid()(this.user_data.take())
             }
@@ -632,13 +633,13 @@ impl_vtable! {
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn user_data(this: *const ()) -> Optional<*const Object<IBase<SendSyncMarker>>> {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.user_data.map(|d| d.as_ptr() as *const _)
         }
 
         #[allow(improper_ctypes_definitions)]
         unsafe extern "C" fn user_data_mut(this: *mut ()) -> Optional<*mut Object<IBase<SendSyncMarker>>> {
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             this.user_data.map(|d| d.as_ptr())
         }
 
@@ -646,7 +647,7 @@ impl_vtable! {
         unsafe extern "C" fn scheduler_data(
             this: *const (),
         ) -> Optional<*const Object<IBase<SendSyncMarker>>> {
-            let this = &*(this as *const SchedulerContextInner);
+            let this = &*(this as *const SchedulerContextInner<'_>);
             this.scheduler_data.as_ref().map(|d| &**d as _)
         }
 
@@ -654,7 +655,7 @@ impl_vtable! {
         unsafe extern "C" fn scheduler_data_mut(
             this: *mut (),
         ) -> Optional<*mut Object<IBase<SendSyncMarker>>> {
-            let this = &mut *(this as *mut SchedulerContextInner);
+            let this = &mut *(this as *mut SchedulerContextInner<'_>);
             this.scheduler_data.as_mut().map(|d| &mut **d as _)
         }
     }
@@ -833,7 +834,7 @@ impl ISchedulerContext {
     ///
     /// Behavior is undefined if not called from a task scheduler.
     #[inline]
-    pub unsafe fn take_entry_function(&mut self) -> Option<EntryFunc> {
+    pub unsafe fn take_entry_function<'a>(&mut self) -> Option<EntryFunc<'a>> {
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.take_entry_function)(ptr).into_rust()
     }
@@ -1003,7 +1004,7 @@ fimo_vtable! {
         /// # Safety
         ///
         /// Behavior is undefined if not called from a task scheduler.
-        pub take_entry_function: unsafe extern "C" fn(*mut ()) -> Optional<EntryFunc>,
+        pub take_entry_function: unsafe extern "C" fn(*mut ()) -> Optional<EntryFunc<'static>>,
         /// Checks whether the task is panicking.
         pub is_panicking: unsafe extern "C" fn(*const ()) -> bool,
         /// Sets the panicking flag.
