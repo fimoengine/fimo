@@ -152,7 +152,7 @@ pub(crate) struct TaskInfo {
 }
 
 /// A builder for raw tasks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Builder {
     info: TaskInfo,
     start_time: SystemTime,
@@ -184,6 +184,15 @@ impl Builder {
         self
     }
 
+    /// Extends the name of the task with an index.
+    #[inline]
+    pub fn extend_name_index(mut self, index: usize) -> Self {
+        if let Some(n) = &mut self.info.name {
+            n.push_str(&format!(": {}", index));
+        }
+        self
+    }
+
     /// Assigns a priority to the task.
     ///
     /// A lower [`TaskPriority`] value will lead to a higher priority.
@@ -209,8 +218,8 @@ impl Builder {
     ///
     /// Behavior is undefined if the worker does not exist.
     #[inline]
-    pub unsafe fn with_worker(mut self, worker: WorkerId) -> Self {
-        self.worker = Some(worker);
+    pub unsafe fn with_worker(mut self, worker: Option<WorkerId>) -> Self {
+        self.worker = worker;
         self
     }
 

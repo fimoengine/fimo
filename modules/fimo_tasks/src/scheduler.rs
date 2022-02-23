@@ -71,6 +71,12 @@ impl TaskScheduler {
         self.worker_pool.start_workers(runtime, msg_sender, workers)
     }
 
+    /// Fetches the ids of all running workers.
+    #[inline]
+    pub fn worker_ids(&self) -> &[WorkerId] {
+        self.worker_pool.workers()
+    }
+
     /// Searches for a registered task.
     #[inline]
     pub fn find_task(&self, handle: TaskHandle) -> Result<&IRawTask, Error> {
