@@ -18,8 +18,11 @@
 #![feature(slice_range)]
 #![feature(new_uninit)]
 #![feature(fn_traits)]
+#![feature(unsize)]
 
 pub mod error;
+pub mod ffi_fn;
+pub mod tuple;
 pub mod fn_wrapper;
 pub mod marker;
 pub mod optional;
