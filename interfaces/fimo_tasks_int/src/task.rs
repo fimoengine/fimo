@@ -3,7 +3,7 @@
 use crate::raw::{IRawTask, RawTaskInner, TaskPriority, TaskScheduleStatus, WorkerId};
 use crate::runtime::{get_runtime, is_worker};
 use crate::{IRuntime, TaskHandle};
-use fimo_ffi::fn_wrapper::RawFnOnce;
+use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::marker::{SendMarker, SendSyncMarker};
 use fimo_ffi::object::{CoerceObject, ObjectWrapper};
 use fimo_ffi::vtable::{IBase, VTableUpcast};
@@ -245,8 +245,8 @@ impl<T, R: RawTaskWrapper<Output = T>> Drop for JoinHandle<T, R> {
 }
 
 #[derive(Debug)]
-struct Task<T> {
-    raw: RawTaskInner,
+struct Task<'a, T> {
+    raw: RawTaskInner<'a>,
     res: UnsafeCell<MaybeUninit<T>>,
 }
 
@@ -310,9 +310,9 @@ macro_rules! as_raw_impl {
     };
 }
 
-as_raw_impl! {&Task<T>}
-as_raw_impl! {Pin<Box<Task<T>>>, Pin<ObjBox<Task<T>>>}
-as_raw_impl! {Pin<Arc<Task<T>>>, Pin<ObjArc<Task<T>>>}
+as_raw_impl! {&Task<'_, T>}
+as_raw_impl! {Pin<Box<Task<'_, T>>>, Pin<ObjBox<Task<'_, T>>>}
+as_raw_impl! {Pin<Arc<Task<'_, T>>>, Pin<ObjArc<Task<'_, T>>>}
 
 /// A task builder.
 #[derive(Debug)]
@@ -390,7 +390,7 @@ impl Builder {
         assert!(is_worker());
         trace!("Blocking on new task");
 
-        let mut task: MaybeUninit<Task<R>> = MaybeUninit::uninit();
+        let mut task: MaybeUninit<Task<'_, R>> = MaybeUninit::uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
         let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
@@ -413,7 +413,7 @@ impl Builder {
         };
         let mut f = MaybeUninit::new(f);
         // safety: we know that f is valid until the raw fn is called.
-        let f = unsafe { RawFnOnce::new(&mut f) };
+        let f = unsafe { RawFfiFn::new_value(&mut f) };
 
         // initialize the raw field.
         let raw_task = self.inner.build(Some(f), None, None);
@@ -480,7 +480,7 @@ impl Builder {
     ) -> Result<R, Error> {
         trace!("Blocking on new task");
 
-        let mut task: MaybeUninit<Task<R>> = MaybeUninit::uninit();
+        let mut task: MaybeUninit<Task<'_, R>> = MaybeUninit::uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
         let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
@@ -503,7 +503,7 @@ impl Builder {
         };
         let mut f = MaybeUninit::new(f);
         // safety: we know that f is valid until the raw fn is called.
-        let f = unsafe { RawFnOnce::new(&mut f) };
+        let f = unsafe { RawFfiFn::new_value(&mut f) };
 
         let cleanup = move |data: Optional<NonNull<Object<IBase<SendSyncMarker>>>>| {
             if let Some(data) = data.into_rust() {
@@ -515,7 +515,7 @@ impl Builder {
             }
         };
         let mut cleanup = MaybeUninit::new(cleanup);
-        let cleanup = unsafe { RawFnOnce::new(&mut cleanup) };
+        let cleanup = unsafe { RawFfiFn::new_value(&mut cleanup) };
 
         let data = O::coerce_obj_raw(data.as_ptr());
         let data = Object::cast_super_raw(data);
@@ -573,7 +573,7 @@ impl Builder {
         assert!(is_worker());
         trace!("Spawning new task");
 
-        let mut task: ObjBox<MaybeUninit<Task<R>>> = ObjBox::new_uninit();
+        let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
         let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
@@ -594,7 +594,7 @@ impl Builder {
             // at least as long as the task itself.
             unsafe { res.0.write(MaybeUninit::new(f())) };
         };
-        let f = RawFnOnce::new_boxed(Box::new(f));
+        let f = RawFfiFn::r#box(Box::new(f));
 
         // initialize the raw field.
         let raw_task = self.inner.build(Some(f), None, None);
@@ -632,7 +632,7 @@ impl Builder {
     ) -> Result<JoinHandle<R, impl RawTaskWrapper<Output = R> + 'static>, Error> {
         trace!("Spawning new task");
 
-        let mut task: ObjBox<MaybeUninit<Task<R>>> = ObjBox::new_uninit();
+        let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
         let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
@@ -653,7 +653,7 @@ impl Builder {
             // at least as long as the task itself.
             unsafe { res.0.write(MaybeUninit::new(f())) };
         };
-        let f = RawFnOnce::new_boxed(Box::new(f));
+        let f = RawFfiFn::r#box(Box::new(f));
 
         let cleanup = move |data: Optional<NonNull<Object<IBase<SendSyncMarker>>>>| {
             if let Some(data) = data.into_rust() {
@@ -664,7 +664,7 @@ impl Builder {
                 cleanup(None);
             }
         };
-        let cleanup = RawFnOnce::new_boxed(Box::new(cleanup));
+        let cleanup = RawFfiFn::r#box(Box::new(cleanup));
 
         let data = O::coerce_obj_raw(data.as_ptr());
         let data = Object::cast_super_raw(data);
@@ -813,7 +813,7 @@ impl ParallelBuilder {
             Ok((0..num_tasks)
                 .map(|i| {
                     tasks.push(MaybeUninit::uninit());
-                    let task: &mut MaybeUninit<Task<R>> = &mut tasks[i];
+                    let task: &mut MaybeUninit<Task<'_, R>> = &mut tasks[i];
                     let worker = task_workers[i];
 
                     // fetch the addresses to the inner members, so we can initialize them.
@@ -840,7 +840,7 @@ impl ParallelBuilder {
                     funcs.push(f);
 
                     // safety: we know that f is valid until the raw fn is called.
-                    let f = unsafe { RawFnOnce::new(&mut funcs[i]) };
+                    let f = unsafe { RawFfiFn::new_value(&mut funcs[i]) };
 
                     // initialize the raw field.
                     let raw_task = unsafe {

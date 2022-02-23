@@ -40,7 +40,7 @@ impl WorkerPool {
     pub fn start_workers(
         &mut self,
         runtime: Weak<Runtime>,
-        msg_sender: Sender<Msg>,
+        msg_sender: Sender<Msg<'static>>,
         workers: Option<usize>,
     ) -> Result<(), Error> {
         trace!("Starting worker threads");
@@ -96,7 +96,7 @@ impl WorkerPool {
     pub fn workers(&self) -> &[WorkerId] {
         &self.worker_ids
     }
-    
+
     #[inline]
     pub fn schedule_task(&mut self, task: &'static RawTask) {
         let context = task.scheduler_context();
@@ -155,7 +155,7 @@ pub(crate) struct TaskWorker {
 }
 
 pub(crate) struct WorkerInner {
-    sender: Sender<Msg>,
+    sender: Sender<Msg<'static>>,
     worker: Arc<TaskWorker>,
     local_queue: Worker<&'static RawTask>,
     current_task: Cell<Option<&'static RawTask>>,
@@ -212,7 +212,7 @@ pub(crate) static WORKER: Cell<Option<&'static WorkerInner>> = Cell::new(None);
 impl TaskWorker {
     pub fn new(
         id: WorkerId,
-        sender: Sender<Msg>,
+        sender: Sender<Msg<'static>>,
         runtime: Weak<Runtime>,
         global_queue: Arc<Injector<&'static RawTask>>,
     ) -> Result<(Arc<Self>, Stealer<&'static RawTask>), Error> {
@@ -413,7 +413,7 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
                 context.context = Some(tr.context);
 
                 // read msg data.
-                unsafe { (tr.data as *const MsgData).read() }
+                unsafe { (tr.data as *const MsgData<'_>).read() }
             } else {
                 // remove task
                 worker.current_task.set(None);
@@ -446,7 +446,7 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
 /// - The thread local `WORKER` is initialized to `Some(_)`
 /// - The handle to the current task is saved in `WORKER`
 /// - The context of the current task is provided in the handle of the task.
-pub(crate) unsafe fn yield_to_worker(msg_data: MsgData) {
+pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
     // take the context of the current task.
     let worker = WORKER.get().unwrap_unchecked();
     let task = worker.current_task.get().unwrap_unchecked();

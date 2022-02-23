@@ -33,7 +33,7 @@ impl TaskScheduler {
         stack_size: usize,
         pre_allocated: usize,
         preferred_num_allocations: usize,
-        msg_receiver: Receiver<Msg>,
+        msg_receiver: Receiver<Msg<'static>>,
     ) -> Result<Self, Error> {
         trace!("Constructing scheduler");
 
@@ -65,7 +65,7 @@ impl TaskScheduler {
     pub(crate) fn start_workers(
         &mut self,
         runtime: Weak<Runtime>,
-        msg_sender: Sender<Msg>,
+        msg_sender: Sender<Msg<'static>>,
         workers: Option<usize>,
     ) -> Result<(), Error> {
         self.worker_pool.start_workers(runtime, msg_sender, workers)
@@ -276,7 +276,7 @@ impl TaskScheduler {
                     let scheduler: &mut IScheduler =
                         IScheduler::from_object_mut(self.coerce_obj_mut());
                     unsafe {
-                        f.assume_valid()(NonNull::from(scheduler), NonNull::from(task.as_i_raw()))
+                        f.assume_valid()(scheduler, task.as_i_raw())
                     }
                 }
                 MsgData::Completed { aborted } => {

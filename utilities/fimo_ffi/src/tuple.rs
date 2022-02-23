@@ -78,6 +78,37 @@ macro_rules! tuple_impls {
     }
 }
 
+/// Tuple with zero generic types.
+#[repr(C)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+pub struct Tuple0();
+
+impl ReprRust for () {
+    type T = Tuple0;
+
+    fn into_c(self) -> Self::T {
+        Tuple0()
+    }
+
+    fn from_c(_t: Self::T) -> Self {}
+}
+
+impl ReprC for Tuple0 {
+    type T = ();
+
+    fn into_rust(self) -> Self::T {}
+
+    fn from_rust(_t: Self::T) -> Self {
+        Tuple0()
+    }
+}
+
+impl Debug for Tuple0 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("").finish()
+    }
+}
+
 tuple_impls! {
     /// Tuple with one generic type.
     Tuple1 {

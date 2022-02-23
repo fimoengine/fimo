@@ -3,7 +3,7 @@
 use crate::tuple::ReprRust;
 use fimo_object::ObjBox;
 use std::alloc::{Allocator, Global};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::marker::{PhantomData, Unsize};
 use std::mem::{forget, MaybeUninit};
 
@@ -79,7 +79,6 @@ impl<T: ?Sized, Meta> Debug for RawFfiFnInner<T, Meta> {
 
 /// A ffi-safe closure without any lifetime.
 #[repr(transparent)]
-#[derive(Debug)]
 pub struct RawFfiFn<T: ?Sized, Meta = Global> {
     inner: RawFfiFnInner<T, Meta>,
 }
@@ -491,9 +490,16 @@ impl<T: ?Sized, Meta: Default> RawFfiFn<T, Meta> {
     }
 }
 
+impl<'a, T: ?Sized + 'a, Meta: 'a> Debug for RawFfiFn<T, Meta> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawFfiFn")
+            .field("raw", &self.inner)
+            .finish()
+    }
+}
+
 /// A safe alternative to an [`RawFfiFn`].
 #[repr(transparent)]
-#[derive(Debug)]
 pub struct FfiFn<'a, T: ?Sized, Meta = Global> {
     raw: RawFfiFn<T, Meta>,
     _phantom: PhantomData<&'a mut T>,
@@ -653,6 +659,12 @@ impl<'a, T: ?Sized, Meta: Default> FfiFn<'a, T, Meta> {
     #[inline]
     pub fn into_raw(self) -> RawFfiFn<T, Meta> {
         self.raw
+    }
+}
+
+impl<'a, T: ?Sized + 'a, Meta: 'a> Debug for FfiFn<'a, T, Meta> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FfiFn").field("raw", &self.raw).finish()
     }
 }
 

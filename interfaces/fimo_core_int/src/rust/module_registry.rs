@@ -1,8 +1,8 @@
 //! Specification of a module registry.
-use fimo_ffi::fn_wrapper::RawFnOnce;
+use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::marker::SendSyncMarker;
 use fimo_ffi::object::ObjectWrapper;
-use fimo_ffi::{HeapFnOnce, ObjArc};
+use fimo_ffi::{FfiFn, ObjArc};
 use fimo_module::{
     fimo_object, fimo_vtable, Error, IModuleInterface, IModuleInterfaceVTable, IModuleLoader,
     IModuleLoaderVTable, InterfaceQuery, ModuleInterfaceDescriptor,
@@ -26,14 +26,12 @@ impl IModuleRegistry {
     ///
     /// The function may only call into the registry with the provided inner reference.
     #[inline]
-    pub fn enter_inner<F: FnOnce(&'_ mut IModuleRegistryInner)>(&self, f: F) {
-        let mut wrapper = MaybeUninit::new(move |inner: *mut IModuleRegistryInner| {
-            unsafe { f(&mut *inner) };
-        });
-        let wrapper_ref = unsafe { RawFnOnce::new(&mut wrapper) };
+    pub fn enter_inner<F: FnOnce(&mut IModuleRegistryInner)>(&self, f: F) {
+        let mut f = MaybeUninit::new(f);
+        let f = unsafe { RawFfiFn::new_value(&mut f) };
 
         let (ptr, vtable) = self.into_raw_parts();
-        (vtable.enter_inner)(ptr, wrapper_ref)
+        (vtable.enter_inner)(ptr, f)
     }
 
     /// Registers a new module loader to the `ModuleRegistry`.
@@ -90,7 +88,7 @@ impl IModuleRegistry {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_loader_callback<
-        F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync + 'static,
     >(
         &self,
         r#type: &str,
@@ -202,7 +200,7 @@ impl IModuleRegistry {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_interface_callback<
-        F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync + 'static,
     >(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
@@ -278,7 +276,7 @@ impl IModuleRegistry {
 
 fimo_vtable! {
     /// VTable of the [`IModuleRegistry`] type.
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    #[derive(Copy, Clone)]
     #![marker = SendSyncMarker]
     #![uuid(0x1eb872f8, 0xa966, 0x40a6, 0x844d, 0x9db4b08bf6db)]
     pub struct ModuleRegistryVTable {
@@ -287,7 +285,8 @@ fimo_vtable! {
         /// # Deadlock
         ///
         /// The function may only call into the registry with the provided inner pointer.
-        pub enter_inner: fn(*const (), RawFnOnce<(*mut IModuleRegistryInner,), ()>),
+        #[allow(clippy::type_complexity)]
+        pub enter_inner: fn(*const (), RawFfiFn<dyn FnOnce(&mut IModuleRegistryInner) + '_>),
     }
 }
 
@@ -333,17 +332,13 @@ impl IModuleRegistryInner {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_loader_callback<
-        F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync + 'static,
     >(
         &mut self,
         r#type: &str,
-        callback: F,
+        f: F,
     ) -> Result<LoaderCallbackId, Error> {
-        let wrapper = Box::new(move |inner: *mut IModuleRegistryInner, loader| unsafe {
-            callback(&mut *inner, loader)
-        });
-
-        let callback = LoaderCallback::from(wrapper);
+        let callback = LoaderCallback::from(Box::new(f));
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.register_loader_callback)(ptr, r#type, callback)
     }
@@ -398,17 +393,13 @@ impl IModuleRegistryInner {
     /// The callback may only call into the registry over the provided reference.
     #[inline]
     pub fn register_interface_callback<
-        F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync,
+        F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync + 'static,
     >(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
-        callback: F,
+        f: F,
     ) -> Result<InterfaceCallbackId, Error> {
-        let wrapper = Box::new(move |inner: *mut IModuleRegistryInner, interface| unsafe {
-            callback(&mut *inner, interface)
-        });
-
-        let callback = InterfaceCallback::from(wrapper);
+        let callback = InterfaceCallback::from(Box::new(f));
         let (ptr, vtable) = self.into_raw_parts_mut();
         (vtable.register_interface_callback)(ptr, descriptor, callback)
     }
@@ -745,16 +736,17 @@ impl From<LoaderCallbackId> for usize {
 #[derive(Debug)]
 pub struct LoaderCallback {
     /// Inner callable
-    pub inner: HeapFnOnce<(*mut IModuleRegistryInner, &'static IModuleLoader), (), SendSyncMarker>,
+    pub inner:
+        FfiFn<'static, dyn FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync>,
 }
 
-impl<F: FnOnce(*mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync> From<Box<F>>
-    for LoaderCallback
+impl<F: FnOnce(&mut IModuleRegistryInner, &'static IModuleLoader) + Send + Sync + 'static>
+    From<Box<F>> for LoaderCallback
 {
     #[inline]
     fn from(data: Box<F>) -> Self {
         Self {
-            inner: HeapFnOnce::new_boxed(data),
+            inner: FfiFn::r#box(data),
         }
     }
 }
@@ -824,17 +816,19 @@ impl From<InterfaceCallbackId> for usize {
 #[derive(Debug)]
 pub struct InterfaceCallback {
     /// Inner callable
-    pub inner:
-        HeapFnOnce<(*mut IModuleRegistryInner, ObjArc<IModuleInterface>), (), SendSyncMarker>,
+    pub inner: FfiFn<
+        'static,
+        dyn FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync,
+    >,
 }
 
-impl<F: FnOnce(*mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync> From<Box<F>>
-    for InterfaceCallback
+impl<F: FnOnce(&mut IModuleRegistryInner, ObjArc<IModuleInterface>) + Send + Sync + 'static>
+    From<Box<F>> for InterfaceCallback
 {
     #[inline]
     fn from(data: Box<F>) -> Self {
         Self {
-            inner: HeapFnOnce::new_boxed(data),
+            inner: FfiFn::r#box(data),
         }
     }
 }

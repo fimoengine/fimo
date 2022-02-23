@@ -13,8 +13,8 @@ use actix_web::Scope;
 use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
-use fimo_ffi::fn_wrapper::{HeapFn, HeapFnMut};
 use fimo_ffi::marker::SendSyncMarker;
+use fimo_ffi::FfiFn;
 use fimo_module::{fimo_interface, fimo_vtable};
 
 /// Status of the server.
@@ -110,7 +110,7 @@ impl IFimoActix {
     /// The provided builder function is called, when the server is starting.
     /// The builder may not call into the interface.
     #[inline]
-    pub fn register_scope<'a, F: Fn(Scope) -> Scope + Send + Sync>(
+    pub fn register_scope<'a, F: Fn(Scope) -> Scope + Send + Sync + 'static>(
         &'a self,
         path: &'a str,
         builder: Box<F>,
@@ -146,7 +146,7 @@ impl IFimoActix {
     /// Registers a callback that is called every time the server status changes.
     ///
     /// The function may not call into the interface.
-    pub fn register_callback<F: FnMut(ServerEvent) + Send + Sync>(
+    pub fn register_callback<F: FnMut(ServerEvent) + Send + Sync + 'static>(
         &self,
         f: Box<F>,
     ) -> CallbackGuard<'_> {
@@ -287,7 +287,7 @@ impl From<CallbackId> for usize {
 /// A scope builder.
 #[derive(Debug)]
 pub struct ScopeBuilder {
-    inner: HeapFn<(Scope,), Scope>,
+    inner: FfiFn<'static, dyn Fn(Scope) -> Scope + Send + Sync>,
 }
 
 impl FnOnce<(Scope,)> for ScopeBuilder {
@@ -313,21 +313,18 @@ impl Fn<(Scope,)> for ScopeBuilder {
     }
 }
 
-impl<F: Fn(Scope) -> Scope + Send + Sync> From<Box<F>> for ScopeBuilder {
+impl<F: Fn(Scope) -> Scope + Send + Sync + 'static> From<Box<F>> for ScopeBuilder {
     fn from(b: Box<F>) -> Self {
         Self {
-            inner: HeapFn::new_boxed(b),
+            inner: FfiFn::r#box(b),
         }
     }
 }
 
-unsafe impl Send for ScopeBuilder {}
-unsafe impl Sync for ScopeBuilder {}
-
 /// A callback.
 #[derive(Debug)]
 pub struct Callback {
-    inner: HeapFnMut<(ServerEvent,), ()>,
+    inner: FfiFn<'static, dyn FnMut(ServerEvent) + Send + Sync>,
 }
 
 impl FnOnce<(ServerEvent,)> for Callback {
@@ -346,13 +343,10 @@ impl FnMut<(ServerEvent,)> for Callback {
     }
 }
 
-impl<F: FnMut(ServerEvent) + Send + Sync> From<Box<F>> for Callback {
+impl<F: FnMut(ServerEvent) + Send + Sync + 'static> From<Box<F>> for Callback {
     fn from(b: Box<F>) -> Self {
         Self {
-            inner: HeapFnMut::new_boxed(b),
+            inner: FfiFn::r#box(b),
         }
     }
 }
-
-unsafe impl Send for Callback {}
-unsafe impl Sync for Callback {}
