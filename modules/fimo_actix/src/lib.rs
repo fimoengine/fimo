@@ -10,8 +10,9 @@
     rustdoc::broken_intra_doc_links
 )]
 extern crate static_assertions as sa;
+use actix_rt::Arbiter;
 use fimo_actix_int::actix::dev::ServerHandle;
-use fimo_actix_int::actix::rt::{Arbiter, System};
+use fimo_actix_int::actix::rt::System;
 use fimo_actix_int::actix::{App, HttpServer, Scope};
 use fimo_actix_int::{
     Callback, CallbackId, ScopeBuilder, ScopeBuilderId, ServerEvent, ServerStatus,
