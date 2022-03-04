@@ -2,7 +2,7 @@
 // This is a modified implementation of the `String` type found in
 // the std library, which is dual-licensed under Apache 2.0 and MIT terms.
 // All rights go to the contributors of the Rust project.
-use crate::{Vec, Version};
+use crate::Vec;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::alloc::{Allocator, Global};
@@ -1543,28 +1543,6 @@ impl<A: Allocator> From<Box<str, A>> for String<A> {
         let len = b.len();
         let (ptr, alloc) = Box::into_raw_with_allocator(b);
         unsafe { String::from_raw_parts_in(ptr as *mut u8, len, len, alloc) }
-    }
-}
-
-impl From<&Version> for String {
-    fn from(version: &Version) -> Self {
-        let req = version.string_length_full();
-        let mut buff = Vec::with_capacity(req);
-        // Safety:
-        let mut str = unsafe {
-            buff.set_len(req);
-            String::from_utf8_unchecked(buff)
-        };
-
-        version.as_string_full(&mut str).unwrap();
-
-        str
-    }
-}
-
-impl From<Version> for String {
-    fn from(version: Version) -> Self {
-        From::from(&version)
     }
 }
 
