@@ -1,5 +1,5 @@
-use crate::vtable::IBase;
-use crate::{impl_vtable, is_object, ObjArc, ObjWeak, Object};
+use crate::ptr::IBase;
+use crate::{base_object, DynObj, ObjArc, ObjWeak};
 use std::cell::RefCell;
 
 #[test]
@@ -83,20 +83,19 @@ fn drop_sized() {
 
 #[test]
 fn drop_obj() {
-    struct TestObj<'a>(&'a RefCell<usize>);
-    impl<'a> Drop for TestObj<'a> {
+    struct TestObj(ObjArc<RefCell<usize>>);
+    impl Drop for TestObj {
         fn drop(&mut self) {
             *self.0.borrow_mut() = 1;
         }
     }
-    is_object! { #![uuid(0x6e3178d1, 0xad1e, 0x4071, 0xaa82, 0xd732eefe118f)] TestObj<'_> }
-    impl_vtable! { impl IBase => TestObj<'_> {} }
+    base_object! { #![uuid(0x6e3178d1, 0xad1e, 0x4071, 0xaa82, 0xd732eefe118f)] impl TestObj }
 
-    let val = RefCell::new(0);
-    let x = ObjArc::new(TestObj(&val));
+    let val = ObjArc::new(RefCell::new(0));
+    let x = ObjArc::new(TestObj(val.clone()));
     assert_eq!(*x.0.borrow(), 0);
 
-    let x: ObjArc<Object<IBase>> = ObjArc::coerce_object(x);
+    let x: ObjArc<DynObj<dyn IBase>> = ObjArc::coerce_obj(x);
     assert_eq!(*val.borrow(), 0);
 
     std::mem::drop(x);

@@ -275,9 +275,7 @@ impl TaskScheduler {
                 MsgData::Yield { f } => {
                     let scheduler: &mut IScheduler =
                         IScheduler::from_object_mut(self.coerce_obj_mut());
-                    unsafe {
-                        f.assume_valid()(scheduler, task.as_i_raw())
-                    }
+                    unsafe { f.assume_valid()(scheduler, task.as_i_raw()) }
                 }
                 MsgData::Completed { aborted } => {
                     if aborted {

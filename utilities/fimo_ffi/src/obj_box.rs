@@ -1,28 +1,25 @@
 //! Definition of an object-aware box type.
-use crate::object::{ObjPtrCompat, ObjectWrapper};
-use crate::raw::CastError;
-use crate::vtable::{MarkerCompatible, ObjectID, VTable, VTableUpcast};
-use crate::{CoerceObjectMut, Object};
+use crate::ptr::{CastSuper, DynObj, FetchVTable, ObjInterface, ObjectId};
 use std::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
+use std::marker::{PhantomData, Unsize};
 use std::mem::{align_of_val_raw, size_of_val_raw, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
 /// A pointer type for heap allocation, akin to a [`Box`].
 #[repr(C)]
-pub struct ObjBox<T: ObjPtrCompat + ?Sized, A: Allocator = Global>(Unique<T>, A);
+pub struct ObjBox<T: ?Sized, A: Allocator = Global>(Unique<T>, A);
 
 #[repr(transparent)]
 #[allow(missing_debug_implementations)]
-struct Unique<T: ObjPtrCompat + ?Sized>(NonNull<T>, PhantomData<T>);
+struct Unique<T: ?Sized>(NonNull<T>, PhantomData<T>);
 
-impl<T: ObjPtrCompat + ?Sized> Unique<T> {
+impl<T: ?Sized> Unique<T> {
     fn new(ptr: NonNull<T>) -> Self {
         Self(ptr, Default::default())
     }
@@ -106,84 +103,77 @@ impl<T, A: Allocator> ObjBox<T, A> {
     }
 }
 
-impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjBox<O, A> {
-    /// Coerces a `ObjBox<T, A>` to an `ObjBox<O, A>`.
-    pub fn coerce_object<T: CoerceObjectMut<O::VTable>>(b: ObjBox<T, A>) -> ObjBox<O, A> {
+impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
+    /// Coerces a `ObjBox<U, A>` to an `ObjBox<DynObj<T>, A>`.
+    #[inline]
+    pub fn coerce_obj<U>(b: ObjBox<U, A>) -> Self
+    where
+        U: FetchVTable<T::Base> + Unsize<T> + 'a,
+        T: ObjInterface,
+    {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = T::coerce_obj_mut_raw(ptr);
-        let ptr = O::from_object_mut_raw(obj);
+        let obj = crate::ptr::coerce_obj_mut_raw(ptr);
+        unsafe { ObjBox::from_raw_parts(obj, alloc) }
+    }
+
+    /// Returns whether the contained object is of type `U`.
+    #[inline]
+    pub fn is<U>(b: &Self) -> bool
+    where
+        U: ObjectId + Unsize<T>,
+    {
+        crate::ptr::is::<U, _>(&**b)
+    }
+
+    /// Returns the downcasted box if it is of type `U`.
+    #[inline]
+    pub fn downcast<U>(b: Self) -> Option<ObjBox<U, A>>
+    where
+        U: ObjectId + Unsize<T>,
+    {
+        let (ptr, alloc) = ObjBox::into_raw_parts(b);
+        if let Some(ptr) = crate::ptr::downcast_mut::<U, _>(ptr) {
+            unsafe { Some(ObjBox::from_raw_parts(ptr, alloc)) }
+        } else {
+            unsafe { ObjBox::from_raw_parts(ptr, alloc) };
+            None
+        }
+    }
+
+    /// Returns a box to the super object.
+    #[inline]
+    pub fn cast_super<U>(b: Self) -> ObjBox<DynObj<U>, A>
+    where
+        T: CastSuper<U>,
+        U: ObjInterface + ?Sized + 'a,
+    {
+        let (ptr, alloc) = ObjBox::into_raw_parts(b);
+        let ptr = crate::ptr::cast_super_mut::<U, _>(ptr);
         unsafe { ObjBox::from_raw_parts(ptr, alloc) }
     }
 
-    /// Tries to revert from an `ObjBox<O, A>` to an `ObjBox<T, A>`.
-    pub fn try_object_cast<T: ObjectID>(
-        b: ObjBox<O, A>,
-    ) -> Result<ObjBox<T, A>, CastError<ObjBox<O, A>>> {
-        let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = O::as_object_mut_raw(ptr);
-
-        unsafe {
-            match Object::<O::VTable>::try_cast_obj_mut_raw::<T>(obj) {
-                Ok(casted) => Ok(ObjBox::from_raw_parts(casted, alloc)),
-                Err(err) => Err(CastError {
-                    obj: ObjBox::from_raw_parts(ptr, alloc),
-                    required: err.required,
-                    required_id: err.required_id,
-                    available: err.available,
-                    available_id: err.available_id,
-                }),
-            }
-        }
+    /// Returns whether a certain interface is contained.
+    #[inline]
+    pub fn is_interface<U>(b: &Self) -> bool
+    where
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
+    {
+        crate::ptr::is_interface::<U, _>(&**b)
     }
 
-    /// Tries casting the object to another object.
-    pub fn try_cast<U: ObjectWrapper + ?Sized>(
-        b: ObjBox<O, A>,
-    ) -> Result<ObjBox<U, A>, CastError<ObjBox<O, A>>>
+    /// Returns a box to the downcasted interface if it is contained.
+    #[inline]
+    pub fn downcast_interface<U>(b: Self) -> Option<ObjBox<DynObj<U>, A>>
     where
-        <<U as ObjectWrapper>::VTable as VTable>::Marker:
-            MarkerCompatible<<<O as ObjectWrapper>::VTable as VTable>::Marker>,
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = O::as_object_mut_raw(ptr);
-
-        unsafe {
-            match Object::<O::VTable>::try_cast_mut_raw::<U::VTable>(obj) {
-                Ok(casted) => Ok(ObjBox::from_raw_parts(
-                    U::from_object_mut_raw(casted),
-                    alloc,
-                )),
-                Err(err) => Err(CastError {
-                    obj: ObjBox::from_raw_parts(ptr, alloc),
-                    required: err.required,
-                    required_id: err.required_id,
-                    available: err.available,
-                    available_id: err.available_id,
-                }),
-            }
+        if let Some(ptr) = crate::ptr::downcast_interface_mut(ptr) {
+            unsafe { Some(ObjBox::from_raw_parts(ptr, alloc)) }
+        } else {
+            unsafe { ObjBox::from_raw_parts(ptr, alloc) };
+            None
         }
-    }
-
-    /// Casts between different [`ObjectWrapper`]'s with the same vtable.
-    pub fn static_cast<U: ObjectWrapper<VTable = O::VTable> + ?Sized>(
-        w: ObjBox<O, A>,
-    ) -> ObjBox<U, A> {
-        let (ptr, alloc) = ObjBox::into_raw_parts(w);
-        let obj = O::as_object_mut_raw(ptr);
-        let obj = U::from_object_mut_raw(obj);
-        unsafe { ObjBox::from_raw_parts(obj, alloc) }
-    }
-
-    /// Casts an `ObjBox<O, A>` to a super object.
-    pub fn cast_super<U: ObjectWrapper + ?Sized>(b: ObjBox<O, A>) -> ObjBox<U, A>
-    where
-        O::VTable: VTableUpcast<U::VTable>,
-    {
-        let (ptr, alloc) = ObjBox::into_raw_parts(b);
-        let obj = O::as_object_mut_raw(ptr);
-        let obj = Object::<O::VTable>::cast_super_mut_raw(obj);
-        let obj = U::from_object_mut_raw(obj);
-        unsafe { ObjBox::from_raw_parts(obj, alloc) }
     }
 }
 
@@ -199,7 +189,7 @@ impl<T, A: Allocator> ObjBox<MaybeUninit<T>, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized> ObjBox<T, Global> {
+impl<T: ?Sized> ObjBox<T, Global> {
     /// Constructs a box from a raw pointer.
     ///
     /// # Safety
@@ -210,7 +200,7 @@ impl<T: ObjPtrCompat + ?Sized> ObjBox<T, Global> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> ObjBox<T, A> {
     /// Constructs a box from a raw pointer and an allocator.
     ///
     /// # Safety
@@ -255,28 +245,28 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjBox<T, A> {
     }
 }
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Send, A: Allocator + Send> Send for ObjBox<T, A> {}
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync, A: Allocator + Sync> Sync for ObjBox<T, A> {}
+unsafe impl<T: ?Sized + Send, A: Allocator + Send> Send for ObjBox<T, A> {}
+unsafe impl<T: ?Sized + Sync, A: Allocator + Sync> Sync for ObjBox<T, A> {}
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> AsRef<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> AsRef<T> for ObjBox<T, A> {
     fn as_ref(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> AsMut<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> AsMut<T> for ObjBox<T, A> {
     fn as_mut(&mut self) -> &mut T {
         &mut **self
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Borrow<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> Borrow<T> for ObjBox<T, A> {
     fn borrow(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> BorrowMut<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> BorrowMut<T> for ObjBox<T, A> {
     fn borrow_mut(&mut self) -> &mut T {
         &mut **self
     }
@@ -292,7 +282,7 @@ impl<T: Clone, A: Allocator + Clone> Clone for ObjBox<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + Debug + ?Sized, A: Allocator> Debug for ObjBox<T, A> {
+impl<T: Debug + ?Sized, A: Allocator> Debug for ObjBox<T, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&**self, f)
     }
@@ -304,13 +294,13 @@ impl<T: Default> Default for ObjBox<T, Global> {
     }
 }
 
-impl<T: ObjPtrCompat + Display + ?Sized, A: Allocator> Display for ObjBox<T, A> {
+impl<T: Display + ?Sized, A: Allocator> Display for ObjBox<T, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&**self, f)
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Deref for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> Deref for ObjBox<T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -318,13 +308,13 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> Deref for ObjBox<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> DerefMut for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> DerefMut for ObjBox<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.0.as_ptr() }
     }
 }
 
-unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjBox<T, A> {
+unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjBox<T, A> {
     default fn drop(&mut self) {
         let layout = unsafe { T::layout_for_raw(self.0.as_ptr()) };
 
@@ -385,13 +375,13 @@ impl<T> From<T> for ObjBox<T, Global> {
     }
 }
 
-impl<T: ObjPtrCompat + Hash + ?Sized, A: Allocator> Hash for ObjBox<T, A> {
+impl<T: Hash + ?Sized, A: Allocator> Hash for ObjBox<T, A> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
     }
 }
 
-impl<T: ObjPtrCompat + Hasher + ?Sized, A: Allocator> Hasher for ObjBox<T, A> {
+impl<T: Hasher + ?Sized, A: Allocator> Hasher for ObjBox<T, A> {
     fn finish(&self) -> u64 {
         (**self).finish()
     }
@@ -436,7 +426,7 @@ impl<T: ObjPtrCompat + Hasher + ?Sized, A: Allocator> Hasher for ObjBox<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + Iterator + ?Sized, A: Allocator> Iterator for ObjBox<T, A> {
+impl<T: Iterator + ?Sized, A: Allocator> Iterator for ObjBox<T, A> {
     type Item = T::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -444,46 +434,42 @@ impl<T: ObjPtrCompat + Iterator + ?Sized, A: Allocator> Iterator for ObjBox<T, A
     }
 }
 
-impl<T: ObjPtrCompat + Ord + ?Sized, A: Allocator> Ord for ObjBox<T, A> {
+impl<T: Ord + ?Sized, A: Allocator> Ord for ObjBox<T, A> {
     fn cmp(&self, other: &Self) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
 }
 
-impl<T: ObjPtrCompat + PartialEq<T> + ?Sized, A: Allocator> PartialEq<ObjBox<T, A>>
-    for ObjBox<T, A>
-{
+impl<T: PartialEq<T> + ?Sized, A: Allocator> PartialEq<ObjBox<T, A>> for ObjBox<T, A> {
     fn eq(&self, other: &ObjBox<T, A>) -> bool {
         PartialEq::eq(&**self, &**other)
     }
 }
 
-impl<T: ObjPtrCompat + PartialOrd<T> + ?Sized, A: Allocator> PartialOrd<ObjBox<T, A>>
-    for ObjBox<T, A>
-{
+impl<T: PartialOrd<T> + ?Sized, A: Allocator> PartialOrd<ObjBox<T, A>> for ObjBox<T, A> {
     fn partial_cmp(&self, other: &ObjBox<T, A>) -> Option<Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Pointer for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> Pointer for ObjBox<T, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let ptr: *const T = &**self;
         Pointer::fmt(&ptr, f)
     }
 }
 
-impl<T: ObjPtrCompat + Eq + ?Sized, A: Allocator> Eq for ObjBox<T, A> {}
+impl<T: Eq + ?Sized, A: Allocator> Eq for ObjBox<T, A> {}
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator + 'static> Unpin for ObjBox<T, A> {}
+impl<T: ?Sized, A: Allocator + 'static> Unpin for ObjBox<T, A> {}
 
-pub(crate) trait ConstructLayoutRaw: ObjPtrCompat {
+pub(crate) trait ConstructLayoutRaw {
     unsafe fn size_of_val_raw(ptr: *const Self) -> usize;
     unsafe fn align_of_val_raw(ptr: *const Self) -> usize;
     unsafe fn layout_for_raw(ptr: *const Self) -> Layout;
 }
 
-impl<T: ObjPtrCompat + ?Sized> ConstructLayoutRaw for T {
+impl<T: ?Sized> ConstructLayoutRaw for T {
     #[inline]
     default unsafe fn size_of_val_raw(ptr: *const Self) -> usize {
         size_of_val_raw(ptr)
@@ -500,33 +486,30 @@ impl<T: ObjPtrCompat + ?Sized> ConstructLayoutRaw for T {
     }
 }
 
-// `Object<T>` and it's wrappers do not work with the current type-system.
+// `DynObj<T>` and it's wrappers do not work with the current type-system.
 // As a workaround we manually retrieve to layout of the object.
-impl<T: ObjectWrapper + ?Sized> ConstructLayoutRaw for T {
+impl<T: ?Sized> ConstructLayoutRaw for DynObj<T> {
     #[inline]
     unsafe fn size_of_val_raw(ptr: *const Self) -> usize {
-        let obj = T::as_object_raw(ptr);
-        crate::object::size_of_val(obj)
+        crate::ptr::size_of_val(ptr)
     }
 
     #[inline]
     unsafe fn align_of_val_raw(ptr: *const Self) -> usize {
-        let obj = T::as_object_raw(ptr);
-        crate::object::align_of_val(obj)
+        crate::ptr::align_of_val(ptr)
     }
 
     #[inline]
     unsafe fn layout_for_raw(ptr: *const Self) -> Layout {
-        let (_, vtable) = T::into_raw_parts(ptr);
-        Layout::from_size_align_unchecked(vtable.size_of(), vtable.align_of())
+        crate::ptr::layout_of_val(ptr)
     }
 }
 
-pub(crate) trait PtrDrop: ObjPtrCompat {
+pub(crate) trait PtrDrop {
     unsafe fn drop_in_place(ptr: *mut Self);
 }
 
-impl<T: ObjPtrCompat + ?Sized> PtrDrop for T {
+impl<T: ?Sized> PtrDrop for T {
     #[inline]
     default unsafe fn drop_in_place(ptr: *mut Self) {
         std::ptr::drop_in_place(ptr)
@@ -534,11 +517,10 @@ impl<T: ObjPtrCompat + ?Sized> PtrDrop for T {
 }
 
 // The drop procedure is contained inside the vtable of the object.
-impl<T: ObjectWrapper + ?Sized> PtrDrop for T {
+impl<T: ?Sized> PtrDrop for DynObj<T> {
     #[inline]
     unsafe fn drop_in_place(ptr: *mut Self) {
-        let obj = T::as_object_mut_raw(ptr);
-        crate::object::drop_in_place(obj)
+        crate::ptr::drop_in_place(ptr)
     }
 }
 

@@ -7,46 +7,49 @@
 )]
 #![allow(incomplete_features)]
 #![feature(const_fn_fn_ptr_basics)]
+#![feature(const_ptr_offset_from)]
 #![feature(const_fn_trait_bound)]
-#![feature(unboxed_closures)]
+#![feature(alloc_layout_extra)]
 #![feature(try_reserve_kind)]
+#![feature(unboxed_closures)]
+#![feature(const_type_name)]
 #![feature(dropck_eyepatch)]
 #![feature(specialization)]
+#![feature(layout_for_ptr)]
 #![feature(allocator_api)]
+#![feature(set_ptr_value)]
 #![feature(slice_ptr_len)]
-#![feature(trusted_len)]
+#![feature(cfg_sanitize)]
+#![feature(ptr_metadata)]
 #![feature(slice_range)]
+#![feature(trusted_len)]
 #![feature(new_uninit)]
 #![feature(fn_traits)]
+#![feature(c_unwind)]
 #![feature(unsize)]
 
 pub mod error;
 pub mod ffi_fn;
-pub mod tuple;
-pub mod marker;
+pub mod fmt;
+pub mod obj_arc;
+pub mod obj_box;
 pub mod optional;
+pub mod ptr;
 pub mod result;
+pub mod span;
+pub mod str;
 pub mod string;
+pub mod tuple;
 pub mod vec;
-
-pub use fimo_object::obj_arc;
-pub use fimo_object::obj_box;
-pub use fimo_object::object;
-pub use fimo_object::raw;
-pub use fimo_object::span;
-pub use fimo_object::str;
-pub use fimo_object::vtable;
-pub use fimo_object::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object};
 
 pub use fimo_version_core as version;
 
 pub use crate::str::{ConstStr, MutStr, StrInner};
-pub use error::IError;
 pub use ffi_fn::FfiFn;
 pub use obj_arc::{ObjArc, ObjWeak};
 pub use obj_box::ObjBox;
-pub use object::Object;
 pub use optional::Optional;
+pub use ptr::DynObj;
 pub use result::Result;
 pub use span::{ConstSpan, MutSpan, SpanInner};
 pub use string::String;
