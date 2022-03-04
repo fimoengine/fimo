@@ -17,7 +17,7 @@ pub use uuid::Uuid;
 /// This trait can be implemented only if the type is prefixed
 /// with the same members of the internal vtable head and is
 /// laid out using the system C abi.
-pub unsafe trait ObjMetadataCompatible<'a>: 'static {}
+pub unsafe trait ObjMetadataCompatible: 'static {}
 
 /// Specifies a new object type.
 pub trait ObjectId {
@@ -29,9 +29,9 @@ pub trait ObjectId {
 }
 
 /// Specifies a new interface type.
-pub trait ObjMetadataInterface<'a>: 'a {
+pub trait ObjInterfaceBase {
     /// VTable of the interface.
-    type VTable: ObjMetadataCompatible<'a>;
+    type VTable: ObjMetadataCompatible;
 
     /// Unique id of the interface.
     const INTERFACE_ID: Uuid;
@@ -41,15 +41,15 @@ pub trait ObjMetadataInterface<'a>: 'a {
 }
 
 /// Indicated that a type is usable with a [`DynObj`].
-pub trait ObjMetadataInterfaceCompatibility<'a>: 'a {
+pub trait ObjInterface {
     /// Base type that specifies the used vtable.
-    type Base: ObjMetadataInterface<'a> + ?Sized;
+    type Base: ObjInterfaceBase + ?Sized;
 }
 
 /// Indicates that an object can be coerced to a [`DynObj`].
-pub trait FetchVTable<'a, Dyn>: ObjectId + Unsize<Dyn>
+pub trait FetchVTable<Dyn>: ObjectId + Unsize<Dyn>
 where
-    Dyn: ObjMetadataInterface<'a> + ?Sized,
+    Dyn: ObjInterfaceBase + ?Sized,
 {
     /// Returns a static reference to the vtable describing the interface and object.
     fn fetch_interface() -> &'static Dyn::VTable;
@@ -59,15 +59,20 @@ where
 ///
 /// The upcasting operation must maintain the ids and names of the original object and interface.
 ///
-/// Example:
+/// # Note
+///
+/// This trait is not transitive, i.e. defining conversions `A -> B` and `B -> C` does not imply
+/// that `A -> C`. Such conversions must be manually implemented.
+///
+/// # Examples:
 ///
 /// ```
 /// #![feature(const_fn_fn_ptr_basics)]
 /// #![feature(const_fn_trait_bound)]
 /// #![feature(unsize)]
 ///
-/// use fimo_object::ptr::{IBase, ObjMetadata};
-/// use fimo_object::{base_vtable, base_interface, impl_upcast};
+/// use fimo_ffi::ptr::{IBase, ObjMetadata};
+/// use fimo_ffi::{base_vtable, base_interface, impl_upcast};
 ///
 /// base_interface!{
 ///     #![vtable = AVTable]
@@ -137,7 +142,7 @@ where
 ///     }
 /// }
 /// ```
-pub trait CastSuper<'a, Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized>: Unsize<Dyn> {
+pub trait CastSuper<Dyn: ObjInterface + ?Sized>: ObjInterface + Unsize<Dyn> {
     /// Retrieves a super vtable to the same object.
     fn cast_super(obj: ObjMetadata<Self>) -> ObjMetadata<Dyn>;
 }
@@ -152,27 +157,38 @@ pub struct ObjMetadata<Dyn: ?Sized> {
 impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Constructs a new `ObjMetadata` with a given vtable.
     #[inline]
-    pub fn new(vtable: &'static <Dyn::Base as ObjMetadataInterface<'a>>::VTable) -> Self
+    pub fn new(vtable: &'static <Dyn::Base as ObjInterfaceBase>::VTable) -> Self
     where
-        Dyn: ObjMetadataInterfaceCompatibility<'a>,
+        Dyn: ObjInterface + 'a,
     {
         Self {
             // safety: the safety is guaranteed with the
             // implementation of ObjMetadataCompatible.
-            vtable_ptr: unsafe { std::mem::transmute(vtable) },
+            vtable_ptr: unsafe { &*(vtable as *const _ as *const VTableHead) },
             phantom: Default::default(),
         }
     }
 
     /// Returns a vtable that is compatible with the current interface.
     #[inline]
-    pub fn vtable(self) -> &'static <Dyn::Base as ObjMetadataInterface<'a>>::VTable
+    pub fn vtable(self) -> &'static <Dyn::Base as ObjInterfaceBase>::VTable
     where
-        Dyn: ObjMetadataInterfaceCompatibility<'a>,
+        Dyn: ObjInterface + 'a,
     {
         // safety: the safety is guaranteed with the
         // implementation of ObjMetadataCompatible.
-        unsafe { std::mem::transmute(self.vtable_ptr) }
+        unsafe { &*(self.vtable_ptr as *const _ as *const _) }
+    }
+
+    /// Returns the vtable to a parent object.
+    #[inline]
+    pub fn super_vtable<T>(self) -> &'a <T::Base as ObjInterfaceBase>::VTable
+    where
+        Dyn: CastSuper<T> + 'a,
+        T: ObjInterface + ?Sized + 'a,
+    {
+        let s = self.cast_super::<T>();
+        s.vtable()
     }
 
     /// Returns if the contained type matches.
@@ -188,8 +204,8 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn cast_super<U>(self) -> ObjMetadata<U>
     where
-        Dyn: CastSuper<'a, U>,
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        Dyn: CastSuper<U> + 'a,
+        U: ObjInterface + ?Sized + 'a,
     {
         CastSuper::cast_super(self)
     }
@@ -198,7 +214,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn is_interface<U>(self) -> bool
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        U: ObjInterface + Unsize<Dyn> + ?Sized,
     {
         self.interface_id() == U::Base::INTERFACE_ID
     }
@@ -207,10 +223,10 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn downcast_interface<U>(self) -> Option<ObjMetadata<U>>
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + Unsize<Dyn> + ?Sized,
+        U: ObjInterface + Unsize<Dyn> + ?Sized,
     {
         if self.is_interface::<U>() {
-            let vtable_ptr = self.vtable_ptr as *const VTableHead as *const u8;
+            let vtable_ptr = self.vtable_ptr as *const _ as *const u8;
             let vtable_ptr = vtable_ptr.wrapping_sub(self.vtable_offset());
             let vtable_ptr = vtable_ptr as *const VTableHead;
 
@@ -282,7 +298,7 @@ unsafe impl<Dyn: ?Sized> Sync for ObjMetadata<Dyn> {}
 impl<Dyn: ?Sized> Debug for ObjMetadata<Dyn> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ObjMetadata")
-            .field(&(self.vtable_ptr as *const VTableHead))
+            .field(&(self.vtable_ptr as *const _))
             .finish()
     }
 }
@@ -412,20 +428,20 @@ pub fn from_raw_mut<Dyn: ?Sized>(ptr: RawObjMut<Dyn>) -> *mut DynObj<Dyn> {
 
 /// Coerces an object reference to a [`DynObj`] reference.
 #[inline]
-pub fn coerce_obj<'a, T, Dyn>(obj: &T) -> &DynObj<Dyn>
+pub fn coerce_obj<T, Dyn>(obj: &T) -> &DynObj<Dyn>
 where
-    T: FetchVTable<'a, Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+    T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
+    Dyn: ObjInterface + ?Sized,
 {
     unsafe { &*coerce_obj_raw(obj) }
 }
 
 /// Coerces a object pointer to a [`DynObj`] pointer.
 #[inline]
-pub fn coerce_obj_raw<'a, T, Dyn>(obj: *const T) -> *const DynObj<Dyn>
+pub fn coerce_obj_raw<T, Dyn>(obj: *const T) -> *const DynObj<Dyn>
 where
-    T: FetchVTable<'a, Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+    T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
+    Dyn: ObjInterface + ?Sized,
 {
     let vtable = T::fetch_interface();
     let metadata = ObjMetadata::<Dyn>::new(vtable);
@@ -434,24 +450,126 @@ where
 
 /// Coerces a mutable object reference to a [`DynObj`] reference.
 #[inline]
-pub fn coerce_obj_mut<'a, T, Dyn>(obj: &mut T) -> &mut DynObj<Dyn>
+pub fn coerce_obj_mut<T, Dyn>(obj: &mut T) -> &mut DynObj<Dyn>
 where
-    T: FetchVTable<'a, Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+    T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
+    Dyn: ObjInterface + ?Sized,
 {
     unsafe { &mut *coerce_obj_mut_raw(obj) }
 }
 
 /// Coerces a mutable object pointer to a [`DynObj`] pointer.
 #[inline]
-pub fn coerce_obj_mut_raw<'a, T, Dyn>(obj: *mut T) -> *mut DynObj<Dyn>
+pub fn coerce_obj_mut_raw<T, Dyn>(obj: *mut T) -> *mut DynObj<Dyn>
 where
-    T: FetchVTable<'a, Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+    T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
+    Dyn: ObjInterface + ?Sized,
 {
     let vtable = T::fetch_interface();
     let metadata = ObjMetadata::<Dyn>::new(vtable);
     from_raw_parts_mut(obj as *mut (), metadata)
+}
+
+// basic vtable manipulations
+
+/// Returns whether the contained object is of type `T`.
+#[inline]
+pub fn is<T, Dyn>(obj: *const DynObj<Dyn>) -> bool
+where
+    T: ObjectId + Unsize<Dyn>,
+    Dyn: ?Sized,
+{
+    let metadata = metadata(obj);
+    metadata.is::<T>()
+}
+
+/// Returns a pointer to the downcasted object if it is of type `T`.
+#[inline]
+pub fn downcast<T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const T>
+where
+    T: ObjectId + Unsize<Dyn>,
+    Dyn: ?Sized,
+{
+    if is::<T, Dyn>(obj) {
+        Some(obj as *const T)
+    } else {
+        None
+    }
+}
+
+/// Returns a mutable pointer to the downcasted object if it is of type `T`.
+#[inline]
+pub fn downcast_mut<T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut T>
+where
+    T: ObjectId + Unsize<Dyn>,
+    Dyn: ?Sized,
+{
+    if is::<T, Dyn>(obj) {
+        Some(obj as *mut T)
+    } else {
+        None
+    }
+}
+
+/// Returns a pointer to the super object.
+#[inline]
+pub fn cast_super<'a, T, U>(obj: *const DynObj<U>) -> *const DynObj<T>
+where
+    T: ObjInterface + ?Sized + 'a,
+    U: CastSuper<T> + ?Sized + 'a,
+{
+    let metadata = metadata(obj);
+    let metadata = metadata.cast_super::<T>();
+    from_raw_parts(obj as *const _, metadata)
+}
+
+/// Returns a mutable pointer to the super object.
+#[inline]
+pub fn cast_super_mut<'a, T, U>(obj: *mut DynObj<U>) -> *mut DynObj<T>
+where
+    T: ObjInterface + ?Sized + 'a,
+    U: CastSuper<T> + ?Sized + 'a,
+{
+    let metadata = metadata(obj);
+    let metadata = metadata.cast_super::<T>();
+    from_raw_parts_mut(obj as *mut _, metadata)
+}
+
+/// Returns if the a certain interface is implemented.
+#[inline]
+pub fn is_interface<'a, T, Dyn>(obj: *const DynObj<Dyn>) -> bool
+where
+    T: ObjInterface + Unsize<Dyn> + ?Sized,
+    Dyn: ?Sized + 'a,
+{
+    let metadata = metadata(obj);
+    metadata.is_interface::<T>()
+}
+
+/// Returns a pointer to the downcasted interface if it is of type `T`.
+#[inline]
+pub fn downcast_interface<'a, T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const DynObj<T>>
+where
+    T: ObjInterface + Unsize<Dyn> + ?Sized,
+    Dyn: ?Sized + 'a,
+{
+    let metadata = metadata(obj);
+    metadata
+        .downcast_interface::<T>()
+        .map(|metadata| from_raw_parts(obj as *const (), metadata))
+}
+
+/// Returns a mutable pointer to the downcasted interface if it is of type `T`.
+#[inline]
+pub fn downcast_interface_mut<'a, T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut DynObj<T>>
+where
+    T: ObjInterface + Unsize<Dyn> + ?Sized,
+    Dyn: ?Sized + 'a,
+{
+    let metadata = metadata(obj);
+    metadata
+        .downcast_interface::<T>()
+        .map(|metadata| from_raw_parts_mut(obj as *mut (), metadata))
 }
 
 // pointer info
@@ -461,6 +579,7 @@ where
 /// # Safety
 ///
 /// See [`std::ptr::drop_in_place()`];
+#[inline]
 pub unsafe fn drop_in_place<Dyn: ?Sized>(obj: *mut DynObj<Dyn>) {
     let metadata = metadata(obj);
     if let Some(drop) = metadata.vtable_ptr.__internal_drop_in_place {
@@ -469,36 +588,49 @@ pub unsafe fn drop_in_place<Dyn: ?Sized>(obj: *mut DynObj<Dyn>) {
 }
 
 /// Returns the size of the type associated with this vtable.
+#[inline]
 pub fn size_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> usize {
     let metadata = metadata(obj);
     metadata.size_of()
 }
 
 /// Retrieves the alignment of the object.
+#[inline]
 pub fn align_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> usize {
     let metadata = metadata(obj);
     metadata.align_of()
 }
 
+/// Retrieves the layout of the contained type.
+#[inline]
+pub fn layout_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> Layout {
+    let metadata = metadata(obj);
+    metadata.layout()
+}
+
 /// Returns the id of the type associated with this vtable.
+#[inline]
 pub fn object_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid {
     let metadata = metadata(obj);
     metadata.object_id()
 }
 
 /// Returns the name of the type associated with this vtable.
+#[inline]
 pub fn object_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
     let metadata = metadata(obj);
     metadata.object_name()
 }
 
 /// Returns the id of the interface implemented with this vtable.
+#[inline]
 pub fn interface_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid {
     let metadata = metadata(obj);
     metadata.interface_id()
 }
 
 /// Returns the name of the interface implemented with this vtable.
+#[inline]
 pub fn interface_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
     let metadata = metadata(obj);
     metadata.interface_name()
@@ -589,7 +721,7 @@ impl VTableHead {
     pub const fn new<'a, T, Dyn>() -> Self
     where
         T: ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        Dyn: ObjInterface + ?Sized + 'a,
     {
         Self::new_embedded::<'a, T, Dyn>(0)
     }
@@ -598,9 +730,17 @@ impl VTableHead {
     pub const fn new_embedded<'a, T, Dyn>(offset: usize) -> Self
     where
         T: ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        Dyn: ObjInterface + ?Sized + 'a,
     {
-        let drop = if std::mem::needs_drop::<T>() { Some(drop_obj_in_place::<T> as _) } else { None };
+        unsafe extern "C-unwind" fn drop_ptr<T>(ptr: *mut ()) {
+            std::ptr::drop_in_place(ptr as *mut T)
+        }
+
+        let drop = if std::mem::needs_drop::<T>() {
+            Some(drop_ptr::<T> as _)
+        } else {
+            None
+        };
 
         Self {
             __internal_drop_in_place: drop,
@@ -619,7 +759,7 @@ impl VTableHead {
     }
 }
 
-unsafe impl<'a> ObjMetadataCompatible<'a> for VTableHead {}
+unsafe impl ObjMetadataCompatible for VTableHead {}
 
 /// Creates a new vtable for a given trait.
 #[macro_export]
@@ -640,40 +780,40 @@ macro_rules! base_interface {
 
         $crate::impl_upcast!{ impl $(< $($gen),+ >)? ($name $(< $($gen),+ >)? ) -> ($name $(< $($gen),+ >)?) obj: ObjMetadata<_> { unsafe { std::mem::transmute(obj) } } }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterface<'inner> for dyn $name $(< $($gen),+ >)? + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterfaceBase for dyn $name $(< $($gen),+ >)? + 'inner {
             type VTable = $vtable;
             const INTERFACE_ID: $crate::ptr::Uuid = $crate::ptr::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Send + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Send + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Sync + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Sync + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Unpin + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Unpin + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Send + Sync + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Send + Sync + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Send + Unpin + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Send + Unpin + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Sync + Unpin + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Sync + Unpin + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> for dyn $name $(< $($gen),+ >)? + Send + Sync + Unpin + 'inner {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjInterface for dyn $name $(< $($gen),+ >)? + Send + Sync + Unpin + 'inner {
             type Base = dyn $name $(< $($gen),+ >)? + 'inner;
         }
     };
@@ -682,17 +822,30 @@ macro_rules! base_interface {
 /// Implements the necessary traits for coercing a type to a [`IBase`] object.
 #[macro_export]
 macro_rules! base_object {
-    (#![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)] $name:ty) => {
+    (#![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)] impl $name:ty ) => {
         impl $crate::ptr::ObjectId for $name {
             const OBJECT_ID: $crate::ptr::Uuid =
                 $crate::ptr::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
         }
 
-        impl $crate::ptr::IBase for $name {}
-
-        impl<'a> $crate::ptr::FetchVTable<'a, dyn $crate::ptr::IBase + 'a> for $name {
+        impl<'inner> $crate::ptr::FetchVTable<dyn $crate::ptr::IBase + 'inner> for $name
+        {
             fn fetch_interface() -> &'static $crate::ptr::IBaseVTable {
-                static VTABLE: $crate::ptr::IBaseVTable = $crate::ptr::new_ibase_vtable::<$name>();
+                static VTABLE: $crate::ptr::IBaseVTable = $crate::ptr::IBaseVTable::new::<$name>();
+                &VTABLE
+            }
+        }
+    };
+    (#![uuid($u1:literal, $u2:literal, $u3:literal, $u4:literal, $u5:literal)] generic < $($gen:lifetime),+ > $name:ty => $elided:ty) => {
+        impl < $($gen),+ > $crate::ptr::ObjectId for $name {
+            const OBJECT_ID: $crate::ptr::Uuid =
+                $crate::ptr::new_uuid($u1, $u2, $u3, (($u4 as u64) << 48) | $u5 as u64);
+        }
+
+        impl<'inner, $($gen:'inner),+> $crate::ptr::FetchVTable<dyn $crate::ptr::IBase + 'inner> for $name
+        {
+            fn fetch_interface() -> &'static $crate::ptr::IBaseVTable {
+                static VTABLE: $crate::ptr::IBaseVTable = $crate::ptr::IBaseVTable::new::<$elided>();
                 &VTABLE
             }
         }
@@ -739,8 +892,9 @@ macro_rules! impl_upcast {
         $crate::impl_upcast!{ impl $(< $($gen),+ >)? inner (dyn $($source)* + Send + Sync + Unpin) -> (dyn $($dest)* + Send + Sync + Unpin) $obj $body }
     };
     (impl $(< $($gen:lifetime),+ >)? inner ($($source:tt)*) -> ($($dest:tt)*) $obj:ident $body:block) => {
-        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::CastSuper<'inner, $($dest)* + 'inner> for $($source)* + 'inner {
-            fn cast_super($obj: ObjMetadata<$($source)* + 'inner>) -> ObjMetadata<$($dest)* + 'inner> {
+        impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::CastSuper<$($dest)* + 'inner> for $($source)* + 'inner {
+            #[inline]
+            fn cast_super($obj: $crate::ptr::ObjMetadata<$($source)* + 'inner>) -> $crate::ptr::ObjMetadata<$($dest)* + 'inner> {
                 $body
             }
         }
@@ -759,7 +913,7 @@ macro_rules! impl_ibase_upcast {
         impl_ibase_upcast!{ impl inner (dyn IBase + Send + Sync + Unpin) }
     };
     (impl inner ($($dest:tt)*)) => {
-        impl<'a, 'b: 'a, T: Unsize<$($dest)* + 'a> + ?Sized + 'b> $crate::ptr::CastSuper<'a, $($dest)* + 'a> for T {
+        impl<'a, 'b: 'a, T: ObjInterface + Unsize<$($dest)* + 'a> + ?Sized + 'b> $crate::ptr::CastSuper<$($dest)* + 'a> for T {
             default fn cast_super(obj: ObjMetadata<T>) -> ObjMetadata<$($dest)* + 'a> {
                 unsafe { std::mem::transmute(obj) }
             }
@@ -773,7 +927,7 @@ macro_rules! base_vtable {
     // struct with named fields
     (
         $(#[$attr:meta])*
-        #![interface = $trait:tt]
+        #![interface = $($trait:tt)+]
         $vis:vis struct $name:ident $(< $($gen:lifetime),+ >)? {
             $(
                 $(#[$elem_attr:meta])* $elem_vis:vis $elem:ident: $elem_ty:ty
@@ -783,22 +937,20 @@ macro_rules! base_vtable {
         $(#[$attr])*
         #[repr(C)]
         #[allow(missing_debug_implementations)]
-        $vis struct $name $(< $($gen),+ >)? {
+        $vis struct $name {
             /// Common head of the vtable.
             pub __internal_head: $crate::ptr::VTableHead,
-            /// Marker for the contained trait.
-            pub __internal_phantom: std::marker::PhantomData<for<'inner> fn(*const (dyn $trait + 'inner))>,
             $($(#[$elem_attr])* $elem_vis $elem: $elem_ty),*
         }
 
-        impl<'inner $(, $($gen:'inner),+)?> $name $(< $($gen),+ >)? {
+        impl<'inner $(, $($gen:'inner),+)?> $name {
             /// Constructs a new instance of the vtable.
             #[allow(clippy::type_complexity)]
             #[allow(clippy::too_many_arguments)]
             pub const fn new<T>($($elem: $elem_ty),*) -> Self
-            where T: $trait + $crate::ptr::ObjectId + 'inner
+            where T: $($trait)+ + $crate::ptr::ObjectId + 'inner
             {
-                Self::new_embedded::<T, dyn $trait + 'inner>(0, $($elem),*)
+                Self::new_embedded::<T, dyn $($trait)+ + 'inner>(0, $($elem),*)
             }
 
             /// Constructs a new instance of the vtable when embedded into another vtable.
@@ -807,27 +959,17 @@ macro_rules! base_vtable {
             pub const fn new_embedded<T, Dyn>(internal_offset: usize, $($elem: $elem_ty),*) -> Self
             where
                 T: $crate::ptr::ObjectId + std::marker::Unsize<Dyn> + 'inner,
-                Dyn: $crate::ptr::ObjMetadataInterfaceCompatibility<'inner> + ?Sized
+                Dyn: $crate::ptr::ObjInterface + ?Sized + 'inner
             {
                 Self {
                     __internal_head: $crate::ptr::VTableHead::new_embedded::<'inner, T, Dyn>(internal_offset),
-                    __internal_phantom: std::marker::PhantomData,
                     $($elem),*
                 }
             }
         }
 
-        unsafe impl<'inner $(, $($gen:'inner),+)?> $crate::ptr::ObjMetadataCompatible<'inner> for $name $(< $($gen),+ >)? {}
+        unsafe impl $crate::ptr::ObjMetadataCompatible for $name {}
     };
-}
-
-/// Drops the pointed to value.
-///
-/// # Safety
-///
-/// See [std::ptr::drop_in_place].
-pub unsafe extern "C-unwind" fn drop_obj_in_place<T>(ptr: *mut ()) {
-    std::ptr::drop_in_place::<T>(ptr as *mut T)
 }
 
 /// Constructs a new [`Uuid`].
@@ -842,6 +984,8 @@ base_interface! {
     #![uuid(0x0, 0x0, 0x0, 0x0, 0x0)]
     pub trait IBase: () {}
 }
+
+impl<T: ?Sized> IBase for T {}
 
 base_vtable! {
     /// VTable of the [`IBase`] trait.
@@ -872,41 +1016,38 @@ pub trait DynIBase<'a, Dyn: IBase + ?Sized + 'a> {
     /// Returns the super object.
     fn cast_super<U>(&self) -> &DynObj<U>
     where
-        Dyn: CastSuper<'a, U>,
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized;
+        Dyn: CastSuper<U> + 'a,
+        U: ObjInterface + ?Sized + 'a;
 
     /// Returns the mutable super object.
     fn cast_super_mut<U>(&mut self) -> &mut DynObj<U>
     where
-        Dyn: CastSuper<'a, U>,
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized;
+        Dyn: CastSuper<U> + 'a,
+        U: ObjInterface + ?Sized + 'a;
 
     /// Returns if the a certain interface is implemented.
     fn is_interface<U>(&self) -> bool
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized;
+        U: ObjInterface + Unsize<Dyn> + ?Sized + 'a;
 
     /// Returns the downcasted interface if it is of type `U`.
     fn downcast_interface<U>(&self) -> Option<&DynObj<U>>
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + Unsize<Dyn> + ?Sized;
+        U: ObjInterface + Unsize<Dyn> + ?Sized + 'a;
 
     /// Returns the mutable downcasted interface if it is of type `U`.
     fn downcast_interface_mut<U>(&mut self) -> Option<&mut DynObj<U>>
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + Unsize<Dyn> + ?Sized;
+        U: ObjInterface + Unsize<Dyn> + ?Sized + 'a;
 }
 
-impl<T: IBase + ?Sized> IBase for DynObj<T> {}
-
-impl<'a, T: IBase + ?Sized + 'a> DynIBase<'a, T> for DynObj<T> {
+impl<'a, T: ?Sized + 'a> DynIBase<'a, T> for DynObj<T> {
     #[inline]
     fn is<U>(&self) -> bool
     where
         U: ObjectId + Unsize<T>,
     {
-        let metadata = metadata(self);
-        metadata.is::<U>()
+        is::<U, _>(self)
     }
 
     #[inline]
@@ -914,11 +1055,8 @@ impl<'a, T: IBase + ?Sized + 'a> DynIBase<'a, T> for DynObj<T> {
     where
         U: ObjectId + Unsize<T>,
     {
-        if self.is::<U>() {
-            unsafe { Some(&*(self as *const _ as *const U)) }
-        } else {
-            None
-        }
+        // safety: the pointer stems from the reference so it is always safe
+        downcast::<U, _>(self).map(|u| unsafe { &*u })
     }
 
     #[inline]
@@ -926,67 +1064,53 @@ impl<'a, T: IBase + ?Sized + 'a> DynIBase<'a, T> for DynObj<T> {
     where
         U: ObjectId + Unsize<T>,
     {
-        if self.is::<U>() {
-            unsafe { Some(&mut *(self as *mut _ as *mut U)) }
-        } else {
-            None
-        }
+        // safety: the pointer stems from the reference so it is always safe
+        downcast_mut::<U, _>(self).map(|u| unsafe { &mut *u })
     }
 
     #[inline]
     fn cast_super<U>(&self) -> &DynObj<U>
     where
-        T: CastSuper<'a, U>,
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        T: CastSuper<U> + 'a,
+        U: ObjInterface + ?Sized + 'a,
     {
-        let metadata = metadata(self);
-        let metadata = metadata.cast_super::<U>();
-        unsafe { &*(from_raw_parts(self as *const _ as *const (), metadata)) }
+        // safety: the pointer stems from the reference so it is always safe
+        unsafe { &*cast_super::<U, _>(self) }
     }
 
     #[inline]
     fn cast_super_mut<U>(&mut self) -> &mut DynObj<U>
     where
-        T: CastSuper<'a, U>,
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        T: CastSuper<U> + 'a,
+        U: ObjInterface + ?Sized + 'a,
     {
-        let metadata = metadata(self);
-        let metadata = metadata.cast_super::<U>();
-        unsafe { &mut *(from_raw_parts_mut(self as *mut _ as *mut (), metadata)) }
+        // safety: the pointer stems from the reference so it is always safe
+        unsafe { &mut *cast_super_mut::<U, _>(self) }
     }
 
     #[inline]
     fn is_interface<U>(&self) -> bool
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + ?Sized,
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
     {
-        let metadata = metadata(self);
-        metadata.is_interface::<U>()
+        is_interface::<U, _>(self)
     }
 
     #[inline]
     fn downcast_interface<U>(&self) -> Option<&DynObj<U>>
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + Unsize<T> + ?Sized,
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
     {
-        let metadata = metadata(self);
-        if let Some(metadata) = metadata.downcast_interface::<U>() {
-            unsafe { Some(&*(from_raw_parts(self as *const _ as *const (), metadata))) }
-        } else {
-            None
-        }
+        // safety: the pointer stems from the reference so it is always safe
+        downcast_interface::<U, _>(self).map(|u| unsafe { &*u })
     }
 
     #[inline]
     fn downcast_interface_mut<U>(&mut self) -> Option<&mut DynObj<U>>
     where
-        U: ObjMetadataInterfaceCompatibility<'a> + Unsize<T> + ?Sized,
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
     {
-        let metadata = metadata(self);
-        if let Some(metadata) = metadata.downcast_interface::<U>() {
-            unsafe { Some(&mut *(from_raw_parts_mut(self as *mut _ as *mut (), metadata))) }
-        } else {
-            None
-        }
+        // safety: the pointer stems from the reference so it is always safe
+        downcast_interface_mut::<U, _>(self).map(|u| unsafe { &mut *u })
     }
 }

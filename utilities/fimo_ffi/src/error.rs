@@ -1,292 +1,657 @@
 //! Error type.
-use crate::marker::SendSyncMarker;
-use crate::object::CoerceObjectMut;
-use crate::{fimo_object, fimo_vtable, ObjBox, Optional, StrInner};
-use fimo_object::object::{ObjPtrCompat, ObjectWrapper};
-use fimo_object::{impl_vtable, is_object};
-use std::fmt::Write;
+use crate::fmt::{FmtWrapper, Formatter, IDebug, IDebugVTable, IDisplay, IDisplayVTable};
+use crate::ptr::{
+    from_raw, into_raw, metadata, CastSuper, FetchVTable, ObjInterface, ObjMetadata, ObjectId,
+    RawObj,
+};
+use crate::{base_interface, base_object, base_vtable, impl_upcast, DynObj, ObjBox, Optional};
+use std::marker::Unsize;
+use std::mem::MaybeUninit;
+use std::ops::{Deref, DerefMut};
+use std::ptr::addr_of;
 
-fimo_object! {
-    /// Interface of an error.
-    // Don't generate a debug implementation, as we are gonna derive it manually.
-    #![no_debug]
+base_interface! {
+    /// [`Error`]: std::error::Error equivalent for [`DynObj`] objects.
     #![vtable = IErrorVTable]
-    pub struct IError;
-}
-
-impl IError {
-    /// Lower-level source, if it exists.
-    #[inline]
-    pub fn source(&self) -> Option<&IError> {
-        let (ptr, vtable) = crate::object::into_raw_parts(&self.inner);
-        unsafe { (vtable.source)(ptr).into_rust().map(|e| &*e) }
-    }
-}
-
-impl std::fmt::Debug for IError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut wrapper = FormatterWrapper { inner: f };
-        let w = IWriter::from_object_mut_raw(wrapper.coerce_obj_mut());
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe {
-            (vtable.debug)(ptr, w)
-                .into_rust()
-                .map_err(|_| std::fmt::Error)
+    #![uuid(0x4c9db273, 0xb5f5, 0x4edf, 0x9658, 0x4739f2bd4bc5)]
+    pub trait IError: (IDebug + IDisplay) {
+        /// The lower-level source of this error, if any.
+        fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+            None
         }
     }
 }
 
-impl std::fmt::Display for IError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut wrapper = FormatterWrapper { inner: f };
-        let w = IWriter::from_object_mut_raw(wrapper.coerce_obj_mut());
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe {
-            (vtable.display)(ptr, w)
-                .into_rust()
-                .map_err(|_| std::fmt::Error)
-        }
-    }
-}
-
-fimo_vtable! {
-    /// VTable of an [`IError`].
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![marker = SendSyncMarker]
-    #![uuid(0xe7af13dd, 0xadfd, 0x4541, 0xa0fa, 0x173b2f200e65)]
+base_vtable! {
+    /// VTable for [`IError`] objects.
+    #![interface = IError]
     pub struct IErrorVTable {
-        /// Lower-level source, if it exists.
-        pub source: unsafe extern "C" fn(*const ()) -> Optional<*const IError>,
-        /// Debug formatted error info.
-        pub debug: unsafe extern "C" fn(*const (), *mut IWriter) -> crate::Result<(), WriteError>,
-        /// Display formatted error info.
-        pub display: unsafe extern "C" fn(*const (), *mut IWriter) -> crate::Result<(), WriteError>,
+        /// VTable to the [`IDebug`] implementation.
+        pub debug: IDebugVTable,
+        /// VTable to the [`IDisplay`] implementation.
+        pub display: IDisplayVTable,
+        /// The lower-level source of this error, if any.
+        pub source: extern "C-unwind" fn(*const ()) -> Optional<RawObj<dyn IError + 'static>>
     }
 }
 
-/// The error type that is returned from writing a message into a stream.
-#[derive(Copy, Clone, Debug, Default, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct WriteError;
+impl_upcast! {
+    impl (IError) -> (IDebug) obj: ObjMetadata<_> {
+        let vtable: &IErrorVTable = obj.vtable();
+        ObjMetadata::new(&vtable.debug)
+    }
+}
 
-impl std::fmt::Display for WriteError {
+impl_upcast! {
+    impl (IError) -> (IDisplay) obj: ObjMetadata<_> {
+        let vtable: &IErrorVTable = obj.vtable();
+        ObjMetadata::new(&vtable.display)
+    }
+}
+
+impl IErrorVTable {
+    /// Constructs a new vtable for a given type.
+    #[inline]
+    pub const fn new_for<'a, T>() -> Self
+    where
+        T: IError + ObjectId + 'a,
+    {
+        Self::new_for_embedded::<'a, T, dyn IError>(0)
+    }
+
+    /// Constructs a new vtable for a given type and interface with a custom offset.
+    #[inline]
+    pub const fn new_for_embedded<'a, T, Dyn>(offset: usize) -> Self
+    where
+        T: IError + ObjectId + Unsize<Dyn> + 'a,
+        Dyn: ObjInterface + ?Sized + 'a,
+    {
+        const UNINIT: MaybeUninit<IErrorVTable> = MaybeUninit::uninit();
+        const UNINIT_PTR: *const IErrorVTable = UNINIT.as_ptr();
+        const IDEBUG_VTABLE_PTR: *const IDebugVTable = unsafe { addr_of!((*UNINIT_PTR).debug) };
+        const IDISPLAY_VTABLE_PTR: *const IDisplayVTable =
+            unsafe { addr_of!((*UNINIT_PTR).display) };
+        const IDEBUG_OFFSET: usize = unsafe {
+            (IDEBUG_VTABLE_PTR as *const u8).offset_from(UNINIT_PTR as *const u8) as usize
+        };
+        const IDISPLAY_OFFSET: usize = unsafe {
+            (IDISPLAY_VTABLE_PTR as *const u8).offset_from(UNINIT_PTR as *const u8) as usize
+        };
+
+        extern "C-unwind" fn source<T: IError>(
+            ptr: *const (),
+        ) -> Optional<RawObj<dyn IError + 'static>> {
+            let t = unsafe { &*(ptr as *const T) };
+            t.source().map(|s| into_raw(s)).into()
+        }
+
+        Self::new_embedded::<T, Dyn>(
+            offset,
+            IDebugVTable::new_for_embedded::<T, Dyn>(IDEBUG_OFFSET),
+            IDisplayVTable::new_for_embedded::<T, Dyn>(IDISPLAY_OFFSET),
+            source::<T> as _,
+        )
+    }
+}
+
+impl<'a, T: IError + ?Sized> IError for &'a T {
+    #[inline]
+    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+        (*self).source()
+    }
+}
+
+impl<T: IError> IError for ObjBox<T> {
+    #[inline]
+    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+        (**self).source()
+    }
+}
+
+impl<'a, T> IError for DynObj<T>
+where
+    T: CastSuper<dyn IDebug + 'a>
+        + CastSuper<dyn IDisplay + 'a>
+        + CastSuper<dyn IError + 'a>
+        + ?Sized,
+{
+    #[inline]
+    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+        let vtable: &IErrorVTable = metadata(self).super_vtable::<dyn IError + 'a>();
+        (vtable.source)(self as *const _ as _)
+            .into_rust()
+            .map(|s| unsafe { &*(from_raw(s)) })
+    }
+}
+
+impl<'a> From<&'_ str> for ObjBox<DynObj<dyn IError + 'a>> {
+    #[inline]
+    fn from(s: &'_ str) -> Self {
+        From::from(String::from(s))
+    }
+}
+
+impl<'a> From<&'_ str> for ObjBox<DynObj<dyn IError + Send + Sync + 'a>> {
+    #[inline]
+    fn from(s: &'_ str) -> Self {
+        From::from(String::from(s))
+    }
+}
+
+impl From<crate::String> for ObjBox<DynObj<dyn IError>> {
+    #[inline]
+    fn from(v: crate::String) -> Self {
+        let obj: ObjBox<DynObj<dyn IError + Send + Sync>> = From::from(v);
+        ObjBox::cast_super(obj)
+    }
+}
+
+impl From<crate::String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
+    #[inline]
+    fn from(v: crate::String) -> Self {
+        struct StringError {
+            v: crate::String,
+        }
+
+        base_object! {
+            #![uuid(0x8626eb10, 0x89d3, 0x4a75, 0xb11d, 0x457e3c4daa9c)]
+            impl StringError
+        }
+
+        impl IDebug for StringError {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{:?}", &self.v)
+            }
+        }
+
+        impl IDisplay for StringError {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{:?}", &self.v)
+            }
+        }
+
+        impl IError for StringError {
+            fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+                None
+            }
+        }
+
+        impl FetchVTable<dyn IError> for StringError {
+            fn fetch_interface() -> &'static IErrorVTable {
+                static VTABLE: IErrorVTable = IErrorVTable::new_for::<StringError>();
+                &VTABLE
+            }
+        }
+
+        let v = StringError { v };
+        let obj = ObjBox::new(v);
+        ObjBox::coerce_obj(obj)
+    }
+}
+
+impl From<String> for ObjBox<DynObj<dyn IError>> {
+    #[inline]
+    fn from(v: String) -> Self {
+        let obj: ObjBox<DynObj<dyn IError + Send + Sync>> = From::from(v);
+        ObjBox::cast_super(obj)
+    }
+}
+
+impl From<String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
+    #[inline]
+    fn from(v: String) -> Self {
+        struct StringError {
+            v: String,
+        }
+
+        base_object! {
+            #![uuid(0xb569493b, 0xe573, 0x4efa, 0x84c9, 0x8b514e861a7b)]
+            impl StringError
+        }
+
+        impl IDebug for StringError {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{:?}", &self.v)
+            }
+        }
+
+        impl IDisplay for StringError {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{:?}", &self.v)
+            }
+        }
+
+        impl IError for StringError {
+            fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+                None
+            }
+        }
+
+        impl FetchVTable<dyn IError> for StringError {
+            fn fetch_interface() -> &'static IErrorVTable {
+                static VTABLE: IErrorVTable = IErrorVTable::new_for::<StringError>();
+                &VTABLE
+            }
+        }
+
+        let v = StringError { v };
+        let obj = ObjBox::new(v);
+        ObjBox::coerce_obj(obj)
+    }
+}
+
+impl<'a, T: IError + 'a> From<T> for ObjBox<DynObj<dyn IError + 'a>> {
+    #[inline]
+    default fn from(v: T) -> Self {
+        struct ErrorWrapper<'a> {
+            e: Box<dyn IError + 'a>,
+        }
+
+        base_object! {
+            #![uuid(0x30fd9f73, 0x42df, 0x41bc, 0xb462, 0x94385325cff7)]
+            generic<'a> ErrorWrapper<'a> => ErrorWrapper<'_>
+        }
+
+        impl IDebug for ErrorWrapper<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{:?}", FmtWrapper::new_ref(&self.e))
+            }
+        }
+
+        impl IDisplay for ErrorWrapper<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{}", FmtWrapper::new_ref(&self.e))
+            }
+        }
+
+        impl IError for ErrorWrapper<'_> {
+            fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+                self.e.source()
+            }
+        }
+
+        impl<'a> FetchVTable<dyn IError + 'a> for ErrorWrapper<'a> {
+            fn fetch_interface() -> &'static IErrorVTable {
+                static VTABLE: IErrorVTable = IErrorVTable::new_for::<ErrorWrapper<'_>>();
+                &VTABLE
+            }
+        }
+
+        let v = ErrorWrapper { e: Box::new(v) };
+        From::from(v)
+    }
+}
+
+impl<'a, T: IError + FetchVTable<dyn IError + 'a> + 'a> From<T>
+    for ObjBox<DynObj<dyn IError + 'a>>
+{
+    #[inline]
+    fn from(v: T) -> Self {
+        let obj = ObjBox::new(v);
+        ObjBox::coerce_obj(obj)
+    }
+}
+
+impl<'a, T: IError + Send + Sync + 'a> From<T> for ObjBox<DynObj<dyn IError + Send + Sync + 'a>> {
+    #[inline]
+    default fn from(v: T) -> Self {
+        struct ErrorSendSync<'a> {
+            e: Box<dyn IError + Send + Sync + 'a>,
+        }
+
+        base_object! {
+            #![uuid(0x5c76cb7f, 0x687c, 0x45a3, 0x94b3, 0x6c164fa923a6)]
+            generic<'a> ErrorSendSync<'a> => ErrorSendSync<'_>
+        }
+
+        impl IDebug for ErrorSendSync<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{:?}", FmtWrapper::new_ref(&self.e))
+            }
+        }
+
+        impl IDisplay for ErrorSendSync<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+                write!(f, "{}", FmtWrapper::new_ref(&self.e))
+            }
+        }
+
+        impl IError for ErrorSendSync<'_> {
+            fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+                self.e.source()
+            }
+        }
+
+        impl<'a> FetchVTable<dyn IError + 'a> for ErrorSendSync<'a> {
+            fn fetch_interface() -> &'static IErrorVTable {
+                static VTABLE: IErrorVTable = IErrorVTable::new_for::<ErrorSendSync<'_>>();
+                &VTABLE
+            }
+        }
+
+        let v = ErrorSendSync { e: Box::new(v) };
+        From::from(v)
+    }
+}
+
+impl<'a, T: IError + Send + Sync + FetchVTable<dyn IError + 'a> + 'a> From<T>
+    for ObjBox<DynObj<dyn IError + Send + Sync + 'a>>
+{
+    #[inline]
+    fn from(v: T) -> Self {
+        let obj = ObjBox::new(v);
+        ObjBox::coerce_obj(obj)
+    }
+}
+
+/// Wraps an [`IError`] so that it implements [`Error`](std::error::Error).
+///
+/// # Note
+///
+/// We currently don't support returning the inner error and instead return [`None`].
+#[repr(transparent)]
+pub struct ErrorWrapper<T: IError + ?Sized> {
+    inner: FmtWrapper<T>,
+}
+
+impl<T: IError + ?Sized> ErrorWrapper<T> {
+    /// Constructs a new instance of an `ErrorWrapper` taking ownership of the value.
+    #[inline]
+    pub const fn new(inner: T) -> Self
+    where
+        T: Sized,
+    {
+        Self {
+            inner: FmtWrapper::new(inner),
+        }
+    }
+
+    /// Constructs a new instance of an `ErrorWrapper` borrowing the value.
+    #[inline]
+    pub const fn new_ref(inner: &T) -> &Self {
+        unsafe { &*(FmtWrapper::new_ref(inner) as *const _ as *const Self) }
+    }
+
+    /// Constructs a new instance of an `ErrorWrapper` borrowing the value mutable.
+    #[inline]
+    pub fn new_mut(inner: &mut T) -> &mut Self {
+        unsafe { &mut *(FmtWrapper::new_mut(inner) as *mut _ as *mut Self) }
+    }
+}
+
+impl<T: IError + ?Sized> Deref for ErrorWrapper<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<T: IError + ?Sized> DerefMut for ErrorWrapper<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.inner
+    }
+}
+
+impl<T: IError + ?Sized> std::fmt::Debug for ErrorWrapper<T> {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt("an error occurred when writing into a stream", f)
+        write!(f, "{:?}", &self.inner)
     }
 }
 
-fimo_object! {
-    /// Interface for writing into a steam/buffer.
-    #![vtable = IWriterVTable]
-    pub struct IWriter;
-}
-
-impl IWriter {
-    /// Writes a string into the buffer/stream.
-    pub fn write_str(&mut self, s: &str) -> Result<(), WriteError> {
-        let (ptr, vtable) = self.into_raw_parts_mut();
-        unsafe { (vtable.write_str)(ptr, s.into()).into_rust() }
-    }
-
-    /// Writes a character into the buffer/stream.
-    pub fn write_char(&mut self, c: char) -> Result<(), WriteError> {
-        let (ptr, vtable) = self.into_raw_parts_mut();
-        unsafe { (vtable.write_char)(ptr, c as u32).into_rust() }
-    }
-}
-
-fimo_vtable! {
-    /// VTable of an [`IWriter`].
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![uuid(0x75cff6a6, 0xf163, 0x4578, 0x8290, 0x20a4d157c338)]
-    pub struct IWriterVTable {
-        /// Writes a string into the buffer/stream.
-        pub write_str: unsafe extern "C" fn(*mut (), StrInner<false>) -> crate::Result<(), WriteError>,
-        /// Writes a character into the buffer/stream.
-        pub write_char: unsafe extern "C" fn(*mut (), u32) -> crate::Result<(), WriteError>
-    }
-}
-
-struct FormatterWrapper<'a, 'b> {
-    inner: &'a mut std::fmt::Formatter<'b>,
-}
-
-impl std::fmt::Write for FormatterWrapper<'_, '_> {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.inner.write_str(s)
-    }
-
-    fn write_char(&mut self, c: char) -> std::fmt::Result {
-        self.inner.write_char(c)
-    }
-
-    #[allow(clippy::needless_arbitrary_self_type)]
-    fn write_fmt(self: &mut Self, args: std::fmt::Arguments<'_>) -> std::fmt::Result {
-        self.inner.write_fmt(args)
-    }
-}
-
-is_object! { #![uuid(0x86f338ae, 0x9c3d, 0x4ec7, 0xb9e4, 0x92c3deb010dd)] FormatterWrapper<'_, '_> }
-
-impl_vtable! {
-    impl mut IWriterVTable => FormatterWrapper<'_, '_> {
-        unsafe extern "C" fn write_str(
-            ptr: *mut (),
-            s: StrInner<false>,
-        ) -> crate::Result<(), WriteError> {
-            let w = &mut *(ptr as *mut FormatterWrapper<'_, '_>);
-            w.write_str(s.into()).map_err(|_| WriteError).into()
-        }
-
-        unsafe extern "C" fn write_char(ptr: *mut (), c: u32) -> crate::Result<(), WriteError> {
-            let w = &mut *(ptr as *mut FormatterWrapper<'_, '_>);
-            let c = char::from_u32_unchecked(c);
-            w.write_char(c).map_err(|_| WriteError).into()
-        }
-    }
-}
-
-/// Trait for casting a type to a boxed error.
-pub trait ToBoxedError<B> {
-    /// Boxes the type to the specified error value.
-    fn to_error(self) -> B;
-}
-
-/// Trait for complex errors wrapping an internal error.
-pub trait InnerError: std::fmt::Debug + std::fmt::Display + Send + Sync {
-    /// Returns a reference to the internal error.
-    fn source(&self) -> Option<&IError>;
-}
-
-impl InnerError for &'_ str {
+impl<T: IError + ?Sized> std::fmt::Display for ErrorWrapper<T> {
     #[inline]
-    fn source(&self) -> Option<&IError> {
-        None
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &self.inner)
     }
 }
 
-impl InnerError for String {
+// we currently don't support returning the source error, instead
+// we simply return `None`.
+impl<T: IError + ?Sized> std::error::Error for ErrorWrapper<T> {}
+
+/// Error type for modules.
+#[repr(C)]
+pub struct Error {
+    repr: ErrorRepr,
+}
+
+impl Error {
+    /// Creates a new error from a known kind of error as well as an arbitrary payload.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::error::{Error, ErrorKind};
+    ///
+    /// // errors can be created from strings
+    /// let custom_error = Error::new(ErrorKind::Unknown, "oh no!");
+    /// ```
+    pub fn new(
+        kind: ErrorKind,
+        error: impl Into<ObjBox<DynObj<dyn IError + Send + Sync>>>,
+    ) -> Error {
+        Error {
+            repr: ErrorRepr::Custom(Box::new(CustomError {
+                kind,
+                error: error.into(),
+            })),
+        }
+    }
+
+    /// Consumes the `Error`, returning its inner error (if any).
+    ///
+    /// If this [`Error`] was constructed via [`new`] then this function will
+    /// return [`Some`], otherwise it will return [`None`].
+    ///
+    /// [`new`]: Error::new
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::error::{Error, ErrorKind, ErrorWrapper};
+    ///
+    /// fn print_error(err: Error) {
+    ///     if let Some(inner_err) = err.into_inner() {
+    ///         println!("Inner error: {}", ErrorWrapper::new_ref(&*inner_err));
+    ///     } else {
+    ///         println!("No inner error");
+    ///     }
+    /// }
+    ///
+    /// fn main() {
+    ///     // Will print "No inner error".
+    ///     print_error(ErrorKind::NotFound.into());
+    ///     // Will print "Inner error: ...".
+    ///     print_error(Error::new(ErrorKind::Unknown, "oh no!"));
+    /// }
+    /// ```
+    pub fn into_inner(self) -> Option<ObjBox<DynObj<dyn IError + Send + Sync>>> {
+        match self.repr {
+            ErrorRepr::Simple(_) => None,
+            ErrorRepr::Custom(c) => Some(c.error),
+        }
+    }
+
+    /// Returns the corresponding [`ErrorKind`] of this error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_ffi::error::{Error, ErrorKind};
+    ///
+    /// fn print_error(err: Error) {
+    ///     println!("{:?}", err.kind());
+    /// }
+    ///
+    /// fn main() {
+    ///     // Will print "NotFound".
+    ///     print_error(ErrorKind::NotFound.into());
+    ///     // Will print "Unknown".
+    ///     print_error(Error::new(ErrorKind::Unknown, "oh no!"));
+    /// }
+    /// ```
+    pub fn kind(&self) -> ErrorKind {
+        match self.repr {
+            ErrorRepr::Simple(kind) => kind,
+            ErrorRepr::Custom(ref c) => c.kind,
+        }
+    }
+}
+
+impl From<ErrorKind> for Error {
     #[inline]
-    fn source(&self) -> Option<&IError> {
-        None
+    fn from(kind: ErrorKind) -> Self {
+        Self {
+            repr: ErrorRepr::Simple(kind),
+        }
     }
 }
 
-impl InnerError for IError {
+impl std::fmt::Debug for Error {
     #[inline]
-    fn source(&self) -> Option<&IError> {
-        self.source()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.repr, f)
     }
 }
 
-impl<T: ObjPtrCompat + InnerError + ?Sized> InnerError for ObjBox<T> {
+impl std::fmt::Display for Error {
     #[inline]
-    fn source(&self) -> Option<&IError> {
-        (**self).source()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.repr {
+            ErrorRepr::Simple(kind) => write!(f, "{}", kind.as_str()),
+            ErrorRepr::Custom(ref c) => std::fmt::Display::fmt(FmtWrapper::new_ref(&c.error), f),
+        }
     }
 }
 
-impl<T: InnerError + ?Sized> InnerError for Box<T> {
+impl std::error::Error for Error {
     #[inline]
-    fn source(&self) -> Option<&IError> {
-        (**self).source()
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        ErrorWrapper::new_ref(self).source()
     }
 }
 
-impl<'a> ToBoxedError<Box<dyn std::error::Error + Send + Sync>> for &'a str {
-    fn to_error(self) -> Box<dyn std::error::Error + Send + Sync> {
-        self.into()
+impl IDebug for Error {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+        write!(f, "{:?}", self)
     }
 }
 
-trait DisplayDebug: std::fmt::Display + std::fmt::Debug + Send + Sync {}
-
-impl<T: std::fmt::Display + std::fmt::Debug + Send + Sync + ?Sized> DisplayDebug for T {}
-
-impl<T: DisplayDebug + 'static> ToBoxedError<ObjBox<IError>> for T {
-    default fn to_error(self) -> ObjBox<IError> {
-        let b = ObjBox::new(SimpleErrorWrapper { e: Box::new(self) });
-        ObjBox::coerce_object(b)
+impl IDisplay for Error {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+        write!(f, "{}", self)
     }
 }
 
-impl<T: InnerError + 'static> ToBoxedError<ObjBox<IError>> for T {
-    fn to_error(self) -> ObjBox<IError> {
-        let b = ObjBox::new(ErrorWrapper { e: Box::new(self) });
-        ObjBox::coerce_object(b)
-    }
-}
-
-#[allow(missing_debug_implementations)]
-struct SimpleErrorWrapper {
-    e: Box<dyn DisplayDebug>,
-}
-
-is_object! { #![uuid(0xf1aa569c, 0xdf5c, 0x4eb6, 0xa726, 0x1f717e1413f8)] SimpleErrorWrapper }
-
-impl_vtable! {
-    impl mut IErrorVTable => SimpleErrorWrapper {
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn source(_e: *const ()) -> Optional<*const IError> {
-            Optional::None
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn debug(e: *const (), w: *mut IWriter) -> crate::Result<(), WriteError> {
-            let e = &*(e as *const SimpleErrorWrapper);
-            let w = &mut *w;
-
-            let s = format!("{:?}", e.e);
-            w.write_str(s.as_str()).into()
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn display(
-            e: *const (),
-            w: *mut IWriter,
-        ) -> crate::Result<(), WriteError> {
-            let e = &*(e as *const SimpleErrorWrapper);
-            let w = &mut *w;
-
-            let s = format!("{}", e.e);
-            w.write_str(s.as_str()).into()
+impl IError for Error {
+    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+        match self.repr {
+            ErrorRepr::Simple(_) => None,
+            ErrorRepr::Custom(ref c) => c.error.source(),
         }
     }
 }
 
-#[allow(missing_debug_implementations)]
-struct ErrorWrapper {
-    e: Box<dyn InnerError>,
+/// gRPC status codes used by [`Error`].
+///
+/// These variants match the [gRPC status codes].
+///
+/// [gRPC status codes]: https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc
+#[repr(i8)]
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ErrorKind {
+    /// The operation was cancelled.
+    Cancelled = 1,
+    /// Unknown error.
+    Unknown = 2,
+    /// Client specified an invalid argument.
+    InvalidArgument = 3,
+    /// Deadline expired before operation could complete.
+    DeadlineExceeded = 4,
+    /// Some requested entity was not found.
+    NotFound = 5,
+    /// The entity that a client attempted to create already exists.
+    AlreadyExists = 6,
+    /// The caller does not have permission to execute the specified operation.
+    PermissionDenied = 7,
+    /// Some resource has been exhausted.
+    ResourceExhausted = 8,
+    /// The system is not in a state required for the operation's execution.
+    FailedPrecondition = 9,
+    /// The operation was aborted.
+    Aborted = 10,
+    /// The operation was attempted past the valid range.
+    OutOfRange = 11,
+    /// The operation is not implemented or is not supported/enabled.
+    Unimplemented = 12,
+    /// Internal error.
+    Internal = 13,
+    /// The service is currently unavailable.
+    Unavailable = 14,
+    /// Unrecoverable data loss or corruption.
+    DataLoss = 15,
+    /// The request does not have valid authentication credentials for the operation.
+    Unauthenticated = 16,
 }
 
-is_object! { #![uuid(0x02c27279, 0xfdc1, 0x4e15, 0x8e6b, 0xe4e0b5be2a7b)] ErrorWrapper }
-
-impl_vtable! {
-    impl mut IErrorVTable => ErrorWrapper {
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn source(e: *const ()) -> Optional<*const IError> {
-            let e = &*(e as *const ErrorWrapper);
-            e.e.source().map(|i| i as _).into()
+impl ErrorKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ErrorKind::Cancelled => "cancelled",
+            ErrorKind::Unknown => "unknown error",
+            ErrorKind::InvalidArgument => "invalid argument specified",
+            ErrorKind::DeadlineExceeded => "operation deadline exceeded",
+            ErrorKind::NotFound => "entity not found",
+            ErrorKind::AlreadyExists => "entity already exists",
+            ErrorKind::PermissionDenied => "permission denied",
+            ErrorKind::ResourceExhausted => "resource exhausted",
+            ErrorKind::FailedPrecondition => "precondition failed",
+            ErrorKind::Aborted => "aborted",
+            ErrorKind::OutOfRange => "out of range",
+            ErrorKind::Unimplemented => "unimplemented",
+            ErrorKind::Internal => "internal error",
+            ErrorKind::Unavailable => "unavailable",
+            ErrorKind::DataLoss => "data loss",
+            ErrorKind::Unauthenticated => "unauthenticated",
         }
+    }
+}
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn debug(e: *const (), w: *mut IWriter) -> crate::Result<(), WriteError> {
-            let e = &*(e as *const ErrorWrapper);
-            let w = &mut *w;
+#[repr(C)]
+enum ErrorRepr {
+    Simple(ErrorKind),
+    Custom(Box<CustomError>),
+}
 
-            let s = format!("{:?}", e.e);
-            w.write_str(s.as_str()).into()
+impl std::fmt::Debug for ErrorRepr {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorRepr::Simple(kind) => f.debug_tuple("Kind").field(&kind).finish(),
+            ErrorRepr::Custom(ref c) => std::fmt::Debug::fmt(&c, f),
         }
+    }
+}
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn display(
-            e: *const (),
-            w: *mut IWriter,
-        ) -> crate::Result<(), WriteError> {
-            let e = &*(e as *const ErrorWrapper);
-            let w = &mut *w;
+#[repr(C)]
+struct CustomError {
+    kind: ErrorKind,
+    error: ObjBox<DynObj<dyn IError + Send + Sync>>,
+}
 
-            let s = format!("{}", e.e);
-            w.write_str(s.as_str()).into()
-        }
+impl std::fmt::Debug for CustomError {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomError")
+            .field("kind", &self.kind)
+            .field("error", FmtWrapper::new_ref(&self.error))
+            .finish()
     }
 }

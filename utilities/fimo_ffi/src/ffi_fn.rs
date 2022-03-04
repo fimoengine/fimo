@@ -1,7 +1,7 @@
 //! FFI safe closure implementations.
 
 use crate::tuple::ReprRust;
-use fimo_object::ObjBox;
+use crate::ObjBox;
 use std::alloc::{Allocator, Global};
 use std::fmt::{Debug, Formatter};
 use std::marker::{PhantomData, Unsize};

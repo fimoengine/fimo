@@ -4,17 +4,14 @@
 // terms.
 
 use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
-use crate::object::{ObjPtrCompat, ObjectWrapper};
-use crate::raw::CastError;
-use crate::vtable::{MarkerCompatible, ObjectID, VTable, VTableUpcast};
-use crate::{CoerceObject, Object};
+use crate::ptr::{CastSuper, DynObj, FetchVTable, ObjInterface, ObjectId};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
+use std::marker::{PhantomData, Unsize};
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -51,7 +48,7 @@ macro_rules! acquire {
 
 /// A reference-counted pointer type for heap allocation, akin to an [`std::sync::Arc`].
 #[repr(C)]
-pub struct ObjArc<T: ObjPtrCompat + ?Sized, A: Allocator = Global> {
+pub struct ObjArc<T: ?Sized, A: Allocator = Global> {
     ptr: NonNull<ObjArcInner<T>>,
     phantom: PhantomData<ObjArcInner<T>>,
     alloc: A,
@@ -63,7 +60,7 @@ impl<T> ObjArc<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     /// ```
@@ -77,7 +74,7 @@ impl<T> ObjArc<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let mut five = ObjArc::<u32>::new_uninit();
     ///
@@ -101,7 +98,7 @@ impl<T> ObjArc<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let zero = ObjArc::<u32>::new_zeroed();
     /// let zero = unsafe { zero.assume_init() };
@@ -124,7 +121,7 @@ impl<T, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new_in(5, Global);
     /// ```
@@ -149,7 +146,7 @@ impl<T, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let mut five = ObjArc::<u32>::new_uninit_in(Global);
     ///
@@ -192,7 +189,7 @@ impl<T, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let zero = ObjArc::<u32>::new_zeroed_in(Global);
     /// let zero = unsafe { zero.assume_init() };
@@ -222,362 +219,309 @@ impl<T, A: Allocator> ObjArc<T, A> {
     }
 }
 
-impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjArc<O, A> {
-    /// Coerces a `ObjArc<T, A>` to an `ObjArc<O, A>`.
+impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
+    /// Coerces a `ObjArc<U, A>` to an `ObjArc<DynObj<T>, A>`.
     ///
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::ObjectID;
-    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
+    /// use fimo_ffi::{ObjArc, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) {
+    ///         fn add(&self, num: usize) -> usize;
+    ///     }
+    /// }
     ///
     /// // Define a custom interface vtable.
-    /// fimo_vtable! {
-    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    /// base_vtable! {
+    ///     #![interface = Obj]
     ///     struct ObjVTable {
-    ///         add: fn(*const (), usize) -> usize
+    ///         add: fn(*const (), usize) -> usize,
     ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
-    /// is_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] MyObj }
-    /// impl_vtable! {
-    ///     impl inline ObjVTable => MyObj {
-    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj {
+    ///     fn add(&self, num: usize) -> usize {
+    ///         self.0 + num
     ///     }
     /// }
     ///
-    /// // Helper type for accessing the interface.
-    /// struct Obj {
-    ///     inner: Object<ObjVTable>
-    /// }
-    /// impl Obj {
-    ///     pub fn add(&self, num: usize) -> usize {
-    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
-    ///         (vtable.add)(ptr, num)
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         const ADD: fn(*const (), usize) -> usize =
+    ///             unsafe { std::mem::transmute::<fn(_, _) -> _, _>(MyObj::add as _) };
+    ///
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(ADD);
+    ///         &VTABLE
     ///     }
     /// }
-    /// unsafe impl ObjPtrCompat for Obj {}
-    /// unsafe impl ObjectWrapper for Obj {
-    ///     type VTable = ObjVTable;
     ///
-    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         ptr as *const Object<_>
-    ///     }
-    ///
-    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         obj as *const Self
+    /// impl<'a, T: ObjInterface<Base=dyn Obj + 'a> + Obj + ?Sized + 'a> Obj for DynObj<T> {
+    ///     fn add(&self, num: usize) -> usize {
+    ///         let vtable: &ObjVTable = fimo_ffi::ptr::metadata(self).vtable();
+    ///         (vtable.add)(self as *const _ as *const (), num)
     ///     }
     /// }
     ///
     /// let x = ObjArc::new(MyObj(5));
     /// assert_eq!(x.0, 5);
     ///
-    /// let x: ObjArc<Obj> = ObjArc::coerce_object(x);
+    /// let x: ObjArc<DynObj<dyn Obj>> = ObjArc::coerce_obj(x);
     /// assert_eq!(x.add(0), 5);
     /// assert_eq!(x.add(1), 6);
     /// assert_eq!(x.add(5), 10);
     /// ```
-    pub fn coerce_object<T: CoerceObject<O::VTable>>(a: ObjArc<T, A>) -> ObjArc<O, A> {
+    #[inline]
+    pub fn coerce_obj<U>(a: ObjArc<U, A>) -> Self
+    where
+        U: FetchVTable<T::Base> + Unsize<T> + 'a,
+        T: ObjInterface,
+    {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = T::coerce_obj_raw(ptr);
-        let ptr = O::from_object_raw(obj);
+        let obj = crate::ptr::coerce_obj_raw(ptr);
+        unsafe { ObjArc::from_raw_parts(obj, alloc) }
+    }
+
+    /// Returns whether the contained object is of type `U`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, DynObj, base_object};
+    /// use fimo_ffi::ptr::{ObjInterface, IBase};
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct SomeObj;
+    /// struct OtherObj;
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl SomeObj }
+    /// base_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] impl OtherObj }
+    ///
+    /// let x = ObjArc::new(SomeObj);
+    /// let x: ObjArc<DynObj<dyn IBase>> = ObjArc::coerce_obj(x);
+    /// assert_eq!(ObjArc::is::<SomeObj>(&x), true);
+    /// assert_eq!(ObjArc::is::<OtherObj>(&x), false);
+    /// ```
+    #[inline]
+    pub fn is<U>(a: &Self) -> bool
+    where
+        U: ObjectId + Unsize<T>,
+    {
+        crate::ptr::is::<U, _>(&**a)
+    }
+
+    /// Returns the downcasted box if it is of type `U`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, DynObj, base_object};
+    /// use fimo_ffi::ptr::{ObjInterface, IBase};
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct SomeObj;
+    /// struct OtherObj;
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl SomeObj }
+    /// base_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] impl OtherObj }
+    ///
+    /// let x = ObjArc::new(SomeObj);
+    /// let x: ObjArc<DynObj<dyn IBase>> = ObjArc::coerce_obj(x);
+    /// assert!(matches!(ObjArc::downcast::<SomeObj>(x.clone()), Some(_)));
+    /// assert!(matches!(ObjArc::downcast::<OtherObj>(x), None));
+    /// ```
+    #[inline]
+    pub fn downcast<U>(a: Self) -> Option<ObjArc<U, A>>
+    where
+        U: ObjectId + Unsize<T>,
+    {
+        let (ptr, alloc) = ObjArc::into_raw_parts(a);
+        if let Some(ptr) = crate::ptr::downcast::<U, _>(ptr) {
+            unsafe { Some(ObjArc::from_raw_parts(ptr, alloc)) }
+        } else {
+            unsafe { ObjArc::from_raw_parts(ptr, alloc) };
+            None
+        }
+    }
+
+    /// Returns an arc to the super object.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) { }
+    /// }
+    ///
+    /// // Define a custom interface vtable.
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable { }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj { }
+    ///
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// let x: ObjArc<DynObj<dyn Obj>> = ObjArc::coerce_obj(x);
+    /// let x: ObjArc<DynObj<dyn IBase>> = ObjArc::cast_super(x);
+    /// ```
+    #[inline]
+    pub fn cast_super<U>(a: Self) -> ObjArc<DynObj<U>, A>
+    where
+        T: CastSuper<U>,
+        U: ObjInterface + ?Sized + 'a,
+    {
+        let (ptr, alloc) = ObjArc::into_raw_parts(a);
+        let ptr = crate::ptr::cast_super::<U, _>(ptr);
         unsafe { ObjArc::from_raw_parts(ptr, alloc) }
     }
 
-    /// Tries to revert from an `ObjArc<O, A>` to an `ObjArc<T, A>`.
+    /// Returns whether a certain interface is contained.
     ///
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_fn_trait_bound)]
     /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
     ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::ObjectID;
+    /// use fimo_ffi::{ObjArc, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
     ///
-    /// // Define a custom interface vtable.
-    /// fimo_vtable! {
-    ///     #![uuid(0x07b2f853, 0x3beb, 0x4abf, 0xb782, 0xd502fcb2ea7b)]
-    ///     struct ObjVTable;
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) { }
     /// }
     ///
-    /// // Define custom objects implementing the interface.
-    /// struct FirstObj(usize);
-    /// struct SecondObj;
-    /// is_object! { #![uuid(0xe98df5c9, 0x1d0e, 0x4289, 0x8f93, 0x55037e65c725)] FirstObj }
-    /// is_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] SecondObj }
-    /// impl_vtable! { impl ObjVTable => FirstObj {} }
-    /// impl_vtable! { impl ObjVTable => SecondObj {} }
-    ///
-    /// let x = ObjArc::new(FirstObj(5));
-    /// let obj: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
-    /// let also_obj = ObjArc::clone(&obj);
-    /// assert_eq!(ObjArc::try_object_cast::<FirstObj>(obj).unwrap().0, 5);
-    /// assert!(ObjArc::try_object_cast::<SecondObj>(also_obj).is_err());
-    ///
-    /// ```
-    pub fn try_object_cast<T: ObjectID>(
-        a: ObjArc<O, A>,
-    ) -> Result<ObjArc<T, A>, CastError<ObjArc<O, A>>> {
-        let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object_raw(ptr);
-
-        unsafe {
-            match Object::<O::VTable>::try_cast_obj_raw::<T>(obj) {
-                Ok(casted) => Ok(ObjArc::from_raw_parts(casted, alloc)),
-                Err(err) => Err(CastError {
-                    obj: ObjArc::from_raw_parts(ptr, alloc),
-                    required: err.required,
-                    required_id: err.required_id,
-                    available: err.available,
-                    available_id: err.available_id,
-                }),
-            }
-        }
-    }
-
-    /// Tries casting the object to another object.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(const_fn_trait_bound)]
-    /// #![feature(const_fn_fn_ptr_basics)]
-    ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::ObjectID;
-    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
-    ///
     /// // Define a custom interface vtable.
-    /// fimo_vtable! {
-    ///     #![uuid(0x0f42329a, 0x9abd, 0x44b6, 0xb03f, 0x70d2f82c809f)]
-    ///     struct ObjVTable {
-    ///         add: fn(*const (), usize) -> usize
-    ///     }
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable { }
     /// }
     ///
     /// // Define a custom object implementing the interface.
     /// struct MyObj(usize);
-    /// is_object! { #![uuid(0x9558d810, 0x0053, 0x41a3, 0xa520, 0x9745f965567c)] MyObj }
-    /// impl_vtable! {
-    ///     impl inline ObjVTable => MyObj {
-    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
-    ///     }
-    /// }
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
     ///
-    /// // Helper type for accessing the interface.
-    /// struct Obj {
-    ///     inner: Object<ObjVTable>
-    /// }
-    /// impl Obj {
-    ///     pub fn add(&self, num: usize) -> usize {
-    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
-    ///         (vtable.add)(ptr, num)
-    ///     }
-    /// }
-    /// unsafe impl ObjPtrCompat for Obj {}
-    /// unsafe impl ObjectWrapper for Obj {
-    ///     type VTable = ObjVTable;
+    /// impl Obj for MyObj { }
     ///
-    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         ptr as *const Object<_>
-    ///     }
-    ///
-    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         obj as *const Self
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>();
+    ///         &VTABLE
     ///     }
     /// }
     ///
     /// let x = ObjArc::new(MyObj(5));
-    /// assert_eq!(x.0, 5);
-    ///
-    /// let x: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
-    /// let x: ObjArc<Obj> = ObjArc::try_cast(x).unwrap();
-    /// assert_eq!(x.add(0), 5);
-    /// assert_eq!(x.add(1), 6);
-    /// assert_eq!(x.add(5), 10);
-    /// ```
-    pub fn try_cast<U: ObjectWrapper + ?Sized>(
-        a: ObjArc<O, A>,
-    ) -> Result<ObjArc<U, A>, CastError<ObjArc<O, A>>>
+    /// let x: ObjArc<DynObj<dyn Obj>> = ObjArc::coerce_obj(x);
+    /// let x: ObjArc<DynObj<dyn IBase>> = ObjArc::cast_super(x);
+    /// assert_eq!(ObjArc::is_interface::<dyn Obj>(&x), true);
+    /// assert_eq!(ObjArc::is_interface::<dyn IBase>(&x), false);
+    #[inline]
+    pub fn is_interface<U>(a: &Self) -> bool
     where
-        <<U as ObjectWrapper>::VTable as VTable>::Marker:
-            MarkerCompatible<<<O as ObjectWrapper>::VTable as VTable>::Marker>,
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
+    {
+        crate::ptr::is_interface::<U, _>(&**a)
+    }
+
+    /// Returns a box to the downcasted interface if it is contained.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) { }
+    /// }
+    ///
+    /// // Define a custom interface vtable.
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable { }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj { }
+    ///
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// let x: ObjArc<DynObj<dyn Obj>> = ObjArc::coerce_obj(x);
+    /// let x: ObjArc<DynObj<dyn IBase>> = ObjArc::cast_super(x);
+    /// assert!(matches!(ObjArc::downcast_interface::<dyn Obj>(x.clone()), Some(_)));
+    /// assert!(matches!(ObjArc::downcast_interface::<dyn IBase>(x), None));
+    #[inline]
+    pub fn downcast_interface<U>(a: Self) -> Option<ObjArc<DynObj<U>, A>>
+    where
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
     {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object_raw(ptr);
-
-        unsafe {
-            match Object::<O::VTable>::try_cast_raw::<U::VTable>(obj) {
-                Ok(casted) => Ok(ObjArc::from_raw_parts(U::from_object_raw(casted), alloc)),
-                Err(err) => Err(CastError {
-                    obj: ObjArc::from_raw_parts(ptr, alloc),
-                    required: err.required,
-                    required_id: err.required_id,
-                    available: err.available,
-                    available_id: err.available_id,
-                }),
-            }
+        if let Some(ptr) = crate::ptr::downcast_interface(ptr) {
+            unsafe { Some(ObjArc::from_raw_parts(ptr, alloc)) }
+        } else {
+            unsafe { ObjArc::from_raw_parts(ptr, alloc) };
+            None
         }
-    }
-
-    /// Casts between different [`ObjectWrapper`]'s with the same vtable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(const_fn_trait_bound)]
-    /// #![feature(const_fn_fn_ptr_basics)]
-    ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::ObjectID;
-    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
-    ///
-    /// // Define a custom interface vtable.
-    /// fimo_vtable! {
-    ///     #![uuid(0x0f42329a, 0x9abd, 0x44b6, 0xb03f, 0x70d2f82c809f)]
-    ///     struct ObjVTable {
-    ///         add: fn(*const (), usize) -> usize
-    ///     }
-    /// }
-    ///
-    /// // Define a custom object implementing the interface.
-    /// struct MyObj(usize);
-    /// is_object! { #![uuid(0x9558d810, 0x0053, 0x41a3, 0xa520, 0x9745f965567c)] MyObj }
-    /// impl_vtable! {
-    ///     impl inline ObjVTable => MyObj {
-    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
-    ///     }
-    /// }
-    ///
-    /// // Helper type for accessing the interface.
-    /// struct Obj {
-    ///     inner: Object<ObjVTable>
-    /// }
-    /// impl Obj {
-    ///     pub fn add(&self, num: usize) -> usize {
-    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
-    ///         (vtable.add)(ptr, num)
-    ///     }
-    /// }
-    /// unsafe impl ObjPtrCompat for Obj {}
-    /// unsafe impl ObjectWrapper for Obj {
-    ///     type VTable = ObjVTable;
-    ///
-    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         ptr as *const Object<_>
-    ///     }
-    ///
-    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         obj as *const Self
-    ///     }
-    /// }
-    ///
-    /// let x = ObjArc::new(MyObj(5));
-    /// assert_eq!(x.0, 5);
-    ///
-    /// let x: ObjArc<Object<ObjVTable>> = ObjArc::coerce_object(x);
-    /// let x: ObjArc<Obj> = ObjArc::static_cast(x);
-    /// assert_eq!(x.add(0), 5);
-    /// assert_eq!(x.add(1), 6);
-    /// assert_eq!(x.add(5), 10);
-    ///
-    /// let x: ObjArc<Object<ObjVTable>> = ObjArc::static_cast(x);
-    /// ```
-    pub fn static_cast<U: ObjectWrapper<VTable = O::VTable> + ?Sized>(
-        a: ObjArc<O, A>,
-    ) -> ObjArc<U, A> {
-        let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object_raw(ptr);
-        let obj = U::from_object_raw(obj);
-        unsafe { ObjArc::from_raw_parts(obj, alloc) }
-    }
-
-    /// Casts an `ObjArc<O, A>` to an `ObjArc<Object<BaseInterface>>`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// #![feature(const_fn_trait_bound)]
-    /// #![feature(const_fn_fn_ptr_basics)]
-    ///
-    /// use fimo_object::{CoerceObject, fimo_vtable, is_object, impl_vtable, ObjArc, Object};
-    /// use fimo_object::vtable::{IBase, ObjectID};
-    /// use fimo_object::object::{ObjectWrapper, ObjPtrCompat};
-    ///
-    /// // Define a custom interface vtable.
-    /// fimo_vtable! {
-    ///     #![uuid(0x93f88692, 0xceca, 0x4dc5, 0x813e, 0x8b008a0bb132)]
-    ///     struct ObjVTable {
-    ///         add: fn(*const (), usize) -> usize
-    ///     }
-    /// }
-    ///
-    /// // Define a custom object implementing the interface.
-    /// struct MyObj(usize);
-    /// is_object! { #![uuid(0xe0497698, 0xa0f1, 0x480e, 0xb158, 0x9cdbd7de426d)] MyObj }
-    /// impl_vtable! {
-    ///     impl inline ObjVTable => MyObj {
-    ///         |this, num| unsafe { (*(this as *const MyObj)).0 + num }
-    ///     }
-    /// }
-    ///
-    /// // Helper type for accessing the interface.
-    /// struct Obj {
-    ///     inner: Object<ObjVTable>
-    /// }
-    /// impl Obj {
-    ///     pub fn add(&self, num: usize) -> usize {
-    ///         let (ptr, vtable) = fimo_object::object::into_raw_parts(&self.inner);
-    ///         (vtable.add)(ptr, num)
-    ///     }
-    /// }
-    /// unsafe impl ObjPtrCompat for Obj {}
-    /// unsafe impl ObjectWrapper for Obj {
-    ///     type VTable = ObjVTable;
-    ///
-    ///     fn as_object_raw(ptr: *const Self) -> *const Object<Self::VTable> {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         ptr as *const Object<_>
-    ///     }
-    ///
-    ///     fn from_object_raw(obj: *const Object<Self::VTable>) -> *const Self {
-    ///         // `*const Self` and `*const Object<_>` have the same layout.
-    ///         obj as *const Self
-    ///     }
-    /// }
-    ///
-    /// let x = ObjArc::new(MyObj(5));
-    /// assert_eq!(x.0, 5);
-    ///
-    /// let x: ObjArc<Obj> = ObjArc::coerce_object(x);
-    /// let x: ObjArc<Object<IBase>> = ObjArc::cast_super(x);
-    /// let x: ObjArc<Obj> = ObjArc::try_cast(x).unwrap();
-    /// assert_eq!(x.add(0), 5);
-    /// assert_eq!(x.add(1), 6);
-    /// assert_eq!(x.add(5), 10);
-    /// ```
-    pub fn cast_super<U: ObjectWrapper + ?Sized>(a: ObjArc<O, A>) -> ObjArc<U, A>
-    where
-        O::VTable: VTableUpcast<U::VTable>,
-    {
-        let (ptr, alloc) = ObjArc::into_raw_parts(a);
-        let obj = O::as_object_raw(ptr);
-        let obj = Object::<O::VTable>::cast_super_raw(obj);
-        let obj = U::from_object_raw(obj);
-        unsafe { ObjArc::from_raw_parts(obj, alloc) }
     }
 }
 
@@ -591,7 +535,7 @@ impl<T, A: Allocator> ObjArc<MaybeUninit<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let mut five = ObjArc::<u32>::new_uninit();
     ///
@@ -611,7 +555,7 @@ impl<T, A: Allocator> ObjArc<MaybeUninit<T>, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
+impl<T: ?Sized> ObjArc<T> {
     /// Constructs an `ObjArc<T>` from a raw pointer.
     ///
     /// # Safety
@@ -621,7 +565,7 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// # Safety
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let x = ObjArc::new("hello".to_owned());
     /// let x_ptr = ObjArc::into_raw(x);
@@ -651,7 +595,7 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     ///
@@ -680,7 +624,7 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     ///
@@ -702,7 +646,7 @@ impl<T: ObjPtrCompat + ?Sized> ObjArc<T> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     /// Constructs an `ObjArc<T>` from a raw pointer and the allocator.
     ///
     /// # Safety
@@ -715,7 +659,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let x = ObjArc::new_in("hello".to_owned(), Global);
     /// let (x_ptr, x_alloc) = ObjArc::into_raw_parts(x);
@@ -749,7 +693,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let x = ObjArc::new("hello".to_owned());
     /// let x_ptr = ObjArc::into_raw(x);
@@ -770,7 +714,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let x = ObjArc::new_in("hello".to_owned(), Global);
     /// let (x_ptr, x_alloc) = ObjArc::into_raw_parts(x);
@@ -794,7 +738,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let x = ObjArc::new("hello".to_owned());
     /// let y = ObjArc::clone(&x);
@@ -816,7 +760,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let x = ObjArc::new_in("hello".to_owned(), Global);
     /// let alloc = ObjArc::allocator(&x);
@@ -855,7 +799,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     /// let _weak_five = ObjArc::downgrade(&five);
@@ -881,7 +825,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     /// let _also_five = ObjArc::clone(&five);
@@ -900,7 +844,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     ///
@@ -961,7 +905,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new_in(5, Global);
     ///
@@ -999,7 +943,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new_in(5, Global);
     ///
@@ -1025,7 +969,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     /// let same_five = ObjArc::clone(&five);
@@ -1040,7 +984,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     /// Returns a mutable reference into the given `ObjArc`, if there are
     /// no other `ObjArc` or [`ObjWeak`] pointers to the same allocation.
     ///
@@ -1050,7 +994,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let mut x = ObjArc::new(3);
     /// *ObjArc::get_mut(&mut x).unwrap() = 4;
@@ -1083,7 +1027,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let mut x = ObjArc::new(String::new());
     /// unsafe {
@@ -1142,7 +1086,7 @@ impl<T: Clone, A: Allocator + Clone> ObjArc<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let mut data = ObjArc::new(5);
     ///
@@ -1219,32 +1163,29 @@ impl<T: Clone, A: Allocator + Clone> ObjArc<T, A> {
     }
 }
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Send> Send for ObjArc<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjArc<T, A> {}
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjArc<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjArc<T, A> {}
 
-impl<T: ObjPtrCompat + RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> UnwindSafe
-    for ObjArc<T, A>
-{
-}
+impl<T: RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> UnwindSafe for ObjArc<T, A> {}
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Unpin for ObjArc<T, A> {}
+impl<T: ?Sized, A: Allocator> Unpin for ObjArc<T, A> {}
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> AsRef<T> for ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator> AsRef<T> for ObjArc<T, A> {
     #[inline]
     fn as_ref(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Borrow<T> for ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator> Borrow<T> for ObjArc<T, A> {
     #[inline]
     fn borrow(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator + Clone> Clone for ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator + Clone> Clone for ObjArc<T, A> {
     #[inline]
     fn clone(&self) -> Self {
         // Using a relaxed ordering is alright here, as knowledge of the
@@ -1281,21 +1222,21 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator + Clone> Clone for ObjArc<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized + Debug, A: Allocator> Debug for ObjArc<T, A> {
+impl<T: ?Sized + Debug, A: Allocator> Debug for ObjArc<T, A> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized + Display, A: Allocator> Display for ObjArc<T, A> {
+impl<T: ?Sized + Display, A: Allocator> Display for ObjArc<T, A> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(&**self, f)
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Pointer for ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator> Pointer for ObjArc<T, A> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         std::fmt::Pointer::fmt(&(&**self as *const T), f)
@@ -1309,7 +1250,7 @@ impl<T: Default, A: Allocator + Default> Default for ObjArc<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> Deref for ObjArc<T, A> {
+impl<T: ?Sized, A: Allocator> Deref for ObjArc<T, A> {
     type Target = T;
 
     #[inline]
@@ -1318,7 +1259,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> Deref for ObjArc<T, A> {
     }
 }
 
-unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjArc<T, A> {
+unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjArc<T, A> {
     #[inline]
     fn drop(&mut self) {
         // Because `fetch_sub` is already atomic, we do not need to synchronize
@@ -1390,7 +1331,7 @@ impl<T> From<T> for ObjArc<T> {
     }
 }
 
-impl<T: ObjPtrCompat + Hash + ?Sized, A: Allocator> Hash for ObjArc<T, A> {
+impl<T: Hash + ?Sized, A: Allocator> Hash for ObjArc<T, A> {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
@@ -1412,40 +1353,40 @@ trait MarkerEq: PartialEq<Self> {}
 
 impl<T: Eq> MarkerEq for T {}
 
-trait ObjArcEqIdent<T: ObjPtrCompat + ?Sized + PartialEq, A: Allocator> {
+trait ObjArcEqIdent<T: ?Sized + PartialEq, A: Allocator> {
     fn eq(&self, other: &ObjArc<T, A>) -> bool;
 }
 
-impl<T: ObjPtrCompat + ?Sized + PartialEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
+impl<T: ?Sized + PartialEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
     #[inline]
     default fn eq(&self, other: &ObjArc<T, A>) -> bool {
         **self == **other
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized + MarkerEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
+impl<T: ?Sized + MarkerEq, A: Allocator> ObjArcEqIdent<T, A> for ObjArc<T, A> {
     #[inline]
     fn eq(&self, other: &ObjArc<T, A>) -> bool {
         ObjArc::ptr_eq(self, other) || **self == **other
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized + PartialEq, A: Allocator> PartialEq for ObjArc<T, A> {
+impl<T: ?Sized + PartialEq, A: Allocator> PartialEq for ObjArc<T, A> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         ObjArcEqIdent::eq(self, other)
     }
 }
 
-impl<T: ObjPtrCompat + PartialOrd<T> + ?Sized, A: Allocator> PartialOrd for ObjArc<T, A> {
+impl<T: PartialOrd<T> + ?Sized, A: Allocator> PartialOrd for ObjArc<T, A> {
     fn partial_cmp(&self, other: &ObjArc<T, A>) -> Option<Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
-impl<T: ObjPtrCompat + Eq + ?Sized, A: Allocator> Eq for ObjArc<T, A> {}
+impl<T: Eq + ?Sized, A: Allocator> Eq for ObjArc<T, A> {}
 
-impl<T: ObjPtrCompat + Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
+impl<T: Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
     fn cmp(&self, other: &Self) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
@@ -1454,7 +1395,7 @@ impl<T: ObjPtrCompat + Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
 /// `ObjWeak` is a version of [`ObjArc`] that holds a non-owning reference to
 /// the managed allocation, akin to a [`std::sync::Weak`].
 #[repr(C)]
-pub struct ObjWeak<T: ObjPtrCompat + ?Sized, A: Allocator = Global> {
+pub struct ObjWeak<T: ?Sized, A: Allocator = Global> {
     // This is a `NonNull` to allow optimizing the size of this type in enums,
     // but it is not necessarily a valid pointer.
     // `Weak::new` sets this to `usize::MAX` so that it doesn’t need
@@ -1471,7 +1412,7 @@ impl<T> ObjWeak<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjWeak;
+    /// use fimo_ffi::ObjWeak;
     ///
     /// let empty: ObjWeak<i64> = ObjWeak::new();
     /// assert!(empty.upgrade().is_none());
@@ -1492,7 +1433,7 @@ impl<T, A: Allocator> ObjWeak<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::ObjWeak;
+    /// use fimo_ffi::ObjWeak;
     ///
     /// let empty: ObjWeak<i64> = ObjWeak::new_in(Global);
     /// assert!(empty.upgrade().is_none());
@@ -1506,85 +1447,320 @@ impl<T, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-impl<O: ObjectWrapper + ?Sized, A: Allocator> ObjWeak<O, A> {
-    /// Coerces a `ObjWeak<T, A>` to an `ObjWeak<O, A>`.
-    pub fn coerce_object<T: CoerceObject<O::VTable>>(w: ObjWeak<T, A>) -> ObjWeak<O, A> {
+impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
+    /// Coerces a `ObjArc<U, A>` to an `ObjArc<DynObj<T>, A>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) {
+    ///         fn add(&self, num: usize) -> usize;
+    ///     }
+    /// }
+    ///
+    /// // Define a custom interface vtable.
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable {
+    ///         add: fn(*const (), usize) -> usize,
+    ///     }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj {
+    ///     fn add(&self, num: usize) -> usize {
+    ///         self.0 + num
+    ///     }
+    /// }
+    ///
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         const ADD: fn(*const (), usize) -> usize =
+    ///             unsafe { std::mem::transmute::<fn(_, _) -> _, _>(MyObj::add as _) };
+    ///
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>(ADD);
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// impl<'a, T: ObjInterface<Base=dyn Obj + 'a> + Obj + ?Sized + 'a> Obj for DynObj<T> {
+    ///     fn add(&self, num: usize) -> usize {
+    ///         let vtable: &ObjVTable = fimo_ffi::ptr::metadata(self).vtable();
+    ///         (vtable.add)(self as *const _ as *const (), num)
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// assert_eq!(x.0, 5);
+    ///
+    /// let x = ObjArc::downgrade(&x);
+    /// let x: ObjWeak<DynObj<dyn Obj>> = ObjWeak::coerce_obj(x);
+    /// let x = x.upgrade().unwrap();
+    /// assert_eq!(x.add(0), 5);
+    /// assert_eq!(x.add(1), 6);
+    /// assert_eq!(x.add(5), 10);
+    /// ```
+    #[inline]
+    pub fn coerce_obj<U>(w: ObjWeak<U, A>) -> Self
+    where
+        U: FetchVTable<T::Base> + Unsize<T> + 'a,
+        T: ObjInterface,
+    {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = T::coerce_obj_raw(ptr);
-        let ptr = O::from_object_raw(obj);
+        let obj = crate::ptr::coerce_obj_raw(ptr);
+        unsafe { ObjWeak::from_raw_parts(obj, alloc) }
+    }
+
+    /// Returns whether the contained object is of type `U`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, base_object};
+    /// use fimo_ffi::ptr::{ObjInterface, IBase};
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct SomeObj;
+    /// struct OtherObj;
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl SomeObj }
+    /// base_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] impl OtherObj }
+    ///
+    /// let x = ObjArc::new(SomeObj);
+    /// let x: ObjWeak<DynObj<dyn IBase>> = ObjArc::downgrade(&ObjArc::coerce_obj(x));
+    /// assert_eq!(ObjWeak::is::<SomeObj>(&x), true);
+    /// assert_eq!(ObjWeak::is::<OtherObj>(&x), false);
+    /// ```
+    #[inline]
+    pub fn is<U>(w: &Self) -> bool
+    where
+        U: ObjectId + Unsize<T>,
+    {
+        crate::ptr::is::<U, _>(w.as_ptr())
+    }
+
+    /// Returns the downcasted box if it is of type `U`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, base_object};
+    /// use fimo_ffi::ptr::{ObjInterface, IBase};
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct SomeObj;
+    /// struct OtherObj;
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl SomeObj }
+    /// base_object! { #![uuid(0xabd4e0e7, 0xf8bd, 0x41cc, 0xbb1d, 0x7f419ebf0315)] impl OtherObj }
+    ///
+    /// let x = ObjArc::new(SomeObj);
+    /// let x: ObjWeak<DynObj<dyn IBase>> = ObjArc::downgrade(&ObjArc::coerce_obj(x));
+    /// assert!(matches!(ObjWeak::downcast::<SomeObj>(x.clone()), Some(_)));
+    /// assert!(matches!(ObjWeak::downcast::<OtherObj>(x), None));
+    /// ```
+    #[inline]
+    pub fn downcast<U>(w: Self) -> Option<ObjWeak<U, A>>
+    where
+        U: ObjectId + Unsize<T>,
+    {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(w);
+        if let Some(ptr) = crate::ptr::downcast::<U, _>(ptr) {
+            unsafe { Some(ObjWeak::from_raw_parts(ptr, alloc)) }
+        } else {
+            unsafe { ObjWeak::from_raw_parts(ptr, alloc) };
+            None
+        }
+    }
+
+    /// Returns an arc to the super object.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) { }
+    /// }
+    ///
+    /// // Define a custom interface vtable.
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable { }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj { }
+    ///
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// let x = ObjArc::downgrade(&x);
+    /// let x: ObjWeak<DynObj<dyn Obj>> = ObjWeak::coerce_obj(x);
+    /// let x: ObjWeak<DynObj<dyn IBase>> = ObjWeak::cast_super(x);
+    /// ```
+    #[inline]
+    pub fn cast_super<U>(w: Self) -> ObjWeak<DynObj<U>, A>
+    where
+        T: CastSuper<U>,
+        U: ObjInterface + ?Sized + 'a,
+    {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(w);
+        let ptr = crate::ptr::cast_super::<U, _>(ptr);
         unsafe { ObjWeak::from_raw_parts(ptr, alloc) }
     }
 
-    /// Tries to revert from an `ObjWeak<O, A>` to an `ObjWeak<T, A>`.
-    pub fn try_object_cast<T: ObjectID>(
-        w: ObjWeak<O, A>,
-    ) -> Result<ObjWeak<T, A>, CastError<ObjWeak<O, A>>> {
-        let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object_raw(ptr);
-
-        unsafe {
-            match Object::<O::VTable>::try_cast_obj_raw::<T>(obj) {
-                Ok(casted) => Ok(ObjWeak::from_raw_parts(casted, alloc)),
-                Err(err) => Err(CastError {
-                    obj: ObjWeak::from_raw_parts(ptr, alloc),
-                    required: err.required,
-                    required_id: err.required_id,
-                    available: err.available,
-                    available_id: err.available_id,
-                }),
-            }
-        }
+    /// Returns whether a certain interface is contained.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) { }
+    /// }
+    ///
+    /// // Define a custom interface vtable.
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable { }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj { }
+    ///
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// let x = ObjArc::downgrade(&x);
+    /// let x: ObjWeak<DynObj<dyn Obj>> = ObjWeak::coerce_obj(x);
+    /// let x: ObjWeak<DynObj<dyn IBase>> = ObjWeak::cast_super(x);
+    /// assert_eq!(ObjWeak::is_interface::<dyn Obj>(&x), true);
+    /// assert_eq!(ObjWeak::is_interface::<dyn IBase>(&x), false);
+    /// ```
+    #[inline]
+    pub fn is_interface<U>(w: &Self) -> bool
+    where
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
+    {
+        crate::ptr::is_interface::<U, _>(w.as_ptr())
     }
 
-    /// Tries casting the object to another object.
-    pub fn try_cast<U: ObjectWrapper + ?Sized>(
-        w: ObjWeak<O, A>,
-    ) -> Result<ObjWeak<U, A>, CastError<ObjWeak<O, A>>>
+    /// Returns a box to the downcasted interface if it is contained.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(const_fn_fn_ptr_basics)]
+    /// #![feature(const_fn_trait_bound)]
+    /// #![feature(unsize)]
+    ///
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, base_object, base_vtable, base_interface};
+    /// use fimo_ffi::ptr::{ObjInterface, FetchVTable, IBase};
+    ///
+    /// // Define a custom interface.
+    /// base_interface! {
+    ///     #![vtable = ObjVTable]
+    ///     #![uuid(0x59dc47cf, 0xfd2e, 0x4d58, 0xbcd4, 0x5a31adc68a44)]
+    ///     trait Obj: (IBase) { }
+    /// }
+    ///
+    /// // Define a custom interface vtable.
+    /// base_vtable! {
+    ///     #![interface = Obj]
+    ///     struct ObjVTable { }
+    /// }
+    ///
+    /// // Define a custom object implementing the interface.
+    /// struct MyObj(usize);
+    /// base_object! { #![uuid(0x5a7cc7de, 0x541d, 0x4fc2, 0xbc7e, 0xa799b180ee1e)] impl MyObj }
+    ///
+    /// impl Obj for MyObj { }
+    ///
+    /// impl<'a> FetchVTable<dyn Obj + 'a> for MyObj {
+    ///     fn fetch_interface() -> &'static ObjVTable {
+    ///         static VTABLE: ObjVTable = ObjVTable::new::<MyObj>();
+    ///         &VTABLE
+    ///     }
+    /// }
+    ///
+    /// let x = ObjArc::new(MyObj(5));
+    /// let x = ObjArc::downgrade(&x);
+    /// let x: ObjWeak<DynObj<dyn Obj>> = ObjWeak::coerce_obj(x);
+    /// let x: ObjWeak<DynObj<dyn IBase>> = ObjWeak::cast_super(x);
+    /// assert!(matches!(ObjWeak::downcast_interface::<dyn Obj>(x.clone()), Some(_)));
+    /// assert!(matches!(ObjWeak::downcast_interface::<dyn IBase>(x), None));
+    /// ```
+    #[inline]
+    pub fn downcast_interface<U>(w: Self) -> Option<ObjWeak<DynObj<U>, A>>
     where
-        <<U as ObjectWrapper>::VTable as VTable>::Marker:
-            MarkerCompatible<<<O as ObjectWrapper>::VTable as VTable>::Marker>,
+        U: ObjInterface + Unsize<T> + ?Sized + 'a,
     {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object_raw(ptr);
-
-        unsafe {
-            match Object::<O::VTable>::try_cast_raw::<U::VTable>(obj) {
-                Ok(casted) => Ok(ObjWeak::from_raw_parts(U::from_object_raw(casted), alloc)),
-                Err(err) => Err(CastError {
-                    obj: ObjWeak::from_raw_parts(ptr, alloc),
-                    required: err.required,
-                    required_id: err.required_id,
-                    available: err.available,
-                    available_id: err.available_id,
-                }),
-            }
+        if let Some(ptr) = crate::ptr::downcast_interface(ptr) {
+            unsafe { Some(ObjWeak::from_raw_parts(ptr, alloc)) }
+        } else {
+            unsafe { ObjWeak::from_raw_parts(ptr, alloc) };
+            None
         }
-    }
-
-    /// Casts between different [`ObjectWrapper`]'s with the same vtable.
-    pub fn static_cast<U: ObjectWrapper<VTable = O::VTable> + ?Sized>(
-        w: ObjWeak<O, A>,
-    ) -> ObjWeak<U, A> {
-        let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object_raw(ptr);
-        let obj = U::from_object_raw(obj);
-        unsafe { ObjWeak::from_raw_parts(obj, alloc) }
-    }
-
-    /// Casts an `ObjWeak<O, A>` to a super object.
-    pub fn cast_super<U: ObjectWrapper + ?Sized>(w: ObjWeak<O, A>) -> ObjWeak<U, A>
-    where
-        O::VTable: VTableUpcast<U::VTable>,
-    {
-        let (ptr, alloc) = ObjWeak::into_raw_parts(w);
-        let obj = O::as_object_raw(ptr);
-        let obj = Object::<O::VTable>::cast_super_raw(obj);
-        let obj = U::from_object_raw(obj);
-        unsafe { ObjWeak::from_raw_parts(obj, alloc) }
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized> ObjWeak<T> {
+impl<T: ?Sized> ObjWeak<T> {
     /// Converts a raw pointer previously created by [`ObjWeak::into_raw`] back into `ObjWeak<T>`
     /// in the provided allocator.
     ///
@@ -1595,7 +1771,7 @@ impl<T: ObjPtrCompat + ?Sized> ObjWeak<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::{ObjArc, ObjWeak};
+    /// use fimo_ffi::{ObjArc, ObjWeak};
     ///
     /// let strong = ObjArc::new("hello".to_owned());
     ///
@@ -1617,13 +1793,13 @@ impl<T: ObjPtrCompat + ?Sized> ObjWeak<T> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
+impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Returns a raw pointer to the object `T` pointed to by this `ObjWeak<T>`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     /// use std::ptr;
     ///
     /// let strong = ObjArc::new("hello".to_owned());
@@ -1659,7 +1835,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::{ObjArc, ObjWeak};
+    /// use fimo_ffi::{ObjArc, ObjWeak};
     ///
     /// let strong = ObjArc::new("hello".to_owned());
     /// let weak = ObjArc::downgrade(&strong);
@@ -1685,7 +1861,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::{ObjArc, ObjWeak};
+    /// use fimo_ffi::{ObjArc, ObjWeak};
     ///
     /// let strong = ObjArc::new_in("hello".to_owned(), Global);
     /// let weak = ObjArc::downgrade(&strong);
@@ -1717,7 +1893,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// #![feature(allocator_api)]
     ///
     /// use std::alloc::Global;
-    /// use fimo_object::{ObjArc, ObjWeak};
+    /// use fimo_ffi::{ObjArc, ObjWeak};
     ///
     /// let strong = ObjArc::new_in("hello".to_owned(), Global);
     ///
@@ -1757,14 +1933,14 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
+impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Attempts to upgrade the `ObjWeak` pointer to an [`ObjArc`], delaying
     /// dropping of the inner value if successful.
     ///
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let five = ObjArc::new(5);
     ///
@@ -1885,7 +2061,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_object::ObjArc;
+    /// use fimo_ffi::ObjArc;
     ///
     /// let first_arc = ObjArc::new(5);
     /// let first = ObjArc::downgrade(&first_arc);
@@ -1902,7 +2078,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     /// Comparing `ObjWeak::new`.
     ///
     /// ```
-    /// use fimo_object::{ObjArc, ObjWeak};
+    /// use fimo_ffi::{ObjArc, ObjWeak};
     ///
     /// let first = ObjWeak::new();
     /// let second = ObjWeak::new();
@@ -1919,11 +2095,11 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Send> Send for ObjWeak<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjWeak<T, A> {}
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjWeak<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjWeak<T, A> {}
 
-impl<T: ObjPtrCompat + ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
+impl<T: ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
     fn clone(&self) -> Self {
         let inner = if let Some(inner) = self.inner() {
             inner
@@ -1951,7 +2127,7 @@ impl<T: ObjPtrCompat + ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
     }
 }
 
-impl<T: ObjPtrCompat + ?Sized + Debug, A: Allocator> Debug for ObjWeak<T, A> {
+impl<T: ?Sized + Debug, A: Allocator> Debug for ObjWeak<T, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "(ObjWeak)")
     }
@@ -1963,7 +2139,7 @@ impl<T, A: Allocator + Default> Default for ObjWeak<T, A> {
     }
 }
 
-unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
+unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
     fn drop(&mut self) {
         // If we find out that we were the last weak pointer, then its time to
         // deallocate the data entirely. See the discussion in Arc::drop() about
@@ -1991,7 +2167,7 @@ unsafe impl<#[may_dangle] T: ObjPtrCompat + ?Sized, A: Allocator> Drop for ObjWe
 
 #[repr(C)]
 #[allow(missing_debug_implementations)]
-struct ObjArcInner<T: ObjPtrCompat + ?Sized> {
+struct ObjArcInner<T: ?Sized> {
     strong: atomic::AtomicUsize,
 
     // the value usize::MAX acts as a sentinel for temporarily "locking" the
@@ -2001,7 +2177,7 @@ struct ObjArcInner<T: ObjPtrCompat + ?Sized> {
     data: T,
 }
 
-impl<T: ObjPtrCompat + ?Sized> ObjArcInner<T> {
+impl<T: ?Sized> ObjArcInner<T> {
     fn get_layout(&self) -> Layout {
         let ptr: *const T = std::ptr::addr_of!(self.data);
 
@@ -2016,9 +2192,9 @@ impl<T: ObjPtrCompat + ?Sized> ObjArcInner<T> {
     }
 }
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send> Send for ObjArcInner<T> {}
+unsafe impl<T: ?Sized + Sync + Send> Send for ObjArcInner<T> {}
 
-unsafe impl<T: ObjPtrCompat + ?Sized + Sync + Send> Sync for ObjArcInner<T> {}
+unsafe impl<T: ?Sized + Sync + Send> Sync for ObjArcInner<T> {}
 
 /// Helper type to allow accessing the reference counts without
 /// making any assertions about the data field.
@@ -2034,9 +2210,7 @@ struct WeakInner<'a> {
 ///
 /// The pointer must point to (and have valid metadata for) a previously
 /// valid instance of T, but the T is allowed to be dropped.
-unsafe fn data_offset<T: ObjPtrCompat + ?Sized + crate::obj_box::ConstructLayoutRaw>(
-    ptr: *const T,
-) -> isize {
+unsafe fn data_offset<T: ?Sized + crate::obj_box::ConstructLayoutRaw>(ptr: *const T) -> isize {
     // Align the unsized value to the end of the ObjArcInner.
     // Because ObjArcInner is repr(C), it will always be the last field in memory.
     data_offset_align(T::align_of_val_raw(ptr))
