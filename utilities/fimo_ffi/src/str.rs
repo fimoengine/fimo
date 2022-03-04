@@ -1,11 +1,12 @@
 //! Implementation of string types and utility functions.
-use crate::span::SpanInner;
+use crate::span::{ConstSpanPtr, MutSpanPtr};
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::panic::{RefUnwindSafe, UnwindSafe};
 
 /// A ‘string slice’, akin to `&str`.
 ///
@@ -13,108 +14,115 @@ use std::ops::{Deref, DerefMut};
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct ConstStr<'a> {
-    inner: StrInner<false>,
+    ptr: ConstStrPtr,
     _phantom: PhantomData<&'a str>,
 }
 
-impl Deref for ConstStr<'_> {
+unsafe impl<'a> Send for ConstStr<'a> {}
+
+unsafe impl<'a> Sync for ConstStr<'a> {}
+
+impl<'a> Unpin for ConstStr<'a> {}
+
+impl<'a> RefUnwindSafe for ConstStr<'a> {}
+
+impl<'a> UnwindSafe for ConstStr<'a> {}
+
+impl const Deref for ConstStr<'_> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.deref()
+        let str: *const str = self.ptr.into();
+        unsafe { &*str }
     }
 }
 
-impl Borrow<str> for ConstStr<'_> {
+impl const Borrow<str> for ConstStr<'_> {
     fn borrow(&self) -> &str {
-        self.inner.borrow()
+        let str: *const str = self.ptr.into();
+        unsafe { &*str }
     }
 }
 
-impl Pointer for ConstStr<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Pointer::fmt(&self.inner, f)
-    }
-}
-
-impl From<&str> for ConstStr<'_> {
+impl const From<&str> for ConstStr<'_> {
     fn from(s: &str) -> Self {
         Self {
-            inner: s.into(),
-            _phantom: Default::default(),
+            ptr: s.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl From<&mut str> for ConstStr<'_> {
+impl const From<&mut str> for ConstStr<'_> {
     fn from(s: &mut str) -> Self {
         Self {
-            inner: s.into(),
-            _phantom: Default::default(),
+            ptr: s.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl From<MutStr<'_>> for ConstStr<'_> {
+impl const From<MutStr<'_>> for ConstStr<'_> {
     fn from(s: MutStr<'_>) -> Self {
         Self {
-            inner: s.inner.into(),
-            _phantom: Default::default(),
+            ptr: s.ptr.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<'a> From<ConstStr<'a>> for &str {
+impl<'a> const From<ConstStr<'a>> for &'a str {
     fn from(s: ConstStr<'a>) -> Self {
-        s.inner.into()
+        let str: *const str = s.ptr.into();
+        unsafe { &*str }
     }
 }
 
 impl Debug for ConstStr<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.inner, f)
+        Debug::fmt(&**self, f)
     }
 }
 
 impl Display for ConstStr<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.inner, f)
+        Display::fmt(&**self, f)
     }
 }
 
 impl Hash for ConstStr<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.inner.hash(state)
+        (&**self).hash(state)
     }
 }
 
 impl PartialEq<ConstStr<'_>> for ConstStr<'_> {
     fn eq(&self, other: &ConstStr<'_>) -> bool {
-        self.inner.eq(&other.inner)
+        (&**self).eq(&**other)
     }
 }
 
 impl PartialEq<MutStr<'_>> for ConstStr<'_> {
     fn eq(&self, other: &MutStr<'_>) -> bool {
-        self.inner.eq(&other.inner)
+        (&**self).eq(&**other)
     }
 }
 
 impl PartialEq<str> for ConstStr<'_> {
     fn eq(&self, other: &str) -> bool {
-        self.inner.eq(other)
+        (&**self).eq(other)
     }
 }
 
 impl PartialEq<&str> for ConstStr<'_> {
     fn eq(&self, other: &&str) -> bool {
-        self.inner.eq(*other)
+        (&**self).eq(*other)
     }
 }
 
 impl PartialEq<&mut str> for ConstStr<'_> {
     fn eq(&self, other: &&mut str) -> bool {
-        self.inner.eq(*other)
+        (&**self).eq(*other)
     }
 }
 
@@ -122,37 +130,37 @@ impl Eq for ConstStr<'_> {}
 
 impl PartialOrd<ConstStr<'_>> for ConstStr<'_> {
     fn partial_cmp(&self, other: &ConstStr<'_>) -> Option<Ordering> {
-        self.inner.partial_cmp(&other.inner)
+        (&**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<MutStr<'_>> for ConstStr<'_> {
     fn partial_cmp(&self, other: &MutStr<'_>) -> Option<Ordering> {
-        self.inner.partial_cmp(&other.inner)
+        (&**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<str> for ConstStr<'_> {
     fn partial_cmp(&self, other: &str) -> Option<Ordering> {
-        self.inner.partial_cmp(other)
+        (&**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&str> for ConstStr<'_> {
     fn partial_cmp(&self, other: &&str) -> Option<Ordering> {
-        self.inner.partial_cmp(other)
+        (&**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&mut str> for ConstStr<'_> {
     fn partial_cmp(&self, other: &&mut str) -> Option<Ordering> {
-        self.inner.partial_cmp(other)
+        (&**self).partial_cmp(other)
     }
 }
 
 impl Ord for ConstStr<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.inner.cmp(&other.inner)
+        (&**self).cmp(&**other)
     }
 }
 
@@ -162,108 +170,118 @@ impl Ord for ConstStr<'_> {
 #[repr(C)]
 #[derive(Default)]
 pub struct MutStr<'a> {
-    inner: StrInner<true>,
+    ptr: MutStrPtr,
     _phantom: PhantomData<&'a mut str>,
 }
 
-impl Deref for MutStr<'_> {
+unsafe impl<'a> Send for MutStr<'a> {}
+
+unsafe impl<'a> Sync for MutStr<'a> {}
+
+impl<'a> Unpin for MutStr<'a> {}
+
+impl<'a> RefUnwindSafe for MutStr<'a> {}
+
+impl<'a> UnwindSafe for MutStr<'a> {}
+
+impl const Deref for MutStr<'_> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        self.inner.deref()
+        let str: *const str = self.ptr.into();
+        unsafe { &*str }
     }
 }
 
-impl DerefMut for MutStr<'_> {
+impl const DerefMut for MutStr<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner.deref_mut()
+        let str: *mut str = self.ptr.into();
+        unsafe { &mut *str }
     }
 }
 
-impl Borrow<str> for MutStr<'_> {
+impl const Borrow<str> for MutStr<'_> {
     fn borrow(&self) -> &str {
-        self.inner.borrow()
+        let str: *const str = self.ptr.into();
+        unsafe { &*str }
     }
 }
 
-impl BorrowMut<str> for MutStr<'_> {
+impl const BorrowMut<str> for MutStr<'_> {
     fn borrow_mut(&mut self) -> &mut str {
-        self.inner.borrow_mut()
+        let str: *mut str = self.ptr.into();
+        unsafe { &mut *str }
     }
 }
 
-impl Pointer for MutStr<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Pointer::fmt(&self.inner, f)
-    }
-}
-
-impl From<&mut str> for MutStr<'_> {
+impl const From<&mut str> for MutStr<'_> {
     fn from(s: &mut str) -> Self {
         Self {
-            inner: s.into(),
-            _phantom: Default::default(),
+            ptr: s.into(),
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<'a> From<MutStr<'a>> for &str {
+impl<'a> const From<MutStr<'a>> for &'a str {
     fn from(s: MutStr<'a>) -> Self {
-        s.inner.into()
+        let str: *const str = s.ptr.into();
+        unsafe { &*str }
     }
 }
 
-impl<'a> From<MutStr<'a>> for &'a mut str {
+impl<'a> const From<MutStr<'a>> for &'a mut str {
     fn from(s: MutStr<'a>) -> Self {
-        s.inner.into()
+        let str: *mut str = s.ptr.into();
+        unsafe { &mut *str }
     }
 }
 
 impl Debug for MutStr<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self.inner, f)
+        Debug::fmt(&**self, f)
     }
 }
 
 impl Display for MutStr<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.inner, f)
+        Display::fmt(&**self, f)
     }
 }
 
 impl Hash for MutStr<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.inner.hash(state)
+        (&**self).hash(state)
     }
 }
 
 impl PartialEq<ConstStr<'_>> for MutStr<'_> {
     fn eq(&self, other: &ConstStr<'_>) -> bool {
-        self.inner.eq(&other.inner)
+        (&**self).eq(&**other)
     }
 }
 
 impl PartialEq<MutStr<'_>> for MutStr<'_> {
     fn eq(&self, other: &MutStr<'_>) -> bool {
-        self.inner.eq(&other.inner)
+        (&**self).eq(&**other)
     }
 }
 
 impl PartialEq<str> for MutStr<'_> {
     fn eq(&self, other: &str) -> bool {
-        self.inner.eq(other)
+        (&**self).eq(other)
     }
 }
 
 impl PartialEq<&str> for MutStr<'_> {
     fn eq(&self, other: &&str) -> bool {
-        self.inner.eq(*other)
+        (&**self).eq(*other)
     }
 }
 
 impl PartialEq<&mut str> for MutStr<'_> {
     fn eq(&self, other: &&mut str) -> bool {
-        self.inner.eq(*other)
+        (&**self).eq(*other)
     }
 }
 
@@ -271,290 +289,212 @@ impl Eq for MutStr<'_> {}
 
 impl PartialOrd<ConstStr<'_>> for MutStr<'_> {
     fn partial_cmp(&self, other: &ConstStr<'_>) -> Option<Ordering> {
-        self.inner.partial_cmp(&other.inner)
+        (&**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<MutStr<'_>> for MutStr<'_> {
     fn partial_cmp(&self, other: &MutStr<'_>) -> Option<Ordering> {
-        self.inner.partial_cmp(&other.inner)
+        (&**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<str> for MutStr<'_> {
     fn partial_cmp(&self, other: &str) -> Option<Ordering> {
-        self.inner.partial_cmp(other)
+        (&**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&str> for MutStr<'_> {
     fn partial_cmp(&self, other: &&str) -> Option<Ordering> {
-        self.inner.partial_cmp(other)
+        (&**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&mut str> for MutStr<'_> {
     fn partial_cmp(&self, other: &&mut str) -> Option<Ordering> {
-        self.inner.partial_cmp(other)
+        (&**self).partial_cmp(other)
     }
 }
 
 impl Ord for MutStr<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.inner.cmp(&other.inner)
+        (&**self).cmp(&**other)
     }
 }
 
-/// A ‘string slice’, akin to `&str` and `&mut str`.
+/// A str pointer.
 ///
-/// String slices are always valid UTF-8.
-///
-/// # Safety
-///
-/// Usage of this type is unsafe, as it does not track the lifetime of the contained string.
+/// Equivalent to a `*const str`
 #[repr(C)]
-#[derive(Copy, Clone)]
-pub struct StrInner<const MUT: bool> {
-    inner: SpanInner<u8, MUT>,
+#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Default)]
+pub struct ConstStrPtr {
+    ptr: ConstSpanPtr<u8>,
 }
 
-impl<const MUT: bool> Deref for StrInner<MUT> {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        // It is guaranteed that the invariants are met.
-        unsafe { std::str::from_utf8_unchecked(self.inner.into()) }
-    }
-}
-
-impl DerefMut for StrInner<true> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        // It is guaranteed that the invariants are met.
-        unsafe { std::str::from_utf8_unchecked_mut(self.inner.into()) }
-    }
-}
-
-impl<const MUT: bool> Borrow<str> for StrInner<MUT> {
-    fn borrow(&self) -> &str {
-        (**self).borrow()
-    }
-}
-
-impl BorrowMut<str> for StrInner<true> {
-    fn borrow_mut(&mut self) -> &mut str {
-        (**self).borrow_mut()
-    }
-}
-
-impl<const MUT: bool> Pointer for StrInner<MUT> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Pointer::fmt(&&**self, f)
-    }
-}
-
-impl From<StrInner<true>> for StrInner<false> {
-    fn from(s: StrInner<true>) -> Self {
-        Self {
-            inner: s.inner.into(),
+impl ConstStrPtr {
+    /// Dereferences the `ConstStrPtr` to a [`ConstStr`].
+    ///
+    /// # Safety
+    ///
+    /// This function performs the same operation as a pointer dereference.
+    #[inline]
+    pub const unsafe fn deref<'a>(self) -> ConstStr<'a> {
+        ConstStr {
+            ptr: self,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl From<&str> for StrInner<false> {
-    fn from(s: &str) -> Self {
-        Self {
-            inner: s.as_bytes().into(),
+impl Debug for ConstStrPtr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.ptr, f)
+    }
+}
+
+impl Pointer for ConstStrPtr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Pointer::fmt(&self.ptr, f)
+    }
+}
+
+impl const From<&'_ str> for ConstStrPtr {
+    fn from(s: &'_ str) -> Self {
+        ptr_from_raw_parts(s.as_ptr(), s.len())
+    }
+}
+
+impl const From<&'_ mut str> for ConstStrPtr {
+    fn from(s: &'_ mut str) -> Self {
+        ptr_from_raw_parts(s.as_ptr(), s.len())
+    }
+}
+
+impl const From<*const str> for ConstStrPtr {
+    fn from(s: *const str) -> Self {
+        ptr_from_raw_parts(s as *const _ as *const u8, std::ptr::metadata(s))
+    }
+}
+
+impl const From<*mut str> for ConstStrPtr {
+    fn from(s: *mut str) -> Self {
+        ptr_from_raw_parts(s as *const _ as *const u8, std::ptr::metadata(s))
+    }
+}
+
+impl const From<ConstStrPtr> for *const str {
+    fn from(s: ConstStrPtr) -> Self {
+        std::ptr::from_raw_parts(s.ptr.as_ptr() as _, s.ptr.len())
+    }
+}
+
+/// A mutable str pointer.
+///
+/// Equivalent to a `*mut str`
+#[repr(C)]
+#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Default)]
+pub struct MutStrPtr {
+    ptr: MutSpanPtr<u8>,
+}
+
+impl MutStrPtr {
+    /// Dereferences the `MutStrPtr` to a [`ConstStr`].
+    ///
+    /// # Safety
+    ///
+    /// This function performs the same operation as a pointer dereference.
+    #[inline]
+    pub const unsafe fn deref<'a>(self) -> ConstStr<'a> {
+        ConstStr {
+            ptr: self.into(),
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Dereferences the `MutStrPtr` to a [`MutStr`].
+    ///
+    /// # Safety
+    ///
+    /// This function performs the same operation as a pointer dereference.
+    #[inline]
+    pub const unsafe fn deref_mut<'a>(self) -> MutStr<'a> {
+        MutStr {
+            ptr: self,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl<const MUT: bool> From<&mut str> for StrInner<MUT> {
-    fn from(s: &mut str) -> Self {
-        Self {
-            inner: unsafe { s.as_bytes_mut().into() },
-        }
-    }
-}
-
-impl<const MUT: bool> From<StrInner<MUT>> for &str {
-    fn from(s: StrInner<MUT>) -> Self {
-        // It is guaranteed that the invariants are met.
-        unsafe { std::str::from_utf8_unchecked(s.inner.into()) }
-    }
-}
-
-impl From<StrInner<true>> for &mut str {
-    fn from(s: StrInner<true>) -> Self {
-        // It is guaranteed that the invariants are met.
-        unsafe { std::str::from_utf8_unchecked_mut(s.inner.into()) }
-    }
-}
-
-impl<const MUT: bool> Debug for StrInner<MUT> {
+impl Debug for MutStrPtr {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&**self, f)
+        Debug::fmt(&self.ptr, f)
     }
 }
 
-impl<const MUT: bool> Display for StrInner<MUT> {
+impl Pointer for MutStrPtr {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&**self, f)
+        Pointer::fmt(&self.ptr, f)
     }
 }
 
-impl<const MUT: bool> Default for StrInner<MUT> {
-    fn default() -> Self {
-        <&mut str as Default>::default().into()
+impl const From<&'_ mut str> for MutStrPtr {
+    #[inline]
+    fn from(s: &'_ mut str) -> Self {
+        From::from(s as *mut _)
     }
 }
 
-impl<const MUT: bool> Hash for StrInner<MUT> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (**self).hash(state)
+impl const From<*mut str> for MutStrPtr {
+    #[inline]
+    fn from(s: *mut str) -> Self {
+        ptr_from_raw_parts_mut(s as *mut u8, std::ptr::metadata(s))
     }
 }
 
-impl<const MUT: bool, const MUT_2: bool> PartialEq<StrInner<MUT_2>> for StrInner<MUT> {
-    fn eq(&self, other: &StrInner<MUT_2>) -> bool {
-        (**self).eq(&**other)
+impl const From<MutStrPtr> for ConstStrPtr {
+    #[inline]
+    fn from(s: MutStrPtr) -> Self {
+        ptr_from_raw_parts(s.ptr.as_ptr(), s.ptr.len())
     }
 }
 
-impl<const MUT: bool> PartialEq<str> for StrInner<MUT> {
-    fn eq(&self, other: &str) -> bool {
-        (**self).eq(other)
+impl const From<MutStrPtr> for *const str {
+    #[inline]
+    fn from(s: MutStrPtr) -> Self {
+        std::ptr::from_raw_parts(s.ptr.as_ptr() as _, s.ptr.len())
     }
 }
 
-impl<const MUT: bool> PartialEq<&str> for StrInner<MUT> {
-    fn eq(&self, other: &&str) -> bool {
-        (**self).eq(*other)
-    }
-}
-
-impl<const MUT: bool> PartialEq<&mut str> for StrInner<MUT> {
-    fn eq(&self, other: &&mut str) -> bool {
-        (**self).eq(*other)
-    }
-}
-
-impl<const MUT: bool> Eq for StrInner<MUT> {}
-
-impl<const MUT: bool, const MUT_2: bool> PartialOrd<StrInner<MUT_2>> for StrInner<MUT> {
-    fn partial_cmp(&self, other: &StrInner<MUT_2>) -> Option<Ordering> {
-        (**self).partial_cmp(&**other)
-    }
-}
-
-impl<const MUT: bool> PartialOrd<str> for StrInner<MUT> {
-    fn partial_cmp(&self, other: &str) -> Option<Ordering> {
-        (**self).partial_cmp(other)
-    }
-}
-
-impl<const MUT: bool> PartialOrd<&str> for StrInner<MUT> {
-    fn partial_cmp(&self, other: &&str) -> Option<Ordering> {
-        (**self).partial_cmp(other)
-    }
-}
-
-impl<const MUT: bool> PartialOrd<&mut str> for StrInner<MUT> {
-    fn partial_cmp(&self, other: &&mut str) -> Option<Ordering> {
-        (**self).partial_cmp(other)
-    }
-}
-
-impl<const MUT: bool> Ord for StrInner<MUT> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        (**self).cmp(&**other)
+impl const From<MutStrPtr> for *mut str {
+    #[inline]
+    fn from(s: MutStrPtr) -> Self {
+        std::ptr::from_raw_parts_mut(s.ptr.as_ptr() as _, s.ptr.len())
     }
 }
 
 /// Converts a slice of bytes to a string slice.
 ///
 /// See [`std::str::from_utf8`].
-///
-/// # Safety
-///
-/// A [`SpanInner<T>`] does not track the lifetime of `T`.
-pub unsafe fn from_utf8_inner(data: &[u8]) -> Result<StrInner<false>, std::str::Utf8Error> {
-    std::str::from_utf8(data).map(|s| s.into())
+#[inline]
+pub fn from_utf8(v: &[u8]) -> Result<ConstStr<'_>, std::str::Utf8Error> {
+    match std::str::from_utf8(v) {
+        Ok(_) => unsafe { Ok(from_utf8_unchecked(v)) },
+        Err(e) => Err(e),
+    }
 }
 
 /// Converts a slice of bytes to a string slice.
 ///
 /// See [`std::str::from_utf8_mut`].
-///
-/// # Safety
-///
-/// A [`SpanInner<T>`] does not track the lifetime of `T`.
-pub unsafe fn from_utf8_mut_inner(data: &mut [u8]) -> Result<StrInner<true>, std::str::Utf8Error> {
-    std::str::from_utf8_mut(data).map(|s| s.into())
-}
-
-/// Converts a slice of bytes to a string slice.
-///
-/// # Safety
-///
-/// - A [`SpanInner<T>`] does not track the lifetime of `T`.
-/// - See [`std::str::from_utf8_unchecked`].
-pub const unsafe fn from_utf8_unchecked_inner(data: &[u8]) -> StrInner<false> {
-    StrInner {
-        inner: crate::span::from_raw_parts_inner(data.as_ptr(), data.len()),
+#[inline]
+pub fn from_utf8_mut(v: &mut [u8]) -> Result<MutStr<'_>, std::str::Utf8Error> {
+    match std::str::from_utf8_mut(v) {
+        Ok(_) => unsafe { Ok(from_utf8_unchecked_mut(v)) },
+        Err(e) => Err(e),
     }
-}
-
-/// Converts a slice of bytes to a string slice.
-///
-/// # Safety
-///
-/// - A [`SpanInner<T>`] does not track the lifetime of `T`.
-/// - See [`std::str::from_utf8_unchecked_mut`].
-pub unsafe fn from_utf8_unchecked_mut_inner(data: &mut [u8]) -> StrInner<true> {
-    std::str::from_utf8_unchecked_mut(data).into()
-}
-
-/// Converts a [`StrInner<false>`] to a [`ConstStr`].
-///
-/// # Safety
-///
-/// This function can assign an arbitrary lifetime to the returned string.
-pub const unsafe fn from_inner<'a, const MUT: bool>(s: StrInner<MUT>) -> ConstStr<'a> {
-    ConstStr {
-        // safety: they have the same layout.
-        inner: std::mem::transmute(s),
-        _phantom: PhantomData,
-    }
-}
-
-/// Converts a [`StrInner<true>`] to a [`MutStr`].
-///
-/// # Safety
-///
-/// This function can assign an arbitrary lifetime to the returned string.
-pub unsafe fn from_inner_mut<'a>(s: StrInner<true>) -> MutStr<'a> {
-    MutStr {
-        inner: s,
-        _phantom: Default::default(),
-    }
-}
-
-/// Converts a slice of bytes to a string slice.
-///
-/// See [`std::str::from_utf8`].
-///
-/// # Safety
-///
-/// A [`SpanInner<T>`] does not track the lifetime of `T`.
-pub fn from_utf8(data: &[u8]) -> Result<ConstStr<'_>, std::str::Utf8Error> {
-    unsafe { from_utf8_inner(data).map(|s| from_inner(s)) }
-}
-
-/// Converts a slice of bytes to a string slice.
-///
-/// See [`std::str::from_utf8_mut`].
-pub fn from_utf8_mut(data: &mut [u8]) -> Result<MutStr<'_>, std::str::Utf8Error> {
-    unsafe { from_utf8_mut_inner(data).map(|s| from_inner_mut(s)) }
 }
 
 /// Converts a slice of bytes to a string slice.
@@ -562,8 +502,9 @@ pub fn from_utf8_mut(data: &mut [u8]) -> Result<MutStr<'_>, std::str::Utf8Error>
 /// # Safety
 ///
 /// See [`std::str::from_utf8_unchecked`].
-pub const unsafe fn from_utf8_unchecked(data: &[u8]) -> ConstStr<'_> {
-    from_inner(from_utf8_unchecked_inner(data))
+#[inline]
+pub const unsafe fn from_utf8_unchecked(v: &[u8]) -> ConstStr<'_> {
+    ptr_from_raw_parts(v.as_ptr(), v.len()).deref()
 }
 
 /// Converts a slice of bytes to a string slice.
@@ -571,6 +512,27 @@ pub const unsafe fn from_utf8_unchecked(data: &[u8]) -> ConstStr<'_> {
 /// # Safety
 ///
 /// See [`std::str::from_utf8_unchecked_mut`].
-pub unsafe fn from_utf8_unchecked_mut(data: &mut [u8]) -> MutStr<'_> {
-    from_inner_mut(from_utf8_unchecked_mut_inner(data))
+#[inline]
+pub const unsafe fn from_utf8_unchecked_mut(v: &mut [u8]) -> MutStr<'_> {
+    ptr_from_raw_parts_mut(v as *mut _ as *mut _, v.len()).deref_mut()
+}
+
+/// Constructs a [`ConstStrPtr`] from a pointer and a length.
+///
+/// See [`from_raw_parts`](std::ptr::from_raw_parts).
+#[inline]
+pub const fn ptr_from_raw_parts(data: *const u8, len: usize) -> ConstStrPtr {
+    ConstStrPtr {
+        ptr: crate::span::ptr_from_raw_parts(data, len),
+    }
+}
+
+/// Constructs a [`MutStrPtr`] from a pointer and a length.
+///
+/// See [`from_raw_parts_mut`](std::ptr::from_raw_parts_mut).
+#[inline]
+pub const fn ptr_from_raw_parts_mut(data: *mut u8, len: usize) -> MutStrPtr {
+    MutStrPtr {
+        ptr: crate::span::ptr_from_raw_parts_mut(data, len),
+    }
 }
