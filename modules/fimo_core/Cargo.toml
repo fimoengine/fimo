@@ -22,7 +22,6 @@ fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_core_int = { version = "=0.1.0", path = "../../interfaces/fimo_core_int" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
-fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core", features = ["serde"] }
 
 [dev-dependencies]
 module_loading = { path = "../../test_utilities/module_loading" }

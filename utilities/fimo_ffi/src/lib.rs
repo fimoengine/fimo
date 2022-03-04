@@ -30,6 +30,7 @@
 #![feature(trusted_len)]
 #![feature(new_uninit)]
 #![feature(fn_traits)]
+#![feature(once_cell)]
 #![feature(c_unwind)]
 #![feature(unsize)]
 
@@ -46,8 +47,7 @@ pub mod str;
 pub mod string;
 pub mod tuple;
 pub mod vec;
-
-pub use fimo_version_core as version;
+pub mod version;
 
 pub use crate::str::{ConstStr, MutStr};
 pub use ffi_fn::FfiFn;

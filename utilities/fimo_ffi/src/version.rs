@@ -1,22 +1,14 @@
-//! This crate implements the
+//! Implementation of the
 //! [version specification](https://fimoengine.github.io/emf-rfcs/0004-versioning-specification.html).
-#![warn(
-    missing_docs,
-    rust_2018_idioms,
-    missing_debug_implementations,
-    rustdoc::broken_intra_doc_links
-)]
-use lazy_static::lazy_static;
 use numtoa::NumToA;
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
+use std::lazy::SyncLazy;
 
-lazy_static! {
-    static ref VERSION_VALIDATOR: regex::Regex =
-        regex::Regex::new(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<release_type>(unstable|beta))(\.(?P<release_number>\d+))?)?(\+(?P<build>\d+))?").unwrap();
-}
+static VERSION_VALIDATOR: SyncLazy<regex::Regex> = SyncLazy::new(|| {
+    regex::Regex::new(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<release_type>(unstable|beta))(\.(?P<release_number>\d+))?)?(\+(?P<build>\d+))?").unwrap()
+});
 
 /// A version.
 #[repr(C)]
@@ -39,17 +31,16 @@ pub struct Version {
 /// Errors of the version api.
 #[repr(i8)]
 #[non_exhaustive]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ReleaseType {
     /// Stable release.
-    #[cfg_attr(feature = "serde", serde(rename = "stable"))]
+    #[serde(rename = "stable")]
     Stable = 0,
     /// Unstable pre-release.
-    #[cfg_attr(feature = "serde", serde(rename = "unstable"))]
+    #[serde(rename = "unstable")]
     Unstable = 1,
     /// API-stable pre-release.
-    #[cfg_attr(feature = "serde", serde(rename = "beta"))]
+    #[serde(rename = "beta")]
     Beta = 2,
 }
 
@@ -455,17 +446,41 @@ impl Display for Version {
     }
 }
 
+impl From<&Version> for crate::String {
+    fn from(v: &Version) -> Self {
+        let req = v.string_length_full();
+        let mut buff = crate::Vec::with_capacity(req);
+        buff.fill(0);
+        // Safety:
+        let mut str = unsafe {
+            buff.set_len(req);
+            crate::String::from_utf8_unchecked(buff)
+        };
+
+        v.as_string_full(&mut str).unwrap();
+
+        str
+    }
+}
+
+impl From<Version> for crate::String {
+    fn from(version: Version) -> Self {
+        From::from(&version)
+    }
+}
+
 impl From<&Version> for String {
-    fn from(version: &Version) -> Self {
-        let req = version.string_length_full();
+    fn from(v: &Version) -> Self {
+        let req = v.string_length_full();
         let mut buff = Vec::with_capacity(req);
+        buff.fill(0);
         // Safety:
         let mut str = unsafe {
             buff.set_len(req);
             String::from_utf8_unchecked(buff)
         };
 
-        version.as_string_full(&mut str).unwrap();
+        v.as_string_full(&mut str).unwrap();
 
         str
     }
@@ -477,7 +492,6 @@ impl From<Version> for String {
     }
 }
 
-#[cfg(feature = "serde")]
 impl Serialize for Version {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -487,7 +501,6 @@ impl Serialize for Version {
     }
 }
 
-#[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for Version {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -523,7 +536,7 @@ impl std::error::Error for VersionError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::{ReleaseType, Version};
+    use super::{ReleaseType, Version};
     use std::cmp::Ordering;
 
     #[test]

@@ -15,7 +15,6 @@ actix-rt = "2.6.0"
 parking_lot = "0.11"
 static_assertions = "1.1.0"
 serde = { version = "1.0.123", features = ["derive"] }
-fimo_version_core = { version = "0.1.0", path = "../../utilities/fimo_version_core" }
 fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
 fimo_actix_int = { version = "0.1.0", path = "../../interfaces/fimo_actix_int" }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi", optional = true }
