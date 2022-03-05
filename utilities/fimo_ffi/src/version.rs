@@ -239,133 +239,138 @@ impl Version {
     ///
     /// # Failure
     ///
-    /// This function fails if `buffer.len() < string_length_short(version)`.
-    pub fn as_string_short(&self, mut buffer: impl AsMut<str>) -> Result<usize, VersionError> {
-        let mut digit_buffer = [0u8; 20];
-        let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
+    /// This function fails if `buffer.len() < string_length_short()`.
+    pub fn write_str_short<'a>(
+        &self,
+        buffer: &'a mut [u8],
+    ) -> Result<(&'a mut str, &'a mut [u8]), VersionError> {
+        use std::io::Write;
 
-        let mut length = 0;
-        let major_buff = self.major.numtoa(10, &mut digit_buffer);
-        if length + major_buff.len() + 1 >= buffer.len() {
+        let len = buffer.len();
+        let required = self.string_length_short();
+        if len < required {
             return Err(VersionError::BufferOverflow {
-                buffer: buffer.len(),
-                needed: self.string_length_short(),
+                buffer: len,
+                needed: required,
             });
         }
-        buffer[length..length + major_buff.len()].copy_from_slice(major_buff);
-        length += major_buff.len();
 
-        buffer[length] = b'.';
-        length += 1;
-
-        let minor_buff = self.minor.numtoa(10, &mut digit_buffer);
-        if length + minor_buff.len() + 1 >= buffer.len() {
-            return Err(VersionError::BufferOverflow {
-                buffer: buffer.len(),
-                needed: self.string_length_short(),
-            });
+        let mut tmp = &mut buffer[0..];
+        match write!(tmp, "{}.{}.{}", self.major, self.minor, self.patch) {
+            Ok(_) => {
+                let len = tmp.len();
+                let len = buffer.len() - len;
+                let (str, rest) = buffer.split_at_mut(len);
+                unsafe { Ok((std::str::from_utf8_unchecked_mut(str), rest)) }
+            }
+            Err(_) => Err(VersionError::BufferOverflow {
+                buffer: len,
+                needed: required,
+            }),
         }
-        buffer[length..length + minor_buff.len()].copy_from_slice(minor_buff);
-        length += minor_buff.len();
-
-        buffer[length] = b'.';
-        length += 1;
-
-        let patch_buff = self.patch.numtoa(10, &mut digit_buffer);
-        if length + patch_buff.len() > buffer.len() {
-            return Err(VersionError::BufferOverflow {
-                buffer: buffer.len(),
-                needed: self.string_length_short(),
-            });
-        }
-        buffer[length..length + patch_buff.len()].copy_from_slice(patch_buff);
-        length += patch_buff.len();
-
-        Ok(length)
     }
 
     /// Represents the version as a long string.
     ///
     /// # Failure
     ///
-    /// This function fails if `buffer.len() < string_length_long(version)`.
-    pub fn as_string_long(&self, mut buffer: impl AsMut<str>) -> Result<usize, VersionError> {
-        let mut length = self.as_string_short(&mut buffer)?;
-        let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
+    /// This function fails if `buffer.len() < string_length_long()`.
+    pub fn write_str_long<'a>(
+        &self,
+        buffer: &'a mut [u8],
+    ) -> Result<(&'a mut str, &'a mut [u8]), VersionError> {
+        use std::io::Write;
 
-        let release_type = match self.release_type {
-            ReleaseType::Stable => return Ok(length),
-            ReleaseType::Beta => "-beta",
-            ReleaseType::Unstable => "-unstable",
-        };
-
-        if length + release_type.len() > buffer.len() {
+        let len = buffer.len();
+        let required = self.string_length_long();
+        if len < required {
             return Err(VersionError::BufferOverflow {
-                buffer: buffer.len(),
-                needed: self.string_length_long(),
+                buffer: len,
+                needed: required,
             });
         }
-        buffer[length..length + release_type.len()].copy_from_slice(release_type.as_bytes());
-        length += release_type.len();
 
-        if self.release_number > 0 {
-            if length + 1 > buffer.len() {
-                return Err(VersionError::BufferOverflow {
-                    buffer: buffer.len(),
-                    needed: self.string_length_long(),
-                });
-            }
-            buffer[length] = b'.';
-            length += 1;
+        let (_, mut rest) =
+            self.write_str_short(buffer)
+                .map_err(|_| VersionError::BufferOverflow {
+                    buffer: len,
+                    needed: required,
+                })?;
 
-            let mut digit_buffer = [0u8; 20];
-            let release_number_buff = self.release_number.numtoa(10, &mut digit_buffer);
-            if length + release_number_buff.len() > buffer.len() {
-                return Err(VersionError::BufferOverflow {
-                    buffer: buffer.len(),
-                    needed: self.string_length_long(),
-                });
+        let release_type = match self.release_type {
+            ReleaseType::Stable => "stable",
+            ReleaseType::Beta => "beta",
+            ReleaseType::Unstable => "unstable",
+        };
+
+        let res = if self.release_type != ReleaseType::Stable {
+            if self.release_number == 0 {
+                write!(rest, "-{}", release_type)
+            } else {
+                write!(rest, "-{}.{}", release_type, self.release_number)
             }
-            buffer[length..length + release_number_buff.len()].copy_from_slice(release_number_buff);
-            length += release_number_buff.len();
+        } else {
+            Ok(())
+        };
+
+        let buf_len = len;
+        let len = buf_len - rest.len();
+
+        let (str, rest) = buffer.split_at_mut(len);
+        match res {
+            Ok(_) => unsafe { Ok((std::str::from_utf8_unchecked_mut(str), rest)) },
+            Err(_) => Err(VersionError::BufferOverflow {
+                buffer: buf_len,
+                needed: required,
+            }),
         }
-
-        Ok(length)
     }
 
     /// Represents the version as a full string.
     ///
     /// # Failure
     ///
-    /// This function fails if `buffer.len() < string_length_full(version)`.
-    pub fn as_string_full(&self, mut buffer: impl AsMut<str>) -> Result<usize, VersionError> {
-        let mut length = self.as_string_long(&mut buffer)?;
+    /// This function fails if `buffer.len() < string_length_full()`.
+    pub fn write_str_full<'a>(
+        &self,
+        buffer: &'a mut [u8],
+    ) -> Result<(&'a mut str, &'a mut [u8]), VersionError> {
+        use std::io::Write;
 
-        if self.build > 0 {
-            let buffer = unsafe { buffer.as_mut().as_bytes_mut() };
-
-            if length + 1 > buffer.len() {
-                return Err(VersionError::BufferOverflow {
-                    buffer: buffer.len(),
-                    needed: self.string_length_full(),
-                });
-            }
-            buffer[length] = b'+';
-            length += 1;
-
-            let mut digit_buffer = [0u8; 20];
-            let build_buff = self.build.numtoa(10, &mut digit_buffer);
-            if length + build_buff.len() > buffer.len() {
-                return Err(VersionError::BufferOverflow {
-                    buffer: buffer.len(),
-                    needed: self.string_length_full(),
-                });
-            }
-            buffer[length..length + build_buff.len()].copy_from_slice(build_buff);
-            length += build_buff.len();
+        let len = buffer.len();
+        let required = self.string_length_full();
+        if buffer.len() < required {
+            return Err(VersionError::BufferOverflow {
+                buffer: len,
+                needed: required,
+            });
         }
 
-        Ok(length)
+        let (_, mut rest) =
+            self.write_str_long(buffer)
+                .map_err(|_| VersionError::BufferOverflow {
+                    buffer: len,
+                    needed: required,
+                })?;
+
+        let res = if self.build == 0 {
+            Ok(())
+        } else {
+            write!(rest, "+{}", self.build)
+        };
+
+        match res {
+            Ok(_) => {
+                let len = rest.len();
+                let len = buffer.len() - len;
+                let (str, rest) = buffer.split_at_mut(len);
+                unsafe { Ok((std::str::from_utf8_unchecked_mut(str), rest)) }
+            }
+            Err(_) => Err(VersionError::BufferOverflow {
+                buffer: buffer.len(),
+                needed: required,
+            }),
+        }
     }
 
     /// Compares two versions.
@@ -449,17 +454,13 @@ impl Display for Version {
 impl From<&Version> for crate::String {
     fn from(v: &Version) -> Self {
         let req = v.string_length_full();
-        let mut buff = crate::Vec::with_capacity(req);
-        buff.fill(0);
-        // Safety:
-        let mut str = unsafe {
-            buff.set_len(req);
-            crate::String::from_utf8_unchecked(buff)
-        };
+        let mut buff = crate::vec![0; req];
 
-        v.as_string_full(&mut str).unwrap();
+        let (str, _) = v.write_str_full(&mut buff).unwrap();
+        let len = str.len();
+        unsafe { buff.set_len(len) }
 
-        str
+        unsafe { crate::String::from_utf8_unchecked(buff) }
     }
 }
 
@@ -472,17 +473,13 @@ impl From<Version> for crate::String {
 impl From<&Version> for String {
     fn from(v: &Version) -> Self {
         let req = v.string_length_full();
-        let mut buff = Vec::with_capacity(req);
-        buff.fill(0);
-        // Safety:
-        let mut str = unsafe {
-            buff.set_len(req);
-            String::from_utf8_unchecked(buff)
-        };
+        let mut buff = vec![0; req];
 
-        v.as_string_full(&mut str).unwrap();
+        let (str, _) = v.write_str_full(&mut buff).unwrap();
+        let len = str.len();
+        unsafe { buff.set_len(len) }
 
-        str
+        unsafe { String::from_utf8_unchecked(buff) }
     }
 }
 
@@ -735,24 +732,16 @@ mod tests {
         ];
 
         let mut buffer = [0u8; 40];
-        let mut str = unsafe { std::str::from_utf8_unchecked_mut(&mut buffer) };
         for version_string in version_strings.iter() {
             let version = Version::from_string(version_string.0).unwrap();
-            assert_eq!(
-                Version::as_string_short(&version, &mut str),
-                Ok(version_string.1.len())
-            );
-            assert_eq!(&str[..version_string.1.len()], version_string.1);
-            assert_eq!(
-                Version::as_string_long(&version, &mut str),
-                Ok(version_string.2.len())
-            );
-            assert_eq!(&str[..version_string.2.len()], version_string.2);
-            assert_eq!(
-                Version::as_string_full(&version, &mut str),
-                Ok(version_string.3.len())
-            );
-            assert_eq!(&str[..version_string.3.len()], version_string.3);
+            let (str, _) = version.write_str_short(&mut buffer).unwrap();
+            assert_eq!(str, version_string.1);
+
+            let (str, _) = version.write_str_long(&mut buffer).unwrap();
+            assert_eq!(str, version_string.2);
+
+            let (str, _) = version.write_str_full(&mut buffer).unwrap();
+            assert_eq!(str, version_string.3);
         }
     }
 
