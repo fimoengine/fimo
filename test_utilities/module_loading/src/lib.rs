@@ -1,18 +1,22 @@
-use fimo_ffi::ObjArc;
-use fimo_module::rust_loader::{RustLoader, MODULE_LOADER_TYPE};
-use fimo_module::{Error, ErrorKind, ModuleInterfaceDescriptor};
+#![feature(unsize)]
+
+use fimo_ffi::{DynObj, ObjArc};
+use fimo_module::loader::{RustLoader, MODULE_LOADER_TYPE};
+use fimo_module::{Error, IModule, IModuleLoader, ModuleInterfaceDescriptor};
 use fimo_module::{FimoInterface, IModuleInstance, IModuleInterface};
 use std::any::TypeId;
 use std::collections::BTreeMap;
+use std::marker::Unsize;
 use std::path::{Path, PathBuf};
 
-use fimo_core_int::rust::module_registry::InterfaceHandle;
-use fimo_core_int::rust::IFimoCore;
+use fimo_core_int::modules::{IModuleRegistry, IModuleRegistryExt, InterfaceHandle};
+use fimo_core_int::IFimoCore;
+use fimo_ffi::ptr::{CastInto, IBase};
 
+#[cfg(feature = "fimo_actix_int")]
 use fimo_actix_int::IFimoActix;
-use fimo_ffi::marker::SendSyncMarker;
-use fimo_ffi::object::ObjectWrapper;
-use fimo_ffi::vtable::{MarkerCompatible, VTable};
+
+#[cfg(feature = "fimo_tasks_int")]
 use fimo_tasks_int::IFimoTasks;
 
 #[cfg(target_os = "windows")]
@@ -44,8 +48,8 @@ macro_rules! lib_path {
 }
 
 pub struct ModuleDatabase {
-    core: ObjArc<IFimoCore>,
-    core_instance: ObjArc<IModuleInstance>,
+    core: ObjArc<DynObj<dyn IFimoCore>>,
+    core_instance: ObjArc<DynObj<dyn IModuleInstance>>,
     paths: BTreeMap<ModuleInterfaceDescriptor, PathBuf>,
 }
 
@@ -53,32 +57,38 @@ impl ModuleDatabase {
     pub fn new() -> Result<Self, Error> {
         let mut paths = BTreeMap::new();
         paths.insert(
-            IFimoCore::new_descriptor(),
-            new_path(lib_path!("fimo_core"))?,
+            <dyn IFimoCore>::new_descriptor(),
+            PathBuf::from(lib_path!("fimo_core")),
         );
+        #[cfg(feature = "fimo_actix_int")]
         paths.insert(
-            IFimoActix::new_descriptor(),
-            new_path(lib_path!("fimo_actix"))?,
+            <dyn IFimoActix>::new_descriptor(),
+            PathBuf::from(lib_path!("fimo_actix")),
         );
+        #[cfg(feature = "fimo_tasks_int")]
         paths.insert(
-            IFimoTasks::new_descriptor(),
-            new_path(lib_path!("fimo_tasks"))?,
+            <dyn IFimoTasks>::new_descriptor(),
+            PathBuf::from(lib_path!("fimo_tasks")),
         );
 
         let module_loader = RustLoader::new();
         let core_module = unsafe {
-            module_loader
-                .load_module_raw(paths.get(&IFimoCore::new_descriptor()).unwrap().as_path())?
+            module_loader.load_module_raw(
+                paths
+                    .get(&<dyn IFimoCore>::new_descriptor())
+                    .unwrap()
+                    .as_path(),
+            )?
         };
         let core_instance = core_module.new_instance()?;
         let core_descriptor = core_instance
             .available_interfaces()
             .iter()
-            .find(|interface| interface.name == IFimoCore::NAME)
+            .find(|interface| interface.name == <dyn IFimoCore>::NAME)
             .unwrap();
 
-        let interface = core_instance.interface(core_descriptor).into_rust()?;
-        let core = IModuleInterface::try_downcast_arc(interface)?;
+        let interface = core_instance.interface(core_descriptor)?;
+        let core = fimo_module::try_downcast_arc(interface)?;
 
         Ok(Self {
             core,
@@ -91,29 +101,25 @@ impl ModuleDatabase {
         self.paths.get(&I::new_descriptor()).map(|p| p.as_path())
     }
 
-    pub fn core_interface(&self) -> ObjArc<IFimoCore> {
-        self.core.clone()
+    pub fn core_interface(&self) -> ObjArc<DynObj<dyn IFimoCore>> {
+        ObjArc::cast_super(self.core.clone())
     }
 
-    pub fn new_interface<I: 'static + FimoInterface + ?Sized>(
+    pub fn new_interface<I>(
         &self,
-    ) -> Result<(ObjArc<I>, InterfaceHandle<IModuleInterface>), Error>
+    ) -> Result<InterfaceHandle<'_, DynObj<I>, DynObj<dyn IModuleRegistry + '_>>, Error>
     where
-        <<I as ObjectWrapper>::VTable as VTable>::Marker: MarkerCompatible<SendSyncMarker>,
+        I: CastInto<dyn IModuleInterface> + Unsize<dyn IBase> + FimoInterface + ?Sized + 'static,
     {
-        if TypeId::of::<I>() == TypeId::of::<IFimoCore>() {
+        if TypeId::of::<I>() == TypeId::of::<dyn IFimoCore>() {
             panic!("Can not create core")
         }
 
-        let module_registry = self.core.get_module_registry();
+        let module_registry = self.core.modules();
         let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
-        let module = unsafe {
-            loader
-                .load_module_raw(self.interface_path::<I>().unwrap())
-                .into_rust()?
-        };
+        let module = unsafe { loader.load_module_raw(self.interface_path::<I>().unwrap())? };
 
-        let instance = module.new_instance().into_rust()?;
+        let instance = module.new_instance()?;
         let interface_descriptor = instance
             .available_interfaces()
             .iter()
@@ -123,29 +129,20 @@ impl ModuleDatabase {
             .core_instance
             .available_interfaces()
             .iter()
-            .find(|interface| interface.name == IFimoCore::NAME)
+            .find(|interface| interface.name == <dyn IFimoCore>::NAME)
             .unwrap();
 
-        let i = self.core_instance.interface(core_descriptor).into_rust()?;
+        let i = self.core_instance.interface(core_descriptor)?;
 
-        instance.set_core(core_descriptor, i).into_rust()?;
-        let interface = instance.interface(interface_descriptor).into_rust()?;
-        let handle = module_registry.register_interface(&I::new_descriptor(), interface.clone())?;
-        let interface = IModuleInterface::try_downcast_arc(interface)?;
-        Ok((interface, handle))
+        instance.bind_interface(interface_descriptor, i)?;
+        let interface = instance.interface(interface_descriptor)?;
+        let interface: ObjArc<DynObj<I>> = fimo_module::try_downcast_arc(interface)?;
+        let handle = module_registry.register_interface(&I::new_descriptor(), interface)?;
+        Ok(handle)
     }
 }
 
 pub fn core_path() -> &'static Path {
     const CORE_PATH: &str = lib_path!("fimo_core");
     Path::new(CORE_PATH)
-}
-
-fn new_path(path: &str) -> Result<PathBuf, Error> {
-    let current = std::env::current_exe().map_err(|e| Error::new(ErrorKind::Internal, e))?;
-    let artifact_dir = PathBuf::from(current.parent().unwrap().parent().unwrap());
-    artifact_dir
-        .join(path)
-        .canonicalize()
-        .map_err(|e| Error::new(ErrorKind::Internal, e))
 }

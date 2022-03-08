@@ -2504,6 +2504,18 @@ impl<'a, T: Clone> From<&'a mut [T]> for Vec<T> {
     }
 }
 
+impl<T> From<std::vec::Vec<T>> for Vec<T> {
+    fn from(v: std::vec::Vec<T>) -> Self {
+        v.into_iter().collect()
+    }
+}
+
+impl<T> From<Vec<T>> for std::vec::Vec<T> {
+    fn from(v: Vec<T>) -> Self {
+        v.into_iter().collect()
+    }
+}
+
 impl<'a> From<&'a str> for Vec<u8> {
     /// Allocate a `Vec<u8>` and fill it with a UTF-8 string.
     ///

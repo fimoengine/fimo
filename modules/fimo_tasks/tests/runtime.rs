@@ -1,20 +1,21 @@
+use fimo_ffi::DynObj;
 use fimo_module::Error;
 use fimo_tasks::Builder;
-use fimo_tasks_int::runtime::{init_runtime, is_worker, IRuntime};
+use fimo_tasks_int::runtime::{init_runtime, is_worker, IRuntime, IRuntimeExt, IScheduler};
 use fimo_tasks_int::task::ParallelBuilder;
 use std::sync::{Mutex, Once};
 
 static INIT: Once = Once::new();
 
-fn new_runtime(f: impl FnOnce(&IRuntime) -> Result<(), Error>) -> Result<(), Error> {
+fn new_runtime(f: impl FnOnce(&DynObj<dyn IRuntime>) -> Result<(), Error>) -> Result<(), Error> {
     INIT.call_once(pretty_env_logger::init);
 
     let runtime = Builder::new().build()?;
-    f(&*runtime)
+    let runtime = fimo_ffi::ptr::coerce_obj(&*runtime);
+    f(runtime)
 }
 
 #[test]
-#[ignore]
 fn enter_scheduler() {
     new_runtime(|r| {
         r.enter_scheduler(|_s, c| {
@@ -37,7 +38,6 @@ fn enter_scheduler() {
 }
 
 #[test]
-#[ignore]
 fn worker_id() {
     new_runtime(|r| {
         assert!(!is_worker());
@@ -62,7 +62,6 @@ fn worker_id() {
 }
 
 #[test]
-#[ignore]
 fn unique_worker_ids() {
     new_runtime(|r| {
         r.block_on_and_enter(
@@ -88,7 +87,6 @@ fn unique_worker_ids() {
 }
 
 #[test]
-#[ignore]
 fn block_on_multiple_unique() {
     new_runtime(|r| {
         r.block_on_and_enter(

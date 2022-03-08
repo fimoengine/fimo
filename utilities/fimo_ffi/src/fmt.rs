@@ -1,18 +1,12 @@
 //! Utilities for formatting.
 
 use crate::ptr::{
-    coerce_obj_mut, from_raw_mut, into_raw_mut, metadata, CastSuper, FetchVTable, IBase,
-    ObjInterface, ObjMetadata, ObjectId, RawObjMut,
+    coerce_obj_mut, from_raw_mut, into_raw_mut, metadata, CastInto, IBase, ObjInterface, RawObjMut,
 };
-use crate::{
-    base_interface, base_object, base_vtable, impl_upcast, ConstStr, DynObj, ObjArc, ObjBox,
-    Optional,
-};
+use crate::{interface, vtable, ConstStr, DynObj, ObjArc, ObjBox, ObjectId, Optional, ReprC};
 use std::fmt::{Arguments, Debug};
 use std::marker::Unsize;
-use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
-use std::ptr::addr_of;
 
 /// Helper type for bridging the implementations of the `fmt` modules of
 /// this crate and the std library.
@@ -82,56 +76,43 @@ where
     }
 }
 
-base_interface! {
-    /// [`Debug`] equivalent for [`DynObj`] objects.
-    #![vtable = IDebugVTable]
-    #![uuid(0x2f8ffa24, 0x1b60, 0x43d8, 0xbd3d, 0x82197b2372bf)]
-    pub trait IDebug : (IBase) {
-        /// Formats the value using the given formatter.
-        fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error>;
+/// [`Debug`] equivalent for [`DynObj`] objects.
+#[interface(
+    uuid = "2f8ffa24-1b60-43d8-bd3d-82197b2372bf",
+    vtable = "IDebugVTable",
+    generate()
+)]
+pub trait IDebug: IBase {
+    /// Formats the value using the given formatter.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "crate::Result<(), Error>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn fmt(
+        &self,
+        #[vtable_info(
+            type = "RawObjMut<dyn IFormatter + '_>",
+            into = "formatter_into_raw",
+            from = "formatter_from_raw"
+        )]
+        f: &mut Formatter<'_>,
+    ) -> Result<(), Error>;
+}
+
+#[inline]
+fn formatter_from_raw<'a>(raw: RawObjMut<dyn IFormatter + 'a>) -> &mut Formatter<'a> {
+    unsafe {
+        let formatter = from_raw_mut(raw) as *mut Formatter<'a>;
+        &mut *formatter
     }
 }
 
-base_vtable! {
-    /// VTable for a [`IDebug`] object.
-    #![interface = IDebug]
-    pub struct IDebugVTable {
-        /// Formats the value using the given formatter.
-        pub fmt: extern "C-unwind" fn(
-            *const (),
-            RawObjMut<dyn IFormatter + '_>,
-        ) -> crate::Result<(), Error>,
-    }
-}
-
-impl IDebugVTable {
-    /// Constructs a new vtable for a given type.
-    #[inline]
-    pub const fn new_for<'a, T>() -> Self
-    where
-        T: IDebug + ObjectId + 'a,
-    {
-        Self::new_for_embedded::<'a, T, dyn IDebug>(0)
-    }
-
-    /// Constructs a new vtable for a given type and interface with a custom offset.
-    #[inline]
-    pub const fn new_for_embedded<'a, T, Dyn>(offset: usize) -> Self
-    where
-        T: IDebug + ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
-    {
-        extern "C-unwind" fn fmt<T: IDebug>(
-            ptr: *const (),
-            f: RawObjMut<dyn IFormatter + '_>,
-        ) -> crate::Result<(), Error> {
-            let ptr = unsafe { &*(ptr as *const T) };
-            let f = unsafe { &mut *(from_raw_mut(f) as *mut Formatter<'_>) };
-            ptr.fmt(f).into()
-        }
-
-        Self::new_embedded::<T, Dyn>(offset, fmt::<T> as _)
-    }
+#[inline]
+fn formatter_into_raw<'a>(f: &mut Formatter<'a>) -> RawObjMut<dyn IFormatter + 'a> {
+    into_raw_mut(&mut f.inner)
 }
 
 impl<T: IDebug + ?Sized> IDebug for ObjBox<T> {
@@ -178,64 +159,30 @@ impl<T: IDebug + ?Sized> IDebug for &'_ mut T {
     }
 }
 
-impl<'a, T: CastSuper<dyn IDebug + 'a> + ?Sized> IDebug for DynObj<T> {
-    #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let vtable: &IDebugVTable = metadata(self).super_vtable();
-        (vtable.fmt)(self as *const _ as _, into_raw_mut(&mut f.inner)).into_rust()
-    }
-}
-
-base_interface! {
-    /// [`Display`](std::fmt::Display) equivalent for [`DynObj`] objects.
-    #![vtable = IDisplayVTable]
-    #![uuid(0x62ceb949, 0x1605, 0x402a, 0xaa8c, 0x1acdc75dd160)]
-    pub trait IDisplay : (IBase) {
-        /// Formats the value using the given formatter.
-        fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error>;
-    }
-}
-
-base_vtable! {
-    /// VTable for a [`IDisplay`] object.
-    #![interface = IDebug]
-    pub struct IDisplayVTable {
-        /// Formats the value using the given formatter.
-        pub fmt: extern "C-unwind" fn(
-            *const (),
-            RawObjMut<dyn IFormatter + '_>,
-        ) -> crate::Result<(), Error>,
-    }
-}
-
-impl IDisplayVTable {
-    /// Constructs a new vtable for a given type.
-    #[inline]
-    pub const fn new_for<'a, T>() -> Self
-    where
-        T: IDisplay + ObjectId + 'a,
-    {
-        Self::new_for_embedded::<'a, T, dyn IDisplay>(0)
-    }
-
-    /// Constructs a new vtable for a given type and interface with a custom offset.
-    #[inline]
-    pub const fn new_for_embedded<'a, T, Dyn>(offset: usize) -> Self
-    where
-        T: IDisplay + ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
-    {
-        extern "C-unwind" fn fmt<T: IDisplay>(
-            ptr: *const (),
-            f: RawObjMut<dyn IFormatter + '_>,
-        ) -> crate::Result<(), Error> {
-            let ptr = unsafe { &*(ptr as *const T) };
-            let f = unsafe { &mut *(from_raw_mut(f) as *mut Formatter<'_>) };
-            ptr.fmt(f).into()
-        }
-
-        Self::new_embedded::<T, Dyn>(offset, fmt::<T> as _)
-    }
+/// [`Display`](std::fmt::Display) equivalent for [`DynObj`] objects.
+#[interface(
+    uuid = "62ceb949-1605-402a-aa8c-1acdc75dd160",
+    vtable = "IDisplayVTable",
+    generate()
+)]
+pub trait IDisplay: IBase {
+    /// Formats the value using the given formatter.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "crate::Result<(), Error>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn fmt(
+        &self,
+        #[vtable_info(
+            type = "RawObjMut<dyn IFormatter + '_>",
+            into = "formatter_into_raw",
+            from = "formatter_from_raw"
+        )]
+        f: &mut Formatter<'_>,
+    ) -> Result<(), Error>;
 }
 
 impl<T: IDisplay + ?Sized> IDisplay for ObjBox<T> {
@@ -282,14 +229,6 @@ impl<T: IDisplay + ?Sized> IDisplay for &'_ mut T {
     }
 }
 
-impl<'a, T: CastSuper<dyn IDisplay + 'a> + ?Sized> IDisplay for DynObj<T> {
-    #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let vtable: &IDisplayVTable = metadata(self).super_vtable();
-        (vtable.fmt)(self as *const _ as _, into_raw_mut(&mut f.inner)).into_rust()
-    }
-}
-
 /// Possible alignments returned by [`IFormatter::align`].
 #[repr(u32)]
 #[derive(Debug)]
@@ -302,166 +241,97 @@ pub enum Alignment {
     Center,
 }
 
-base_interface! {
-    /// Type-erased configuration for formatting.
-    #![vtable = IFormatterVTable]
-    #![uuid(0x4f94dc64, 0x2f45, 0x4590, 0x9d41, 0x1b7917510138)]
-    pub trait IFormatter : (IWrite) {
-        /// See [`Formatter::pad`]: std::fmt::Formatter::pad.
-        fn pad(&mut self, s: &str) -> Result<(), Error>;
-        /// See [`Formatter::pad_integral`]: std::fmt::Formatter::pad_integral.
-        fn pad_integral(&mut self, is_nonnegative: bool, prefix: &str, buf: &str) -> Result<(), Error>;
-        /// See [`Formatter::fill`]: std::fmt::Formatter::fill.
-        fn fill(&self) -> char;
-        /// See [`Formatter::align`]: std::fmt::Formatter::align.
-        fn align(&self) -> Option<Alignment>;
-        /// See [`Formatter::width`]: std::fmt::Formatter::width.
-        fn width(&self) -> Option<usize>;
-        /// See [`Formatter::precision`]: std::fmt::Formatter::precision.
-        fn precision(&self) -> Option<usize>;
-        /// See [`Formatter::sign_plus`]: std::fmt::Formatter::sign_plus.
-        fn sign_plus(&self) -> bool;
-        /// See [`Formatter::sign_minus`]: std::fmt::Formatter::sign_minus.
-        fn sign_minus(&self) -> bool;
-        /// See [`Formatter::alternate`]: std::fmt::Formatter::alternate.
-        fn alternate(&self) -> bool;
-        /// See [`Formatter::sign_aware_zero_pad`]: std::fmt::Formatter::sign_aware_zero_pad.
-        fn sign_aware_zero_pad(&self) -> bool;
-    }
-}
+/// Type-erased configuration for formatting.
+#[interface(
+    uuid = "4f94dc64-2f45-4590-9d41-1b7917510138",
+    vtable = "IFormatterVTable",
+    generate(IWriteVTable)
+)]
+pub trait IFormatter: IWrite {
+    /// See [`Formatter::pad`]: std::fmt::Formatter::pad.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "crate::Result<(), Error>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn pad(
+        &mut self,
+        #[vtable_info(type = "ConstStr<'_>", into = "Into::into", from = "Into::into")] s: &str,
+    ) -> Result<(), Error>;
 
-base_vtable! {
-    /// VTable for an [`IFormatter`].
-    #![interface = IFormatter]
-    pub struct IFormatterVTable {
-        /// VTable for the [`IWrite`] implementation.
-        pub write_vtable: IWriteVTable,
-        /// See [`Formatter::pad`]: std::fmt::Formatter::pad.
-        pub pad: extern "C-unwind" fn(*mut (), ConstStr<'_>) -> crate::Result<(), Error>,
-        /// See [`Formatter::pad_integral`]: std::fmt::Formatter::pad_integral.
-        pub pad_integral: extern "C-unwind" fn(
-            *mut (),
-            bool,
-            ConstStr<'_>,
-            ConstStr<'_>
-        ) -> crate::Result<(), Error>,
-        /// See [`Formatter::fill`]: std::fmt::Formatter::fill.
-        pub fill: extern "C-unwind" fn(*const ()) -> u32,
-        /// See [`Formatter::align`]: std::fmt::Formatter::align.
-        pub align: extern "C-unwind" fn(*const ()) -> Optional<Alignment>,
-        /// See [`Formatter::width`]: std::fmt::Formatter::width.
-        pub width: extern "C-unwind" fn(*const ()) -> Optional<usize>,
-        /// See [`Formatter::precision`]: std::fmt::Formatter::precision.
-        pub precision: extern "C-unwind" fn(*const ()) -> Optional<usize>,
-        /// See [`Formatter::sign_plus`]: std::fmt::Formatter::sign_plus.
-        pub sign_plus: extern "C-unwind" fn(*const ()) -> bool,
-        /// See [`Formatter::sign_minus`]: std::fmt::Formatter::sign_minus.
-        pub sign_minus: extern "C-unwind" fn(*const ()) -> bool,
-        /// See [`Formatter::alternate`]: std::fmt::Formatter::alternate.
-        pub alternate: extern "C-unwind" fn(*const ()) -> bool,
-        /// See [`Formatter::sign_aware_zero_pad`]: std::fmt::Formatter::sign_aware_zero_pad.
-        pub sign_aware_zero_pad: extern "C-unwind" fn(*const ()) -> bool,
-    }
-}
+    /// See [`Formatter::pad_integral`]: std::fmt::Formatter::pad_integral.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "crate::Result<(), Error>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn pad_integral(
+        &mut self,
+        is_nonnegative: bool,
+        #[vtable_info(type = "ConstStr<'_>", into = "Into::into", from = "Into::into")]
+        prefix: &str,
+        #[vtable_info(type = "ConstStr<'_>", into = "Into::into", from = "Into::into")] buf: &str,
+    ) -> Result<(), Error>;
 
-impl_upcast! {
-    impl (IFormatter) -> (IWrite) obj: ObjMetadata<_> {
-        let vtable: &IFormatterVTable = obj.vtable();
-        let vtable = &vtable.write_vtable;
-        ObjMetadata::new(vtable)
-    }
-}
+    /// See [`Formatter::fill`]: std::fmt::Formatter::fill.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "u32",
+        into = "Into::into",
+        from = "char::from_u32_unchecked"
+    )]
+    fn fill(&self) -> char;
 
-impl IFormatterVTable {
-    /// Constructs a new vtable for a given type.
-    #[inline]
-    pub const fn new_for<'a, T>() -> Self
-    where
-        T: IFormatter + ObjectId + 'a,
-    {
-        Self::new_for_embedded::<'a, T, dyn IFormatter>(0)
-    }
+    /// See [`Formatter::align`]: std::fmt::Formatter::align.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "Optional<Alignment>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn align(&self) -> Option<Alignment>;
 
-    /// Constructs a new vtable for a given type and interface with a custom offset.
-    #[inline]
-    pub const fn new_for_embedded<'a, T, Dyn>(offset: usize) -> Self
-    where
-        T: IFormatter + ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
-    {
-        extern "C-unwind" fn pad<T: IFormatter>(
-            ptr: *mut (),
-            s: ConstStr<'_>,
-        ) -> crate::Result<(), Error> {
-            let ptr = unsafe { &mut *(ptr as *mut T) };
-            ptr.pad(s.into()).into()
-        }
-        extern "C-unwind" fn pad_internal<T: IFormatter>(
-            ptr: *mut (),
-            is_nonnegative: bool,
-            prefix: ConstStr<'_>,
-            buf: ConstStr<'_>,
-        ) -> crate::Result<(), Error> {
-            let ptr = unsafe { &mut *(ptr as *mut T) };
-            ptr.pad_integral(is_nonnegative, prefix.into(), buf.into())
-                .into()
-        }
-        extern "C-unwind" fn fill<T: IFormatter>(ptr: *const ()) -> u32 {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.fill() as u32
-        }
-        extern "C-unwind" fn align<T: IFormatter>(ptr: *const ()) -> Optional<Alignment> {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.align().into()
-        }
-        extern "C-unwind" fn width<T: IFormatter>(ptr: *const ()) -> Optional<usize> {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.width().into()
-        }
-        extern "C-unwind" fn precision<T: IFormatter>(ptr: *const ()) -> Optional<usize> {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.precision().into()
-        }
-        extern "C-unwind" fn sign_plus<T: IFormatter>(ptr: *const ()) -> bool {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.sign_plus()
-        }
-        extern "C-unwind" fn sign_minus<T: IFormatter>(ptr: *const ()) -> bool {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.sign_minus()
-        }
-        extern "C-unwind" fn alternate<T: IFormatter>(ptr: *const ()) -> bool {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.alternate()
-        }
-        extern "C-unwind" fn sign_aware_zero_pad<T: IFormatter>(ptr: *const ()) -> bool {
-            let ptr = unsafe { &*(ptr as *const T) };
-            ptr.sign_aware_zero_pad()
-        }
+    /// See [`Formatter::width`]: std::fmt::Formatter::width.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "Optional<usize>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn width(&self) -> Option<usize>;
 
-        const UNINIT: MaybeUninit<IFormatterVTable> = MaybeUninit::uninit();
-        const UNINIT_PTR: *const IFormatterVTable = UNINIT.as_ptr();
-        const IWRITE_VTABLE_PTR: *const IWriteVTable =
-            unsafe { addr_of!((*UNINIT_PTR).write_vtable) };
-        const IWRITE_OFFSET: usize = unsafe {
-            (IWRITE_VTABLE_PTR as *const u8).offset_from(UNINIT_PTR as *const u8) as usize
-        };
+    /// See [`Formatter::precision`]: std::fmt::Formatter::precision.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "Optional<usize>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    fn precision(&self) -> Option<usize>;
 
-        Self::new_embedded::<T, Dyn>(
-            offset,
-            IWriteVTable::new_for_embedded::<T, Dyn>(IWRITE_OFFSET),
-            pad::<T> as _,
-            pad_internal::<T> as _,
-            fill::<T> as _,
-            align::<T> as _,
-            width::<T> as _,
-            precision::<T> as _,
-            sign_plus::<T> as _,
-            sign_minus::<T> as _,
-            alternate::<T> as _,
-            sign_aware_zero_pad::<T> as _,
-        )
-    }
+    /// See [`Formatter::sign_plus`]: std::fmt::Formatter::sign_plus.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    fn sign_plus(&self) -> bool;
+
+    /// See [`Formatter::sign_minus`]: std::fmt::Formatter::sign_minus.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    fn sign_minus(&self) -> bool;
+
+    /// See [`Formatter::alternate`]: std::fmt::Formatter::alternate.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    fn alternate(&self) -> bool;
+
+    /// See [`Formatter::sign_aware_zero_pad`]: std::fmt::Formatter::sign_aware_zero_pad.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    fn sign_aware_zero_pad(&self) -> bool;
 }
 
 /// Wrapper around a `DynObj<dyn IFormatter + 'a>`
@@ -569,20 +439,10 @@ impl<'a> IWrite for Formatter<'a> {
     }
 }
 
+#[derive(ObjectId)]
+#[fetch_vtable(uuid = "bfd8655b-3746-412d-a874-7af026932817", interfaces(IFormatter))]
 struct FormatterWrapper<'a, 'b> {
     fmt: &'a mut std::fmt::Formatter<'b>,
-}
-
-base_object! {
-    #![uuid(0x5567dd5f, 0xd992, 0x4460, 0xa24b, 0xa863896ef27e)]
-    generic <'a, 'b> FormatterWrapper<'a, 'b> => FormatterWrapper<'_, '_>
-}
-
-impl<'a, 'b> FetchVTable<dyn IFormatter + 'a> for FormatterWrapper<'a, 'b> {
-    fn fetch_interface() -> &'static IFormatterVTable {
-        static VTABLE: IFormatterVTable = IFormatterVTable::new_for::<FormatterWrapper<'_, '_>>();
-        &VTABLE
-    }
 }
 
 impl<'a, 'b> IWrite for FormatterWrapper<'a, 'b> {
@@ -660,109 +520,37 @@ impl<'a, 'b> IFormatter for FormatterWrapper<'a, 'b> {
     }
 }
 
-impl<'a, T: CastSuper<dyn IFormatter + 'a> + ?Sized> IFormatter for DynObj<T>
-where
-    DynObj<T>: IWrite,
-{
-    #[inline]
-    fn pad(&mut self, s: &str) -> Result<(), Error> {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.pad)(self as *mut _ as _, s.into()).into_rust()
-    }
+/// [`Write`](std::fmt::Write) equivalent for [`DynObj`] objects.
+#[interface(uuid = "fef2a45f-1309-46c2-8a83-361d51f1bf0f", vtable = "IWriteVTable")]
+pub trait IWrite: IBase {
+    /// Writes a string slice into this writer, returning whether the write succeeded.
+    fn write_str(&mut self, s: &str) -> Result<(), Error>;
 
-    #[inline]
-    fn pad_integral(&mut self, is_nonnegative: bool, prefix: &str, buf: &str) -> Result<(), Error> {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.pad_integral)(
-            self as *mut _ as _,
-            is_nonnegative,
-            prefix.into(),
-            buf.into(),
-        )
-        .into_rust()
-    }
+    /// Writes a [`char`] into this writer, returning whether the write succeeded.
+    fn write_char(&mut self, c: char) -> Result<(), Error>;
 
-    #[inline]
-    fn fill(&self) -> char {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        let c = (vtable.fill)(self as *const _ as _);
-        unsafe { char::from_u32_unchecked(c) }
-    }
-
-    #[inline]
-    fn align(&self) -> Option<Alignment> {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.align)(self as *const _ as _).into_rust()
-    }
-
-    #[inline]
-    fn width(&self) -> Option<usize> {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.width)(self as *const _ as _).into_rust()
-    }
-
-    #[inline]
-    fn precision(&self) -> Option<usize> {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.precision)(self as *const _ as _).into_rust()
-    }
-
-    #[inline]
-    fn sign_plus(&self) -> bool {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.sign_plus)(self as *const _ as _)
-    }
-
-    #[inline]
-    fn sign_minus(&self) -> bool {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.sign_minus)(self as *const _ as _)
-    }
-
-    #[inline]
-    fn alternate(&self) -> bool {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.alternate)(self as *const _ as _)
-    }
-
-    #[inline]
-    fn sign_aware_zero_pad(&self) -> bool {
-        let vtable: &IFormatterVTable = metadata(self).super_vtable::<dyn IFormatter + 'a>();
-        (vtable.sign_aware_zero_pad)(self as *const _ as _)
-    }
+    /// Writes a multiple arguments into this writer, returning whether the write succeeded.
+    fn write_fmt(&mut self, args: Arguments<'_>) -> Result<(), Error>;
 }
 
-base_interface! {
-    /// [`Write`](std::fmt::Write) equivalent for [`DynObj`] objects.
-    #![vtable = IWriteVTable]
-    #![uuid(0xfef2a45f, 0x1309, 0x46c2, 0x8a83, 0x361d51f1bf0f)]
-    pub trait IWrite : (IBase) {
-        /// Writes a string slice into this writer, returning whether the write succeeded.
-        fn write_str(&mut self, s: &str) -> Result<(), Error>;
-        /// Writes a [`char`] into this writer, returning whether the write succeeded.
-        fn write_char(&mut self, c: char) -> Result<(), Error>;
-        /// Writes a multiple arguments into this writer, returning whether the write succeeded.
-        fn write_fmt(&mut self, args: Arguments<'_>) -> Result<(), Error>;
-    }
-}
-
-base_vtable! {
-    /// VTable for [`IWrite`] objects.
-    #![interface = IWrite]
-    pub struct IWriteVTable {
-        /// Writes a string slice into this writer, returning whether the write succeeded.
-        pub write_str: extern "C-unwind" fn(*mut (), ConstStr<'_>) -> crate::Result<(), Error>,
-        /// Writes a [`char`] into this writer, returning whether the write succeeded.
-        pub write_char: extern "C-unwind" fn(*mut (), u32) -> crate::Result<(), Error>,
-        /// Writes a multiple arguments into this writer, returning whether the write succeeded.
-        ///
-        /// # Note
-        ///
-        /// Implementation of this function is optional and allows for formatting without
-        /// allocating additional buffers.
-        #[allow(clippy::type_complexity)]
-        pub write_fmt: Option<fn(*mut (), Arguments<'_>) -> crate::Result<(), Error>>,
-    }
+// The vtable contains an `Option` so we must define it manually.
+/// VTable for [`IWrite`] objects.
+#[vtable(interface = "IWrite")]
+#[derive(Copy, Clone)]
+#[allow(missing_debug_implementations)]
+pub struct IWriteVTable {
+    /// Writes a string slice into this writer, returning whether the write succeeded.
+    pub write_str: extern "C-unwind" fn(*mut (), ConstStr<'_>) -> crate::Result<(), Error>,
+    /// Writes a [`char`] into this writer, returning whether the write succeeded.
+    pub write_char: extern "C-unwind" fn(*mut (), u32) -> crate::Result<(), Error>,
+    /// Writes a multiple arguments into this writer, returning whether the write succeeded.
+    ///
+    /// # Note
+    ///
+    /// Implementation of this function is optional and allows for formatting without
+    /// allocating additional buffers.
+    #[allow(clippy::type_complexity)]
+    pub write_fmt: Option<fn(*mut (), Arguments<'_>) -> crate::Result<(), Error>>,
 }
 
 impl IWriteVTable {
@@ -811,7 +599,10 @@ impl IWriteVTable {
     }
 }
 
-impl<'a, T: CastSuper<dyn IWrite + 'a> + ?Sized> IWrite for DynObj<T> {
+impl<'a, T: CastInto<dyn IWrite + 'a> + ?Sized> IWrite for DynObj<T>
+where
+    DynObj<T>: IBase,
+{
     #[inline]
     fn write_str(&mut self, s: &str) -> Result<(), Error> {
         let vtable: &IWriteVTable = metadata(self).super_vtable::<dyn IWrite + 'a>();

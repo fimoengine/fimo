@@ -2,16 +2,14 @@ use crate::spin_wait::SpinWait;
 use crate::task_manager::MsgData;
 use crate::worker_pool::{yield_to_worker, WORKER};
 use crate::TaskScheduler;
-use fimo_ffi::ffi_fn::RawFfiFn;
-use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::Optional;
-use fimo_module::{impl_vtable, is_object, Error};
+use fimo_ffi::ptr::IBaseExt;
+use fimo_ffi::{DynObj, FfiFn, ObjectId};
+use fimo_module::Error;
 use fimo_tasks_int::raw::{IRawTask, WorkerId};
-use fimo_tasks_int::runtime::{IRuntime, IRuntimeVTable, IScheduler};
+use fimo_tasks_int::runtime::{IRuntime, IRuntimeExt, IScheduler};
 use log::{error, info, trace};
 use parking_lot::Mutex;
 use std::mem::MaybeUninit;
-use std::ops::Deref;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
@@ -101,7 +99,8 @@ impl Default for Builder {
 }
 
 /// A runtime for running tasks.
-#[derive(Debug)]
+#[derive(Debug, ObjectId)]
+#[fetch_vtable(uuid = "99bab93c-0db6-4979-a8fd-2b298df4e3ec", interfaces(IRuntime))]
 pub struct Runtime {
     scheduler: Arc<Mutex<TaskScheduler>>,
 }
@@ -148,7 +147,10 @@ impl Runtime {
     /// Trying to access the scheduler by other means than
     /// the provided reference may result in a deadlock.
     #[inline]
-    pub fn enter_scheduler<F: FnOnce(&mut TaskScheduler, Option<&IRawTask>) -> R, R>(
+    pub fn enter_scheduler<
+        F: FnOnce(&mut TaskScheduler, Option<&DynObj<dyn IRawTask + '_>>) -> R,
+        R,
+    >(
         &self,
         f: F,
     ) -> R {
@@ -165,16 +167,10 @@ impl Runtime {
             loop {
                 // try to lock the scheduler.
                 if let Some(mut scheduler) = self.scheduler.try_lock() {
-                    let current = unsafe {
-                        WORKER
-                            .get()
-                            .unwrap_unchecked()
-                            .current_task()
-                            .unwrap()
-                            .as_i_raw()
-                    };
+                    let current =
+                        unsafe { WORKER.get().unwrap_unchecked().current_task().unwrap() };
 
-                    return f(&mut *scheduler, Some(current));
+                    return f(&mut *scheduler, Some(current.as_raw()));
                 }
 
                 // if it could not be locked, try spinning a few times.
@@ -223,36 +219,91 @@ impl Runtime {
         }
     }
 
+    /// Yields the current task to the runtime.
+    ///
+    /// Yields the current task to the runtime, allowing other tasks to be
+    /// run on the current worker. On the next run of the scheduler it will call
+    /// the provided function.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
     #[inline]
-    fn enter_scheduler_inner(
+    pub fn yield_and_enter<
+        F: FnOnce(&mut TaskScheduler, &DynObj<dyn IRawTask + '_>) -> R + Send,
+        R: Send,
+    >(
         &self,
-        f: RawFfiFn<dyn FnOnce(&mut IScheduler, Optional<&IRawTask>) + '_>,
-    ) {
-        let f = unsafe { f.assume_valid() };
+        f: F,
+    ) -> R {
+        if WORKER.get().is_none() {
+            error!("Tried yielding from outside of a worker thread");
+            panic!("Yielding is only supported from a worker thread");
+        } else {
+            trace!("Yielding to scheduler");
+            let mut res = MaybeUninit::uninit();
 
+            {
+                let res = &mut res;
+                let wrapper = move |s: &mut DynObj<dyn IScheduler + '_>,
+                                    t: &DynObj<dyn IRawTask + '_>| unsafe {
+                    trace!("Yielded to scheduler");
+                    let scheduler = s.downcast_mut().unwrap_unchecked();
+                    res.write(f(scheduler, t));
+                    trace!("Resuming task");
+                };
+                let mut wrapper = MaybeUninit::new(wrapper);
+                let wrapper = unsafe { FfiFn::new_value(&mut wrapper) };
+
+                self.yield_and_enter_impl(wrapper);
+            }
+
+            trace!("Task resumed");
+            unsafe { res.assume_init() }
+        }
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        info!("Shutting down task runtime");
+        self.scheduler.lock().shutdown_worker_pool();
+    }
+}
+
+impl IRuntime for Runtime {
+    #[inline]
+    fn worker_id(&self) -> Option<WorkerId> {
+        self.worker_id()
+    }
+
+    #[inline]
+    fn enter_scheduler_impl(
+        &self,
+        f: fimo_ffi::FfiFn<
+            '_,
+            dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, Option<&DynObj<dyn IRawTask + '_>>) + '_,
+        >,
+    ) {
         if WORKER.get().is_none() {
             // outside worker.
             let mut scheduler = self.scheduler.lock();
+            let s = fimo_ffi::ptr::coerce_obj_mut(&mut *scheduler);
 
             // call the function, then schedule the remaining tasks.
-            f((&mut **scheduler).into(), Optional::None);
+            f(s, None);
             scheduler.schedule_tasks();
         } else {
             let mut spin_wait = SpinWait::new();
             loop {
                 // try to lock the scheduler.
                 if let Some(mut scheduler) = self.scheduler.try_lock() {
-                    let current = unsafe {
-                        WORKER
-                            .get()
-                            .unwrap_unchecked()
-                            .current_task()
-                            .unwrap()
-                            .as_i_raw()
-                    };
+                    let s = fimo_ffi::ptr::coerce_obj_mut(&mut *scheduler);
+                    let current =
+                        unsafe { WORKER.get().unwrap_unchecked().current_task().unwrap() };
 
                     // call the function, then schedule the remaining tasks.
-                    f((&mut **scheduler).into(), Optional::Some(current.into()));
+                    f(s, Some(current.as_raw()));
                     scheduler.schedule_tasks();
                     return;
                 }
@@ -273,98 +324,15 @@ impl Runtime {
         }
     }
 
-    /// Yields the current task to the runtime.
-    ///
-    /// Yields the current task to the runtime, allowing other tasks to be
-    /// run on the current worker. On the next run of the scheduler it will call
-    /// the provided function.
-    ///
-    /// # Panics
-    ///
-    /// Can only be called from a worker thread.
     #[inline]
-    pub fn yield_and_enter<F: FnOnce(&mut TaskScheduler, &IRawTask) -> R + Send, R: Send>(
+    fn yield_and_enter_impl(
         &self,
-        f: F,
-    ) -> R {
-        if WORKER.get().is_none() {
-            error!("Tried yielding from outside of a worker thread");
-            panic!("Yielding is only supported from a worker thread");
-        } else {
-            trace!("Yielding to scheduler");
-            let mut res = MaybeUninit::uninit();
-
-            {
-                let res = &mut res;
-                let wrapper = move |s: &mut IScheduler, t: &IRawTask| unsafe {
-                    trace!("Yielded to scheduler");
-                    let obj = IScheduler::as_object_mut(s);
-                    let scheduler = obj.try_cast_obj_mut().unwrap_unchecked();
-                    res.write(f(scheduler, t));
-                    trace!("Resuming task");
-                };
-                let mut wrapper = MaybeUninit::new(wrapper);
-                let wrapper = unsafe { RawFfiFn::new_value(&mut wrapper) };
-
-                self.yield_and_enter_inner(wrapper);
-            }
-
-            trace!("Task resumed");
-            unsafe { res.assume_init() }
-        }
-    }
-
-    #[inline]
-    fn yield_and_enter_inner(
-        &self,
-        f: RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + '_>,
+        f: fimo_ffi::FfiFn<
+            '_,
+            dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, &DynObj<dyn IRawTask + '_>) + Send + '_,
+        >,
     ) {
-        let msg_data = MsgData::Yield { f };
+        let msg_data = MsgData::Yield { f: f.into_raw() };
         unsafe { yield_to_worker(msg_data) }
-    }
-}
-
-is_object! { #![uuid(0x99bab93c, 0x0db6, 0x4979, 0xa8fd, 0x2b298df4e3ec)] Runtime }
-
-impl Deref for Runtime {
-    type Target = IRuntime;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        IRuntime::from_object(self.coerce_obj())
-    }
-}
-
-impl Drop for Runtime {
-    fn drop(&mut self) {
-        info!("Shutting down task runtime");
-        self.scheduler.lock().shutdown_worker_pool();
-    }
-}
-
-impl_vtable! {
-    impl IRuntimeVTable => Runtime {
-        unsafe extern "C" fn worker_id(this: *const ()) -> Optional<WorkerId> {
-            let this = &*(this as *const Runtime);
-            Runtime::worker_id(this).into()
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn enter_scheduler(
-            this: *const (),
-            f: RawFfiFn<dyn FnOnce(&mut IScheduler, Optional<&IRawTask>) + '_>
-        ) {
-            let this = &*(this as *const Runtime);
-            Runtime::enter_scheduler_inner(this, f)
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn yield_and_enter(
-            this: *const (),
-            f: RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + '_>
-        ) {
-            let this = &*(this as *const Runtime);
-            Runtime::yield_and_enter_inner(this, f)
-        }
     }
 }

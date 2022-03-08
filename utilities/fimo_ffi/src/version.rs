@@ -30,7 +30,6 @@ pub struct Version {
 
 /// Errors of the version api.
 #[repr(i8)]
-#[non_exhaustive]
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ReleaseType {
     /// Stable release.

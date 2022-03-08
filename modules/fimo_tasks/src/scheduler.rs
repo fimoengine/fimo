@@ -1,32 +1,33 @@
 use crate::stack_allocator::StackAllocator;
-use crate::task_manager::{Msg, MsgData, RawTask, TaskManager};
+use crate::task_manager::{AssertValidTask, Msg, MsgData, TaskManager};
 use crate::worker_pool::WorkerPool;
 use crate::Runtime;
 use context::Context;
-use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
-use fimo_ffi::{ObjArc, Optional, SpanInner};
-use fimo_module::{impl_vtable, is_object, Error};
+use fimo_ffi::{DynObj, ObjArc, ObjectId};
+use fimo_module::Error;
 use fimo_tasks_int::raw::{
     Builder, IRawTask, StatusRequest, TaskHandle, TaskRunStatus, TaskScheduleStatus, WorkerId,
 };
-use fimo_tasks_int::runtime::{IScheduler, ISchedulerResult, ISchedulerVTable};
+use fimo_tasks_int::runtime::IScheduler;
 use log::{debug, error, info, trace};
 use std::cmp::Reverse;
+use std::fmt::Debug;
 use std::mem::ManuallyDrop;
-use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Weak;
 use std::time::SystemTime;
 
 /// Task scheduler.
-#[derive(Debug)]
+#[derive(ObjectId)]
+#[fetch_vtable(uuid = "7f2cb683-26b4-46cb-a91d-3cbecf295ad8", interfaces(IScheduler))]
 pub struct TaskScheduler {
-    scheduler_task: ObjArc<IRawTask>,
+    scheduler_task: ObjArc<DynObj<dyn IRawTask>>,
     stacks: ManuallyDrop<StackAllocator>,
     worker_pool: ManuallyDrop<WorkerPool>,
     task_manager: ManuallyDrop<TaskManager>,
 }
+
+unsafe impl Sync for TaskScheduler {}
 
 impl TaskScheduler {
     pub(crate) fn new(
@@ -41,9 +42,9 @@ impl TaskScheduler {
         let scheduler_task = Builder::new()
             .with_name("Task runtime scheduler".into())
             .blocked()
-            .build(None, None, None);
+            .build(None, None);
         let scheduler_task = ObjArc::new(scheduler_task);
-        let scheduler_task: ObjArc<IRawTask> = ObjArc::coerce_object(scheduler_task);
+        let scheduler_task: ObjArc<DynObj<dyn IRawTask>> = ObjArc::coerce_obj(scheduler_task);
 
         let mut this = Self {
             scheduler_task: scheduler_task.clone(),
@@ -79,7 +80,7 @@ impl TaskScheduler {
 
     /// Searches for a registered task.
     #[inline]
-    pub fn find_task(&self, handle: TaskHandle) -> Result<&IRawTask, Error> {
+    pub fn find_task(&self, handle: TaskHandle) -> Result<&DynObj<dyn IRawTask + '_>, Error> {
         self.task_manager.find_task(handle)
     }
 
@@ -91,17 +92,16 @@ impl TaskScheduler {
     #[inline]
     pub unsafe fn register_task(
         &mut self,
-        task: &IRawTask,
+        task: &DynObj<dyn IRawTask + '_>,
         deps: &[TaskHandle],
     ) -> Result<(), Error> {
-        let task: &'static IRawTask = &*(task as *const _);
         self.task_manager.register_task(task, deps)
     }
 
     /// Unregisters a task from the task runtime.
-    pub fn unregister_task(&mut self, task: &IRawTask) -> Result<(), Error> {
+    pub fn unregister_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> Result<(), Error> {
         // we assert that we own the task.
-        let task = unsafe { RawTask::from_i_raw(task) };
+        let task = unsafe { AssertValidTask::from_raw(task) };
         self.task_manager.unregister_task(task)
     }
 
@@ -113,17 +113,24 @@ impl TaskScheduler {
     ///
     /// Does not guarantee that the task will wait immediately if it is already scheduled.
     #[inline]
-    pub fn wait_task_on(&mut self, task: &IRawTask, wait_on: &IRawTask) -> Result<(), Error> {
+    pub fn wait_task_on(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+        wait_on: &DynObj<dyn IRawTask + '_>,
+    ) -> Result<(), Error> {
         // we assert that we own both tasks.
-        let task: &'static RawTask = unsafe { &*(RawTask::from_i_raw(task) as *const _) };
-        let wait_on: &'static RawTask = unsafe { &*(RawTask::from_i_raw(wait_on) as *const _) };
+        let task = unsafe { AssertValidTask::from_raw(task) };
+        let wait_on = unsafe { AssertValidTask::from_raw(wait_on) };
         self.task_manager.wait_task_on(task, wait_on)
     }
 
     #[inline]
-    pub(crate) fn wait_on_scheduler(&mut self, task: &IRawTask) -> Result<(), Error> {
-        let scheduler_task: &IRawTask = unsafe { &*(&*self.scheduler_task as *const _) };
-        self.wait_task_on(task, scheduler_task)
+    pub(crate) fn wait_on_scheduler(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+    ) -> Result<(), Error> {
+        let scheduler_task = self.scheduler_task.clone();
+        self.wait_task_on(task, &scheduler_task)
     }
 
     /// Wakes up one task.
@@ -138,9 +145,12 @@ impl TaskScheduler {
     /// resuming execution. This function is mainly intended to be
     /// used for the implementation of condition variables.
     #[inline]
-    pub unsafe fn notify_one(&mut self, task: &IRawTask) -> Result<Option<usize>, Error> {
+    pub unsafe fn notify_one(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+    ) -> Result<Option<usize>, Error> {
         // we assert that we own the task.
-        let task = RawTask::from_i_raw(task);
+        let task = AssertValidTask::from_raw(task);
         self.task_manager.notify_one(task)
     }
 
@@ -154,23 +164,22 @@ impl TaskScheduler {
     /// resuming execution. This function is mainly intended to be
     /// used for the implementation of condition variables.
     #[inline]
-    pub unsafe fn notify_all(&mut self, task: &IRawTask) -> Result<usize, Error> {
+    pub unsafe fn notify_all(&mut self, task: &DynObj<dyn IRawTask + '_>) -> Result<usize, Error> {
         // we assert that we own the task.
-        let task = RawTask::from_i_raw(task);
+        let task = AssertValidTask::from_raw(task);
         self.task_manager.notify_all(task)
     }
 
     /// Unblocks a blocked task.
     #[inline]
-    pub fn unblock_task(&mut self, task: &'static IRawTask) -> Result<(), Error> {
+    pub fn unblock_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> Result<(), Error> {
         // we assert that we own the task.
-        let task: &'static RawTask = unsafe { &*(task as *const _ as *const RawTask) };
+        let task = unsafe { AssertValidTask::from_raw(task) };
         self.task_manager.unblock_task(task)
     }
 
-    fn process_finished(&mut self, task: &RawTask) {
-        // safety: we are inside the scheduler.
-        let context = unsafe { task.scheduler_context_mut() };
+    fn process_finished(&mut self, task: AssertValidTask) {
+        let context = task.context().borrow();
 
         trace!("Cleaning up task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
@@ -191,7 +200,9 @@ impl TaskScheduler {
         debug_assert!(unsafe { context.scheduler_data().dependencies.is_empty() });
 
         trace!("Notify waiters of {}", context.handle());
+        drop(context);
         unsafe { self.task_manager.notify_all(task).expect("Invalid task") };
+        let mut context = task.context().borrow_mut();
 
         trace!("Free task slot of {}", context.handle());
         if let Some(slot) = unsafe { context.scheduler_data_mut().slot.take() } {
@@ -217,7 +228,7 @@ impl TaskScheduler {
 
         trace!("Processing {} scheduler messages", msgs.len());
         for Msg { task, data } in msgs {
-            let context = unsafe { task.scheduler_context_mut() };
+            let mut context = task.context().borrow_mut();
             let scheduler_data = unsafe { context.scheduler_data() };
 
             trace!(
@@ -271,13 +282,14 @@ impl TaskScheduler {
 
             // finally process the message
             trace!("Processing {} message", data.msg_type());
+            drop(context);
             match data {
                 MsgData::Yield { f } => {
-                    let scheduler: &mut IScheduler =
-                        IScheduler::from_object_mut(self.coerce_obj_mut());
-                    unsafe { f.assume_valid()(scheduler, task.as_i_raw()) }
+                    let scheduler = fimo_ffi::ptr::coerce_obj_mut(self);
+                    unsafe { f.assume_valid()(scheduler, task.as_raw()) }
                 }
                 MsgData::Completed { aborted } => {
+                    let context = task.context().borrow();
                     if aborted {
                         trace!("Marking task {} as aborted", context.handle());
                         unsafe { context.set_schedule_status(TaskScheduleStatus::Aborted) }
@@ -287,6 +299,8 @@ impl TaskScheduler {
                     }
                 }
             }
+            let mut context = task.context().borrow_mut();
+            let scheduler_data = unsafe { context.scheduler_data() };
 
             // the status may have changed.
             trace!("Task {} processed", context.handle());
@@ -318,6 +332,7 @@ impl TaskScheduler {
                 }
                 TaskScheduleStatus::Aborted | TaskScheduleStatus::Finished => {
                     trace!("Task finished cleaning up");
+                    drop(context);
                     self.process_finished(task);
                 }
                 TaskScheduleStatus::Waiting | TaskScheduleStatus::Blocked => {
@@ -348,7 +363,7 @@ impl TaskScheduler {
 
         let stale = stale && queue.is_empty();
         for Reverse(task) in queue.into_sorted_vec() {
-            let context = unsafe { task.scheduler_context_mut() };
+            let mut context = task.context().borrow_mut();
 
             let handle = context.handle();
             let empty_task = context.is_empty_task();
@@ -415,6 +430,16 @@ impl TaskScheduler {
     }
 }
 
+impl Debug for TaskScheduler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskScheduler")
+            .field("stacks", &self.stacks)
+            .field("worker_pool", &self.worker_pool)
+            .field("task_manager", &self.task_manager)
+            .finish()
+    }
+}
+
 impl Drop for TaskScheduler {
     fn drop(&mut self) {
         info!("Shutting down task scheduler");
@@ -428,94 +453,56 @@ impl Drop for TaskScheduler {
     }
 }
 
-impl Deref for TaskScheduler {
-    type Target = IScheduler;
-
-    fn deref(&self) -> &Self::Target {
-        IScheduler::from_object(self.coerce_obj())
+impl IScheduler for TaskScheduler {
+    fn worker_ids(&self) -> &[WorkerId] {
+        self.worker_ids()
     }
-}
 
-impl DerefMut for TaskScheduler {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        IScheduler::from_object_mut(self.coerce_obj_mut())
+    unsafe fn find_task_unbound<'a>(
+        &self,
+        handle: TaskHandle,
+    ) -> fimo_module::Result<&'a DynObj<dyn IRawTask + 'a>> {
+        match self.find_task(handle) {
+            Ok(t) => Ok(std::mem::transmute(t)),
+            Err(e) => Err(e),
+        }
     }
-}
 
-is_object! { #![uuid(0x7f2cb683, 0x26b4, 0x46cb, 0xa91d, 0x3cbecf295ad8)] TaskScheduler }
+    unsafe fn register_task(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+        wait_on: &[TaskHandle],
+    ) -> fimo_module::Result<()> {
+        self.register_task(task, wait_on)
+    }
 
-impl_vtable! {
-    impl mut ISchedulerVTable => TaskScheduler {
-        unsafe extern "C" fn worker_ids(
-            ptr: *const ()
-        ) -> SpanInner<WorkerId, false> {
-            let this = &*(ptr as *const TaskScheduler);
-            this.worker_ids().into()
-        }
+    fn unregister_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> fimo_module::Result<()> {
+        self.unregister_task(task)
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn find_task(
-            ptr: *const (),
-            handle: TaskHandle
-        ) -> ISchedulerResult<NonNull<IRawTask>> {
-            let this = &*(ptr as *const TaskScheduler);
-            this.find_task(handle).map(|t| t.into()).into()
-        }
+    fn wait_task_on(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+        on: &DynObj<dyn IRawTask + '_>,
+    ) -> fimo_module::Result<()> {
+        self.wait_task_on(task, on)
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn register_task(
-            ptr: *mut (),
-            task: NonNull<IRawTask>,
-            wait_on: SpanInner<TaskHandle, false>,
-        ) -> ISchedulerResult<()> {
-            let this = &mut *(ptr as *mut TaskScheduler);
-            this.register_task(task.as_ref(), wait_on.into()).into()
-        }
+    unsafe fn notify_one(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+    ) -> fimo_module::Result<Option<usize>> {
+        self.notify_one(task)
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn unregister_task(
-            ptr: *mut (),
-            task: NonNull<IRawTask>,
-        ) -> ISchedulerResult<()> {
-            let this = &mut *(ptr as *mut TaskScheduler);
-            this.unregister_task(task.as_ref()).into()
-        }
+    unsafe fn notify_all(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+    ) -> fimo_module::Result<usize> {
+        self.notify_all(task)
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn wait_task_on(
-            ptr: *mut (),
-            task: NonNull<IRawTask>,
-            wait_on: NonNull<IRawTask>
-        ) -> ISchedulerResult<()> {
-            let this = &mut *(ptr as *mut TaskScheduler);
-            this.wait_task_on(task.as_ref(), wait_on.as_ref()).into()
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn notify_one(
-            ptr: *mut (),
-            task: NonNull<IRawTask>
-        ) -> ISchedulerResult<Optional<usize>> {
-            let this = &mut *(ptr as *mut TaskScheduler);
-            this.notify_one(task.as_ref()).map(|w| w.into()).into()
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn notify_all(
-            ptr: *mut (),
-            task: NonNull<IRawTask>
-        ) -> ISchedulerResult<usize> {
-            let this = &mut *(ptr as *mut TaskScheduler);
-            this.notify_all(task.as_ref()).into()
-        }
-
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn unblock_task(
-            ptr: *mut (),
-            task: NonNull<IRawTask>
-        ) -> ISchedulerResult<()> {
-            let this = &mut *(ptr as *mut TaskScheduler);
-            this.unblock_task(task.as_ref()).into()
-        }
+    fn unblock_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> fimo_module::Result<()> {
+        self.unblock_task(task)
     }
 }

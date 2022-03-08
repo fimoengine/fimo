@@ -78,6 +78,8 @@ impl<T: ?Sized, Meta> Debug for RawFfiFnInner<T, Meta> {
 }
 
 /// A ffi-safe closure without any lifetime.
+///
+/// Is covariant in `T`.
 #[repr(transparent)]
 pub struct RawFfiFn<T: ?Sized, Meta = Global> {
     inner: RawFfiFnInner<T, Meta>,
@@ -499,13 +501,15 @@ impl<'a, T: ?Sized + 'a, Meta: 'a> Debug for RawFfiFn<T, Meta> {
 }
 
 /// A safe alternative to an [`RawFfiFn`].
+///
+/// Is covariant in `'a` and invariant in 'T'.
 #[repr(transparent)]
 pub struct FfiFn<'a, T: ?Sized, Meta = Global> {
     raw: RawFfiFn<T, Meta>,
     _phantom: PhantomData<&'a mut T>,
 }
 
-impl<'a, T: ?Sized, Meta> FfiFn<'a, T, Meta> {
+impl<'a, T: ?Sized + 'a, Meta> FfiFn<'a, T, Meta> {
     /// Constructs a new `FfiFn` with the provided [`Box`].
     ///
     /// # Examples
@@ -529,9 +533,9 @@ impl<'a, T: ?Sized, Meta> FfiFn<'a, T, Meta> {
     /// assert_eq!(n.get(), 15);
     /// ```
     #[inline]
-    pub fn r#box<F: FnOnce<Args, Output = Output> + Unsize<T>, Args: ReprRust, Output>(
+    pub fn r#box<F: FnOnce<Args, Output = Output> + Unsize<T> + 'a, Args: ReprRust, Output>(
         f: Box<F, Meta>,
-    ) -> FfiFn<'static, T, Meta>
+    ) -> FfiFn<'a, T, Meta>
     where
         Meta: Allocator,
     {
@@ -565,9 +569,9 @@ impl<'a, T: ?Sized, Meta> FfiFn<'a, T, Meta> {
     /// assert_eq!(n.get(), 15);
     /// ```
     #[inline]
-    pub fn obj_box<F: FnOnce<Args, Output = Output> + Unsize<T>, Args: ReprRust, Output>(
+    pub fn obj_box<F: FnOnce<Args, Output = Output> + Unsize<T> + 'a, Args: ReprRust, Output>(
         f: ObjBox<F, Meta>,
-    ) -> FfiFn<'static, T, Meta>
+    ) -> FfiFn<'a, T, Meta>
     where
         Meta: Allocator,
     {

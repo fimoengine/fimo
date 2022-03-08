@@ -1528,6 +1528,18 @@ impl From<&'_ mut str> for String {
     }
 }
 
+impl From<std::string::String> for String {
+    fn from(s: std::string::String) -> Self {
+        String::from(s.as_str())
+    }
+}
+
+impl From<String> for std::string::String {
+    fn from(s: String) -> Self {
+        std::string::String::from(s.as_str())
+    }
+}
+
 impl From<char> for String {
     #[inline]
     fn from(ch: char) -> Self {

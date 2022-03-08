@@ -5,39 +5,48 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-#![feature(const_fn_fn_ptr_basics)]
-#![feature(const_fn_trait_bound)]
+#![feature(const_ptr_offset_from)]
 #![feature(negative_impls)]
 #![feature(const_mut_refs)]
 #![feature(thread_local)]
+#![feature(try_blocks)]
+#![feature(c_unwind)]
+#![feature(unsize)]
 
 use crate::raw::TaskHandle;
-use crate::runtime::IRuntime;
-use fimo_ffi::marker::SendSyncMarker;
-use fimo_module::{fimo_interface, fimo_vtable, Error, ReleaseType, Version};
-use std::ptr::NonNull;
+use crate::runtime::{IRuntime, IRuntimeExt};
+use fimo_ffi::{interface, DynObj};
+use fimo_module::{FimoInterface, IModuleInterface, IModuleInterfaceVTable, ReleaseType, Version};
 
 pub mod raw;
 pub mod runtime;
 pub mod task;
 
-fimo_interface! {
-    /// Type-erased `fimo-tasks` interface.
-    #![vtable = IFimoTasksVTable]
-    pub struct IFimoTasks {
-        name: "fimo::interfaces::core::fimo_tasks",
-        version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0),
-    }
+/// Type-erased `fimo-tasks` interface.
+#[interface(
+    uuid = "e4a1d023-2261-4b8f-b237-9bf25c8c65ef",
+    vtable = "IFimoTasksVTable",
+    generate(IModuleInterfaceVTable)
+)]
+pub trait IFimoTasks: IModuleInterface {
+    /// Fetches a reference to the task runtime.
+    #[vtable_info(
+        return_type = "*const DynObj<dyn IRuntime>",
+        from_expr = "unsafe { &*res }"
+    )]
+    fn runtime(&self) -> &DynObj<dyn IRuntime>;
 }
 
-impl IFimoTasks {
-    /// Fetches a reference to the task runtime.
-    #[inline]
-    pub fn runtime(&self) -> &IRuntime {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.runtime)(ptr).as_ref() }
-    }
+impl<'a> FimoInterface for dyn IFimoTasks + 'a {
+    const NAME: &'static str = "fimo::interfaces::core::fimo_tasks";
 
+    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
+
+    const EXTENSIONS: &'static [&'static str] = &[];
+}
+
+/// Extension trait for implementations of [`IFimoTasks`].
+pub trait IFimoTasksExt: IFimoTasks {
     /// Runs a task to completion on the task runtime.
     ///
     /// Blocks the current task until the new task has been completed.
@@ -47,22 +56,13 @@ impl IFimoTasks {
     /// This function panics if the provided function panics.
     #[inline]
     #[track_caller]
-    pub fn block_on<F: FnOnce(&IRuntime) -> R + Send, R: Send>(
+    fn block_on<F: FnOnce(&DynObj<dyn IRuntime>) -> R + Send, R: Send>(
         &self,
         f: F,
         wait_on: &[TaskHandle],
-    ) -> Result<R, Error> {
+    ) -> fimo_module::Result<R> {
         self.runtime().block_on_and_enter(f, wait_on)
     }
 }
 
-fimo_vtable! {
-    /// VTable of an [`IFimoTasks`].
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![marker = SendSyncMarker]
-    #![uuid(0xe4a1d023, 0x2261, 0x4b8f, 0xb237, 0x9bf25c8c65ef)]
-    pub struct IFimoTasksVTable {
-        /// Fetches a reference to the task runtime.
-        pub runtime: fn(*const ()) -> NonNull<IRuntime>
-    }
-}
+impl<T: IFimoTasks + ?Sized> IFimoTasksExt for T {}

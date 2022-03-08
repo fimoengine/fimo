@@ -1,13 +1,12 @@
 //! Implementation of the `ModuleRegistry` type.
-use fimo_core_int::rust::module_registry::{
-    IModuleRegistry, IModuleRegistryInner, InterfaceCallback, InterfaceCallbackId, InterfaceId,
-    LoaderCallback, LoaderCallbackId, LoaderId, ModuleRegistryInnerVTable, ModuleRegistryVTable,
+use fimo_core_int::modules::{
+    IModuleRegistry, IModuleRegistryExt, IModuleRegistryInner, InterfaceCallback,
+    InterfaceCallbackId, InterfaceId, LoaderCallback, LoaderCallbackId, LoaderId,
 };
-use fimo_ffi::object::{CoerceObject, CoerceObjectMut, ObjectWrapper};
-use fimo_ffi::ObjArc;
+use fimo_ffi::ObjectId;
+use fimo_ffi::{DynObj, FfiFn, ObjArc};
 use fimo_module::{
-    impl_vtable, is_object, Error, ErrorKind, IModuleInterface, IModuleLoader, InterfaceQuery,
-    ModuleInterfaceDescriptor,
+    Error, ErrorKind, IModuleInterface, IModuleLoader, InterfaceQuery, ModuleInterfaceDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -21,26 +20,31 @@ use std::path::Path;
 pub const MODULE_MANIFEST_PATH: &str = "module.json";
 
 /// The module registry.
+#[derive(ObjectId)]
+#[fetch_vtable(
+    uuid = "43cdc830-1706-4234-bedc-29a51e751dc7",
+    interfaces(IModuleRegistry)
+)]
 pub struct ModuleRegistry {
-    inner: parking_lot::Mutex<ModuleRegistryInner>,
+    inner: parking_lot::RwLock<ModuleRegistryInner>,
 }
-
-sa::assert_impl_all!(ModuleRegistry: Send, Sync);
 
 impl ModuleRegistry {
     /// Constructs a new `ModuleRegistry`.
     #[inline]
     pub fn new() -> Self {
         let registry = Self {
-            inner: parking_lot::Mutex::new(ModuleRegistryInner::new()),
+            inner: parking_lot::RwLock::new(ModuleRegistryInner::new()),
         };
-        let i_registry = IModuleRegistry::from_object(registry.coerce_obj());
+        let i_registry = fimo_ffi::ptr::coerce_obj::<_, dyn IModuleRegistry>(&registry);
 
         if cfg!(feature = "rust_module_loader") {
             let handle = i_registry
                 .register_loader(
-                    fimo_module::rust_loader::MODULE_LOADER_TYPE,
-                    fimo_module::rust_loader::RustLoader::new().coerce_obj(),
+                    fimo_module::loader::MODULE_LOADER_TYPE,
+                    fimo_ffi::ptr::coerce_obj::<_, dyn IModuleLoader>(
+                        fimo_module::loader::RustLoader::new(),
+                    ),
                 )
                 .unwrap();
             std::mem::forget(handle);
@@ -56,17 +60,20 @@ impl Default for ModuleRegistry {
     }
 }
 
-is_object! { #![uuid(0x43cdc830, 0x1706, 0x4234, 0xbedc, 0x29a51e751dc7)] ModuleRegistry }
+impl IModuleRegistry for ModuleRegistry {
+    fn enter_impl(&self, f: FfiFn<'_, dyn FnOnce(&'_ DynObj<dyn IModuleRegistryInner + '_>) + '_>) {
+        let inner = self.inner.read();
+        let obj = fimo_ffi::ptr::coerce_obj(&*inner);
+        f(obj)
+    }
 
-impl_vtable! {
-    impl inline ModuleRegistryVTable => ModuleRegistry {
-        |ptr, f| {
-            let registry = unsafe { &*(ptr as *const ModuleRegistry) };
-            let mut inner = registry.inner.lock();
-            let inner = inner.coerce_obj_mut();
-            let inner = IModuleRegistryInner::from_object_mut(inner);
-            unsafe { f.call_once((inner,)) }
-        }
+    fn enter_mut_impl(
+        &self,
+        f: FfiFn<'_, dyn FnOnce(&'_ mut DynObj<dyn IModuleRegistryInner + '_>) + '_>,
+    ) {
+        let mut inner = self.inner.write();
+        let obj = fimo_ffi::ptr::coerce_obj_mut(&mut *inner);
+        f(obj)
     }
 }
 
@@ -76,6 +83,11 @@ impl std::fmt::Debug for ModuleRegistry {
     }
 }
 
+#[derive(ObjectId)]
+#[fetch_vtable(
+    uuid = "f9077e25-43e1-4857-be2b-fcd430802e46",
+    interfaces(IModuleRegistryInner)
+)]
 struct ModuleRegistryInner {
     loader_id_gen: RangeFrom<IdWrapper<LoaderId>>,
     loader_callback_id_gen: RangeFrom<IdWrapper<LoaderCallbackId>>,
@@ -90,12 +102,12 @@ struct ModuleRegistryInner {
 }
 
 struct LoaderCollection {
-    loader: &'static IModuleLoader,
+    loader: &'static DynObj<dyn IModuleLoader>,
     callbacks: BTreeMap<LoaderCallbackId, LoaderCallback>,
 }
 
 struct InterfaceCollection {
-    interface: ObjArc<IModuleInterface>,
+    interface: ObjArc<DynObj<dyn IModuleInterface>>,
     callbacks: BTreeMap<InterfaceCallbackId, InterfaceCallback>,
 }
 
@@ -128,7 +140,7 @@ impl ModuleRegistryInner {
     fn register_loader(
         &mut self,
         r#type: &str,
-        loader: &'static IModuleLoader,
+        loader: &'static DynObj<dyn IModuleLoader>,
     ) -> Result<LoaderId, ModuleRegistryError> {
         if self.loader_type_map.contains_key(r#type) {
             return Err(ModuleRegistryError::DuplicateLoaderType(String::from(
@@ -156,7 +168,7 @@ impl ModuleRegistryInner {
     fn unregister_loader(
         &mut self,
         id: LoaderId,
-    ) -> Result<&'static IModuleLoader, ModuleRegistryError> {
+    ) -> Result<&'static DynObj<dyn IModuleLoader>, ModuleRegistryError> {
         let loader = self.loaders.remove(&id);
 
         if loader.is_none() {
@@ -166,9 +178,9 @@ impl ModuleRegistryInner {
         let LoaderCollection { loader, callbacks } = loader.unwrap();
         self.loader_type_map.retain(|_, l_id| *l_id != id);
 
-        let i_registry = IModuleRegistryInner::from_object_mut(self.coerce_obj_mut());
+        let i_registry = fimo_ffi::ptr::coerce_obj_mut(self);
         for (_, callback) in callbacks {
-            (callback.inner)(i_registry, loader)
+            (callback)(i_registry, loader)
         }
 
         Ok(loader)
@@ -217,7 +229,7 @@ impl ModuleRegistryInner {
     fn get_loader_from_type(
         &self,
         r#type: &str,
-    ) -> Result<&'static IModuleLoader, ModuleRegistryError> {
+    ) -> Result<&'static DynObj<dyn IModuleLoader>, ModuleRegistryError> {
         let LoaderCollection { loader, .. } = self.get_loader_from_type_inner(r#type)?;
         Ok(*loader)
     }
@@ -250,7 +262,7 @@ impl ModuleRegistryInner {
     fn register_interface(
         &mut self,
         descriptor: &ModuleInterfaceDescriptor,
-        interface: ObjArc<IModuleInterface>,
+        interface: ObjArc<DynObj<dyn IModuleInterface>>,
     ) -> Result<InterfaceId, ModuleRegistryError> {
         if self.interface_map.contains_key(descriptor) {
             return Err(ModuleRegistryError::DuplicateInterface(descriptor.clone()));
@@ -276,7 +288,7 @@ impl ModuleRegistryInner {
     fn unregister_interface(
         &mut self,
         id: InterfaceId,
-    ) -> Result<ObjArc<IModuleInterface>, ModuleRegistryError> {
+    ) -> Result<ObjArc<DynObj<dyn IModuleInterface>>, ModuleRegistryError> {
         let interface = self.interfaces.remove(&id);
 
         if interface.is_none() {
@@ -289,9 +301,9 @@ impl ModuleRegistryInner {
         } = interface.unwrap();
         self.interface_map.retain(|_, i_id| *i_id != id);
 
-        let i_registry = IModuleRegistryInner::from_object_mut(self.coerce_obj_mut());
+        let i_registry = fimo_ffi::ptr::coerce_obj_mut(self);
         for (_, callback) in callbacks {
-            (callback.inner)(i_registry, interface.clone())
+            (callback)(i_registry, interface.clone())
         }
 
         Ok(interface)
@@ -342,7 +354,7 @@ impl ModuleRegistryInner {
     fn get_interface_from_descriptor(
         &self,
         descriptor: &ModuleInterfaceDescriptor,
-    ) -> Result<ObjArc<IModuleInterface>, ModuleRegistryError> {
+    ) -> Result<ObjArc<DynObj<dyn IModuleInterface>>, ModuleRegistryError> {
         let InterfaceCollection { interface, .. } =
             self.get_interface_from_descriptor_inner(descriptor)?;
         Ok(interface.clone())
@@ -382,81 +394,92 @@ impl ModuleRegistryInner {
     }
 }
 
-is_object! { #![uuid(0xf9077e25, 0x43e1, 0x4857, 0xbe2b, 0xfcd430802e46)] ModuleRegistryInner }
+impl IModuleRegistryInner for ModuleRegistryInner {
+    #[inline]
+    fn register_loader(
+        &mut self,
+        r#type: &str,
+        loader: &'static DynObj<dyn IModuleLoader>,
+    ) -> fimo_module::Result<LoaderId> {
+        self.register_loader(r#type, loader).map_err(Into::into)
+    }
 
-impl_vtable! {
-    impl inline mut ModuleRegistryInnerVTable => ModuleRegistryInner {
-        |ptr, r#type, loader| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            let r#type = unsafe { &*r#type };
-            registry
-                .register_loader(r#type, loader)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, id| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            registry
-                .unregister_loader(id)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, r#type, callback| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            let r#type = unsafe { &*r#type };
-            registry
-                .register_loader_callback(r#type, callback)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, id| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            registry
-                .unregister_loader_callback(id)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, r#type| {
-            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-            let r#type = unsafe { &*r#type };
-            registry
-                .get_loader_from_type(r#type)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, descriptor, interface| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            let descriptor = unsafe { &*descriptor };
-            registry
-                .register_interface(descriptor, interface)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, id| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            registry
-                .unregister_interface(id)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, descriptor, callback| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            let descriptor = unsafe { &*descriptor };
-            registry
-                .register_interface_callback(descriptor, callback)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, id| {
-            let registry = unsafe { &mut *(ptr as *mut ModuleRegistryInner) };
-            registry
-                .unregister_interface_callback(id)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, descriptor| {
-            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-            let descriptor = unsafe { &*descriptor };
-            registry
-                .get_interface_from_descriptor(descriptor)
-                .map_err(|e| Error::new(ErrorKind::Unknown, e))
-        },
-        |ptr, query| {
-            let registry = unsafe { &*(ptr as *const ModuleRegistryInner) };
-            let query = unsafe { &*query };
-            registry.query_interfaces(query)
-        },
+    #[inline]
+    fn unregister_loader(
+        &mut self,
+        id: LoaderId,
+    ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>> {
+        self.unregister_loader(id).map_err(Into::into)
+    }
+
+    #[inline]
+    fn register_loader_callback(
+        &mut self,
+        r#type: &str,
+        f: LoaderCallback,
+    ) -> fimo_module::Result<LoaderCallbackId> {
+        self.register_loader_callback(r#type, f).map_err(Into::into)
+    }
+
+    #[inline]
+    fn unregister_loader_callback(&mut self, id: LoaderCallbackId) -> fimo_module::Result<()> {
+        self.unregister_loader_callback(id).map_err(Into::into)
+    }
+
+    #[inline]
+    fn get_loader_from_type(
+        &self,
+        r#type: &str,
+    ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>> {
+        self.get_loader_from_type(r#type).map_err(Into::into)
+    }
+
+    #[inline]
+    fn register_interface(
+        &mut self,
+        desc: &ModuleInterfaceDescriptor,
+        i: ObjArc<DynObj<dyn IModuleInterface>>,
+    ) -> fimo_module::Result<InterfaceId> {
+        self.register_interface(desc, i).map_err(Into::into)
+    }
+
+    #[inline]
+    fn unregister_interface(
+        &mut self,
+        id: InterfaceId,
+    ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
+        self.unregister_interface(id).map_err(Into::into)
+    }
+
+    #[inline]
+    fn register_interface_callback(
+        &mut self,
+        desc: &ModuleInterfaceDescriptor,
+        f: InterfaceCallback,
+    ) -> fimo_module::Result<InterfaceCallbackId> {
+        self.register_interface_callback(desc, f)
+            .map_err(Into::into)
+    }
+
+    #[inline]
+    fn unregister_interface_callback(
+        &mut self,
+        id: InterfaceCallbackId,
+    ) -> fimo_module::Result<()> {
+        self.unregister_interface_callback(id).map_err(Into::into)
+    }
+
+    #[inline]
+    fn get_interface_from_descriptor(
+        &self,
+        desc: &ModuleInterfaceDescriptor,
+    ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
+        self.get_interface_from_descriptor(desc).map_err(Into::into)
+    }
+
+    #[inline]
+    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
+        self.query_interfaces(query)
     }
 }
 
@@ -508,94 +531,36 @@ impl Default for IdWrapper<InterfaceCallbackId> {
         }
     }
 }
+macro_rules! step_impl {
+    ($expr: tt, $($type: ty),*) => {
+        $(
+            impl Step for IdWrapper<$type> {
+                fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+                    let start = start.get().into();
+                    let end = end.get().into();
+                    usize::steps_between(&start, &end)
+                }
 
-impl Step for IdWrapper<LoaderId> {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        let start = start.get().into();
-        let end = end.get().into();
-        usize::steps_between(&start, &end)
-    }
+                fn forward_checked(start: Self, count: usize) -> Option<Self> {
+                    let start = start.get().into();
+                    usize::forward_checked(start, count).map(|id| Self {
+                        id: unsafe { <$type>::$expr(id) },
+                    })
+                }
 
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::forward_checked(start, count).map(|id| Self {
-            id: unsafe { LoaderId::from_raw(id) },
-        })
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::backward_checked(start, count).map(|id| Self {
-            id: unsafe { LoaderId::from_raw(id) },
-        })
-    }
+                fn backward_checked(start: Self, count: usize) -> Option<Self> {
+                    let start = start.get().into();
+                    usize::backward_checked(start, count).map(|id| Self {
+                        id: unsafe { <$type>::$expr(id) },
+                    })
+                }
+            }
+        )*
+    };
 }
 
-impl Step for IdWrapper<LoaderCallbackId> {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        let start = start.get().into();
-        let end = end.get().into();
-        usize::steps_between(&start, &end)
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::forward_checked(start, count).map(|id| Self {
-            id: unsafe { LoaderCallbackId::from_usize(id) },
-        })
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::backward_checked(start, count).map(|id| Self {
-            id: unsafe { LoaderCallbackId::from_usize(id) },
-        })
-    }
-}
-
-impl Step for IdWrapper<InterfaceId> {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        let start = start.get().into();
-        let end = end.get().into();
-        usize::steps_between(&start, &end)
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::forward_checked(start, count).map(|id| Self {
-            id: unsafe { InterfaceId::from_raw(id) },
-        })
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::backward_checked(start, count).map(|id| Self {
-            id: unsafe { InterfaceId::from_raw(id) },
-        })
-    }
-}
-
-impl Step for IdWrapper<InterfaceCallbackId> {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        let start = start.get().into();
-        let end = end.get().into();
-        usize::steps_between(&start, &end)
-    }
-
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::forward_checked(start, count).map(|id| Self {
-            id: unsafe { InterfaceCallbackId::from_usize(id) },
-        })
-    }
-
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        let start = start.get().into();
-        usize::backward_checked(start, count).map(|id| Self {
-            id: unsafe { InterfaceCallbackId::from_usize(id) },
-        })
-    }
-}
+step_impl!(from_raw, LoaderId, InterfaceId);
+step_impl!(from_usize, LoaderCallbackId, InterfaceCallbackId);
 
 /// Basic module information.
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
@@ -637,7 +602,7 @@ pub struct ModuleInterfaceInfo {
     /// Name of the interface.
     pub name: String,
     /// Version of the interface.
-    pub version: fimo_version_core::Version,
+    pub version: fimo_ffi::Version,
     /// Interface extensions.
     pub extensions: Vec<String>,
 }
@@ -720,5 +685,25 @@ impl From<serde_json::Error> for ModuleRegistryError {
 impl From<std::io::Error> for ModuleRegistryError {
     fn from(err: std::io::Error) -> Self {
         ModuleRegistryError::IOError(err)
+    }
+}
+
+impl From<ModuleRegistryError> for Error {
+    fn from(e: ModuleRegistryError) -> Self {
+        let kind = match &e {
+            ModuleRegistryError::UnknownLoaderId(_) => ErrorKind::NotFound,
+            ModuleRegistryError::UnknownLoaderType(_) => ErrorKind::NotFound,
+            ModuleRegistryError::DuplicateLoaderType(_) => ErrorKind::AlreadyExists,
+            ModuleRegistryError::UnknownLoaderCallbackId(_) => ErrorKind::NotFound,
+            ModuleRegistryError::UnknownInterfaceId(_) => ErrorKind::NotFound,
+            ModuleRegistryError::UnknownInterface(_) => ErrorKind::NotFound,
+            ModuleRegistryError::DuplicateInterface(_) => ErrorKind::AlreadyExists,
+            ModuleRegistryError::UnknownInterfaceCallbackId(_) => ErrorKind::NotFound,
+            ModuleRegistryError::SerdeError(_) => ErrorKind::Internal,
+            ModuleRegistryError::IOError(_) => ErrorKind::Internal,
+            ModuleRegistryError::IdExhaustion => ErrorKind::ResourceExhausted,
+        };
+
+        Error::new(kind, fimo_ffi::error::wrap_error(e))
     }
 }

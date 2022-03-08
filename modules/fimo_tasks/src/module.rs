@@ -1,149 +1,116 @@
 use crate::{Builder, Runtime};
-use fimo_core_int::rust::settings_registry::{SettingsItem, SettingsRegistryPath};
-use fimo_core_int::rust::IFimoCore;
-use fimo_ffi::marker::SendSyncMarker;
-use fimo_ffi::vtable::{IBase, VTable};
-use fimo_ffi::{ObjArc, ObjWeak, Object, Optional, StrInner};
-use fimo_generic_module::{GenericModule, GenericModuleInstance};
-use fimo_module::rust_loader::{IRustModuleInner, IRustModuleParent};
+use fimo_core_int::settings::{ISettingsRegistryExt, SettingsItem, SettingsPath};
+use fimo_core_int::IFimoCore;
+use fimo_ffi::ptr::IBaseExt;
+use fimo_ffi::{DynObj, ObjArc, ObjectId};
 use fimo_module::{
-    impl_vtable, is_object, rust_module, Error, ErrorKind, FimoInterface, IModuleInstance,
-    IModuleInterface, IModuleInterfaceVTable, ModuleInfo, ModuleInterfaceDescriptor, Version,
+    Error, ErrorKind, FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader,
+    ModuleInfo,
 };
-use fimo_tasks_int::{IFimoTasks, IFimoTasksVTable};
-use std::collections::{BTreeMap, HashMap};
+use fimo_tasks_int::IFimoTasks;
+use std::fmt::{Debug, Formatter};
+use std::path::Path;
 use std::sync::Arc;
 
 const MODULE_NAME: &str = "fimo_tasks";
 
-#[derive(Debug)]
-struct RuntimeModule {
+/// Implementation of the `fimo-tasks` interface.
+#[derive(ObjectId)]
+#[fetch_vtable(
+    uuid = "4d7a5ec0-3acd-42c5-9f18-a4694961985a",
+    interfaces(IModuleInterface, IFimoTasks)
+)]
+pub struct TasksInterface {
     runtime: Arc<Runtime>,
-    parent: ObjArc<IModuleInstance>,
+    parent: ObjArc<DynObj<dyn IModuleInstance>>,
 }
 
-impl RuntimeModule {
-    #[inline]
-    pub fn new(runtime: Arc<Runtime>, parent: ObjArc<IModuleInstance>) -> Self {
-        Self { runtime, parent }
-    }
-
-    #[inline]
-    pub fn runtime(&self) -> &Runtime {
-        &self.runtime
+impl Debug for TasksInterface {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(FimoActixInterface)")
     }
 }
 
-is_object! { #![uuid(0x4d7a5ec0, 0x3acd, 0x42c5, 0x9f18, 0xa4694961985a)] RuntimeModule }
+impl IModuleInterface for TasksInterface {
+    fn as_inner(&self) -> &DynObj<dyn fimo_ffi::ptr::IBase + Send + Sync> {
+        let inner = fimo_ffi::ptr::coerce_obj::<_, dyn IFimoTasks + Send + Sync>(self);
+        inner.cast_super()
+    }
 
-impl_vtable! {
-    impl IModuleInterfaceVTable => RuntimeModule {
-        unsafe extern "C" fn inner(_ptr: *const ()) -> &'static IBase<SendSyncMarker> {
-            let i: &IFimoTasksVTable = RuntimeModule::get_vtable();
-            i.as_super()
-        }
+    fn name(&self) -> &str {
+        <dyn IFimoTasks>::NAME
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn version(_ptr: *const ()) -> Version {
-            IFimoTasks::VERSION
-        }
+    fn version(&self) -> fimo_ffi::Version {
+        <dyn IFimoTasks>::VERSION
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn extension(
-            _ptr: *const (),
-            _ext: StrInner<false>,
-        ) -> Optional<*const Object<IBase<SendSyncMarker>>> {
-            Optional::None
-        }
+    fn extensions(&self) -> &[&str] {
+        <dyn IFimoTasks>::EXTENSIONS
+    }
 
-        #[allow(improper_ctypes_definitions)]
-        unsafe extern "C" fn instance(ptr: *const ()) -> ObjArc<IModuleInstance> {
-            let this = &*(ptr as *const RuntimeModule);
-            this.parent.clone()
-        }
+    fn extension(&self, _name: &str) -> Option<&DynObj<dyn fimo_ffi::ptr::IBase + Send + Sync>> {
+        None
+    }
+
+    fn instance(&self) -> ObjArc<DynObj<dyn IModuleInstance>> {
+        self.parent.clone()
     }
 }
 
-impl_vtable! {
-    impl inline IFimoTasksVTable => RuntimeModule {
-        |this| {
-            let this = unsafe { &*(this as *const RuntimeModule) };
-            (&**this.runtime()).into()
-        }
+impl IFimoTasks for TasksInterface {
+    fn runtime(&self) -> &DynObj<dyn fimo_tasks_int::runtime::IRuntime> {
+        fimo_ffi::ptr::coerce_obj(&*self.runtime)
     }
 }
 
-rust_module!(construct_module);
-
-#[allow(improper_ctypes_definitions)]
-extern "C" fn construct_module() -> Result<ObjArc<IRustModuleInner>, Error> {
-    Ok(GenericModule::new_inner(
-        construct_module_info(),
-        build_instance,
-    ))
-}
-
-fn build_instance(
-    parent: ObjArc<IRustModuleParent>,
-) -> Result<ObjArc<GenericModuleInstance>, Error> {
-    let desc = IFimoTasks::new_descriptor();
-
-    let mut interfaces = HashMap::new();
-    interfaces.insert(
-        desc,
-        (build_interface as _, vec![IFimoCore::new_descriptor()]),
-    );
-    Ok(GenericModuleInstance::new(parent, interfaces))
-}
-
-fn build_interface(
-    instance: ObjArc<GenericModuleInstance>,
-    dep_map: &HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<IModuleInterface>>>,
-) -> Result<ObjArc<IModuleInterface>, Error> {
-    let core = dep_map
-        .get(&IFimoCore::new_descriptor())
-        .and_then(|i| i.as_ref().map(|i| i.upgrade()))
-        .flatten();
-
-    if core.is_none() {
-        return Err(Error::new(
-            ErrorKind::NotFound,
-            "fimo-core interface not found",
-        ));
-    }
-
-    let core = core.unwrap();
-    let core: ObjArc<IFimoCore> = IModuleInterface::try_downcast_arc(core)?;
-
-    let settings_path = SettingsRegistryPath::new("fimo_tasks").unwrap();
-
-    let registry = core.get_settings_registry();
-    let settings: ModuleSettings = match registry.try_read(settings_path) {
-        Ok(Some(Ok(s))) => s,
-        _ => {
-            let settings = ModuleSettings::new();
-            registry.write(settings_path, settings).unwrap();
-            settings
-        }
-    };
-
-    let runtime = Builder::new()
-        .stack_size(settings.stack_size)
-        .allocated_tasks(settings.pre_allocated_stacks)
-        .free_threshold(settings.task_free_threshold)
-        .workers(settings.workers)
-        .build()?;
-    let instance = ObjArc::coerce_object(instance);
-    let module = RuntimeModule::new(runtime, instance);
-
-    Ok(ObjArc::coerce_object(ObjArc::new(module)))
-}
-
-fn construct_module_info() -> ModuleInfo {
+fn module_info() -> ModuleInfo {
     ModuleInfo {
         name: MODULE_NAME.into(),
-        version: IFimoTasks::VERSION.into(),
+        version: <dyn IFimoTasks>::VERSION.into(),
     }
+}
+
+fimo_module::rust_module!(load_module);
+
+fn load_module(
+    loader: &'static DynObj<dyn IModuleLoader>,
+    path: &Path,
+) -> fimo_module::Result<ObjArc<DynObj<dyn IModule>>> {
+    let module = fimo_module::module::Module::new(module_info(), path, loader, |module| {
+        let builder = fimo_module::module::InstanceBuilder::new(module);
+
+        let desc = <dyn IFimoTasks>::new_descriptor();
+        let deps = &[<dyn IFimoCore>::new_descriptor()];
+        let f = |instance, mut deps: Vec<_>| {
+            // we only have one dependency so it must reside as the first element of the vec.
+            let core = fimo_module::try_downcast_arc::<dyn IFimoCore, _>(deps.remove(0))?;
+
+            let settings_path = SettingsPath::new("fimo-tasks").unwrap();
+            let settings = core
+                .settings()
+                .read_or(settings_path, ModuleSettings::default())
+                .map_err(|_| Error::from(ErrorKind::FailedPrecondition))?;
+
+            let runtime = Builder::new()
+                .stack_size(settings.stack_size)
+                .allocated_tasks(settings.pre_allocated_stacks)
+                .free_threshold(settings.task_free_threshold)
+                .workers(settings.workers)
+                .build()?;
+
+            let interface = ObjArc::new(TasksInterface {
+                runtime,
+                parent: ObjArc::coerce_obj(instance),
+            });
+
+            Ok(ObjArc::coerce_obj(interface))
+        };
+
+        let instance = builder.interface(desc, deps, f).build();
+        Ok(instance)
+    });
+    Ok(ObjArc::coerce_obj(module))
 }
 
 #[derive(Copy, Clone)]
@@ -165,9 +132,16 @@ impl ModuleSettings {
     }
 }
 
+impl Default for ModuleSettings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl From<ModuleSettings> for SettingsItem {
     fn from(settings: ModuleSettings) -> Self {
-        let mut map: BTreeMap<_, _> = Default::default();
+        let mut item = SettingsItem::new_object();
+        let map = item.as_map_mut().unwrap();
         map.insert("stack_size".into(), settings.stack_size.into());
         map.insert(
             "pre_allocated_stacks".into(),
@@ -179,7 +153,7 @@ impl From<ModuleSettings> for SettingsItem {
         );
         map.insert("workers".into(), settings.workers.unwrap_or(0).into());
 
-        map.into()
+        item
     }
 }
 
@@ -191,26 +165,29 @@ impl TryFrom<SettingsItem> for ModuleSettings {
             .into_map()
             .ok_or_else(|| Error::new(ErrorKind::InvalidArgument, "Expected map"))?;
 
+        let path_err = || Error::from(ErrorKind::NotFound);
+        let err_f = |_e| Error::from(ErrorKind::InvalidArgument);
+
         let stack_size: usize = map
             .remove("stack_size")
-            .ok_or_else(|| Error::new(ErrorKind::Internal, "Path not found"))?
+            .ok_or_else(path_err)?
             .try_into()
-            .map_err(|e| Error::new(ErrorKind::Internal, e))?;
+            .map_err(err_f)?;
         let pre_allocated_stacks: usize = map
             .remove("pre_allocated_stacks")
-            .ok_or_else(|| Error::new(ErrorKind::Internal, "Path not found"))?
+            .ok_or_else(path_err)?
             .try_into()
-            .map_err(|e| Error::new(ErrorKind::Internal, e))?;
+            .map_err(err_f)?;
         let task_free_threshold: usize = map
             .remove("task_free_threshold")
-            .ok_or_else(|| Error::new(ErrorKind::Internal, "Path not found"))?
+            .ok_or_else(path_err)?
             .try_into()
-            .map_err(|e| Error::new(ErrorKind::Internal, e))?;
+            .map_err(err_f)?;
         let workers: usize = map
             .remove("workers")
-            .ok_or_else(|| Error::new(ErrorKind::Internal, "Path not found"))?
+            .ok_or_else(path_err)?
             .try_into()
-            .map_err(|e| Error::new(ErrorKind::Internal, e))?;
+            .map_err(err_f)?;
 
         let workers = if workers == 0 { None } else { Some(workers) };
 

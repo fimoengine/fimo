@@ -1,20 +1,18 @@
 //! Utilities for handling tasks.
 //!
-use crate::raw::{IRawTask, RawTaskInner, TaskPriority, TaskScheduleStatus, WorkerId};
-use crate::runtime::{get_runtime, is_worker};
-use crate::{IRuntime, TaskHandle};
-use fimo_ffi::ffi_fn::RawFfiFn;
-use fimo_ffi::marker::{SendMarker, SendSyncMarker};
-use fimo_ffi::object::{CoerceObject, ObjectWrapper};
-use fimo_ffi::vtable::{IBase, VTableUpcast};
-use fimo_ffi::{ObjArc, ObjBox, Object, Optional};
+use crate::raw::{
+    IRawTask, ISchedulerContext, RawTaskInner, TaskPriority, TaskScheduleStatus, WorkerId,
+};
+use crate::runtime::{get_runtime, is_worker, IRuntimeExt, IScheduler};
+use crate::TaskHandle;
+use fimo_ffi::ptr::IBase;
+use fimo_ffi::{DynObj, FfiFn, ObjArc, ObjBox};
 use fimo_module::{Error, ErrorKind};
 use log::{error, trace};
 use std::cell::UnsafeCell;
-use std::mem::{ManuallyDrop, MaybeUninit};
+use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::ptr::NonNull;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -27,27 +25,21 @@ use std::time::SystemTime;
 /// The handle it tied to the runtime that owns the task and may not
 /// be moved outside of it.
 #[derive(Debug)]
-pub struct JoinHandle<T, R: RawTaskWrapper<Output = T>> {
-    handle: R,
+pub struct JoinHandle<T: RawTaskWrapper> {
+    handle: T,
 }
 
-impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
+impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
     /// Fetches the handle of the task.
     #[inline]
     pub fn handle(&self) -> TaskHandle {
         // safety: we own the task and know that it is registered.
-        unsafe {
-            self.handle
-                .as_raw()
-                .scheduler_context()
-                .handle()
-                .assume_init()
-        }
+        unsafe { self.handle.as_raw().context_atomic().handle().assume_init() }
     }
 
     /// Fetches a reference to the contained raw task.
     #[inline]
-    pub fn as_raw(&self) -> &IRawTask {
+    pub fn as_raw(&self) -> &DynObj<dyn IRawTask + '_> {
         self.handle.as_raw()
     }
 
@@ -57,7 +49,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     ///
     /// This function is only safe, if the task has been completed successfully.
     #[inline]
-    pub unsafe fn assume_completed_ref(&self) -> &T {
+    pub unsafe fn assume_completed_ref(&self) -> &R {
         self.handle.peek_output()
     }
 
@@ -67,7 +59,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     ///
     /// This function is only safe, if the task has been completed successfully.
     #[inline]
-    pub unsafe fn assume_completed_mut(&mut self) -> &mut T {
+    pub unsafe fn assume_completed_mut(&mut self) -> &mut R {
         self.handle.peek_output_mut()
     }
 
@@ -79,8 +71,15 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     ///
     /// This function is only safe, if the task has been completed successfully.
     #[inline]
-    pub unsafe fn assume_completed_read(&self) -> T {
+    pub unsafe fn assume_completed_read(&self) -> R {
         self.handle.read_output()
+    }
+
+    /// Returns the inner handle consuming the `JoinHandle` without joining the task.
+    pub fn into_inner(self) -> T {
+        let handle = unsafe { std::ptr::read(&self.handle) };
+        std::mem::forget(self);
+        handle
     }
 
     /// Waits for the associated task to finish.
@@ -88,7 +87,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     /// # Panics
     ///
     /// This function may panic if a task tries to join itself.
-    pub fn join(mut self) -> Result<T, Option<ObjBox<Object<IBase<SendMarker>>>>> {
+    pub fn join(mut self) -> Result<R, Option<ObjBox<DynObj<dyn IBase + Send>>>> {
         trace!(
             "Joining task-id {}, name {:?}",
             self.handle(),
@@ -113,15 +112,13 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     ///
     /// This call consumes the `JoinHandle`.
     #[inline]
-    unsafe fn join_ref(&mut self) -> Result<T, Option<ObjBox<Object<IBase<SendMarker>>>>> {
+    unsafe fn join_ref(&mut self) -> Result<R, Option<ObjBox<DynObj<dyn IBase + Send>>>> {
         let runtime = get_runtime();
+        let handle = self.handle();
         let raw = self.handle.as_raw();
 
         // wait for the task to complete.
-        assert!(matches!(
-            runtime.wait_on(raw.scheduler_context().handle().assume_init()),
-            Ok(_)
-        ));
+        assert!(matches!(runtime.wait_on(handle), Ok(_)));
 
         // unregister the completed task.
         runtime.enter_scheduler(|s, _| {
@@ -129,7 +126,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
         });
 
         // safety: the task is unowned.
-        let context = raw.scheduler_context_mut();
+        let context = &mut *raw.context().borrow_mut();
         match context.schedule_status() {
             TaskScheduleStatus::Aborted => Err(context.take_panic_data()),
             TaskScheduleStatus::Finished => Ok(self.assume_completed_read()),
@@ -141,7 +138,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     ///
     /// Once finished, extracts a reference to the result.
     /// If the task was aborted this function returns [`None`].
-    pub fn wait(&self) -> Option<&T> {
+    pub fn wait(&self) -> Option<&R> {
         debug_assert!(is_worker());
         trace!(
             "Waiting on task-id {}, name {:?}",
@@ -152,7 +149,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
         let runtime = unsafe { get_runtime() };
         assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
 
-        let context = self.as_raw().scheduler_context();
+        let context = self.as_raw().context_atomic();
         match context.schedule_status() {
             TaskScheduleStatus::Aborted => None,
             TaskScheduleStatus::Finished => unsafe { Some(self.assume_completed_ref()) },
@@ -164,7 +161,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
     ///
     /// Once finished, extracts a mutable reference to the result.
     /// If the task was aborted this function returns [`None`].
-    pub fn wait_mut(&mut self) -> Option<&mut T> {
+    pub fn wait_mut(&mut self) -> Option<&mut R> {
         debug_assert!(is_worker());
         trace!(
             "Waiting on task-id {}, name {:?}",
@@ -175,7 +172,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
         let runtime = unsafe { get_runtime() };
         assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
 
-        let context = self.as_raw().scheduler_context();
+        let context = self.as_raw().context_atomic();
         match context.schedule_status() {
             TaskScheduleStatus::Aborted => None,
             TaskScheduleStatus::Finished => unsafe { Some(self.assume_completed_mut()) },
@@ -209,7 +206,7 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
             self.as_raw().resolved_name()
         );
 
-        self.as_raw().scheduler_context().request_block();
+        self.as_raw().context_atomic().request_block();
     }
 
     /// Requests for a task to be aborted.
@@ -229,11 +226,11 @@ impl<T, R: RawTaskWrapper<Output = T>> JoinHandle<T, R> {
             self.as_raw().resolved_name()
         );
 
-        self.as_raw().scheduler_context().request_abort();
+        self.as_raw().context_atomic().request_abort();
     }
 }
 
-impl<T, R: RawTaskWrapper<Output = T>> Drop for JoinHandle<T, R> {
+impl<T: RawTaskWrapper> Drop for JoinHandle<T> {
     fn drop(&mut self) {
         trace!(
             "Dropping task-id {}, name {:?}",
@@ -244,8 +241,9 @@ impl<T, R: RawTaskWrapper<Output = T>> Drop for JoinHandle<T, R> {
     }
 }
 
+/// Definition of a task.
 #[derive(Debug)]
-struct Task<'a, T> {
+pub struct Task<'a, T> {
     raw: RawTaskInner<'a>,
     res: UnsafeCell<MaybeUninit<T>>,
 }
@@ -256,7 +254,7 @@ pub trait RawTaskWrapper: Deref {
     type Output;
 
     /// Extracts a reference to the task.
-    fn as_raw(&self) -> &IRawTask;
+    fn as_raw(&self) -> &DynObj<dyn IRawTask + '_>;
 
     /// Reads the output of the task without moving it.
     ///
@@ -284,12 +282,12 @@ pub trait RawTaskWrapper: Deref {
 
 macro_rules! as_raw_impl {
     ($($type: ty),*) => {
-        $(impl<T> RawTaskWrapper for $type {
+        $(impl<'a, T: 'a> RawTaskWrapper for $type {
             type Output = T;
 
             #[inline]
-            fn as_raw(&self) -> &IRawTask {
-                IRawTask::from_object(self.raw.coerce_obj())
+            fn as_raw(&self) -> &DynObj<dyn IRawTask + '_> {
+                fimo_ffi::ptr::coerce_obj(&self.raw)
             }
 
             #[inline]
@@ -310,9 +308,9 @@ macro_rules! as_raw_impl {
     };
 }
 
-as_raw_impl! {&Task<'_, T>}
-as_raw_impl! {Pin<Box<Task<'_, T>>>, Pin<ObjBox<Task<'_, T>>>}
-as_raw_impl! {Pin<Arc<Task<'_, T>>>, Pin<ObjArc<Task<'_, T>>>}
+as_raw_impl! {&Task<'a, T>}
+as_raw_impl! {Pin<Box<Task<'a, T>>>, Pin<ObjBox<Task<'a, T>>>}
+as_raw_impl! {Pin<Arc<Task<'a, T>>>, Pin<ObjArc<Task<'a, T>>>}
 
 /// A task builder.
 #[derive(Debug)]
@@ -382,105 +380,75 @@ impl Builder {
     /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
-    pub fn block_on<F: FnOnce() -> R + Send, R: Send>(
-        self,
-        f: F,
-        wait_on: &[TaskHandle],
-    ) -> Result<R, Error> {
-        assert!(is_worker());
-        trace!("Blocking on new task");
-
-        let mut task: MaybeUninit<Task<'_, R>> = MaybeUninit::uninit();
-
-        // fetch the addresses to the inner members, so we can initialize them.
-        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
-        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
-
-        struct AssertSync<T>(*mut MaybeUninit<T>);
-        // we know that `T` won't be shared only written, so we can mark it as `Send`.
-        unsafe impl<T: Send> Send for AssertSync<T> {}
-
-        let res = unsafe {
-            // initialize res and fetch a pointer to the inner result.
-            res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
-            AssertSync(&mut *(*res_ptr).get())
-        };
-
-        let f = move || {
-            // write the result directly into the address, knowing that it will live
-            // at least as long as the task itself.
-            unsafe { res.0.write(MaybeUninit::new(f())) };
-        };
-        let mut f = MaybeUninit::new(f);
-        // safety: we know that f is valid until the raw fn is called.
-        let f = unsafe { RawFfiFn::new_value(&mut f) };
-
-        // initialize the raw field.
-        let raw_task = self.inner.build(Some(f), None, None);
-        unsafe { raw_ptr.write(raw_task) };
-
-        // safety: all fields have been initialized.
-        let task = unsafe { task.assume_init() };
-        let handle = &task;
+    pub fn block_on<'a, 'b, F, R>(self, f: F, wait_on: &'b [TaskHandle]) -> fimo_module::Result<R>
+    where
+        F: FnOnce() -> R + Send + 'a,
+        R: Send + 'a,
+    {
+        if !is_worker() {
+            return Err(Error::new(
+                ErrorKind::FailedPrecondition,
+                "spawn() can only be called from an initialized worker thread",
+            ));
+        }
 
         let runtime = unsafe { get_runtime() };
-        let handle = runtime.enter_scheduler(move |s, _| unsafe {
-            trace!("Register task with the runtime");
-            s.register_task(handle.as_raw(), wait_on)
-                .map(|_| JoinHandle { handle })
-        })?;
+        let join = |handle: JoinHandle<&'_ Task<'a, R>>| -> fimo_module::Result<R> {
+            match handle.join() {
+                Ok(v) => Ok(v),
+                Err(err) => {
+                    // empty errors indicate an aborted task.
+                    if let Some(err) = err {
+                        use crate::raw::{IRustPanicData, IRustPanicDataExt};
 
-        match handle.join() {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                // empty errors indicate an aborted task.
-                if let Some(err) = err {
-                    use crate::raw::IRustPanicData;
-
-                    // a runtime written in rust can choose to wrap the native
-                    // panic into a `IRustPanicData`.
-                    if let Ok(err) = ObjBox::try_cast::<IRustPanicData>(err) {
-                        let err = IRustPanicData::take_rust_panic(err);
-                        std::panic::resume_unwind(err)
+                        // a runtime written in rust can choose to wrap the native
+                        // panic into a `IRustPanicData`.
+                        let err = ObjBox::cast_super::<dyn IBase>(err);
+                        if let Some(err) = ObjBox::downcast_interface::<dyn IRustPanicData>(err) {
+                            let err = IRustPanicDataExt::take_rust_panic(err);
+                            std::panic::resume_unwind(err)
+                        }
                     }
-                }
 
-                panic!("Unknown panic!")
+                    panic!("Unknown panic!")
+                }
             }
-        }
+        };
+
+        self.block_on_complex::<_, _, _, fn(), _>(runtime, Some(f), None, wait_on, join)
     }
 
     /// Runs a task to completion on the task runtime.
     ///
     /// Blocks the current task until the new task has been completed.
-    ///
-    /// # Panics
-    ///
-    /// This function panics if the provided function panics.
     #[inline]
     #[track_caller]
-    pub fn block_on_complex<
-        F: FnOnce() -> R + Send,
-        R: Send,
-        C: FnOnce(Option<NonNull<O>>) + Send + 'static,
-        O: CoerceObject<V> + 'static,
-        V: VTableUpcast<IBase<SendSyncMarker>>,
-        J: FnOnce(
-            &IRawTask,
-            &UnsafeCell<MaybeUninit<R>>,
-        ) -> Result<R, Option<ObjBox<Object<IBase<SendMarker>>>>>,
-    >(
+    pub fn block_on_complex<'a, 'b, 'c, Run, F, R, Cleanup, Join>(
         self,
-        f: F,
-        cleanup: C,
-        data: NonNull<O>,
-        wait_on: &[TaskHandle],
-        join: J,
-        runtime: &IRuntime,
-    ) -> Result<R, Error> {
+        runtime: &'b Run,
+        f: Option<F>,
+        cleanup: Option<Cleanup>,
+        wait_on: &'c [TaskHandle],
+        join: Join,
+    ) -> fimo_module::Result<R>
+    where
+        Run: IRuntimeExt + ?Sized,
+        F: FnOnce() -> R + Send + 'a,
+        Cleanup: FnOnce() + Send + 'a,
+        R: Send + 'a,
+        Join: FnOnce(JoinHandle<&'_ Task<'a, R>>) -> fimo_module::Result<R>,
+    {
         trace!("Blocking on new task");
 
-        let mut task: MaybeUninit<Task<'_, R>> = MaybeUninit::uninit();
+        if f.is_none() && std::mem::size_of::<R>() != 0 {
+            error!("Tried to spawn an empty task with an invalid return type");
+            return Err(Error::new(
+                ErrorKind::InvalidArgument,
+                "empty tasks with non zst return types are not allowed",
+            ));
+        }
+
+        let mut task: MaybeUninit<Task<'a, R>> = MaybeUninit::uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
         let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
@@ -493,36 +461,25 @@ impl Builder {
         let res = unsafe {
             // initialize res and fetch a pointer to the inner result.
             res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
-            AssertSync(&mut *(*res_ptr).get())
+            AssertSync((*res_ptr).get())
         };
 
-        let f = move || {
-            // write the result directly into the address, knowing that it will live
-            // at least as long as the task itself.
-            unsafe { res.0.write(MaybeUninit::new(f())) };
-        };
-        let mut f = MaybeUninit::new(f);
-        // safety: we know that f is valid until the raw fn is called.
-        let f = unsafe { RawFfiFn::new_value(&mut f) };
+        let f = if let Some(f) = f {
+            let f = move || {
+                // write the result directly into the address, knowing that it will live
+                // at least as long as the task itself.
+                unsafe { res.0.write(MaybeUninit::new(f())) };
+            };
 
-        let cleanup = move |data: Optional<NonNull<Object<IBase<SendSyncMarker>>>>| {
-            if let Some(data) = data.into_rust() {
-                let data: *const O = Object::try_cast_obj_raw(data.as_ptr()).unwrap();
-                let data: NonNull<O> = unsafe { NonNull::new_unchecked(data as *mut _) };
-                cleanup(Some(data));
-            } else {
-                cleanup(None);
-            }
+            Some(FfiFn::r#box(Box::new(f)))
+        } else {
+            None
         };
-        let mut cleanup = MaybeUninit::new(cleanup);
-        let cleanup = unsafe { RawFfiFn::new_value(&mut cleanup) };
 
-        let data = O::coerce_obj_raw(data.as_ptr());
-        let data = Object::cast_super_raw(data);
-        let data = unsafe { NonNull::new_unchecked(data as *mut _) };
+        let cleanup = cleanup.map(|cleanup| FfiFn::r#box(Box::new(cleanup)));
 
         // initialize the raw field.
-        let raw_task = self.inner.build(Some(f), Some(cleanup), Some(data));
+        let raw_task = self.inner.build(f, cleanup);
         unsafe { raw_ptr.write(raw_task) };
 
         // safety: all fields have been initialized.
@@ -534,26 +491,8 @@ impl Builder {
             s.register_task(handle.as_raw(), wait_on)
                 .map(|_| JoinHandle { handle })
         })?;
-        let handle = ManuallyDrop::new(handle);
 
-        match join(handle.as_raw(), &handle.handle.res) {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                // empty errors indicate an aborted task.
-                if let Some(err) = err {
-                    use crate::raw::IRustPanicData;
-
-                    // a runtime written in rust can choose to wrap the native
-                    // panic into a `IRustPanicData`.
-                    if let Ok(err) = ObjBox::try_cast::<IRustPanicData>(err) {
-                        let err = IRustPanicData::take_rust_panic(err);
-                        std::panic::resume_unwind(err)
-                    }
-                }
-
-                panic!("Unknown panic!")
-            }
-        }
+        join(handle)
     }
 
     /// Spawns a task onto the task runtime.
@@ -565,50 +504,24 @@ impl Builder {
     /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
-    pub fn spawn<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(
+    pub fn spawn<'a, F, R>(
         self,
         f: F,
         wait_on: &[TaskHandle],
-    ) -> Result<JoinHandle<R, impl RawTaskWrapper<Output = R> + 'static>, Error> {
-        assert!(is_worker());
-        trace!("Spawning new task");
-
-        let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
-
-        // fetch the addresses to the inner members, so we can initialize them.
-        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
-        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
-
-        struct AssertSync<T>(*mut MaybeUninit<T>);
-        // we know that `T` won't be shared only written, so we can mark it as `Send`.
-        unsafe impl<T: Send> Send for AssertSync<T> {}
-
-        let res = unsafe {
-            // initialize res and fetch a pointer to the inner result.
-            res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
-            AssertSync(&mut *(*res_ptr).get())
-        };
-
-        let f = move || {
-            // write the result directly into the address, knowing that it will live
-            // at least as long as the task itself.
-            unsafe { res.0.write(MaybeUninit::new(f())) };
-        };
-        let f = RawFfiFn::r#box(Box::new(f));
-
-        // initialize the raw field.
-        let raw_task = self.inner.build(Some(f), None, None);
-        unsafe { raw_ptr.write(raw_task) };
-
-        // safety: all fields have been initialized.
-        let task = unsafe { Pin::new_unchecked(task.assume_init()) };
+    ) -> fimo_module::Result<JoinHandle<Pin<ObjBox<Task<'a, R>>>>>
+    where
+        F: FnOnce() -> R + Send + 'a,
+        R: Send + 'a,
+    {
+        if !is_worker() {
+            return Err(Error::new(
+                ErrorKind::FailedPrecondition,
+                "spawn() can only be called from an initialized worker thread",
+            ));
+        }
 
         let runtime = unsafe { get_runtime() };
-        runtime.enter_scheduler(move |s, _| unsafe {
-            trace!("Register task with the runtime");
-            s.register_task(task.as_raw(), wait_on)
-                .map(|_| JoinHandle { handle: task })
-        })
+        self.spawn_complex::<_, _, _, fn()>(runtime, Some(f), None, wait_on)
     }
 
     /// Spawns a task onto the task runtime.
@@ -616,21 +529,28 @@ impl Builder {
     /// Spawns a task on any of the available workers, where it will run to completion.
     #[inline]
     #[track_caller]
-    pub fn spawn_complex<
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-        C: FnOnce(Option<NonNull<O>>) + Send + 'static,
-        O: CoerceObject<V> + 'static,
-        V: VTableUpcast<IBase<SendSyncMarker>>,
-    >(
+    pub fn spawn_complex<'a, 'b, 'c, Run, F, R, Cleanup>(
         self,
-        runtime: &IRuntime,
-        f: F,
-        cleanup: C,
-        data: NonNull<O>,
-        wait_on: &[TaskHandle],
-    ) -> Result<JoinHandle<R, impl RawTaskWrapper<Output = R> + 'static>, Error> {
+        runtime: &'b Run,
+        f: Option<F>,
+        cleanup: Option<Cleanup>,
+        wait_on: &'c [TaskHandle],
+    ) -> fimo_module::Result<JoinHandle<Pin<ObjBox<Task<'a, R>>>>>
+    where
+        Run: IRuntimeExt + ?Sized,
+        F: FnOnce() -> R + Send + 'a,
+        Cleanup: FnOnce() + Send + 'a,
+        R: Send + 'a,
+    {
         trace!("Spawning new task");
+
+        if f.is_none() && std::mem::size_of::<R>() != 0 {
+            error!("Tried to spawn an empty task with an invalid return type");
+            return Err(Error::new(
+                ErrorKind::InvalidArgument,
+                "empty tasks with non zst return types are not allowed",
+            ));
+        }
 
         let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
 
@@ -645,33 +565,25 @@ impl Builder {
         let res = unsafe {
             // initialize res and fetch a pointer to the inner result.
             res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
-            AssertSync(&mut *(*res_ptr).get())
+            AssertSync((*res_ptr).get())
         };
 
-        let f = move || {
-            // write the result directly into the address, knowing that it will live
-            // at least as long as the task itself.
-            unsafe { res.0.write(MaybeUninit::new(f())) };
-        };
-        let f = RawFfiFn::r#box(Box::new(f));
+        let f = if let Some(f) = f {
+            let f = move || {
+                // write the result directly into the address, knowing that it will live
+                // at least as long as the task itself.
+                unsafe { res.0.write(MaybeUninit::new(f())) };
+            };
 
-        let cleanup = move |data: Optional<NonNull<Object<IBase<SendSyncMarker>>>>| {
-            if let Some(data) = data.into_rust() {
-                let data: *const O = Object::try_cast_obj_raw(data.as_ptr()).unwrap();
-                let data: NonNull<O> = unsafe { NonNull::new_unchecked(data as *mut _) };
-                cleanup(Some(data));
-            } else {
-                cleanup(None);
-            }
+            Some(FfiFn::r#box(Box::new(f)))
+        } else {
+            None
         };
-        let cleanup = RawFfiFn::r#box(Box::new(cleanup));
 
-        let data = O::coerce_obj_raw(data.as_ptr());
-        let data = Object::cast_super_raw(data);
-        let data = unsafe { NonNull::new_unchecked(data as *mut _) };
+        let cleanup = cleanup.map(|cleanup| FfiFn::r#box(Box::new(cleanup)));
 
         // initialize the raw field.
-        let raw_task = self.inner.build(Some(f), Some(cleanup), Some(data));
+        let raw_task = self.inner.build(f, cleanup);
         unsafe { raw_ptr.write(raw_task) };
 
         // safety: all fields have been initialized.
@@ -778,10 +690,6 @@ impl ParallelBuilder {
         assert!(is_worker());
         trace!("Blocking on multiple new tasks");
 
-        let mut funcs = self.num_tasks.map_or(Vec::new(), Vec::with_capacity);
-        let mut tasks = self.num_tasks.map_or(Vec::new(), Vec::with_capacity);
-        let mut task_workers = self.num_tasks.map_or(Vec::new(), Vec::with_capacity);
-
         let runtime = unsafe { get_runtime() };
         let handles: Vec<_> = runtime.enter_scheduler(|s, _| {
             let workers = s.worker_ids();
@@ -801,87 +709,78 @@ impl ParallelBuilder {
                 return Err(Error::new(ErrorKind::OutOfRange, err));
             }
 
-            if self.unique_workers {
-                funcs.reserve(num_tasks);
-                tasks.reserve(num_tasks);
-                task_workers.reserve(num_tasks);
-                task_workers.extend(workers[..num_tasks].iter().map(|w| Some(*w)));
+            let workers: Vec<_> = if self.unique_workers {
+                workers[..num_tasks].iter().map(|w| Some(*w)).collect()
             } else {
-                task_workers.resize(num_tasks, None);
+                vec![None; num_tasks]
+            };
+
+            let mut handles = Vec::with_capacity(num_tasks);
+            for (i, worker) in workers.into_iter().enumerate() {
+                let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
+
+                // fetch the addresses to the inner members, so we can initialize them.
+                let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
+                let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+
+                struct AssertSync<T>(*mut MaybeUninit<T>);
+                // we know that `T` won't be shared only written, so we can mark it as `Send`.
+                unsafe impl<T: Send> Send for AssertSync<T> {}
+
+                let res = unsafe {
+                    // initialize res and fetch a pointer to the inner result.
+                    res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
+                    AssertSync((*res_ptr).get())
+                };
+
+                let f = f.clone();
+                let f = move || {
+                    // write the result directly into the address, knowing that it will live
+                    // at least as long as the task itself.
+                    unsafe { res.0.write(MaybeUninit::new(f())) };
+                };
+                let f = FfiFn::r#box(Box::new(f));
+
+                // initialize the raw field.
+                let raw_task = unsafe {
+                    self.inner
+                        .clone()
+                        .with_worker(worker)
+                        .extend_name_index(i)
+                        .build(Some(f), None)
+                };
+                unsafe { raw_ptr.write(raw_task) };
+
+                // safety: all fields have been initialized.
+                let task = unsafe { Pin::new_unchecked(task.assume_init()) };
+
+                if let Err(e) = unsafe { s.register_task(task.as_raw(), wait_on) } {
+                    handles.push(Err(e));
+                } else {
+                    handles.push(Ok(JoinHandle { handle: task }))
+                }
             }
-
-            Ok((0..num_tasks)
-                .map(|i| {
-                    tasks.push(MaybeUninit::uninit());
-                    let task: &mut MaybeUninit<Task<'_, R>> = &mut tasks[i];
-                    let worker = task_workers[i];
-
-                    // fetch the addresses to the inner members, so we can initialize them.
-                    let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
-                    let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
-
-                    struct AssertSync<T>(*mut MaybeUninit<T>);
-                    // we know that `T` won't be shared only written, so we can mark it as `Send`.
-                    unsafe impl<T: Send> Send for AssertSync<T> {}
-
-                    let res = unsafe {
-                        // initialize res and fetch a pointer to the inner result.
-                        res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
-                        AssertSync(&mut *(*res_ptr).get())
-                    };
-
-                    let f = f.clone();
-                    let f = move || {
-                        // write the result directly into the address, knowing that it will live
-                        // at least as long as the task itself.
-                        unsafe { res.0.write(MaybeUninit::new(f())) };
-                    };
-                    let f = MaybeUninit::new(f);
-                    funcs.push(f);
-
-                    // safety: we know that f is valid until the raw fn is called.
-                    let f = unsafe { RawFfiFn::new_value(&mut funcs[i]) };
-
-                    // initialize the raw field.
-                    let raw_task = unsafe {
-                        self.inner
-                            .clone()
-                            .with_worker(worker)
-                            .extend_name_index(i)
-                            .build(Some(f), None, None)
-                    };
-                    unsafe { raw_ptr.write(raw_task) };
-
-                    // safety: all fields have been initialized.
-                    let task = unsafe { task.assume_init_ref() };
-
-                    trace!("Register task with the runtime");
-                    unsafe { s.register_task(task.as_raw(), wait_on) }
-                })
-                .collect())
+            Ok(handles)
         })?;
 
         handles
             .into_iter()
-            .enumerate()
-            .map(|(i, handle)| {
-                let handle = handle.map(|_| unsafe {
-                    JoinHandle {
-                        handle: tasks[i].assume_init_ref(),
-                    }
-                })?;
+            .map(|handle| {
+                let handle = handle?;
 
                 match handle.join() {
                     Ok(v) => Ok(v),
                     Err(err) => {
                         // empty errors indicate an aborted task.
                         if let Some(err) = err {
-                            use crate::raw::IRustPanicData;
+                            use crate::raw::{IRustPanicData, IRustPanicDataExt};
 
                             // a runtime written in rust can choose to wrap the native
                             // panic into a `IRustPanicData`.
-                            if let Ok(err) = ObjBox::try_cast::<IRustPanicData>(err) {
-                                let err = IRustPanicData::take_rust_panic(err);
+                            let err = ObjBox::cast_super::<dyn IBase>(err);
+                            if let Some(err) = ObjBox::downcast_interface::<dyn IRustPanicData>(err)
+                            {
+                                let err = IRustPanicDataExt::take_rust_panic(err);
                                 std::panic::resume_unwind(err)
                             }
                         }

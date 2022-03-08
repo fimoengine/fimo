@@ -1,15 +1,15 @@
 //! Implementation of the `fimo-actix` interface.
-#![feature(unboxed_closures)]
-#![feature(async_closure)]
-#![feature(fn_traits)]
-#![feature(c_unwind)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-extern crate static_assertions as sa;
+#![feature(unboxed_closures)]
+#![feature(async_closure)]
+#![feature(fn_traits)]
+#![feature(c_unwind)]
+
 use actix_rt::Arbiter;
 use fimo_actix_int::actix::dev::ServerHandle;
 use fimo_actix_int::actix::rt::System;
@@ -17,6 +17,7 @@ use fimo_actix_int::actix::{App, HttpServer, Scope};
 use fimo_actix_int::{
     Callback, CallbackId, ScopeBuilder, ScopeBuilderId, ServerEvent, ServerStatus,
 };
+use fimo_ffi::error::{Error, ErrorKind};
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::net::ToSocketAddrs;
@@ -30,9 +31,6 @@ pub mod module;
 pub struct FimoActixServer<A: 'static + ToSocketAddrs + Send + Sync> {
     inner: Mutex<ActixServerInner<A>>,
 }
-
-// use `String` as a catch-all.
-sa::assert_impl_all!(FimoActixServer<String>: Send, Sync);
 
 struct ActixServerInner<A: 'static + ToSocketAddrs + Send + Sync> {
     address: A,
@@ -99,7 +97,11 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> FimoActixServer<A> {
     /// Registers a new scope to the server.
     ///
     /// The scopes will be added to the server on startup or restart.
-    pub fn register_scope(&self, path: &str, builder: ScopeBuilder) -> Option<ScopeBuilderId> {
+    pub fn register_scope(
+        &self,
+        path: &str,
+        builder: ScopeBuilder,
+    ) -> fimo_module::Result<ScopeBuilderId> {
         self.inner.lock().register_scope(path, builder)
     }
 
@@ -110,12 +112,12 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> FimoActixServer<A> {
     /// # Panic
     ///
     /// The `id` must stem from a call to [`FimoActixServer::register_scope`].
-    pub fn unregister_scope(&self, id: ScopeBuilderId) {
+    pub fn unregister_scope(&self, id: ScopeBuilderId) -> fimo_module::Result<()> {
         self.inner.lock().unregister_scope(id)
     }
 
     /// Registers a callback to the server.
-    pub fn register_callback(&self, callback: Callback) -> CallbackId {
+    pub fn register_callback(&self, callback: Callback) -> fimo_module::Result<CallbackId> {
         self.inner.lock().register_callback(callback)
     }
 
@@ -124,7 +126,7 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> FimoActixServer<A> {
     /// # Panic
     ///
     /// The `id` must stem from a call to [`FimoActixServer::register_callback`].
-    pub fn unregister_callback(&self, id: CallbackId) {
+    pub fn unregister_callback(&self, id: CallbackId) -> fimo_module::Result<()> {
         self.inner.lock().unregister_callback(id)
     }
 }
@@ -345,9 +347,16 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
         self.status
     }
 
-    fn register_scope(&mut self, path: &str, builder: ScopeBuilder) -> Option<ScopeBuilderId> {
+    fn register_scope(
+        &mut self,
+        path: &str,
+        builder: ScopeBuilder,
+    ) -> fimo_module::Result<ScopeBuilderId> {
         if self.scopes.contains_key(path) {
-            return None;
+            return Err(Error::new(
+                ErrorKind::AlreadyExists,
+                format!("a scope is already registered with the path: {:?}", path),
+            ));
         }
 
         let id = self.scope_ids.next().unwrap();
@@ -356,25 +365,40 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
         self.scopes.insert(scope_name.clone(), builder);
         self.registered_scopes.insert(id, scope_name);
 
-        Some(unsafe { ScopeBuilderId::from_usize(id) })
+        Ok(unsafe { ScopeBuilderId::from_usize(id) })
     }
 
-    fn unregister_scope(&mut self, id: ScopeBuilderId) {
+    fn unregister_scope(&mut self, id: ScopeBuilderId) -> fimo_module::Result<()> {
         let id = usize::from(id);
-        let scope = self.registered_scopes.remove(&id).unwrap();
+        let scope = match self.registered_scopes.remove(&id) {
+            None => {
+                return Err(Error::new(
+                    ErrorKind::NotFound,
+                    format!("the id {:?} is not registered", id),
+                ));
+            }
+            Some(s) => s,
+        };
         self.scopes.remove(&scope);
+        Ok(())
     }
 
-    fn register_callback(&mut self, callback: Callback) -> CallbackId {
-        let id = self.callback_ids.next().unwrap();
+    fn register_callback(&mut self, callback: Callback) -> fimo_module::Result<CallbackId> {
+        let id = match self.callback_ids.next() {
+            None => return Err(Error::from(ErrorKind::ResourceExhausted)),
+            Some(id) => id,
+        };
         self.callbacks.insert(id, callback);
 
-        unsafe { CallbackId::from_usize(id) }
+        unsafe { Ok(CallbackId::from_usize(id)) }
     }
 
-    fn unregister_callback(&mut self, id: CallbackId) {
+    fn unregister_callback(&mut self, id: CallbackId) -> fimo_module::Result<()> {
         let id = usize::from(id);
-        self.callbacks.remove(&id).unwrap();
+        match self.callbacks.remove(&id) {
+            None => Err(Error::from(ErrorKind::NotFound)),
+            Some(_) => Ok(()),
+        }
     }
 }
 

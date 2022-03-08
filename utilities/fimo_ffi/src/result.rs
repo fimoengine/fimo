@@ -1,6 +1,9 @@
 //! Implementation of the `Result` type.
-use crate::Optional;
-use std::fmt::Debug;
+use crate::{Optional, ReprC, ReprRust};
+use std::{
+    fmt::Debug,
+    ops::{FromResidual, Residual, Try},
+};
 
 /// A type that represents either success ([`Result::Ok`]) or failure ([`Result::Err`]).
 #[repr(C, i8)]
@@ -132,15 +135,6 @@ impl<T, E> Result<T, E> {
             Result::Err(x) => op(x),
         }
     }
-
-    /// Maps the `Result<T, E>` to the native `Result<T, E>`.
-    #[inline]
-    pub fn into_rust(self) -> std::result::Result<T, E> {
-        match self {
-            Result::Ok(x) => Ok(x),
-            Result::Err(x) => Err(x),
-        }
-    }
 }
 
 impl<T, E> Result<T, E>
@@ -207,10 +201,10 @@ where
     }
 }
 
-impl<T, E> Clone for Result<T, E>
+impl<T, E> const Clone for Result<T, E>
 where
-    T: Clone,
-    E: Clone,
+    T: ~const Clone,
+    E: ~const Clone,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -221,7 +215,7 @@ where
     }
 }
 
-impl<T, E> From<std::result::Result<T, E>> for Result<T, E> {
+impl<T, E> const From<std::result::Result<T, E>> for Result<T, E> {
     #[inline]
     fn from(val: std::result::Result<T, E>) -> Self {
         match val {
@@ -231,11 +225,78 @@ impl<T, E> From<std::result::Result<T, E>> for Result<T, E> {
     }
 }
 
-impl<T, E> From<Result<T, E>> for std::result::Result<T, E> {
+impl<T, E> const From<Result<T, E>> for std::result::Result<T, E> {
     #[inline]
     fn from(val: Result<T, E>) -> Self {
         val.into_rust()
     }
+}
+
+impl<T, E> const ReprC for Result<T, E> {
+    type T = std::result::Result<T, E>;
+
+    #[inline]
+    fn into_rust(self) -> Self::T {
+        match self {
+            Result::Ok(v) => Ok(v),
+            Result::Err(e) => Err(e),
+        }
+    }
+
+    #[inline]
+    fn from_rust(t: Self::T) -> Self {
+        match t {
+            Ok(v) => Result::Ok(v),
+            Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<T, E> const ReprRust for std::result::Result<T, E> {
+    type T = Result<T, E>;
+
+    #[inline]
+    fn into_c(self) -> Self::T {
+        <Result<T, E> as ReprC>::from_rust(self)
+    }
+
+    #[inline]
+    fn from_c(t: Self::T) -> Self {
+        <Result<T, E> as ReprC>::into_rust(t)
+    }
+}
+
+impl<T, E> const Try for Result<T, E> {
+    type Output = T;
+
+    type Residual = Result<std::convert::Infallible, E>;
+
+    #[inline]
+    fn from_output(output: Self::Output) -> Self {
+        Self::Ok(output)
+    }
+
+    #[inline]
+    fn branch(self) -> std::ops::ControlFlow<Self::Residual, Self::Output> {
+        match self {
+            Result::Ok(v) => std::ops::ControlFlow::Continue(v),
+            Result::Err(e) => std::ops::ControlFlow::Break(Result::Err(e)),
+        }
+    }
+}
+
+impl<T, E> const FromResidual for Result<T, E> {
+    #[inline]
+    fn from_residual(residual: Result<std::convert::Infallible, E>) -> Self {
+        match residual {
+            Result::Ok(_) => unreachable!(),
+            Result::Err(e) => Result::Err(e),
+        }
+    }
+}
+
+impl<T, E> const Residual<T> for Result<std::convert::Infallible, E> {
+    type TryType = Result<T, E>;
 }
 
 #[cfg(test)]
