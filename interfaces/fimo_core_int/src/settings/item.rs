@@ -1,6 +1,4 @@
-use crate::rust::settings_registry::{
-    SettingsRegistryInvalidPathError, SettingsRegistryPath, SettingsRegistryPathComponentIter,
-};
+use crate::settings::{SettingsPath, SettingsPathBuf, SettingsPathComponentIter};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
@@ -10,17 +8,11 @@ pub trait SettingsItemMetadata: Default + Clone {
     /// Combines the metadata of `self` with `other`.
     fn combine(&mut self, other: &mut Self);
 
-    /// Event called when a write operation has started.
-    fn on_write(&self, path: &SettingsRegistryPath, new: &SettingsItem<Self>);
-
-    /// Event called when a write operation been aborted.
-    fn on_write_abort(&self, path: &SettingsRegistryPath);
-
     /// Event called when a write operation been completed.
-    fn on_write_complete(&self, path: &SettingsRegistryPath, old: &Option<SettingsItem<Self>>);
+    fn on_write(&self, path: &SettingsPath);
 
     /// Event called when an item has been removed.
-    fn on_removal(&self, path: &SettingsRegistryPath, old: &SettingsItem<Self>);
+    fn on_remove(&self, path: &SettingsPath);
 }
 
 impl SettingsItemMetadata for () {
@@ -28,16 +20,10 @@ impl SettingsItemMetadata for () {
     fn combine(&mut self, _other: &mut Self) {}
 
     #[inline]
-    fn on_write(&self, _path: &SettingsRegistryPath, _new: &SettingsItem<Self>) {}
+    fn on_write(&self, _path: &SettingsPath) {}
 
     #[inline]
-    fn on_write_abort(&self, _path: &SettingsRegistryPath) {}
-
-    #[inline]
-    fn on_write_complete(&self, _path: &SettingsRegistryPath, _old: &Option<SettingsItem<Self>>) {}
-
-    #[inline]
-    fn on_removal(&self, _path: &SettingsRegistryPath, _old: &SettingsItem<Self>) {}
+    fn on_remove(&self, _path: &SettingsPath) {}
 }
 
 /// A item from the settings registry.
@@ -53,11 +39,11 @@ pub enum SettingsItem<T: SettingsItemMetadata = ()> {
     /// F64 number value.
     F64(SettingsItemVal<f64, T>),
     /// String value.
-    String(SettingsItemVal<String, T>),
+    String(SettingsItemVal<fimo_module::fimo_ffi::String, T>),
     /// Array of items.
-    Array(SettingsItemVal<Vec<Self>, T>),
+    Array(SettingsItemVal<fimo_module::fimo_ffi::Vec<Self>, T>),
     /// Map of items.
-    Object(SettingsItemVal<BTreeMap<String, Self>, T>),
+    Object(SettingsItemVal<BTreeMap<fimo_module::fimo_ffi::String, Self>, T>),
 }
 
 /// Value of a [`SettingsItem`].
@@ -73,10 +59,13 @@ impl<T, M: SettingsItemMetadata> SettingsItemVal<T, M> {
     /// Constructs a new `SettingsItemVal`.
     #[inline]
     pub fn new<U: Into<T>>(v: U) -> Self {
-        Self {
-            v: v.into(),
-            m: M::default(),
-        }
+        Self::new_with_metadata(v, Default::default())
+    }
+
+    /// Constructs a new `SettingsItemVal`.
+    #[inline]
+    pub fn new_with_metadata<U: Into<T>>(v: U, m: M) -> Self {
+        Self { v: v.into(), m }
     }
 
     /// Extracts a reference to the contained data.
@@ -114,7 +103,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     /// Constructs a new array.
     #[inline]
     pub fn new_array() -> Self {
-        Self::Array(SettingsItemVal::new(vec![]))
+        Self::Array(SettingsItemVal::new(fimo_module::fimo_ffi::vec![]))
     }
 
     /// Constructs a new object.
@@ -220,54 +209,54 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         }
     }
 
-    /// Extracts a reference to a [`String`], if it is contained.
+    /// Extracts a reference to a [`String`](fimo_module::fimo_ffi::String), if it is contained.
     #[inline]
-    pub fn as_string(&self) -> Option<&String> {
+    pub fn as_string(&self) -> Option<&fimo_module::fimo_ffi::String> {
         match self {
             SettingsItem::String(v) => Some(v.as_val()),
             _ => None,
         }
     }
 
-    /// Extracts a mutable reference to a [`String`], if it is contained.
+    /// Extracts a mutable reference to a [`String`](fimo_module::fimo_ffi::String), if it is contained.
     #[inline]
-    pub fn as_string_mut(&mut self) -> Option<&mut String> {
+    pub fn as_string_mut(&mut self) -> Option<&mut fimo_module::fimo_ffi::String> {
         match self {
             SettingsItem::String(v) => Some(v.as_val_mut()),
             _ => None,
         }
     }
 
-    /// Extracts a [`String`], if it is contained.
+    /// Extracts a [`String`](fimo_module::fimo_ffi::String), if it is contained.
     #[inline]
-    pub fn into_string(self) -> Option<String> {
+    pub fn into_string(self) -> Option<fimo_module::fimo_ffi::String> {
         match self {
             SettingsItem::String(v) => Some(v.into_val()),
             _ => None,
         }
     }
 
-    /// Extracts a reference to a [`Vec`], if it is contained.
+    /// Extracts a reference to a [`Vec`](fimo_module::fimo_ffi::Vec), if it is contained.
     #[inline]
-    pub fn as_vec(&self) -> Option<&Vec<Self>> {
+    pub fn as_vec(&self) -> Option<&fimo_module::fimo_ffi::Vec<Self>> {
         match self {
             SettingsItem::Array(v) => Some(v.as_val()),
             _ => None,
         }
     }
 
-    /// Extracts a mutable reference to a [`Vec`], if it is contained.
+    /// Extracts a mutable reference to a [`Vec`](fimo_module::fimo_ffi::Vec), if it is contained.
     #[inline]
-    pub fn as_vec_mut(&mut self) -> Option<&mut Vec<Self>> {
+    pub fn as_vec_mut(&mut self) -> Option<&mut fimo_module::fimo_ffi::Vec<Self>> {
         match self {
             SettingsItem::Array(v) => Some(v.as_val_mut()),
             _ => None,
         }
     }
 
-    /// Extracts a [`Vec`], if it is contained.
+    /// Extracts a [`Vec`](fimo_module::fimo_ffi::Vec), if it is contained.
     #[inline]
-    pub fn into_vec(self) -> Option<Vec<Self>> {
+    pub fn into_vec(self) -> Option<fimo_module::fimo_ffi::Vec<Self>> {
         match self {
             SettingsItem::Array(v) => Some(v.into_val()),
             _ => None,
@@ -276,7 +265,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
 
     /// Extracts a reference to a [`BTreeMap`], if it is contained.
     #[inline]
-    pub fn as_map(&self) -> Option<&BTreeMap<String, Self>> {
+    pub fn as_map(&self) -> Option<&BTreeMap<fimo_module::fimo_ffi::String, Self>> {
         match self {
             SettingsItem::Object(v) => Some(v.as_val()),
             _ => None,
@@ -285,7 +274,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
 
     /// Extracts a mutable reference to a [`BTreeMap`], if it is contained.
     #[inline]
-    pub fn as_map_mut(&mut self) -> Option<&mut BTreeMap<String, Self>> {
+    pub fn as_map_mut(&mut self) -> Option<&mut BTreeMap<fimo_module::fimo_ffi::String, Self>> {
         match self {
             SettingsItem::Object(v) => Some(v.as_val_mut()),
             _ => None,
@@ -294,7 +283,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
 
     /// Extracts a [`BTreeMap`], if it is contained.
     #[inline]
-    pub fn into_map(self) -> Option<BTreeMap<String, Self>> {
+    pub fn into_map(self) -> Option<BTreeMap<fimo_module::fimo_ffi::String, Self>> {
         match self {
             SettingsItem::Object(v) => Some(v.into_val()),
             _ => None,
@@ -329,21 +318,40 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
         }
     }
 
-    /// Casts the metadata of the `SettingsItem`.
+    /// Map the metadata of the `SettingsItem`.
     #[inline]
-    pub fn cast<U: SettingsItemMetadata>(self) -> SettingsItem<U> {
+    pub fn map_metadata<U: SettingsItemMetadata, F: FnOnce(T) -> U + Clone>(
+        self,
+        f: F,
+    ) -> SettingsItem<U> {
         match self {
-            SettingsItem::Null(_) => SettingsItem::default(),
-            SettingsItem::Bool(v) => SettingsItem::from(v.v),
-            SettingsItem::U64(v) => SettingsItem::from(v.v),
-            SettingsItem::F64(v) => SettingsItem::from(v.v),
-            SettingsItem::String(v) => SettingsItem::from(v.v),
+            SettingsItem::Null(v) => {
+                SettingsItem::Null(SettingsItemVal::new_with_metadata((), f(v.m)))
+            }
+            SettingsItem::Bool(v) => {
+                SettingsItem::Bool(SettingsItemVal::new_with_metadata(v.v, f(v.m)))
+            }
+            SettingsItem::U64(v) => {
+                SettingsItem::U64(SettingsItemVal::new_with_metadata(v.v, f(v.m)))
+            }
+            SettingsItem::F64(v) => {
+                SettingsItem::F64(SettingsItemVal::new_with_metadata(v.v, f(v.m)))
+            }
+            SettingsItem::String(v) => {
+                SettingsItem::String(SettingsItemVal::new_with_metadata(v.v, f(v.m)))
+            }
             SettingsItem::Array(v) => {
-                let v: Vec<_> = v.v.into_iter().map(|i| i.cast()).collect();
+                let v: fimo_module::fimo_ffi::Vec<_> =
+                    v.v.into_iter()
+                        .map(move |i| i.map_metadata(f.clone()))
+                        .collect();
                 SettingsItem::from(v)
             }
             SettingsItem::Object(v) => {
-                let v: BTreeMap<_, _> = v.v.into_iter().map(|(s, i)| (s, i.cast())).collect();
+                let v: BTreeMap<_, _> =
+                    v.v.into_iter()
+                        .map(move |(s, i)| (s, i.map_metadata(f.clone())))
+                        .collect();
                 SettingsItem::from(v)
             }
         }
@@ -351,39 +359,39 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
 
     /// Checks if an item is contained.
     #[inline]
-    pub fn contains<P: AsRef<SettingsRegistryPath>>(
+    pub fn contains<P: AsRef<SettingsPath>>(
         &self,
         path: P,
-    ) -> Result<bool, SettingsRegistryInvalidPathError> {
+    ) -> Result<bool, SettingsInvalidPathError> {
         self.get(path).map(|i| i.is_some())
     }
 
     /// Extracts a reference to an item.
     #[inline]
-    pub fn get<P: AsRef<SettingsRegistryPath>>(
+    pub fn get<P: AsRef<SettingsPath>>(
         &self,
         path: P,
-    ) -> Result<Option<&Self>, SettingsRegistryInvalidPathError> {
+    ) -> Result<Option<&Self>, SettingsInvalidPathError> {
         let path = path.as_ref();
         self.get_inner(path, path.iter(), |_| {})
     }
 
     /// Extracts a mutable reference to an item.
     #[inline]
-    pub fn get_mut<P: AsRef<SettingsRegistryPath>>(
+    pub fn get_mut<P: AsRef<SettingsPath>>(
         &mut self,
         path: P,
-    ) -> Result<Option<&mut Self>, SettingsRegistryInvalidPathError> {
+    ) -> Result<Option<&mut Self>, SettingsInvalidPathError> {
         let path = path.as_ref();
         self.get_inner_mut(path, path.iter(), |_| {})
     }
 
     /// Extracts an item.
     #[inline]
-    pub fn read<P: AsRef<SettingsRegistryPath>>(
+    pub fn read<P: AsRef<SettingsPath>>(
         &self,
         path: P,
-    ) -> Result<Option<Self>, SettingsRegistryInvalidPathError> {
+    ) -> Result<Option<Self>, SettingsInvalidPathError> {
         self.get(path).map(|i| i.cloned())
     }
 
@@ -392,73 +400,60 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     /// If the parent of `path` is an array, it is extended to the required
     /// length with `SettingsItem::Null`.
     #[inline]
-    pub fn write<P: AsRef<SettingsRegistryPath>>(
+    pub fn write<P: AsRef<SettingsPath>>(
         &mut self,
         path: P,
         value: Self,
-    ) -> Result<Option<Self>, SettingsRegistryInvalidPathError> {
+    ) -> Result<Option<Self>, SettingsInvalidPathError> {
         let f = |item: &Self| {
             let path = path.as_ref();
             let metadata = item.as_metadata();
-            metadata.on_write(path, item);
-        };
-        let f_err = |item: &Self| {
-            let path = path.as_ref();
-            let metadata = item.as_metadata();
-            metadata.on_write_abort(path);
-        };
-        let f_comp = |item: &Self, old: &Option<Self>| {
-            let path = path.as_ref();
-            let metadata = item.as_metadata();
-            metadata.on_write_complete(path, old);
+            metadata.on_write(path);
         };
 
-        self.write_inner(path.as_ref(), value, f, f_err, f_comp)
+        self.write_inner(path.as_ref(), value, f)
     }
 
     #[inline]
-    fn write_inner<P: AsRef<SettingsRegistryPath>>(
+    fn write_inner<P: AsRef<SettingsPath>>(
         &mut self,
         path: P,
         mut value: Self,
         f: impl FnMut(&Self),
-        f_err: impl FnMut(&Self),
-        mut f_comp: impl FnMut(&Self, &Option<Self>),
-    ) -> Result<Option<Self>, SettingsRegistryInvalidPathError> {
-        let (parent, component) = self.get_parent_mut(path.as_ref(), f, f_err)?;
+    ) -> Result<Option<Self>, SettingsInvalidPathError> {
+        let (parent, component) = self.get_parent_mut(path.as_ref(), |_| {})?;
         if component.is_root() {
-            return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+            return Err(SettingsInvalidPathError::new(path.as_ref()));
         }
 
         let old = if let Some(item) = parent.get_mut(component)? {
             std::mem::swap(item, &mut value);
             item.as_metadata_mut().combine(value.as_metadata_mut());
             let old = Some(value);
-            item.as_metadata_mut()
-                .on_write_complete(path.as_ref(), &old);
+            item.as_metadata_mut().on_write(path.as_ref());
             old
         } else {
             let component_name = component.iter().next().unwrap();
             if let Some(name) = component_name.name() {
                 let map = parent.as_map_mut();
                 if map.is_none() {
-                    return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+                    return Err(SettingsInvalidPathError::new(path.as_ref()));
                 }
                 let map = map.unwrap();
 
                 if let Some(idx) = component_name.index() {
                     let mut vec = vec![Default::default(); idx];
                     vec[idx] = value;
-                    map.insert(String::from(name), vec.into());
+                    map.insert(fimo_module::fimo_ffi::String::from(name), vec.into());
                 } else {
-                    map.insert(String::from(name), value);
+                    map.insert(fimo_module::fimo_ffi::String::from(name), value);
                 }
             } else {
                 let idx = component_name.index().unwrap();
 
                 let vec = parent.as_vec_mut();
                 if vec.is_none() {
-                    return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+                    return Err(SettingsInvalidPathError::new(path.as_ref()));
                 }
                 let vec = vec.unwrap();
                 if idx >= vec.len() {
@@ -470,10 +465,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
             None
         };
 
-        let f_comp = |item: &Self| {
-            f_comp(item, &old);
-        };
-        self.get_parent_mut(path.as_ref(), f_comp, |_| {})?;
+        self.get_parent_mut(path.as_ref(), f)?;
         Ok(old)
     }
 
@@ -481,31 +473,28 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     ///
     /// It is initialized with `default`, if the item does not exist.
     #[inline]
-    pub fn read_or<P: AsRef<SettingsRegistryPath>>(
+    pub fn read_or<P: AsRef<SettingsPath>>(
         &mut self,
         path: P,
         default: Self,
-    ) -> Result<Self, SettingsRegistryInvalidPathError> {
-        let f = |_item: &Self| {};
-        let f_err = |_item: &Self| {};
-        let (parent, component) = self.get_parent_mut(path.as_ref(), f, f_err)?;
+    ) -> Result<Self, SettingsInvalidPathError> {
+        let (parent, component) = self.get_parent_mut(path.as_ref(), |_| {})?;
         if component.is_root() {
-            return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+            return Err(SettingsInvalidPathError::new(path.as_ref()));
         }
 
         if let Some(i) = parent.read(component)? {
             Ok(i)
         } else {
-            let res = parent.write_inner(component, default.clone(), |_| {}, |_| {}, |_, _| {});
+            let res = parent.write_inner(component, default.clone(), |_| {});
 
             if res.is_ok() {
                 let f = |item: &Self| {
                     let path = path.as_ref();
                     let metadata = item.as_metadata();
-                    metadata.on_write(path, &default);
-                    metadata.on_write_complete(path, &None);
+                    metadata.on_write(path);
                 };
-                self.get_parent_mut(path.as_ref(), f, f_err)?;
+                self.get_parent_mut(path.as_ref(), f)?;
             }
 
             res.map(|_| default)
@@ -514,22 +503,20 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
 
     /// Removes a `SettingsItem` value.
     #[inline]
-    pub fn remove<P: AsRef<SettingsRegistryPath>>(
+    pub fn remove<P: AsRef<SettingsPath>>(
         &mut self,
         path: P,
-    ) -> Result<Option<Self>, SettingsRegistryInvalidPathError> {
-        let f = |_item: &Self| {};
-        let f_err = |_item: &Self| {};
-        let (parent, component) = self.get_parent_mut(path.as_ref(), f, f_err)?;
+    ) -> Result<Option<Self>, SettingsInvalidPathError> {
+        let (parent, component) = self.get_parent_mut(path.as_ref(), |_| {})?;
         if component.is_root() {
-            return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+            return Err(SettingsInvalidPathError::new(path.as_ref()));
         }
 
         let component_name = component.iter().next().unwrap();
         let mut old = if let Some(name) = component_name.name() {
             let map = parent.as_map_mut();
             if map.is_none() {
-                return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+                return Err(SettingsInvalidPathError::new(path.as_ref()));
             }
             let map = map.unwrap();
             map.remove(name)
@@ -538,7 +525,7 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
 
             let vec = parent.as_vec_mut();
             if vec.is_none() {
-                return Err(SettingsRegistryInvalidPathError::new(path.as_ref()));
+                return Err(SettingsInvalidPathError::new(path.as_ref()));
             }
             let vec = vec.unwrap();
             if vec.get(idx).is_some() {
@@ -552,11 +539,11 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
             let f = |item: &Self| {
                 let path = path.as_ref();
                 let metadata = item.as_metadata();
-                metadata.on_removal(path, item);
+                metadata.on_remove(path);
             };
 
             f(old.as_mut().unwrap());
-            self.get_parent_mut(path.as_ref(), f, |_| {})?;
+            self.get_parent_mut(path.as_ref(), f)?;
         }
 
         Ok(old)
@@ -565,10 +552,9 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     #[inline]
     fn get_parent_mut<'a>(
         &mut self,
-        path: &'a SettingsRegistryPath,
+        path: &'a SettingsPath,
         mut f: impl FnMut(&Self),
-        f_err: impl FnMut(&Self),
-    ) -> Result<(&mut Self, &'a SettingsRegistryPath), SettingsRegistryInvalidPathError> {
+    ) -> Result<(&mut Self, &'a SettingsPath), SettingsInvalidPathError> {
         let (parent, component) = path.split_parent();
         match parent {
             None => {
@@ -580,15 +566,9 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
                 Ok((self, component))
             }
             Some(parent) => {
-                let self_ptr = self as *mut Self;
                 let item = self.get_inner_mut(parent, parent.iter(), f);
                 match item {
-                    Ok(None) | Err(_) => {
-                        // safety: the compiler can't figure out, that there aren't two
-                        // distinct mutable borrows.
-                        let _ = unsafe { (*self_ptr).get_inner_mut(parent, parent.iter(), f_err) };
-                        Err(SettingsRegistryInvalidPathError::new(path))
-                    }
+                    Ok(None) | Err(_) => Err(SettingsInvalidPathError::new(path)),
                     Ok(Some(i)) => Ok((i, component)),
                 }
             }
@@ -598,15 +578,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     #[inline]
     fn get_inner(
         &self,
-        path: &SettingsRegistryPath,
-        mut components: SettingsRegistryPathComponentIter<'_>,
+        path: &SettingsPath,
+        mut components: SettingsPathComponentIter<'_>,
         mut f: impl FnMut(&Self),
-    ) -> Result<Option<&Self>, SettingsRegistryInvalidPathError> {
+    ) -> Result<Option<&Self>, SettingsInvalidPathError> {
         f(self);
 
         let component = components.next();
         if component.is_none() || component.unwrap().as_path().is_root() {
-            return Err(SettingsRegistryInvalidPathError::new(path));
+            return Err(SettingsInvalidPathError::new(path));
         }
         let component = component.unwrap();
         let item = if let Some(name) = component.name() {
@@ -658,15 +638,15 @@ impl<T: SettingsItemMetadata> SettingsItem<T> {
     #[inline]
     fn get_inner_mut(
         &mut self,
-        path: &SettingsRegistryPath,
-        mut components: SettingsRegistryPathComponentIter<'_>,
+        path: &SettingsPath,
+        mut components: SettingsPathComponentIter<'_>,
         mut f: impl FnMut(&Self),
-    ) -> Result<Option<&mut Self>, SettingsRegistryInvalidPathError> {
+    ) -> Result<Option<&mut Self>, SettingsInvalidPathError> {
         f(self);
 
         let component = components.next();
         if component.is_none() || component.unwrap().as_path().is_root() {
-            return Err(SettingsRegistryInvalidPathError::new(path));
+            return Err(SettingsInvalidPathError::new(path));
         }
         let component = component.unwrap();
         let item = if let Some(name) = component.name() {
@@ -806,6 +786,13 @@ impl<T: SettingsItemMetadata> From<&'_ str> for SettingsItem<T> {
 impl<T: SettingsItemMetadata> From<String> for SettingsItem<T> {
     #[inline]
     fn from(val: String) -> Self {
+        SettingsItem::from(fimo_module::fimo_ffi::String::from(val))
+    }
+}
+
+impl<T: SettingsItemMetadata> From<fimo_module::fimo_ffi::String> for SettingsItem<T> {
+    #[inline]
+    fn from(val: fimo_module::fimo_ffi::String) -> Self {
         SettingsItem::String(SettingsItemVal::new(val))
     }
 }
@@ -815,7 +802,7 @@ impl<T: Into<SettingsItem<U>>, U: SettingsItemMetadata, const LEN: usize> From<[
 {
     #[inline]
     fn from(val: [T; LEN]) -> Self {
-        let vec: Vec<_> = val.into_iter().map(|v| v.into()).collect();
+        let vec: fimo_module::fimo_ffi::Vec<_> = val.into_iter().map(|v| v.into()).collect();
         Self::Array(SettingsItemVal::new(vec))
     }
 }
@@ -823,7 +810,7 @@ impl<T: Into<SettingsItem<U>>, U: SettingsItemMetadata, const LEN: usize> From<[
 impl<T: Into<SettingsItem<U>> + Clone, U: SettingsItemMetadata> From<&[T]> for SettingsItem<U> {
     #[inline]
     fn from(val: &[T]) -> Self {
-        let vec: Vec<_> = val.iter().map(|v| v.clone().into()).collect();
+        let vec: fimo_module::fimo_ffi::Vec<_> = val.iter().map(|v| v.clone().into()).collect();
         Self::Array(SettingsItemVal::new(vec))
     }
 }
@@ -831,14 +818,34 @@ impl<T: Into<SettingsItem<U>> + Clone, U: SettingsItemMetadata> From<&[T]> for S
 impl<T: Into<SettingsItem<U>>, U: SettingsItemMetadata> From<Vec<T>> for SettingsItem<U> {
     #[inline]
     fn from(val: Vec<T>) -> Self {
-        let vec: Vec<_> = val.into_iter().map(|v| v.into()).collect();
+        let vec: fimo_module::fimo_ffi::Vec<_> = val.into_iter().map(|v| v.into()).collect();
         Self::Array(SettingsItemVal::new(vec))
+    }
+}
+
+impl<T: Into<SettingsItem<U>>, U: SettingsItemMetadata> From<fimo_module::fimo_ffi::Vec<T>>
+    for SettingsItem<U>
+{
+    #[inline]
+    fn from(val: fimo_module::fimo_ffi::Vec<T>) -> Self {
+        let vec: fimo_module::fimo_ffi::Vec<_> = val.into_iter().map(|v| v.into()).collect();
+        Self::Array(SettingsItemVal::new(vec))
+    }
+}
+
+impl<U: SettingsItemMetadata> From<BTreeMap<fimo_module::fimo_ffi::String, SettingsItem<U>>>
+    for SettingsItem<U>
+{
+    #[inline]
+    fn from(val: BTreeMap<fimo_module::fimo_ffi::String, SettingsItem<U>>) -> Self {
+        SettingsItem::Object(SettingsItemVal::new(val))
     }
 }
 
 impl<U: SettingsItemMetadata> From<BTreeMap<String, SettingsItem<U>>> for SettingsItem<U> {
     #[inline]
     fn from(val: BTreeMap<String, SettingsItem<U>>) -> Self {
+        let val: BTreeMap<_, _> = val.into_iter().map(|(k, v)| (k.into(), v)).collect();
         SettingsItem::Object(SettingsItemVal::new(val))
     }
 }
@@ -957,6 +964,18 @@ impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>> for String {
     #[inline]
     fn try_from(value: SettingsItem<T>) -> Result<Self, Self::Error> {
         match value {
+            SettingsItem::String(v) => Ok(v.v.into()),
+            _ => Err(SettingsItemTryFromError::InvalidType),
+        }
+    }
+}
+
+impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>> for fimo_module::fimo_ffi::String {
+    type Error = SettingsItemTryFromError;
+
+    #[inline]
+    fn try_from(value: SettingsItem<T>) -> Result<Self, Self::Error> {
+        match value {
             SettingsItem::String(v) => Ok(v.v),
             _ => Err(SettingsItemTryFromError::InvalidType),
         }
@@ -969,6 +988,19 @@ impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>> for Vec<SettingsItem<T>> 
     #[inline]
     fn try_from(value: SettingsItem<T>) -> Result<Self, Self::Error> {
         match value {
+            SettingsItem::Array(v) => Ok(v.v.into()),
+            _ => Err(SettingsItemTryFromError::InvalidType),
+        }
+    }
+}
+impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>>
+    for fimo_module::fimo_ffi::Vec<SettingsItem<T>>
+{
+    type Error = SettingsItemTryFromError;
+
+    #[inline]
+    fn try_from(value: SettingsItem<T>) -> Result<Self, Self::Error> {
+        match value {
             SettingsItem::Array(v) => Ok(v.v),
             _ => Err(SettingsItemTryFromError::InvalidType),
         }
@@ -976,6 +1008,18 @@ impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>> for Vec<SettingsItem<T>> 
 }
 
 impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>> for BTreeMap<String, SettingsItem<T>> {
+    type Error = SettingsItemTryFromError;
+
+    #[inline]
+    fn try_from(value: SettingsItem<T>) -> Result<Self, Self::Error> {
+        let map: BTreeMap<fimo_module::fimo_ffi::String, _> = value.try_into()?;
+        Ok(map.into_iter().map(|(k, v)| (k.into(), v)).collect())
+    }
+}
+
+impl<T: SettingsItemMetadata> TryFrom<SettingsItem<T>>
+    for BTreeMap<fimo_module::fimo_ffi::String, SettingsItem<T>>
+{
     type Error = SettingsItemTryFromError;
 
     #[inline]
@@ -1083,13 +1127,41 @@ impl SettingsItemType {
     }
 }
 
+/// Error from using an invalid path.
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct SettingsInvalidPathError {
+    path: SettingsPathBuf,
+}
+
+impl SettingsInvalidPathError {
+    /// Constructs a new `SettingsPathNotFoundError`.
+    #[inline]
+    pub fn new<P: AsRef<SettingsPath>>(path: P) -> Self {
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+
+    /// Coerces `self` to a [`SettingsPath`] slice.
+    #[inline]
+    pub fn path(&self) -> &SettingsPath {
+        self.path.as_path()
+    }
+
+    /// Consumes `self` and returns the contained [`SettingsPathBuf`].
+    #[inline]
+    pub fn to_path_buffer(self) -> SettingsPathBuf {
+        self.path
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::rust::settings_registry::{SettingsItem, SettingsRegistryPath};
+    use super::{SettingsItem, SettingsPath};
 
     #[test]
     fn write_obj() {
-        let path = SettingsRegistryPath::new("element").unwrap();
+        let path = SettingsPath::new("element").unwrap();
 
         let mut obj = <SettingsItem>::new_object();
         assert!(!obj.contains(path).unwrap());
@@ -1105,7 +1177,7 @@ mod tests {
 
     #[test]
     fn write_array() {
-        let path = SettingsRegistryPath::new("[9]").unwrap();
+        let path = SettingsPath::new("[9]").unwrap();
 
         let mut arr = <SettingsItem>::new_array();
         assert!(arr.as_vec().unwrap().is_empty());
@@ -1113,12 +1185,12 @@ mod tests {
         arr.write(path, 5usize.into()).unwrap();
         assert_eq!(arr.as_vec().unwrap().len(), 10);
 
-        let path = SettingsRegistryPath::new("[5]").unwrap();
+        let path = SettingsPath::new("[5]").unwrap();
         let element = arr.remove(path).unwrap();
         assert_eq!(element, Some(().into()));
         assert_eq!(arr.as_vec().unwrap().len(), 9);
 
-        let path = SettingsRegistryPath::new("[8]").unwrap();
+        let path = SettingsPath::new("[8]").unwrap();
         let element = arr.remove(path).unwrap();
         assert_eq!(element, Some(5usize.into()));
         assert_eq!(arr.as_vec().unwrap().len(), 8);
@@ -1126,7 +1198,7 @@ mod tests {
 
     #[test]
     fn write_nested_obj() {
-        let obj_path = SettingsRegistryPath::new("obj").unwrap();
+        let obj_path = SettingsPath::new("obj").unwrap();
         let path = obj_path.join_str("element").unwrap();
 
         let mut obj = <SettingsItem>::new_object();
@@ -1143,7 +1215,7 @@ mod tests {
 
     #[test]
     fn write_nested_array() {
-        let arr_path = SettingsRegistryPath::new("[0]").unwrap();
+        let arr_path = SettingsPath::new("[0]").unwrap();
         let path = arr_path.join_str("[2]").unwrap();
 
         let mut arr = <SettingsItem>::new_array();
@@ -1160,7 +1232,7 @@ mod tests {
 
     #[test]
     fn read_items() {
-        let path = SettingsRegistryPath::new("element").unwrap();
+        let path = SettingsPath::new("element").unwrap();
 
         let mut obj = <SettingsItem>::new_object();
         assert!(!obj.contains(path).unwrap());

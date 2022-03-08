@@ -1,4 +1,5 @@
 use context::stack::{ProtectedFixedSizeStack, Stack};
+use fimo_ffi::error::wrap_error;
 use fimo_module::{Error, ErrorKind};
 use log::{debug, error, trace};
 use std::collections::{BTreeMap, VecDeque};
@@ -49,7 +50,7 @@ impl StackAllocator {
         let mut slots = BTreeMap::new();
         for s in &free_slots {
             let stack = ProtectedFixedSizeStack::new(stack_size)
-                .map_err(|e| Error::new(ErrorKind::ResourceExhausted, e))?;
+                .map_err(|e| Error::new(ErrorKind::ResourceExhausted, wrap_error(e)))?;
             slots.insert(*s, Some(StackWrapper(stack)));
         }
 
@@ -101,7 +102,7 @@ impl StackAllocator {
         if stack.is_none() {
             trace!("Stack not allocated; allocating");
             let alloc = ProtectedFixedSizeStack::new(self.stack_size)
-                .map_err(|e| Error::new(ErrorKind::ResourceExhausted, e))?;
+                .map_err(|e| Error::new(ErrorKind::ResourceExhausted, wrap_error(e)))?;
             *stack = Some(StackWrapper(alloc));
             self.allocated_stacks += 1;
             trace!("Stack allocated");

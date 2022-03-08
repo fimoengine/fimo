@@ -11,3 +11,4 @@ regex = "1.4.3"
 numtoa = "0.2.3"
 uuid = "1.0.0-alpha.1"
 serde = { version = "1.0.123", features = ["derive"] }
+fimo_ffi_codegen = { version = "0.1.0", path = "../fimo_ffi_codegen" }

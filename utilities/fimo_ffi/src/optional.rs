@@ -1,6 +1,10 @@
 //! Implementation of the `Optional` type.
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::marker::Destruct;
+use std::ops::{FromResidual, Residual, Try};
+
+use crate::tuple::{ReprC, ReprRust};
 
 /// An optional value.
 ///
@@ -110,7 +114,7 @@ impl<T> Optional<T> {
     /// assert_eq!(x, Optional::Some(42));
     /// ```
     #[inline]
-    pub fn as_mut(&mut self) -> Optional<&mut T> {
+    pub const fn as_mut(&mut self) -> Optional<&mut T> {
         match *self {
             Optional::None => Optional::None,
             Optional::Some(ref mut val) => Optional::Some(val),
@@ -139,7 +143,7 @@ impl<T> Optional<T> {
     /// x.expect("fruits are healthy");
     /// ```
     #[inline]
-    pub fn expect(self, msg: &str) -> T {
+    pub const fn expect(self, msg: &str) -> T {
         match self {
             Optional::None => panic!("{}", msg),
             Optional::Some(val) => val,
@@ -168,7 +172,7 @@ impl<T> Optional<T> {
     /// assert_eq!(x.unwrap(), "air"); // fails
     /// ```
     #[inline]
-    pub fn unwrap(self) -> T {
+    pub const fn unwrap(self) -> T {
         match self {
             Optional::None => panic!("called `Optional::unwrap()` on an empty optional"),
             Optional::Some(val) => val,
@@ -186,7 +190,10 @@ impl<T> Optional<T> {
     /// assert_eq!(Optional::None.unwrap_or("bike"), "bike");
     /// ```
     #[inline]
-    pub fn unwrap_or(self, default: T) -> T {
+    pub const fn unwrap_or(self, default: T) -> T
+    where
+        T: ~const Destruct,
+    {
         match self {
             Optional::None => default,
             Optional::Some(val) => val,
@@ -205,9 +212,9 @@ impl<T> Optional<T> {
     /// assert_eq!(Optional::None.unwrap_or_else(|| 2 * k), 20);
     /// ```
     #[inline]
-    pub fn unwrap_or_else<F>(self, f: F) -> T
+    pub const fn unwrap_or_else<F>(self, f: F) -> T
     where
-        F: FnOnce() -> T,
+        F: ~const FnOnce() -> T + ~const Destruct,
     {
         match self {
             Optional::None => f(),
@@ -229,9 +236,9 @@ impl<T> Optional<T> {
     /// assert_eq!(maybe_some_len, Optional::Some(13));
     /// ```
     #[inline]
-    pub fn map<U, F>(self, f: F) -> Optional<U>
+    pub const fn map<U, F>(self, f: F) -> Optional<U>
     where
-        F: FnOnce(T) -> U,
+        F: ~const FnOnce(T) -> U + ~const Destruct,
     {
         match self {
             Optional::None => Optional::None,
@@ -253,9 +260,10 @@ impl<T> Optional<T> {
     /// assert_eq!(x.map_or(42, |v| v.len()), 42);
     /// ```
     #[inline]
-    pub fn map_or<U, F>(self, default: U, f: F) -> U
+    pub const fn map_or<U, F>(self, default: U, f: F) -> U
     where
-        F: FnOnce(T) -> U,
+        U: ~const Destruct,
+        F: ~const FnOnce(T) -> U + ~const Destruct,
     {
         match self {
             Optional::None => default,
@@ -279,10 +287,10 @@ impl<T> Optional<T> {
     /// assert_eq!(x.map_or_else(|| 2 * k, |v| v.len()), 42);
     /// ```
     #[inline]
-    pub fn map_or_else<U, D, F>(self, default: D, f: F) -> U
+    pub const fn map_or_else<U, D, F>(self, default: D, f: F) -> U
     where
-        D: FnOnce() -> U,
-        F: FnOnce(T) -> U,
+        D: ~const FnOnce() -> U + ~const Destruct,
+        F: ~const FnOnce(T) -> U + ~const Destruct,
     {
         match self {
             Optional::None => default(),
@@ -304,7 +312,10 @@ impl<T> Optional<T> {
     /// assert_eq!(x.ok_or(0), Result::Err(0));
     /// ```
     #[inline]
-    pub fn ok_or<E>(self, err: E) -> crate::Result<T, E> {
+    pub const fn ok_or<E>(self, err: E) -> crate::Result<T, E>
+    where
+        E: ~const Destruct,
+    {
         match self {
             Optional::None => crate::Result::Err(err),
             Optional::Some(x) => crate::Result::Ok(x),
@@ -326,9 +337,9 @@ impl<T> Optional<T> {
     /// assert_eq!(x.ok_or_else(|| 0), Result::Err(0));
     /// ```
     #[inline]
-    pub fn ok_or_else<E, F>(self, f: F) -> crate::Result<T, E>
+    pub const fn ok_or_else<E, F>(self, f: F) -> crate::Result<T, E>
     where
-        F: FnOnce() -> E,
+        F: ~const FnOnce() -> E + ~const Destruct,
     {
         match self {
             Optional::None => crate::Result::Err(f()),
@@ -380,30 +391,9 @@ impl<T> Optional<T> {
     pub fn replace(&mut self, value: T) -> Optional<T> {
         std::mem::replace(self, Optional::Some(value))
     }
-
-    /// Maps the `Optional<T>` to the native `Option<T>`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use fimo_ffi::Optional;
-    ///
-    /// let x = Optional::Some("foo");
-    /// assert_eq!(x.into_rust(), Some("foo"));
-    ///
-    /// let x: Optional<&str> = Optional::None;
-    /// assert_eq!(x.into_rust(), None);
-    /// ```
-    #[inline]
-    pub fn into_rust(self) -> Option<T> {
-        match self {
-            Optional::None => None,
-            Optional::Some(x) => Some(x),
-        }
-    }
 }
 
-impl<T: Clone> Clone for Optional<T> {
+impl<T: ~const Clone> const Clone for Optional<T> {
     #[inline]
     fn clone(&self) -> Self {
         match self {
@@ -413,32 +403,96 @@ impl<T: Clone> Clone for Optional<T> {
     }
 }
 
-impl<T> Default for Optional<T> {
+impl<T> const Default for Optional<T> {
     #[inline]
     fn default() -> Self {
         Optional::None
     }
 }
 
-impl<T> From<T> for Optional<T> {
+impl<T> const From<T> for Optional<T> {
     fn from(val: T) -> Self {
         Optional::Some(val)
     }
 }
 
-impl<T> From<Option<T>> for Optional<T> {
+impl<T> const From<Option<T>> for Optional<T> {
     #[inline]
     fn from(val: Option<T>) -> Self {
-        match val {
-            None => Optional::None,
-            Some(x) => Optional::Some(x),
+        <Option<T> as ReprRust>::into_c(val)
+    }
+}
+
+impl<T> const From<Optional<T>> for Option<T> {
+    #[inline]
+    fn from(val: Optional<T>) -> Self {
+        <Optional<T> as ReprC>::into_rust(val)
+    }
+}
+
+impl<T> const ReprC for Optional<T> {
+    type T = Option<T>;
+
+    #[inline]
+    fn into_rust(self) -> Self::T {
+        match self {
+            Optional::None => None,
+            Optional::Some(v) => Some(v),
+        }
+    }
+
+    #[inline]
+    fn from_rust(t: Self::T) -> Self {
+        match t {
+            Some(v) => Self::Some(v),
+            None => Self::None,
         }
     }
 }
 
-impl<T> From<Optional<T>> for Option<T> {
+impl<T> const ReprRust for Option<T> {
+    type T = Optional<T>;
+
     #[inline]
-    fn from(val: Optional<T>) -> Self {
-        val.into_rust()
+    fn into_c(self) -> Self::T {
+        <Optional<T> as ReprC>::from_rust(self)
     }
+
+    #[inline]
+    fn from_c(t: Self::T) -> Self {
+        <Optional<T> as ReprC>::into_rust(t)
+    }
+}
+
+impl<T> const Try for Optional<T> {
+    type Output = T;
+
+    type Residual = Optional<std::convert::Infallible>;
+
+    #[inline]
+    fn from_output(output: Self::Output) -> Self {
+        Self::Some(output)
+    }
+
+    #[inline]
+    fn branch(self) -> std::ops::ControlFlow<Self::Residual, Self::Output> {
+        match self {
+            Optional::None => std::ops::ControlFlow::Break(Optional::None),
+            Optional::Some(v) => std::ops::ControlFlow::Continue(v),
+        }
+    }
+}
+
+impl<T> const FromResidual for Optional<T> {
+    #[inline]
+    fn from_residual(residual: Optional<std::convert::Infallible>) -> Self {
+        match residual {
+            Optional::None => Optional::None,
+            Optional::Some(_) => unreachable!(),
+        }
+    }
+}
+
+impl<T> const Residual<T> for Optional<std::convert::Infallible> {
+    type TryType = Optional<T>;
 }

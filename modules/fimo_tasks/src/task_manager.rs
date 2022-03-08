@@ -1,19 +1,20 @@
 use crate::stack_allocator::TaskSlot;
 use context::Context;
+use fimo_ffi::cell::RefCell;
 use fimo_ffi::ffi_fn::RawFfiFn;
-use fimo_ffi::marker::SendSyncMarker;
-use fimo_ffi::vtable::IBase;
-use fimo_ffi::ObjBox;
-use fimo_module::{impl_vtable, is_object, Error, ErrorKind};
+use fimo_ffi::ptr::IBaseExt;
+use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
+use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{
-    IRawTask, IRustPanicData, IRustPanicDataVTable, ISchedulerContext, StatusRequest, TaskHandle,
-    TaskPriority, TaskRunStatus, TaskScheduleStatus, WorkerId,
+    AtomicISchedulerContext, IRawTask, IRustPanicData, ISchedulerContext, StatusRequest,
+    TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WorkerId,
 };
 use fimo_tasks_int::runtime::IScheduler;
 use log::{debug, error, trace};
 use std::any::Any;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
+use std::fmt::Debug;
 use std::ops::RangeFrom;
 use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
@@ -23,8 +24,8 @@ pub(crate) struct TaskManager {
     msg_receiver: Receiver<Msg<'static>>,
     handle_iter: RangeFrom<usize>,
     free_handles: VecDeque<TaskHandle>,
-    tasks: BTreeMap<TaskHandle, &'static RawTask>,
-    processing_queue: BinaryHeap<Reverse<&'static RawTask>>,
+    tasks: BTreeMap<TaskHandle, AssertValidTask>,
+    processing_queue: BinaryHeap<Reverse<AssertValidTask>>,
 }
 
 impl TaskManager {
@@ -94,14 +95,15 @@ impl TaskManager {
     ///
     /// A task may appear only once in the queue.
     #[inline]
-    pub unsafe fn enqueue(&mut self, task: &'static RawTask) {
+    pub unsafe fn enqueue(&mut self, task: AssertValidTask) {
         self.processing_queue.push(Reverse(task))
     }
 
     #[inline]
-    pub fn enqueue_checked(&mut self, task: &'static RawTask) {
+    pub fn enqueue_checked(&mut self, task: AssertValidTask) {
         unsafe {
-            let data = task.scheduler_context().scheduler_data();
+            let context = task.context().borrow();
+            let data = context.scheduler_data();
             if !data.processing {
                 self.enqueue(task)
             }
@@ -109,15 +111,15 @@ impl TaskManager {
     }
 
     #[inline]
-    pub fn clear_queue(&mut self) -> BinaryHeap<Reverse<&'static RawTask>> {
+    pub fn clear_queue(&mut self) -> BinaryHeap<Reverse<AssertValidTask>> {
         std::mem::take(&mut self.processing_queue)
     }
 
-    pub fn find_task(&self, handle: TaskHandle) -> Result<&'static IRawTask, Error> {
+    pub fn find_task(&self, handle: TaskHandle) -> Result<&'static DynObj<dyn IRawTask>, Error> {
         trace!("Searching for task {}", handle);
         if let Some(&task) = self.tasks.get(&handle) {
             trace!("Found task");
-            Ok(&task.0)
+            Ok(task.0)
         } else {
             error!("Task {} not found", handle);
             let err = format!("Task {} is not registered", handle);
@@ -127,27 +129,30 @@ impl TaskManager {
 
     pub fn register_task(
         &mut self,
-        task: &'static IRawTask,
+        task: &DynObj<dyn IRawTask + '_>,
         wait_on: &[TaskHandle],
     ) -> Result<(), Error> {
         trace!("Registering new task {:?}", task.resolved_name());
 
-        let context = unsafe { task.scheduler_context_mut() };
-        if context.is_registered() {
-            error!("Task {:?} already registered", task.resolved_name());
-            let err = format!("The task {:?} is already registered", task.resolved_name());
-            return Err(Error::new(ErrorKind::InvalidArgument, err));
+        let handle;
+        {
+            let mut context = task.context().borrow_mut();
+            if context.is_registered() {
+                error!("Task {:?} already registered", task.resolved_name());
+                let err = format!("The task {:?} is already registered", task.resolved_name());
+                return Err(Error::new(ErrorKind::InvalidArgument, err));
+            }
+
+            // register the handle and data internally.
+            handle = self.allocate_handle()?;
+            let data = ObjBox::new(ContextData::new());
+            unsafe { context.register(handle, Some(ObjBox::coerce_obj(data))) }
         }
 
-        // register the handle and data internally.
-        let handle = self.allocate_handle()?;
-        let data = ObjBox::new(ContextData::new());
-        unsafe { context.register(handle, Some(ObjBox::coerce_object(data))) }
-
-        let task: &'static RawTask = unsafe { &*(task as *const _ as *const RawTask) };
+        let task = unsafe { AssertValidTask::from_raw(task) };
 
         // clear the task.
-        let context = unsafe { task.scheduler_context_mut() };
+        let mut context = task.context().borrow_mut();
         unsafe { context.set_run_status(TaskRunStatus::Idle) };
         unsafe { context.set_schedule_status(TaskScheduleStatus::Processing) };
         unsafe { context.take_panic_data() };
@@ -215,9 +220,8 @@ impl TaskManager {
         Ok(())
     }
 
-    pub fn unregister_task(&mut self, task: &RawTask) -> Result<(), Error> {
-        // safety: we are inside the scheduler.
-        let context = unsafe { task.scheduler_context_mut() };
+    pub fn unregister_task(&mut self, task: AssertValidTask) -> Result<(), Error> {
+        let mut context = task.context().borrow_mut();
 
         trace!("Unregistering task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
@@ -248,12 +252,23 @@ impl TaskManager {
 
     pub fn wait_task_on(
         &mut self,
-        task: &'static RawTask,
-        wait_on: &'static RawTask,
+        task: AssertValidTask,
+        wait_on: AssertValidTask,
     ) -> Result<(), Error> {
-        // safety: we are inside the scheduler.
-        let context = unsafe { task.scheduler_context_mut() };
-        let wait_on_context = unsafe { wait_on.scheduler_context_mut() };
+        if task == wait_on {
+            error!(
+                "Task {} waiting on itself",
+                task.context().borrow().handle()
+            );
+            let err = format!(
+                "A task may not wait on itself, handle: {}",
+                task.context().borrow().handle()
+            );
+            return Err(Error::new(ErrorKind::InvalidArgument, err));
+        }
+
+        let mut context = task.context().borrow_mut();
+        let mut wait_on_context = wait_on.context().borrow_mut();
 
         trace!(
             "Setting task {} to wait for task {}",
@@ -268,15 +283,6 @@ impl TaskManager {
         debug!("Number of dependencies: {}", unsafe {
             context.scheduler_data().dependencies.len()
         });
-
-        if task == wait_on {
-            error!("Task {} waiting on itself", context.handle());
-            let err = format!(
-                "A task may not wait on itself, handle: {}",
-                context.handle()
-            );
-            return Err(Error::new(ErrorKind::InvalidArgument, err));
-        }
 
         // check that the task has not been completed.
         if context.run_status() == TaskRunStatus::Completed {
@@ -296,7 +302,7 @@ impl TaskManager {
         }
 
         // a task may not wait on another task multiple times.
-        if unsafe { context.scheduler_data().dependencies.contains(wait_on) } {
+        if unsafe { context.scheduler_data().dependencies.contains(&wait_on) } {
             error!(
                 "Task {} waiting on {} multiple times",
                 context.handle(),
@@ -327,9 +333,8 @@ impl TaskManager {
         Ok(())
     }
 
-    pub unsafe fn notify_one(&mut self, task: &RawTask) -> Result<Option<usize>, Error> {
-        // safety: we are inside the scheduler.
-        let context = task.scheduler_context_mut();
+    pub unsafe fn notify_one(&mut self, task: AssertValidTask) -> Result<Option<usize>, Error> {
+        let mut context = task.context().borrow_mut();
 
         trace!("Notifying one waiter of task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
@@ -361,9 +366,8 @@ impl TaskManager {
         }
     }
 
-    pub unsafe fn notify_all(&mut self, task: &RawTask) -> Result<usize, Error> {
-        // safety: we are inside the scheduler.
-        let context = task.scheduler_context_mut();
+    pub unsafe fn notify_all(&mut self, task: AssertValidTask) -> Result<usize, Error> {
+        let mut context = task.context().borrow_mut();
 
         trace!("Notifying all waiters of task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
@@ -387,60 +391,65 @@ impl TaskManager {
         // the scheduler and can therefore be modified.
         let scheduler_data = context.scheduler_data_mut();
 
-        let num_waiters = scheduler_data.waiters.len();
-        while let Some(Reverse(waiter)) = scheduler_data.waiters.pop() {
+        let mut waiters = std::mem::take(&mut scheduler_data.waiters);
+        let num_waiters = waiters.len();
+        drop(context);
+
+        while let Some(Reverse(waiter)) = waiters.pop() {
             self.notify_waiter(task, waiter)
         }
 
         Ok(num_waiters)
     }
 
-    pub unsafe fn notify_waiter(&mut self, task: &RawTask, waiter: &'static RawTask) {
-        let task_context = task.scheduler_context_mut();
-        let waiter_context = waiter.scheduler_context_mut();
+    pub unsafe fn notify_waiter(&mut self, task: AssertValidTask, waiter: AssertValidTask) {
+        let task_context = task.context().borrow();
+        let mut waiter_context = waiter.context().borrow_mut();
 
         trace!(
             "Notifying waiter {} that {} finished",
-            waiter_context.handle(),
-            task_context.handle()
+            (*waiter_context).handle(),
+            (*task_context).handle()
         );
-        debug!("Waiter run status: {:?}", waiter_context.run_status());
+        debug!("Waiter run status: {:?}", (*waiter_context).run_status());
         debug!(
             "Waiter schedule status: {:?}",
-            waiter_context.schedule_status()
+            (*waiter_context).schedule_status()
         );
         debug!(
             "Number of waiters: {}",
-            waiter_context.scheduler_data().waiters.len()
+            (*waiter_context).scheduler_data().waiters.len()
         );
         debug!(
             "Number of dependencies: {}",
-            waiter_context.scheduler_data().dependencies.len()
+            (*waiter_context).scheduler_data().dependencies.len()
         );
 
         // the waiter must be either blocked or waiting.
         debug_assert!(matches!(
-            waiter_context.schedule_status(),
+            (*waiter_context).schedule_status(),
             TaskScheduleStatus::Blocked | TaskScheduleStatus::Waiting
         ));
 
         // cache schedule status.
-        let handle = waiter_context.handle();
-        let schedule_status = waiter_context.schedule_status();
+        let handle = (*waiter_context).handle();
+        let schedule_status = (*waiter_context).schedule_status();
 
         let waiter_data = waiter_context.scheduler_data_mut();
-        debug_assert!(waiter_data.dependencies.remove(task));
+        debug_assert!(waiter_data.dependencies.remove(&task));
 
         // make the task runnable if nothing prevents it.
         if waiter_data.dependencies.is_empty() && schedule_status == TaskScheduleStatus::Waiting {
             trace!("Waking up task {}", handle);
             waiter_context.set_schedule_status(TaskScheduleStatus::Runnable);
+            drop(task_context);
+            drop(waiter_context);
             self.enqueue_checked(waiter);
         }
     }
 
-    pub fn unblock_task(&mut self, task: &'static RawTask) -> Result<(), Error> {
-        let context = task.scheduler_context();
+    pub fn unblock_task(&mut self, task: AssertValidTask) -> Result<(), Error> {
+        let context = task.context().borrow();
 
         trace!("Unblocking task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
@@ -480,9 +489,8 @@ impl TaskManager {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct Msg<'a> {
-    pub task: &'static RawTask,
+    pub task: AssertValidTask,
     pub data: MsgData<'a>,
 }
 
@@ -491,8 +499,11 @@ pub(crate) enum MsgData<'a> {
     Completed {
         aborted: bool,
     },
+    #[allow(clippy::type_complexity)]
     Yield {
-        f: RawFfiFn<dyn FnOnce(&mut IScheduler, &IRawTask) + Send + 'a>,
+        f: RawFfiFn<
+            dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, &DynObj<dyn IRawTask + '_>) + Send + 'a,
+        >,
     },
 }
 
@@ -506,26 +517,33 @@ impl MsgData<'_> {
     }
 }
 
-#[derive(Debug)]
 #[repr(transparent)]
-pub(crate) struct RawTask(IRawTask);
+#[derive(Clone, Copy)]
+pub(crate) struct AssertValidTask(&'static DynObj<dyn IRawTask + 'static>);
 
-impl RawTask {
-    /// Constructs a `RawTask` from an [`IRawTask`].
+impl AssertValidTask {
+    /// Constructs a `AssertValidTask` from an [`IRawTask`].
     ///
     /// # Safety
     ///
     /// The caller must ensure that the task is registered
     /// with the current runtime.
     #[inline]
-    pub unsafe fn from_i_raw(task: &IRawTask) -> &Self {
-        &*(task as *const _ as *const Self)
+    pub unsafe fn from_raw(task: &DynObj<dyn IRawTask + '_>) -> Self {
+        let task = std::mem::transmute(task);
+        Self(task)
     }
 
     /// Extracts the contained [`IRawTask`].
     #[inline]
-    pub fn as_i_raw(&self) -> &IRawTask {
-        &self.0
+    pub fn as_raw<'t>(&self) -> &DynObj<dyn IRawTask + 't> {
+        self.0
+    }
+
+    /// Shorthand for `self.name().unwrap_or("unnamed")`.
+    #[inline]
+    pub fn name(&self) -> Option<&str> {
+        self.0.name()
     }
 
     /// Shorthand for `self.name().unwrap_or("unnamed")`.
@@ -540,57 +558,58 @@ impl RawTask {
         self.0.priority()
     }
 
-    /// Fetches a pointer to the internal scheduler context.
+    /// Returns a reference to the context.
     #[inline]
-    pub fn scheduler_context(&self) -> &SchedulerContext {
-        // safety: SchedulerContext has a transparent repr and we know that
-        // the task is registered with our runtime.
+    pub fn context(&self) -> &RefCell<SchedulerContext<'_>> {
+        let context = self.0.context();
+        // SAFETY: SchedulerContext has a  transparent repr so it should be safe
+        unsafe { std::mem::transmute(context) }
+    }
+
+    #[inline]
+    pub fn context_atomic(&self) -> AtomicISchedulerContext<'_> {
+        self.0.context_atomic()
+    }
+}
+
+impl PartialEq for AssertValidTask {
+    fn eq(&self, other: &Self) -> bool {
+        // SAFETY: The invariant was checked at construction time.
         unsafe {
-            std::mem::transmute::<&ISchedulerContext, &SchedulerContext>(self.0.scheduler_context())
+            self.context_atomic().handle().assume_init()
+                == other.context_atomic().handle().assume_init()
         }
     }
-
-    /// Fetches a mutable pointer to the internal scheduler context.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[inline]
-    #[allow(clippy::mut_from_ref)]
-    pub unsafe fn scheduler_context_mut(&self) -> &mut SchedulerContext {
-        // safety: SchedulerContext has a transparent repr and we know that
-        // the task is registered with our runtime.
-        std::mem::transmute::<&mut ISchedulerContext, &mut SchedulerContext>(
-            self.0.scheduler_context_mut(),
-        )
-    }
 }
 
-impl PartialEq for RawTask {
-    fn eq(&self, other: &Self) -> bool {
-        self.scheduler_context().handle() == other.scheduler_context().handle()
-    }
-}
-
-impl PartialOrd for RawTask {
+impl PartialOrd for AssertValidTask {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for RawTask {}
+impl Eq for AssertValidTask {}
 
-impl Ord for RawTask {
+impl Ord for AssertValidTask {
     fn cmp(&self, other: &Self) -> Ordering {
         self.priority().cmp(&other.priority())
     }
 }
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub(crate) struct SchedulerContext(ISchedulerContext);
+impl Debug for AssertValidTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("AssertValidTask")
+            .field(&self.name())
+            .field(&self.priority())
+            .field(&self.context_atomic())
+            .finish()
+    }
+}
 
-impl SchedulerContext {
+#[repr(transparent)]
+pub(crate) struct SchedulerContext<'a>(DynObj<dyn ISchedulerContext + 'a>);
+
+impl<'a> SchedulerContext<'a> {
     /// Extracts the handle to the task.
     #[inline]
     pub fn handle(&self) -> TaskHandle {
@@ -617,7 +636,7 @@ impl SchedulerContext {
     pub unsafe fn unregister(&mut self) -> (TaskHandle, ObjBox<ContextData>) {
         let (handle, data) = self.0.unregister();
         let data = data.expect("Scheduler data taken from registered task");
-        let data = ObjBox::try_object_cast(data).expect("Invalid scheduler data");
+        let data = ObjBox::downcast(data).expect("Invalid scheduler data");
         (handle, data)
     }
 
@@ -629,6 +648,7 @@ impl SchedulerContext {
 
     /// Extracts the assigned worker.
     #[inline]
+    #[allow(unused)]
     pub fn worker(&self) -> Option<WorkerId> {
         self.0.worker()
     }
@@ -700,7 +720,7 @@ impl SchedulerContext {
     ///
     /// Behavior is undefined if not called from a task scheduler.
     #[inline]
-    pub unsafe fn take_entry_function<'a>(&mut self) -> Option<RawFfiFn<dyn FnOnce() + Send + 'a>> {
+    pub unsafe fn take_entry_function(&mut self) -> Option<FfiFn<'_, dyn FnOnce() + Send + '_>> {
         self.0.take_entry_function()
     }
 
@@ -722,7 +742,7 @@ impl SchedulerContext {
     #[inline]
     pub unsafe fn set_panic(&mut self, panic: Option<ObjBox<PanicData>>) {
         let panic = panic.map(|p| {
-            let p: ObjBox<IRustPanicData> = ObjBox::coerce_object(p);
+            let p: ObjBox<DynObj<dyn IRustPanicData + Send>> = ObjBox::coerce_obj(p);
             ObjBox::cast_super(p)
         });
         self.0.set_panic(panic)
@@ -741,7 +761,7 @@ impl SchedulerContext {
     pub unsafe fn take_panic_data(&mut self) -> Option<ObjBox<PanicData>> {
         self.0
             .take_panic_data()
-            .map(|p| ObjBox::try_object_cast(p).expect("Invalid panic data"))
+            .map(|p| ObjBox::downcast(p).expect("Invalid panic data"))
     }
 
     /// Calls the cleanup function.
@@ -760,7 +780,7 @@ impl SchedulerContext {
         self.0
             .scheduler_data()
             .expect("Invalid scheduler data")
-            .try_cast_obj()
+            .downcast()
             .expect("Invalid scheduler data")
     }
 
@@ -774,18 +794,19 @@ impl SchedulerContext {
         self.0
             .scheduler_data_mut()
             .expect("Invalid scheduler data")
-            .try_cast_obj_mut()
+            .downcast_mut()
             .expect("Invalid scheduler data")
     }
 }
 
-#[derive(Debug)]
+#[derive(ObjectId)]
+#[fetch_vtable(uuid = "c68fe659-beef-4341-9b75-f54b0ef387ff")]
 pub(crate) struct ContextData {
     pub processing: bool,
     pub slot: Option<TaskSlot>,
     pub context: Option<Context>,
-    pub dependencies: BTreeSet<&'static RawTask>,
-    pub waiters: BinaryHeap<Reverse<&'static RawTask>>,
+    pub dependencies: BTreeSet<AssertValidTask>,
+    pub waiters: BinaryHeap<Reverse<AssertValidTask>>,
 }
 
 impl ContextData {
@@ -800,12 +821,11 @@ impl ContextData {
     }
 }
 
-is_object! { #![uuid(0xc68fe659, 0xbeef, 0x4341, 0x9b75, 0xf54b0ef387ff)] ContextData }
-
-impl_vtable! {
-    impl mut IBase<SendSyncMarker> => ContextData {}
-}
-
+#[derive(ObjectId)]
+#[fetch_vtable(
+    uuid = "d2e5a6f3-d5a0-41f0-a6b1-62d543c5c46b",
+    interfaces(IRustPanicData)
+)]
 pub(crate) struct PanicData {
     data: Option<Box<dyn Any + Send + 'static>>,
 }
@@ -816,13 +836,9 @@ impl PanicData {
     }
 }
 
-is_object! { #![uuid(0xd2e5a6f3, 0xd5a0, 0x41f0, 0xa6b1, 0x62d543c5c46b)] PanicData }
-
-impl_vtable! {
-    impl inline mut IRustPanicDataVTable => PanicData {
-        |ptr| unsafe {
-            let this = &mut *(ptr as *mut PanicData);
-            this.data.take().expect("Invalid panic data")
-        }
+impl IRustPanicData for PanicData {
+    unsafe fn take_rust_panic_impl(&mut self) -> Box<dyn Any + Send + 'static> {
+        // safety: the function is called only once
+        self.data.take().unwrap_unchecked()
     }
 }

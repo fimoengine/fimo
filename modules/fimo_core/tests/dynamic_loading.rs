@@ -1,8 +1,9 @@
-use ci::rust::settings_registry::{SettingsEvent, SettingsItem, SettingsRegistryPath};
-use fimo_core_int as ci;
-use fimo_core_int::rust::IFimoCore;
-use fimo_ffi::ObjArc;
-use fimo_module::{Error, FimoInterface, IModuleInterface};
+use fimo_core_int::settings::{ISettingsRegistryExt, SettingsEvent, SettingsItem, SettingsPath};
+use fimo_core_int::IFimoCore;
+use fimo_ffi::{DynObj, ObjArc};
+use fimo_module::{
+    Error, FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader,
+};
 use std::alloc::System;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,13 +17,13 @@ static A: System = System;
 fn load_dynamic() -> Result<(), Error> {
     let core_path = module_loading::core_path();
 
-    let module_loader = fimo_module::rust_loader::RustLoader::new();
+    let module_loader = fimo_module::loader::RustLoader::new();
     let core_module = unsafe { module_loader.load_module_raw(core_path)? };
 
     println!(
         "Core info: {}, Path: {}",
         core_module.module_info(),
-        core_module.module_path_buf().display()
+        core_module.module_path().display()
     );
 
     let core_instance = core_module.new_instance()?;
@@ -35,19 +36,19 @@ fn load_dynamic() -> Result<(), Error> {
     let core_descriptor = core_instance
         .available_interfaces()
         .iter()
-        .find(|interface| interface.name == IFimoCore::NAME)
+        .find(|interface| interface.name == <dyn IFimoCore>::NAME)
         .unwrap();
 
     println!("Core interface: {}", core_descriptor);
     println!(
         "Core dependencies: {:?}",
-        core_instance.dependencies(core_descriptor).into_rust()?
+        core_instance.dependencies(core_descriptor)?
     );
 
-    let core_interface = core_instance.interface(core_descriptor).into_rust()?;
+    let core_interface = core_instance.interface(core_descriptor)?;
     print!("Core version: {}", core_interface.version());
 
-    let _: ObjArc<IFimoCore> = IModuleInterface::try_downcast_arc(core_interface)?;
+    let _: ObjArc<DynObj<dyn IFimoCore>> = fimo_module::try_downcast_arc(core_interface)?;
     Ok(())
 }
 
@@ -57,18 +58,18 @@ fn settings_registry() -> Result<(), Error> {
     let db = module_loading::ModuleDatabase::new()?;
     let core = db.core_interface();
 
-    let settings_registry = core.get_settings_registry();
+    let settings_registry = core.settings();
 
     let array = vec![SettingsItem::from(false), SettingsItem::from(false)];
     let object = BTreeMap::new();
 
-    let none_path = SettingsRegistryPath::new("none").unwrap();
-    let bool_path = SettingsRegistryPath::new("bool").unwrap();
-    let integer_path = SettingsRegistryPath::new("integer").unwrap();
-    let float_path = SettingsRegistryPath::new("float").unwrap();
-    let string_path = SettingsRegistryPath::new("string").unwrap();
-    let array_path = SettingsRegistryPath::new("array").unwrap();
-    let object_path = SettingsRegistryPath::new("object").unwrap();
+    let none_path = SettingsPath::new("none").unwrap();
+    let bool_path = SettingsPath::new("bool").unwrap();
+    let integer_path = SettingsPath::new("integer").unwrap();
+    let float_path = SettingsPath::new("float").unwrap();
+    let string_path = SettingsPath::new("string").unwrap();
+    let array_path = SettingsPath::new("array").unwrap();
+    let object_path = SettingsPath::new("object").unwrap();
 
     let _ = settings_registry.write(none_path, ()).unwrap();
     let _ = settings_registry.write(bool_path, false).unwrap();
@@ -131,8 +132,8 @@ fn settings_registry() -> Result<(), Error> {
         object
     );
 
-    let array_index_path = SettingsRegistryPath::new("array[1]").unwrap();
-    let sub_object_path = object_path.join(SettingsRegistryPath::new("name").unwrap());
+    let array_index_path = SettingsPath::new("array[1]").unwrap();
+    let sub_object_path = object_path.join(SettingsPath::new("name").unwrap());
 
     let _ = settings_registry.write(array_index_path, true);
     let _ = settings_registry.write(&sub_object_path, true);
@@ -150,14 +151,14 @@ fn settings_registry() -> Result<(), Error> {
     let flag_clone = Arc::clone(&flag);
     let _callback = settings_registry.register_callback(
         none_path,
-        Box::new(move |path: &SettingsRegistryPath, event: &SettingsEvent| {
+        move |_: _, path: &SettingsPath, event: SettingsEvent| {
             flag_clone.store(true, Ordering::Relaxed);
             assert_eq!(path, none_path);
-            assert!(matches!(event, SettingsEvent::Remove { .. }));
-        }),
+            assert_eq!(event, SettingsEvent::Removed);
+        },
     );
     assert_eq!(
-        settings_registry.remove(none_path).unwrap().unwrap(),
+        settings_registry.remove_item(none_path).unwrap().unwrap(),
         SettingsItem::from(())
     );
     assert!(flag.load(Ordering::Acquire));

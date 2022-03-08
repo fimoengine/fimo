@@ -1,5 +1,9 @@
 //! Definition of an object-aware box type.
-use crate::ptr::{CastSuper, DynObj, FetchVTable, ObjInterface, ObjectId};
+use crate::obj_arc::CGlobal;
+use crate::ptr::{
+    CastInto, DowncastSafe, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId,
+    RawObjMut,
+};
 use std::alloc::{handle_alloc_error, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp::Ordering;
@@ -7,7 +11,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use std::hash::{Hash, Hasher};
 use std::marker::{PhantomData, Unsize};
-use std::mem::{align_of_val_raw, size_of_val_raw, MaybeUninit};
+use std::mem::{align_of_val_raw, size_of_val_raw, ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
@@ -120,7 +124,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(b: &Self) -> bool
     where
-        U: ObjectId + Unsize<T>,
+        U: DowncastSafe + ObjectId + Unsize<T>,
     {
         crate::ptr::is::<U, _>(&**b)
     }
@@ -129,7 +133,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(b: Self) -> Option<ObjBox<U, A>>
     where
-        U: ObjectId + Unsize<T>,
+        U: DowncastSafe + ObjectId + Unsize<T>,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         if let Some(ptr) = crate::ptr::downcast_mut::<U, _>(ptr) {
@@ -144,7 +148,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn cast_super<U>(b: Self) -> ObjBox<DynObj<U>, A>
     where
-        T: CastSuper<U>,
+        T: CastInto<U>,
         U: ObjInterface + ?Sized + 'a,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
@@ -156,7 +160,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn is_interface<U>(b: &Self) -> bool
     where
-        U: ObjInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
     {
         crate::ptr::is_interface::<U, _>(&**b)
     }
@@ -165,7 +169,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn downcast_interface<U>(b: Self) -> Option<ObjBox<DynObj<U>, A>>
     where
-        U: ObjInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         if let Some(ptr) = crate::ptr::downcast_interface_mut(ptr) {
@@ -462,6 +466,76 @@ impl<T: ?Sized, A: Allocator> Pointer for ObjBox<T, A> {
 impl<T: Eq + ?Sized, A: Allocator> Eq for ObjBox<T, A> {}
 
 impl<T: ?Sized, A: Allocator + 'static> Unpin for ObjBox<T, A> {}
+
+/// FFI-safe wrapper for an `ObjBox<DynObj<T>>`.
+#[repr(C)]
+pub struct RawObjBox<T, A: Allocator = CGlobal> {
+    ptr: T,
+    alloc: ManuallyDrop<A>,
+}
+
+impl<T: ?Sized, A: Allocator> RawObjBox<RawObjMut<T>, A> {
+    /// Consumes the `RawObjBox<T>` and turns it into a raw pointer.
+    #[inline]
+    pub fn into_raw_parts(self) -> (RawObjMut<T>, A) {
+        let ptr = unsafe { std::ptr::read(&self.ptr) };
+        let alloc = unsafe { std::ptr::read(&self.alloc) };
+        std::mem::forget(self);
+        (ptr, ManuallyDrop::into_inner(alloc))
+    }
+
+    /// Converts a raw pointer previously created by [`RawObjBox::into_raw_parts`] back into
+    /// `RawObjBox<T>` in the provided allocator.
+    ///
+    /// # Safety
+    ///
+    /// See [`ObjBox::from_raw_parts`].
+    #[inline]
+    pub unsafe fn from_raw_parts(ptr: RawObjMut<T>, alloc: A) -> RawObjBox<RawObjMut<T>, A> {
+        Self {
+            ptr,
+            alloc: ManuallyDrop::new(alloc),
+        }
+    }
+}
+
+impl<T: ?Sized, A: Allocator> From<ObjBox<DynObj<T>, A>> for RawObjBox<RawObjMut<T>, A> {
+    fn from(v: ObjBox<DynObj<T>, A>) -> Self {
+        let (ptr, alloc) = ObjBox::into_raw_parts(v);
+        let ptr = crate::ptr::into_raw_mut(ptr);
+        unsafe { RawObjBox::from_raw_parts(ptr, alloc) }
+    }
+}
+
+impl<T: ?Sized> From<ObjBox<DynObj<T>, Global>> for RawObjBox<RawObjMut<T>, CGlobal> {
+    fn from(v: ObjBox<DynObj<T>, Global>) -> Self {
+        let (ptr, _) = ObjBox::into_raw_parts(v);
+        let ptr = crate::ptr::into_raw_mut(ptr);
+        unsafe { RawObjBox::from_raw_parts(ptr, CGlobal { _v: 0 }) }
+    }
+}
+
+impl<T: ?Sized, A: Allocator> From<RawObjBox<RawObjMut<T>, A>> for ObjBox<DynObj<T>, A> {
+    fn from(v: RawObjBox<RawObjMut<T>, A>) -> Self {
+        let (ptr, alloc) = v.into_raw_parts();
+        let ptr = crate::ptr::from_raw_mut(ptr);
+        unsafe { ObjBox::from_raw_parts(ptr, alloc) }
+    }
+}
+
+impl<T: ?Sized> From<RawObjBox<RawObjMut<T>, CGlobal>> for ObjBox<DynObj<T>, Global> {
+    fn from(v: RawObjBox<RawObjMut<T>, CGlobal>) -> Self {
+        let (ptr, _) = v.into_raw_parts();
+        let ptr = crate::ptr::from_raw_mut(ptr);
+        unsafe { ObjBox::from_raw_parts(ptr, Global) }
+    }
+}
+
+impl<T: Debug, A: Allocator> Debug for RawObjBox<T, A> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(RawObjBox)")
+    }
+}
 
 pub(crate) trait ConstructLayoutRaw {
     unsafe fn size_of_val_raw(ptr: *const Self) -> usize;

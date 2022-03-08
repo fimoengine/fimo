@@ -1,37 +1,44 @@
 //! Implementation of basic fimo module loaders.
-#![feature(const_fn_fn_ptr_basics)]
-#![feature(const_fn_trait_bound)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+#![feature(unsize)]
+#![feature(c_unwind)]
 
-mod error;
 mod interfaces;
 
-pub mod rust_loader;
+pub mod loader;
+pub mod module;
 
-pub use error::{Error, ErrorKind, Result};
-pub use fimo_ffi::{fimo_marker, fimo_object, fimo_vtable, impl_vtable, is_object, version};
 pub use interfaces::*;
-pub use version::{ReleaseType, Version};
+
+pub use fimo_ffi;
+pub use fimo_ffi::error::{self, Error, ErrorKind};
+pub use fimo_ffi::version::{self, ReleaseType, Version};
 
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
+/// Result type for modules.
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// FFi-safe result type for modules.
+pub type FFIResult<T> = fimo_ffi::result::Result<T, Error>;
+
 /// Module information.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleInfo<S = fimo_ffi::String> {
+#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInfo {
     /// Module name.
-    pub name: S,
+    pub name: fimo_ffi::String,
     /// Module version.
-    pub version: S,
+    pub version: fimo_ffi::String,
 }
 
-impl<S: std::fmt::Display> std::fmt::Display for ModuleInfo<S> {
+impl std::fmt::Display for ModuleInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "name: {}, version: {}", self.name, self.version)
     }
@@ -39,28 +46,33 @@ impl<S: std::fmt::Display> std::fmt::Display for ModuleInfo<S> {
 
 /// A descriptor for a module interface.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleInterfaceDescriptor<N = fimo_ffi::String, E = fimo_ffi::Vec<N>> {
+#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleInterfaceDescriptor {
     /// Name of the interface.
-    pub name: N,
+    pub name: fimo_ffi::String,
     /// Version of the interface.
-    pub version: fimo_version_core::Version,
+    pub version: Version,
     /// Available interface extensions.
-    pub extensions: E,
+    pub extensions: fimo_ffi::Vec<fimo_ffi::String>,
 }
 
-impl<N: AsRef<str>, M: AsRef<[N]>> ModuleInterfaceDescriptor<N, M> {
-    /// Constructs a borrowed query.
-    pub fn as_borrowed(&self) -> ModuleInterfaceDescriptor<&str, &[N]> {
-        ModuleInterfaceDescriptor {
-            name: self.name.as_ref(),
-            version: self.version,
-            extensions: self.extensions.as_ref(),
+impl ModuleInterfaceDescriptor {
+    /// Constructs a new descriptor.
+    #[inline]
+    pub fn new(
+        name: fimo_ffi::String,
+        version: Version,
+        extensions: fimo_ffi::Vec<fimo_ffi::String>,
+    ) -> Self {
+        Self {
+            name,
+            version,
+            extensions,
         }
     }
 }
 
-impl<N: std::fmt::Display> std::fmt::Display for ModuleInterfaceDescriptor<N> {
+impl std::fmt::Display for ModuleInterfaceDescriptor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "name: {}, version: {}", self.name, self.version)
     }
@@ -73,15 +85,15 @@ pub enum VersionQuery {
     /// Matches any version.
     Any,
     /// Query for an exact version.
-    Exact(fimo_version_core::Version),
+    Exact(Version),
     /// Query for a minimum version.
-    Minimum(fimo_version_core::Version),
+    Minimum(Version),
     /// Query for a range of versions.
     Range {
         /// Minimum supported version.
-        min: fimo_version_core::Version,
+        min: Version,
         /// Maximum supported version.
-        max: fimo_version_core::Version,
+        max: Version,
     },
 }
 
@@ -95,7 +107,7 @@ impl VersionQuery {
     /// # Examples
     ///
     /// ```
-    /// use fimo_version_core::Version;
+    /// use fimo_ffi::Version;
     /// use fimo_module::VersionQuery;
     ///
     /// let q = VersionQuery::Any;
@@ -120,10 +132,8 @@ impl VersionQuery {
     /// assert!(q.query_matches(Version::new_short(1, 3, 0)));
     /// assert!(!q.query_matches(Version::new_short(1, 3, 1)));
     /// ```
-    ///
-    /// [`Version`]: fimo_version_core::Version
     #[inline]
-    pub fn query_matches(&self, version: fimo_version_core::Version) -> bool {
+    pub fn query_matches(&self, version: Version) -> bool {
         match *self {
             VersionQuery::Any => true,
             VersionQuery::Exact(v) => v == version,
@@ -135,14 +145,14 @@ impl VersionQuery {
 
 /// A query for an interface.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InterfaceQuery<N = fimo_ffi::String, E = fimo_ffi::Vec<N>> {
+#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterfaceQuery {
     /// Name of the interface.
-    pub name: N,
+    pub name: fimo_ffi::String,
     /// Version of the interface.
     pub version: VersionQuery,
     /// Required extensions.
-    pub extensions: E,
+    pub extensions: fimo_ffi::Vec<fimo_ffi::String>,
 }
 
 impl InterfaceQuery {
@@ -164,31 +174,14 @@ impl InterfaceQuery {
     }
 }
 
-impl<N: AsRef<str>, M: AsRef<[N]>> InterfaceQuery<N, M> {
-    /// Constructs a borrowed query.
-    pub fn as_borrowed(&self) -> InterfaceQuery<&str, &[N]> {
-        InterfaceQuery {
-            name: self.name.as_ref(),
-            version: self.version,
-            extensions: self.extensions.as_ref(),
-        }
-    }
-
+impl InterfaceQuery {
     /// Checks whether a [`ModuleInterfaceDescriptor`] matches the query.
-    pub fn query_matches<O: AsRef<str>, P: AsRef<[N]>>(
-        &self,
-        desc: &ModuleInterfaceDescriptor<O, P>,
-    ) -> bool
-    where
-        N: PartialEq,
-    {
-        let borrowed = self.as_borrowed();
-        if desc.name.as_ref() == borrowed.name && borrowed.version.query_matches(desc.version) {
-            let extensions = desc.extensions.as_ref();
-            return borrowed
+    pub fn query_matches(&self, desc: &ModuleInterfaceDescriptor) -> bool {
+        if desc.name == self.name && self.version.query_matches(desc.version) {
+            return self
                 .extensions
                 .iter()
-                .all(|ext| extensions.contains(ext));
+                .all(|ext| desc.extensions.contains(ext));
         }
 
         false

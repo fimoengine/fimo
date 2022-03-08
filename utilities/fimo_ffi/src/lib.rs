@@ -7,12 +7,13 @@
 )]
 #![allow(incomplete_features)]
 #![feature(const_slice_from_raw_parts)]
-#![feature(const_fn_fn_ptr_basics)]
+#![feature(const_precise_live_drops)]
 #![feature(const_ptr_offset_from)]
-#![feature(const_fn_trait_bound)]
+#![feature(try_trait_v2_residual)]
 #![feature(const_slice_ptr_len)]
 #![feature(alloc_layout_extra)]
 #![feature(const_trait_impl)]
+#![feature(must_not_suspend)]
 #![feature(try_reserve_kind)]
 #![feature(unboxed_closures)]
 #![feature(const_type_name)]
@@ -20,12 +21,14 @@
 #![feature(specialization)]
 #![feature(const_mut_refs)]
 #![feature(layout_for_ptr)]
+#![feature(negative_impls)]
 #![feature(allocator_api)]
 #![feature(const_convert)]
 #![feature(set_ptr_value)]
 #![feature(slice_ptr_len)]
 #![feature(cfg_sanitize)]
 #![feature(ptr_metadata)]
+#![feature(try_trait_v2)]
 #![feature(slice_range)]
 #![feature(trusted_len)]
 #![feature(new_uninit)]
@@ -34,6 +37,9 @@
 #![feature(c_unwind)]
 #![feature(unsize)]
 
+extern crate self as fimo_ffi;
+
+pub mod cell;
 pub mod error;
 pub mod ffi_fn;
 pub mod fmt;
@@ -54,9 +60,10 @@ pub use ffi_fn::FfiFn;
 pub use obj_arc::{ObjArc, ObjWeak};
 pub use obj_box::ObjBox;
 pub use optional::Optional;
-pub use ptr::DynObj;
+pub use ptr::{interface, vtable, DynObj, ObjectId};
 pub use result::Result;
 pub use span::{ConstSpan, MutSpan};
 pub use string::String;
+pub use tuple::{ReprC, ReprRust};
 pub use vec::Vec;
 pub use version::{ReleaseType, Version};

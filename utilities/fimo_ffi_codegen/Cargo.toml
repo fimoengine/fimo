@@ -1,0 +1,17 @@
+[package]
+name = "fimo_ffi_codegen"
+version = "0.1.0"
+edition = "2021"
+description = "Code generation crate for the fimo_ffi crate"
+license = "MIT OR Apache-2.0"
+categories = ["game-development"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+uuid = "0.8.2"
+quote = "1.0.0"
+darling = "0.13.1"
+proc-macro2 = "1.0.36"
+syn = { version = "1.0", features = ["full"] }

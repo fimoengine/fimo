@@ -10,18 +10,13 @@ categories = ["game-development"]
 crate-type = ["lib", "dylib"]
 
 [dependencies]
-regex = "1.4.3"
 serde_json = "1.0"
-libloading = "0.7.0"
-lazy_static = "1.4.0"
 parking_lot = "0.11.1"
-static_assertions = "1.1.0"
 semver = { version = "1.0.4", features = ["serde"] }
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_core_int = { version = "=0.1.0", path = "../../interfaces/fimo_core_int" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
-fimo_generic_module = { version = "0.1.0", path = "../../utilities/fimo_generic_module" }
 
 [dev-dependencies]
 module_loading = { path = "../../test_utilities/module_loading" }

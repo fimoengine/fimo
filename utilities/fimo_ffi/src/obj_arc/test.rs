@@ -1,5 +1,5 @@
 use crate::ptr::IBase;
-use crate::{base_object, DynObj, ObjArc, ObjWeak};
+use crate::{DynObj, ObjArc, ObjWeak, ObjectId};
 use std::cell::RefCell;
 
 #[test]
@@ -83,13 +83,14 @@ fn drop_sized() {
 
 #[test]
 fn drop_obj() {
+    #[derive(ObjectId)]
+    #[fetch_vtable(uuid = "6e3178d1-ad1e-4071-aa82-d732eefe118f")]
     struct TestObj(ObjArc<RefCell<usize>>);
     impl Drop for TestObj {
         fn drop(&mut self) {
             *self.0.borrow_mut() = 1;
         }
     }
-    base_object! { #![uuid(0x6e3178d1, 0xad1e, 0x4071, 0xaa82, 0xd732eefe118f)] impl TestObj }
 
     let val = ObjArc::new(RefCell::new(0));
     let x = ObjArc::new(TestObj(val.clone()));

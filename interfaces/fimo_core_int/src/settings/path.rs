@@ -15,19 +15,20 @@ lazy_static! {
 }
 
 /// Path to an item.
+#[repr(transparent)]
 #[derive(Debug, PartialOrd, PartialEq, Ord, Eq, Hash, Serialize)]
-pub struct SettingsRegistryPath {
+pub struct SettingsPath {
     path: str,
 }
 
-impl SettingsRegistryPath {
-    /// Returns the root `SettingsRegistryPath`.
+impl SettingsPath {
+    /// Returns the root `SettingsPath`.
     #[inline]
     pub const fn root() -> &'static Self {
-        unsafe { SettingsRegistryPath::new_unchecked(":") }
+        unsafe { SettingsPath::new_unchecked(":") }
     }
 
-    /// Constructs a new `SettingsRegistryPath`.
+    /// Constructs a new `SettingsPath`.
     ///
     /// # Format
     ///
@@ -42,24 +43,24 @@ impl SettingsRegistryPath {
     /// - Array path: `"array[15]"`
     /// - Nested path: `"object::array[0][12]::name"`
     #[inline]
-    pub fn new(path: &str) -> Result<&Self, SettingsRegistryPathConstructionError<&'_ str>> {
+    pub fn new(path: &str) -> Result<&Self, SettingsPathConstructionError<&'_ str>> {
         if path.is_empty() {
-            return Err(SettingsRegistryPathConstructionError { path });
+            return Err(SettingsPathConstructionError { path });
         }
 
         if !PATH_VALIDATOR.is_match(path) {
-            return Err(SettingsRegistryPathConstructionError { path });
+            return Err(SettingsPathConstructionError { path });
         }
 
         // safety: the path has been validated
         unsafe { Ok(Self::new_unchecked(path)) }
     }
 
-    /// Constructs a new `SettingsRegistryPath` without checking its validity.
+    /// Constructs a new `SettingsPath` without checking its validity.
     ///
     /// # Safety
     ///
-    /// See [`SettingsRegistryPath::new`] for more info.
+    /// See [`SettingsPath::new`] for more info.
     #[inline]
     pub const unsafe fn new_unchecked(path: &str) -> &Self {
         // is just a wrapper around a `str`.
@@ -68,8 +69,8 @@ impl SettingsRegistryPath {
 
     /// Returns an iterator over the path.
     #[inline]
-    pub fn iter(&self) -> SettingsRegistryPathComponentIter<'_> {
-        SettingsRegistryPathComponentIter::new(self)
+    pub fn iter(&self) -> SettingsPathComponentIter<'_> {
+        SettingsPathComponentIter::new(self)
     }
 
     /// Coerces to a `str` slice.
@@ -78,10 +79,10 @@ impl SettingsRegistryPath {
         &self.path
     }
 
-    /// Constructs a `SettingsRegistryPathBuf` with the path.
+    /// Constructs a `SettingsPathBuf` with the path.
     #[inline]
-    pub fn to_path_buf(&self) -> SettingsRegistryPathBuf {
-        SettingsRegistryPathBuf::from(self)
+    pub fn to_path_buf(&self) -> SettingsPathBuf {
+        SettingsPathBuf::from(self)
     }
 
     /// Checks if the path is the root path.
@@ -90,7 +91,7 @@ impl SettingsRegistryPath {
         self == Self::root()
     }
 
-    /// Returns the `SettingsRegistryPath` without its final component, if there is one.
+    /// Returns the `SettingsPath` without its final component, if there is one.
     ///
     /// Returns [`None`] if the path terminates in a root.
     #[inline]
@@ -99,7 +100,7 @@ impl SettingsRegistryPath {
         parent
     }
 
-    /// Splits the `SettingsRegistryPath` into the first and its remaining components.
+    /// Splits the `SettingsPath` into the first and its remaining components.
     #[inline]
     pub fn split_component(&self) -> (&Self, Option<&Self>) {
         let split_arr = |idx: usize| {
@@ -129,7 +130,7 @@ impl SettingsRegistryPath {
         }
     }
 
-    /// Splits the `SettingsRegistryPath` into the parent `SettingsRegistryPath` and
+    /// Splits the `SettingsPath` into the parent `SettingsPath` and
     /// the last component, if they exist.
     #[inline]
     pub fn split_parent(&self) -> (Option<&Self>, &Self) {
@@ -158,7 +159,7 @@ impl SettingsRegistryPath {
 
     /// Joins two paths.
     #[inline]
-    pub fn join<P: AsRef<SettingsRegistryPath>>(&self, path: P) -> SettingsRegistryPathBuf {
+    pub fn join<P: AsRef<SettingsPath>>(&self, path: P) -> SettingsPathBuf {
         let mut buf = self.to_path_buf();
         buf.push(path);
         buf
@@ -169,30 +170,30 @@ impl SettingsRegistryPath {
     pub fn join_str<'a>(
         &self,
         string: &'a str,
-    ) -> Result<SettingsRegistryPathBuf, SettingsRegistryPathConstructionError<&'a str>> {
-        let path = SettingsRegistryPath::new(string)?;
+    ) -> Result<SettingsPathBuf, SettingsPathConstructionError<&'a str>> {
+        let path = SettingsPath::new(string)?;
         Ok(self.join(path))
     }
 }
 
-impl AsRef<SettingsRegistryPath> for &'_ SettingsRegistryPath {
-    fn as_ref(&self) -> &SettingsRegistryPath {
+impl AsRef<SettingsPath> for &'_ SettingsPath {
+    fn as_ref(&self) -> &SettingsPath {
         self
     }
 }
 
-impl ToOwned for SettingsRegistryPath {
-    type Owned = SettingsRegistryPathBuf;
+impl ToOwned for SettingsPath {
+    type Owned = SettingsPathBuf;
 
     #[inline]
     fn to_owned(&self) -> Self::Owned {
-        SettingsRegistryPathBuf::from(self)
+        SettingsPathBuf::from(self)
     }
 }
 
-impl<'a> IntoIterator for &'a SettingsRegistryPath {
-    type Item = SettingsRegistryPathComponent<'a>;
-    type IntoIter = SettingsRegistryPathComponentIter<'a>;
+impl<'a> IntoIterator for &'a SettingsPath {
+    type Item = SettingsPathComponent<'a>;
+    type IntoIter = SettingsPathComponentIter<'a>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -200,40 +201,47 @@ impl<'a> IntoIterator for &'a SettingsRegistryPath {
     }
 }
 
-impl PartialEq<str> for SettingsRegistryPath {
+impl PartialEq<str> for SettingsPath {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         self.as_str().eq(other)
     }
 }
-impl PartialEq<&'_ str> for SettingsRegistryPath {
+impl PartialEq<&'_ str> for SettingsPath {
     #[inline]
     fn eq(&self, other: &&'_ str) -> bool {
         self.eq(*other)
     }
 }
 
-impl PartialEq<String> for SettingsRegistryPath {
+impl PartialEq<String> for SettingsPath {
     #[inline]
     fn eq(&self, other: &String) -> bool {
         self.eq(other.as_str())
     }
 }
 
-impl PartialEq<SettingsRegistryPathBuf> for SettingsRegistryPath {
+impl PartialEq<fimo_module::fimo_ffi::String> for SettingsPath {
     #[inline]
-    fn eq(&self, other: &SettingsRegistryPathBuf) -> bool {
+    fn eq(&self, other: &fimo_module::fimo_ffi::String) -> bool {
+        self.eq(other.as_str())
+    }
+}
+
+impl PartialEq<SettingsPathBuf> for SettingsPath {
+    #[inline]
+    fn eq(&self, other: &SettingsPathBuf) -> bool {
         self.eq(other.as_path())
     }
 }
 
-/// Possible error of the [`SettingsRegistryPath::new`] function.
+/// Possible error of the [`SettingsPath::new`] function.
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Ord, Eq, Hash)]
-pub struct SettingsRegistryPathConstructionError<T: ?Sized> {
+pub struct SettingsPathConstructionError<T: ?Sized> {
     path: T,
 }
 
-impl<'a> SettingsRegistryPathConstructionError<&'a str> {
+impl<'a> SettingsPathConstructionError<&'a str> {
     /// Extracts the path from the error.
     #[inline]
     pub fn path(&self) -> &'a str {
@@ -241,7 +249,15 @@ impl<'a> SettingsRegistryPathConstructionError<&'a str> {
     }
 }
 
-impl SettingsRegistryPathConstructionError<String> {
+impl SettingsPathConstructionError<String> {
+    /// Extracts the path from the error.
+    #[inline]
+    pub fn path(&self) -> &str {
+        self.path.as_str()
+    }
+}
+
+impl SettingsPathConstructionError<fimo_module::fimo_ffi::String> {
     /// Extracts the path from the error.
     #[inline]
     pub fn path(&self) -> &str {
@@ -251,20 +267,20 @@ impl SettingsRegistryPathConstructionError<String> {
 
 /// Path component iterator.
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Ord, Eq, Hash)]
-pub struct SettingsRegistryPathComponentIter<'a> {
-    path: Option<&'a SettingsRegistryPath>,
+pub struct SettingsPathComponentIter<'a> {
+    path: Option<&'a SettingsPath>,
 }
 
-impl<'a> SettingsRegistryPathComponentIter<'a> {
-    /// Constructs a new `SettingsRegistryPathComponentIter`.
+impl<'a> SettingsPathComponentIter<'a> {
+    /// Constructs a new `SettingsPathComponentIter`.
     #[inline]
-    pub fn new(path: &'a SettingsRegistryPath) -> Self {
+    pub fn new(path: &'a SettingsPath) -> Self {
         Self { path: Some(path) }
     }
 }
 
-impl<'a> Iterator for SettingsRegistryPathComponentIter<'a> {
-    type Item = SettingsRegistryPathComponent<'a>;
+impl<'a> Iterator for SettingsPathComponentIter<'a> {
+    type Item = SettingsPathComponent<'a>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -282,14 +298,14 @@ impl<'a> Iterator for SettingsRegistryPathComponentIter<'a> {
 
         if let Some(name) = captures.name("name") {
             let name = name.as_str();
-            Some(SettingsRegistryPathComponent::Item {
+            Some(SettingsPathComponent::Item {
                 name,
                 path: component,
             })
         } else {
             let name = captures.name("arr_name").map(|n| n.as_str());
             let index: usize = captures.name("index").unwrap().as_str().parse().unwrap();
-            Some(SettingsRegistryPathComponent::ArrayItem {
+            Some(SettingsPathComponent::ArrayItem {
                 name,
                 index,
                 path: component,
@@ -300,13 +316,13 @@ impl<'a> Iterator for SettingsRegistryPathComponentIter<'a> {
 
 /// Component of a path.
 #[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Ord, Eq, Hash)]
-pub enum SettingsRegistryPathComponent<'a> {
+pub enum SettingsPathComponent<'a> {
     /// Normal item.
     Item {
         /// Name of the item.
         name: &'a str,
         /// Path representation of the component.
-        path: &'a SettingsRegistryPath,
+        path: &'a SettingsPath,
     },
     /// An array item.
     ArrayItem {
@@ -315,29 +331,29 @@ pub enum SettingsRegistryPathComponent<'a> {
         /// Index of the element.
         index: usize,
         /// Path representation of the component.
-        path: &'a SettingsRegistryPath,
+        path: &'a SettingsPath,
     },
 }
 
-impl SettingsRegistryPathComponent<'_> {
+impl SettingsPathComponent<'_> {
     /// Checks whether the component points to a normal item.
     #[inline]
     pub fn is_item(&self) -> bool {
-        matches!(self, SettingsRegistryPathComponent::Item { .. })
+        matches!(self, SettingsPathComponent::Item { .. })
     }
 
     /// Checks whether the component points to an array item.
     #[inline]
     pub fn is_array_item(&self) -> bool {
-        matches!(self, SettingsRegistryPathComponent::ArrayItem { .. })
+        matches!(self, SettingsPathComponent::ArrayItem { .. })
     }
 
     /// Extracts the name of the component.
     #[inline]
     pub fn name(&self) -> Option<&str> {
         match *self {
-            SettingsRegistryPathComponent::Item { name, .. } => Some(name),
-            SettingsRegistryPathComponent::ArrayItem { name, .. } => name,
+            SettingsPathComponent::Item { name, .. } => Some(name),
+            SettingsPathComponent::ArrayItem { name, .. } => name,
         }
     }
 
@@ -345,69 +361,69 @@ impl SettingsRegistryPathComponent<'_> {
     #[inline]
     pub fn index(&self) -> Option<usize> {
         match *self {
-            SettingsRegistryPathComponent::Item { .. } => None,
-            SettingsRegistryPathComponent::ArrayItem { index, .. } => Some(index),
+            SettingsPathComponent::Item { .. } => None,
+            SettingsPathComponent::ArrayItem { index, .. } => Some(index),
         }
     }
 
     /// Extracts the path of the component.
     #[inline]
-    pub fn as_path(&self) -> &SettingsRegistryPath {
+    pub fn as_path(&self) -> &SettingsPath {
         match *self {
-            SettingsRegistryPathComponent::Item { path, .. } => path,
-            SettingsRegistryPathComponent::ArrayItem { path, .. } => path,
+            SettingsPathComponent::Item { path, .. } => path,
+            SettingsPathComponent::ArrayItem { path, .. } => path,
         }
     }
 }
 
 /// An owned mutable path.
 #[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq, Hash, Serialize, Deserialize)]
-pub struct SettingsRegistryPathBuf {
+pub struct SettingsPathBuf {
     path: String,
 }
 
-impl SettingsRegistryPathBuf {
-    /// Allocates an empty `SettingsRegistryPathBuf`.
+impl SettingsPathBuf {
+    /// Allocates an empty `SettingsPathBuf`.
     #[inline]
     pub fn new() -> Self {
         Self {
-            path: String::from(SettingsRegistryPath::root().as_str()),
+            path: String::from(SettingsPath::root().as_str()),
         }
     }
 
-    /// Constructs a new `SettingsRegistryPathBuf`.
+    /// Constructs a new `SettingsPathBuf`.
     #[inline]
     pub fn from_string<S: AsRef<str>>(
         path: S,
-    ) -> Result<Self, SettingsRegistryPathConstructionError<String>> {
-        match SettingsRegistryPath::new(path.as_ref()) {
+    ) -> Result<Self, SettingsPathConstructionError<String>> {
+        match SettingsPath::new(path.as_ref()) {
             Ok(p) => Ok(p.to_path_buf()),
-            Err(e) => Err(SettingsRegistryPathConstructionError {
+            Err(e) => Err(SettingsPathConstructionError {
                 path: String::from(e.path),
             }),
         }
     }
 
-    /// Creates a new `SettingsRegistryPathBuf` with a given capacity.
+    /// Creates a new `SettingsPathBuf` with a given capacity.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = SettingsRegistryPath::root().as_str().len().max(capacity);
+        let capacity = SettingsPath::root().as_str().len().max(capacity);
         let mut path = String::with_capacity(capacity);
-        path.push_str(SettingsRegistryPath::root().as_str());
+        path.push_str(SettingsPath::root().as_str());
 
         Self { path }
     }
 
-    /// Coerces to a [`SettingsRegistryPath`] reference.
+    /// Coerces to a [`SettingsPath`] reference.
     #[inline]
-    pub fn as_path(&self) -> &SettingsRegistryPath {
+    pub fn as_path(&self) -> &SettingsPath {
         // safety: the string is always valid.
-        unsafe { SettingsRegistryPath::new_unchecked(self.path.as_str()) }
+        unsafe { SettingsPath::new_unchecked(self.path.as_str()) }
     }
 
     /// Extends `self` with `path`.
     #[inline]
-    pub fn push<P: AsRef<SettingsRegistryPath>>(&mut self, path: P) {
+    pub fn push<P: AsRef<SettingsPath>>(&mut self, path: P) {
         let path = path.as_ref();
         if path.is_root() {
             return;
@@ -426,14 +442,14 @@ impl SettingsRegistryPathBuf {
 
     /// Tries to extend `self` with `string`.
     ///
-    /// Helper function for calling [`SettingsRegistryPathBuf::push`] without explicitly
-    /// constructing a [`SettingsRegistryPath`].
+    /// Helper function for calling [`SettingsPathBuf::push`] without explicitly
+    /// constructing a [`SettingsPath`].
     #[inline]
     pub fn push_str<'a>(
         &mut self,
         string: &'a str,
-    ) -> Result<(), SettingsRegistryPathConstructionError<&'a str>> {
-        match SettingsRegistryPath::new(string) {
+    ) -> Result<(), SettingsPathConstructionError<&'a str>> {
+        match SettingsPath::new(string) {
             Ok(p) => {
                 self.push(p);
                 Ok(())
@@ -451,7 +467,7 @@ impl SettingsRegistryPathBuf {
         if let Some(parent) = self.parent() {
             if parent.is_root() {
                 self.path.clear();
-                self.path.push_str(SettingsRegistryPath::root().as_str());
+                self.path.push_str(SettingsPath::root().as_str());
             } else {
                 let parent_bytes = parent.as_str().as_bytes();
                 let parent_bytes_len = parent_bytes.len();
@@ -471,7 +487,7 @@ impl SettingsRegistryPathBuf {
         self.path.len()
     }
 
-    /// Returns the capacity of the `SettingsRegistryPathBuf`.
+    /// Returns the capacity of the `SettingsPathBuf`.
     #[inline]
     pub fn capacity(&self) -> usize {
         self.path.capacity()
@@ -499,15 +515,15 @@ impl SettingsRegistryPathBuf {
     }
 }
 
-impl Default for SettingsRegistryPathBuf {
+impl Default for SettingsPathBuf {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Deref for SettingsRegistryPathBuf {
-    type Target = SettingsRegistryPath;
+impl Deref for SettingsPathBuf {
+    type Target = SettingsPath;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -515,8 +531,8 @@ impl Deref for SettingsRegistryPathBuf {
     }
 }
 
-impl From<&'_ SettingsRegistryPath> for SettingsRegistryPathBuf {
-    fn from(val: &'_ SettingsRegistryPath) -> Self {
+impl From<&'_ SettingsPath> for SettingsPathBuf {
+    fn from(val: &'_ SettingsPath) -> Self {
         // a path is always valid, so we can simply clone the contents.
         Self {
             path: String::from(val.as_str()),
@@ -524,93 +540,100 @@ impl From<&'_ SettingsRegistryPath> for SettingsRegistryPathBuf {
     }
 }
 
-impl AsRef<SettingsRegistryPath> for SettingsRegistryPathBuf {
+impl AsRef<SettingsPath> for SettingsPathBuf {
     #[inline]
-    fn as_ref(&self) -> &SettingsRegistryPath {
+    fn as_ref(&self) -> &SettingsPath {
         self.as_path()
     }
 }
 
-impl Borrow<SettingsRegistryPath> for SettingsRegistryPathBuf {
+impl Borrow<SettingsPath> for SettingsPathBuf {
     #[inline]
-    fn borrow(&self) -> &SettingsRegistryPath {
+    fn borrow(&self) -> &SettingsPath {
         self.as_path()
     }
 }
 
-impl PartialEq<str> for SettingsRegistryPathBuf {
+impl PartialEq<str> for SettingsPathBuf {
     #[inline]
     fn eq(&self, other: &str) -> bool {
         self.as_path().eq(other)
     }
 }
 
-impl PartialEq<&'_ str> for SettingsRegistryPathBuf {
+impl PartialEq<&'_ str> for SettingsPathBuf {
     #[inline]
     fn eq(&self, other: &&'_ str) -> bool {
         self.eq(*other)
     }
 }
 
-impl PartialEq<String> for SettingsRegistryPathBuf {
+impl PartialEq<String> for SettingsPathBuf {
     #[inline]
     fn eq(&self, other: &String) -> bool {
         self.as_path().eq(other)
     }
 }
 
-impl PartialEq<SettingsRegistryPath> for SettingsRegistryPathBuf {
+impl PartialEq<fimo_module::fimo_ffi::String> for SettingsPathBuf {
     #[inline]
-    fn eq(&self, other: &SettingsRegistryPath) -> bool {
+    fn eq(&self, other: &fimo_module::fimo_ffi::String) -> bool {
         self.as_path().eq(other)
     }
 }
 
-impl PartialEq<&'_ SettingsRegistryPath> for SettingsRegistryPathBuf {
+impl PartialEq<SettingsPath> for SettingsPathBuf {
     #[inline]
-    fn eq(&self, other: &&'_ SettingsRegistryPath) -> bool {
+    fn eq(&self, other: &SettingsPath) -> bool {
+        self.as_path().eq(other)
+    }
+}
+
+impl PartialEq<&'_ SettingsPath> for SettingsPathBuf {
+    #[inline]
+    fn eq(&self, other: &&'_ SettingsPath) -> bool {
         self.eq(*other)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::rust::settings_registry::SettingsRegistryPath;
+    use super::SettingsPath;
 
     #[test]
     fn new_path() {
-        let _ = SettingsRegistryPath::new("object").unwrap();
-        let _ = SettingsRegistryPath::new("[0]").unwrap();
-        let _ = SettingsRegistryPath::new("arr[2]").unwrap();
-        let _ = SettingsRegistryPath::new("sub[2][5]").unwrap();
-        let _ = SettingsRegistryPath::new("map::element").unwrap();
-        let _ = SettingsRegistryPath::new("map::arr[2]").unwrap();
-        let _ = SettingsRegistryPath::new("map::sub[2][5]").unwrap();
+        let _ = SettingsPath::new("object").unwrap();
+        let _ = SettingsPath::new("[0]").unwrap();
+        let _ = SettingsPath::new("arr[2]").unwrap();
+        let _ = SettingsPath::new("sub[2][5]").unwrap();
+        let _ = SettingsPath::new("map::element").unwrap();
+        let _ = SettingsPath::new("map::arr[2]").unwrap();
+        let _ = SettingsPath::new("map::sub[2][5]").unwrap();
 
-        assert!(SettingsRegistryPath::new("").is_err());
-        assert!(SettingsRegistryPath::new(":").is_err());
-        assert!(SettingsRegistryPath::new("::").is_err());
-        assert!(SettingsRegistryPath::new("map::[5]").is_err());
-        assert!(SettingsRegistryPath::new("map::element[5]element").is_err());
+        assert!(SettingsPath::new("").is_err());
+        assert!(SettingsPath::new(":").is_err());
+        assert!(SettingsPath::new("::").is_err());
+        assert!(SettingsPath::new("map::[5]").is_err());
+        assert!(SettingsPath::new("map::element[5]element").is_err());
     }
 
     #[test]
     fn root() {
-        let root = SettingsRegistryPath::root();
+        let root = SettingsPath::root();
         assert!(root.is_root());
 
-        let p = SettingsRegistryPath::new("object").unwrap();
+        let p = SettingsPath::new("object").unwrap();
         assert!(!p.is_root());
     }
 
     #[test]
     fn split_components() {
-        let root = SettingsRegistryPath::root();
+        let root = SettingsPath::root();
         let (first, rest) = root.split_component();
         assert_eq!(first, root);
         assert_eq!(rest, None);
 
-        let p1 = SettingsRegistryPath::new("map::arr[0][1][2]::element::a[0]").unwrap();
+        let p1 = SettingsPath::new("map::arr[0][1][2]::element::a[0]").unwrap();
 
         let (first, rest) = p1.split_component();
         let rest = rest.unwrap();
@@ -644,12 +667,12 @@ mod test {
 
     #[test]
     fn split_parent() {
-        let root = SettingsRegistryPath::root();
+        let root = SettingsPath::root();
         let (parent, component) = root.split_parent();
         assert_eq!(parent, None);
         assert_eq!(component, root);
 
-        let p1 = SettingsRegistryPath::new("map::arr[0][1][2]::element::a[0]").unwrap();
+        let p1 = SettingsPath::new("map::arr[0][1][2]::element::a[0]").unwrap();
 
         let (parent, component) = p1.split_parent();
         let parent = parent.unwrap();
@@ -693,11 +716,11 @@ mod test {
 
     #[test]
     fn join_paths() {
-        let root = SettingsRegistryPath::root();
-        let p1 = SettingsRegistryPath::new("obj").unwrap();
-        let p2 = SettingsRegistryPath::new("obj2").unwrap();
-        let p3 = SettingsRegistryPath::new("arr[2][7]").unwrap();
-        let p4 = SettingsRegistryPath::new("[0]").unwrap();
+        let root = SettingsPath::root();
+        let p1 = SettingsPath::new("obj").unwrap();
+        let p2 = SettingsPath::new("obj2").unwrap();
+        let p3 = SettingsPath::new("arr[2][7]").unwrap();
+        let p4 = SettingsPath::new("[0]").unwrap();
 
         let j = root.join(root);
         assert_eq!(j, root);
@@ -717,8 +740,8 @@ mod test {
 
     #[test]
     fn push_path() {
-        let mut path = SettingsRegistryPath::root().to_path_buf();
-        assert_eq!(path, SettingsRegistryPath::root());
+        let mut path = SettingsPath::root().to_path_buf();
+        assert_eq!(path, SettingsPath::root());
 
         path.push_str("[7]").unwrap();
         assert_eq!(path, "[7]");
@@ -734,7 +757,7 @@ mod test {
 
     #[test]
     fn pop_path() {
-        let mut path = SettingsRegistryPath::new("map::arr[0][1][2]::element::a[0]")
+        let mut path = SettingsPath::new("map::arr[0][1][2]::element::a[0]")
             .unwrap()
             .to_path_buf();
         assert_eq!(path, "map::arr[0][1][2]::element::a[0]");
@@ -754,7 +777,7 @@ mod test {
         assert!(path.pop());
         assert_eq!(path, "map");
         assert!(path.pop());
-        assert_eq!(path, SettingsRegistryPath::root());
+        assert_eq!(path, SettingsPath::root());
         assert!(!path.pop());
     }
 }

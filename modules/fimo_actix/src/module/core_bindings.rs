@@ -1,11 +1,10 @@
 use fimo_actix_int::actix::{web, HttpResponse, Responder, Scope};
-use fimo_core_int::rust::settings_registry::SettingsRegistryPathBuf;
-use fimo_core_int::rust::{
-    settings_registry::{
-        SettingsEvent, SettingsEventCallbackHandle, SettingsItem, SettingsRegistryPath,
-    },
-    IFimoCore,
+use fimo_core_int::settings::{
+    ISettingsRegistry, ISettingsRegistryExt, ISettingsRegistryInner, SettingsEvent,
+    SettingsEventCallbackHandle, SettingsItem, SettingsPath, SettingsPathBuf,
 };
+use fimo_core_int::IFimoCore;
+use fimo_ffi::DynObj;
 use futures::lock::Mutex;
 use serde::Serialize;
 use std::sync::mpsc::Receiver;
@@ -42,12 +41,12 @@ impl CoreSettingsInner {
 enum Event {
     Remove {
         time: SystemTime,
-        path: SettingsRegistryPathBuf,
+        path: SettingsPathBuf,
     },
     Write {
         time: SystemTime,
         item: SettingsItem,
-        path: SettingsRegistryPathBuf,
+        path: SettingsPathBuf,
     },
 }
 
@@ -68,23 +67,23 @@ async fn settings_events(data: web::Data<CoreSettings>) -> impl Responder {
 }
 
 pub(crate) fn scope_builder(
-    core: &IFimoCore,
+    core: &DynObj<dyn IFimoCore>,
 ) -> (
     impl Fn(Scope) -> Scope + Send + Sync,
-    SettingsEventCallbackHandle<'_>,
+    SettingsEventCallbackHandle<'_, DynObj<dyn ISettingsRegistry + '_>>,
 ) {
-    let mut tmp_item = None;
     let (tx, rx) = std::sync::mpsc::channel();
-    let callback = move |path: &SettingsRegistryPath, event: &SettingsEvent| match event {
-        SettingsEvent::Remove { .. } => {
+    let callback = move |inner: &'_ DynObj<dyn ISettingsRegistryInner + '_>,
+                         path: &SettingsPath,
+                         event: SettingsEvent| match event {
+        SettingsEvent::Removed => {
             let _ = tx.send(Event::Remove {
                 time: SystemTime::now(),
                 path: path.to_path_buf(),
             });
         }
-        SettingsEvent::StartWrite { new } => tmp_item = Some(new.clone()),
-        SettingsEvent::EndWrite { .. } => {
-            let item = tmp_item.take().unwrap();
+        SettingsEvent::Updated => {
+            let item = inner.read(path).unwrap().unwrap();
 
             let _ = tx.send(Event::Write {
                 time: SystemTime::now(),
@@ -92,20 +91,14 @@ pub(crate) fn scope_builder(
                 path: path.to_path_buf(),
             });
         }
-        SettingsEvent::AbortWrite => {
-            tmp_item = None;
-        }
     };
 
-    let registry = core.get_settings_registry();
+    let registry = core.settings();
     let handle = registry
-        .register_callback(SettingsRegistryPath::root(), Box::new(callback))
+        .register_callback(SettingsPath::root(), callback)
         .unwrap();
 
-    let root = registry
-        .read(SettingsRegistryPath::root())
-        .unwrap()
-        .unwrap();
+    let root = registry.read(SettingsPath::root()).unwrap().unwrap();
     let data = web::Data::new(CoreSettings {
         inner: Mutex::new(CoreSettingsInner {
             root,

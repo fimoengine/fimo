@@ -1,97 +1,38 @@
 //! Error type.
 use crate::fmt::{FmtWrapper, Formatter, IDebug, IDebugVTable, IDisplay, IDisplayVTable};
-use crate::ptr::{
-    from_raw, into_raw, metadata, CastSuper, FetchVTable, ObjInterface, ObjMetadata, ObjectId,
-    RawObj,
-};
-use crate::{base_interface, base_object, base_vtable, impl_upcast, DynObj, ObjBox, Optional};
-use std::marker::Unsize;
-use std::mem::MaybeUninit;
+use crate::ptr::{from_raw, into_raw, FetchVTable, RawObj};
+use crate::{interface, DynObj, ObjBox, ObjectId, Optional, ReprC};
 use std::ops::{Deref, DerefMut};
-use std::ptr::addr_of;
 
-base_interface! {
-    /// [`Error`]: std::error::Error equivalent for [`DynObj`] objects.
-    #![vtable = IErrorVTable]
-    #![uuid(0x4c9db273, 0xb5f5, 0x4edf, 0x9658, 0x4739f2bd4bc5)]
-    pub trait IError: (IDebug + IDisplay) {
-        /// The lower-level source of this error, if any.
-        fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
-            None
-        }
+/// [`Error`]: std::error::Error equivalent for [`DynObj`] objects.
+#[interface(
+    uuid = "4c9db273-b5f5-4edf-9658-4739f2bd4bc5",
+    vtable = "IErrorVTable",
+    generate(IDebugVTable, IDisplayVTable)
+)]
+pub trait IError: IDebug + IDisplay {
+    /// The lower-level source of this error, if any.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "Optional<RawObj<dyn IError + 'static>>",
+        into = "source_into",
+        from = "source_from"
+    )]
+    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+        None
     }
 }
 
-base_vtable! {
-    /// VTable for [`IError`] objects.
-    #![interface = IError]
-    pub struct IErrorVTable {
-        /// VTable to the [`IDebug`] implementation.
-        pub debug: IDebugVTable,
-        /// VTable to the [`IDisplay`] implementation.
-        pub display: IDisplayVTable,
-        /// The lower-level source of this error, if any.
-        pub source: extern "C-unwind" fn(*const ()) -> Optional<RawObj<dyn IError + 'static>>
-    }
+#[inline]
+fn source_into(s: Option<&DynObj<dyn IError + 'static>>) -> Optional<RawObj<dyn IError + 'static>> {
+    s.map(|s| into_raw(s)).into()
 }
 
-impl_upcast! {
-    impl (IError) -> (IDebug) obj: ObjMetadata<_> {
-        let vtable: &IErrorVTable = obj.vtable();
-        ObjMetadata::new(&vtable.debug)
-    }
-}
-
-impl_upcast! {
-    impl (IError) -> (IDisplay) obj: ObjMetadata<_> {
-        let vtable: &IErrorVTable = obj.vtable();
-        ObjMetadata::new(&vtable.display)
-    }
-}
-
-impl IErrorVTable {
-    /// Constructs a new vtable for a given type.
-    #[inline]
-    pub const fn new_for<'a, T>() -> Self
-    where
-        T: IError + ObjectId + 'a,
-    {
-        Self::new_for_embedded::<'a, T, dyn IError>(0)
-    }
-
-    /// Constructs a new vtable for a given type and interface with a custom offset.
-    #[inline]
-    pub const fn new_for_embedded<'a, T, Dyn>(offset: usize) -> Self
-    where
-        T: IError + ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
-    {
-        const UNINIT: MaybeUninit<IErrorVTable> = MaybeUninit::uninit();
-        const UNINIT_PTR: *const IErrorVTable = UNINIT.as_ptr();
-        const IDEBUG_VTABLE_PTR: *const IDebugVTable = unsafe { addr_of!((*UNINIT_PTR).debug) };
-        const IDISPLAY_VTABLE_PTR: *const IDisplayVTable =
-            unsafe { addr_of!((*UNINIT_PTR).display) };
-        const IDEBUG_OFFSET: usize = unsafe {
-            (IDEBUG_VTABLE_PTR as *const u8).offset_from(UNINIT_PTR as *const u8) as usize
-        };
-        const IDISPLAY_OFFSET: usize = unsafe {
-            (IDISPLAY_VTABLE_PTR as *const u8).offset_from(UNINIT_PTR as *const u8) as usize
-        };
-
-        extern "C-unwind" fn source<T: IError>(
-            ptr: *const (),
-        ) -> Optional<RawObj<dyn IError + 'static>> {
-            let t = unsafe { &*(ptr as *const T) };
-            t.source().map(|s| into_raw(s)).into()
-        }
-
-        Self::new_embedded::<T, Dyn>(
-            offset,
-            IDebugVTable::new_for_embedded::<T, Dyn>(IDEBUG_OFFSET),
-            IDisplayVTable::new_for_embedded::<T, Dyn>(IDISPLAY_OFFSET),
-            source::<T> as _,
-        )
-    }
+#[inline]
+fn source_from(s: Optional<RawObj<dyn IError + 'static>>) -> Option<&DynObj<dyn IError + 'static>> {
+    let source = s.into_rust()?;
+    unsafe { Some(&*from_raw(source)) }
 }
 
 impl<'a, T: IError + ?Sized> IError for &'a T {
@@ -105,22 +46,6 @@ impl<T: IError> IError for ObjBox<T> {
     #[inline]
     fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
         (**self).source()
-    }
-}
-
-impl<'a, T> IError for DynObj<T>
-where
-    T: CastSuper<dyn IDebug + 'a>
-        + CastSuper<dyn IDisplay + 'a>
-        + CastSuper<dyn IError + 'a>
-        + ?Sized,
-{
-    #[inline]
-    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
-        let vtable: &IErrorVTable = metadata(self).super_vtable::<dyn IError + 'a>();
-        (vtable.source)(self as *const _ as _)
-            .into_rust()
-            .map(|s| unsafe { &*(from_raw(s)) })
     }
 }
 
@@ -149,13 +74,10 @@ impl From<crate::String> for ObjBox<DynObj<dyn IError>> {
 impl From<crate::String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
     #[inline]
     fn from(v: crate::String) -> Self {
+        #[derive(ObjectId)]
+        #[fetch_vtable(interfaces(IError))]
         struct StringError {
             v: crate::String,
-        }
-
-        base_object! {
-            #![uuid(0x8626eb10, 0x89d3, 0x4a75, 0xb11d, 0x457e3c4daa9c)]
-            impl StringError
         }
 
         impl IDebug for StringError {
@@ -173,13 +95,6 @@ impl From<crate::String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
         impl IError for StringError {
             fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
                 None
-            }
-        }
-
-        impl FetchVTable<dyn IError> for StringError {
-            fn fetch_interface() -> &'static IErrorVTable {
-                static VTABLE: IErrorVTable = IErrorVTable::new_for::<StringError>();
-                &VTABLE
             }
         }
 
@@ -200,13 +115,10 @@ impl From<String> for ObjBox<DynObj<dyn IError>> {
 impl From<String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
     #[inline]
     fn from(v: String) -> Self {
+        #[derive(ObjectId)]
+        #[fetch_vtable(interfaces(IError))]
         struct StringError {
             v: String,
-        }
-
-        base_object! {
-            #![uuid(0xb569493b, 0xe573, 0x4efa, 0x84c9, 0x8b514e861a7b)]
-            impl StringError
         }
 
         impl IDebug for StringError {
@@ -227,13 +139,6 @@ impl From<String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
             }
         }
 
-        impl FetchVTable<dyn IError> for StringError {
-            fn fetch_interface() -> &'static IErrorVTable {
-                static VTABLE: IErrorVTable = IErrorVTable::new_for::<StringError>();
-                &VTABLE
-            }
-        }
-
         let v = StringError { v };
         let obj = ObjBox::new(v);
         ObjBox::coerce_obj(obj)
@@ -243,13 +148,10 @@ impl From<String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
 impl<'a, T: IError + 'a> From<T> for ObjBox<DynObj<dyn IError + 'a>> {
     #[inline]
     default fn from(v: T) -> Self {
+        #[derive(ObjectId)]
+        #[fetch_vtable(interfaces(IError))]
         struct ErrorWrapper<'a> {
             e: Box<dyn IError + 'a>,
-        }
-
-        base_object! {
-            #![uuid(0x30fd9f73, 0x42df, 0x41bc, 0xb462, 0x94385325cff7)]
-            generic<'a> ErrorWrapper<'a> => ErrorWrapper<'_>
         }
 
         impl IDebug for ErrorWrapper<'_> {
@@ -267,13 +169,6 @@ impl<'a, T: IError + 'a> From<T> for ObjBox<DynObj<dyn IError + 'a>> {
         impl IError for ErrorWrapper<'_> {
             fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
                 self.e.source()
-            }
-        }
-
-        impl<'a> FetchVTable<dyn IError + 'a> for ErrorWrapper<'a> {
-            fn fetch_interface() -> &'static IErrorVTable {
-                static VTABLE: IErrorVTable = IErrorVTable::new_for::<ErrorWrapper<'_>>();
-                &VTABLE
             }
         }
 
@@ -295,13 +190,10 @@ impl<'a, T: IError + FetchVTable<dyn IError + 'a> + 'a> From<T>
 impl<'a, T: IError + Send + Sync + 'a> From<T> for ObjBox<DynObj<dyn IError + Send + Sync + 'a>> {
     #[inline]
     default fn from(v: T) -> Self {
+        #[derive(ObjectId)]
+        #[fetch_vtable(interfaces(IError))]
         struct ErrorSendSync<'a> {
             e: Box<dyn IError + Send + Sync + 'a>,
-        }
-
-        base_object! {
-            #![uuid(0x5c76cb7f, 0x687c, 0x45a3, 0x94b3, 0x6c164fa923a6)]
-            generic<'a> ErrorSendSync<'a> => ErrorSendSync<'_>
         }
 
         impl IDebug for ErrorSendSync<'_> {
@@ -319,13 +211,6 @@ impl<'a, T: IError + Send + Sync + 'a> From<T> for ObjBox<DynObj<dyn IError + Se
         impl IError for ErrorSendSync<'_> {
             fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
                 self.e.source()
-            }
-        }
-
-        impl<'a> FetchVTable<dyn IError + 'a> for ErrorSendSync<'a> {
-            fn fetch_interface() -> &'static IErrorVTable {
-                static VTABLE: IErrorVTable = IErrorVTable::new_for::<ErrorSendSync<'_>>();
-                &VTABLE
             }
         }
 
@@ -439,6 +324,22 @@ impl Error {
                 kind,
                 error: error.into(),
             })),
+        }
+    }
+
+    /// Returns a reference to the inner error wrapped by this error (if any).
+    pub fn get_ref(&self) -> Option<&DynObj<dyn IError + Send + Sync + 'static>> {
+        match self.repr {
+            ErrorRepr::Simple(_) => None,
+            ErrorRepr::Custom(ref err) => Some(&err.error),
+        }
+    }
+
+    /// Returns a mutable reference to the inner error wrapped by this error (if any).
+    pub fn get_mut(&mut self) -> Option<&mut DynObj<dyn IError + Send + Sync + 'static>> {
+        match self.repr {
+            ErrorRepr::Simple(_) => None,
+            ErrorRepr::Custom(ref mut err) => Some(&mut err.error),
         }
     }
 
@@ -564,7 +465,6 @@ impl IError for Error {
 ///
 /// [gRPC status codes]: https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc
 #[repr(i8)]
-#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ErrorKind {
     /// The operation was cancelled.
@@ -654,4 +554,33 @@ impl std::fmt::Debug for CustomError {
             .field("error", FmtWrapper::new_ref(&self.error))
             .finish()
     }
+}
+
+/// Wraps an [`std::error::Error`] into an [`IError`].
+///
+/// # Note
+///
+/// The result does not contain the internal source error.
+pub fn wrap_error<T: std::error::Error + Send + Sync + 'static>(
+    err: T,
+) -> impl Into<ObjBox<DynObj<dyn IError + Send + Sync>>> {
+    struct Wrapper<T> {
+        err: T,
+    }
+
+    impl<T: std::error::Error> IDebug for Wrapper<T> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+            write!(f, "{:?}", self.err)
+        }
+    }
+
+    impl<T: std::error::Error> IDisplay for Wrapper<T> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), crate::fmt::Error> {
+            write!(f, "{}", self.err)
+        }
+    }
+
+    impl<T: std::error::Error> IError for Wrapper<T> {}
+
+    Wrapper { err }
 }

@@ -1,21 +1,18 @@
 //! Definition of the `fimo-actix` interface.
-#![feature(const_fn_fn_ptr_basics)]
-#![feature(const_fn_trait_bound)]
-#![feature(unboxed_closures)]
-#![feature(fn_traits)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+#![feature(const_ptr_offset_from)]
+#![feature(unsize)]
+
 use actix_web::Scope;
-use fimo_version_core::{ReleaseType, Version};
 
 pub use actix_web as actix;
-use fimo_ffi::marker::SendSyncMarker;
-use fimo_ffi::FfiFn;
-use fimo_module::{fimo_interface, fimo_vtable};
+use fimo_ffi::{interface, FfiFn, ReleaseType, Version};
+use fimo_module::{FimoInterface, IModuleInterface, IModuleInterfaceVTable};
 
 /// Status of the server.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -53,182 +50,152 @@ pub enum ServerEvent {
     Aborted,
 }
 
-fimo_interface! {
-    /// The fimo-actix interface.
-    #![vtable = IFimoActixVTable]
-    pub struct IFimoActix {
-        name: "fimo::interfaces::actix::fimo_actix",
-        version: Version::new_long(0, 1, 0, ReleaseType::Unstable, 0)
-    }
-}
-
-impl IFimoActix {
+/// The fimo-actix interface.
+#[interface(
+    uuid = "85fa7a5f-959d-40c6-8d7a-ccd4dea654cf",
+    vtable = "IFimoActixVTable",
+    generate(IModuleInterfaceVTable)
+)]
+pub trait IFimoActix: IModuleInterface {
     /// Starts the server if it is not running.
-    #[inline]
-    pub fn start(&self) -> ServerStatus {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.start)(ptr) }
-    }
+    fn start(&self) -> ServerStatus;
 
     /// Stops the server if it is running.
-    #[inline]
-    pub fn stop(&self) -> ServerStatus {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.stop)(ptr) }
-    }
+    fn stop(&self) -> ServerStatus;
 
     /// Pauses the server if it is running.
-    #[inline]
-    pub fn pause(&self) -> ServerStatus {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.pause)(ptr) }
-    }
+    fn pause(&self) -> ServerStatus;
 
     /// Resumes the server if it is paused.
-    #[inline]
-    pub fn resume(&self) -> ServerStatus {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.resume)(ptr) }
-    }
+    fn resume(&self) -> ServerStatus;
 
     /// Restarts the server if it is running.
-    #[inline]
-    pub fn restart(&self) -> ServerStatus {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.restart)(ptr) }
-    }
+    fn restart(&self) -> ServerStatus;
 
     /// Fetches the status of the server.
-    #[inline]
-    pub fn get_server_status(&self) -> ServerStatus {
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.get_server_status)(ptr) }
-    }
+    fn get_server_status(&self) -> ServerStatus;
 
     /// Registers a new scope for the server.
     ///
     /// The provided builder function is called, when the server is starting.
     /// The builder may not call into the interface.
-    #[inline]
-    pub fn register_scope<'a, F: Fn(Scope) -> Scope + Send + Sync + 'static>(
-        &'a self,
-        path: &'a str,
-        builder: Box<F>,
-    ) -> Option<ScopeBuilderGuard<'a>> {
-        let scope_builder = ScopeBuilder::from(builder);
+    fn register_scope_raw(
+        &self,
+        path: &str,
+        builder: ScopeBuilder,
+    ) -> fimo_module::Result<ScopeBuilderId>;
 
-        let path_ptr = path as *const _;
-        let (ptr, vtable) = self.into_raw_parts();
+    /// Unregisters a scope.
+    fn unregister_scope_raw(&self, id: ScopeBuilderId) -> fimo_module::Result<()>;
 
-        let id = unsafe { (vtable.register_scope)(ptr, path_ptr, scope_builder) };
+    /// Registers a callback that is called every time the server status changes.
+    ///
+    /// The function may not call into the interface.
+    fn register_callback_raw(&self, f: Callback) -> fimo_module::Result<CallbackId>;
 
-        id.map(|id| ScopeBuilderGuard {
+    /// Unregisters a callback.
+    fn unregister_callback_raw(&self, id: CallbackId) -> fimo_module::Result<()>;
+}
+
+impl FimoInterface for dyn IFimoActix {
+    const NAME: &'static str = "fimo::interfaces::actix::fimo_actix";
+    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
+    const EXTENSIONS: &'static [&'static str] = &[];
+}
+
+/// Extension trait for all implementors of [`IFimoActix`].
+pub trait IFimoActixExt: IFimoActix {
+    /// Registers a new scope for the server.
+    ///
+    /// The provided builder function is called, when the server is starting.
+    /// The builder may not call into the interface.
+    fn register_scope<F>(
+        &self,
+        path: &str,
+        f: F,
+    ) -> fimo_module::Result<ScopeBuilderGuard<'_, Self>>
+    where
+        F: Fn(Scope) -> Scope + Send + Sync + 'static,
+    {
+        let f = ScopeBuilder::r#box(Box::new(f));
+        let id = self.register_scope_raw(path, f)?;
+        Ok(ScopeBuilderGuard {
             id,
             interface: self,
         })
     }
 
     /// Unregisters a scope.
-    ///
-    /// Equivalent to calling `drop(guard)`.
-    #[inline]
-    pub fn unregister_scope(&self, guard: ScopeBuilderGuard<'_>) {
-        drop(guard)
-    }
-
-    #[inline]
-    fn unregister_scope_inner(&self, id: ScopeBuilderId) {
-        // unregister builder.
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.unregister_scope)(ptr, id) }
+    fn unregister_scope(&self, guard: ScopeBuilderGuard<'_, Self>) -> fimo_module::Result<()> {
+        let id = unsafe { std::ptr::read(&guard.id) };
+        std::mem::forget(guard);
+        self.unregister_scope_raw(id)
     }
 
     /// Registers a callback that is called every time the server status changes.
     ///
     /// The function may not call into the interface.
-    pub fn register_callback<F: FnMut(ServerEvent) + Send + Sync + 'static>(
-        &self,
-        f: Box<F>,
-    ) -> CallbackGuard<'_> {
-        let callback = Callback::from(f);
-        let (ptr, vtable) = self.into_raw_parts();
-
-        let id = unsafe { (vtable.register_callback)(ptr, callback) };
-
-        CallbackGuard {
+    fn register_callback<F>(&self, f: F) -> fimo_module::Result<CallbackGuard<'_, Self>>
+    where
+        F: FnMut(ServerEvent) + Send + Sync + 'static,
+    {
+        let f = Callback::r#box(Box::new(f));
+        let id = self.register_callback_raw(f)?;
+        Ok(CallbackGuard {
             id,
             interface: self,
-        }
+        })
     }
 
     /// Unregisters a callback.
-    ///
-    /// Equivalent to calling `drop(guard)`.
-    #[inline]
-    pub fn unregister_callback(&self, guard: CallbackGuard<'_>) {
-        drop(guard)
-    }
-
-    #[inline]
-    fn unregister_callback_inner(&self, id: CallbackId) {
-        // unregister callback
-        let (ptr, vtable) = self.into_raw_parts();
-        unsafe { (vtable.unregister_callback)(ptr, id) }
+    fn unregister_callback(&self, guard: CallbackGuard<'_, Self>) -> fimo_module::Result<()> {
+        let id = unsafe { std::ptr::read(&guard.id) };
+        std::mem::forget(guard);
+        self.unregister_callback_raw(id)
     }
 }
 
-fimo_vtable! {
-    /// VTable of a [`IFimoActix`].
-    #[allow(clippy::type_complexity)]
-    #[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-    #![marker = SendSyncMarker]
-    #![uuid(0x85fa7a5f, 0x959d, 0x40c6, 0x8d7a, 0xccd4dea654cf)]
-    pub struct IFimoActixVTable {
-        /// Starts the server if it is not running.
-        pub start: unsafe fn(*const ()) -> ServerStatus,
-        /// Stops the server if it is running.
-        pub stop: unsafe fn(*const ()) -> ServerStatus,
-        /// Pauses the server if it is running.
-        pub pause: unsafe fn(*const ()) -> ServerStatus,
-        /// Resumes the server if it is paused.
-        pub resume: unsafe fn(*const ()) -> ServerStatus,
-        /// Restarts the server if it is running.
-        pub restart: unsafe fn(*const ()) -> ServerStatus,
-        /// Fetches the status of the server.
-        pub get_server_status: unsafe fn(*const ()) -> ServerStatus,
-        /// Registers a new scope for the server.
-        ///
-        /// The provided builder function is called, when the server is starting.
-        /// The builder may not call into the interface.
-        pub register_scope: unsafe fn(*const (), *const str, ScopeBuilder) -> Option<ScopeBuilderId>,
-        /// Unregisters a scope.
-        pub unregister_scope: unsafe fn(*const (), ScopeBuilderId),
-        /// Registers a callback that is called every time the server status changes.
-        ///
-        /// The function may not call into the interface.
-        pub register_callback: unsafe fn(*const (), Callback) -> CallbackId,
-        /// Unregisters a callback.
-        pub unregister_callback: unsafe fn(*const (), CallbackId),
-    }
-}
+impl<T: IFimoActix + ?Sized> IFimoActixExt for T {}
 
 /// A RAII guard for scopes.
 #[derive(Debug)]
-pub struct ScopeBuilderGuard<'a> {
+pub struct ScopeBuilderGuard<'a, I: IFimoActix + ?Sized> {
     id: ScopeBuilderId,
-    interface: &'a IFimoActix,
+    interface: &'a I,
 }
 
-impl Drop for ScopeBuilderGuard<'_> {
+impl<'a, I: IFimoActix + ?Sized> ScopeBuilderGuard<'a, I> {
+    /// Constructs a new `ScopeBuilderGuard` from its raw parts.
+    ///
+    /// # Safety
+    ///
+    /// The id must be registered and owned by the caller.
+    pub unsafe fn from_raw_parts(id: ScopeBuilderId, interface: &'a I) -> Self {
+        Self { id, interface }
+    }
+
+    /// Splits the `ScopeBuilderGuard` into its constituents without dropping it.
+    pub fn into_raw_parts(self) -> (ScopeBuilderId, &'a I) {
+        let id = unsafe { std::ptr::read(&self.id) };
+        let interface = self.interface;
+        std::mem::forget(self);
+        (id, interface)
+    }
+}
+
+impl<I: IFimoActix + ?Sized> Drop for ScopeBuilderGuard<'_, I> {
     #[inline]
     fn drop(&mut self) {
         let id = unsafe { std::ptr::read(&self.id) };
-        self.interface.unregister_scope_inner(id);
+        self.interface
+            .unregister_scope_raw(id)
+            .expect("could not drop the ScopeBuilderGuard");
     }
 }
 
 /// Id of a callback.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct ScopeBuilderId(usize);
 
 impl ScopeBuilderId {
@@ -250,21 +217,43 @@ impl From<ScopeBuilderId> for usize {
 
 /// A RAII guard for callbacks.
 #[derive(Debug)]
-pub struct CallbackGuard<'a> {
+pub struct CallbackGuard<'a, I: IFimoActix + ?Sized> {
     id: CallbackId,
-    interface: &'a IFimoActix,
+    interface: &'a I,
 }
 
-impl Drop for CallbackGuard<'_> {
+impl<'a, I: IFimoActix + ?Sized> CallbackGuard<'a, I> {
+    /// Constructs a new `CallbackGuard` from its raw parts.
+    ///
+    /// # Safety
+    ///
+    /// The id must be registered and owned by the caller.
+    pub unsafe fn from_raw_parts(id: CallbackId, interface: &'a I) -> Self {
+        Self { id, interface }
+    }
+
+    /// Splits the `CallbackGuard` into its constituents without dropping it.
+    pub fn into_raw_parts(self) -> (CallbackId, &'a I) {
+        let id = unsafe { std::ptr::read(&self.id) };
+        let interface = self.interface;
+        std::mem::forget(self);
+        (id, interface)
+    }
+}
+
+impl<I: IFimoActix + ?Sized> Drop for CallbackGuard<'_, I> {
     #[inline]
     fn drop(&mut self) {
         let id = unsafe { std::ptr::read(&self.id) };
-        self.interface.unregister_callback_inner(id);
+        self.interface
+            .unregister_callback_raw(id)
+            .expect("could not drop the CallbackGuard");
     }
 }
 
 /// Id of a callback.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct CallbackId(usize);
 
 impl CallbackId {
@@ -285,68 +274,7 @@ impl From<CallbackId> for usize {
 }
 
 /// A scope builder.
-#[derive(Debug)]
-pub struct ScopeBuilder {
-    inner: FfiFn<'static, dyn Fn(Scope) -> Scope + Send + Sync>,
-}
-
-impl FnOnce<(Scope,)> for ScopeBuilder {
-    type Output = Scope;
-
-    #[inline]
-    extern "rust-call" fn call_once(self, args: (Scope,)) -> Self::Output {
-        self.inner.call_once(args)
-    }
-}
-
-impl FnMut<(Scope,)> for ScopeBuilder {
-    #[inline]
-    extern "rust-call" fn call_mut(&mut self, args: (Scope,)) -> Self::Output {
-        self.inner.call_mut(args)
-    }
-}
-
-impl Fn<(Scope,)> for ScopeBuilder {
-    #[inline]
-    extern "rust-call" fn call(&self, args: (Scope,)) -> Self::Output {
-        self.inner.call(args)
-    }
-}
-
-impl<F: Fn(Scope) -> Scope + Send + Sync + 'static> From<Box<F>> for ScopeBuilder {
-    fn from(b: Box<F>) -> Self {
-        Self {
-            inner: FfiFn::r#box(b),
-        }
-    }
-}
+pub type ScopeBuilder = FfiFn<'static, dyn Fn(Scope) -> Scope + Send + Sync>;
 
 /// A callback.
-#[derive(Debug)]
-pub struct Callback {
-    inner: FfiFn<'static, dyn FnMut(ServerEvent) + Send + Sync>,
-}
-
-impl FnOnce<(ServerEvent,)> for Callback {
-    type Output = ();
-
-    #[inline]
-    extern "rust-call" fn call_once(self, args: (ServerEvent,)) -> Self::Output {
-        self.inner.call_once(args)
-    }
-}
-
-impl FnMut<(ServerEvent,)> for Callback {
-    #[inline]
-    extern "rust-call" fn call_mut(&mut self, args: (ServerEvent,)) -> Self::Output {
-        self.inner.call_mut(args)
-    }
-}
-
-impl<F: FnMut(ServerEvent) + Send + Sync + 'static> From<Box<F>> for Callback {
-    fn from(b: Box<F>) -> Self {
-        Self {
-            inner: FfiFn::r#box(b),
-        }
-    }
-}
+pub type Callback = FfiFn<'static, dyn FnMut(ServerEvent) + Send + Sync>;
