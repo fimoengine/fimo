@@ -799,6 +799,7 @@ pub trait ISchedulerContext: IBase + Send + Sync {
     /// # Note
     ///
     /// Must be implemented atomically.
+    /// The runtime may not be notified if this is called outside of the scheduler.
     #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
     fn set_resume_time(
         &self,
@@ -1021,7 +1022,7 @@ pub trait ISchedulerContext: IBase + Send + Sync {
 
 /// Access to the atomic member functions of [`ISchedulerContext`].
 ///
-/// Bypasses the [`RefCell`] allowing access while the context is borrowed.
+/// Bypasses the [`AtomicRefCell`] allowing access while the context is borrowed.
 pub struct AtomicISchedulerContext<'a> {
     context: &'a AtomicRefCell<DynObj<dyn ISchedulerContext + 'a>>,
 }
@@ -1052,6 +1053,10 @@ impl AtomicISchedulerContext<'_> {
     }
 
     /// Advances the internal timer to the provided time.
+    ///
+    /// # Note
+    ///
+    /// The runtime may not be notified if this is called outside of the scheduler.
     #[inline]
     pub fn set_resume_time(&self, time: SystemTime) {
         let ptr = self.context.as_ptr();
