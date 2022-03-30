@@ -9,7 +9,7 @@ use log::trace;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 #[thread_local]
 static RUNTIME: std::cell::Cell<Option<*const DynObj<dyn IRuntime>>> = std::cell::Cell::new(None);
@@ -259,7 +259,22 @@ pub trait IRuntimeExt: IRuntime {
         self.yield_and_enter(|_, _| {})
     }
 
-    /// Yields the current task to the runtime.
+    /// Yields the current task to the runtime for at least the specified amount of time.
+    ///
+    /// Yields the current task to the runtime, allowing other tasks to be
+    /// run on the current worker. The task won't resume until the duration
+    /// `dur`
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
+    #[inline]
+    fn yield_for(&self, dur: Duration) {
+        let until = SystemTime::now() + dur;
+        self.yield_until(until)
+    }
+
+    /// Yields the current task to the runtime until at least the specified time has passed.
     ///
     /// Yields the current task to the runtime, allowing other tasks to be
     /// run on the current worker. The task won't resume until the instant
