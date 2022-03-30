@@ -24,7 +24,6 @@
 #![feature(negative_impls)]
 #![feature(allocator_api)]
 #![feature(const_convert)]
-#![feature(set_ptr_value)]
 #![feature(slice_ptr_len)]
 #![feature(cfg_sanitize)]
 #![feature(ptr_metadata)]
