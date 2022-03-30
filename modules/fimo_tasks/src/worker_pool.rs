@@ -5,9 +5,9 @@ use context::stack::ProtectedFixedSizeStack;
 use context::{Context, Transfer};
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use fimo_ffi::error::wrap_error;
-use fimo_ffi::FfiFn;
+use fimo_ffi::{DynObj, FfiFn};
 use fimo_module::{Error, ErrorKind};
-use fimo_tasks_int::raw::{TaskScheduleStatus, WorkerId};
+use fimo_tasks_int::raw::{IRawTask, TaskScheduleStatus, WorkerId};
 use fimo_tasks_int::runtime::init_runtime;
 use log::{debug, error, info, trace, warn};
 use parking_lot::{Condvar, Mutex, MutexGuard};
@@ -158,7 +158,22 @@ pub(crate) struct WorkerInner {
     sender: Sender<Msg<'static>>,
     worker: Arc<TaskWorker>,
     local_queue: Worker<AssertValidTask>,
-    current_task: Cell<Option<AssertValidTask>>,
+    current_task: Cell<Option<CopyTask>>,
+}
+
+#[derive(Clone, Copy)]
+struct CopyTask(&'static DynObj<dyn IRawTask + 'static>);
+
+impl CopyTask {
+    #[inline]
+    fn from_task(t: AssertValidTask) -> Self {
+        unsafe { Self(&*(t.as_raw() as *const _)) }
+    }
+
+    #[inline]
+    fn into_task(self) -> AssertValidTask {
+        unsafe { AssertValidTask::from_raw(self.0) }
+    }
 }
 
 impl WorkerInner {
@@ -169,7 +184,7 @@ impl WorkerInner {
 
     #[inline]
     pub fn current_task(&self) -> Option<AssertValidTask> {
-        self.current_task.get()
+        self.current_task.get().map(|t| t.into_task())
     }
 
     #[inline]
@@ -396,7 +411,9 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
                 worker.worker.id,
                 context.handle()
             );
-            worker.current_task.set(Some(task));
+            worker
+                .current_task
+                .set(Some(CopyTask::from_task(task.clone())));
 
             // register task with current worker.
             unsafe { context.set_worker(Some(worker.worker.id)) };
@@ -457,7 +474,7 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
     let Transfer { context, .. } = {
         // take the context of the current task.
         let worker = WORKER.get().unwrap_unchecked();
-        let task = worker.current_task.get().unwrap_unchecked();
+        let task = worker.current_task.get().unwrap_unchecked().into_task();
 
         let worker_context = {
             let mut scheduler_context = task.context().borrow_mut();
@@ -484,7 +501,7 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
     // with and we must ensure that the access to the thread_local WORKER isn't
     // elided with the old one.
     let worker = std::ptr::read_volatile(&WORKER).get().unwrap_unchecked();
-    let task = worker.current_task.get().unwrap_unchecked();
+    let task = worker.current_task.get().unwrap_unchecked().into_task();
     let mut scheduler_context = task.context().borrow_mut();
     let _ = scheduler_context
         .scheduler_data_mut()
@@ -502,7 +519,7 @@ pub(crate) extern "C" fn task_main(thread_context: Transfer) -> ! {
     loop {
         // fetch the worker and write back the thread context.
         let worker = unsafe { WORKER.get().unwrap_unchecked() };
-        let task = unsafe { worker.current_task.get().unwrap_unchecked() };
+        let task = unsafe { worker.current_task.get().unwrap_unchecked().into_task() };
         let mut context = task.context().borrow_mut();
         let _ = unsafe {
             context
