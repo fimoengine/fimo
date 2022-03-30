@@ -191,12 +191,7 @@ impl TaskScheduler {
         trace!("Cleaning up task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
         debug!("Task schedule status: {:?}", context.schedule_status());
-        debug!("Number of waiters: {}", unsafe {
-            context.scheduler_data().waiters.len()
-        });
-        debug!("Number of dependencies: {}", unsafe {
-            context.scheduler_data().dependencies.len()
-        });
+        debug!("Task data: {:?}", unsafe { context.scheduler_data() });
 
         // task should not be running or have any dependencies at this point
         debug_assert_eq!(context.run_status(), TaskRunStatus::Idle);
@@ -256,11 +251,7 @@ impl TaskScheduler {
 
             debug!("Task run status: {:?}", run_status);
             debug!("Task schedule status: {:?}", schedule_status);
-            debug!("Number of waiters: {}", scheduler_data.waiters.len());
-            debug!(
-                "Number of dependencies: {}",
-                scheduler_data.dependencies.len()
-            );
+            debug!("Task data: {:?}", scheduler_data);
 
             // task should not be running
             debug_assert_eq!(run_status, TaskRunStatus::Idle);
@@ -317,11 +308,7 @@ impl TaskScheduler {
             trace!("Task {} processed", context.handle());
             debug!("Task run status: {:?}", context.run_status());
             debug!("Task schedule status: {:?}", context.schedule_status());
-            debug!("Number of waiters: {}", scheduler_data.waiters.len());
-            debug!(
-                "Number of dependencies: {}",
-                scheduler_data.dependencies.len()
-            );
+            debug!("Task data: {:?}", scheduler_data);
 
             // remove the processing flag.
             let scheduler_data = unsafe { context.scheduler_data_mut() };
@@ -392,11 +379,7 @@ impl TaskScheduler {
             );
             debug!("Task run status: {:?}", run_status);
             debug!("Task schedule status: {:?}", schedule_status);
-            debug!("Number of waiters: {}", scheduler_data.waiters.len());
-            debug!(
-                "Number of dependencies: {}",
-                scheduler_data.dependencies.len()
-            );
+            debug!("Task data: {:?}", scheduler_data);
             debug_assert_eq!(run_status, TaskRunStatus::Idle);
 
             // The `wait_task_on` method can change the status of a runnable

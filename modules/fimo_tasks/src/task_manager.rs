@@ -237,12 +237,7 @@ impl TaskManager {
         trace!("Unregistering task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
         debug!("Task schedule status: {:?}", context.schedule_status());
-        debug!("Number of waiters: {}", unsafe {
-            context.scheduler_data().waiters.len()
-        });
-        debug!("Number of dependencies: {}", unsafe {
-            context.scheduler_data().dependencies.len()
-        });
+        debug!("Task data: {:?}", unsafe { context.scheduler_data() });
 
         if context.run_status() != TaskRunStatus::Completed {
             error!("Task {} has not been completed", context.handle());
@@ -253,7 +248,7 @@ impl TaskManager {
         // the task has been completed, we only need to unregister it and free the handle.
         let (handle, data) = unsafe { context.unregister() };
 
-        debug_assert!(matches!(self.tasks.remove(&handle), Some(_)));
+        assert!(matches!(self.tasks.remove(&handle), Some(_)));
         debug_assert!(data.dependencies.is_empty());
         debug_assert!(data.waiters.is_empty());
 
@@ -288,12 +283,7 @@ impl TaskManager {
         );
         debug!("Task run status: {:?}", context.run_status());
         debug!("Task schedule status: {:?}", context.schedule_status());
-        debug!("Number of waiters: {}", unsafe {
-            context.scheduler_data().waiters.len()
-        });
-        debug!("Number of dependencies: {}", unsafe {
-            context.scheduler_data().dependencies.len()
-        });
+        debug!("Task data: {:?}", unsafe { context.scheduler_data() });
 
         // check that the task has not been completed.
         if context.run_status() == TaskRunStatus::Completed {
@@ -350,14 +340,7 @@ impl TaskManager {
         trace!("Notifying one waiter of task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
         debug!("Task schedule status: {:?}", context.schedule_status());
-        debug!(
-            "Number of waiters: {}",
-            context.scheduler_data().waiters.len()
-        );
-        debug!(
-            "Number of dependencies: {}",
-            context.scheduler_data().dependencies.len()
-        );
+        debug!("Task data: {:?}", context.scheduler_data());
 
         if !context.is_registered() {
             error!("Task {} is not registered", context.handle());
@@ -385,14 +368,7 @@ impl TaskManager {
         trace!("Notifying all waiters of task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
         debug!("Task schedule status: {:?}", context.schedule_status());
-        debug!(
-            "Number of waiters: {}",
-            context.scheduler_data().waiters.len()
-        );
-        debug!(
-            "Number of dependencies: {}",
-            context.scheduler_data().dependencies.len()
-        );
+        debug!("Task data: {:?}", context.scheduler_data());
 
         if !context.is_registered() {
             error!("Task {} is not registered", context.handle());
@@ -421,35 +397,28 @@ impl TaskManager {
 
         trace!(
             "Notifying waiter {} that {} finished",
-            (*waiter_context).handle(),
-            (*task_context).handle()
+            waiter_context.handle(),
+            task_context.handle()
         );
-        debug!("Waiter run status: {:?}", (*waiter_context).run_status());
+        debug!("Waiter run status: {:?}", waiter_context.run_status());
         debug!(
             "Waiter schedule status: {:?}",
-            (*waiter_context).schedule_status()
+            waiter_context.schedule_status()
         );
-        debug!(
-            "Number of waiters: {}",
-            (*waiter_context).scheduler_data().waiters.len()
-        );
-        debug!(
-            "Number of dependencies: {}",
-            (*waiter_context).scheduler_data().dependencies.len()
-        );
+        debug!("Task data: {:?}", waiter_context.scheduler_data());
 
         // the waiter must be either blocked or waiting.
         debug_assert!(matches!(
-            (*waiter_context).schedule_status(),
+            waiter_context.schedule_status(),
             TaskScheduleStatus::Blocked | TaskScheduleStatus::Waiting
         ));
 
         // cache schedule status.
-        let handle = (*waiter_context).handle();
-        let schedule_status = (*waiter_context).schedule_status();
+        let handle = waiter_context.handle();
+        let schedule_status = waiter_context.schedule_status();
 
         let waiter_data = waiter_context.scheduler_data_mut();
-        debug_assert!(waiter_data.dependencies.remove(&task));
+        assert!(waiter_data.dependencies.remove(&task));
 
         // make the task runnable if nothing prevents it.
         if waiter_data.dependencies.is_empty() && schedule_status == TaskScheduleStatus::Waiting {
@@ -467,12 +436,7 @@ impl TaskManager {
         trace!("Unblocking task {}", context.handle());
         debug!("Task run status: {:?}", context.run_status());
         debug!("Task schedule status: {:?}", context.schedule_status());
-        debug!("Number of waiters: {}", unsafe {
-            context.scheduler_data().waiters.len()
-        });
-        debug!("Number of dependencies: {}", unsafe {
-            context.scheduler_data().dependencies.len()
-        });
+        debug!("Task data: {:?}", unsafe { context.scheduler_data() });
 
         if context.schedule_status() != TaskScheduleStatus::Blocked {
             error!(
@@ -813,7 +777,7 @@ impl<'a> SchedulerContext<'a> {
     }
 }
 
-#[derive(ObjectId)]
+#[derive(Debug, ObjectId)]
 #[fetch_vtable(uuid = "c68fe659-beef-4341-9b75-f54b0ef387ff")]
 pub(crate) struct ContextData {
     pub processing: bool,
