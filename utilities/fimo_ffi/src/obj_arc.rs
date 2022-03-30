@@ -620,7 +620,9 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
         let offset = data_offset(ptr);
 
         // reverse the offset to find the original `ObjArcInner`.
-        let arc_ptr = (ptr as *mut ObjArcInner<T>).set_ptr_value((ptr as *mut u8).offset(-offset));
+        let offset_ptr = (ptr as *mut u8).offset(-offset);
+        let metadata = std::ptr::metadata(ptr as *mut ObjArcInner<T>);
+        let arc_ptr = std::ptr::from_raw_parts_mut(offset_ptr as *mut (), metadata);
 
         ObjArc {
             ptr: NonNull::new_unchecked(arc_ptr),
@@ -1801,7 +1803,10 @@ impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
             let offset = data_offset(ptr);
             // Thus, we reverse the offset to get the whole RcBox.
             // SAFETY: the pointer originated from a Weak, so this offset is safe.
-            (ptr as *mut ObjArcInner<T>).set_ptr_value((ptr as *mut u8).offset(-offset))
+
+            let offset_ptr = (ptr as *mut u8).offset(-offset);
+            let metadata = std::ptr::metadata(ptr as *mut ObjArcInner<T>);
+            std::ptr::from_raw_parts_mut(offset_ptr as *mut (), metadata)
         };
 
         // SAFETY: we now have recovered the original Weak pointer, so can create the Weak.
