@@ -1,7 +1,7 @@
 //! Raw tasks primitives.
 
 use atomic::Atomic;
-use fimo_ffi::cell::RefCell;
+use fimo_ffi::cell::AtomicRefCell;
 use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::obj_box::RawObjBox;
 use fimo_ffi::ptr::{IBase, RawObj, RawObjMut};
@@ -106,10 +106,8 @@ pub enum TaskScheduleStatus {
 #[fetch_vtable(uuid = "eb91ee4a-22d2-4b91-9e06-0994f0d79b0f", interfaces(IRawTask))]
 pub struct RawTaskInner<'a> {
     info: TaskInfo,
-    data: RefCell<SchedulerContextInner<'a>>,
+    data: AtomicRefCell<SchedulerContextInner<'a>>,
 }
-
-unsafe impl<'a> Sync for RawTaskInner<'a> where SchedulerContextInner<'a>: Sync {}
 
 impl<'a> IRawTask for RawTaskInner<'a> {
     #[inline]
@@ -128,7 +126,7 @@ impl<'a> IRawTask for RawTaskInner<'a> {
     }
 
     #[inline]
-    fn context(&self) -> &RefCell<DynObj<dyn ISchedulerContext + '_>> {
+    fn context(&self) -> &AtomicRefCell<DynObj<dyn ISchedulerContext + '_>> {
         self.data.coerce_obj()
     }
 }
@@ -228,7 +226,8 @@ impl Builder {
     ) -> RawTaskInner<'a> {
         RawTaskInner {
             info: self.info,
-            data: RefCell::new(SchedulerContextInner {
+            data: AtomicRefCell::new(SchedulerContextInner {
+                is_empty: f.is_none(),
                 panicking: Atomic::new(false),
                 registered: Atomic::new(false),
                 handle: Atomic::new(MaybeUninit::uninit()),
@@ -246,9 +245,9 @@ impl Builder {
                 request: Atomic::new(self.status),
                 run_status: Atomic::new(TaskRunStatus::Idle),
                 schedule_status: Atomic::new(TaskScheduleStatus::Runnable),
-                cleanup_func: cleanup,
-                entry_func: f,
-                panic_data: None,
+                cleanup_func: SyncWrapper::new(cleanup),
+                entry_func: SyncWrapper::new(f),
+                panic_data: SyncWrapper::new(None),
                 scheduler_data: None,
                 _pinned: Default::default(),
             }),
@@ -306,20 +305,20 @@ pub trait IRawTask: IBase + Send + Sync {
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
-        return_type = "*const RefCell<DynObj<dyn ISchedulerContext + 'static>>",
+        return_type = "*const AtomicRefCell<DynObj<dyn ISchedulerContext + 'static>>",
         into_expr = "
             std::mem::transmute
-                ::<*const RefCell<DynObj<dyn ISchedulerContext + '_>>, 
-                    *const RefCell<DynObj<dyn ISchedulerContext + 'static>>>(res)",
+                ::<*const AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>, 
+                    *const AtomicRefCell<DynObj<dyn ISchedulerContext + 'static>>>(res)",
         from_expr = "
             unsafe {
                 let res = std::mem::transmute
-                    ::<*const RefCell<DynObj<dyn ISchedulerContext + 'static>>, 
-                        *const RefCell<DynObj<dyn ISchedulerContext + '_>>>(res);
+                    ::<*const AtomicRefCell<DynObj<dyn ISchedulerContext + 'static>>, 
+                        *const AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>>(res);
                 &*res
             }"
     )]
-    fn context(&self) -> &RefCell<DynObj<dyn ISchedulerContext + '_>>;
+    fn context(&self) -> &AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>;
 
     /// Returns an atomic view to the context.
     ///
@@ -449,6 +448,7 @@ pub enum StatusRequest {
     interfaces(ISchedulerContext)
 )]
 pub(crate) struct SchedulerContextInner<'a> {
+    is_empty: bool,
     panicking: Atomic<bool>,
     registered: Atomic<bool>,
     // may use locks on some architectures
@@ -458,15 +458,61 @@ pub(crate) struct SchedulerContextInner<'a> {
     request: Atomic<StatusRequest>,
     run_status: Atomic<TaskRunStatus>,
     schedule_status: Atomic<TaskScheduleStatus>,
-    cleanup_func: Option<FfiFn<'a, dyn FnOnce() + Send + 'a>>,
-    entry_func: Option<FfiFn<'a, dyn FnOnce() + Send + 'a>>,
-    panic_data: Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>,
+    cleanup_func: SyncWrapper<Option<FfiFn<'a, dyn FnOnce() + Send + 'a>>>,
+    entry_func: SyncWrapper<Option<FfiFn<'a, dyn FnOnce() + Send + 'a>>>,
+    panic_data: SyncWrapper<Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>>,
     scheduler_data: Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
     _pinned: PhantomPinned,
 }
 
-unsafe impl Send for SchedulerContextInner<'_> {}
-unsafe impl Sync for SchedulerContextInner<'_> {}
+struct SyncWrapper<T> {
+    init: bool,
+    val: MaybeUninit<T>,
+}
+
+impl<T> SyncWrapper<T> {
+    #[inline]
+    fn new(val: T) -> Self {
+        Self {
+            init: true,
+            val: MaybeUninit::new(val),
+        }
+    }
+
+    #[inline]
+    fn is_init(&self) -> bool {
+        self.init
+    }
+
+    #[inline]
+    fn take(&mut self) -> T {
+        assert!(self.init, "value already taken");
+        self.init = false;
+        unsafe { self.val.assume_init_read() }
+    }
+
+    #[inline]
+    fn write(&mut self, val: T) -> Option<T> {
+        let mut val = MaybeUninit::new(val);
+        std::mem::swap(&mut self.val, &mut val);
+
+        if std::mem::take(&mut self.init) {
+            unsafe { Some(val.assume_init()) }
+        } else {
+            None
+        }
+    }
+}
+
+unsafe impl<T: Send> Sync for SyncWrapper<T> {}
+
+impl<T> Drop for SyncWrapper<T> {
+    fn drop(&mut self) {
+        if self.init {
+            unsafe { self.val.assume_init_drop() }
+        }
+    }
+}
 
 impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
     #[inline]
@@ -485,7 +531,7 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
         handle: TaskHandle,
         scheduler_data: Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
     ) {
-        assert!(!self.is_registered());
+        assert!(!self.is_registered(), "task already registered");
 
         self.handle
             .store(MaybeUninit::new(handle), Ordering::Release);
@@ -500,7 +546,7 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
         TaskHandle,
         Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
     ) {
-        assert!(self.is_registered());
+        assert!(self.is_registered(), "task is not registered");
 
         let handle = self.handle().assume_init();
         let data = self.scheduler_data.take();
@@ -594,13 +640,16 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
 
     #[inline]
     fn is_empty_task(&self) -> bool {
-        self.entry_func.is_none()
+        self.is_empty
     }
 
     #[inline]
     unsafe fn take_entry_function(&mut self) -> Option<FfiFn<'_, dyn FnOnce() + Send + '_>> {
         // FfiFn is invariant in `T` but RawFfiFn is not.
-        self.entry_func.take().map(|f| f.into_raw().assume_valid())
+        self.entry_func
+            .take()
+            .take()
+            .map(|f| f.into_raw().assume_valid())
     }
 
     #[inline]
@@ -610,9 +659,9 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
 
     #[inline]
     unsafe fn set_panic(&mut self, panic: Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>) {
-        assert!(!self.is_panicking());
+        assert!(!self.is_panicking(), "panic may not be overwritten");
 
-        self.panic_data = panic;
+        self.panic_data.write(panic);
         self.panicking.store(true, Ordering::Release)
     }
 
@@ -643,7 +692,9 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
 
 impl Drop for SchedulerContextInner<'_> {
     fn drop(&mut self) {
-        self.cleanup()
+        if self.cleanup_func.is_init() {
+            self.cleanup()
+        }
     }
 }
 
@@ -972,7 +1023,7 @@ pub trait ISchedulerContext: IBase + Send + Sync {
 ///
 /// Bypasses the [`RefCell`] allowing access while the context is borrowed.
 pub struct AtomicISchedulerContext<'a> {
-    context: &'a RefCell<DynObj<dyn ISchedulerContext + 'a>>,
+    context: &'a AtomicRefCell<DynObj<dyn ISchedulerContext + 'a>>,
 }
 
 impl AtomicISchedulerContext<'_> {

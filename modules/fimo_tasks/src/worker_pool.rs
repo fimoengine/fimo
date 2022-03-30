@@ -15,15 +15,17 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ptr::addr_of_mut;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
+use std::time::SystemTime;
 
 #[derive(Debug)]
 pub(crate) struct WorkerPool {
     runtime: Weak<Runtime>,
     worker_ids: Vec<WorkerId>,
+    running_workers: Arc<AtomicUsize>,
     global_queue: Arc<Injector<AssertValidTask>>,
     workers: BTreeMap<WorkerId, (Arc<TaskWorker>, Stealer<AssertValidTask>)>,
 }
@@ -34,6 +36,7 @@ impl WorkerPool {
             runtime: Weak::new(),
             worker_ids: vec![],
             workers: Default::default(),
+            running_workers: Arc::new(AtomicUsize::new(0)),
             global_queue: Arc::new(Injector::new()),
         }
     }
@@ -70,6 +73,7 @@ impl WorkerPool {
                 id,
                 msg_sender.clone(),
                 runtime.clone(),
+                self.running_workers.clone(),
                 self.global_queue.clone(),
             )?;
             self.worker_ids.push(id);
@@ -148,6 +152,7 @@ pub(crate) struct TaskWorker {
     runtime: Weak<Runtime>,
     should_run: AtomicBool,
     tasks_available: Condvar,
+    running_workers: Arc<AtomicUsize>,
     thread: ManuallyDrop<JoinHandle<()>>,
     owned_queue: Injector<AssertValidTask>,
     global_queue: Arc<Injector<AssertValidTask>>,
@@ -188,16 +193,41 @@ impl WorkerInner {
     }
 
     #[inline]
-    pub fn wait_on_tasks(&self, lock: &mut MutexGuard<'_, TaskScheduler>) {
+    pub fn wait_on_tasks(
+        &self,
+        mut lock: MutexGuard<'_, TaskScheduler>,
+        until: Option<SystemTime>,
+    ) {
         // wait only if there are no more tasks available.
         if self.local_queue.is_empty()
             && self.shared_data().owned_queue.is_empty()
             && self.shared_data().global_queue.is_empty()
             && self.shared_data().should_run()
         {
-            info!("No more tasks. Worker {} going to sleep", self.worker.id);
-            self.worker.tasks_available.wait(lock);
-            info!("Woke up worker {} from sleep", self.worker.id);
+            if self.shared_data().mark_waiting() {
+                info!(
+                    "No more tasks. Worker {} going to deep sleep",
+                    self.worker.id
+                );
+                self.worker.tasks_available.wait(&mut lock);
+                info!("Woke up worker {} from sleep", self.worker.id);
+            } else {
+                info!(
+                    "Putting last worker {} to sleep until a task becomes runnable",
+                    self.worker.id
+                );
+
+                if let Some(until) = until {
+                    let now = SystemTime::now();
+                    let until = std::cmp::max(now, until);
+                    let duration = until.duration_since(now).expect("time went backwards");
+                    self.worker.tasks_available.wait_for(&mut lock, duration);
+                } else {
+                    self.worker.tasks_available.wait(&mut lock);
+                }
+            }
+
+            self.shared_data().mark_running();
         }
     }
 }
@@ -229,6 +259,7 @@ impl TaskWorker {
         id: WorkerId,
         sender: Sender<Msg<'static>>,
         runtime: Weak<Runtime>,
+        running_workers: Arc<AtomicUsize>,
         global_queue: Arc<Injector<AssertValidTask>>,
     ) -> Result<(Arc<Self>, Stealer<AssertValidTask>), Error> {
         let (sen, rec) = channel();
@@ -263,6 +294,8 @@ impl TaskWorker {
                     let runtime = fimo_ffi::ptr::coerce_obj_raw(runtime);
 
                     unsafe { init_runtime(runtime) };
+
+                    inner.shared_data().mark_running();
                     WORKER.set(Some(Box::leak(inner)));
 
                     let stack = ProtectedFixedSizeStack::default();
@@ -271,13 +304,14 @@ impl TaskWorker {
                     }
 
                     // remove and deallocate published worker.
-                    unsafe {
+                    let worker = unsafe {
                         Box::from_raw(
                             WORKER.take().unwrap() as *const WorkerInner as *mut WorkerInner
                         )
                     };
 
                     info!("Shutting down worker {id}");
+                    worker.shared_data().mark_waiting();
                 })
                 .map_err(|e| Error::new(ErrorKind::Unknown, wrap_error(e)))?
         };
@@ -290,6 +324,7 @@ impl TaskWorker {
         let runtime_ptr = unsafe { addr_of_mut!((*uninit_worker).runtime) };
         let thread_ptr = unsafe { addr_of_mut!((*uninit_worker).thread) };
         let should_run_ptr = unsafe { addr_of_mut!((*uninit_worker).should_run) };
+        let running_workers_ptr = unsafe { addr_of_mut!((*uninit_worker).running_workers) };
         let tasks_available_ptr = unsafe { addr_of_mut!((*uninit_worker).tasks_available) };
         let owned_queue_ptr = unsafe { addr_of_mut!((*uninit_worker).owned_queue) };
         let global_queue_ptr = unsafe { addr_of_mut!((*uninit_worker).global_queue) };
@@ -301,6 +336,7 @@ impl TaskWorker {
             runtime_ptr.write(runtime);
             thread_ptr.write(ManuallyDrop::new(thread));
             should_run_ptr.write(AtomicBool::new(false));
+            running_workers_ptr.write(running_workers);
             tasks_available_ptr.write(Condvar::new());
             owned_queue_ptr.write(Injector::new());
             global_queue_ptr.write(global_queue);
@@ -349,6 +385,20 @@ impl TaskWorker {
     #[inline]
     pub fn should_run(&self) -> bool {
         self.should_run.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn mark_running(&self) {
+        self.running_workers
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+
+    #[inline]
+    pub fn mark_waiting(&self) -> bool {
+        // if we are not the last running worker we should be put to sleep
+        self.running_workers
+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
+            != 1
     }
 }
 

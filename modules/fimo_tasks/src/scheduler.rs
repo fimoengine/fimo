@@ -133,6 +133,13 @@ impl TaskScheduler {
         self.wait_task_on(task, &scheduler_task)
     }
 
+    #[inline]
+    pub(crate) fn notify_one_scheduler_waiter(&mut self) -> Result<(), Error> {
+        let scheduler_task = self.scheduler_task.clone();
+        unsafe { self.notify_one(&scheduler_task)? };
+        Ok(())
+    }
+
     /// Wakes up one task.
     ///
     /// Wakes up the task with the highest priority, that is waiting on provided task to finish.
@@ -358,15 +365,16 @@ impl TaskScheduler {
         unsafe { ManuallyDrop::drop(&mut self.worker_pool) };
     }
 
-    pub(crate) fn schedule_tasks(&mut self) -> bool {
+    pub(crate) fn schedule_tasks(&mut self) -> (bool, Option<SystemTime>) {
         trace!("Running scheduler");
-        let stale = self.process_msg();
+        let no_msgs = self.process_msg();
 
         let time = SystemTime::now();
         let queue = self.task_manager.clear_queue();
         trace!("Scheduling {} tasks", queue.len());
 
-        let stale = stale && queue.is_empty();
+        let mut stale = no_msgs;
+        let mut min_time = None;
         for Reverse(task) in queue.into_sorted_vec() {
             let mut context = task.context().borrow_mut();
 
@@ -391,11 +399,12 @@ impl TaskScheduler {
             );
             debug_assert_eq!(run_status, TaskRunStatus::Idle);
 
-            // check that the task is still runnable.
+            // The `wait_task_on` method can change the status of a runnable
+            // task from `Runnable` to `Waiting` even when it is already enqueued.
+            // If that is the case we must remove the task from the queue.
             if schedule_status != TaskScheduleStatus::Runnable {
                 info!("Task {} not runnable, skipping", handle);
                 drop(context);
-                unsafe { self.task_manager.enqueue(task) };
                 continue;
             }
 
@@ -406,9 +415,17 @@ impl TaskScheduler {
                     resume_time, time
                 );
                 drop(context);
+
+                min_time = Some(min_time.map_or(resume_time, |t| std::cmp::min(t, resume_time)));
+
+                // SAFETY: The task only appeared once in the queue before it was cleared
+                // so moving it to the new queue won't cause any duplicates.
                 unsafe { self.task_manager.enqueue(task) };
                 continue;
             }
+
+            // we found a runnable task so we are not stale
+            stale = false;
 
             // allocate stack
             if scheduler_data.context.is_none() && !empty_task {
@@ -419,6 +436,11 @@ impl TaskScheduler {
                         error!("Unable to schedule task {}, retrying later", handle);
                         drop(context);
                         unsafe { self.task_manager.enqueue(task) };
+
+                        if min_time.is_none() {
+                            min_time = Some(time)
+                        }
+
                         continue;
                     }
                 };
@@ -435,7 +457,10 @@ impl TaskScheduler {
             self.worker_pool.schedule_task(task);
         }
 
-        stale
+        self.notify_one_scheduler_waiter()
+            .expect("can not notify tasks waiting on the scheduler");
+
+        (stale, min_time)
     }
 }
 
