@@ -3,7 +3,7 @@ use fimo_module::Error;
 use fimo_tasks::Builder;
 use fimo_tasks_int::runtime::{init_runtime, is_worker, IRuntime, IRuntimeExt, IScheduler};
 use fimo_tasks_int::task::ParallelBuilder;
-use std::sync::{Mutex, Once};
+use std::sync::Once;
 
 static INIT: Once = Once::new();
 
@@ -91,21 +91,18 @@ fn block_on_multiple_unique() {
     new_runtime(|r| {
         r.block_on_and_enter(
             |r| {
-                let ids = Mutex::new(Vec::new());
-                ParallelBuilder::new()
+                let ids = ParallelBuilder::new()
                     .with_name("Parallel block_on".into())
                     .unique_workers(true)
                     .block_on(
                         || {
                             unsafe { init_runtime(r) };
-                            let mut id = ids.lock().unwrap();
-                            id.push(r.worker_id().unwrap());
+                            r.worker_id().unwrap()
                         },
                         &[],
                     )
                     .unwrap();
 
-                let ids = ids.lock().unwrap();
                 assert!(r.enter_scheduler(|s, _| s.worker_ids().iter().all(|id| ids.contains(id))))
             },
             &[],

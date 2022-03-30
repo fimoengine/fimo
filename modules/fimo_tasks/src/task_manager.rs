@@ -1,6 +1,6 @@
 use crate::stack_allocator::TaskSlot;
 use context::Context;
-use fimo_ffi::cell::RefCell;
+use fimo_ffi::cell::AtomicRefCell;
 use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::ptr::IBaseExt;
 use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
@@ -187,6 +187,8 @@ impl TaskManager {
                     );
                     unsafe { context.set_schedule_status(TaskScheduleStatus::Runnable) };
                     drop(context);
+
+                    // SAFETY: The task was newly created so it can't be already enqueued.
                     unsafe { self.enqueue(task.clone()) };
                 } else {
                     trace!(
@@ -572,7 +574,7 @@ impl AssertValidTask {
 
     /// Returns a reference to the context.
     #[inline]
-    pub fn context(&self) -> &RefCell<SchedulerContext<'_>> {
+    pub fn context(&self) -> &AtomicRefCell<SchedulerContext<'_>> {
         let context = self.0.context();
         // SAFETY: SchedulerContext has a  transparent repr so it should be safe
         unsafe { std::mem::transmute(context) }

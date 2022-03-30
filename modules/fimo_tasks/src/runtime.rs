@@ -190,7 +190,7 @@ impl Runtime {
     }
 
     #[inline]
-    pub(crate) fn schedule_tasks(this: Arc<Self>, spin_wait: &mut SpinWait) -> Option<bool> {
+    pub(crate) fn schedule_tasks(this: Arc<Self>, spin_wait: &mut SpinWait) -> Option<()> {
         debug_assert!(WORKER.get().is_some());
 
         let s = this.scheduler.clone();
@@ -207,13 +207,13 @@ impl Runtime {
         };
 
         if let Some(mut scheduler) = scheduler {
-            let stale = scheduler.schedule_tasks();
+            let (stale, sleep_until) = scheduler.schedule_tasks();
             if stale {
                 let worker = unsafe { WORKER.get().unwrap_unchecked() };
-                worker.wait_on_tasks(&mut scheduler);
+                worker.wait_on_tasks(scheduler, sleep_until);
             }
 
-            Some(stale)
+            Some(())
         } else {
             None
         }
