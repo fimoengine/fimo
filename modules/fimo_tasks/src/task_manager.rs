@@ -105,6 +105,7 @@ impl TaskManager {
             let context = task.context().borrow();
             let data = context.scheduler_data();
             if !data.processing {
+                drop(context);
                 self.enqueue(task)
             }
         }
@@ -117,7 +118,7 @@ impl TaskManager {
 
     pub fn find_task(&self, handle: TaskHandle) -> Result<&'static DynObj<dyn IRawTask>, Error> {
         trace!("Searching for task {}", handle);
-        if let Some(&task) = self.tasks.get(&handle) {
+        if let Some(task) = self.tasks.get(&handle) {
             trace!("Found task");
             Ok(task.0)
         } else {
@@ -156,12 +157,15 @@ impl TaskManager {
         unsafe { context.set_run_status(TaskRunStatus::Idle) };
         unsafe { context.set_schedule_status(TaskScheduleStatus::Processing) };
         unsafe { context.take_panic_data() };
+        drop(context);
 
         // wait on all dependencies
         for dep in wait_on {
-            if let Some(&dep) = self.tasks.get(dep) {
-                if let Err(e) = self.wait_task_on(task, dep) {
+            if let Some(dep) = self.tasks.get(dep) {
+                let dep = dep.clone();
+                if let Err(e) = self.wait_task_on(task.clone(), dep) {
                     error!("Aborting registration, error: {}", e);
+                    let mut context = task.context().borrow_mut();
                     let (handle, _) = unsafe { context.unregister() };
                     unsafe { self.free_handle_reuse(handle) };
                     return Err(e);
@@ -169,6 +173,7 @@ impl TaskManager {
             }
         }
 
+        let mut context = task.context().borrow_mut();
         let request = context.clear_request();
 
         match request {
@@ -181,7 +186,8 @@ impl TaskManager {
                         context.handle()
                     );
                     unsafe { context.set_schedule_status(TaskScheduleStatus::Runnable) };
-                    unsafe { self.enqueue(task) };
+                    drop(context);
+                    unsafe { self.enqueue(task.clone()) };
                 } else {
                     trace!(
                         "Registered task {:?} with id {} as waiting",
@@ -189,6 +195,7 @@ impl TaskManager {
                         context.handle()
                     );
                     unsafe { context.set_schedule_status(TaskScheduleStatus::Waiting) };
+                    drop(context);
                 }
             }
             StatusRequest::Block => {
@@ -198,6 +205,7 @@ impl TaskManager {
                     context.handle()
                 );
                 unsafe { context.set_schedule_status(TaskScheduleStatus::Blocked) };
+                drop(context);
             }
             StatusRequest::Abort => {
                 error!(
@@ -209,6 +217,7 @@ impl TaskManager {
                     task.resolved_name()
                 );
                 let (handle, _) = unsafe { context.unregister() };
+                drop(context);
                 unsafe { self.free_handle_reuse(handle) };
                 return Err(Error::new(ErrorKind::InvalidArgument, err));
             }
@@ -320,8 +329,8 @@ impl TaskManager {
         let wait_on_scheduler_data = unsafe { wait_on_context.scheduler_data_mut() };
 
         // register the dependency
-        scheduler_data.dependencies.insert(wait_on);
-        wait_on_scheduler_data.waiters.push(Reverse(task));
+        scheduler_data.dependencies.insert(wait_on.clone());
+        wait_on_scheduler_data.waiters.push(Reverse(task.clone()));
 
         // if the task is marked as runnable (i.e. is inserted into the processing queue),
         // we set it to waiting.
@@ -358,8 +367,10 @@ impl TaskManager {
         // the scheduler and can therefore be modified.
         let scheduler_data = context.scheduler_data_mut();
         if let Some(Reverse(waiter)) = scheduler_data.waiters.pop() {
-            self.notify_waiter(task, waiter);
-            Ok(Some(scheduler_data.waiters.len()))
+            drop(context);
+            self.notify_waiter(task.clone(), waiter);
+            let context = task.context().borrow();
+            Ok(Some(context.scheduler_data().waiters.len()))
         } else {
             trace!("No waiters skipping");
             Ok(None)
@@ -396,7 +407,7 @@ impl TaskManager {
         drop(context);
 
         while let Some(Reverse(waiter)) = waiters.pop() {
-            self.notify_waiter(task, waiter)
+            self.notify_waiter(task.clone(), waiter)
         }
 
         Ok(num_waiters)
@@ -479,6 +490,7 @@ impl TaskManager {
         if scheduler_data.dependencies.is_empty() {
             trace!("Marking task {} as runnable", context.handle());
             unsafe { context.set_schedule_status(TaskScheduleStatus::Runnable) };
+            drop(context);
             self.enqueue_checked(task);
         } else {
             trace!("Marking task {} as waiting", context.handle());
@@ -518,7 +530,7 @@ impl MsgData<'_> {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct AssertValidTask(&'static DynObj<dyn IRawTask + 'static>);
 
 impl AssertValidTask {

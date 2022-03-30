@@ -201,7 +201,11 @@ impl TaskScheduler {
 
         trace!("Notify waiters of {}", context.handle());
         drop(context);
-        unsafe { self.task_manager.notify_all(task).expect("Invalid task") };
+        unsafe {
+            self.task_manager
+                .notify_all(task.clone())
+                .expect("Invalid task")
+        };
         let mut context = task.context().borrow_mut();
 
         trace!("Free task slot of {}", context.handle());
@@ -320,6 +324,7 @@ impl TaskScheduler {
             match context.schedule_status() {
                 TaskScheduleStatus::Runnable => {
                     trace!("Inserting task {} into processing queue", context.handle());
+                    drop(context);
                     unsafe { self.task_manager.enqueue(task) };
                 }
                 TaskScheduleStatus::Scheduled | TaskScheduleStatus::Processing => {
@@ -389,6 +394,7 @@ impl TaskScheduler {
             // check that the task is still runnable.
             if schedule_status != TaskScheduleStatus::Runnable {
                 info!("Task {} not runnable, skipping", handle);
+                drop(context);
                 unsafe { self.task_manager.enqueue(task) };
                 continue;
             }
@@ -399,6 +405,7 @@ impl TaskScheduler {
                     "Task resume time {:?} not reached, time {:?}, skipping.",
                     resume_time, time
                 );
+                drop(context);
                 unsafe { self.task_manager.enqueue(task) };
                 continue;
             }
@@ -410,6 +417,7 @@ impl TaskScheduler {
                     Ok(r) => r,
                     Err(_) => {
                         error!("Unable to schedule task {}, retrying later", handle);
+                        drop(context);
                         unsafe { self.task_manager.enqueue(task) };
                         continue;
                     }
@@ -423,6 +431,7 @@ impl TaskScheduler {
             }
 
             // schedule task on worker
+            drop(context);
             self.worker_pool.schedule_task(task);
         }
 
