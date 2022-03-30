@@ -113,7 +113,7 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
 
     // Implement the `FetchVTable<dyn IBase + '_>` trait for the generic type.
     impls.push(quote! {
-        impl #generics ::fimo_ffi::ptr::FetchVTable<dyn ::fimo_ffi::ptr::IBase + 'inner> for #ty 
+        impl #generics ::fimo_ffi::ptr::FetchVTable<dyn ::fimo_ffi::ptr::IBase + 'inner> for #ty
         where #ty: 'inner
         {
             fn fetch_interface() -> &'static ::fimo_ffi::ptr::IBaseVTable {
@@ -126,7 +126,7 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
     // Implement the remaining `FetchVTable<dyn _ + '_>` traits for the generic type.
     for interface in interfaces.iter() {
         impls.push(quote! {
-            impl #generics ::fimo_ffi::ptr::FetchVTable<dyn #interface + 'inner> for #ty 
+            impl #generics ::fimo_ffi::ptr::FetchVTable<dyn #interface + 'inner> for #ty
             where #ty: 'inner
             {
                 fn fetch_interface() -> &'static <<(dyn #interface + 'inner) as ::fimo_ffi::ptr::ObjInterface>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable {

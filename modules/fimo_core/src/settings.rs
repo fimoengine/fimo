@@ -273,13 +273,12 @@ impl SettingsRegistryInner {
     #[inline]
     fn unregister_callback(&mut self, id: SettingsEventCallbackId) -> fimo_module::Result<()> {
         let id = usize::from(id);
-        let path = self
-            .callback_map
-            .remove(&id)
-            .ok_or_else(|| fimo_ffi::error::Error::new(
+        let path = self.callback_map.remove(&id).ok_or_else(|| {
+            fimo_ffi::error::Error::new(
                 fimo_ffi::error::ErrorKind::NotFound,
                 format!("invalid callback id {:?}", id),
-            ))?;
+            )
+        })?;
 
         let item = if path.is_root() {
             Some(&mut self.root)
