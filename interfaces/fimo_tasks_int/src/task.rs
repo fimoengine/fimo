@@ -448,27 +448,29 @@ impl Builder {
             ));
         }
 
-        let mut task: MaybeUninit<Task<'a, R>> = MaybeUninit::uninit();
+        let mut task: MaybeUninit<UnsafeCell<Task<'a, R>>> = MaybeUninit::uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
-        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
-        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+        let task_ptr = UnsafeCell::raw_get(task.as_ptr());
+        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task_ptr).raw) };
+        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task_ptr).res) };
 
-        struct AssertSync<T>(*mut MaybeUninit<T>);
-        // we know that `T` won't be shared only written, so we can mark it as `Send`.
-        unsafe impl<T: Send> Send for AssertSync<T> {}
+        struct AssertSend<T>(*mut T);
+
+        // SAFETY: we know that T is Send
+        unsafe impl<T: Send> Send for AssertSend<T> {}
 
         let res = unsafe {
             // initialize res and fetch a pointer to the inner result.
             res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
-            AssertSync((*res_ptr).get())
+            AssertSend((*(*res_ptr).get()).as_mut_ptr())
         };
 
         let f = if let Some(f) = f {
             let f = move || {
                 // write the result directly into the address, knowing that it will live
                 // at least as long as the task itself.
-                unsafe { res.0.write(MaybeUninit::new(f())) };
+                unsafe { res.0.write(f()) };
             };
 
             Some(FfiFn::r#box(Box::new(f)))
@@ -482,17 +484,24 @@ impl Builder {
         let raw_task = self.inner.build(f, cleanup);
         unsafe { raw_ptr.write(raw_task) };
 
-        // safety: all fields have been initialized.
-        let task = unsafe { task.assume_init() };
-        let handle = &task;
+        // SAFETY: all fields have been initialized so we can fetch a reference to it
+        // but we aren't allowed to move the task as it contains a self referencing pointer
+        // to the result member.
+        let handle = unsafe { &*task.assume_init_ref().get() };
 
-        let handle = runtime.enter_scheduler(move |s, _| unsafe {
+        match runtime.enter_scheduler(move |s, _| unsafe {
             trace!("Register task with the runtime");
             s.register_task(handle.as_raw(), wait_on)
                 .map(|_| JoinHandle { handle })
-        })?;
-
-        join(handle)
+        }) {
+            Ok(handle) => join(handle),
+            Err(e) => {
+                // The task could not be registered so it hasn't begun its execution.
+                // Therefore the task can be dropped.
+                unsafe { task.assume_init_drop() }
+                Err(e)
+            }
+        }
     }
 
     /// Spawns a task onto the task runtime.
