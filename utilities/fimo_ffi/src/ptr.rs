@@ -483,7 +483,7 @@ pub fn from_raw_parts_mut<Dyn: ?Sized>(
 /// Extracts the metadata component of the pointer.
 #[inline]
 pub fn metadata<Dyn: ?Sized>(ptr: *const DynObj<Dyn>) -> ObjMetadata<Dyn> {
-    let metadata: usize = std::ptr::metadata(ptr);
+    let metadata = std::ptr::metadata(ptr);
     unsafe { std::mem::transmute(metadata) }
 }
 
