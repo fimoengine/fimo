@@ -1,5 +1,5 @@
+use crate::scheduler::task_manager::MsgData;
 use crate::spin_wait::SpinWait;
-use crate::task_manager::MsgData;
 use crate::worker_pool::{yield_to_worker, WORKER};
 use crate::TaskScheduler;
 use fimo_ffi::ptr::IBaseExt;
@@ -154,39 +154,35 @@ impl Runtime {
         &self,
         f: F,
     ) -> R {
-        if WORKER.get().is_none() {
-            // outside worker.
-            let mut scheduler = self.scheduler.lock();
+        trace!("Waiting for scheduler lock");
 
-            // call the function, then schedule the remaining tasks.
-            let res = f(&mut *scheduler, None);
-            scheduler.schedule_tasks();
-            res
-        } else {
-            let mut spin_wait = SpinWait::new();
-            loop {
-                // try to lock the scheduler.
-                if let Some(mut scheduler) = self.scheduler.try_lock() {
-                    let current =
-                        unsafe { WORKER.get().unwrap_unchecked().current_task().unwrap() };
+        let mut res = MaybeUninit::uninit();
+        {
+            let res = &mut res;
+            let wrapper = move |s: &mut DynObj<dyn IScheduler + '_>,
+                                t: Option<&DynObj<dyn IRawTask + '_>>| {
+                trace!("Scheduler lock acquired");
 
-                    return f(&mut *scheduler, Some(current.as_raw()));
-                }
+                // SAFETY: As the implementation of the runtime we ensure that the type of the
+                // scheduler matches.
+                let scheduler = unsafe { s.downcast_mut().unwrap_unchecked() };
 
-                // if it could not be locked, try spinning a few times.
-                if spin_wait.spin(move || self.yield_now()) {
-                    continue;
-                }
+                res.write(f(scheduler, t));
+                trace!("Relinquish scheduler lock");
+            };
+            let mut wrapper = MaybeUninit::new(wrapper);
 
-                // else block until the scheduler is free.
-                self.yield_and_enter(move |s, c| {
-                    if let Err(e) = s.wait_on_scheduler(c) {
-                        error!("Unable to wait on scheduler, error: {}", e)
-                    }
-                });
-                spin_wait.reset();
-            }
+            // SAFETY: The closure is initialized.
+            let wrapper = unsafe { FfiFn::new_value(&mut wrapper) };
+
+            self.enter_scheduler_impl(wrapper);
         }
+
+        trace!("Task resumed");
+
+        // SAFETY: This point will only be reached if the closure could be invoked,
+        // in which case it wrote the result in the `res` variable.
+        unsafe { res.assume_init() }
     }
 
     #[inline]
@@ -209,6 +205,9 @@ impl Runtime {
         if let Some(mut scheduler) = scheduler {
             let (stale, sleep_until) = scheduler.schedule_tasks();
             if stale {
+                // SAFETY: This method can only be called from a worker thread.
+                // All worker threads have access to an initialized `WORKER` for
+                // their entire lifetime.
                 let worker = unsafe { WORKER.get().unwrap_unchecked() };
                 worker.wait_on_tasks(scheduler, sleep_until);
             }
@@ -246,19 +245,28 @@ impl Runtime {
             {
                 let res = &mut res;
                 let wrapper = move |s: &mut DynObj<dyn IScheduler + '_>,
-                                    t: &DynObj<dyn IRawTask + '_>| unsafe {
+                                    t: &DynObj<dyn IRawTask + '_>| {
                     trace!("Yielded to scheduler");
-                    let scheduler = s.downcast_mut().unwrap_unchecked();
+
+                    // SAFETY: As the implementation of the runtime we ensure that the type of the
+                    // scheduler matches.
+                    let scheduler = unsafe { s.downcast_mut().unwrap_unchecked() };
+
                     res.write(f(scheduler, t));
                     trace!("Resuming task");
                 };
                 let mut wrapper = MaybeUninit::new(wrapper);
+
+                // SAFETY: The closure is initialized.
                 let wrapper = unsafe { FfiFn::new_value(&mut wrapper) };
 
                 self.yield_and_enter_impl(wrapper);
             }
 
             trace!("Task resumed");
+
+            // SAFETY: This point will only be reached if the closure could be invoked,
+            // in which case it wrote the result in the `res` variable.
             unsafe { res.assume_init() }
         }
     }
@@ -299,6 +307,8 @@ impl IRuntime for Runtime {
                 // try to lock the scheduler.
                 if let Some(mut scheduler) = self.scheduler.try_lock() {
                     let s = fimo_ffi::ptr::coerce_obj_mut(&mut *scheduler);
+
+                    // SAFETY: We have already checked that the worker exists.
                     let current =
                         unsafe { WORKER.get().unwrap_unchecked().current_task().unwrap() };
 
@@ -315,7 +325,8 @@ impl IRuntime for Runtime {
 
                 // else block until the scheduler is free.
                 self.yield_and_enter(move |s, c| {
-                    if let Err(e) = s.wait_on_scheduler(c) {
+                    // SAFETY: `c` comes from the scheduler so it is registered.
+                    if let Err(e) = unsafe { s.wait_on_scheduler(c) } {
                         error!("Unable to wait on scheduler, error: {}", e)
                     }
                 });
@@ -333,6 +344,11 @@ impl IRuntime for Runtime {
         >,
     ) {
         let msg_data = MsgData::Yield { f: f.into_raw() };
+
+        // SAFETY: All conditions are upheld if called by a
+        // worker thread after a task has been set up. We know
+        // that the call stems from a task so it must have been
+        // set up properly.
         unsafe { yield_to_worker(msg_data) }
     }
 }

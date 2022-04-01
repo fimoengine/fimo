@@ -1,11 +1,11 @@
+use crate::scheduler::task_manager::{AssertValidTask, Msg, MsgData, PanicData};
 use crate::spin_wait::SpinWait;
-use crate::task_manager::{AssertValidTask, Msg, MsgData, PanicData};
 use crate::{Runtime, TaskScheduler};
 use context::stack::ProtectedFixedSizeStack;
 use context::{Context, Transfer};
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use fimo_ffi::error::wrap_error;
-use fimo_ffi::{DynObj, FfiFn};
+use fimo_ffi::DynObj;
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{IRawTask, TaskScheduleStatus, WorkerId};
 use fimo_tasks_int::runtime::init_runtime;
@@ -102,41 +102,38 @@ impl WorkerPool {
         &self.worker_ids
     }
 
+    /// Assigns a task to a worker queue.
     #[inline]
-    pub fn schedule_task(&mut self, task: AssertValidTask) {
-        let context = task.context_atomic();
+    pub fn assign_task_to_worker(&mut self, task: AssertValidTask) {
+        let (handle, worker) = {
+            let context = task.context().borrow();
+            (context.handle(), context.worker())
+        };
 
-        if let Some(id) = context.worker() {
-            trace!(
-                "Assigning task {} to worker {}",
-                unsafe { context.handle().assume_init() },
-                id
-            );
+        if let Some(id) = worker {
+            // If the task was assigned to a worker we push it to its private
+            // queue and ensure that only the worker can run it.
 
+            trace!("Assigning task {handle} to worker {id}");
             let (worker, _) = self.workers.get(&id).unwrap_or_else(|| {
-                warn!(
-                    "Worker id {} not found, assigning {} to random worker",
-                    id,
-                    unsafe { context.handle().assume_init() },
-                );
+                warn!("Worker id {id} not found, assigning {handle} to random worker");
                 self.workers.values().next().unwrap()
             });
-
-            unsafe { context.set_schedule_status(TaskScheduleStatus::Scheduled) };
             worker.owned_queue.push(task);
 
             trace!("Notifying worker {}", worker.id);
             worker.tasks_available.notify_all();
         } else {
-            trace!("Assigning task {} to the global queue", unsafe {
-                context.handle().assume_init()
-            },);
-            unsafe { context.set_schedule_status(TaskScheduleStatus::Scheduled) };
+            // If the task is unassigned we push it to the global queue and dynamically
+            // assign it to the first free worker.
+
+            trace!("Assigning task {handle} to the global queue");
             self.global_queue.push(task);
             self.wake_all_workers();
         }
     }
 
+    /// Notifies all workers that there are scheduled tasks.
     #[inline]
     pub fn wake_all_workers(&mut self) {
         trace!("Waking all workers");
@@ -172,11 +169,13 @@ struct CopyTask(&'static DynObj<dyn IRawTask + 'static>);
 impl CopyTask {
     #[inline]
     fn from_task(t: AssertValidTask) -> Self {
-        unsafe { Self(&*(t.as_raw() as *const _)) }
+        // SAFETY: The types have the same layout.
+        unsafe { std::mem::transmute(t) }
     }
 
     #[inline]
     fn into_task(self) -> AssertValidTask {
+        // SAFETY: The task remained valid.
         unsafe { AssertValidTask::from_raw(self.0) }
     }
 }
@@ -192,6 +191,7 @@ impl WorkerInner {
         self.current_task.get().map(|t| t.into_task())
     }
 
+    /// Puts a worker to sleep if it can't run any tasks.
     #[inline]
     pub fn wait_on_tasks(
         &self,
@@ -246,6 +246,7 @@ impl Drop for WorkerPool {
 
         // wait for the tasks to finish
         for (worker, _) in self.workers.values_mut() {
+            // SAFETY: We are the WorkerPool
             unsafe { worker.join() };
         }
     }
@@ -293,21 +294,25 @@ impl TaskWorker {
                     let runtime = inner.worker.runtime.as_ptr();
                     let runtime = fimo_ffi::ptr::coerce_obj_raw(runtime);
 
+                    // SAFETY: The thread was just created so it can't have been called.
                     unsafe { init_runtime(runtime) };
 
                     inner.shared_data().mark_running();
                     WORKER.set(Some(Box::leak(inner)));
 
                     let stack = ProtectedFixedSizeStack::default();
+
+                    // SAFETY: The stack will outlive the context.
                     unsafe {
                         Context::new(&*stack, worker_main).resume(0);
                     }
 
                     // remove and deallocate published worker.
+                    // SAFETY: The data was allocated in a box and now that the worker is cleaning up
+                    // no one has access to the data.
                     let worker = unsafe {
-                        Box::from_raw(
-                            WORKER.take().unwrap() as *const WorkerInner as *mut WorkerInner
-                        )
+                        Box::from_raw(WORKER.take().unwrap_unchecked() as *const WorkerInner
+                            as *mut WorkerInner)
                     };
 
                     info!("Shutting down worker {id}");
@@ -320,18 +325,20 @@ impl TaskWorker {
 
         // get addresses of all fields manually.
         let uninit_worker = Arc::get_mut(&mut worker).unwrap().as_mut_ptr();
-        let id_ptr = unsafe { addr_of_mut!((*uninit_worker).id) };
-        let runtime_ptr = unsafe { addr_of_mut!((*uninit_worker).runtime) };
-        let thread_ptr = unsafe { addr_of_mut!((*uninit_worker).thread) };
-        let should_run_ptr = unsafe { addr_of_mut!((*uninit_worker).should_run) };
-        let running_workers_ptr = unsafe { addr_of_mut!((*uninit_worker).running_workers) };
-        let tasks_available_ptr = unsafe { addr_of_mut!((*uninit_worker).tasks_available) };
-        let owned_queue_ptr = unsafe { addr_of_mut!((*uninit_worker).owned_queue) };
-        let global_queue_ptr = unsafe { addr_of_mut!((*uninit_worker).global_queue) };
-        let task_stealer_ptr = unsafe { addr_of_mut!((*uninit_worker).task_stealer) };
 
-        // initialize fields.
+        // SAFETY: We aren't dereferencing the pointer, just initializing the data manually.
         unsafe {
+            let id_ptr = addr_of_mut!((*uninit_worker).id);
+            let runtime_ptr = addr_of_mut!((*uninit_worker).runtime);
+            let thread_ptr = addr_of_mut!((*uninit_worker).thread);
+            let should_run_ptr = addr_of_mut!((*uninit_worker).should_run);
+            let running_workers_ptr = addr_of_mut!((*uninit_worker).running_workers);
+            let tasks_available_ptr = addr_of_mut!((*uninit_worker).tasks_available);
+            let owned_queue_ptr = addr_of_mut!((*uninit_worker).owned_queue);
+            let global_queue_ptr = addr_of_mut!((*uninit_worker).global_queue);
+            let task_stealer_ptr = addr_of_mut!((*uninit_worker).task_stealer);
+
+            // initialize fields.
             id_ptr.write(id);
             runtime_ptr.write(runtime);
             thread_ptr.write(ManuallyDrop::new(thread));
@@ -370,7 +377,7 @@ impl TaskWorker {
     ///
     /// Called only from the worker pool.
     #[inline]
-    pub unsafe fn join(&self) {
+    unsafe fn join(&self) {
         let mut thread = std::ptr::read(&self.thread);
         ManuallyDrop::drop(&mut thread)
     }
@@ -455,35 +462,59 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
         let task = task.unwrap();
 
         let context = {
-            let mut context = task.context().borrow_mut();
+            let context = task.context().borrow();
             trace!(
                 "Worker {} set to run task {}",
                 worker.worker.id,
                 context.handle()
             );
+
+            // The `task_main` requires that the current task is privided
+            // in `current_task`.
             worker
                 .current_task
                 .set(Some(CopyTask::from_task(task.clone())));
 
             // register task with current worker.
+            // SAFETY: The operation is valid for the following reasons:
+            // 1. We know that the id exists, as that is the id of the current worker.
+            // 2. Currently there are only two paths a path can take -- it was registered with
+            // the worker set to `None` or `Some(_)`. This is the only instance of a call to
+            // `set_worker` in the runtime implementation, and according to the safety doc
+            // we can assume that no one will modify it until the task is unregistered.
+            // Starting with the case that the worker was `None`, we know that the task has not
+            // jet started it's execution. Therefore we are allowed to assign it to any available
+            // worker. The other case it that the worker is `Some`. In that case the task has
+            // already started and we must make shure that we don't invalidate any data cached
+            // by the task. With the current implementation such an invalidation is impossible,
+            // as the task will be reassigned to the same worker each time it is scheduled.
+            // Therefore we aren't actually modifying the worker but just setting it to the same
+            // value.
             unsafe { context.set_worker(Some(worker.worker.id)) };
 
-            unsafe { context.scheduler_data_mut().context.take() }
+            let data = context.scheduler_data();
+            let mut shared = data.shared_data_mut();
+            shared.take_context()
         };
 
         let msg_data = if let Some(context) = context {
             // jump into task.
+            // SAFETY: We assume that the tasks are well behaved.
             let tr = unsafe { context.resume(0) };
 
             // remove task
             worker.current_task.set(None);
 
             // write back task context.
-            let mut context = task.context().borrow_mut();
-            let scheduler_data = unsafe { context.scheduler_data_mut() };
-            scheduler_data.context = Some(tr.context);
+            let context = task.context().borrow();
+            context
+                .scheduler_data()
+                .shared_data_mut()
+                .set_context(tr.context);
 
             // read msg data.
+            // SAFETY: `yield_to_worker` writes the pointer of the message
+            // in the `Transfer` and ensures that it won't drop it.
             unsafe { (tr.data as *const MsgData<'_>).read() }
         } else {
             // remove task
@@ -493,8 +524,11 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
         };
 
         // Mark the status as processing.
+        // SAFETY: While we are outside of the scheduler, this operation
+        // is implementation defined and the runtime knows how to handle it.
         unsafe {
-            task.context_atomic()
+            task.context()
+                .borrow()
                 .set_schedule_status(TaskScheduleStatus::Processing)
         };
 
@@ -507,6 +541,7 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
     }
 
     // resume main function.
+    // SAFETY: We assume that the tasks are well behaved.
     unsafe { thread_context.context.resume(0) };
     unreachable!()
 }
@@ -527,18 +562,16 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
         let task = worker.current_task.get().unwrap_unchecked().into_task();
 
         let worker_context = {
-            let mut scheduler_context = task.context().borrow_mut();
+            let scheduler_context = task.context().borrow();
             trace!(
                 "Yielding task {} to worker {}",
                 scheduler_context.handle(),
                 worker.worker.id
             );
 
-            scheduler_context
-                .scheduler_data_mut()
-                .context
-                .take()
-                .unwrap_unchecked()
+            let data = scheduler_context.scheduler_data();
+            let mut shared = data.shared_data_mut();
+            shared.take_context().unwrap_unchecked()
         };
 
         // pass the pointer to the data back to the worker function.
@@ -552,11 +585,11 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
     // elided with the old one.
     let worker = std::ptr::read_volatile(&WORKER).get().unwrap_unchecked();
     let task = worker.current_task.get().unwrap_unchecked().into_task();
-    let mut scheduler_context = task.context().borrow_mut();
-    let _ = scheduler_context
-        .scheduler_data_mut()
-        .context
-        .insert(context);
+    let scheduler_context = task.context().borrow();
+    scheduler_context
+        .scheduler_data()
+        .shared_data_mut()
+        .set_context(context);
 
     trace!(
         "Resumed task {} to worker {}",
@@ -567,35 +600,41 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
 
 pub(crate) extern "C" fn task_main(thread_context: Transfer) -> ! {
     loop {
-        // fetch the worker and write back the thread context.
-        let worker = unsafe { WORKER.get().unwrap_unchecked() };
-        let task = unsafe { worker.current_task.get().unwrap_unchecked().into_task() };
-        let mut context = task.context().borrow_mut();
-        let _ = unsafe {
-            context
-                .scheduler_data_mut()
-                .context
-                .insert(thread_context.context)
+        // Fetch the worker, write back the thread context and take the entry function.
+        // SAFETY: `WORKER` is always initialized during the execution of a worker and
+        // the current task was initialized prior to calling this function.
+        let task = unsafe {
+            let worker = WORKER.get().unwrap_unchecked();
+            worker.current_task.get().unwrap_unchecked().into_task()
         };
 
-        let f = unsafe { context.take_entry_function() };
-        let f: Option<FfiFn<'static, dyn FnOnce() + Send + 'static>> =
-            f.map(|f| unsafe { std::mem::transmute(f.into_raw().assume_valid()) });
-        drop(context);
+        let f = {
+            let context = task.context().borrow();
+            let data = context.scheduler_data();
+            let mut shared = data.shared_data_mut();
+            shared.set_context(thread_context.context);
+            shared.take_entry_func()
+        };
 
         if let Some(f) = f {
             let f = std::panic::AssertUnwindSafe(f);
             if let Err(e) = std::panic::catch_unwind(f) {
+                // If there was an error we wrap it up in our custom wrapper and write it
+                // into the shared context portion.
                 let e = PanicData::new(e);
                 {
-                    let mut context = task.context().borrow_mut();
-                    unsafe { context.set_panic(Some(e)) };
-                    debug_assert!(context.is_panicking());
+                    let context = task.context().borrow();
+                    let data = context.scheduler_data();
+                    let mut shared = data.shared_data_mut();
+                    shared.set_panic(e);
                 }
+
+                // SAFETY: The preconditions are satisfied by the worker loop.
                 unsafe { yield_to_worker(MsgData::Completed { aborted: true }) }
             }
         }
 
+        // SAFETY: The preconditions are satisfied by the worker loop.
         unsafe { yield_to_worker(MsgData::Completed { aborted: false }) }
 
         unreachable!()

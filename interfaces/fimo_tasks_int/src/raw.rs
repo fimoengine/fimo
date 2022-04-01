@@ -102,7 +102,7 @@ pub enum TaskScheduleStatus {
 }
 
 /// Representation of a raw task.
-#[derive(Debug, ObjectId)]
+#[derive(ObjectId)]
 #[fetch_vtable(uuid = "eb91ee4a-22d2-4b91-9e06-0994f0d79b0f", interfaces(IRawTask))]
 pub struct RawTaskInner<'a> {
     info: TaskInfo,
@@ -128,6 +128,15 @@ impl<'a> IRawTask for RawTaskInner<'a> {
     #[inline]
     fn context(&self) -> &AtomicRefCell<DynObj<dyn ISchedulerContext + '_>> {
         self.data.coerce_obj()
+    }
+}
+
+impl Debug for RawTaskInner<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawTaskInner")
+            .field("info", &self.info)
+            .field("data", &self.context_atomic())
+            .finish()
     }
 }
 
@@ -302,6 +311,22 @@ pub trait IRawTask: IBase + Send + Sync {
     fn spawn_location(&self) -> Option<Location<'static>>;
 
     /// Returns a reference to the context.
+    ///
+    /// # Intended usage
+    ///
+    /// This method is intended to be used primarely by owners of unregistered tasks
+    /// or while holding a lock to the scheduler. Under these circumstances the runtime
+    /// guarantees that a call to [`try_borrow`][try_borrow] succeeds.
+    ///
+    /// Calling the [`try_borrow_mut`][try_borrow_mut] method may cause a panic as multiple
+    /// workers try to access the context. Therefore the [`try_borrow_mut`][try_borrow_mut]
+    /// method is reserved for use by the scheduler and owners of unregistered tasks.
+    ///
+    /// Using these functions without, even indirectly, without the proper preconditions may
+    /// cause undefined behavior.
+    ///
+    /// [try_borrow]: AtomicRefCell::try_borrow
+    /// [try_borrow_mut]: AtomicRefCell::try_borrow_mut
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -323,7 +348,7 @@ pub trait IRawTask: IBase + Send + Sync {
     /// Returns an atomic view to the context.
     ///
     /// Should be preferred over [`context`](#method.context) as it allows accessing
-    /// the [`ISchedulerContext`] without borrowing it.
+    /// parts of the [`ISchedulerContext`] without borrowing it.
     #[inline]
     #[vtable_info(ignore)]
     fn context_atomic(&self) -> AtomicISchedulerContext<'_> {
@@ -614,7 +639,7 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
     }
 
     #[inline]
-    fn clear_request(&self) -> StatusRequest {
+    unsafe fn clear_request(&self) -> StatusRequest {
         self.request.swap(StatusRequest::None, Ordering::AcqRel)
     }
 
@@ -678,15 +703,8 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
     }
 
     #[inline]
-    unsafe fn scheduler_data(&self) -> Option<&DynObj<dyn IBase + Send + Sync + 'static>> {
+    fn scheduler_data(&self) -> Option<&DynObj<dyn IBase + Send + Sync + 'static>> {
         self.scheduler_data.as_deref()
-    }
-
-    #[inline]
-    unsafe fn scheduler_data_mut(
-        &mut self,
-    ) -> Option<&mut DynObj<dyn IBase + Send + Sync + 'static>> {
-        self.scheduler_data.as_deref_mut()
     }
 }
 
@@ -695,21 +713,6 @@ impl Drop for SchedulerContextInner<'_> {
         if self.cleanup_func.is_init() {
             self.cleanup()
         }
-    }
-}
-
-impl Debug for SchedulerContextInner<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SchedulerContextInner")
-            .field("panicking", &self.panicking)
-            .field("registered", &self.registered)
-            .field("handle", &self.handle)
-            .field("resume_time", &self.resume_time)
-            .field("worker", &self.worker)
-            .field("request", &self.request)
-            .field("run_status", &self.run_status)
-            .field("schedule_status", &self.schedule_status)
-            .finish()
     }
 }
 
@@ -823,6 +826,8 @@ pub trait ISchedulerContext: IBase + Send + Sync {
 
     /// Sets a new worker.
     ///
+    /// Passing in `None` will automatically select an appropriate worker.
+    ///
     /// # Note
     ///
     /// Must be implemented atomically.
@@ -833,6 +838,7 @@ pub trait ISchedulerContext: IBase + Send + Sync {
     ///
     /// * A worker associated with the provided [`WorkerId`] does not exist.
     /// * The task has yielded it's execution and has cached thread-local variables.
+    /// * Is used by someone other than the runtime implementation and the task is registered.
     #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
     unsafe fn set_worker(
         &self,
@@ -873,8 +879,12 @@ pub trait ISchedulerContext: IBase + Send + Sync {
     /// # Note
     ///
     /// Must be implemented atomically.
+    ///
+    /// # Safety
+    ///
+    /// Behavior is undefined if not called from a task scheduler.
     #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn clear_request(&self) -> StatusRequest;
+    unsafe fn clear_request(&self) -> StatusRequest;
 
     /// Extracts the current run status.
     ///
@@ -990,34 +1000,14 @@ pub trait ISchedulerContext: IBase + Send + Sync {
     fn cleanup(&mut self);
 
     /// Fetches a reference to the scheduler data.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
         return_type = "Optional<RawObj<dyn IBase + Send + Sync + 'static>>",
         into_expr = "let res = Optional::from_rust(res)?; Optional::Some(fimo_ffi::ptr::into_raw(res))",
-        from_expr = "let res = res.into_rust()?; Some(&*fimo_ffi::ptr::from_raw(res))"
+        from_expr = "let res = res.into_rust()?; unsafe { Some(&*fimo_ffi::ptr::from_raw(res)) }"
     )]
-    unsafe fn scheduler_data(&self) -> Option<&DynObj<dyn IBase + Send + Sync + 'static>>;
-
-    /// Fetches a reference to the scheduler data.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<RawObjMut<dyn IBase + Send + Sync + 'static>>",
-        into_expr = "let res = Optional::from_rust(res)?; Optional::Some(fimo_ffi::ptr::into_raw_mut(res))",
-        from_expr = "let res = res.into_rust()?; Some(&mut *fimo_ffi::ptr::from_raw_mut(res))"
-    )]
-    unsafe fn scheduler_data_mut(
-        &mut self,
-    ) -> Option<&mut DynObj<dyn IBase + Send + Sync + 'static>>;
+    fn scheduler_data(&self) -> Option<&DynObj<dyn IBase + Send + Sync + 'static>>;
 }
 
 /// Access to the atomic member functions of [`ISchedulerContext`].
@@ -1052,39 +1042,12 @@ impl AtomicISchedulerContext<'_> {
         unsafe { (*ptr).resume_time() }
     }
 
-    /// Advances the internal timer to the provided time.
-    ///
-    /// # Note
-    ///
-    /// The runtime may not be notified if this is called outside of the scheduler.
-    #[inline]
-    pub fn set_resume_time(&self, time: SystemTime) {
-        let ptr = self.context.as_ptr();
-        // SAFETY: the function is atomic and therefore causes no data races.
-        unsafe { (*ptr).set_resume_time(time) }
-    }
-
     /// Extracts the assigned worker.
     #[inline]
     pub fn worker(&self) -> Option<WorkerId> {
         let ptr = self.context.as_ptr();
         // SAFETY: the function is atomic and therefore causes no data races.
         unsafe { (*ptr).worker() }
-    }
-
-    /// Sets a new worker.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if any of the following conditions are violated:
-    ///
-    /// * A worker associated with the provided [`WorkerId`] does not exist.
-    /// * The task has yielded it's execution and has cached thread-local variables.
-    #[inline]
-    pub unsafe fn set_worker(&self, worker: Option<WorkerId>) {
-        let ptr = self.context.as_ptr();
-        // SAFETY: the function is atomic and therefore causes no data races.
-        (*ptr).set_worker(worker)
     }
 
     /// Requests for the task to be blocked.
@@ -1115,14 +1078,6 @@ impl AtomicISchedulerContext<'_> {
         unsafe { (*ptr).peek_request() }
     }
 
-    /// Clears the requests and returns it.
-    #[inline]
-    pub fn clear_request(&self) -> StatusRequest {
-        let ptr = self.context.as_ptr();
-        // SAFETY: the function is atomic and therefore causes no data races.
-        unsafe { (*ptr).clear_request() }
-    }
-
     /// Extracts the current run status.
     #[inline]
     pub fn run_status(&self) -> TaskRunStatus {
@@ -1131,36 +1086,12 @@ impl AtomicISchedulerContext<'_> {
         unsafe { (*ptr).run_status() }
     }
 
-    /// Sets a new run status.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[inline]
-    pub unsafe fn set_run_status(&self, status: TaskRunStatus) {
-        let ptr = self.context.as_ptr();
-        // SAFETY: the function is atomic and therefore causes no data races.
-        (*ptr).set_run_status(status)
-    }
-
     /// Extracts the current schedule status.
     #[inline]
     pub fn schedule_status(&self) -> TaskScheduleStatus {
         let ptr = self.context.as_ptr();
         // SAFETY: the function is atomic and therefore causes no data races.
         unsafe { (*ptr).schedule_status() }
-    }
-
-    /// Sets a new schedule status.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[inline]
-    pub unsafe fn set_schedule_status(&self, status: TaskScheduleStatus) {
-        let ptr = self.context.as_ptr();
-        // SAFETY: the function is atomic and therefore causes no data races.
-        (*ptr).set_schedule_status(status)
     }
 
     /// Checks whether the task is panicking.

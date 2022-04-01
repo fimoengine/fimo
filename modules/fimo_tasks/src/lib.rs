@@ -1,5 +1,5 @@
 //! Implementation of the `fimo-tasks` interface.
-#![feature(c_unwind)]
+#![forbid(clippy::undocumented_unsafe_blocks)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -7,12 +7,11 @@
     rustdoc::broken_intra_doc_links
 )]
 #![feature(thread_local)]
+#![feature(c_unwind)]
 
 mod runtime;
 mod scheduler;
 mod spin_wait;
-mod stack_allocator;
-mod task_manager;
 mod worker_pool;
 
 #[cfg(feature = "module")]

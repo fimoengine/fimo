@@ -34,6 +34,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
     #[inline]
     pub fn handle(&self) -> TaskHandle {
         // safety: we own the task and know that it is registered.
+        // we require the `context_atomic` as we might be outside of the scheduler
         unsafe { self.handle.as_raw().context_atomic().handle().assume_init() }
     }
 
@@ -125,7 +126,6 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
             assert!(matches!(s.unregister_task(raw), Ok(_)));
         });
 
-        // safety: the task is unowned.
         let context = &mut *raw.context().borrow_mut();
         match context.schedule_status() {
             TaskScheduleStatus::Aborted => Err(context.take_panic_data()),
@@ -149,6 +149,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
         let runtime = unsafe { get_runtime() };
         assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
 
+        // We are outside of the scheduler, so we must use `context_atomic`.
         let context = self.as_raw().context_atomic();
         match context.schedule_status() {
             TaskScheduleStatus::Aborted => None,
@@ -172,6 +173,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
         let runtime = unsafe { get_runtime() };
         assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
 
+        // We are outside of the scheduler, so we must use `context_atomic`.
         let context = self.as_raw().context_atomic();
         match context.schedule_status() {
             TaskScheduleStatus::Aborted => None,
@@ -189,8 +191,11 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
             self.as_raw().resolved_name()
         );
 
+        // SAFETY: A `JoinHandle` can assume to only be used inside of the runtime.
         let runtime = unsafe { get_runtime() };
-        runtime.enter_scheduler(|s, _| s.unblock_task(self.as_raw()))
+
+        // SAFETY: Being registered is an invariant of the `JoinHandle`.
+        runtime.enter_scheduler(|s, _| unsafe { s.unblock_task(self.as_raw()) })
     }
 
     /// Requests for a task to be blocked.
@@ -206,6 +211,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
             self.as_raw().resolved_name()
         );
 
+        // We are outside of the scheduler, so we must use `context_atomic`.
         self.as_raw().context_atomic().request_block();
     }
 
@@ -226,6 +232,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
             self.as_raw().resolved_name()
         );
 
+        // We are outside of the scheduler, so we must use `context_atomic`.
         self.as_raw().context_atomic().request_abort();
     }
 }
