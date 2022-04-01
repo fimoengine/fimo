@@ -70,6 +70,12 @@ impl StackAllocator {
         })
     }
 
+    /// Allocates a new stack.
+    ///
+    /// The return type is comprised of a [`TaskSlot`] (handle/id of the allocation)
+    /// and a [`Stack`] (span of the allocated memory region).
+    ///
+    /// The allocated stack can be deallocated with [`deallocate`](#method.deallocate).
     pub fn allocate(&mut self) -> Result<(TaskSlot, Stack), Error> {
         trace!("Allocating a new stack and slot");
 
@@ -112,7 +118,7 @@ impl StackAllocator {
         let stack = stack.as_ref().expect("Shouldn't happen");
         let (top, bottom) = (stack.0.top(), stack.0.bottom());
 
-        // safety: we know that the addresses are valid, because they
+        // SAFETY: we know that the addresses are valid, because they
         // originate from an allocated stack, that won't be deallocated
         // until we free the slot.
         let stack = unsafe { Stack::new(top, bottom) };
@@ -121,6 +127,10 @@ impl StackAllocator {
         Ok((slot, stack))
     }
 
+    /// Deallocates an allocated stack.
+    ///
+    /// Logically deallocates a stack but may keep its memory allocated to
+    /// be reused by a following allocation.
     pub fn deallocate(&mut self, slot: TaskSlot) -> Result<(), Error> {
         trace!("Deallocating task slot {:?}", slot);
 

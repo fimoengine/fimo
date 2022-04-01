@@ -151,8 +151,10 @@ pub trait IRuntimeExt: IRuntime {
                 let handle = handle.into_inner();
                 let task = handle.as_raw();
 
-                // by this point the task has finished so we can unregister it.
-                self.enter_scheduler(|s, _| {
+                // By this point the task has finished so we can unregister it.
+                // SAFETY: The handle was the original owner of the task and now it has been
+                // transferred to us, so we are allowed to unregister it.
+                self.enter_scheduler(|s, _| unsafe {
                     assert!(matches!(s.unregister_task(task), Ok(_)));
                 });
 
@@ -287,7 +289,8 @@ pub trait IRuntimeExt: IRuntime {
     fn yield_until(&self, until: SystemTime) {
         self.yield_and_enter(move |_, curr| {
             trace!("Yielding task {:?} until {:?}", curr.resolved_name(), until);
-            curr.context_atomic().set_resume_time(until)
+            // we are inside the scheduler so the call to `borrow` is guaranteed to succeed.
+            curr.context().borrow().set_resume_time(until)
         })
     }
 
@@ -341,7 +344,8 @@ pub trait IRuntimeExt: IRuntime {
         trace!("Requesting block of current task");
 
         self.yield_and_enter(|_, curr| {
-            curr.context_atomic().request_block();
+            // we are inside the scheduler so the call to `borrow` is guaranteed to succeed.
+            curr.context().borrow().request_block();
             trace!("Requested block for task {:?}", curr.resolved_name())
         })
     }
@@ -380,12 +384,14 @@ pub trait IRuntimeExt: IRuntime {
         trace!("Wait until task-id {} completes", handle);
 
         self.yield_and_enter(move |s, curr| {
-            // safety: the task is provided from the scheduler, so it is registered.
-            if unsafe { curr.context_atomic().handle().assume_init() } != handle {
-                // safety: a wait operation does not invalidate the task
-                // or cause race-conditions.
+            // SAFETY: The task is provided from the scheduler, so it is registered.
+            // we are inside the scheduler so the call to `borrow` is guaranteed to succeed.
+            if unsafe { curr.context().borrow().handle().assume_init() } != handle {
+                // SAFETY: A wait operation does not invalidate the task or cause race-conditions.
                 if let Ok(wait_on) = unsafe { s.find_task_unbound(handle) } {
-                    s.wait_task_on(curr, wait_on).map(|_| WaitStatus::Completed)
+                    // SAFETY: Both tasks are provided by the scheduler and can't have been
+                    // unregistered in the meantime, as the runtime is locked.
+                    unsafe { s.wait_task_on(curr, wait_on).map(|_| WaitStatus::Completed) }
                 } else {
                     trace!("The task-id {} was not found, skipping wait", handle);
                     Ok(WaitStatus::Skipped)
@@ -443,9 +449,22 @@ pub trait IScheduler: Sync {
 
     /// Registers a task with the runtime for execution.
     ///
+    /// This function effectively tries to transfer the ownership of the task
+    /// to the runtime. On success, the caller may request the runtime to give
+    /// up the ownership of the task by calling the [`unregister_task`](#method.unregister_task)
+    /// method.
+    ///
+    /// The task may be modified by the method even in the case that it doen't succeed.
+    /// In case of failure, the task should be seen as invalid and be dropped.
+    ///
     /// # Safety
     ///
-    /// The pointed to value must be kept alive until the runtime releases it.
+    /// Behavior is undefined if any of the following conditions are violated:
+    ///
+    /// * The task must be valid.
+    /// * The same task may not be registered multiple times.
+    /// * The task may not be moved while owned by the runtime.
+    /// * The task must be kept alive until the runtime relinquishes the ownership.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -470,6 +489,20 @@ pub trait IScheduler: Sync {
     ) -> fimo_module::Result<()>;
 
     /// Unregisters a task from the task runtime.
+    ///
+    /// Requests for the runtime to give up its ownership of the task.
+    /// For this method to complete, the task must have run to completion
+    /// (i. e. is finished or aborted). On success the task is invalidated
+    /// and the ownership returned to the caller.
+    ///
+    /// # Safety
+    ///
+    /// This method can be thought of the task equivalent of the `free` function
+    /// which deallocates a memory allocation. Following this analogy the task
+    /// must have been registered with the runtime with a call to
+    /// [register_task](#method.register_task). Further, a caller must ensure
+    /// that they are the original owners of the task and are not merely borrowing
+    /// it by the likes of [`find_task`](#method.find_task) or any other means.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -477,7 +510,7 @@ pub trait IScheduler: Sync {
         into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
         from_expr = "let _ = res.into_rust()?; Ok(())"
     )]
-    fn unregister_task(
+    unsafe fn unregister_task(
         &mut self,
         #[vtable_info(
             type = "RawObj<dyn IRawTask + '_>",
@@ -489,11 +522,15 @@ pub trait IScheduler: Sync {
 
     /// Registers a block for a task until the dependency completes.
     ///
-    /// A task may not wait on itself.
+    /// A task may not wait on itself or wait on another task multiple times.
     ///
     /// # Note
     ///
     /// Does not guarantee that the task will wait immediately if it is already scheduled.
+    ///
+    /// # Safety
+    ///
+    /// Both tasks must be registered with the runtime.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -501,7 +538,7 @@ pub trait IScheduler: Sync {
         into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
         from_expr = "let _ = res.into_rust()?; Ok(())"
     )]
-    fn wait_task_on(
+    unsafe fn wait_task_on(
         &mut self,
         #[vtable_info(
             type = "RawObj<dyn IRawTask + '_>",
@@ -528,6 +565,8 @@ pub trait IScheduler: Sync {
     /// A waiting task may require that the task fully finishes before
     /// resuming execution. This function is mainly intended to be
     /// used for the implementation of condition variables.
+    ///
+    /// Further, the behavior is undefined if called with an unregistered task.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -554,6 +593,8 @@ pub trait IScheduler: Sync {
     /// A waiting task may require that the task fully finishes before
     /// resuming execution. This function is mainly intended to be
     /// used for the implementation of condition variables.
+    ///
+    /// Further, the behavior is undefined if called with an unregistered task.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -572,6 +613,13 @@ pub trait IScheduler: Sync {
     ) -> fimo_module::Result<usize>;
 
     /// Unblocks a blocked task.
+    ///
+    /// Once unblocked, the task may resume it's execution.
+    /// May error if the task is not blocked.
+    ///
+    /// # Safety
+    ///
+    /// The task must be registered with the runtime.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
@@ -579,7 +627,7 @@ pub trait IScheduler: Sync {
         into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
         from_expr = "let _ = res.into_rust()?; Ok(())"
     )]
-    fn unblock_task(
+    unsafe fn unblock_task(
         &mut self,
         #[vtable_info(
             type = "RawObj<dyn IRawTask + '_>",
@@ -612,7 +660,7 @@ pub unsafe fn get_runtime() -> &'static DynObj<dyn IRuntime> {
 ///
 /// # Safety
 ///
-/// May not be called with multiple runtimes.
+/// May not be called with multiple runtimes from the same worker.
 pub unsafe fn init_runtime(runtime: *const DynObj<dyn IRuntime>) {
     RUNTIME.set(Some(runtime))
 }
