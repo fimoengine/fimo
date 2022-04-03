@@ -5,16 +5,16 @@ use crate::ObjBox;
 use std::alloc::{Allocator, Global};
 use std::fmt::{Debug, Formatter};
 use std::marker::{PhantomData, Unsize};
-use std::mem::{forget, MaybeUninit};
+use std::mem::{ManuallyDrop, MaybeUninit};
 
 #[repr(C)]
 struct RawFfiFnInner<T: ?Sized, Meta> {
     ptr: *mut (),
     metadata: MaybeUninit<Meta>,
-    drop: unsafe extern "C" fn(*mut (), Meta),
-    call_once: unsafe extern "C" fn(*mut (), Meta, *const (), *mut ()),
-    call_mut: Option<unsafe extern "C" fn(*mut (), *mut Meta, *const (), *mut ())>,
-    call: Option<unsafe extern "C" fn(*mut (), *const Meta, *const (), *mut ())>,
+    drop: unsafe extern "C-unwind" fn(*mut (), Meta),
+    call_once: unsafe extern "C-unwind" fn(*mut (), Meta, *const (), *mut ()),
+    call_mut: Option<unsafe extern "C-unwind" fn(*mut (), *mut Meta, *const (), *mut ())>,
+    call: Option<unsafe extern "C-unwind" fn(*mut (), *const Meta, *const (), *mut ())>,
     _marker: PhantomData<T>,
 }
 
@@ -23,10 +23,10 @@ impl<T: ?Sized, Meta> RawFfiFnInner<T, Meta> {
     unsafe fn new(
         ptr: *mut (),
         metadata: Meta,
-        drop: unsafe extern "C" fn(*mut (), Meta),
-        call_once: unsafe extern "C" fn(*mut (), Meta, *const (), *mut ()),
-        call_mut: Option<unsafe extern "C" fn(*mut (), *mut Meta, *const (), *mut ())>,
-        call: Option<unsafe extern "C" fn(*mut (), *const Meta, *const (), *mut ())>,
+        drop: unsafe extern "C-unwind" fn(*mut (), Meta),
+        call_once: unsafe extern "C-unwind" fn(*mut (), Meta, *const (), *mut ()),
+        call_mut: Option<unsafe extern "C-unwind" fn(*mut (), *mut Meta, *const (), *mut ())>,
+        call: Option<unsafe extern "C-unwind" fn(*mut (), *const Meta, *const (), *mut ())>,
     ) -> Self {
         Self {
             ptr,
@@ -41,8 +41,8 @@ impl<T: ?Sized, Meta> RawFfiFnInner<T, Meta> {
 
     #[inline]
     unsafe fn call_once(self, args: *const (), output: *mut ()) {
-        (self.call_once)(self.ptr, self.metadata.assume_init_read(), args, output);
-        forget(self)
+        let this = ManuallyDrop::new(self);
+        (this.call_once)(this.ptr, this.metadata.assume_init_read(), args, output);
     }
 
     #[inline]
@@ -71,8 +71,14 @@ impl<T: ?Sized, Meta> Debug for RawFfiFnInner<T, Meta> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawFfiFnInner")
             .field("ptr", &self.ptr)
-            .field("drop", &self.drop)
-            .field("call", &self.call)
+            .field("drop", &unsafe {
+                std::mem::transmute::<_, extern "C" fn(*mut (), Meta)>(self.drop)
+            })
+            .field("call", &unsafe {
+                std::mem::transmute::<_, extern "C" fn(*mut (), *const Meta, *const (), *const ())>(
+                    self.call,
+                )
+            })
             .finish()
     }
 }
@@ -699,10 +705,10 @@ impl<T: Fn<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> Fn<Arg
 }
 
 struct FnInfo<Meta> {
-    pub call_once: unsafe extern "C" fn(*mut (), Meta, *const (), *mut ()),
-    pub call_mut: Option<unsafe extern "C" fn(*mut (), *mut Meta, *const (), *mut ())>,
-    pub call: Option<unsafe extern "C" fn(*mut (), *const Meta, *const (), *mut ())>,
-    pub drop: unsafe extern "C" fn(*mut (), Meta),
+    pub call_once: unsafe extern "C-unwind" fn(*mut (), Meta, *const (), *mut ()),
+    pub call_mut: Option<unsafe extern "C-unwind" fn(*mut (), *mut Meta, *const (), *mut ())>,
+    pub call: Option<unsafe extern "C-unwind" fn(*mut (), *const Meta, *const (), *mut ())>,
+    pub drop: unsafe extern "C-unwind" fn(*mut (), Meta),
 }
 
 trait GetFnTraits<Meta> {
@@ -743,7 +749,7 @@ impl<T: Fn<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for (T,
 }
 
 trait FnTraits<Meta> {
-    unsafe extern "C" fn call_once<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
         f: *mut (),
         meta: Meta,
         args: *const (),
@@ -751,7 +757,7 @@ trait FnTraits<Meta> {
     ) where
         Self: FnOnce<Args, Output = Output>;
 
-    unsafe extern "C" fn call_mut<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
         f: *mut (),
         meta: *mut Meta,
         args: *const (),
@@ -759,7 +765,7 @@ trait FnTraits<Meta> {
     ) where
         Self: FnMut<Args, Output = Output>;
 
-    unsafe extern "C" fn call<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
         f: *mut (),
         meta: *const Meta,
         args: *const (),
@@ -767,11 +773,11 @@ trait FnTraits<Meta> {
     ) where
         Self: Fn<Args, Output = Output>;
 
-    unsafe extern "C" fn drop(f: *mut (), meta: Meta);
+    unsafe extern "C-unwind" fn drop(f: *mut (), meta: Meta);
 }
 
 impl<T, Meta> FnTraits<Meta> for T {
-    default unsafe extern "C" fn call_once<Args: ReprRust, Output>(
+    default unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
         f: *mut (),
         _meta: Meta,
         args: *const (),
@@ -785,7 +791,7 @@ impl<T, Meta> FnTraits<Meta> for T {
         output.write(<Self as FnOnce<Args>>::call_once(f, args))
     }
 
-    default unsafe extern "C" fn call_mut<Args: ReprRust, Output>(
+    default unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
         f: *mut (),
         _meta: *mut Meta,
         args: *const (),
@@ -799,7 +805,7 @@ impl<T, Meta> FnTraits<Meta> for T {
         output.write(<Self as FnMut<Args>>::call_mut(f, args))
     }
 
-    default unsafe extern "C" fn call<Args: ReprRust, Output>(
+    default unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
         f: *mut (),
         _meta: *const Meta,
         args: *const (),
@@ -813,7 +819,7 @@ impl<T, Meta> FnTraits<Meta> for T {
         output.write(<Self as Fn<Args>>::call(f, args))
     }
 
-    default unsafe extern "C" fn drop(f: *mut (), _meta: Meta) {
+    default unsafe extern "C-unwind" fn drop(f: *mut (), _meta: Meta) {
         let f = f as *mut Self;
         std::ptr::drop_in_place(f);
     }
@@ -821,7 +827,7 @@ impl<T, Meta> FnTraits<Meta> for T {
 
 impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
     #[inline]
-    unsafe extern "C" fn call_once<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
         f: *mut (),
         meta: Meta,
         args: *const (),
@@ -837,7 +843,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
         output.write(<Self as FnOnce<Args>>::call_once(f, args))
     }
 
-    unsafe extern "C" fn call_mut<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
         _f: *mut (),
         _meta: *mut Meta,
         _args: *const (),
@@ -848,7 +854,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
         unimplemented!()
     }
 
-    unsafe extern "C" fn call<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
         _f: *mut (),
         _meta: *const Meta,
         _args: *const (),
@@ -859,7 +865,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
         unimplemented!()
     }
 
-    unsafe extern "C" fn drop(f: *mut (), meta: Meta) {
+    unsafe extern "C-unwind" fn drop(f: *mut (), meta: Meta) {
         let f = f as *mut T;
         let b = Box::from_raw_in(f, meta);
         drop(b)
@@ -868,7 +874,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
 
 impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
     #[inline]
-    unsafe extern "C" fn call_once<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
         f: *mut (),
         meta: Meta,
         args: *const (),
@@ -884,7 +890,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
         output.write(<Self as FnOnce<Args>>::call_once(f, args))
     }
 
-    unsafe extern "C" fn call_mut<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
         _f: *mut (),
         _meta: *mut Meta,
         _args: *const (),
@@ -895,7 +901,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
         unimplemented!()
     }
 
-    unsafe extern "C" fn call<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
         _f: *mut (),
         _meta: *const Meta,
         _args: *const (),
@@ -906,7 +912,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
         unimplemented!()
     }
 
-    unsafe extern "C" fn drop(f: *mut (), meta: Meta) {
+    unsafe extern "C-unwind" fn drop(f: *mut (), meta: Meta) {
         let f = f as *mut T;
         let b = ObjBox::from_raw_parts(f, meta);
         drop(b)

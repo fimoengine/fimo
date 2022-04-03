@@ -10,7 +10,7 @@ use fimo_ffi::{DynObj, FfiFn, ObjArc, ObjBox};
 use fimo_module::{Error, ErrorKind};
 use log::{error, trace};
 use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -88,7 +88,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
     /// # Panics
     ///
     /// This function may panic if a task tries to join itself.
-    pub fn join(mut self) -> Result<R, Option<ObjBox<DynObj<dyn IBase + Send>>>> {
+    pub fn join(self) -> Result<R, Option<ObjBox<DynObj<dyn IBase + Send>>>> {
         trace!(
             "Joining task-id {}, name {:?}",
             self.handle(),
@@ -96,10 +96,8 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
         );
 
         // join the task.
-        let res = unsafe { self.join_ref() };
-
-        // at this point the task has already been consumed, so we must forget it.
-        std::mem::forget(self);
+        let mut this = ManuallyDrop::new(self);
+        let res = unsafe { this.join_ref() };
         res
     }
 

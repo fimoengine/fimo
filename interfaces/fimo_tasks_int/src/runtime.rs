@@ -41,6 +41,10 @@ pub trait IRuntime: Send + Sync {
     ///
     /// Trying to access the scheduler by other means than
     /// the provided reference may result in a deadlock.
+    ///
+    /// # Notes
+    ///
+    /// The closure is not allowed to panic.
     #[allow(clippy::type_complexity)]
     fn enter_scheduler_impl(
         &self,
@@ -55,6 +59,10 @@ pub trait IRuntime: Send + Sync {
     /// Yields the current task to the runtime, allowing other tasks to be
     /// run on the current worker. On the next run of the scheduler it will call
     /// the provided function.
+    ///
+    /// # Notes
+    ///
+    /// The closure is not allowed to panic.
     #[allow(clippy::type_complexity)]
     fn yield_and_enter_impl(
         &self,
@@ -217,6 +225,10 @@ pub trait IRuntimeExt: IRuntime {
     ///
     /// Trying to access the scheduler by other means than
     /// the provided reference may result in a deadlock.
+    ///
+    /// # Panics
+    ///
+    /// Any panic inside the closure will be catched and resumed once the task resumes.
     #[inline]
     fn enter_scheduler<
         F: FnOnce(&mut DynObj<dyn IScheduler + '_>, Option<&DynObj<dyn IRawTask + '_>>) -> R,
@@ -225,6 +237,8 @@ pub trait IRuntimeExt: IRuntime {
         &self,
         f: F,
     ) -> R {
+        use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
         trace!("Entering scheduler");
         let mut res = MaybeUninit::uninit();
 
@@ -233,7 +247,10 @@ pub trait IRuntimeExt: IRuntime {
             let f = move |s: &mut DynObj<dyn IScheduler + '_>,
                           t: Option<&DynObj<dyn IRawTask + '_>>| {
                 trace!("Scheduler entered");
-                res.write(f(s, t));
+
+                let x = catch_unwind(AssertUnwindSafe(|| f(s, t)));
+                res.write(x);
+
                 trace!("Exiting scheduler");
             };
             let mut f = MaybeUninit::new(f);
@@ -245,7 +262,11 @@ pub trait IRuntimeExt: IRuntime {
         }
 
         trace!("Scheduler exited");
-        unsafe { res.assume_init() }
+        let result = unsafe { res.assume_init() };
+        match result {
+            Ok(x) => x,
+            Err(p) => resume_unwind(p),
+        }
     }
 
     /// Yields the current task to the runtime.
@@ -302,7 +323,8 @@ pub trait IRuntimeExt: IRuntime {
     ///
     /// # Panics
     ///
-    /// Can only be called from a worker thread.
+    /// Can only be called from a worker thread. Any panic inside the closure
+    /// will be catched and resumed once the task resumes.
     #[inline]
     fn yield_and_enter<
         F: FnOnce(&mut DynObj<dyn IScheduler + '_>, &DynObj<dyn IRawTask + '_>) -> R + Send,
@@ -311,15 +333,20 @@ pub trait IRuntimeExt: IRuntime {
         &self,
         f: F,
     ) -> R {
+        use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
         assert!(is_worker());
         trace!("Yielding to scheduler");
+
         let mut res = MaybeUninit::uninit();
 
         {
             let res = &mut res;
             let f = move |s: &mut DynObj<dyn IScheduler + '_>, t: &DynObj<dyn IRawTask + '_>| {
                 trace!("Yielded to scheduler");
-                res.write(f(s, t));
+
+                let x = catch_unwind(AssertUnwindSafe(|| f(s, t)));
+                res.write(x);
                 trace!("Resuming task");
             };
             let mut f = MaybeUninit::new(f);
@@ -331,7 +358,12 @@ pub trait IRuntimeExt: IRuntime {
         }
 
         trace!("Task resumed");
-        unsafe { res.assume_init() }
+
+        let result = unsafe { res.assume_init() };
+        match result {
+            Ok(x) => x,
+            Err(p) => resume_unwind(p),
+        }
     }
 
     /// Blocks the current task indefinitely.
@@ -373,8 +405,11 @@ pub trait IRuntimeExt: IRuntime {
     ///
     /// The current task will yield it's execution, until the other task completes.
     /// Returns whether the task waited on the other task.
-    /// Passing the handle to the current task will always return `Ok(WaitStatus::Skipped)`.
-    /// Otherwise this function always guarantees, that the other task has completed.
+    ///
+    /// Passing the handle to the current or non existant task will always
+    /// succeed with `WaitStatus::Skipped`.
+    ///
+    /// On success the specified task will be completed.
     ///
     /// # Panics
     ///
@@ -654,6 +689,18 @@ pub fn is_worker() -> bool {
 #[inline]
 pub unsafe fn get_runtime() -> &'static DynObj<dyn IRuntime> {
     &*RUNTIME.get().unwrap_unchecked()
+}
+
+/// Returns a reference to the [`IRuntime`] that owns the worker.
+///
+/// The reference remains valid as long as the worker thread is kept alive.
+#[inline]
+pub fn current_runtime() -> Option<&'static DynObj<dyn IRuntime>> {
+    if is_worker() {
+        unsafe { Some(get_runtime()) }
+    } else {
+        None
+    }
 }
 
 /// Provides the runtime to the current worker.

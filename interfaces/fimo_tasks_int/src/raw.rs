@@ -517,11 +517,21 @@ impl<T> SyncWrapper<T> {
     }
 
     #[inline]
+    fn swap(&mut self, val: T) -> T {
+        assert!(self.init, "value already taken");
+        let mut val = MaybeUninit::new(val);
+        std::mem::swap(&mut self.val, &mut val);
+        unsafe { val.assume_init() }
+    }
+
+    #[inline]
     fn write(&mut self, val: T) -> Option<T> {
         let mut val = MaybeUninit::new(val);
         std::mem::swap(&mut self.val, &mut val);
 
-        if std::mem::take(&mut self.init) {
+        let mut init = true;
+        std::mem::swap(&mut self.init, &mut init);
+        if init {
             unsafe { Some(val.assume_init()) }
         } else {
             None
@@ -692,7 +702,7 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
 
     #[inline]
     unsafe fn take_panic_data(&mut self) -> Option<ObjBox<DynObj<dyn IBase + Send + 'static>>> {
-        self.panic_data.take()
+        self.panic_data.swap(None)
     }
 
     #[inline]
