@@ -461,7 +461,7 @@ pub fn from_raw_parts<Dyn: ?Sized>(
     ptr: *const (),
     metadata: ObjMetadata<Dyn>,
 ) -> *const DynObj<Dyn> {
-    let metadata: usize = unsafe { std::mem::transmute(metadata) };
+    let metadata: usize = metadata.vtable_ptr as *const _ as usize;
     let inner: *const [()] = std::ptr::from_raw_parts(ptr, metadata);
     inner as *const DynObj<Dyn>
 }
@@ -475,7 +475,7 @@ pub fn from_raw_parts_mut<Dyn: ?Sized>(
     ptr: *mut (),
     metadata: ObjMetadata<Dyn>,
 ) -> *mut DynObj<Dyn> {
-    let metadata: usize = unsafe { std::mem::transmute(metadata) };
+    let metadata: usize = metadata.vtable_ptr as *const _ as usize;
     let inner: *mut [()] = std::ptr::from_raw_parts_mut(ptr, metadata);
     inner as *mut DynObj<Dyn>
 }
@@ -484,7 +484,11 @@ pub fn from_raw_parts_mut<Dyn: ?Sized>(
 #[inline]
 pub fn metadata<Dyn: ?Sized>(ptr: *const DynObj<Dyn>) -> ObjMetadata<Dyn> {
     let metadata = std::ptr::metadata(ptr);
-    unsafe { std::mem::transmute(metadata) }
+    let metadata = unsafe { &*(metadata as *const VTableHead) };
+    ObjMetadata {
+        vtable_ptr: metadata,
+        phantom: PhantomData,
+    }
 }
 
 /// Constructs a [`RawObj<T>`] from a `*const DynObj<T>`.
