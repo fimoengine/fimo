@@ -220,31 +220,9 @@ impl TaskScheduler {
             debug_assert_eq!(run_status, TaskRunStatus::Idle);
             debug_assert_eq!(schedule_status, TaskScheduleStatus::Processing);
 
-            // clear and fetch the status change request and apply it.
-            // SAFETY: We are the scheduler and are therefore allowed to clear the requests
-            // and apply them.
-            let mut private = scheduler_data.private_data_mut();
-            unsafe {
-                let request = context.clear_request();
-                match request {
-                    StatusRequest::None => {
-                        if private.dependencies.is_empty() {
-                            context.set_schedule_status(TaskScheduleStatus::Runnable)
-                        } else {
-                            context.set_schedule_status(TaskScheduleStatus::Waiting)
-                        }
-                    }
-                    StatusRequest::Block => {
-                        context.set_schedule_status(TaskScheduleStatus::Blocked)
-                    }
-                    StatusRequest::Abort => {
-                        context.set_schedule_status(TaskScheduleStatus::Aborted)
-                    }
-                }
-            }
-
-            // finally process the message
+            // Start by processing the message
             // SAFETY: We are toggling and untoggling the flag according to the documentation.
+            let mut private = scheduler_data.private_data_mut();
             unsafe { private.toggle_processing(true) };
 
             trace!("Processing {} message", data.msg_type());
@@ -253,7 +231,7 @@ impl TaskScheduler {
             drop(private);
             drop(context);
 
-            match data {
+            let apply_requests = match data {
                 MsgData::Yield { f } => {
                     let scheduler = fimo_ffi::ptr::coerce_obj_mut(self);
 
@@ -261,7 +239,8 @@ impl TaskScheduler {
                     // the message is processed. We know that the callback was valid
                     // at the time the task yielded its execution, therefore it must
                     // have remained valid and we can invoke it.
-                    unsafe { f.assume_valid()(scheduler, task.as_raw()) }
+                    unsafe { f.assume_valid()(scheduler, task.as_raw()) };
+                    true
                 }
                 MsgData::Completed { aborted } => {
                     let context = task.context().borrow();
@@ -278,8 +257,10 @@ impl TaskScheduler {
                             context.set_schedule_status(TaskScheduleStatus::Finished)
                         }
                     }
+                    false
                 }
-            }
+            };
+
             let context = task.context().borrow();
             let scheduler_data = context.scheduler_data();
 
@@ -294,6 +275,30 @@ impl TaskScheduler {
             // SAFETY: See above.
             // Remove the processing flag.
             unsafe { private.toggle_processing(false) };
+
+            if apply_requests {
+                // Clear and apply the status-change request now that they may be set.
+                // SAFETY: We are the scheduler and are therefore allowed to clear the requests
+                // and apply them.
+                unsafe {
+                    let request = context.clear_request();
+                    match request {
+                        StatusRequest::None => {
+                            if private.dependencies.is_empty() {
+                                context.set_schedule_status(TaskScheduleStatus::Runnable)
+                            } else {
+                                context.set_schedule_status(TaskScheduleStatus::Waiting)
+                            }
+                        }
+                        StatusRequest::Block => {
+                            context.set_schedule_status(TaskScheduleStatus::Blocked)
+                        }
+                        StatusRequest::Abort => {
+                            context.set_schedule_status(TaskScheduleStatus::Aborted)
+                        }
+                    }
+                }
+            }
 
             // The status must be queried again.
             match context.schedule_status() {
