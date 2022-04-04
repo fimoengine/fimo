@@ -18,6 +18,8 @@ use crate::runtime::{IRuntime, IRuntimeExt};
 use fimo_ffi::{interface, DynObj};
 use fimo_module::{FimoInterface, IModuleInterface, IModuleInterfaceVTable, ReleaseType, Version};
 
+pub mod sync;
+
 pub mod raw;
 pub mod runtime;
 pub mod task;

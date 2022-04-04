@@ -2,7 +2,7 @@ use fimo_ffi::cell::AtomicRefCell;
 use fimo_ffi::DynObj;
 use fimo_module::Error;
 use fimo_tasks::Builder;
-use fimo_tasks_int::raw::{IRawTask, ISchedulerContext, TaskScheduleStatus};
+use fimo_tasks_int::raw::{IRawTask, ISchedulerContext, TaskScheduleStatus, WakeupData};
 use fimo_tasks_int::runtime::{
     current_runtime, get_runtime, init_runtime, is_worker, IRuntime, IRuntimeExt, IScheduler,
     WaitStatus,
@@ -12,6 +12,8 @@ use std::sync::Once;
 use std::time::{Duration, SystemTime};
 
 static INIT: Once = Once::new();
+
+mod sync;
 
 fn new_runtime<R>(f: impl FnOnce(&DynObj<dyn IRuntime>) -> Result<R, Error>) -> Result<R, Error> {
     INIT.call_once(pretty_env_logger::init);
@@ -192,7 +194,7 @@ fn spawn() -> Result<(), Error> {
 fn sleep_for() -> Result<(), Error> {
     enter_and_init_runtime(|| {
         let before_sleep = SystemTime::now();
-        let duration = Duration::from_millis(500);
+        let duration = Duration::from_millis(100);
         let r = unsafe { get_runtime() };
 
         r.yield_for(duration);
@@ -208,7 +210,7 @@ fn sleep_for() -> Result<(), Error> {
 fn sleep_until() -> Result<(), Error> {
     enter_and_init_runtime(|| {
         let before_sleep = SystemTime::now();
-        let duration = Duration::from_millis(500);
+        let duration = Duration::from_millis(100);
         let sleep_until = before_sleep + duration;
         let r = unsafe { get_runtime() };
 
@@ -293,7 +295,10 @@ fn wait() -> Result<(), Error> {
         let t = r.spawn(|| {}, &[])?;
         let t_handle = t.handle();
 
-        assert!(matches!(r.wait_on(t_handle), Ok(WaitStatus::Completed)));
+        assert!(matches!(
+            r.wait_on(t_handle),
+            Ok(WaitStatus::Completed(WakeupData::None))
+        ));
         let status = t.as_raw().context_atomic().schedule_status();
         assert_eq!(status, TaskScheduleStatus::Finished);
         let _ = t.join();
