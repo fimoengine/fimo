@@ -4,13 +4,14 @@ use context::Context;
 use fimo_ffi::{DynObj, ObjArc, ObjectId};
 use fimo_module::Error;
 use fimo_tasks_int::raw::{
-    Builder, IRawTask, StatusRequest, TaskHandle, TaskRunStatus, TaskScheduleStatus, WorkerId,
+    Builder, IRawTask, StatusRequest, TaskHandle, TaskRunStatus, TaskScheduleStatus, WakeupData,
+    WorkerId,
 };
 use fimo_tasks_int::runtime::IScheduler;
 use log::{debug, error, info, trace};
 use std::cmp::Reverse;
 use std::fmt::Debug;
-use std::mem::ManuallyDrop;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Weak;
 use std::time::SystemTime;
@@ -103,7 +104,7 @@ impl TaskScheduler {
         task: &DynObj<dyn IRawTask + '_>,
     ) -> Result<(), Error> {
         let scheduler_task = self.scheduler_task.clone();
-        self.wait_task_on(task, &scheduler_task)
+        self.wait_task_on(task, &scheduler_task, None)
     }
 
     #[inline]
@@ -120,7 +121,7 @@ impl TaskScheduler {
         // Under these semantics, the mutex is only a performance improvement over
         // calling an equivalent `try_lock` in a loop and has therefore no side effects.
         let scheduler_task = self.scheduler_task.clone();
-        unsafe { self.notify_one(&scheduler_task)? };
+        unsafe { self.notify_one(&scheduler_task, WakeupData::None)? };
         Ok(())
     }
 
@@ -154,7 +155,7 @@ impl TaskScheduler {
         // of the task is a safe (and required) operation.
         unsafe {
             self.task_manager
-                .notify_all(task.clone())
+                .notify_all(task.clone(), WakeupData::None)
                 .expect("Invalid task")
         };
 
@@ -507,6 +508,18 @@ impl IScheduler for TaskScheduler {
         }
     }
 
+    unsafe fn num_waiting_tasks(&self, task: &DynObj<dyn IRawTask + '_>) -> usize {
+        // SAFETY: We assume that the tasks are both registered with our runtime.
+        let task = AssertValidTask::from_raw(task);
+        self.task_manager.num_waiting_tasks(task)
+    }
+
+    unsafe fn num_tasks_dependencies(&self, task: &DynObj<dyn IRawTask + '_>) -> usize {
+        // SAFETY: We assume that the tasks are both registered with our runtime.
+        let task = AssertValidTask::from_raw(task);
+        self.task_manager.num_tasks_dependencies(task)
+    }
+
     unsafe fn register_task(
         &mut self,
         task: &DynObj<dyn IRawTask + '_>,
@@ -528,29 +541,32 @@ impl IScheduler for TaskScheduler {
         &mut self,
         task: &DynObj<dyn IRawTask + '_>,
         on: &DynObj<dyn IRawTask + '_>,
+        data_addr: Option<&mut MaybeUninit<WakeupData>>,
     ) -> fimo_module::Result<()> {
         // SAFETY: We assume that the tasks are both registered with our runtime.
         let task = AssertValidTask::from_raw(task);
         let on = AssertValidTask::from_raw(on);
-        self.task_manager.wait_task_on(task, on)
+        self.task_manager.wait_task_on(task, on, data_addr)
     }
 
     unsafe fn notify_one(
         &mut self,
         task: &DynObj<dyn IRawTask + '_>,
+        data: WakeupData,
     ) -> fimo_module::Result<Option<usize>> {
         // SAFETY: We assume that the task is registered with our runtime.
         let task = AssertValidTask::from_raw(task);
-        self.task_manager.notify_one(task)
+        self.task_manager.notify_one(task, data)
     }
 
     unsafe fn notify_all(
         &mut self,
         task: &DynObj<dyn IRawTask + '_>,
+        data: WakeupData,
     ) -> fimo_module::Result<usize> {
         // SAFETY: We assume that the task is registered with our runtime.
         let task = AssertValidTask::from_raw(task);
-        self.task_manager.notify_all(task)
+        self.task_manager.notify_all(task, data)
     }
 
     unsafe fn unblock_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> fimo_module::Result<()> {

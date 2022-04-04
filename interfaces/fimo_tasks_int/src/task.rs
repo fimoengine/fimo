@@ -805,6 +805,104 @@ impl ParallelBuilder {
             })
             .collect()
     }
+
+    /// Spawns multiple tasks on the runtime.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
+    #[inline]
+    #[track_caller]
+    #[allow(clippy::type_complexity)]
+    pub fn spawn<'a, 'b, F: FnOnce() -> R + Send + Clone + 'b, R: Send + 'b>(
+        self,
+        f: F,
+        wait_on: &'a [TaskHandle],
+    ) -> Result<Vec<JoinHandle<Pin<ObjBox<Task<'b, R>>>>>, Error> {
+        assert!(is_worker());
+        trace!("Spawning multiple new tasks");
+
+        let runtime = unsafe { get_runtime() };
+        let handles: Vec<_> = runtime.enter_scheduler(|s, _| {
+            let workers = s.worker_ids();
+            let num_tasks = self.num_tasks.unwrap_or(workers.len());
+
+            if num_tasks > workers.len() && self.unique_workers {
+                error!(
+                    "Can not spawn {} tasks on {} unique workers",
+                    num_tasks,
+                    workers.len()
+                );
+                let err = format!(
+                    "Can not spawn {} tasks on {} unique workers",
+                    num_tasks,
+                    workers.len()
+                );
+                return Err(Error::new(ErrorKind::OutOfRange, err));
+            }
+
+            let workers: Vec<_> = if self.unique_workers {
+                workers[..num_tasks].iter().map(|w| Some(*w)).collect()
+            } else {
+                vec![None; num_tasks]
+            };
+
+            let mut handles = Vec::with_capacity(num_tasks);
+            for (i, worker) in workers.into_iter().enumerate() {
+                let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
+
+                // fetch the addresses to the inner members, so we can initialize them.
+                let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
+                let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+
+                struct AssertSync<T>(*mut MaybeUninit<T>);
+                // we know that `T` won't be shared only written, so we can mark it as `Send`.
+                unsafe impl<T: Send> Send for AssertSync<T> {}
+
+                let res = unsafe {
+                    // initialize res and fetch a pointer to the inner result.
+                    res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
+                    AssertSync((*res_ptr).get())
+                };
+
+                let f = f.clone();
+                let f = move || {
+                    // write the result directly into the address, knowing that it will live
+                    // at least as long as the task itself.
+                    unsafe { res.0.write(MaybeUninit::new(f())) };
+                };
+                let f = FfiFn::r#box(Box::new(f));
+
+                // initialize the raw field.
+                let raw_task = unsafe {
+                    self.inner
+                        .clone()
+                        .with_worker(worker)
+                        .extend_name_index(i)
+                        .build(Some(f), None)
+                };
+                unsafe { raw_ptr.write(raw_task) };
+
+                // safety: all fields have been initialized.
+                let task = unsafe { Pin::new_unchecked(task.assume_init()) };
+
+                if let Err(e) = unsafe { s.register_task(task.as_raw(), wait_on) } {
+                    handles.push(Err(e));
+                } else {
+                    handles.push(Ok(JoinHandle { handle: task }))
+                }
+            }
+            Ok(handles)
+        })?;
+
+        let mut join_handles = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let handle = handle?;
+            join_handles.push(handle)
+        }
+
+        Ok(join_handles)
+    }
 }
 
 impl Default for ParallelBuilder {

@@ -101,6 +101,19 @@ pub enum TaskScheduleStatus {
     Finished,
 }
 
+/// Data passed to a task upon wakeup.
+#[repr(C, u8)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+pub enum WakeupData {
+    /// Wake up without any data.
+    None,
+    /// Custom data passed to the task.
+    Custom(*const ()),
+}
+
+/// The passed data transfers ownership of the contents.
+unsafe impl Send for WakeupData {}
+
 /// Representation of a raw task.
 #[derive(ObjectId)]
 #[fetch_vtable(uuid = "eb91ee4a-22d2-4b91-9e06-0994f0d79b0f", interfaces(IRawTask))]
@@ -489,6 +502,9 @@ pub(crate) struct SchedulerContextInner<'a> {
     scheduler_data: Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
     _pinned: PhantomPinned,
 }
+
+struct SendWrapper<T>(T);
+unsafe impl<T> Send for SendWrapper<T> {}
 
 struct SyncWrapper<T> {
     init: bool,

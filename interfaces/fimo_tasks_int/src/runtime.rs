@@ -1,6 +1,8 @@
 //! Task runtime interface.
 
-use crate::raw::{IRawTask, ISchedulerContext, TaskHandle, TaskScheduleStatus, WorkerId};
+use crate::raw::{
+    IRawTask, ISchedulerContext, TaskHandle, TaskScheduleStatus, WakeupData, WorkerId,
+};
 use crate::task::{Builder, JoinHandle, RawTaskWrapper, Task};
 use fimo_ffi::ptr::{IBase, RawObj};
 use fimo_ffi::span::ConstSpanPtr;
@@ -20,7 +22,7 @@ pub enum WaitStatus {
     /// The operation was skipped because the dependency does not exist or refers to itself.
     Skipped,
     /// The wait was successful.
-    Completed,
+    Completed(WakeupData),
 }
 
 /// Interface of a task runtime.
@@ -418,7 +420,9 @@ pub trait IRuntimeExt: IRuntime {
     fn wait_on(&self, handle: TaskHandle) -> fimo_module::Result<WaitStatus> {
         trace!("Wait until task-id {} completes", handle);
 
-        self.yield_and_enter(move |s, curr| {
+        let mut data = MaybeUninit::uninit();
+        let data_ref = &mut data;
+        let res = self.yield_and_enter(move |s, curr| {
             // SAFETY: The task is provided from the scheduler, so it is registered.
             // we are inside the scheduler so the call to `borrow` is guaranteed to succeed.
             if unsafe { curr.context().borrow().handle().assume_init() } != handle {
@@ -426,7 +430,10 @@ pub trait IRuntimeExt: IRuntime {
                 if let Ok(wait_on) = unsafe { s.find_task_unbound(handle) } {
                     // SAFETY: Both tasks are provided by the scheduler and can't have been
                     // unregistered in the meantime, as the runtime is locked.
-                    unsafe { s.wait_task_on(curr, wait_on).map(|_| WaitStatus::Completed) }
+                    unsafe {
+                        s.wait_task_on(curr, wait_on, Some(data_ref))
+                            .map(|_| WaitStatus::Completed(WakeupData::None))
+                    }
                 } else {
                     trace!("The task-id {} was not found, skipping wait", handle);
                     Ok(WaitStatus::Skipped)
@@ -435,7 +442,19 @@ pub trait IRuntimeExt: IRuntime {
                 trace!("The task-id {} refers to itself, skipping wait", handle);
                 Ok(WaitStatus::Skipped)
             }
-        })
+        });
+
+        match res {
+            Ok(WaitStatus::Completed(_)) => {
+                // SAFETY: By the contract of the `wait_task_on` we know that
+                // if the task was put to sleep, it will have some data passed to
+                // once it is woken up. We just checked that the wait operation
+                // was successful, therefore the data was written in `data`.
+                unsafe { Ok(WaitStatus::Completed(data.assume_init())) }
+            }
+            Ok(WaitStatus::Skipped) => Ok(WaitStatus::Skipped),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -481,6 +500,38 @@ pub trait IScheduler: Sync {
         &self,
         handle: TaskHandle,
     ) -> fimo_module::Result<&'a DynObj<dyn IRawTask + 'a>>;
+
+    /// Returns the number of tasks waiting on the task.
+    ///
+    /// # Safety
+    ///
+    /// The task must be registered with the runtime.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    unsafe fn num_waiting_tasks(
+        &self,
+        #[vtable_info(
+            type = "RawObj<dyn IRawTask + '_>",
+            into = "fimo_ffi::ptr::into_raw",
+            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
+        )]
+        task: &DynObj<dyn IRawTask + '_>,
+    ) -> usize;
+
+    /// Returns the number of tasks the taske depends on to continue to run.
+    ///
+    /// # Safety
+    ///
+    /// The task must be registered with the runtime.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    unsafe fn num_tasks_dependencies(
+        &self,
+        #[vtable_info(
+            type = "RawObj<dyn IRawTask + '_>",
+            into = "fimo_ffi::ptr::into_raw",
+            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
+        )]
+        task: &DynObj<dyn IRawTask + '_>,
+    ) -> usize;
 
     /// Registers a task with the runtime for execution.
     ///
@@ -558,6 +609,7 @@ pub trait IScheduler: Sync {
     /// Registers a block for a task until the dependency completes.
     ///
     /// A task may not wait on itself or wait on another task multiple times.
+    /// After being woken up `data_addr` is initialized with a message from the task that woke it up.
     ///
     /// # Note
     ///
@@ -587,6 +639,12 @@ pub trait IScheduler: Sync {
             from_expr = "let p_2 = &*fimo_ffi::ptr::from_raw(p_2);"
         )]
         on: &DynObj<dyn IRawTask + '_>,
+        #[vtable_info(
+            type = "Optional<&mut MaybeUninit<WakeupData>>",
+            into = "Into::into",
+            from = "Into::into"
+        )]
+        data_addr: Option<&mut MaybeUninit<WakeupData>>,
     ) -> fimo_module::Result<()>;
 
     /// Wakes up one task.
@@ -617,6 +675,7 @@ pub trait IScheduler: Sync {
             from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
         )]
         task: &DynObj<dyn IRawTask + '_>,
+        data: WakeupData,
     ) -> fimo_module::Result<Option<usize>>;
 
     /// Wakes up all tasks.
@@ -645,6 +704,7 @@ pub trait IScheduler: Sync {
             from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
         )]
         task: &DynObj<dyn IRawTask + '_>,
+        data: WakeupData,
     ) -> fimo_module::Result<usize>;
 
     /// Unblocks a blocked task.

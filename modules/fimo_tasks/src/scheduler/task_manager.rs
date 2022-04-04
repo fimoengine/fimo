@@ -7,7 +7,7 @@ use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{
     AtomicISchedulerContext, IRawTask, IRustPanicData, ISchedulerContext, StatusRequest,
-    TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WorkerId,
+    TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WakeupData, WorkerId,
 };
 use fimo_tasks_int::runtime::IScheduler;
 use log::{debug, error, trace};
@@ -15,7 +15,9 @@ use std::any::Any;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::fmt::Debug;
+use std::mem::MaybeUninit;
 use std::ops::RangeFrom;
+use std::sync::atomic::AtomicPtr;
 use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
@@ -167,6 +169,26 @@ impl TaskManager {
 
     /// # Safety
     ///
+    /// See [`num_waiting_tasks`](fimo_tasks_int::runtime::IScheduler::num_waiting_tasks)
+    pub unsafe fn num_waiting_tasks(&self, task: AssertValidTask) -> usize {
+        let context = task.context().borrow();
+        let scheduler_data = context.scheduler_data();
+        let private = scheduler_data.private_data();
+        private.waiters.len()
+    }
+
+    /// # Safety
+    ///
+    /// See [`num_tasks_dependencies`](fimo_tasks_int::runtime::IScheduler::num_tasks_dependencies)
+    pub unsafe fn num_tasks_dependencies(&self, task: AssertValidTask) -> usize {
+        let context = task.context().borrow();
+        let scheduler_data = context.scheduler_data();
+        let private = scheduler_data.private_data();
+        private.dependencies.len()
+    }
+
+    /// # Safety
+    ///
     /// See [`register_task`](fimo_tasks_int::runtime::IScheduler::register_task)
     pub unsafe fn register_task(
         &mut self,
@@ -211,7 +233,7 @@ impl TaskManager {
         for dep in wait_on {
             if let Some(dep) = self.tasks.get(dep) {
                 let dep = dep.clone();
-                if let Err(e) = self.wait_task_on(task.clone(), dep) {
+                if let Err(e) = self.wait_task_on(task.clone(), dep, None) {
                     error!("Aborting registration, error: {}", e);
                     let mut context = task.context().borrow_mut();
                     let (handle, _) = context.unregister();
@@ -340,6 +362,7 @@ impl TaskManager {
         &mut self,
         task: AssertValidTask,
         wait_on: AssertValidTask,
+        data_addr: Option<&mut MaybeUninit<WakeupData>>,
     ) -> Result<(), Error> {
         if task == wait_on {
             error!(
@@ -403,6 +426,14 @@ impl TaskManager {
             return Err(Error::new(ErrorKind::InvalidArgument, err));
         }
 
+        // Insert the address of the data in the map of the task.
+        debug_assert!(!private.dependency_data_addr.contains_key(&wait_on));
+        if let Some(addr) = data_addr {
+            private
+                .dependency_data_addr
+                .insert(wait_on.clone(), AtomicPtr::new(addr.as_mut_ptr()));
+        }
+
         // register the dependency
         private.dependencies.insert(wait_on.clone());
         wait_on_private.waiters.push(Reverse(task.clone()));
@@ -428,7 +459,11 @@ impl TaskManager {
     /// # Safety
     ///
     /// See [`notify_one`](fimo_tasks_int::runtime::IScheduler::notify_one)
-    pub unsafe fn notify_one(&mut self, task: AssertValidTask) -> Result<Option<usize>, Error> {
+    pub unsafe fn notify_one(
+        &mut self,
+        task: AssertValidTask,
+        data: WakeupData,
+    ) -> Result<Option<usize>, Error> {
         let context = task.context().borrow();
         let scheduler_data = context.scheduler_data();
 
@@ -444,7 +479,7 @@ impl TaskManager {
         // the first waiter from the `waiters` heap, which returns the waiter with the
         // highest priority.
         if let Some(Reverse(waiter)) = private.waiters.pop() {
-            self.notify_waiter(task.clone(), waiter);
+            self.notify_waiter(task.clone(), waiter, data);
             Ok(Some(private.waiters.len()))
         } else {
             trace!("No waiters, skipping");
@@ -455,7 +490,11 @@ impl TaskManager {
     /// # Safety
     ///
     /// See [`notify_all`](fimo_tasks_int::runtime::IScheduler::notify_all)
-    pub unsafe fn notify_all(&mut self, task: AssertValidTask) -> Result<usize, Error> {
+    pub unsafe fn notify_all(
+        &mut self,
+        task: AssertValidTask,
+        data: WakeupData,
+    ) -> Result<usize, Error> {
         let context = task.context().borrow();
         let scheduler_data = context.scheduler_data();
 
@@ -472,7 +511,7 @@ impl TaskManager {
         // The actual logic of waking a task is implemented in the `notify_waiter`
         // method. We simply call that method with every waiter in the heap.
         while let Some(Reverse(waiter)) = waiters.pop() {
-            self.notify_waiter(task.clone(), waiter)
+            self.notify_waiter(task.clone(), waiter, data)
         }
 
         Ok(num_waiters)
@@ -482,7 +521,12 @@ impl TaskManager {
     ///
     /// May only be called by [`notify_one`](#method.notify_one)
     /// and [`notify_all`](#method.notify_all).
-    pub unsafe fn notify_waiter(&mut self, task: AssertValidTask, waiter: AssertValidTask) {
+    pub unsafe fn notify_waiter(
+        &mut self,
+        task: AssertValidTask,
+        waiter: AssertValidTask,
+        data: WakeupData,
+    ) {
         let task_context = task.context().borrow();
         let waiter_context = waiter.context().borrow();
         let waiter_data = waiter_context.scheduler_data();
@@ -501,6 +545,15 @@ impl TaskManager {
 
         let mut waiter_private = waiter_data.private_data_mut();
         assert!(waiter_private.dependencies.remove(&task));
+
+        // Write the message into the data if it points to a valid address.
+        if let Some(mut data_addr) = waiter_private.dependency_data_addr.remove(&task) {
+            // SAFETY: We know by the contract of the `wait_on` method, that the data_addr
+            // must be either valid or null. In the former case, we also know that the task
+            // did not continue its execution, as it was put to wait. Therefore the address
+            // must have remained valid.
+            data_addr.get_mut().write(data);
+        }
 
         // make the task runnable if nothing prevents it.
         let schedule_status = waiter_context.schedule_status();
@@ -888,6 +941,8 @@ pub(super) struct PrivateContext {
     /// Heap of tasks waiting on this task to finish,
     /// sorted by descending priority.
     pub waiters: BinaryHeap<Reverse<AssertValidTask>>,
+    /// Address of the WakeupData for each dependency.
+    pub dependency_data_addr: BTreeMap<AssertValidTask, AtomicPtr<WakeupData>>,
 }
 
 impl ContextData {
@@ -972,6 +1027,7 @@ impl PrivateContext {
             slot: None,
             dependencies: Default::default(),
             waiters: Default::default(),
+            dependency_data_addr: Default::default(),
         }
     }
 
