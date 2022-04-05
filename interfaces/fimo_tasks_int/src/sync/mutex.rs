@@ -9,14 +9,14 @@ use std::{
 };
 
 use crate::{
-    raw::WakeupData,
+    raw::{IRawTask, WakeupData},
     runtime::{current_runtime, IRuntimeExt, IScheduler},
 };
 use crate::{
     sync::spin_wait::SpinWait,
     task::{Builder, JoinHandle, Task},
 };
-use fimo_ffi::ObjBox;
+use fimo_ffi::{DynObj, ObjBox};
 use rand::SeedableRng;
 
 /// A mutual exclusion primitive useful for protecting shared data
@@ -180,6 +180,12 @@ impl<T: ?Sized> MutexGuard<'_, T> {
         let m = ManuallyDrop::new(self);
         unsafe { m.lock.raw.unlock_fair() }
     }
+
+    /// Fetches the contained [`RawMutex`].
+    #[inline]
+    pub(crate) fn as_raw(&self) -> &RawMutex {
+        &self.lock.raw
+    }
 }
 
 impl<T: ?Sized> !Send for MutexGuard<'_, T> {}
@@ -234,7 +240,7 @@ impl<T: ?Sized> Drop for MutexGuard<'_, T> {
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
-struct RawMutex {
+pub(crate) struct RawMutex {
     state: AtomicU8,
     fair_timeout: Cell<Instant>,
     rng: UnsafeCell<rand::rngs::SmallRng>,
@@ -247,6 +253,7 @@ impl RawMutex {
     const LOCKED_BIT: u8 = 0b01;
     const WAITERS_BIT: u8 = 0b10;
 
+    const UNINIT_TOKEN: *const () = std::ptr::null();
     const HANDOFF_LOCK: *const () = 1 as *const ();
 
     #[inline]
@@ -269,7 +276,7 @@ impl RawMutex {
     }
 
     #[inline]
-    fn lock(&self) {
+    pub fn lock(&self) {
         // Try to acquire the lock by performing a CAS operation on the state.
         // The `Acquire` synchronizes with the `Release` in unlock and unlock_fair.
         if self
@@ -326,27 +333,33 @@ impl RawMutex {
             }
 
             // Block our tasks until we are woken up by an unlock
-            let mut data = MaybeUninit::uninit();
-            runtime.yield_and_enter(|s, curr| {
+            let mut data = MaybeUninit::new(WakeupData::Custom(Self::UNINIT_TOKEN));
+            let waited = runtime.yield_and_enter(|s, curr| {
                 let state = self.state.load(atomic::Ordering::Relaxed);
                 if state == Self::LOCKED_BIT | Self::WAITERS_BIT {
                     unsafe {
                         s.wait_task_on(curr, self.task.as_raw(), Some(&mut data))
                             .expect("can not wait on mutex");
                     }
+
+                    return true;
                 }
+
+                false
             });
 
-            // SAFETY: We were woken up by the runtime, so the data must contain some valid message.
-            match unsafe { data.assume_init() } {
-                // Normal wakeup, retry.
-                WakeupData::None => (),
+            if waited {
+                // SAFETY: We were woken up by the runtime, so the data must contain some valid message.
+                match unsafe { data.assume_init() } {
+                    // Normal wakeup, retry.
+                    WakeupData::None => (),
 
-                // Handoff, we now own the lock.
-                WakeupData::Custom(Self::HANDOFF_LOCK) => return,
-
-                // Internal error.
-                WakeupData::Custom(_) => unreachable!(),
+                    // Handoff, we now own the lock.
+                    WakeupData::Custom(d) => {
+                        debug_assert_eq!(d, Self::HANDOFF_LOCK);
+                        return;
+                    }
+                }
             }
 
             // Loop back and try locking again
@@ -380,7 +393,7 @@ impl RawMutex {
     }
 
     #[inline]
-    unsafe fn unlock(&self) {
+    pub unsafe fn unlock(&self) {
         if self
             .state
             .compare_exchange_weak(
@@ -391,7 +404,7 @@ impl RawMutex {
             )
             .is_err()
         {
-            self.unlock_slow(false)
+            self.unlock_slow(false, None)
         }
     }
 
@@ -407,7 +420,23 @@ impl RawMutex {
             )
             .is_err()
         {
-            self.unlock_slow(true)
+            self.unlock_slow(true, None)
+        }
+    }
+
+    #[inline]
+    pub unsafe fn unlock_condvar(&self, s: &mut DynObj<dyn IScheduler + '_>) {
+        if self
+            .state
+            .compare_exchange_weak(
+                Self::LOCKED_BIT,
+                Self::STATE_INIT,
+                atomic::Ordering::Release,
+                atomic::Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            self.unlock_slow(false, Some(s))
         }
     }
 
@@ -431,12 +460,11 @@ impl RawMutex {
     }
 
     #[inline]
-    unsafe fn unlock_slow(&self, fair: bool) {
+    unsafe fn unlock_slow(&self, fair: bool, s: Option<&mut DynObj<dyn IScheduler + '_>>) {
         let runtime = current_runtime().unwrap();
 
-        // The slow path uses the runtime the synchronize and wake sleeping
-        // tasks.
-        runtime.enter_scheduler(move |s, _| {
+        let f = move |s: &'_ mut DynObj<dyn IScheduler + '_>,
+                      _: Option<&DynObj<dyn IRawTask + '_>>| {
             let num_waiters = s.num_waiting_tasks(self.task.as_raw());
             let one_waiter = num_waiters == 1;
             let has_waiters = num_waiters != 0;
@@ -470,7 +498,15 @@ impl RawMutex {
                 self.state
                     .store(Self::STATE_INIT, atomic::Ordering::Release)
             }
-        });
+        };
+
+        // The slow path uses the runtime the synchronize and wake sleeping
+        // tasks. If s is Some we are already inside the scheduler.
+        if let Some(s) = s {
+            f(s, None)
+        } else {
+            runtime.enter_scheduler(f);
+        }
     }
 }
 
