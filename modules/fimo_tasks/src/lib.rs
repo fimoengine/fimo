@@ -6,6 +6,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+#![feature(strict_provenance)]
 #![feature(thread_local)]
 #![feature(c_unwind)]
 

@@ -6,8 +6,9 @@ use fimo_ffi::ptr::IBaseExt;
 use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{
-    AtomicISchedulerContext, IRawTask, IRustPanicData, ISchedulerContext, StatusRequest,
-    TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WakeupData, WorkerId,
+    AtomicISchedulerContext, IRawTask, IRustPanicData, ISchedulerContext, PseudoTask,
+    StatusRequest, TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WakeupData,
+    WorkerId,
 };
 use fimo_tasks_int::runtime::IScheduler;
 use log::{debug, error, trace};
@@ -27,6 +28,7 @@ pub(crate) struct TaskManager {
     handle_iter: RangeFrom<usize>,
     free_handles: VecDeque<TaskHandle>,
     tasks: BTreeMap<TaskHandle, AssertValidTask>,
+    pseudo_tasks: BTreeMap<usize, PseudoTaskData>,
     processing_queue: BinaryHeap<Reverse<AssertValidTask>>,
 }
 
@@ -38,6 +40,7 @@ impl TaskManager {
             handle_iter: 0..,
             free_handles: Default::default(),
             tasks: Default::default(),
+            pseudo_tasks: Default::default(),
             processing_queue: Default::default(),
         }
     }
@@ -412,7 +415,8 @@ impl TaskManager {
         }
 
         // a task may not wait on another task multiple times.
-        if private.dependencies.contains(&wait_on) {
+        let dependency = Dependency::Task(wait_on.clone());
+        if private.dependencies.contains(&dependency) {
             error!(
                 "Task {} waiting on {} multiple times",
                 context.handle(),
@@ -427,15 +431,18 @@ impl TaskManager {
         }
 
         // Insert the address of the data in the map of the task.
-        debug_assert!(!private.dependency_data_addr.contains_key(&wait_on));
+        debug_assert!(!private.dependency_data_addr.contains_key(&dependency));
         if let Some(addr) = data_addr {
-            private
-                .dependency_data_addr
-                .insert(wait_on.clone(), AtomicPtr::new(addr.as_mut_ptr()));
+            private.dependency_data_addr.insert(
+                Dependency::Task(wait_on.clone()),
+                AtomicPtr::new(addr.as_mut_ptr()),
+            );
         }
 
         // register the dependency
-        private.dependencies.insert(wait_on.clone());
+        private
+            .dependencies
+            .insert(Dependency::Task(wait_on.clone()));
         wait_on_private.waiters.push(Reverse(task.clone()));
 
         // This method accepts arbitrary tasks, so it is possible that the task
@@ -543,11 +550,12 @@ impl TaskManager {
         );
         debug!("Task data: {:?}", waiter_context.scheduler_data());
 
+        let dependency = Dependency::Task(task.clone());
         let mut waiter_private = waiter_data.private_data_mut();
-        assert!(waiter_private.dependencies.remove(&task));
+        assert!(waiter_private.dependencies.remove(&dependency));
 
         // Write the message into the data if it points to a valid address.
-        if let Some(mut data_addr) = waiter_private.dependency_data_addr.remove(&task) {
+        if let Some(mut data_addr) = waiter_private.dependency_data_addr.remove(&dependency) {
             // SAFETY: We know by the contract of the `wait_on` method, that the data_addr
             // must be either valid or null. In the former case, we also know that the task
             // did not continue its execution, as it was put to wait. Therefore the address
@@ -617,6 +625,240 @@ impl TaskManager {
         }
 
         Ok(())
+    }
+
+    /// # Safety
+    ///
+    /// See [`pseudo_num_waiting_tasks`](fimo_tasks_int::runtime::IScheduler::pseudo_num_waiting_tasks)
+    pub unsafe fn pseudo_num_waiting_tasks(&self, task: PseudoTask) -> usize {
+        let addr_key = task.0.addr();
+        let data = self
+            .pseudo_tasks
+            .get(&addr_key)
+            .expect("pseudo task must have been registered");
+        data.waiters.len()
+    }
+
+    /// # Safety
+    ///
+    /// See [`register_or_fetch_pseudo_task`](fimo_tasks_int::runtime::IScheduler::register_or_fetch_pseudo_task)
+    pub unsafe fn register_or_fetch_pseudo_task(
+        &mut self,
+        addr: *const (),
+    ) -> fimo_module::Result<PseudoTask> {
+        let addr_key = addr.addr();
+        let entry = self.pseudo_tasks.entry(addr_key);
+
+        // initialize the entry if it does not exit.
+        let _ = entry.or_default();
+
+        Ok(PseudoTask(addr))
+    }
+
+    /// # Safety
+    ///
+    /// See [`unregister_pseudo_task`](fimo_tasks_int::runtime::IScheduler::unregister_pseudo_task)
+    pub unsafe fn unregister_pseudo_task(&mut self, task: PseudoTask) -> fimo_module::Result<()> {
+        let addr_key = task.0.addr();
+        let data = self
+            .pseudo_tasks
+            .get(&addr_key)
+            .expect("pseudo task must have been registered");
+
+        trace!("Unregistering pseudo task {:?}", task.0);
+        debug!("Pseudo task data: {:?}", data);
+
+        // check that there are no waiters
+        if !data.waiters.is_empty() {
+            error!("Pseudo task {:?} has waiting tasks", task.0);
+            let err = format!("pseudo task {:?} has waiting tasks", task.0);
+            return Err(Error::new(ErrorKind::InvalidArgument, err));
+        }
+
+        self.pseudo_tasks.remove(&addr_key);
+
+        Ok(())
+    }
+
+    /// # Safety
+    ///
+    /// See [`pseudo_wait_task_on`](fimo_tasks_int::runtime::IScheduler::pseudo_wait_task_on)
+    pub unsafe fn pseudo_wait_task_on(
+        &mut self,
+        task: AssertValidTask,
+        on: PseudoTask,
+        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+    ) -> fimo_module::Result<()> {
+        let on_addr = on.0.addr();
+
+        let context = task.context().borrow();
+        let on_data = self
+            .pseudo_tasks
+            .get_mut(&on_addr)
+            .expect("pseudo task must be registered");
+
+        let scheduler_data = context.scheduler_data();
+
+        trace!("Setting task {} to wait for task {on:?}", context.handle(),);
+        debug!("Task run status: {:?}", context.run_status());
+        debug!("Task schedule status: {:?}", context.schedule_status());
+        debug!("Task data: {:?}", context.scheduler_data());
+
+        let mut private = scheduler_data.private_data_mut();
+
+        // check that the task has not been completed.
+        if context.run_status() == TaskRunStatus::Completed {
+            error!("Can not wait, task {} already completed", context.handle());
+            let err = format!("The task {} has already been completed", context.handle());
+            return Err(Error::new(ErrorKind::InvalidArgument, err));
+        }
+
+        // a task may not wait on another task multiple times.
+        if private.dependencies.contains(&Dependency::PseudoTask(on)) {
+            error!(
+                "Task {} waiting on {} multiple times",
+                context.handle(),
+                context.handle()
+            );
+            let err = format!("The task {} is already waiting on {on:?}", context.handle(),);
+            return Err(Error::new(ErrorKind::InvalidArgument, err));
+        }
+
+        // Insert the address of the data in the map of the task.
+        debug_assert!(!private
+            .dependency_data_addr
+            .contains_key(&Dependency::PseudoTask(on)));
+        if let Some(addr) = data_addr {
+            private.dependency_data_addr.insert(
+                Dependency::PseudoTask(on),
+                AtomicPtr::new(addr.as_mut_ptr()),
+            );
+        }
+
+        // register the dependency
+        private.dependencies.insert(Dependency::PseudoTask(on));
+        on_data.waiters.push(Reverse(task.clone()));
+
+        // This method accepts arbitrary tasks, so it is possible that the task
+        // was already inserted into the queue. In that case we simply mark it
+        // as `Waiting` and let the scheduling logic handle the rest.
+        //
+        // In the future we may disallow this entirely by allowing only the own
+        // task to wait on an arbitrary task.
+        if context.schedule_status() == TaskScheduleStatus::Runnable {
+            trace!("Set task {} to waiting", context.handle());
+
+            // SAFETY: We know that only the runtime is allowed to modify the status
+            // of a task. By that logic we can assume that status won't change unless
+            // we are the ones changing it.
+            context.set_schedule_status(TaskScheduleStatus::Waiting)
+        }
+
+        Ok(())
+    }
+
+    /// # Safety
+    ///
+    /// See [`pseudo_notify_one`](fimo_tasks_int::runtime::IScheduler::pseudo_notify_one)
+    pub unsafe fn pseudo_notify_one(
+        &mut self,
+        task: PseudoTask,
+        data: WakeupData,
+    ) -> fimo_module::Result<Option<usize>> {
+        let task_data = self
+            .pseudo_tasks
+            .get_mut(&task.0.addr())
+            .expect("pseudo task must be registered");
+
+        trace!("Notifying one waiter of task {task:?}");
+        debug!("Task data: {:?}", task_data);
+
+        // The actual logic of waking a task is implemented in the `notify_waiter`
+        // method. We must simply select a suitable waiter. This is done by removing
+        // the first waiter from the `waiters` heap, which returns the waiter with the
+        // highest priority.
+        if let Some(Reverse(waiter)) = task_data.waiters.pop() {
+            let waiters = task_data.waiters.len();
+            self.pseudo_notify_waiter(task, waiter, data);
+            Ok(Some(waiters))
+        } else {
+            trace!("No waiters, skipping");
+            Ok(None)
+        }
+    }
+
+    /// # Safety
+    ///
+    /// See [`pseudo_notify_all`](fimo_tasks_int::runtime::IScheduler::pseudo_notify_all)
+    pub unsafe fn pseudo_notify_all(
+        &mut self,
+        task: PseudoTask,
+        data: WakeupData,
+    ) -> fimo_module::Result<usize> {
+        let task_data = self
+            .pseudo_tasks
+            .get_mut(&task.0.addr())
+            .expect("pseudo task must be registered");
+
+        trace!("Notifying all waiters of task {task:?}");
+        debug!("Task data: {:?}", task_data);
+
+        let mut waiters = std::mem::take(&mut task_data.waiters);
+        let num_waiters = waiters.len();
+
+        // The actual logic of waking a task is implemented in the `notify_waiter`
+        // method. We simply call that method with every waiter in the heap.
+        while let Some(Reverse(waiter)) = waiters.pop() {
+            self.pseudo_notify_waiter(task, waiter, data)
+        }
+
+        Ok(num_waiters)
+    }
+
+    /// # Safety
+    ///
+    /// May only be called by [`pseudo_notify_one`](#method.pseudo_notify_one)
+    /// and [`pseudo_notify_all`](#method.pseudo_notify_all).
+    pub unsafe fn pseudo_notify_waiter(
+        &mut self,
+        task: PseudoTask,
+        waiter: AssertValidTask,
+        data: WakeupData,
+    ) {
+        let waiter_context = waiter.context().borrow();
+        let waiter_data = waiter_context.scheduler_data();
+
+        trace!("Notifying waiter {} of {task:?}", waiter_context.handle());
+        debug!("Waiter run status: {:?}", waiter_context.run_status());
+        debug!(
+            "Waiter schedule status: {:?}",
+            waiter_context.schedule_status()
+        );
+        debug!("Task data: {:?}", waiter_context.scheduler_data());
+
+        let dependency = Dependency::PseudoTask(task);
+        let mut waiter_private = waiter_data.private_data_mut();
+        assert!(waiter_private.dependencies.remove(&dependency));
+
+        // Write the message into the data if it points to a valid address.
+        if let Some(mut data_addr) = waiter_private.dependency_data_addr.remove(&dependency) {
+            // SAFETY: We know by the contract of the `wait_on` method, that the data_addr
+            // must be either valid or null. In the former case, we also know that the task
+            // did not continue its execution, as it was put to wait. Therefore the address
+            // must have remained valid.
+            data_addr.get_mut().write(data);
+        }
+
+        // make the task runnable if nothing prevents it.
+        let schedule_status = waiter_context.schedule_status();
+        if waiter_private.dependencies.is_empty() && schedule_status == TaskScheduleStatus::Waiting
+        {
+            trace!("Waking up task {}", waiter_context.handle());
+            waiter_context.set_schedule_status(TaskScheduleStatus::Runnable);
+            drop(waiter_private);
+            drop(waiter_context);
+            self.enqueue(waiter);
+        }
     }
 }
 
@@ -937,12 +1179,18 @@ pub(super) struct PrivateContext {
     /// Slot a task was assigned to.
     pub slot: Option<TaskSlot>,
     /// Dependencies on which the task must wait for.
-    pub dependencies: BTreeSet<AssertValidTask>,
+    pub dependencies: BTreeSet<Dependency>,
     /// Heap of tasks waiting on this task to finish,
     /// sorted by descending priority.
     pub waiters: BinaryHeap<Reverse<AssertValidTask>>,
     /// Address of the WakeupData for each dependency.
-    pub dependency_data_addr: BTreeMap<AssertValidTask, AtomicPtr<WakeupData>>,
+    pub dependency_data_addr: BTreeMap<Dependency, AtomicPtr<WakeupData>>,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Dependency {
+    Task(AssertValidTask),
+    PseudoTask(PseudoTask),
 }
 
 impl ContextData {
@@ -1084,6 +1332,11 @@ impl Debug for SharedContext {
             .field("context", &self.context)
             .finish_non_exhaustive()
     }
+}
+
+#[derive(Default, Debug)]
+struct PseudoTaskData {
+    waiters: BinaryHeap<Reverse<AssertValidTask>>,
 }
 
 #[derive(ObjectId)]

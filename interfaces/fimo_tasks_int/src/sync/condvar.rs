@@ -1,13 +1,6 @@
-use std::{fmt::Debug, pin::Pin, sync::atomic::AtomicPtr};
-
-use fimo_ffi::ObjBox;
-
-use crate::{
-    runtime::{current_runtime, IRuntimeExt, IScheduler},
-    task::{Builder, JoinHandle, Task},
-};
-
 use super::{mutex::RawMutex, MutexGuard};
+use crate::runtime::{current_runtime, IRuntimeExt, IScheduler};
+use std::{fmt::Debug, sync::atomic::AtomicPtr};
 
 /// A Condition Variable
 ///
@@ -22,22 +15,15 @@ use super::{mutex::RawMutex, MutexGuard};
 /// variable may result in a runtime panic.
 pub struct Condvar {
     state: AtomicPtr<RawMutex>,
-    raw: JoinHandle<Pin<ObjBox<Task<'static, ()>>>>,
 }
 
 impl Condvar {
     /// Creates a new condition variable which is ready to be waited on and
     /// notified.
     #[inline]
-    pub fn new() -> Condvar {
-        let raw = Builder::new()
-            .blocked()
-            .spawn(|| {}, &[])
-            .expect("could not create condvar task");
-
+    pub const fn new() -> Condvar {
         Self {
             state: AtomicPtr::new(std::ptr::null_mut()),
-            raw,
         }
     }
 
@@ -71,18 +57,29 @@ impl Condvar {
                 panic!("can not wait with differing mutexes")
             }
 
+            let self_addr = self as *const _ as *const ();
+            let task = unsafe {
+                s.register_or_fetch_pseudo_task(self_addr)
+                    .expect("could not fetch condvar task")
+            };
+
             if !preexisting_mutex {
                 self.state
                     .store(raw as *const _ as *mut _, atomic::Ordering::Release);
             }
 
             // Wait on the condvar task.
-            let wait = unsafe { s.wait_task_on(curr, self.raw.as_raw(), None) };
+            let wait = unsafe { s.pseudo_wait_task_on(curr, task, None) };
             if let Err(e) = wait {
                 // On an error we abort and panic
                 if !preexisting_mutex {
                     self.state
                         .store(std::ptr::null_mut(), atomic::Ordering::Release);
+
+                    unsafe {
+                        s.unregister_pseudo_task(task)
+                            .expect("could not unregister condvar task");
+                    }
                 }
 
                 panic!("{}", e)
@@ -134,19 +131,35 @@ impl Condvar {
         let runtime = current_runtime().unwrap();
 
         runtime.enter_scheduler(|s, _| {
+            let self_addr = self as *const _ as *const ();
+            let task = unsafe {
+                s.register_or_fetch_pseudo_task(self_addr)
+                    .expect("could not fetch condvar task")
+            };
+
             let task_woken = unsafe {
-                s.notify_one(self.raw.as_raw(), crate::raw::WakeupData::None)
+                s.pseudo_notify_one(task, crate::raw::WakeupData::None)
                     .expect("could not wake task")
             };
 
             // If there are no more waiting tasks we clear the mutex state.
             if let Some(remaining) = task_woken {
                 if remaining == 0 {
+                    unsafe {
+                        s.unregister_pseudo_task(task)
+                            .expect("could not unregister condvar task");
+                    }
+
                     self.state
                         .store(std::ptr::null_mut(), atomic::Ordering::Release);
                 }
                 true
             } else {
+                unsafe {
+                    s.unregister_pseudo_task(task)
+                        .expect("could not unregister condvar task");
+                }
+
                 false
             }
         })
@@ -168,12 +181,23 @@ impl Condvar {
         let runtime = current_runtime().unwrap();
 
         runtime.enter_scheduler(|s, _| {
+            let self_addr = self as *const _ as *const ();
+            let task = unsafe {
+                s.register_or_fetch_pseudo_task(self_addr)
+                    .expect("could not fetch condvar task")
+            };
+
             let num = unsafe {
-                s.notify_all(self.raw.as_raw(), crate::raw::WakeupData::None)
+                s.pseudo_notify_all(task, crate::raw::WakeupData::None)
                     .expect("could not wake task")
             };
 
             // Cleanup the local state.
+            unsafe {
+                s.unregister_pseudo_task(task)
+                    .expect("could not unregister condvar task");
+            }
+
             self.state
                 .store(std::ptr::null_mut(), atomic::Ordering::Release);
 
@@ -195,13 +219,5 @@ impl Default for Condvar {
 impl Debug for Condvar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Condvar").finish_non_exhaustive()
-    }
-}
-
-impl Drop for Condvar {
-    fn drop(&mut self) {
-        self.raw
-            .unblock()
-            .expect("could not unblock the condvar task")
     }
 }

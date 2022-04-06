@@ -574,4 +574,49 @@ impl IScheduler for TaskScheduler {
         let task = AssertValidTask::from_raw(task);
         self.task_manager.unblock_task(task)
     }
+
+    unsafe fn pseudo_num_waiting_tasks(&self, task: fimo_tasks_int::raw::PseudoTask) -> usize {
+        self.task_manager.pseudo_num_waiting_tasks(task)
+    }
+
+    unsafe fn register_or_fetch_pseudo_task(
+        &mut self,
+        addr: *const (),
+    ) -> fimo_module::Result<fimo_tasks_int::raw::PseudoTask> {
+        self.task_manager.register_or_fetch_pseudo_task(addr)
+    }
+
+    unsafe fn unregister_pseudo_task(
+        &mut self,
+        task: fimo_tasks_int::raw::PseudoTask,
+    ) -> fimo_module::Result<()> {
+        self.task_manager.unregister_pseudo_task(task)
+    }
+
+    unsafe fn pseudo_wait_task_on(
+        &mut self,
+        task: &DynObj<dyn IRawTask + '_>,
+        on: fimo_tasks_int::raw::PseudoTask,
+        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+    ) -> fimo_module::Result<()> {
+        // SAFETY: We assume that the task is registered with our runtime.
+        let task = AssertValidTask::from_raw(task);
+        self.task_manager.pseudo_wait_task_on(task, on, data_addr)
+    }
+
+    unsafe fn pseudo_notify_one(
+        &mut self,
+        task: fimo_tasks_int::raw::PseudoTask,
+        data: WakeupData,
+    ) -> fimo_module::Result<Option<usize>> {
+        self.task_manager.pseudo_notify_one(task, data)
+    }
+
+    unsafe fn pseudo_notify_all(
+        &mut self,
+        task: fimo_tasks_int::raw::PseudoTask,
+        data: WakeupData,
+    ) -> fimo_module::Result<usize> {
+        self.task_manager.pseudo_notify_all(task, data)
+    }
 }
