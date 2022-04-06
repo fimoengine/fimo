@@ -518,7 +518,41 @@ impl Builder {
     /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
-    pub fn spawn<'a, F, R>(
+    pub fn spawn<F, R>(
+        self,
+        f: F,
+        wait_on: &[TaskHandle],
+    ) -> fimo_module::Result<JoinHandle<Pin<ObjBox<Task<'static, R>>>>>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        // SAFETY: The closure has a 'static lifetime.
+        unsafe { self.spawn_unbound(f, wait_on) }
+    }
+
+    /// Spawns a task onto the task runtime.
+    ///
+    /// Spawns a task on any of the available workers, where it will run to completion.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
+    ///
+    /// # Safety
+    ///
+    /// The caller has to ensure that the spawned task does not outlive any
+    /// references in the supplied task closure and its return type.
+    /// This can be guaranteed in two ways:
+    ///
+    /// - ensure that [`join`][`JoinHandle::join`] is called before any referenced
+    /// data is dropped
+    /// - use only types with `'static` lifetime bounds, i.e., those with no or only
+    /// `'static` references (both [`Builder::spawn`][`Builder::spawn`]
+    /// and [`IRuntimeExt::spawn`][`IRuntimeExt::spawn`] enforce this property statically)
+    #[inline]
+    #[track_caller]
+    pub unsafe fn spawn_unbound<'a, F, R>(
         self,
         f: F,
         wait_on: &[TaskHandle],
@@ -534,8 +568,8 @@ impl Builder {
             ));
         }
 
-        let runtime = unsafe { get_runtime() };
-        self.spawn_complex::<_, _, _, fn()>(runtime, Some(f), None, wait_on)
+        let runtime = get_runtime();
+        self.spawn_complex_unbound::<_, _, _, fn()>(runtime, Some(f), None, wait_on)
     }
 
     /// Spawns a task onto the task runtime.
@@ -543,7 +577,41 @@ impl Builder {
     /// Spawns a task on any of the available workers, where it will run to completion.
     #[inline]
     #[track_caller]
-    pub fn spawn_complex<'a, 'b, 'c, Run, F, R, Cleanup>(
+    pub fn spawn_complex<Run, F, R, Cleanup>(
+        self,
+        runtime: &Run,
+        f: Option<F>,
+        cleanup: Option<Cleanup>,
+        wait_on: &[TaskHandle],
+    ) -> fimo_module::Result<JoinHandle<Pin<ObjBox<Task<'static, R>>>>>
+    where
+        Run: IRuntimeExt + ?Sized,
+        F: FnOnce() -> R + Send + 'static,
+        Cleanup: FnOnce() + Send + 'static,
+        R: Send + 'static,
+    {
+        // SAFETY: The closures have a 'static lifetime.
+        unsafe { self.spawn_complex_unbound(runtime, f, cleanup, wait_on) }
+    }
+
+    /// Spawns a task onto the task runtime.
+    ///
+    /// Spawns a task on any of the available workers, where it will run to completion.
+    ///
+    /// # Safety
+    ///
+    /// The caller has to ensure that the spawned task does not outlive any
+    /// references in the supplied task closure and its return type.
+    /// This can be guaranteed in two ways:
+    ///
+    /// - ensure that [`join`][`JoinHandle::join`] is called before any referenced
+    /// data is dropped
+    /// - use only types with `'static` lifetime bounds, i.e., those with no or only
+    /// `'static` references (both [`Builder::spawn`][`Builder::spawn`]
+    /// and [`IRuntimeExt::spawn`][`IRuntimeExt::spawn`] enforce this property statically)
+    #[inline]
+    #[track_caller]
+    pub unsafe fn spawn_complex_unbound<'a, 'b, 'c, Run, F, R, Cleanup>(
         self,
         runtime: &'b Run,
         f: Option<F>,
@@ -569,14 +637,14 @@ impl Builder {
         let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
 
         // fetch the addresses to the inner members, so we can initialize them.
-        let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
-        let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+        let raw_ptr = std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw);
+        let res_ptr = std::ptr::addr_of_mut!((*task.as_mut_ptr()).res);
 
         struct AssertSync<T>(*mut MaybeUninit<T>);
         // we know that `T` won't be shared only written, so we can mark it as `Send`.
         unsafe impl<T: Send> Send for AssertSync<T> {}
 
-        let res = unsafe {
+        let res = {
             // initialize res and fetch a pointer to the inner result.
             res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
             AssertSync((*res_ptr).get())
@@ -586,7 +654,7 @@ impl Builder {
             let f = move || {
                 // write the result directly into the address, knowing that it will live
                 // at least as long as the task itself.
-                unsafe { res.0.write(MaybeUninit::new(f())) };
+                res.0.write(MaybeUninit::new(f()));
             };
 
             Some(FfiFn::r#box(Box::new(f)))
@@ -598,12 +666,12 @@ impl Builder {
 
         // initialize the raw field.
         let raw_task = self.inner.build(f, cleanup);
-        unsafe { raw_ptr.write(raw_task) };
+        raw_ptr.write(raw_task);
 
         // safety: all fields have been initialized.
-        let task = unsafe { Pin::new_unchecked(task.assume_init()) };
+        let task = Pin::new_unchecked(task.assume_init());
 
-        runtime.enter_scheduler(move |s, _| unsafe {
+        runtime.enter_scheduler(move |s, _| {
             trace!("Register task with the runtime");
             s.register_task(task.as_raw(), wait_on)
                 .map(|_| JoinHandle { handle: task })
@@ -814,7 +882,37 @@ impl ParallelBuilder {
     #[inline]
     #[track_caller]
     #[allow(clippy::type_complexity)]
-    pub fn spawn<'a, 'b, F: FnOnce() -> R + Send + Clone + 'b, R: Send + 'b>(
+    pub fn spawn<F: FnOnce() -> R + Send + Clone + 'static, R: Send + 'static>(
+        self,
+        f: F,
+        wait_on: &[TaskHandle],
+    ) -> Result<Vec<JoinHandle<Pin<ObjBox<Task<'static, R>>>>>, Error> {
+        // SAFETY: The closure have a 'static lifetime and therefore will
+        // outlive the spawned tasks.
+        unsafe { self.spawn_unbound(f, wait_on) }
+    }
+
+    /// Spawns multiple tasks on the runtime.
+    ///
+    /// # Panics
+    ///
+    /// Can only be called from a worker thread.
+    ///
+    /// # Safety
+    ///
+    /// The caller has to ensure that the spawned tasks do not outlive any
+    /// references in the supplied task closure and its return type.
+    /// This can be guaranteed in two ways:
+    ///
+    /// - ensure that [`join`][`JoinHandle::join`] is called before any referenced
+    /// data is dropped
+    /// - use only types with `'static` lifetime bounds, i.e., those with no or only
+    /// `'static` references (both [`ParallelBuilder::spawn`][`ParallelBuilder::spawn`]
+    /// and [`IRuntimeExt::spawn`][`IRuntimeExt::spawn`] enforce this property statically)
+    #[inline]
+    #[track_caller]
+    #[allow(clippy::type_complexity)]
+    pub unsafe fn spawn_unbound<'a, 'b, F: FnOnce() -> R + Send + Clone + 'b, R: Send + 'b>(
         self,
         f: F,
         wait_on: &'a [TaskHandle],
@@ -822,7 +920,7 @@ impl ParallelBuilder {
         assert!(is_worker());
         trace!("Spawning multiple new tasks");
 
-        let runtime = unsafe { get_runtime() };
+        let runtime = get_runtime();
         let handles: Vec<_> = runtime.enter_scheduler(|s, _| {
             let workers = s.worker_ids();
             let num_tasks = self.num_tasks.unwrap_or(workers.len());
@@ -852,14 +950,14 @@ impl ParallelBuilder {
                 let mut task: ObjBox<MaybeUninit<Task<'_, R>>> = ObjBox::new_uninit();
 
                 // fetch the addresses to the inner members, so we can initialize them.
-                let raw_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw) };
-                let res_ptr = unsafe { std::ptr::addr_of_mut!((*task.as_mut_ptr()).res) };
+                let raw_ptr = std::ptr::addr_of_mut!((*task.as_mut_ptr()).raw);
+                let res_ptr = std::ptr::addr_of_mut!((*task.as_mut_ptr()).res);
 
                 struct AssertSync<T>(*mut MaybeUninit<T>);
                 // we know that `T` won't be shared only written, so we can mark it as `Send`.
                 unsafe impl<T: Send> Send for AssertSync<T> {}
 
-                let res = unsafe {
+                let res = {
                     // initialize res and fetch a pointer to the inner result.
                     res_ptr.write(UnsafeCell::new(MaybeUninit::uninit()));
                     AssertSync((*res_ptr).get())
@@ -869,24 +967,24 @@ impl ParallelBuilder {
                 let f = move || {
                     // write the result directly into the address, knowing that it will live
                     // at least as long as the task itself.
-                    unsafe { res.0.write(MaybeUninit::new(f())) };
+                    res.0.write(MaybeUninit::new(f()));
                 };
                 let f = FfiFn::r#box(Box::new(f));
 
                 // initialize the raw field.
-                let raw_task = unsafe {
+                let raw_task = {
                     self.inner
                         .clone()
                         .with_worker(worker)
                         .extend_name_index(i)
                         .build(Some(f), None)
                 };
-                unsafe { raw_ptr.write(raw_task) };
+                raw_ptr.write(raw_task);
 
                 // safety: all fields have been initialized.
-                let task = unsafe { Pin::new_unchecked(task.assume_init()) };
+                let task = Pin::new_unchecked(task.assume_init());
 
-                if let Err(e) = unsafe { s.register_task(task.as_raw(), wait_on) } {
+                if let Err(e) = s.register_task(task.as_raw(), wait_on) {
                     handles.push(Err(e));
                 } else {
                     handles.push(Ok(JoinHandle { handle: task }))

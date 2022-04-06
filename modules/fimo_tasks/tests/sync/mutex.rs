@@ -45,7 +45,7 @@ fn lock() -> Result<(), Error> {
         let m2 = m.clone();
 
         let tasks = ParallelBuilder::new().num_tasks(Some(NUM_TASKS)).spawn(
-            || {
+            move || {
                 let mut l = m2.lock();
                 *l += 1;
             },
