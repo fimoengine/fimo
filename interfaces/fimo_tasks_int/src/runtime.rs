@@ -1,7 +1,7 @@
 //! Task runtime interface.
 
 use crate::raw::{
-    IRawTask, ISchedulerContext, TaskHandle, TaskScheduleStatus, WakeupData, WorkerId,
+    IRawTask, ISchedulerContext, PseudoTask, TaskHandle, TaskScheduleStatus, WakeupData, WorkerId,
 };
 use crate::task::{Builder, JoinHandle, RawTaskWrapper, Task};
 use fimo_ffi::ptr::{IBase, RawObj};
@@ -517,7 +517,7 @@ pub trait IScheduler: Sync {
         task: &DynObj<dyn IRawTask + '_>,
     ) -> usize;
 
-    /// Returns the number of tasks the taske depends on to continue to run.
+    /// Returns the number of tasks the task depends on to continue to run.
     ///
     /// # Safety
     ///
@@ -532,6 +532,14 @@ pub trait IScheduler: Sync {
         )]
         task: &DynObj<dyn IRawTask + '_>,
     ) -> usize;
+
+    /// Returns the number of tasks waiting on the pseudo task.
+    ///
+    /// # Safety
+    ///
+    /// The pseudo task must be registered with the runtime.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    unsafe fn pseudo_num_waiting_tasks(&self, task: PseudoTask) -> usize;
 
     /// Registers a task with the runtime for execution.
     ///
@@ -586,7 +594,7 @@ pub trait IScheduler: Sync {
     /// This method can be thought of the task equivalent of the `free` function
     /// which deallocates a memory allocation. Following this analogy the task
     /// must have been registered with the runtime with a call to
-    /// [register_task](#method.register_task). Further, a caller must ensure
+    /// [`register_task`](#method.register_task). Further, a caller must ensure
     /// that they are the original owners of the task and are not merely borrowing
     /// it by the likes of [`find_task`](#method.find_task) or any other means.
     #[vtable_info(
@@ -605,6 +613,50 @@ pub trait IScheduler: Sync {
         )]
         task: &DynObj<dyn IRawTask + '_>,
     ) -> fimo_module::Result<()>;
+
+    /// Allocates or fetches a [`PseudoTask`] bound to the given address.
+    ///
+    ///
+    /// On success, the caller may request the runtime to unbind to provided address
+    /// by calling the method.
+    ///
+    /// # Safety
+    ///
+    /// Condition:
+    ///
+    /// * The address must be controlled by the caller until it is unbound.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<PseudoTask>",
+        into_expr = "let t = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(t)",
+        from_expr = "let t = res.into_rust()?; Ok(t)"
+    )]
+    unsafe fn register_or_fetch_pseudo_task(
+        &mut self,
+        addr: *const (),
+    ) -> fimo_module::Result<PseudoTask>;
+
+    /// Unregisters a pseudo task from the task runtime.
+    ///
+    /// Invalidates the pseudo task and unbinds the bound address.
+    ///
+    /// # Safety
+    ///
+    /// This method can be thought of the task equivalent of the `free` function
+    /// which deallocates a memory allocation. Following this analogy the task
+    /// must have been registered with the runtime with a call to
+    /// [`register_or_fetch_pseudo_task`](#method.register_or_fetch_pseudo_task).
+    /// Further, a caller must ensure that they are the original owners of the task
+    /// and are not merely borrowing it.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<u8>",
+        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
+        from_expr = "let _ = res.into_rust()?; Ok(())"
+    )]
+    unsafe fn unregister_pseudo_task(&mut self, task: PseudoTask) -> fimo_module::Result<()>;
 
     /// Registers a block for a task until the dependency completes.
     ///
@@ -647,9 +699,45 @@ pub trait IScheduler: Sync {
         data_addr: Option<&mut MaybeUninit<WakeupData>>,
     ) -> fimo_module::Result<()>;
 
+    /// Registers a block for a task until the pseudo task releases it.
+    ///
+    /// A task may not wait on a pseudo task multiple times.
+    /// After being woken up `data_addr` is initialized with a message from the task that woke it up.
+    ///
+    /// # Note
+    ///
+    /// Does not guarantee that the task will wait immediately if it is already scheduled.
+    ///
+    /// # Safety
+    ///
+    /// Both tasks must be registered with the runtime.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<u8>",
+        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
+        from_expr = "let _ = res.into_rust()?; Ok(())"
+    )]
+    unsafe fn pseudo_wait_task_on(
+        &mut self,
+        #[vtable_info(
+            type = "RawObj<dyn IRawTask + '_>",
+            into = "fimo_ffi::ptr::into_raw",
+            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
+        )]
+        task: &DynObj<dyn IRawTask + '_>,
+        on: PseudoTask,
+        #[vtable_info(
+            type = "Optional<&mut MaybeUninit<WakeupData>>",
+            into = "Into::into",
+            from = "Into::into"
+        )]
+        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+    ) -> fimo_module::Result<()>;
+
     /// Wakes up one task.
     ///
-    /// Wakes up the task with the highest priority, that is waiting on provided task to finish.
+    /// Wakes up the task with the highest priority, that is waiting on provided the task to finish.
     /// Returns the number of remaining waiters, if the operation was successful and `Ok(None)`
     /// if there were no waiters.
     ///
@@ -675,6 +763,28 @@ pub trait IScheduler: Sync {
             from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
         )]
         task: &DynObj<dyn IRawTask + '_>,
+        data: WakeupData,
+    ) -> fimo_module::Result<Option<usize>>;
+
+    /// Wakes up one task.
+    ///
+    /// Wakes up the task with the highest priority, that is waiting on the provided pseudo task.
+    /// Returns the number of remaining waiters, if the operation was successful and `Ok(None)`
+    /// if there were no waiters.
+    ///
+    /// # Safety
+    ///
+    /// The pseudo task must be registered with the runtime.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<Optional<usize>>",
+        into_expr = "let res = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(Optional::from_rust(res))",
+        from_expr = "let res = res.into_rust()?; Ok(res.into_rust())"
+    )]
+    unsafe fn pseudo_notify_one(
+        &mut self,
+        task: PseudoTask,
         data: WakeupData,
     ) -> fimo_module::Result<Option<usize>>;
 
@@ -704,6 +814,26 @@ pub trait IScheduler: Sync {
             from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
         )]
         task: &DynObj<dyn IRawTask + '_>,
+        data: WakeupData,
+    ) -> fimo_module::Result<usize>;
+
+    /// Wakes up all tasks.
+    ///
+    /// Wakes up all waiting tasks. Returns the number of tasks that were woken up.
+    ///
+    /// # Safety
+    ///
+    /// The pseudo task must be registered with the runtime.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<usize>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    unsafe fn pseudo_notify_all(
+        &mut self,
+        task: PseudoTask,
         data: WakeupData,
     ) -> fimo_module::Result<usize>;
 

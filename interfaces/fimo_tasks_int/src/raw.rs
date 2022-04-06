@@ -285,6 +285,16 @@ impl Default for Builder {
     }
 }
 
+/// A task that is always blocked and bound to an address.
+///
+/// Useful for the implementation of synchronization primitives.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PseudoTask(pub *const ());
+
+unsafe impl Send for PseudoTask {}
+unsafe impl Sync for PseudoTask {}
+
 /// Interface of a raw task.
 #[interface(
     uuid = "fa8ec56f-9c02-4ad1-9845-814310169d73",

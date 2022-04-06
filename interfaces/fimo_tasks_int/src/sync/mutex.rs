@@ -3,20 +3,16 @@ use std::{
     fmt::{Debug, Display},
     mem::{ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
-    pin::Pin,
     sync::atomic::AtomicU8,
     time::{Duration, Instant},
 };
 
+use crate::sync::spin_wait::SpinWait;
 use crate::{
     raw::{IRawTask, WakeupData},
     runtime::{current_runtime, IRuntimeExt, IScheduler},
 };
-use crate::{
-    sync::spin_wait::SpinWait,
-    task::{Builder, JoinHandle, Task},
-};
-use fimo_ffi::{DynObj, ObjBox};
+use fimo_ffi::DynObj;
 use rand::SeedableRng;
 
 /// A mutual exclusion primitive useful for protecting shared data
@@ -244,7 +240,6 @@ pub(crate) struct RawMutex {
     state: AtomicU8,
     fair_timeout: Cell<Instant>,
     rng: UnsafeCell<rand::rngs::SmallRng>,
-    task: JoinHandle<Pin<ObjBox<Task<'static, ()>>>>,
 }
 
 impl RawMutex {
@@ -258,17 +253,9 @@ impl RawMutex {
 
     #[inline]
     fn new() -> Self {
-        let runtime = current_runtime().unwrap();
-
-        let task = Builder::new()
-            .blocked()
-            .spawn_complex::<_, fn(), _, fn()>(runtime, None, None, &[])
-            .expect("could not create mutex task");
-
         let rng = rand::rngs::SmallRng::from_entropy();
 
         Self {
-            task,
             rng: UnsafeCell::new(rng),
             state: AtomicU8::new(Self::STATE_INIT),
             fair_timeout: Cell::new(Instant::now()),
@@ -338,8 +325,26 @@ impl RawMutex {
                 let state = self.state.load(atomic::Ordering::Relaxed);
                 if state == Self::LOCKED_BIT | Self::WAITERS_BIT {
                     unsafe {
-                        s.wait_task_on(curr, self.task.as_raw(), Some(&mut data))
-                            .expect("can not wait on mutex");
+                        // SAFETY: We controll the address of the mutex and it won't be moved until there are no more
+                        // tasks trying to lock it.
+                        let self_addr = self as *const _ as *const ();
+                        let task = s
+                            .register_or_fetch_pseudo_task(self_addr)
+                            .expect("can not create mutex task");
+
+                        // Try to wait on the task.
+                        match s.pseudo_wait_task_on(curr, task, Some(&mut data)) {
+                            Ok(_) => (),
+                            Err(_) => {
+                                // If we could not wait we must check whether the mutex has other
+                                // waiters and deallocate it's task otherwise.
+                                if s.pseudo_num_waiting_tasks(task) == 0 {
+                                    s.unregister_pseudo_task(task)
+                                        .expect("could not unregister mutex task");
+                                    panic!("can not wait on mutex")
+                                }
+                            }
+                        }
                     }
 
                     return true;
@@ -465,7 +470,12 @@ impl RawMutex {
 
         let f = move |s: &'_ mut DynObj<dyn IScheduler + '_>,
                       _: Option<&DynObj<dyn IRawTask + '_>>| {
-            let num_waiters = s.num_waiting_tasks(self.task.as_raw());
+            let self_addr = self as *const _ as *const ();
+            let task = s
+                .register_or_fetch_pseudo_task(self_addr)
+                .expect("could not fetch mutex task");
+
+            let num_waiters = s.pseudo_num_waiting_tasks(task);
             let one_waiter = num_waiters == 1;
             let has_waiters = num_waiters != 0;
 
@@ -473,19 +483,21 @@ impl RawMutex {
             // to the newly woken up task.
             if has_waiters && (fair || self.use_fair_unlock()) {
                 let data = WakeupData::Custom(Self::HANDOFF_LOCK);
-                s.notify_one(self.task.as_raw(), data)
+                s.pseudo_notify_one(task, data)
                     .expect("could not wake task");
 
-                // Clear the waiters bit if there are no more waiting tasks.
+                // Clear the waiters bit and unregister task if there are no more waiting tasks.
                 if one_waiter {
                     self.state
-                        .store(Self::LOCKED_BIT, atomic::Ordering::Relaxed)
+                        .store(Self::LOCKED_BIT, atomic::Ordering::Relaxed);
+                    s.unregister_pseudo_task(task)
+                        .expect("could not unregister mutex task")
                 }
                 return;
             }
 
             let num_waiters = s
-                .notify_one(self.task.as_raw(), WakeupData::None)
+                .pseudo_notify_one(task, WakeupData::None)
                 .expect("could not wake task")
                 .unwrap_or(0);
 
@@ -494,9 +506,12 @@ impl RawMutex {
                 self.state
                     .store(Self::WAITERS_BIT, atomic::Ordering::Release)
             } else {
-                // If there are no more waiters we set the state to the initial value.
+                // If there are no more waiters we set the state to the initial value
+                // and unregister the task.
                 self.state
-                    .store(Self::STATE_INIT, atomic::Ordering::Release)
+                    .store(Self::STATE_INIT, atomic::Ordering::Release);
+                s.unregister_pseudo_task(task)
+                    .expect("could not unregister mutex task")
             }
         };
 
@@ -512,9 +527,3 @@ impl RawMutex {
 
 unsafe impl Send for RawMutex {}
 unsafe impl Sync for RawMutex {}
-
-impl Drop for RawMutex {
-    fn drop(&mut self) {
-        self.task.unblock().expect("could not unblock mutex task")
-    }
-}

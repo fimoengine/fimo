@@ -515,7 +515,7 @@ pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
             // read msg data.
             // SAFETY: `yield_to_worker` writes the pointer of the message
             // in the `Transfer` and ensures that it won't drop it.
-            unsafe { (tr.data as *const MsgData<'_>).read() }
+            unsafe { std::ptr::from_exposed_addr::<MsgData<'_>>(tr.data).read() }
         } else {
             // remove task
             worker.current_task.set(None);
@@ -577,7 +577,7 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
         // pass the pointer to the data back to the worker function.
         // the worker will read the data, so we must make sure that it won't be dropped by us.
         let msg_data = MaybeUninit::new(msg_data);
-        worker_context.resume(msg_data.as_ptr() as usize)
+        worker_context.resume(msg_data.as_ptr().expose_addr())
     };
 
     // at this point we may be on a different thread than we started
