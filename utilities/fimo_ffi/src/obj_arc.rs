@@ -2107,7 +2107,7 @@ fn data_offset_align(align: usize) -> isize {
 }
 
 fn is_dangling<T: ?Sized>(ptr: *mut T) -> bool {
-    let address = ptr as *mut () as usize;
+    let address = (ptr as *mut ()).addr();
     address == usize::MAX
 }
 
