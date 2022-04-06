@@ -12,6 +12,7 @@
 #![feature(try_trait_v2_residual)]
 #![feature(const_slice_ptr_len)]
 #![feature(alloc_layout_extra)]
+#![feature(strict_provenance)]
 #![feature(const_trait_impl)]
 #![feature(must_not_suspend)]
 #![feature(try_reserve_kind)]
