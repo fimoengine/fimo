@@ -207,14 +207,14 @@ pub trait IRuntimeExt: IRuntime {
     /// Can only be called from a worker thread.
     #[inline]
     #[track_caller]
-    fn spawn<'th, 'a, 'b, F, R>(
-        &'th self,
+    fn spawn<F, R>(
+        &self,
         f: F,
-        wait_on: &'a [TaskHandle],
-    ) -> fimo_module::Result<JoinHandle<Pin<ObjBox<Task<'b, R>>>>>
+        wait_on: &[TaskHandle],
+    ) -> fimo_module::Result<JoinHandle<Pin<ObjBox<Task<'static, R>>>>>
     where
-        F: FnOnce() -> R + Send + 'b,
-        R: Send + 'b,
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
     {
         Builder::new().spawn(f, wait_on)
     }

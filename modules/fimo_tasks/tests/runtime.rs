@@ -8,7 +8,7 @@ use fimo_tasks_int::runtime::{
     WaitStatus,
 };
 use fimo_tasks_int::task::ParallelBuilder;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 use std::time::{Duration, SystemTime};
 
 static INIT: Once = Once::new();
@@ -135,10 +135,11 @@ fn block_on() -> Result<(), Error> {
     enter_and_init_runtime(|| {
         let r = unsafe { get_runtime() };
 
-        let n = AtomicRefCell::new(0);
+        let n = Arc::new(AtomicRefCell::new(0));
+        let n2 = n.clone();
         let t = r.spawn(
-            || {
-                let mut n = n.borrow_mut();
+            move || {
+                let mut n = n2.borrow_mut();
                 *n = 5;
             },
             &[],
@@ -164,16 +165,17 @@ fn block_on() -> Result<(), Error> {
 #[test]
 fn spawn() -> Result<(), Error> {
     enter_and_init_runtime(|| {
-        let n = AtomicRefCell::new(0);
+        let n = Arc::new(AtomicRefCell::new(0));
         let r = unsafe { get_runtime() };
 
         const NUM_TASKS: usize = 100;
 
         let mut tasks = vec![r.spawn(|| {}, &[])?];
         for _ in 0..NUM_TASKS {
+            let n = n.clone();
             let handle = tasks.last().unwrap().handle();
             let t = r.spawn(
-                || {
+                move || {
                     let mut n = n.borrow_mut();
                     *n += 1;
                 },
