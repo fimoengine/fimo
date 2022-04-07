@@ -411,6 +411,14 @@ impl TaskManager {
                 context.handle(),
                 wait_on_context.handle()
             );
+
+            // The caller relies on the fact, that the data is initialized once the task
+            // has been woken up. Normally that would be implemented in the wake routine,
+            // but as we are skipping the wait entirely it is now our responsibility.
+            if let Some(data_addr) = data_addr {
+                data_addr.write(WakeupData::None);
+            }
+
             return Ok(());
         }
 
