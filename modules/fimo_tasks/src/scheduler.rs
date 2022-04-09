@@ -109,6 +109,7 @@ impl TaskScheduler {
 
     #[inline]
     pub(crate) fn notify_scheduler_unlocked(&mut self) -> Result<(), Error> {
+        let scheduler_task = self.scheduler_task.clone();
         // SAFETY: There are two parts of the safety that must be checked:
         // 1. `scheduler_task` is registered (is trivial).
         // 2. Waking one task does not cause any undesired effects,
@@ -120,7 +121,6 @@ impl TaskScheduler {
         // does not equal acquiring the lock, but is rather a hint to retry locking it.
         // Under these semantics, the mutex is only a performance improvement over
         // calling an equivalent `try_lock` in a loop and has therefore no side effects.
-        let scheduler_task = self.scheduler_task.clone();
         unsafe { self.notify_one(&scheduler_task, WakeupData::None)? };
         Ok(())
     }
@@ -222,8 +222,8 @@ impl TaskScheduler {
             debug_assert_eq!(schedule_status, TaskScheduleStatus::Processing);
 
             // Start by processing the message
-            // SAFETY: We are toggling and untoggling the flag according to the documentation.
             let mut private = scheduler_data.private_data_mut();
+            // SAFETY: We are toggling and untoggling the flag according to the documentation.
             unsafe { private.toggle_processing(true) };
 
             trace!("Processing {} message", data.msg_type());
@@ -455,10 +455,14 @@ impl TaskScheduler {
             // schedule task on worker
             // SAFETY: The task was removed from the queue.
             unsafe { private.assert_not_in_queue() };
+
+            // SAFETY: As the scheduler we ensure correctness.
             unsafe { context.set_schedule_status(TaskScheduleStatus::Scheduled) };
+
             drop(private);
             drop(shared);
             drop(context);
+
             self.worker_pool.assign_task_to_worker(task);
         }
 
