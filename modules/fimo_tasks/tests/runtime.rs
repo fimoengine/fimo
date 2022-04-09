@@ -2,10 +2,10 @@ use fimo_ffi::cell::AtomicRefCell;
 use fimo_ffi::DynObj;
 use fimo_module::Error;
 use fimo_tasks::Builder;
-use fimo_tasks_int::raw::{IRawTask, ISchedulerContext, TaskScheduleStatus, WakeupData};
+use fimo_tasks_int::raw::{IRawTask, ISchedulerContext, TaskScheduleStatus};
 use fimo_tasks_int::runtime::{
     current_runtime, get_runtime, init_runtime, is_worker, IRuntime, IRuntimeExt, IScheduler,
-    WaitStatus,
+    WakeupToken,
 };
 use fimo_tasks_int::task::ParallelBuilder;
 use std::sync::{Arc, Once};
@@ -299,19 +299,19 @@ fn wait() -> Result<(), Error> {
 
         assert!(matches!(
             r.wait_on(t_handle),
-            Ok(WaitStatus::Completed(WakeupData::None))
+            Ok(WakeupToken::None | WakeupToken::Skipped)
         ));
         let status = t.as_raw().context_atomic().schedule_status();
         assert_eq!(status, TaskScheduleStatus::Finished);
         let _ = t.join();
 
         // task already finished.
-        assert!(matches!(r.wait_on(t_handle), Ok(WaitStatus::Skipped)));
+        assert!(matches!(r.wait_on(t_handle), Ok(WakeupToken::Skipped)));
 
         // waiting on itself is simply skipped.
         let self_handle =
             r.yield_and_enter(|_, cur| unsafe { cur.context().borrow().handle().assume_init() });
-        assert!(matches!(r.wait_on(self_handle), Ok(WaitStatus::Skipped)));
+        assert!(matches!(r.wait_on(self_handle), Ok(WakeupToken::Skipped)));
 
         Ok(())
     })

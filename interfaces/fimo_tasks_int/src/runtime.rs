@@ -1,7 +1,7 @@
 //! Task runtime interface.
 
 use crate::raw::{
-    IRawTask, ISchedulerContext, PseudoTask, TaskHandle, TaskScheduleStatus, WakeupData, WorkerId,
+    IRawTask, ISchedulerContext, PseudoTask, TaskHandle, TaskScheduleStatus, WorkerId,
 };
 use crate::task::{Builder, JoinHandle, RawTaskWrapper, Task};
 use fimo_ffi::ptr::{IBase, RawObj};
@@ -16,13 +16,78 @@ use std::time::{Duration, SystemTime};
 #[thread_local]
 static RUNTIME: std::cell::Cell<Option<*const DynObj<dyn IRuntime>>> = std::cell::Cell::new(None);
 
-/// Result of a wait operation
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub enum WaitStatus {
-    /// The operation was skipped because the dependency does not exist or refers to itself.
+/// Data passed to a task upon wakeup.
+#[repr(C, u8)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+pub enum WakeupToken {
+    /// Wake up without any data.
+    None,
+    /// The wait operation was skipped by the runtime.
     Skipped,
-    /// The wait was successful.
-    Completed(WakeupData),
+    /// The wait operation timed out.
+    TimedOut,
+    /// Custom data passed to the task.
+    Custom(*const ()),
+}
+
+/// The passed data transfers ownership of the contents.
+unsafe impl Send for WakeupToken {}
+unsafe impl Sync for WakeupToken {}
+
+/// Data provided by a task during a wait operation.
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+pub struct WaitToken(*const ());
+
+impl WaitToken {
+    /// Invalid default token.
+    pub const INVALID: WaitToken = WaitToken(std::ptr::null());
+}
+
+unsafe impl Send for WaitToken {}
+unsafe impl Sync for WaitToken {}
+
+impl Default for WaitToken {
+    #[inline]
+    fn default() -> Self {
+        Self::INVALID
+    }
+}
+
+/// Operation that `notify_filter` and `pseudo_notify_filter` should perform for each task.
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+pub enum NotifyFilterOp {
+    /// Notifies the task and continues the filter operation.
+    Notify,
+    /// Stops the filter operation without notifying the task.
+    Stop,
+    /// Continues the filter operation without notifying the task.
+    Skip,
+}
+
+/// Result of some `notify_*` and `pseudo_notify_*` functions.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+pub struct NotifyResult {
+    /// Number of tasks notified by the operation.
+    pub notified_tasks: usize,
+    /// Number of remaining tasks still waiting for a notification.
+    pub remaining_tasks: usize,
+}
+
+impl NotifyResult {
+    /// Returns whether at least one task was notified.
+    #[inline]
+    pub fn has_notified_tasks(&self) -> bool {
+        self.notified_tasks != 0
+    }
+
+    /// Returns whether there are remaining tasks.
+    #[inline]
+    pub fn has_tasks_remaining(&self) -> bool {
+        self.remaining_tasks != 0
+    }
 }
 
 /// Interface of a task runtime.
@@ -409,7 +474,8 @@ pub trait IRuntimeExt: IRuntime {
     /// Returns whether the task waited on the other task.
     ///
     /// Passing the handle to the current or non existant task will always
-    /// succeed with `WaitStatus::Skipped`.
+    /// succeed with `WakeupToken::Skipped`. May return `WakeupToken::Skipped` if
+    /// the runtime determines that waiting is not necessary.
     ///
     /// On success the specified task will be completed.
     ///
@@ -417,7 +483,7 @@ pub trait IRuntimeExt: IRuntime {
     ///
     /// Can only be called from a worker thread.
     #[inline]
-    fn wait_on(&self, handle: TaskHandle) -> fimo_module::Result<WaitStatus> {
+    fn wait_on(&self, handle: TaskHandle) -> fimo_module::Result<WakeupToken> {
         trace!("Wait until task-id {} completes", handle);
 
         let mut data = MaybeUninit::uninit();
@@ -431,28 +497,29 @@ pub trait IRuntimeExt: IRuntime {
                     // SAFETY: Both tasks are provided by the scheduler and can't have been
                     // unregistered in the meantime, as the runtime is locked.
                     unsafe {
-                        s.wait_task_on(curr, wait_on, Some(data_ref))
-                            .map(|_| WaitStatus::Completed(WakeupData::None))
+                        s.wait_task_on(curr, wait_on, Some(data_ref), WaitToken::INVALID)
+                            .map(|_| WakeupToken::None)
                     }
                 } else {
                     trace!("The task-id {} was not found, skipping wait", handle);
-                    Ok(WaitStatus::Skipped)
+                    Ok(WakeupToken::Skipped)
                 }
             } else {
                 trace!("The task-id {} refers to itself, skipping wait", handle);
-                Ok(WaitStatus::Skipped)
+                Ok(WakeupToken::Skipped)
             }
         });
 
         match res {
-            Ok(WaitStatus::Completed(_)) => {
+            Ok(WakeupToken::None) => {
                 // SAFETY: By the contract of the `wait_task_on` we know that
                 // if the task was put to sleep, it will have some data passed to
                 // once it is woken up. We just checked that the wait operation
                 // was successful, therefore the data was written in `data`.
-                unsafe { Ok(WaitStatus::Completed(data.assume_init())) }
+                unsafe { Ok(data.assume_init()) }
             }
-            Ok(WaitStatus::Skipped) => Ok(WaitStatus::Skipped),
+            Ok(WakeupToken::Skipped) => Ok(WakeupToken::Skipped),
+            Ok(_) => unreachable!(),
             Err(e) => Err(e),
         }
     }
@@ -500,46 +567,6 @@ pub trait IScheduler: Sync {
         &self,
         handle: TaskHandle,
     ) -> fimo_module::Result<&'a DynObj<dyn IRawTask + 'a>>;
-
-    /// Returns the number of tasks waiting on the task.
-    ///
-    /// # Safety
-    ///
-    /// The task must be registered with the runtime.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn num_waiting_tasks(
-        &self,
-        #[vtable_info(
-            type = "RawObj<dyn IRawTask + '_>",
-            into = "fimo_ffi::ptr::into_raw",
-            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
-        )]
-        task: &DynObj<dyn IRawTask + '_>,
-    ) -> usize;
-
-    /// Returns the number of tasks the task depends on to continue to run.
-    ///
-    /// # Safety
-    ///
-    /// The task must be registered with the runtime.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn num_tasks_dependencies(
-        &self,
-        #[vtable_info(
-            type = "RawObj<dyn IRawTask + '_>",
-            into = "fimo_ffi::ptr::into_raw",
-            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
-        )]
-        task: &DynObj<dyn IRawTask + '_>,
-    ) -> usize;
-
-    /// Returns the number of tasks waiting on the pseudo task.
-    ///
-    /// # Safety
-    ///
-    /// The pseudo task must be registered with the runtime.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn pseudo_num_waiting_tasks(&self, task: PseudoTask) -> usize;
 
     /// Registers a task with the runtime for execution.
     ///
@@ -658,6 +685,34 @@ pub trait IScheduler: Sync {
     )]
     unsafe fn unregister_pseudo_task(&mut self, task: PseudoTask) -> fimo_module::Result<()>;
 
+    /// Unregisters a pseudo task from the task runtime if it is empty.
+    ///
+    /// Invalidates the pseudo task and unbinds the bound address if it is in
+    /// an empty state, like after the first call to [`register_or_fetch_pseudo_task`].
+    /// Returns whether the pseudo task was unregistered.
+    ///
+    /// # Safety
+    ///
+    /// This method can be thought of the task equivalent of the `free` function
+    /// which deallocates a memory allocation. Following this analogy the task
+    /// must have been registered with the runtime with a call to
+    /// [`register_or_fetch_pseudo_task`](#method.register_or_fetch_pseudo_task).
+    /// Further, a caller must ensure that they are the original owners of the task
+    /// and are not merely borrowing it.
+    ///
+    /// [`register_or_fetch_pseudo_task`]: #method.register_or_fetch_pseudo_task
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<bool>",
+        into_expr = "let v = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(v)",
+        from_expr = "let v = res.into_rust()?; Ok(v)"
+    )]
+    unsafe fn unregister_pseudo_task_if_empty(
+        &mut self,
+        task: PseudoTask,
+    ) -> fimo_module::Result<bool>;
+
     /// Registers a block for a task until the dependency completes.
     ///
     /// A task may not wait on itself or wait on another task multiple times.
@@ -692,11 +747,12 @@ pub trait IScheduler: Sync {
         )]
         on: &DynObj<dyn IRawTask + '_>,
         #[vtable_info(
-            type = "Optional<&mut MaybeUninit<WakeupData>>",
+            type = "Optional<&mut MaybeUninit<WakeupToken>>",
             into = "Into::into",
             from = "Into::into"
         )]
-        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+        data_addr: Option<&mut MaybeUninit<WakeupToken>>,
+        token: WaitToken,
     ) -> fimo_module::Result<()>;
 
     /// Registers a block for a task until the pseudo task releases it.
@@ -728,18 +784,17 @@ pub trait IScheduler: Sync {
         task: &DynObj<dyn IRawTask + '_>,
         on: PseudoTask,
         #[vtable_info(
-            type = "Optional<&mut MaybeUninit<WakeupData>>",
+            type = "Optional<&mut MaybeUninit<WakeupToken>>",
             into = "Into::into",
             from = "Into::into"
         )]
-        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+        data_addr: Option<&mut MaybeUninit<WakeupToken>>,
+        token: WaitToken,
     ) -> fimo_module::Result<()>;
 
     /// Wakes up one task.
     ///
     /// Wakes up the task with the highest priority, that is waiting on provided the task to finish.
-    /// Returns the number of remaining waiters, if the operation was successful and `Ok(None)`
-    /// if there were no waiters.
     ///
     /// # Safety
     ///
@@ -747,13 +802,14 @@ pub trait IScheduler: Sync {
     /// resuming execution. This function is mainly intended to be
     /// used for the implementation of condition variables.
     ///
+    /// The closure `data_callback` may not panic or call into the scheduler.
     /// Further, the behavior is undefined if called with an unregistered task.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<Optional<usize>>",
-        into_expr = "let res = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(Optional::from_rust(res))",
-        from_expr = "let res = res.into_rust()?; Ok(res.into_rust())"
+        return_type = "fimo_module::FFIResult<NotifyResult>",
+        into = "Into::into",
+        from = "Into::into"
     )]
     unsafe fn notify_one(
         &mut self,
@@ -763,30 +819,29 @@ pub trait IScheduler: Sync {
             from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
         )]
         task: &DynObj<dyn IRawTask + '_>,
-        data: WakeupData,
-    ) -> fimo_module::Result<Option<usize>>;
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> fimo_module::Result<NotifyResult>;
 
     /// Wakes up one task.
     ///
     /// Wakes up the task with the highest priority, that is waiting on the provided pseudo task.
-    /// Returns the number of remaining waiters, if the operation was successful and `Ok(None)`
-    /// if there were no waiters.
     ///
     /// # Safety
     ///
     /// The pseudo task must be registered with the runtime.
+    /// Further, the closure `data_callback` may not panic or call into the scheduler.
     #[vtable_info(
         unsafe,
         abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<Optional<usize>>",
-        into_expr = "let res = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(Optional::from_rust(res))",
-        from_expr = "let res = res.into_rust()?; Ok(res.into_rust())"
+        return_type = "fimo_module::FFIResult<NotifyResult>",
+        into = "Into::into",
+        from = "Into::into"
     )]
     unsafe fn pseudo_notify_one(
         &mut self,
         task: PseudoTask,
-        data: WakeupData,
-    ) -> fimo_module::Result<Option<usize>>;
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> fimo_module::Result<NotifyResult>;
 
     /// Wakes up all tasks.
     ///
@@ -814,7 +869,7 @@ pub trait IScheduler: Sync {
             from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
         )]
         task: &DynObj<dyn IRawTask + '_>,
-        data: WakeupData,
+        data: WakeupToken,
     ) -> fimo_module::Result<usize>;
 
     /// Wakes up all tasks.
@@ -834,7 +889,7 @@ pub trait IScheduler: Sync {
     unsafe fn pseudo_notify_all(
         &mut self,
         task: PseudoTask,
-        data: WakeupData,
+        data: WakeupToken,
     ) -> fimo_module::Result<usize>;
 
     /// Unblocks a blocked task.

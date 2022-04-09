@@ -1,6 +1,8 @@
+use fimo_ffi::FfiFn;
+
 use super::{mutex::RawMutex, MutexGuard};
-use crate::runtime::{current_runtime, IRuntimeExt, IScheduler};
-use std::{fmt::Debug, sync::atomic::AtomicPtr};
+use crate::runtime::{current_runtime, IRuntimeExt, IScheduler, NotifyResult, WaitToken};
+use std::{fmt::Debug, mem::MaybeUninit, sync::atomic::AtomicPtr};
 
 /// A Condition Variable
 ///
@@ -69,7 +71,7 @@ impl Condvar {
             }
 
             // Wait on the condvar task.
-            let wait = unsafe { s.pseudo_wait_task_on(curr, task, None) };
+            let wait = unsafe { s.pseudo_wait_task_on(curr, task, None, WaitToken::INVALID) };
             if let Err(e) = wait {
                 // On an error we abort and panic
                 if !preexisting_mutex {
@@ -128,40 +130,58 @@ impl Condvar {
     /// [`notify_all`]: Self::notify_all
     #[inline]
     pub fn notify_one(&self) -> bool {
+        // Nothing to do if there are no waiting threads
+        let state = self.state.load(atomic::Ordering::Relaxed);
+        if state.is_null() {
+            return false;
+        }
+
+        self.notify_one_slow(state)
+    }
+
+    #[cold]
+    fn notify_one_slow(&self, mutex: *mut RawMutex) -> bool {
         let runtime = current_runtime().unwrap();
 
         runtime.enter_scheduler(|s, _| {
+            // Make sure that our atomic state still points to the same
+            // mutex. If not then it means that all threads on the current
+            // mutex were woken up and a new waiting thread switched to a
+            // different mutex. In that case we can get away with doing
+            // nothing.
+            if self.state.load(atomic::Ordering::Relaxed) != mutex {
+                return false;
+            }
+
             let self_addr = self as *const _ as *const ();
             let task = unsafe {
                 s.register_or_fetch_pseudo_task(self_addr)
                     .expect("could not fetch condvar task")
             };
 
-            let task_woken = unsafe {
-                s.pseudo_notify_one(task, crate::raw::WakeupData::None)
-                    .expect("could not wake task")
-            };
-
-            // If there are no more waiting tasks we clear the mutex state.
-            if let Some(remaining) = task_woken {
-                if remaining == 0 {
-                    unsafe {
-                        s.unregister_pseudo_task(task)
-                            .expect("could not unregister condvar task");
-                    }
-
+            let callback = |result: NotifyResult| {
+                if !result.has_tasks_remaining() {
                     self.state
                         .store(std::ptr::null_mut(), atomic::Ordering::Release);
                 }
-                true
-            } else {
+                crate::runtime::WakeupToken::None
+            };
+            let mut callback = MaybeUninit::new(callback);
+            let callback = unsafe { FfiFn::new_value(&mut callback) };
+
+            let result = unsafe {
+                s.pseudo_notify_one(task, callback)
+                    .expect("could not wake task")
+            };
+
+            if !result.has_tasks_remaining() {
                 unsafe {
                     s.unregister_pseudo_task(task)
                         .expect("could not unregister condvar task");
                 }
-
-                false
             }
+
+            result.has_notified_tasks()
         })
     }
 
@@ -178,9 +198,29 @@ impl Condvar {
     /// [`notify_one`]: Self::notify_one
     #[inline]
     pub fn notify_all(&self) -> usize {
+        // Nothing to do if there are no waiting threads
+        let state = self.state.load(atomic::Ordering::Relaxed);
+        if state.is_null() {
+            return 0;
+        }
+
+        self.notify_all_slow(state)
+    }
+
+    #[cold]
+    fn notify_all_slow(&self, mutex: *mut RawMutex) -> usize {
         let runtime = current_runtime().unwrap();
 
         runtime.enter_scheduler(|s, _| {
+            // Make sure that our atomic state still points to the same
+            // mutex. If not then it means that all threads on the current
+            // mutex were woken up and a new waiting thread switched to a
+            // different mutex. In that case we can get away with doing
+            // nothing.
+            if self.state.load(atomic::Ordering::Relaxed) != mutex {
+                return 0;
+            }
+
             let self_addr = self as *const _ as *const ();
             let task = unsafe {
                 s.register_or_fetch_pseudo_task(self_addr)
@@ -188,7 +228,7 @@ impl Condvar {
             };
 
             let num = unsafe {
-                s.pseudo_notify_all(task, crate::raw::WakeupData::None)
+                s.pseudo_notify_all(task, crate::runtime::WakeupToken::None)
                     .expect("could not wake task")
             };
 

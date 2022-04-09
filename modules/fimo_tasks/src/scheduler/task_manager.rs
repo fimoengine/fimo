@@ -7,10 +7,9 @@ use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{
     AtomicISchedulerContext, IRawTask, IRustPanicData, ISchedulerContext, PseudoTask,
-    StatusRequest, TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WakeupData,
-    WorkerId,
+    StatusRequest, TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WorkerId,
 };
-use fimo_tasks_int::runtime::IScheduler;
+use fimo_tasks_int::runtime::{IScheduler, NotifyResult, WaitToken, WakeupToken};
 use log::{debug, error, trace};
 use std::any::Any;
 use std::cmp::{Ordering, Reverse};
@@ -172,26 +171,6 @@ impl TaskManager {
 
     /// # Safety
     ///
-    /// See [`num_waiting_tasks`](fimo_tasks_int::runtime::IScheduler::num_waiting_tasks)
-    pub unsafe fn num_waiting_tasks(&self, task: AssertValidTask) -> usize {
-        let pseudo_task = self
-            .fetch_pseudo_task(task.0 as *const _ as *const ())
-            .expect("registered task must have a corresponding pseudo task");
-        self.pseudo_num_waiting_tasks(pseudo_task)
-    }
-
-    /// # Safety
-    ///
-    /// See [`num_tasks_dependencies`](fimo_tasks_int::runtime::IScheduler::num_tasks_dependencies)
-    pub unsafe fn num_tasks_dependencies(&self, task: AssertValidTask) -> usize {
-        let context = task.context().borrow();
-        let scheduler_data = context.scheduler_data();
-        let private = scheduler_data.private_data();
-        private.dependencies.len()
-    }
-
-    /// # Safety
-    ///
     /// See [`register_task`](fimo_tasks_int::runtime::IScheduler::register_task)
     pub unsafe fn register_task(
         &mut self,
@@ -248,7 +227,7 @@ impl TaskManager {
         for dep in wait_on {
             if let Some(dep) = self.tasks.get(dep) {
                 let dep = dep.clone();
-                if let Err(e) = self.wait_task_on(task.clone(), dep, None) {
+                if let Err(e) = self.wait_task_on(task.clone(), dep, None, WaitToken::INVALID) {
                     error!("Aborting registration, error: {}", e);
                     let mut context = task.context().borrow_mut();
                     let (handle, _) = context.unregister();
@@ -386,7 +365,8 @@ impl TaskManager {
         &mut self,
         task: AssertValidTask,
         wait_on: AssertValidTask,
-        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+        data_addr: Option<&mut MaybeUninit<WakeupToken>>,
+        token: WaitToken,
     ) -> Result<(), Error> {
         if task == wait_on {
             error!(
@@ -428,7 +408,7 @@ impl TaskManager {
             // has been woken up. Normally that would be implemented in the wake routine,
             // but as we are skipping the wait entirely it is now our responsibility.
             if let Some(data_addr) = data_addr {
-                data_addr.write(WakeupData::None);
+                data_addr.write(WakeupToken::Skipped);
             }
 
             return Ok(());
@@ -440,7 +420,7 @@ impl TaskManager {
         let wait_on_pseudo = self
             .fetch_pseudo_task(wait_on.0 as *const _ as *const ())
             .expect("registered task must have a corresponding pseudo task");
-        self.pseudo_wait_task_on(task, wait_on_pseudo, data_addr)
+        self.pseudo_wait_task_on(task, wait_on_pseudo, data_addr, token)
     }
 
     /// # Safety
@@ -449,8 +429,8 @@ impl TaskManager {
     pub unsafe fn notify_one(
         &mut self,
         task: AssertValidTask,
-        data: WakeupData,
-    ) -> Result<Option<usize>, Error> {
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> Result<NotifyResult, Error> {
         let context = task.context().borrow();
         let scheduler_data = context.scheduler_data();
 
@@ -464,7 +444,7 @@ impl TaskManager {
             .fetch_pseudo_task(task.0 as *const _ as *const ())
             .expect("registered task must have a corresponding pseudo task");
 
-        self.pseudo_notify_one(pseudo_task, data)
+        self.pseudo_notify_one(pseudo_task, data_callback)
     }
 
     /// # Safety
@@ -473,7 +453,7 @@ impl TaskManager {
     pub unsafe fn notify_all(
         &mut self,
         task: AssertValidTask,
-        data: WakeupData,
+        data: WakeupToken,
     ) -> Result<usize, Error> {
         let context = task.context().borrow();
         let scheduler_data = context.scheduler_data();
@@ -545,18 +525,6 @@ impl TaskManager {
 
     /// # Safety
     ///
-    /// See [`pseudo_num_waiting_tasks`](fimo_tasks_int::runtime::IScheduler::pseudo_num_waiting_tasks)
-    pub unsafe fn pseudo_num_waiting_tasks(&self, task: PseudoTask) -> usize {
-        let addr_key = task.0.addr();
-        let data = self
-            .pseudo_tasks
-            .get(&addr_key)
-            .expect("pseudo task must have been registered");
-        data.waiters.len()
-    }
-
-    /// # Safety
-    ///
     /// See [`register_or_fetch_pseudo_task`](fimo_tasks_int::runtime::IScheduler::register_or_fetch_pseudo_task)
     pub unsafe fn register_or_fetch_pseudo_task(
         &mut self,
@@ -607,12 +575,39 @@ impl TaskManager {
 
     /// # Safety
     ///
+    /// See [`unregister_pseudo_task_if_empty`](fimo_tasks_int::runtime::IScheduler::unregister_pseudo_task_if_empty)
+    pub unsafe fn unregister_pseudo_task_if_empty(
+        &mut self,
+        task: PseudoTask,
+    ) -> fimo_module::Result<bool> {
+        let addr_key = task.0.addr();
+        let data = self
+            .pseudo_tasks
+            .get(&addr_key)
+            .expect("pseudo task must have been registered");
+
+        trace!("Unregistering pseudo task {:?}", task.0);
+        debug!("Pseudo task data: {:?}", data);
+
+        // check that there are no waiters
+        if !data.waiters.is_empty() {
+            Ok(false)
+        } else {
+            debug!("Pseudo task {:?} is not empty -- Skipping", task.0);
+            self.pseudo_tasks.remove(&addr_key);
+            Ok(true)
+        }
+    }
+
+    /// # Safety
+    ///
     /// See [`pseudo_wait_task_on`](fimo_tasks_int::runtime::IScheduler::pseudo_wait_task_on)
     pub unsafe fn pseudo_wait_task_on(
         &mut self,
         task: AssertValidTask,
         on: PseudoTask,
-        data_addr: Option<&mut MaybeUninit<WakeupData>>,
+        data_addr: Option<&mut MaybeUninit<WakeupToken>>,
+        token: WaitToken,
     ) -> fimo_module::Result<()> {
         let on_addr = on.0.addr();
 
@@ -655,7 +650,7 @@ impl TaskManager {
 
         // register the dependency
         private.dependencies.insert(on);
-        on_data.waiters.push(Reverse(task.clone()));
+        on_data.waiters.push(Waiter(Reverse(task.clone()), token));
 
         // This method accepts arbitrary tasks, so it is possible that the task
         // was already inserted into the queue. In that case we simply mark it
@@ -681,8 +676,8 @@ impl TaskManager {
     pub unsafe fn pseudo_notify_one(
         &mut self,
         task: PseudoTask,
-        data: WakeupData,
-    ) -> fimo_module::Result<Option<usize>> {
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> fimo_module::Result<NotifyResult> {
         let task_data = self
             .pseudo_tasks
             .get_mut(&task.0.addr())
@@ -691,18 +686,28 @@ impl TaskManager {
         trace!("Notifying one waiter of task {task:?}");
         debug!("Task data: {:?}", task_data);
 
+        let result = if task_data.waiters.is_empty() {
+            NotifyResult {
+                notified_tasks: 0,
+                remaining_tasks: 0,
+            }
+        } else {
+            NotifyResult {
+                notified_tasks: 1,
+                remaining_tasks: task_data.waiters.len() - 1,
+            }
+        };
+        let data = data_callback(result);
+
         // The actual logic of waking a task is implemented in the `notify_waiter`
         // method. We must simply select a suitable waiter. This is done by removing
         // the first waiter from the `waiters` heap, which returns the waiter with the
         // highest priority.
-        if let Some(Reverse(waiter)) = task_data.waiters.pop() {
-            let waiters = task_data.waiters.len();
+        if let Some(Waiter(Reverse(waiter), _)) = task_data.waiters.pop() {
             self.pseudo_notify_waiter(task, waiter, data);
-            Ok(Some(waiters))
-        } else {
-            trace!("No waiters, skipping");
-            Ok(None)
         }
+
+        Ok(result)
     }
 
     /// # Safety
@@ -711,7 +716,7 @@ impl TaskManager {
     pub unsafe fn pseudo_notify_all(
         &mut self,
         task: PseudoTask,
-        data: WakeupData,
+        data: WakeupToken,
     ) -> fimo_module::Result<usize> {
         let task_data = self
             .pseudo_tasks
@@ -726,7 +731,7 @@ impl TaskManager {
 
         // The actual logic of waking a task is implemented in the `notify_waiter`
         // method. We simply call that method with every waiter in the heap.
-        while let Some(Reverse(waiter)) = waiters.pop() {
+        while let Some(Waiter(Reverse(waiter), _)) = waiters.pop() {
             self.pseudo_notify_waiter(task, waiter, data)
         }
 
@@ -741,7 +746,7 @@ impl TaskManager {
         &mut self,
         task: PseudoTask,
         waiter: AssertValidTask,
-        data: WakeupData,
+        data: WakeupToken,
     ) {
         let waiter_context = waiter.context().borrow();
         let waiter_data = waiter_context.scheduler_data();
@@ -1098,7 +1103,7 @@ pub(super) struct PrivateContext {
     /// Dependencies on which the task must wait for.
     pub dependencies: BTreeSet<PseudoTask>,
     /// Address of the WakeupData for each dependency.
-    dependency_data_addr: BTreeMap<PseudoTask, AtomicPtr<WakeupData>>,
+    dependency_data_addr: BTreeMap<PseudoTask, AtomicPtr<WakeupToken>>,
 }
 
 impl ContextData {
@@ -1243,7 +1248,33 @@ impl Debug for SharedContext {
 
 #[derive(Default, Debug)]
 struct PseudoTaskData {
-    waiters: BinaryHeap<Reverse<AssertValidTask>>,
+    waiters: BinaryHeap<Waiter>,
+}
+
+#[derive(Debug)]
+struct Waiter(pub Reverse<AssertValidTask>, pub WaitToken);
+
+impl PartialEq for Waiter {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl Eq for Waiter {}
+
+impl PartialOrd for Waiter {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl Ord for Waiter {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
 }
 
 #[derive(ObjectId)]
