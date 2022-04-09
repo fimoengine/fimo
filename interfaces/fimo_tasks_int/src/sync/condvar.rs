@@ -116,7 +116,7 @@ impl Condvar {
 
     /// Wakes up one blocked task on this condvar.
     ///
-    /// Returns whether a thread was woken up.
+    /// Returns whether a task was woken up.
     ///
     /// If there is a blocked task on this condition variable, then it will
     /// be woken up from its call to [`wait`]. Calls to `notify_one` are
@@ -167,13 +167,13 @@ impl Condvar {
 
     /// Wakes up all blocked task on this condvar.
     ///
-    /// Returns the number of threads woken up.
+    /// Returns the number of tasks woken up.
     ///
     /// This method will ensure that any current waiters on the condition
     /// variable are awoken. Calls to `notify_all()` are not buffered in any
     /// way.
     ///
-    /// To wake up only one thread, see [`notify_one`].
+    /// To wake up only one task, see [`notify_one`].
     ///
     /// [`notify_one`]: Self::notify_one
     #[inline]

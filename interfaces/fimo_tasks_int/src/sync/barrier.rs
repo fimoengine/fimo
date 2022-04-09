@@ -2,12 +2,12 @@
 use crate::sync::{Condvar, Mutex};
 use std::fmt::{Debug, Formatter};
 
-/// A barrier enables multiple threads to synchronize the beginning
+/// A barrier enables multiple tasks to synchronize the beginning
 /// of some computation.
 pub struct Barrier {
     lock: Mutex<BarrierState>,
     cvar: Condvar,
-    num_threads: usize,
+    num_tasks: usize,
 }
 
 struct BarrierState {
@@ -36,11 +36,11 @@ impl Barrier {
                 generation_id: 0,
             }),
             cvar: Condvar::new(),
-            num_threads: n,
+            num_tasks: n,
         }
     }
 
-    /// Blocks the current task until all threads have rendezvoused here.
+    /// Blocks the current task until all tasks have rendezvoused here.
     ///
     /// Barriers are re-usable after all task have rendezvoused once,
     /// and can be used continuously.
@@ -53,14 +53,14 @@ impl Barrier {
         let mut lock = self.lock.lock();
         let local_gen = lock.generation_id;
         lock.count += 1;
-        if lock.count < self.num_threads {
+        if lock.count < self.num_tasks {
             // We need a while loop to guard against spurious wakeups.
             // https://en.wikipedia.org/wiki/Spurious_wakeup
             //
             // Note: The task runtime already prevents spurious wakeups,
             // but this could change in the future.
             self.cvar.wait_while(&mut lock, |l| {
-                local_gen == l.generation_id && l.count < self.num_threads
+                local_gen == l.generation_id && l.count < self.num_tasks
             });
             BarrierWaitResult(false)
         } else {
