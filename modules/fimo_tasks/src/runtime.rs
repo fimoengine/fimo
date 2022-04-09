@@ -308,8 +308,8 @@ impl IRuntime for Runtime {
                 if let Some(mut scheduler) = self.scheduler.try_lock() {
                     let s = fimo_ffi::ptr::coerce_obj_mut(&mut *scheduler);
 
-                    // SAFETY: We have already checked that the worker exists.
                     let current =
+                        // SAFETY: We have already checked that the worker exists.
                         unsafe { WORKER.get().unwrap_unchecked().current_task().unwrap() };
 
                     // call the function, then schedule the remaining tasks.
