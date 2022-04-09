@@ -2265,7 +2265,7 @@ unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawObjArc<T, A> {
     }
 }
 
-trait DropSpec {
+pub(crate) trait DropSpec {
     fn drop_inner(&mut self);
 }
 

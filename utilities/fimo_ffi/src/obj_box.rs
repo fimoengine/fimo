@@ -1,5 +1,5 @@
 //! Definition of an object-aware box type.
-use crate::obj_arc::CGlobal;
+use crate::obj_arc::{CGlobal, DropSpec};
 use crate::ptr::{
     CastInto, DowncastSafe, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId,
     RawObjMut,
@@ -534,6 +534,28 @@ impl<T: ?Sized> From<RawObjBox<RawObjMut<T>, CGlobal>> for ObjBox<DynObj<T>, Glo
 impl<T: Debug, A: Allocator> Debug for RawObjBox<T, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "(RawObjBox)")
+    }
+}
+
+impl<T, A: Allocator> DropSpec for RawObjBox<T, A> {
+    default fn drop_inner(&mut self) {
+        unimplemented!()
+    }
+}
+
+impl<T: ?Sized, A: Allocator> DropSpec for RawObjBox<RawObjMut<T>, A> {
+    fn drop_inner(&mut self) {
+        let ptr = self.ptr;
+        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
+        let copy = unsafe { RawObjBox::from_raw_parts(ptr, alloc) };
+        let copy: ObjBox<DynObj<T>, A> = copy.into();
+        drop(copy)
+    }
+}
+
+unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawObjBox<T, A> {
+    fn drop(&mut self) {
+        self.drop_inner()
     }
 }
 
