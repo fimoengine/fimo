@@ -7,12 +7,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::sync::spin_wait::SpinWait;
 use crate::{
-    raw::{IRawTask, WakeupData},
-    runtime::{current_runtime, IRuntimeExt, IScheduler},
+    raw::IRawTask,
+    runtime::{current_runtime, IRuntimeExt, IScheduler, NotifyResult, WakeupToken},
 };
-use fimo_ffi::DynObj;
+use crate::{runtime::WaitToken, sync::spin_wait::SpinWait};
+use fimo_ffi::{DynObj, FfiFn};
 use rand::SeedableRng;
 
 /// A mutual exclusion primitive useful for protecting shared data
@@ -320,7 +320,7 @@ impl RawMutex {
             }
 
             // Block our tasks until we are woken up by an unlock
-            let mut data = MaybeUninit::new(WakeupData::Custom(Self::UNINIT_TOKEN));
+            let mut data = MaybeUninit::new(WakeupToken::Custom(Self::UNINIT_TOKEN));
             let waited = runtime.yield_and_enter(|s, curr| {
                 let state = self.state.load(atomic::Ordering::Relaxed);
                 if state == Self::LOCKED_BIT | Self::WAITERS_BIT {
@@ -333,16 +333,16 @@ impl RawMutex {
                             .expect("can not create mutex task");
 
                         // Try to wait on the task.
-                        match s.pseudo_wait_task_on(curr, task, Some(&mut data)) {
+                        match s.pseudo_wait_task_on(curr, task, Some(&mut data), WaitToken::INVALID)
+                        {
                             Ok(_) => (),
                             Err(_) => {
                                 // If we could not wait we must check whether the mutex has other
                                 // waiters and deallocate it's task otherwise.
-                                if s.pseudo_num_waiting_tasks(task) == 0 {
-                                    s.unregister_pseudo_task(task)
-                                        .expect("could not unregister mutex task");
-                                    panic!("can not wait on mutex")
-                                }
+                                assert!(s
+                                    .unregister_pseudo_task_if_empty(task)
+                                    .expect("could not unregister mutex task"));
+                                panic!("can not wait on mutex")
                             }
                         }
                     }
@@ -357,13 +357,19 @@ impl RawMutex {
                 // SAFETY: We were woken up by the runtime, so the data must contain some valid message.
                 match unsafe { data.assume_init() } {
                     // Normal wakeup, retry.
-                    WakeupData::None => (),
+                    WakeupToken::None => (),
 
                     // Handoff, we now own the lock.
-                    WakeupData::Custom(d) => {
+                    WakeupToken::Custom(d) => {
                         debug_assert_eq!(d, Self::HANDOFF_LOCK);
                         return;
                     }
+
+                    // Wait operation can never be skipped.
+                    WakeupToken::Skipped => unreachable!(),
+
+                    // Time out is not currently supported
+                    WakeupToken::TimedOut => panic!("Mutex time out not supported"),
                 }
             }
 
@@ -475,41 +481,39 @@ impl RawMutex {
                 .register_or_fetch_pseudo_task(self_addr)
                 .expect("could not fetch mutex task");
 
-            let num_waiters = s.pseudo_num_waiting_tasks(task);
-            let one_waiter = num_waiters == 1;
-            let has_waiters = num_waiters != 0;
-
-            // If we are using a fair unlock then we simply hand the ownership of the lock
-            // to the newly woken up task.
-            if has_waiters && (fair || self.use_fair_unlock()) {
-                let data = WakeupData::Custom(Self::HANDOFF_LOCK);
-                s.pseudo_notify_one(task, data)
-                    .expect("could not wake task");
-
-                // Clear the waiters bit and unregister task if there are no more waiting tasks.
-                if one_waiter {
-                    self.state
-                        .store(Self::LOCKED_BIT, atomic::Ordering::Relaxed);
-                    s.unregister_pseudo_task(task)
-                        .expect("could not unregister mutex task")
+            let callback = |result: NotifyResult| {
+                // If we are using a fair unlock then we simply hand the ownership of the lock
+                // to the newly woken up task.
+                if result.has_notified_tasks() && (fair || self.use_fair_unlock()) {
+                    // Clear the waiters bit and unregister task if there are no more waiting tasks.
+                    if !result.has_tasks_remaining() {
+                        self.state
+                            .store(Self::LOCKED_BIT, atomic::Ordering::Relaxed);
+                    }
+                    return WakeupToken::Custom(Self::HANDOFF_LOCK);
                 }
-                return;
-            }
 
-            let num_waiters = s
-                .pseudo_notify_one(task, WakeupData::None)
-                .expect("could not wake task")
-                .unwrap_or(0);
+                if result.has_tasks_remaining() {
+                    // If there are still waiters we only remove the locked bit.
+                    self.state
+                        .store(Self::WAITERS_BIT, atomic::Ordering::Release)
+                } else {
+                    // If there are no more waiters we set the state to the initial value
+                    // and unregister the task.
+                    self.state
+                        .store(Self::STATE_INIT, atomic::Ordering::Release);
+                }
+                WakeupToken::None
+            };
+            let mut callback = MaybeUninit::new(callback);
+            let callback = FfiFn::new_value(&mut callback);
 
-            if num_waiters != 0 {
-                // If there are still waiters we only remove the locked bit.
-                self.state
-                    .store(Self::WAITERS_BIT, atomic::Ordering::Release)
-            } else {
-                // If there are no more waiters we set the state to the initial value
-                // and unregister the task.
-                self.state
-                    .store(Self::STATE_INIT, atomic::Ordering::Release);
+            let res = s
+                .pseudo_notify_one(task, callback)
+                .expect("could not wake task");
+
+            if !res.has_tasks_remaining() {
+                // If there are no more waiters we unregister the task.
                 s.unregister_pseudo_task(task)
                     .expect("could not unregister mutex task")
             }
