@@ -17,7 +17,7 @@ use rand::SeedableRng;
 
 /// A mutual exclusion primitive useful for protecting shared data
 ///
-/// This mutex will block threads waiting for the lock to become available. The
+/// This mutex will block tasks waiting for the lock to become available. The
 /// mutex can also be statically initialized or created via a [`new`]
 /// constructor. Each mutex has a type parameter which represents the data that
 /// it is protecting. The data can only be accessed through the RAII guards
