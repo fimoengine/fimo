@@ -623,4 +623,14 @@ impl IScheduler for TaskScheduler {
     ) -> fimo_module::Result<usize> {
         self.task_manager.pseudo_notify_all(task, data)
     }
+
+    unsafe fn pseudo_notify_filter(
+        &mut self,
+        task: fimo_tasks_int::raw::PseudoTask,
+        filter: FfiFn<'_, dyn FnMut(WaitToken) -> fimo_tasks_int::runtime::NotifyFilterOp + '_, u8>,
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> fimo_module::Result<NotifyResult> {
+        self.task_manager
+            .pseudo_notify_filter(task, filter, data_callback)
+    }
 }

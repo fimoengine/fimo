@@ -740,8 +740,73 @@ impl TaskManager {
 
     /// # Safety
     ///
-    /// May only be called by [`pseudo_notify_one`](#method.pseudo_notify_one)
-    /// and [`pseudo_notify_all`](#method.pseudo_notify_all).
+    /// See [`pseudo_notify_filter`](fimo_tasks_int::runtime::IScheduler::pseudo_notify_filter)
+    pub unsafe fn pseudo_notify_filter(
+        &mut self,
+        task: fimo_tasks_int::raw::PseudoTask,
+        mut filter: FfiFn<
+            '_,
+            dyn FnMut(WaitToken) -> fimo_tasks_int::runtime::NotifyFilterOp + '_,
+            u8,
+        >,
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> fimo_module::Result<NotifyResult> {
+        let task_data = self
+            .pseudo_tasks
+            .get_mut(&task.0.addr())
+            .expect("pseudo task must be registered");
+
+        trace!("Notifying waiters of task {task:?}");
+        debug!("Task data: {:?}", task_data);
+
+        let mut retain_queue = Vec::new();
+        let mut notify_queue = Vec::new();
+
+        // Filter the waiter queue.
+        while let Some(Waiter(t, token)) = task_data.waiters.pop() {
+            let op = filter(token);
+            match op {
+                // Push the task to the notify queue for further processing.
+                fimo_tasks_int::runtime::NotifyFilterOp::Notify => {
+                    notify_queue.push(t);
+                }
+
+                // Reinsert the task into the waiters queue.
+                fimo_tasks_int::runtime::NotifyFilterOp::Stop => {
+                    task_data.waiters.push(Waiter(t, token));
+                    break;
+                }
+
+                // Push the task to the retain queue for reinsertion.
+                fimo_tasks_int::runtime::NotifyFilterOp::Skip => {
+                    retain_queue.push(Waiter(t, token));
+                }
+            }
+        }
+
+        // Reinsert the skipped waiters into the queue.
+        task_data.waiters.extend(retain_queue);
+
+        let result = NotifyResult {
+            notified_tasks: notify_queue.len(),
+            remaining_tasks: task_data.waiters.len(),
+        };
+        let data = data_callback(result);
+
+        // The actual logic of waking a task is implemented in the `notify_waiter`
+        // method. Wake all the selected waiters.
+        for Reverse(waiter) in notify_queue {
+            self.pseudo_notify_waiter(task, waiter, data);
+        }
+
+        Ok(result)
+    }
+
+    /// # Safety
+    ///
+    /// May only be called by [`pseudo_notify_one`](#method.pseudo_notify_one),
+    /// [`pseudo_notify_all`](#method.pseudo_notify_all) and
+    /// [`pseudo_notify_filter`](#method.pseudo_notify_filter).
     pub unsafe fn pseudo_notify_waiter(
         &mut self,
         task: PseudoTask,
