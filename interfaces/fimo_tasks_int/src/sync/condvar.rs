@@ -71,7 +71,7 @@ impl Condvar {
             }
 
             // Wait on the condvar task.
-            let wait = unsafe { s.pseudo_wait_task_on(curr, task, None, WaitToken::INVALID) };
+            let wait = unsafe { s.wait_task_on(curr, task, None, WaitToken::INVALID) };
             if let Err(e) = wait {
                 // On an error we abort and panic
                 if !preexisting_mutex {
@@ -169,10 +169,7 @@ impl Condvar {
             let mut callback = MaybeUninit::new(callback);
             let callback = unsafe { FfiFn::new_value(&mut callback) };
 
-            let result = unsafe {
-                s.pseudo_notify_one(task, callback)
-                    .expect("could not wake task")
-            };
+            let result = unsafe { s.notify_one(task, callback).expect("could not wake task") };
 
             if !result.has_tasks_remaining() {
                 unsafe {
@@ -228,7 +225,7 @@ impl Condvar {
             };
 
             let num = unsafe {
-                s.pseudo_notify_all(task, crate::runtime::WakeupToken::None)
+                s.notify_all(task, crate::runtime::WakeupToken::None)
                     .expect("could not wake task")
             };
 
