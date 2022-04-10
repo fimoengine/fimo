@@ -333,8 +333,7 @@ impl RawMutex {
                             .expect("can not create mutex task");
 
                         // Try to wait on the task.
-                        match s.pseudo_wait_task_on(curr, task, Some(&mut data), WaitToken::INVALID)
-                        {
+                        match s.wait_task_on(curr, task, Some(&mut data), WaitToken::INVALID) {
                             Ok(_) => (),
                             Err(_) => {
                                 // If we could not wait we must check whether the mutex has other
@@ -508,9 +507,7 @@ impl RawMutex {
             let mut callback = MaybeUninit::new(callback);
             let callback = FfiFn::new_value(&mut callback);
 
-            let res = s
-                .pseudo_notify_one(task, callback)
-                .expect("could not wake task");
+            let res = s.notify_one(task, callback).expect("could not wake task");
 
             if !res.has_tasks_remaining() {
                 // If there are no more waiters we unregister the task.

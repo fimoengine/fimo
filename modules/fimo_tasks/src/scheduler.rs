@@ -1,10 +1,10 @@
 use crate::worker_pool::WorkerPool;
 use crate::Runtime;
 use context::Context;
-use fimo_ffi::{DynObj, FfiFn, ObjArc, ObjectId};
+use fimo_ffi::{DynObj, FfiFn, ObjectId};
 use fimo_module::Error;
 use fimo_tasks_int::raw::{
-    Builder, IRawTask, StatusRequest, TaskHandle, TaskRunStatus, TaskScheduleStatus, WorkerId,
+    IRawTask, PseudoTask, StatusRequest, TaskHandle, TaskRunStatus, TaskScheduleStatus, WorkerId,
 };
 use fimo_tasks_int::runtime::{IScheduler, NotifyResult, WaitToken, WakeupToken};
 use log::{debug, error, info, trace};
@@ -25,7 +25,8 @@ use task_manager::{AssertValidTask, Msg, MsgData, TaskManager};
 #[derive(ObjectId)]
 #[fetch_vtable(uuid = "7f2cb683-26b4-46cb-a91d-3cbecf295ad8", interfaces(IScheduler))]
 pub struct TaskScheduler {
-    scheduler_task: ObjArc<DynObj<dyn IRawTask>>,
+    _unique_addr: Box<u8>,
+    scheduler_task: PseudoTask,
     stacks: ManuallyDrop<StackAllocator>,
     worker_pool: ManuallyDrop<WorkerPool>,
     task_manager: ManuallyDrop<TaskManager>,
@@ -42,16 +43,13 @@ impl TaskScheduler {
     ) -> Result<Self, Error> {
         trace!("Constructing scheduler");
 
-        // construct a blocked task for the scheduler.
-        let scheduler_task = Builder::new()
-            .with_name("Task runtime scheduler".into())
-            .blocked()
-            .build(None, None);
-        let scheduler_task = ObjArc::new(scheduler_task);
-        let scheduler_task: ObjArc<DynObj<dyn IRawTask>> = ObjArc::coerce_obj(scheduler_task);
+        // Allocate a box to generate a new unique address.
+        let addr = Box::new(0);
+        let addr_ptr = &addr as *const _ as *const ();
 
         let mut this = Self {
-            scheduler_task: scheduler_task.clone(),
+            _unique_addr: addr,
+            scheduler_task: PseudoTask(addr_ptr),
             stacks: ManuallyDrop::new(StackAllocator::new(
                 stack_size,
                 pre_allocated,
@@ -62,11 +60,9 @@ impl TaskScheduler {
         };
 
         // SAFETY: Checking of the conditions
-        // 1. Task is valid as it was just created.
+        // 1. We controll the address.
         // 2. Task is yet unregistered.
-        // 3. The task is stored on the heap and won't therefore be moved.
-        // 4. The task lives as long as the scheduler.
-        unsafe { this.register_task(&scheduler_task, &[])? };
+        unsafe { this.register_or_fetch_pseudo_task(addr_ptr)? };
 
         Ok(this)
     }
@@ -86,12 +82,6 @@ impl TaskScheduler {
         self.worker_pool.workers()
     }
 
-    /// Searches for a registered task.
-    #[inline]
-    pub fn find_task(&self, handle: TaskHandle) -> Result<&DynObj<dyn IRawTask + '_>, Error> {
-        self.task_manager.find_task(handle)
-    }
-
     /// Blocks a task until the scheduler has been unlocked.
     ///
     /// # Safety
@@ -102,14 +92,11 @@ impl TaskScheduler {
         &mut self,
         task: &DynObj<dyn IRawTask + '_>,
     ) -> Result<(), Error> {
-        let scheduler_task = self.scheduler_task.clone();
-        self.wait_task_on(task, &scheduler_task, None, WaitToken::INVALID)
+        self.wait_task_on(task, self.scheduler_task, None, WaitToken::INVALID)
     }
 
     #[inline]
     pub(crate) fn notify_scheduler_unlocked(&mut self) -> Result<(), Error> {
-        let scheduler_task = self.scheduler_task.clone();
-
         let mut f = MaybeUninit::new(|_| WakeupToken::None);
 
         // SAFETY: We transfer the ownership of `f` to the wrapper and `discard` it.
@@ -127,7 +114,7 @@ impl TaskScheduler {
         // does not equal acquiring the lock, but is rather a hint to retry locking it.
         // Under these semantics, the mutex is only a performance improvement over
         // calling an equivalent `try_lock` in a loop and has therefore no side effects.
-        unsafe { self.notify_one(&scheduler_task, f)? };
+        unsafe { self.notify_one(self.scheduler_task, f)? };
         Ok(())
     }
 
@@ -157,11 +144,16 @@ impl TaskScheduler {
         // `notify_all` requires the context.
         drop(context);
 
+        let pseudo_task = self
+            .task_manager
+            .fetch_pseudo_task(task.as_raw() as *const _ as *const ())
+            .expect("registered task must have a corresponding pseudo task");
+
         // SAFETY: The task has been completed, therefore notifying the waiters
         // of the task is a safe (and required) operation.
         unsafe {
             self.task_manager
-                .notify_all(task.clone(), WakeupToken::None)
+                .notify_all(pseudo_task, WakeupToken::None)
                 .expect("Invalid task")
         };
 
@@ -508,14 +500,15 @@ impl IScheduler for TaskScheduler {
         self.worker_ids()
     }
 
-    unsafe fn find_task_unbound<'a>(
+    fn get_task_from_handle(&self, handle: TaskHandle) -> Option<&DynObj<dyn IRawTask + '_>> {
+        self.task_manager.get_task_from_handle(handle)
+    }
+
+    unsafe fn get_pseudo_task_from_handle(
         &self,
         handle: TaskHandle,
-    ) -> fimo_module::Result<&'a DynObj<dyn IRawTask + 'a>> {
-        match self.find_task(handle) {
-            Ok(t) => Ok(std::mem::transmute(t)),
-            Err(e) => Err(e),
-        }
+    ) -> Option<fimo_tasks_int::raw::PseudoTask> {
+        self.task_manager.get_pseudo_task_from_handle(handle)
     }
 
     unsafe fn register_task(
@@ -535,39 +528,6 @@ impl IScheduler for TaskScheduler {
         self.task_manager.unregister_task(task)
     }
 
-    unsafe fn wait_task_on(
-        &mut self,
-        task: &DynObj<dyn IRawTask + '_>,
-        on: &DynObj<dyn IRawTask + '_>,
-        data_addr: Option<&mut MaybeUninit<WakeupToken>>,
-        token: WaitToken,
-    ) -> fimo_module::Result<()> {
-        // SAFETY: We assume that the tasks are both registered with our runtime.
-        let task = AssertValidTask::from_raw(task);
-        let on = AssertValidTask::from_raw(on);
-        self.task_manager.wait_task_on(task, on, data_addr, token)
-    }
-
-    unsafe fn notify_one(
-        &mut self,
-        task: &DynObj<dyn IRawTask + '_>,
-        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
-    ) -> fimo_module::Result<NotifyResult> {
-        // SAFETY: We assume that the task is registered with our runtime.
-        let task = AssertValidTask::from_raw(task);
-        self.task_manager.notify_one(task, data_callback)
-    }
-
-    unsafe fn notify_all(
-        &mut self,
-        task: &DynObj<dyn IRawTask + '_>,
-        data: WakeupToken,
-    ) -> fimo_module::Result<usize> {
-        // SAFETY: We assume that the task is registered with our runtime.
-        let task = AssertValidTask::from_raw(task);
-        self.task_manager.notify_all(task, data)
-    }
-
     unsafe fn unblock_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> fimo_module::Result<()> {
         // SAFETY: We assume that the task is registered with our runtime.
         let task = AssertValidTask::from_raw(task);
@@ -578,24 +538,25 @@ impl IScheduler for TaskScheduler {
         &mut self,
         addr: *const (),
     ) -> fimo_module::Result<fimo_tasks_int::raw::PseudoTask> {
-        self.task_manager.register_or_fetch_pseudo_task(addr)
+        self.task_manager.register_or_fetch_pseudo_task(addr, None)
     }
 
     unsafe fn unregister_pseudo_task(
         &mut self,
         task: fimo_tasks_int::raw::PseudoTask,
     ) -> fimo_module::Result<()> {
-        self.task_manager.unregister_pseudo_task(task)
+        self.task_manager.unregister_pseudo_task(task, false)
     }
 
     unsafe fn unregister_pseudo_task_if_empty(
         &mut self,
         task: fimo_tasks_int::raw::PseudoTask,
     ) -> fimo_module::Result<bool> {
-        self.task_manager.unregister_pseudo_task_if_empty(task)
+        self.task_manager
+            .unregister_pseudo_task_if_empty(task, false)
     }
 
-    unsafe fn pseudo_wait_task_on(
+    unsafe fn wait_task_on(
         &mut self,
         task: &DynObj<dyn IRawTask + '_>,
         on: fimo_tasks_int::raw::PseudoTask,
@@ -604,33 +565,31 @@ impl IScheduler for TaskScheduler {
     ) -> fimo_module::Result<()> {
         // SAFETY: We assume that the task is registered with our runtime.
         let task = AssertValidTask::from_raw(task);
-        self.task_manager
-            .pseudo_wait_task_on(task, on, data_addr, token)
+        self.task_manager.wait_task_on(task, on, data_addr, token)
     }
 
-    unsafe fn pseudo_notify_one(
+    unsafe fn notify_one(
         &mut self,
         task: fimo_tasks_int::raw::PseudoTask,
         data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
     ) -> fimo_module::Result<NotifyResult> {
-        self.task_manager.pseudo_notify_one(task, data_callback)
+        self.task_manager.notify_one(task, data_callback)
     }
 
-    unsafe fn pseudo_notify_all(
+    unsafe fn notify_all(
         &mut self,
         task: fimo_tasks_int::raw::PseudoTask,
         data: WakeupToken,
     ) -> fimo_module::Result<usize> {
-        self.task_manager.pseudo_notify_all(task, data)
+        self.task_manager.notify_all(task, data)
     }
 
-    unsafe fn pseudo_notify_filter(
+    unsafe fn notify_filter(
         &mut self,
         task: fimo_tasks_int::raw::PseudoTask,
         filter: FfiFn<'_, dyn FnMut(WaitToken) -> fimo_tasks_int::runtime::NotifyFilterOp + '_, u8>,
         data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
     ) -> fimo_module::Result<NotifyResult> {
-        self.task_manager
-            .pseudo_notify_filter(task, filter, data_callback)
+        self.task_manager.notify_filter(task, filter, data_callback)
     }
 }
