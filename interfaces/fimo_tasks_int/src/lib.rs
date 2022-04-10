@@ -6,6 +6,7 @@
     rustdoc::broken_intra_doc_links
 )]
 #![feature(const_ptr_offset_from)]
+#![feature(strict_provenance)]
 #![feature(negative_impls)]
 #![feature(const_mut_refs)]
 #![feature(thread_local)]

@@ -249,7 +249,7 @@ impl RawMutex {
     const WAITERS_BIT: u8 = 0b10;
 
     const UNINIT_TOKEN: *const () = std::ptr::null();
-    const HANDOFF_LOCK: *const () = 1 as *const ();
+    const HANDOFF_LOCK: *const () = std::ptr::invalid(1);
 
     #[inline]
     fn new() -> Self {

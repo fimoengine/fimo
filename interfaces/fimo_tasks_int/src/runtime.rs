@@ -25,6 +25,10 @@ pub enum WakeupToken {
     /// The wait operation was skipped by the runtime.
     Skipped,
     /// The wait operation timed out.
+    ///
+    /// # Note
+    ///
+    /// Reserved for future use.
     TimedOut,
     /// Custom data passed to the task.
     Custom(*const ()),
@@ -37,7 +41,7 @@ unsafe impl Sync for WakeupToken {}
 /// Data provided by a task during a wait operation.
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct WaitToken(*const ());
+pub struct WaitToken(pub *const ());
 
 impl WaitToken {
     /// Invalid default token.
@@ -891,6 +895,40 @@ pub trait IScheduler: Sync {
         task: PseudoTask,
         data: WakeupToken,
     ) -> fimo_module::Result<usize>;
+
+    /// Notifies a number of tasks depending on the result of a filter function.
+    ///
+    /// The `filter` function is called for each task in the queue or until
+    /// [`NotifyFilterOp::Stop`] is returned. This function is passed the
+    /// [`WaitToken`] associated with a particular task, which is notified if
+    /// [`NotifyFilterOp::Notify`] is returned.
+    ///
+    /// The `data_callback` function is passed an [`NotifyResult`] indicating the
+    /// number of tasks that were notified and whether there are still waiting
+    /// tasks in the queue. This [`NotifyResult`] value is also returned by
+    /// `pseudo_notify_filter`.
+    ///
+    /// The `data_callback` function should return an UnparkToken value which will
+    /// be passed to all tasks that are notified. If no task is notified then the
+    /// returned value is ignored.
+    ///
+    /// # Safety
+    ///
+    /// The pseudo task must be registered with the runtime.
+    /// Further, `filter` and `data_callback` may not panic or call into the scheduler.
+    #[vtable_info(
+        unsafe,
+        abi = r#"extern "C-unwind""#,
+        return_type = "fimo_module::FFIResult<NotifyResult>",
+        into = "Into::into",
+        from = "Into::into"
+    )]
+    unsafe fn pseudo_notify_filter(
+        &mut self,
+        task: PseudoTask,
+        filter: FfiFn<'_, dyn FnMut(WaitToken) -> NotifyFilterOp + '_, u8>,
+        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+    ) -> fimo_module::Result<NotifyResult>;
 
     /// Unblocks a blocked task.
     ///
