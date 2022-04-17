@@ -12,3 +12,7 @@ lazy_static = "1.4.0"
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
+
+[dev-dependencies]
+# Ensure that the module is built when running tests.
+fimo_core = { path = "../../modules/fimo_core" }

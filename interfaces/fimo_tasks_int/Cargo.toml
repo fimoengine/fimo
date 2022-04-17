@@ -14,3 +14,7 @@ atomic = "0.5.1"
 rand = { version = "0.8.5", features = ["small_rng"] }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
+
+[dev-dependencies]
+# Ensure that the module is built when running tests.
+fimo_tasks = { path = "../../modules/fimo_tasks" }
