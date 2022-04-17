@@ -6,7 +6,8 @@ use fimo_core_int::modules::{
 use fimo_ffi::ObjectId;
 use fimo_ffi::{DynObj, FfiFn, ObjArc};
 use fimo_module::{
-    Error, ErrorKind, IModuleInterface, IModuleLoader, InterfaceQuery, ModuleInterfaceDescriptor,
+    Error, ErrorKind, IModule, IModuleInstance, IModuleInterface, IModuleLoader, InterfaceQuery,
+    ModuleInterfaceDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -99,6 +100,7 @@ struct ModuleRegistryInner {
     interfaces: BTreeMap<InterfaceId, InterfaceCollection>,
     interface_map: BTreeMap<ModuleInterfaceDescriptor, InterfaceId>,
     interface_callback_map: BTreeMap<InterfaceCallbackId, InterfaceId>,
+    services: BTreeMap<ModuleInterfaceDescriptor, &'static DynObj<dyn IModuleInterface>>,
 }
 
 struct LoaderCollection {
@@ -107,6 +109,7 @@ struct LoaderCollection {
 }
 
 struct InterfaceCollection {
+    inherit_services: bool,
     interface: ObjArc<DynObj<dyn IModuleInterface>>,
     callbacks: BTreeMap<InterfaceCallbackId, InterfaceCallback>,
 }
@@ -133,6 +136,7 @@ impl ModuleRegistryInner {
             interfaces: Default::default(),
             interface_map: Default::default(),
             interface_callback_map: Default::default(),
+            services: Default::default(),
         }
     }
 
@@ -259,25 +263,61 @@ impl ModuleRegistryInner {
     }
 
     #[inline]
+    fn register_service(
+        &mut self,
+        service: &'static DynObj<dyn IModuleInterface>,
+    ) -> Result<(), ModuleRegistryError> {
+        let descriptor = service.descriptor();
+        if self.services.contains_key(&descriptor) {
+            return Err(ModuleRegistryError::DuplicateInterface(descriptor));
+        }
+
+        self.services.insert(descriptor, service);
+
+        // Bind the service to every registered interface.
+        for interface_info in self.interfaces.values() {
+            if interface_info.inherit_services {
+                let instance = interface_info.interface.instance();
+                let module = instance.module();
+                module.bind_service(service);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[inline]
     fn register_interface(
         &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
+        inherit_services: bool,
         interface: ObjArc<DynObj<dyn IModuleInterface>>,
     ) -> Result<InterfaceId, ModuleRegistryError> {
-        if self.interface_map.contains_key(descriptor) {
-            return Err(ModuleRegistryError::DuplicateInterface(descriptor.clone()));
+        let descriptor = interface.descriptor();
+        if self.interface_map.contains_key(&descriptor) {
+            return Err(ModuleRegistryError::DuplicateInterface(descriptor));
         }
 
         if let Some(id) = self.interface_id_gen.next() {
+            // Bind the registered services if the interface has set the `inherit_services` flag.
+            if inherit_services {
+                let instance = interface.instance();
+                let module = instance.module();
+
+                for service in self.services.values() {
+                    module.bind_service(service)
+                }
+            }
+
             self.interfaces.insert(
                 id.get(),
                 InterfaceCollection {
+                    inherit_services,
                     interface,
                     callbacks: Default::default(),
                 },
             );
 
-            self.interface_map.insert(descriptor.clone(), id.get());
+            self.interface_map.insert(descriptor, id.get());
             Ok(id.get())
         } else {
             Err(ModuleRegistryError::IdExhaustion)
@@ -298,6 +338,7 @@ impl ModuleRegistryInner {
         let InterfaceCollection {
             interface,
             callbacks,
+            ..
         } = interface.unwrap();
         self.interface_map.retain(|_, i_id| *i_id != id);
 
@@ -435,12 +476,21 @@ impl IModuleRegistryInner for ModuleRegistryInner {
     }
 
     #[inline]
+    fn register_service(
+        &mut self,
+        service: &'static DynObj<dyn IModuleInterface>,
+    ) -> fimo_module::Result<()> {
+        self.register_service(service).map_err(Into::into)
+    }
+
+    #[inline]
     fn register_interface(
         &mut self,
-        desc: &ModuleInterfaceDescriptor,
+        inherit_services: bool,
         i: ObjArc<DynObj<dyn IModuleInterface>>,
     ) -> fimo_module::Result<InterfaceId> {
-        self.register_interface(desc, i).map_err(Into::into)
+        self.register_interface(inherit_services, i)
+            .map_err(Into::into)
     }
 
     #[inline]

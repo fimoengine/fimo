@@ -159,10 +159,22 @@ pub trait IModuleRegistryExt: IModuleRegistry {
         self.enter(move |inner| inner.get_loader_from_type(r#type))
     }
 
+    /// Registers a new service with the `ModuleRegistry`.
+    fn register_service<T: ?Sized>(&self, service: &'static DynObj<T>) -> fimo_module::Result<()>
+    where
+        T: CastInto<dyn IModuleInterface>,
+        DynObj<T>: IModuleInterface,
+    {
+        self.enter_mut(move |inner| {
+            let service = service.cast_super();
+            inner.register_service(service)
+        })
+    }
+
     /// Registers a new interface with the `ModuleRegistry`.
     fn register_interface<T: ?Sized>(
         &self,
-        desc: &ModuleInterfaceDescriptor,
+        inherit_services: bool,
         i: ObjArc<DynObj<T>>,
     ) -> fimo_module::Result<InterfaceHandle<'_, DynObj<T>, Self>>
     where
@@ -171,7 +183,7 @@ pub trait IModuleRegistryExt: IModuleRegistry {
     {
         self.enter_mut(move |inner| {
             let i_interface = ObjArc::cast_super(i.clone());
-            let id = inner.register_interface(desc, i_interface)?;
+            let id = inner.register_interface(inherit_services, i_interface)?;
             unsafe { Ok(InterfaceHandle::from_raw_parts(id, i, self)) }
         })
     }
@@ -294,10 +306,19 @@ pub trait IModuleRegistryInner: Send + Sync {
         r#type: &str,
     ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>>;
 
+    /// Registers a new service with the `ModuleRegistry`.
+    ///
+    /// The service will be bound to every existing and new interface, if
+    /// the interface is registered with the inherit flag.
+    fn register_service(
+        &mut self,
+        service: &'static DynObj<dyn IModuleInterface>,
+    ) -> fimo_module::Result<()>;
+
     /// Registers a new interface with the `ModuleRegistry`.
     fn register_interface(
         &mut self,
-        desc: &ModuleInterfaceDescriptor,
+        inherit_services: bool,
         i: ObjArc<DynObj<dyn IModuleInterface>>,
     ) -> fimo_module::Result<InterfaceId>;
 

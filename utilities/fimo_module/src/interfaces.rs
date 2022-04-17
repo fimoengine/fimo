@@ -26,6 +26,9 @@ pub trait IModuleLoader: IBase + Send + Sync {
 
     /// Loads a new module from a path to the module root.
     ///
+    /// An implementation is allowed to keep an internal reference count to
+    /// each module and return an unique [`ObjArc`].
+    ///
     /// # Safety
     ///
     /// - The module must be exposed in a way understood by the module loader.
@@ -35,6 +38,9 @@ pub trait IModuleLoader: IBase + Send + Sync {
     unsafe fn load_module(&'static self, path: &'_ Path) -> Result<ObjArc<DynObj<dyn IModule>>>;
 
     /// Loads a new module from a path to the module library.
+    ///
+    /// An implementation is allowed to keep an internal reference count to
+    /// each module and return an unique [`ObjArc`].
     ///
     /// # Safety
     ///
@@ -126,6 +132,9 @@ pub struct IModuleLoaderVTable {
     pub evict_module_cache: unsafe extern "C-unwind" fn(*const ()),
     /// Loads a new module from a path to the module root.
     ///
+    /// An implementation is allowed to keep an internal reference count to
+    /// each module and return an unique [`ObjArc`].
+    ///
     /// # Safety
     ///
     /// - The module must be exposed in a way understood by the module loader.
@@ -137,6 +146,9 @@ pub struct IModuleLoaderVTable {
         ConstSpan<'_, PathChar>,
     ) -> FFIResult<RawObjArc<RawObj<dyn IModule>>>,
     /// Loads a new module from a path to the module library.
+    ///
+    /// An implementation is allowed to keep an internal reference count to
+    /// each module and return an unique [`ObjArc`].
     ///
     /// # Safety
     ///
@@ -272,6 +284,21 @@ pub trait IModule: IBase + Send + Sync {
         from_expr = "unsafe { &*fimo_ffi::ptr::from_raw(res) }"
     )]
     fn module_loader(&self) -> &'static DynObj<dyn IModuleLoader>;
+
+    /// Binds a service to the module.
+    ///
+    /// Services are lightweight optional interfaces shared
+    /// globally to the entire module.
+    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
+    fn bind_service(
+        &self,
+        #[vtable_info(
+            type = "RawObj<dyn IModuleInterface>",
+            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);",
+            into = "fimo_ffi::ptr::into_raw"
+        )]
+        service: &'static DynObj<dyn IModuleInterface>,
+    );
 
     /// Instantiates the module.
     ///
