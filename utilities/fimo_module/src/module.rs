@@ -21,7 +21,10 @@ pub struct Module {
     root: Box<[PathChar]>,
     parent: &'static DynObj<dyn IModuleLoader>,
     build: Box<dyn Fn(ObjArc<Module>) -> crate::Result<ObjArc<Instance>> + Send + Sync>,
+    service_handler: Option<ServiceHandler>,
 }
+
+type ServiceHandler = Box<dyn Fn(&'static DynObj<dyn IModuleInterface>) + Send + Sync>;
 
 impl Module {
     /// Builds a new `Module`.
@@ -58,7 +61,19 @@ impl Module {
             root: path,
             parent,
             build,
+            service_handler: None,
         })
+    }
+
+    /// Adds a new service handler to the module.
+    ///
+    /// The service handler is called each time a new service is bound
+    /// to the module.
+    pub fn with_service_handler<H>(&mut self, handler: H)
+    where
+        H: Fn(&'static DynObj<dyn IModuleInterface>) + Send + Sync + 'static,
+    {
+        self.service_handler = Some(Box::new(handler))
     }
 }
 
@@ -83,6 +98,12 @@ impl IModule for Module {
 
     fn module_loader(&self) -> &'static DynObj<dyn IModuleLoader> {
         self.parent
+    }
+
+    fn bind_service(&self, service: &'static DynObj<dyn IModuleInterface>) {
+        if let Some(handler) = &self.service_handler {
+            handler(service)
+        }
     }
 
     fn new_instance(&self) -> crate::Result<ObjArc<DynObj<dyn IModuleInstance>>> {

@@ -137,8 +137,37 @@ impl ModuleDatabase {
         instance.bind_interface(interface_descriptor, i)?;
         let interface = instance.interface(interface_descriptor)?;
         let interface: ObjArc<DynObj<I>> = fimo_module::try_downcast_arc(interface)?;
-        let handle = module_registry.register_interface(&I::new_descriptor(), interface)?;
+        let handle = module_registry.register_interface(true, interface)?;
         Ok(handle)
+    }
+
+    pub fn new_service<S>(&self) -> Result<&'static DynObj<S>, Error>
+    where
+        S: CastInto<dyn IModuleInterface> + Unsize<dyn IBase> + FimoInterface + ?Sized + 'static,
+    {
+        if TypeId::of::<S>() == TypeId::of::<dyn IFimoCore>() {
+            panic!("Can not create core")
+        }
+
+        let module_registry = self.core.modules();
+        let loader = module_registry.get_loader_from_type(MODULE_LOADER_TYPE)?;
+        let module = unsafe { loader.load_module_raw(self.interface_path::<S>().unwrap())? };
+
+        let instance = module.new_instance()?;
+        let interface_descriptor = instance
+            .available_interfaces()
+            .iter()
+            .find(|interface| {
+                interface.name == S::NAME && S::VERSION.is_compatible(&interface.version)
+            })
+            .unwrap();
+
+        let service = instance.interface(interface_descriptor)?;
+        let service: ObjArc<DynObj<S>> = fimo_module::try_downcast_arc(service)?;
+        let service = unsafe { &*ObjArc::into_raw(service) };
+        module_registry.register_service(service)?;
+
+        Ok(service)
     }
 }
 
