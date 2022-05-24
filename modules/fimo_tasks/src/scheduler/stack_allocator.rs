@@ -1,7 +1,7 @@
 use context::stack::{ProtectedFixedSizeStack, Stack};
 use fimo_ffi::error::wrap_error;
+use fimo_logging_int::{debug, error, trace};
 use fimo_module::{Error, ErrorKind};
-use log::{debug, error, trace};
 use std::collections::{BTreeMap, VecDeque};
 use std::ops::RangeFrom;
 

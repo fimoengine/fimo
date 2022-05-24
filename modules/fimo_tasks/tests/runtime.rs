@@ -1,5 +1,6 @@
 use fimo_ffi::cell::AtomicRefCell;
-use fimo_ffi::DynObj;
+use fimo_ffi::{DynObj, ObjBox};
+use fimo_logging_int::{ConsoleBackend, ILogger};
 use fimo_module::Error;
 use fimo_tasks::Builder;
 use fimo_tasks_int::raw::{IRawTask, ISchedulerContext, TaskScheduleStatus};
@@ -12,11 +13,24 @@ use std::sync::{Arc, Once};
 use std::time::{Duration, SystemTime};
 
 static INIT: Once = Once::new();
+static INIT_DYN: Once = Once::new();
 
 mod sync;
 
 fn new_runtime<R>(f: impl FnOnce(&DynObj<dyn IRuntime>) -> Result<R, Error>) -> Result<R, Error> {
     INIT.call_once(pretty_env_logger::init);
+
+    INIT_DYN.call_once(|| {
+        let logger = fimo_logging::Logger::new();
+        let logger = ObjBox::new(logger);
+        let logger = ObjBox::coerce_obj(logger);
+
+        let console_backend = ObjBox::new(ConsoleBackend::new());
+        let console_backend = ObjBox::coerce_obj(console_backend);
+        let _ = logger.add_backend(console_backend);
+
+        fimo_logging_int::set_logger(ObjBox::leak(logger)).unwrap();
+    });
 
     let runtime = Builder::new().build()?;
     let runtime = fimo_ffi::ptr::coerce_obj(&*runtime);
@@ -30,13 +44,22 @@ pub fn enter_and_init_runtime<R: Send>(
         assert!(!is_worker());
         assert!(runtime.worker_id().is_none());
 
-        let res = runtime.block_on_and_enter(
-            move |runtime| {
-                unsafe { init_runtime(runtime) };
-                f()
-            },
-            &[],
-        )?;
+        let a = 5;
+        fimo_logging_int::trace!("Before span");
+        let span = fimo_logging_int::trace_span!("new runtime span", "some {}", a);
+        let res = span.scoped(|| {
+            fimo_logging_int::trace!("Entered span");
+            fimo_logging_int::info!("Some info");
+
+            runtime.block_on_and_enter(
+                move |runtime| {
+                    unsafe { init_runtime(runtime) };
+                    f()
+                },
+                &[],
+            )
+        })?;
+        fimo_logging_int::trace!("After span");
 
         assert!(!is_worker());
         assert!(runtime.worker_id().is_none());
