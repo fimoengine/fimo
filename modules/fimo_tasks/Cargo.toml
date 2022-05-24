@@ -18,11 +18,13 @@ crossbeam-deque = "0.8"
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_tasks_int = { version = "0.1.0", path = "../../interfaces/fimo_tasks_int" }
+fimo_logging_int = { version = "0.1.0", path = "../../interfaces/fimo_logging_int" }
 fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", optional = true }
 
 [dev-dependencies]
 rand = "0.8.5"
 pretty_env_logger = "0.4.0"
+fimo_logging = { path = "../fimo_logging" }
 module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]

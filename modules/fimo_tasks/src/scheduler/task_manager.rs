@@ -4,13 +4,13 @@ use fimo_ffi::cell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::ptr::IBaseExt;
 use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
+use fimo_logging_int::{debug, error, info, trace, SpanStackId};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{
     AtomicISchedulerContext, IRawTask, IRustPanicData, ISchedulerContext, PseudoTask,
     StatusRequest, TaskHandle, TaskPriority, TaskRunStatus, TaskScheduleStatus, WorkerId,
 };
 use fimo_tasks_int::runtime::{IScheduler, NotifyResult, WaitToken, WakeupToken};
-use log::{debug, error, info, trace};
 use std::any::Any;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, VecDeque};
@@ -1155,6 +1155,7 @@ pub(crate) struct ContextData {
 /// Data used by the Scheduler and worker pool.
 pub(crate) struct SharedContext {
     context: Option<Context>,
+    branch: Option<SpanStackId>,
     panic: Option<ObjBox<PanicData>>,
     entry_func: Option<FfiFn<'static, dyn FnOnce() + Send + 'static>>,
 }
@@ -1209,6 +1210,7 @@ impl SharedContext {
     fn new(f: Option<FfiFn<'_, dyn FnOnce() + Send + '_>>) -> Self {
         Self {
             context: None,
+            branch: None,
             panic: None,
             // SAFETY: Ideally we would like to have a way to specify the concept of a
             // minimal lifetime. As that is currently not possible, we choose the
@@ -1231,6 +1233,22 @@ impl SharedContext {
     #[inline]
     pub fn set_context(&mut self, c: Context) {
         self.context = Some(c)
+    }
+
+    #[inline]
+    pub fn branch(&mut self) -> SpanStackId {
+        self.branch.expect("The task has no registered branch")
+    }
+
+    #[inline]
+    pub fn take_branch(&mut self) -> Option<SpanStackId> {
+        self.branch.take()
+    }
+
+    #[inline]
+    pub fn set_branch(&mut self, branch: SpanStackId) {
+        debug_assert!(self.branch.is_none());
+        self.branch = Some(branch)
     }
 
     #[inline]

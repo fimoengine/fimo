@@ -2,12 +2,12 @@ use crate::worker_pool::WorkerPool;
 use crate::Runtime;
 use context::Context;
 use fimo_ffi::{DynObj, FfiFn, ObjectId};
+use fimo_logging_int::{debug, error, info, trace};
 use fimo_module::Error;
 use fimo_tasks_int::raw::{
     IRawTask, PseudoTask, StatusRequest, TaskHandle, TaskRunStatus, TaskScheduleStatus, WorkerId,
 };
 use fimo_tasks_int::runtime::{IScheduler, NotifyResult, WaitToken, WakeupToken};
-use log::{debug, error, info, trace};
 use std::cmp::Reverse;
 use std::fmt::Debug;
 use std::mem::{ManuallyDrop, MaybeUninit};

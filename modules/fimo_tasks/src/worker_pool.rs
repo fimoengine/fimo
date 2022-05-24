@@ -6,10 +6,10 @@ use context::{Context, Transfer};
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use fimo_ffi::error::wrap_error;
 use fimo_ffi::DynObj;
+use fimo_logging_int::{debug, error, info, logger, trace, trace_span, warn, ILogger, SpanStackId};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{IRawTask, TaskScheduleStatus, WorkerId};
 use fimo_tasks_int::runtime::init_runtime;
-use log::{debug, error, info, trace, warn};
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -146,6 +146,7 @@ impl WorkerPool {
 #[derive(Debug)]
 pub(crate) struct TaskWorker {
     id: WorkerId,
+    branch: SpanStackId,
     runtime: Weak<Runtime>,
     should_run: AtomicBool,
     tasks_available: Condvar,
@@ -265,11 +266,19 @@ impl TaskWorker {
     ) -> Result<(Arc<Self>, Stealer<AssertValidTask>), Error> {
         let (sen, rec) = channel();
         let (work_sen, work_rec) = channel();
+        let (branch_sen, branch_rec) = channel();
 
         let thread = {
             std::thread::Builder::new()
                 .name(format!("Worker {}", id))
                 .spawn(move || {
+                    let worker_span = trace_span!("Worker", "id={}", id);
+                    let worker_guard = worker_span.enter();
+                    let worker_branch = logger()
+                        .branch_span_stack(SpanStackId::THREAD)
+                        .expect("could not create the worker span branch");
+                    branch_sen.send(worker_branch).unwrap();
+
                     info!("Spawned new worker {id}");
 
                     let local_queue = Worker::new_fifo();
@@ -316,10 +325,26 @@ impl TaskWorker {
                     };
 
                     info!("Shutting down worker {id}");
+
+                    // First join the current branch back with the thread branch.
+                    let logger = logger();
+                    logger
+                        .join_stack(worker_branch)
+                        .expect("could not join worker branch");
+
+                    // Then remove any other branches that may remain from uncompleted task.
+                    logger
+                        .truncate_branched_stacks(SpanStackId::THREAD)
+                        .expect("could not remove child branches");
+                    drop(worker_guard);
+
                     worker.shared_data().mark_waiting();
                 })
                 .map_err(|e| Error::new(ErrorKind::Unknown, wrap_error(e)))?
         };
+
+        // Receive the branch id.
+        let branch = branch_rec.recv().unwrap();
 
         let mut worker: Arc<MaybeUninit<Self>> = Arc::new(MaybeUninit::uninit());
 
@@ -329,6 +354,7 @@ impl TaskWorker {
         // SAFETY: We aren't dereferencing the pointer, just initializing the data manually.
         unsafe {
             let id_ptr = addr_of_mut!((*uninit_worker).id);
+            let branch_ptr = addr_of_mut!((*uninit_worker).branch);
             let runtime_ptr = addr_of_mut!((*uninit_worker).runtime);
             let thread_ptr = addr_of_mut!((*uninit_worker).thread);
             let should_run_ptr = addr_of_mut!((*uninit_worker).should_run);
@@ -340,6 +366,7 @@ impl TaskWorker {
 
             // initialize fields.
             id_ptr.write(id);
+            branch_ptr.write(branch);
             runtime_ptr.write(runtime);
             thread_ptr.write(ManuallyDrop::new(thread));
             should_run_ptr.write(AtomicBool::new(false));
@@ -411,7 +438,6 @@ impl TaskWorker {
 
 pub(crate) extern "C" fn worker_main(thread_context: Transfer) -> ! {
     let worker = WORKER.get().unwrap();
-
     let mut spin_wait = SpinWait::new();
 
     while worker.shared_data().should_run() {
@@ -571,6 +597,29 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
 
             let data = scheduler_context.scheduler_data();
             let mut shared = data.shared_data_mut();
+
+            // Switch/Join to current branch with the worker branch.
+            let logger = logger();
+            let worker_branch = worker.shared_data().branch;
+            match &msg_data {
+                MsgData::Completed { .. } => {
+                    let task_branch = shared.take_branch().unwrap();
+                    logger.truncate_branched_stacks(task_branch).unwrap();
+                    logger
+                        .join_stack(task_branch)
+                        .expect("could not join task branch");
+                    logger
+                        .switch_span_stack(SpanStackId::THREAD, worker_branch)
+                        .expect("could not switch to the worker branch");
+                }
+                MsgData::Yield { .. } => {
+                    let task_branch = shared.branch();
+                    logger
+                        .switch_span_stack(task_branch, worker_branch)
+                        .expect("could not switch to the worker branch");
+                }
+            }
+
             shared.take_context().unwrap_unchecked()
         };
 
@@ -586,10 +635,16 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
     let worker = std::ptr::read_volatile(&WORKER).get().unwrap_unchecked();
     let task = worker.current_task.get().unwrap_unchecked().into_task();
     let scheduler_context = task.context().borrow();
-    scheduler_context
-        .scheduler_data()
-        .shared_data_mut()
-        .set_context(context);
+    let mut shared = scheduler_context.scheduler_data().shared_data_mut();
+    shared.set_context(context);
+
+    // Switch back to the task branch.
+    let logger = logger();
+    let task_branch = shared.branch();
+    let worker_branch = worker.shared_data().branch;
+    logger
+        .switch_span_stack(worker_branch, task_branch)
+        .expect("could not switch to the task branch");
 
     trace!(
         "Resumed task {} to worker {}",
@@ -600,19 +655,30 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
 
 pub(crate) extern "C" fn task_main(thread_context: Transfer) -> ! {
     loop {
+        // SAFETY: `WORKER` is always initialized during the execution of a worker.
+        let worker = unsafe { WORKER.get().unwrap_unchecked() };
+
         // Fetch the worker, write back the thread context and take the entry function.
         // SAFETY: `WORKER` is always initialized during the execution of a worker and
         // the current task was initialized prior to calling this function.
-        let task = unsafe {
-            let worker = WORKER.get().unwrap_unchecked();
-            worker.current_task.get().unwrap_unchecked().into_task()
-        };
+        let task = unsafe { worker.current_task.get().unwrap_unchecked().into_task() };
+
+        // Create a new branch for the current task. Branching the stack makes it
+        // immutable, so we first switch to the main branch.
+        let logger = logger();
+        logger
+            .switch_span_stack(worker.shared_data().branch, SpanStackId::THREAD)
+            .expect("could not swap to the main branch");
+        let task_branch = logger
+            .branch_span_stack(SpanStackId::THREAD)
+            .expect("could not create the task span branch");
 
         let f = {
             let context = task.context().borrow();
             let data = context.scheduler_data();
             let mut shared = data.shared_data_mut();
             shared.set_context(thread_context.context);
+            shared.set_branch(task_branch);
             shared.take_entry_func()
         };
 
