@@ -19,6 +19,9 @@ use fimo_actix_int::IFimoActix;
 #[cfg(feature = "fimo_tasks_int")]
 use fimo_tasks_int::IFimoTasks;
 
+#[cfg(feature = "fimo_logging_int")]
+use fimo_logging_int::IFimoLogging;
+
 #[cfg(target_os = "windows")]
 macro_rules! lib_path {
     ($lib:literal) => {
@@ -69,6 +72,11 @@ impl ModuleDatabase {
         paths.insert(
             <dyn IFimoTasks>::new_descriptor(),
             PathBuf::from(lib_path!("fimo_tasks")),
+        );
+        #[cfg(feature = "fimo_logging_int")]
+        paths.insert(
+            <dyn IFimoLogging>::new_descriptor(),
+            PathBuf::from(lib_path!("fimo_logging")),
         );
 
         let module_loader = RustLoader::new();

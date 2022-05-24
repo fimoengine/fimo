@@ -3,5 +3,6 @@ members = [
     "bin/*",
     "modules/*",
     "utilities/*",
+    "interfaces/*",
     "test_utilities/*"
 ]
