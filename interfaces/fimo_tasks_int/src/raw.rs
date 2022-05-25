@@ -9,6 +9,7 @@ use fimo_ffi::str::ConstStrPtr;
 use fimo_ffi::tuple::Tuple2;
 use fimo_ffi::{interface, ConstStr, DynObj, FfiFn, ObjBox, ObjectId, Optional, ReprC};
 use std::any::Any;
+use std::fmt::Write;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomPinned;
 use std::mem::MaybeUninit;
@@ -184,7 +185,7 @@ impl Builder {
     #[inline]
     pub fn extend_name_index(mut self, index: usize) -> Self {
         if let Some(n) = &mut self.info.name {
-            n.push_str(&format!(": {}", index));
+            write!(n, ": {index}").expect("could not extend name");
         }
         self
     }

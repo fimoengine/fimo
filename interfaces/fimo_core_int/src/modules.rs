@@ -394,7 +394,7 @@ impl<'a, T: IModuleLoader + ?Sized + 'static, R: IModuleRegistry + ?Sized> Loade
 }
 
 impl<'a, T: IModuleLoader + ?Sized + 'static, R: IModuleRegistry + ?Sized> Debug
-    for LoaderHandle<'_, T, R>
+    for LoaderHandle<'a, T, R>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("LoaderHandle").field(&self.id).finish()
@@ -493,7 +493,7 @@ impl<'a, T: IModuleInterface + ?Sized, R: IModuleRegistry + ?Sized> InterfaceHan
 }
 
 impl<'a, T: IModuleInterface + ?Sized, R: IModuleRegistry + ?Sized> Debug
-    for InterfaceHandle<'_, T, R>
+    for InterfaceHandle<'a, T, R>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("InterfaceHandle").field(&self.id).finish()

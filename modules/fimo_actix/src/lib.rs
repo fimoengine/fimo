@@ -298,7 +298,7 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
                 }
                 let future = stop_server(server, tx);
                 self.arbiter.spawn(future);
-                let _ = rx.recv().unwrap();
+                rx.recv().unwrap();
 
                 true
             }
@@ -317,7 +317,7 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
                 }
                 let future = pause_server(server.clone(), tx);
                 self.arbiter.spawn(future);
-                let _ = rx.recv().unwrap();
+                rx.recv().unwrap();
 
                 true
             }
@@ -336,7 +336,7 @@ impl<A: 'static + ToSocketAddrs + Send + Sync> ActixServerInner<A> {
                 }
                 let future = resume_server(server.clone(), tx);
                 self.arbiter.spawn(future);
-                let _ = rx.recv().unwrap();
+                rx.recv().unwrap();
 
                 true
             }
