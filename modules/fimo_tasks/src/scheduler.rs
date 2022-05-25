@@ -32,6 +32,10 @@ pub struct TaskScheduler {
     task_manager: ManuallyDrop<TaskManager>,
 }
 
+// SAFETY: The API of the scheduler ensures that the type can
+// be shared with other threads. This sharing does not happen
+// in practice, as the scheduler will usually lie behind a
+// mutex.
 unsafe impl Sync for TaskScheduler {}
 
 impl TaskScheduler {

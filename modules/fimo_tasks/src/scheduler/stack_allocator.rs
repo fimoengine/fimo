@@ -18,8 +18,10 @@ pub(crate) struct StackAllocator {
 #[derive(Debug)]
 struct StackWrapper(ProtectedFixedSizeStack);
 
-// The stack is basically a Box<u8>
+// SAFETY: The stack is basically a Box<u8>.
 unsafe impl Send for StackWrapper where Box<u8>: Send {}
+
+// SAFETY: The stack is basically a Box<u8>.
 unsafe impl Sync for StackWrapper where Box<u8>: Sync {}
 
 #[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]

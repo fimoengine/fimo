@@ -1160,6 +1160,7 @@ pub(crate) struct SharedContext {
     entry_func: Option<FfiFn<'static, dyn FnOnce() + Send + 'static>>,
 }
 
+// SAFETY: The api ensures that the type can be shared with other threads.
 unsafe impl Sync for SharedContext {}
 
 /// Data used only by the Scheduler.

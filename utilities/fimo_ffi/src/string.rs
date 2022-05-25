@@ -1780,6 +1780,7 @@ impl<A: Allocator> PartialEq for String<A> {
 macro_rules! impl_eq {
     ($lhs:ty, $rhs: ty) => {
         #[allow(unused_lifetimes)]
+        #[allow(clippy::extra_unused_lifetimes)]
         impl<'a, 'b, A: Allocator> PartialEq<$rhs> for $lhs {
             #[inline]
             fn eq(&self, other: &$rhs) -> bool {
@@ -1788,6 +1789,7 @@ macro_rules! impl_eq {
         }
 
         #[allow(unused_lifetimes)]
+        #[allow(clippy::extra_unused_lifetimes)]
         impl<'a, 'b, A: Allocator> PartialEq<$lhs> for $rhs {
             #[inline]
             fn eq(&self, other: &$lhs) -> bool {

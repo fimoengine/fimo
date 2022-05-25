@@ -5,7 +5,11 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-#![allow(incomplete_features)]
+#![allow(
+    incomplete_features,
+    // https://github.com/rust-lang/rust-clippy/issues/8867
+    clippy::derive_partial_eq_without_eq,
+)]
 #![feature(const_slice_from_raw_parts)]
 #![feature(const_precise_live_drops)]
 #![feature(const_ptr_offset_from)]

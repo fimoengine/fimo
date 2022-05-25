@@ -52,6 +52,9 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
         }
     }
 
+    // Generic parameters without any `'inner` lifetime.
+    let generics_no_inner = generics.clone();
+
     // For the implementation we also need the generic arguments without any bounds, e.g.
     // `impl<'a: 'inner, 'b: 'a + 'inner> Trait for Type<'a, 'b>`.
     let mut boundless_generics = generics.clone();
@@ -99,7 +102,7 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
 
     // Implement the `ObjectId` trait for the generic type.
     impls.push(quote! {
-        impl #generics ::fimo_ffi::ptr::ObjectId for #ty {
+        impl #generics_no_inner ::fimo_ffi::ptr::ObjectId for #ty {
             const OBJECT_ID: ::fimo_ffi::ptr::Uuid = ::fimo_ffi::ptr::Uuid::from_bytes([#(#uuid),*]);
         }
     });
@@ -107,7 +110,7 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
     // Implement the `DowncastSafe` trait for the type.
     if is_downcast_safe {
         impls.push(quote! {
-            unsafe impl #generics ::fimo_ffi::ptr::DowncastSafe for #ty { }
+            unsafe impl #generics_no_inner ::fimo_ffi::ptr::DowncastSafe for #ty { }
         });
     }
 
