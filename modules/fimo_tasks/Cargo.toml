@@ -28,5 +28,5 @@ fimo_logging = { path = "../fimo_logging" }
 module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]
-default = ["module"]
+default = []
 module = ["fimo_core_int"]

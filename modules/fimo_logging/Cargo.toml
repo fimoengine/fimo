@@ -18,5 +18,5 @@ fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_logging_int = { version = "0.1.0", path = "../../interfaces/fimo_logging_int" }
 
 [features]
-default = ["module"]
+default = []
 module = []

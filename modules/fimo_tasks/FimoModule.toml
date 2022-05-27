@@ -1,0 +1,18 @@
+[module]
+name = "fimo_tasks"
+version = "0.1.0"
+
+[[profile]]
+name = "rust"
+default = true
+loader = "fimo::module::loader::rust"
+exclude = ["fimo_tasks.rlib", "libfimo_tasks.rlib"]
+
+[profile.builder]
+name = "cargo"
+args = ["--features", "module"]
+
+[[profile.export]]
+name = { name = "fimo_tasks" }
+version = "0.1.0-unstable+0"
+extensions = []

@@ -6,25 +6,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ macos-latest, windows-latest, ubuntu-latest ]
-        rust:
-          - nightly
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
-
   test:
     name: Test Suite
     runs-on: ${{ matrix.os }}
@@ -41,10 +22,10 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: -- --nocapture
+      - name: "Bootstrap build tool"
+        run: ./x.py bootstrap
+      - name: "Run tests"
+        run: fimo/bin/fimo test --release -- --nocapture
         env:
           RUST_BACKTRACE: 1
 
@@ -88,29 +69,3 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
-
-  sanitizer:
-    name: Sanitizers
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        sanitizer: [ memory, thread ]
-        package: [ fimo_tasks ]
-        rust:
-          - nightly
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-          components: rust-src
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: -Zbuild-std --target x86_64-unknown-linux-gnu --release -p ${{ matrix.package }} -- --test-threads=1
-        env:
-          RUSTFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
-          RUSTDOCFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
-          TSAN_OPTIONS: suppressions=${{ github.workspace }}/tsan
