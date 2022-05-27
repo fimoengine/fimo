@@ -25,5 +25,5 @@ reqwest = { version = "0.11.4", features = ["blocking"] }
 module_loading = { path = "../../test_utilities/module_loading", features = ["fimo_actix_int"] }
 
 [features]
-default = ["module"]
+default = []
 module = ["fimo_core_int"]

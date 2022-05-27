@@ -18,7 +18,7 @@ fn load_dynamic() -> Result<(), Error> {
     let core_path = module_loading::core_path();
 
     let module_loader = fimo_module::loader::RustLoader::new();
-    let core_module = unsafe { module_loader.load_module_raw(core_path)? };
+    let core_module = unsafe { module_loader.load_module_raw(&core_path)? };
 
     println!(
         "Core info: {}, Path: {}",

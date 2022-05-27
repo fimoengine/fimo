@@ -61,22 +61,22 @@ impl ModuleDatabase {
         let mut paths = BTreeMap::new();
         paths.insert(
             <dyn IFimoCore>::new_descriptor(),
-            PathBuf::from(lib_path!("fimo_core")),
+            module_path("fimo_core", lib_path!("fimo_core")),
         );
         #[cfg(feature = "fimo_actix_int")]
         paths.insert(
             <dyn IFimoActix>::new_descriptor(),
-            PathBuf::from(lib_path!("fimo_actix")),
+            module_path("fimo_actix", lib_path!("fimo_actix")),
         );
         #[cfg(feature = "fimo_tasks_int")]
         paths.insert(
             <dyn IFimoTasks>::new_descriptor(),
-            PathBuf::from(lib_path!("fimo_tasks")),
+            module_path("fimo_tasks", lib_path!("fimo_tasks")),
         );
         #[cfg(feature = "fimo_logging_int")]
         paths.insert(
             <dyn IFimoLogging>::new_descriptor(),
-            PathBuf::from(lib_path!("fimo_logging")),
+            module_path("fimo_logging", lib_path!("fimo_logging")),
         );
 
         let module_loader = RustLoader::new();
@@ -179,7 +179,14 @@ impl ModuleDatabase {
     }
 }
 
-pub fn core_path() -> &'static Path {
-    const CORE_PATH: &str = lib_path!("fimo_core");
-    Path::new(CORE_PATH)
+pub fn core_path() -> PathBuf {
+    module_path("fimo_core", lib_path!("fimo_core"))
+}
+
+fn module_path(name: &str, lib_name: &str) -> PathBuf {
+    let out_dir = std::env::var_os("FIMO_OUT_DIR").expect("FIMO_OUT_DIR env variable not set");
+    let mut path = PathBuf::from(out_dir);
+    path.push(name);
+    path.push(lib_name);
+    path
 }

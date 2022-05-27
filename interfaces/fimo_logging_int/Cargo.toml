@@ -11,7 +11,3 @@ categories = ["game-development"]
 [dependencies]
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
-
-[dev-dependencies]
-# Ensure that the module is built when running tests.
-fimo_logging = { path = "../../modules/fimo_logging" }

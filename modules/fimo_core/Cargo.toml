@@ -22,7 +22,7 @@ fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]
-default = ["default_module_loaders", "rust_module"]
+default = ["default_module_loaders"]
 module = []
 rust_module = ["module"]
 rust_module_loader = []
