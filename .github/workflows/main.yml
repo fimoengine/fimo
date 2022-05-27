@@ -30,6 +30,7 @@ jobs:
         run: ./x.py bootstrap
       - name: "Run tests"
         run: ./fimo/bin/fimo test --release -- --nocapture
+        shell: bash
         env:
           RUST_BACKTRACE: 1
 
