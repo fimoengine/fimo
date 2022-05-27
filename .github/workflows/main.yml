@@ -22,6 +22,10 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
+      - uses: actions/setup-python@v3
+        with:
+          python-version: '3.x'
+      - run: pip install click
       - name: "Bootstrap build tool"
         run: ./x.py bootstrap
       - name: "Run tests"
