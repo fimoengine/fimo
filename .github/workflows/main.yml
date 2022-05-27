@@ -27,7 +27,7 @@ jobs:
           python-version: '3.x'
       - run: pip install click
       - name: "Bootstrap build tool"
-        run: ./x.py bootstrap
+        run: python ./x.py bootstrap
       - name: "Run tests"
         run: ./fimo/bin/fimo test --release -- --nocapture
         shell: bash
