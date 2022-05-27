@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 toml = "0.5"
-glob = "0.3.0"
+wax = "0.5.0"
 clap = { version = "3.1", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }

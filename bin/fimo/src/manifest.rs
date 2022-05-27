@@ -1,11 +1,11 @@
 use fimo_ffi::Version;
-use glob::glob;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     error::Error,
     path::{Path, PathBuf},
 };
+use wax::Glob;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct FimoManifest {
@@ -91,18 +91,19 @@ pub struct InterfaceName {
 }
 
 pub fn load_fimo_manifest(manifest_path: &Path) -> Result<FimoWorkspace, Box<dyn Error>> {
-    let manifest = std::fs::read(manifest_path)?;
-    let manifest: FimoManifest = toml::from_slice(&manifest)?;
+    let manifest_file = std::fs::read(manifest_path)?;
+    let manifest: FimoManifest = toml::from_slice(&manifest_file)?;
 
-    let manifest_dir = manifest_path.parent().unwrap().canonicalize()?;
+    let manifest_dir = manifest_path.parent().unwrap();
     let mut module_names = BTreeSet::new();
     let mut modules: Vec<(PathBuf, FimoModuleManifest)> =
         Vec::with_capacity(manifest.workspace.modules.len());
 
     for pattern in &manifest.workspace.modules {
-        let path = format!("{}", manifest_dir.join(pattern).display());
-        for module in glob(&path).expect("Failed to read glob pattern") {
-            let module = module?;
+        let glob = Glob::new(pattern).expect("Failed to read glob pattern");
+        for entry in glob.walk(&manifest_dir) {
+            let entry = entry.unwrap();
+            let module = entry.path();
             let module_manifest_path = module.join("FimoModule.toml");
             if !module_manifest_path.exists() {
                 continue;
@@ -117,21 +118,22 @@ pub fn load_fimo_manifest(manifest_path: &Path) -> Result<FimoWorkspace, Box<dyn
                 );
             }
 
-            modules.push((module, module_manifest));
+            modules.push((module.to_path_buf(), module_manifest));
         }
     }
 
     let test = if let Some(test) = manifest.test {
         let mut include = Vec::new();
         for pattern in &test.include {
-            let path = format!("{}", manifest_dir.join(pattern).display());
-            for path in glob(&path).expect("Failed to read glob pattern") {
-                let path = path?;
+            let glob = Glob::new(pattern).expect("Failed to read glob pattern");
+            for entry in glob.walk(&manifest_dir) {
+                let entry = entry.unwrap();
+                let path = entry.path();
                 if !path.exists() || !path.is_dir() {
                     continue;
                 }
 
-                include.push(path);
+                include.push(path.to_path_buf());
             }
         }
 
