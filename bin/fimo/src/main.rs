@@ -213,8 +213,9 @@ fn build(
             command.arg("--verbose");
         }
 
+        command.arg("--");
         if !profile.builder.args.is_empty() {
-            command.arg("--").args(&profile.builder.args);
+            command.args(&profile.builder.args);
         }
 
         if let Some(extra_args) = extra_args {
@@ -312,8 +313,9 @@ fn test(
             command.arg("--verbose");
         }
 
+        command.arg("--");
         if !profile.builder.args.is_empty() {
-            command.arg("--").args(&profile.builder.args);
+            command.args(&profile.builder.args);
         }
 
         if let Some(extra_args) = extra_args {
@@ -353,6 +355,7 @@ fn test(
                 command.arg("--verbose");
             }
 
+            command.arg("--");
             if let Some(extra_args) = extra_args {
                 command.arg("--").args(extra_args);
             }

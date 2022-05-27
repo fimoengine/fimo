@@ -29,7 +29,7 @@ jobs:
       - name: "Bootstrap build tool"
         run: ./x.py bootstrap
       - name: "Run tests"
-        run: fimo/bin/fimo test --release -- --nocapture
+        run: ./fimo/bin/fimo test --release -- --nocapture
         env:
           RUST_BACKTRACE: 1
 
