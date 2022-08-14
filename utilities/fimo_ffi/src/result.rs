@@ -1,5 +1,5 @@
 //! Implementation of the `Result` type.
-use crate::{Optional, ReprC, ReprRust};
+use crate::{marshal::CTypeBridge, Optional, ReprC, ReprRust};
 use std::{
     fmt::Debug,
     ops::{FromResidual, Residual, Try},
@@ -229,6 +229,28 @@ impl<T, E> const From<Result<T, E>> for std::result::Result<T, E> {
     #[inline]
     fn from(val: Result<T, E>) -> Self {
         val.into_rust()
+    }
+}
+
+unsafe impl<T, E> const CTypeBridge for std::result::Result<T, E>
+where
+    T: ~const CTypeBridge,
+    E: ~const CTypeBridge,
+{
+    type Type = Result<T::Type, E::Type>;
+
+    fn marshal(self) -> Self::Type {
+        match self {
+            Ok(x) => Result::Ok(x.marshal()),
+            Err(x) => Result::Err(x.marshal()),
+        }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        match x {
+            Result::Ok(x) => Ok(T::demarshal(x)),
+            Result::Err(x) => Err(E::demarshal(x)),
+        }
     }
 }
 

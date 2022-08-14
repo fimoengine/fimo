@@ -1,8 +1,8 @@
 //! Implementation of generic modules.
 
 use crate::{
-    IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
-    ModuleInterfaceDescriptor, PathChar,
+    IModule, IModuleInstance, IModuleInterface, IModuleLoader, InterfaceDescriptor, ModuleInfo,
+    PathChar,
 };
 use fimo_ffi::error::{Error, ErrorKind, IError};
 use fimo_ffi::fmt::{IDebug, IDisplay};
@@ -123,8 +123,7 @@ impl IModule for Module {
 /// Builder for an [`Instance`].
 pub struct InstanceBuilder {
     parent: ObjArc<Module>,
-    interfaces:
-        HashMap<ModuleInterfaceDescriptor, (Vec<ModuleInterfaceDescriptor>, Box<InterfaceBuildFn>)>,
+    interfaces: HashMap<InterfaceDescriptor, (Vec<InterfaceDescriptor>, Box<InterfaceBuildFn>)>,
 }
 
 impl InstanceBuilder {
@@ -137,7 +136,7 @@ impl InstanceBuilder {
     }
 
     /// Adds a new interface without dependencies to the `InstanceBuilder`.
-    pub fn empty<F: Send + 'static>(self, desc: ModuleInterfaceDescriptor, mut f: F) -> Self
+    pub fn empty<F: Send + 'static>(self, desc: InterfaceDescriptor, mut f: F) -> Self
     where
         F: FnMut(ObjArc<Instance>) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>>,
     {
@@ -148,8 +147,8 @@ impl InstanceBuilder {
     /// Adds a new interface to the `InstanceBuilder`.
     pub fn interface<F: Send + 'static>(
         mut self,
-        desc: ModuleInterfaceDescriptor,
-        deps: &[ModuleInterfaceDescriptor],
+        desc: InterfaceDescriptor,
+        deps: &[InterfaceDescriptor],
         f: F,
     ) -> Self
     where
@@ -210,9 +209,9 @@ impl Debug for InstanceBuilder {
     interfaces(IModuleInstance)
 )]
 pub struct Instance {
-    available_interfaces: Vec<ModuleInterfaceDescriptor>,
-    interfaces: HashMap<ModuleInterfaceDescriptor, Mutex<Interface>>,
-    interface_deps: HashMap<ModuleInterfaceDescriptor, Vec<ModuleInterfaceDescriptor>>,
+    available_interfaces: Vec<InterfaceDescriptor>,
+    interfaces: HashMap<InterfaceDescriptor, Mutex<Interface>>,
+    interface_deps: HashMap<InterfaceDescriptor, Vec<InterfaceDescriptor>>,
     // Drop the module for last
     parent: ObjArc<Module>,
 }
@@ -226,13 +225,13 @@ impl IModuleInstance for Instance {
         ObjArc::coerce_obj(self.parent.clone())
     }
 
-    fn available_interfaces(&self) -> &[ModuleInterfaceDescriptor] {
+    fn available_interfaces(&self) -> &[InterfaceDescriptor] {
         &self.available_interfaces
     }
 
     fn interface(
         &self,
-        i: &ModuleInterfaceDescriptor,
+        i: &InterfaceDescriptor,
     ) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
         if let Some(interface) = self.interfaces.get(i) {
             // A `Instance` always lives inside an `ObjArc` so we try to manually clone it.
@@ -259,10 +258,7 @@ impl IModuleInstance for Instance {
         }
     }
 
-    fn dependencies(
-        &self,
-        i: &ModuleInterfaceDescriptor,
-    ) -> crate::Result<&[ModuleInterfaceDescriptor]> {
+    fn dependencies(&self, i: &InterfaceDescriptor) -> crate::Result<&[InterfaceDescriptor]> {
         if let Some(deps) = self.interface_deps.get(i) {
             Ok(deps.as_slice())
         } else {
@@ -275,7 +271,7 @@ impl IModuleInstance for Instance {
 
     fn bind_interface(
         &self,
-        desc: &ModuleInterfaceDescriptor,
+        desc: &InterfaceDescriptor,
         interface: ObjArc<DynObj<dyn IModuleInterface>>,
     ) -> crate::Result<()> {
         if let Some(inter) = self.interfaces.get(desc) {
@@ -295,8 +291,7 @@ type InterfaceBuildFn = dyn FnMut(
         Vec<ObjArc<DynObj<dyn IModuleInterface>>>,
     ) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>>
     + Send;
-type DependencyMap =
-    HashMap<ModuleInterfaceDescriptor, Option<ObjWeak<DynObj<dyn IModuleInterface>>>>;
+type DependencyMap = HashMap<InterfaceDescriptor, Option<ObjWeak<DynObj<dyn IModuleInterface>>>>;
 
 struct Interface {
     build: Box<InterfaceBuildFn>,
@@ -356,7 +351,7 @@ impl Debug for Interface {
 /// Error resulting from an unknown interface.
 #[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
 pub struct UnknownInterfaceError {
-    interface: ModuleInterfaceDescriptor,
+    interface: InterfaceDescriptor,
 }
 
 impl std::fmt::Display for UnknownInterfaceError {
@@ -387,7 +382,7 @@ pub enum GetInterfaceError {
     /// Error resulting from the unsuccessful construction of an interface.
     ConstructionError {
         /// Interface tried to construct.
-        interface: ModuleInterfaceDescriptor,
+        interface: InterfaceDescriptor,
         /// Resulting error.
         error: Error,
     },

@@ -66,8 +66,11 @@ impl IModuleInterface for CoreInterface {
     }
 
     #[inline]
-    fn extensions(&self) -> &[&str] {
+    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
         <dyn IFimoCore as FimoInterface>::EXTENSIONS
+            .iter()
+            .map(|&s| s.into())
+            .collect()
     }
 
     #[inline]

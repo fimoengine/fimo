@@ -6,8 +6,8 @@ use fimo_core_int::modules::{
 use fimo_ffi::ObjectId;
 use fimo_ffi::{DynObj, FfiFn, ObjArc};
 use fimo_module::{
-    Error, ErrorKind, IModule, IModuleInstance, IModuleInterface, IModuleLoader, InterfaceQuery,
-    ModuleInterfaceDescriptor,
+    Error, ErrorKind, IModule, IModuleInstance, IModuleInterface, IModuleLoader,
+    InterfaceDescriptor, InterfaceQuery,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -98,9 +98,9 @@ struct ModuleRegistryInner {
     loader_type_map: BTreeMap<String, LoaderId>,
     loader_callback_map: BTreeMap<LoaderCallbackId, LoaderId>,
     interfaces: BTreeMap<InterfaceId, InterfaceCollection>,
-    interface_map: BTreeMap<ModuleInterfaceDescriptor, InterfaceId>,
+    interface_map: BTreeMap<InterfaceDescriptor, InterfaceId>,
     interface_callback_map: BTreeMap<InterfaceCallbackId, InterfaceId>,
-    services: BTreeMap<ModuleInterfaceDescriptor, &'static DynObj<dyn IModuleInterface>>,
+    services: BTreeMap<InterfaceDescriptor, &'static DynObj<dyn IModuleInterface>>,
 }
 
 struct LoaderCollection {
@@ -353,7 +353,7 @@ impl ModuleRegistryInner {
     #[inline]
     fn register_interface_callback(
         &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
+        descriptor: &InterfaceDescriptor,
         callback: InterfaceCallback,
     ) -> Result<InterfaceCallbackId, ModuleRegistryError> {
         if let Some(id) = self.interface_callback_id_gen.next() {
@@ -394,7 +394,7 @@ impl ModuleRegistryInner {
     #[inline]
     fn get_interface_from_descriptor(
         &self,
-        descriptor: &ModuleInterfaceDescriptor,
+        descriptor: &InterfaceDescriptor,
     ) -> Result<ObjArc<DynObj<dyn IModuleInterface>>, ModuleRegistryError> {
         let InterfaceCollection { interface, .. } =
             self.get_interface_from_descriptor_inner(descriptor)?;
@@ -404,7 +404,7 @@ impl ModuleRegistryInner {
     #[inline]
     fn get_interface_from_descriptor_inner(
         &self,
-        descriptor: &ModuleInterfaceDescriptor,
+        descriptor: &InterfaceDescriptor,
     ) -> Result<&InterfaceCollection, ModuleRegistryError> {
         if let Some(id) = self.interface_map.get(descriptor) {
             Ok(self.interfaces.get(id).unwrap())
@@ -416,7 +416,7 @@ impl ModuleRegistryInner {
     #[inline]
     fn get_interface_from_descriptor_inner_mut(
         &mut self,
-        descriptor: &ModuleInterfaceDescriptor,
+        descriptor: &InterfaceDescriptor,
     ) -> Result<&mut InterfaceCollection, ModuleRegistryError> {
         if let Some(id) = self.interface_map.get(descriptor) {
             Ok(self.interfaces.get_mut(id).unwrap())
@@ -426,7 +426,7 @@ impl ModuleRegistryInner {
     }
 
     #[inline]
-    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
+    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<InterfaceDescriptor> {
         self.interface_map
             .keys()
             .filter(|x| query.query_matches(x))
@@ -504,7 +504,7 @@ impl IModuleRegistryInner for ModuleRegistryInner {
     #[inline]
     fn register_interface_callback(
         &mut self,
-        desc: &ModuleInterfaceDescriptor,
+        desc: &InterfaceDescriptor,
         f: InterfaceCallback,
     ) -> fimo_module::Result<InterfaceCallbackId> {
         self.register_interface_callback(desc, f)
@@ -522,13 +522,13 @@ impl IModuleRegistryInner for ModuleRegistryInner {
     #[inline]
     fn get_interface_from_descriptor(
         &self,
-        desc: &ModuleInterfaceDescriptor,
+        desc: &InterfaceDescriptor,
     ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
         self.get_interface_from_descriptor(desc).map_err(Into::into)
     }
 
     #[inline]
-    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
+    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<InterfaceDescriptor> {
         self.query_interfaces(query)
     }
 }
@@ -671,9 +671,9 @@ pub enum ModuleRegistryError {
     /// The interface id does not exist.
     UnknownInterfaceId(InterfaceId),
     /// The interface has not been registered.
-    UnknownInterface(ModuleInterfaceDescriptor),
+    UnknownInterface(InterfaceDescriptor),
     /// Tried to register an interface twice.
-    DuplicateInterface(ModuleInterfaceDescriptor),
+    DuplicateInterface(InterfaceDescriptor),
     /// The interface callback id does not exist.
     UnknownInterfaceCallbackId(InterfaceCallbackId),
     /// De-/Serialisation error.

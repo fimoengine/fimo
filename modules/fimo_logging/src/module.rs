@@ -65,8 +65,11 @@ impl IModuleInterface for LoggingInterface {
     }
 
     #[inline]
-    fn extensions(&self) -> &[&str] {
+    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
         <dyn IFimoLogging>::EXTENSIONS
+            .iter()
+            .map(|&s| s.into())
+            .collect()
     }
 
     #[inline]

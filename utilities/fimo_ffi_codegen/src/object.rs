@@ -120,7 +120,7 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
         where #ty: 'inner
         {
             fn fetch_interface() -> &'static ::fimo_ffi::ptr::IBaseVTable {
-                static VTABLE: ::fimo_ffi::ptr::IBaseVTable = ::fimo_ffi::ptr::IBaseVTable::new::<#elided_ty>();
+                static VTABLE: ::fimo_ffi::ptr::IBaseVTable = ::fimo_ffi::ptr::IBaseVTable::new_for::<#elided_ty>();
                 &VTABLE
             }
         }

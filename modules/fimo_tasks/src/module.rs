@@ -45,8 +45,11 @@ impl IModuleInterface for TasksInterface {
         <dyn IFimoTasks>::VERSION
     }
 
-    fn extensions(&self) -> &[&str] {
+    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
         <dyn IFimoTasks>::EXTENSIONS
+            .iter()
+            .map(|&s| s.into())
+            .collect()
     }
 
     fn extension(&self, _name: &str) -> Option<&DynObj<dyn fimo_ffi::ptr::IBase + Send + Sync>> {

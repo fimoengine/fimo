@@ -1,10 +1,11 @@
 //! C compatible tuple definitions.
+use crate::marshal::CTypeBridge;
 use std::fmt::{Debug, Formatter};
 
 /// Casts a C type to and from an equivalent Rust type.
 pub trait ReprC {
     /// Rust type.
-    type T: ReprRust;
+    type T;
 
     /// Casts the tuple to an equivalent Rust type.
     fn into_rust(self) -> Self::T;
@@ -16,7 +17,7 @@ pub trait ReprC {
 /// Casts a Rust type to and from an equivalent C type.
 pub trait ReprRust {
     /// Rust type.
-    type T: ReprC;
+    type T;
 
     /// Casts the tuple to an equivalent C type.
     fn into_c(self) -> Self::T;
@@ -24,6 +25,42 @@ pub trait ReprRust {
     /// Casts the C tuple to the Rust type.
     fn from_c(t: Self::T) -> Self;
 }
+
+macro_rules! primitive_impls {
+    ($($Ty:ty);*) => {
+        $(
+            impl ReprC for $Ty {
+                type T = $Ty;
+
+                #[inline(always)]
+                fn into_rust(self) -> Self::T {
+                    self
+                }
+
+                #[inline(always)]
+                fn from_rust(t: Self::T) -> Self {
+                    t
+                }
+            }
+
+            impl ReprRust for $Ty {
+                type T = $Ty;
+
+                #[inline(always)]
+                fn into_c(self) -> Self::T {
+                    self
+                }
+
+                #[inline(always)]
+                fn from_c(t: Self::T) -> Self {
+                    t
+                }
+            }
+        )*
+    };
+}
+
+primitive_impls! {bool; u8; u16; u32; u64; i8; i16; i32; i64; f32; f64}
 
 macro_rules! tuple_impls {
     ($(
@@ -61,6 +98,22 @@ macro_rules! tuple_impls {
                     ($(t.$idx),+,)
                 }
             }
+
+            unsafe impl<$($T: ~const CTypeBridge),+> const CTypeBridge for ($($T),+,)
+            {
+                type Type = $Tuple<$($T::Type),+>;
+
+                #[inline]
+                fn marshal(self) -> Self::Type {
+                    $Tuple::<$($T::Type),+>($(self.$idx.marshal()),+)
+                }
+
+                #[inline]
+                unsafe fn demarshal(x: Self::Type) -> Self {
+                    ($($T::demarshal(x.$idx)),+,)
+                }
+            }
+
 
             impl<$($T: Debug),+> Debug for $Tuple<$($T),+> {
                 #[allow(non_snake_case)]

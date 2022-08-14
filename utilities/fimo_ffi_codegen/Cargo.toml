@@ -11,6 +11,7 @@ proc-macro = true
 
 [dependencies]
 uuid = "0.8.2"
+regex = "1.6.0"
 quote = "1.0.0"
 darling = "0.13.1"
 proc-macro2 = "1.0.36"

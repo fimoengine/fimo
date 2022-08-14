@@ -1012,7 +1012,7 @@ impl<'a> SchedulerContext<'a> {
     /// Extracts the resume time.
     #[inline]
     pub fn resume_time(&self) -> SystemTime {
-        self.0.resume_time()
+        self.0.resume_time().to_system_time()
     }
 
     /// Extracts the assigned worker.

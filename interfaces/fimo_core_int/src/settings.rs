@@ -11,32 +11,33 @@ use std::mem::MaybeUninit;
 
 use fimo_module::fimo_ffi::{interface, DynObj, FfiFn};
 
-/// Type-erased settings registry.
-#[interface(
-    uuid = "b8b6d47f-6a26-489c-a7c9-b86a993dcb60",
-    vtable = "ISettingsRegistryVTable",
-    generate()
-)]
-pub trait ISettingsRegistry: Send + Sync {
-    /// Enters the inner registry possibly locking it.
-    ///
-    /// # Deadlock
-    ///
-    /// The function may only call into the registry with the provided inner reference.
-    fn enter_impl(
-        &self,
-        f: FfiFn<'_, dyn FnOnce(&'_ DynObj<dyn ISettingsRegistryInner + '_>) + '_>,
-    );
+interface! {
+    #![interface_cfg(uuid = "b8b6d47f-6a26-489c-a7c9-b86a993dcb60")]
 
-    /// Enters the inner registry possibly locking it mutably.
-    ///
-    /// # Deadlock
-    ///
-    /// The function may only call into the registry with the provided inner reference.
-    fn enter_mut_impl(
-        &self,
-        f: FfiFn<'_, dyn FnOnce(&'_ mut DynObj<dyn ISettingsRegistryInner + '_>) + '_>,
-    );
+    /// Type-erased settings registry.
+    pub frozen interface ISettingsRegistry: marker Send + marker Sync {
+        /// Enters the inner registry possibly locking it.
+        ///
+        /// # Deadlock
+        ///
+        /// The function may only call into the registry with the provided inner reference.
+        #[allow(clippy::type_complexity)]
+        fn enter_impl(
+            &self,
+            f: FfiFn<'_, dyn FnOnce(&'_ DynObj<dyn ISettingsRegistryInner + '_>) + '_>,
+        );
+
+        /// Enters the inner registry possibly locking it mutably.
+        ///
+        /// # Deadlock
+        ///
+        /// The function may only call into the registry with the provided inner reference.
+        #[allow(clippy::type_complexity)]
+        fn enter_mut_impl(
+            &self,
+            f: FfiFn<'_, dyn FnOnce(&'_ mut DynObj<dyn ISettingsRegistryInner + '_>) + '_>,
+        );
+    }
 }
 
 /// Extension trait for implementations of [`ISettingsRegistry`].
@@ -260,63 +261,62 @@ pub enum SettingsRegistryError<T: TryFrom<SettingsItem>> {
 
 impl<T: ISettingsRegistry + ?Sized> ISettingsRegistryExt for T {}
 
-/// Type-erased settings registry.
-#[interface(
-    uuid = "824e6374-cb96-4177-a08b-03aee57ad246",
-    vtable = "ISettingsRegistryInnerVTable",
-    generate()
-)]
-pub trait ISettingsRegistryInner: Send + Sync {
-    /// Checks whether an item is contained in the registry.
-    fn contains(&self, path: &SettingsPath) -> Result<bool, SettingsInvalidPathError>;
+interface! {
+    #![interface_cfg(uuid = "824e6374-cb96-4177-a08b-03aee57ad246")]
 
-    /// Extracts the type of an item.
-    fn item_type(
-        &self,
-        path: &SettingsPath,
-    ) -> Result<Option<SettingsItemType>, SettingsInvalidPathError>;
+    /// Type-erased settings registry.
+    pub frozen interface ISettingsRegistryInner: marker Send + marker Sync {
+        /// Checks whether an item is contained in the registry.
+        fn contains(&self, path: &SettingsPath) -> Result<bool, SettingsInvalidPathError>;
 
-    /// Extracts an item from the `SettingsRegistry`.
-    fn read(&self, path: &SettingsPath) -> Result<Option<SettingsItem>, SettingsInvalidPathError>;
+        /// Extracts the type of an item.
+        fn item_type(
+            &self,
+            path: &SettingsPath,
+        ) -> Result<Option<SettingsItemType>, SettingsInvalidPathError>;
 
-    /// Writes into the `SettingsRegistry`.
-    ///
-    /// This function either overwrites an existing item or creates a new one.
-    /// Afterwards the old value is extracted.
-    fn write(
-        &mut self,
-        path: &SettingsPath,
-        item: SettingsItem,
-    ) -> Result<Option<SettingsItem>, SettingsInvalidPathError>;
+        /// Extracts an item from the `SettingsRegistry`.
+        fn read(&self, path: &SettingsPath) -> Result<Option<SettingsItem>, SettingsInvalidPathError>;
 
-    /// Reads or initializes an item from the `SettingsRegistry`.
-    ///
-    /// See [`ISettingsRegistryInner::read`] and [`ISettingsRegistryInner::write`].
-    fn read_or(
-        &mut self,
-        path: &SettingsPath,
-        default: SettingsItem,
-    ) -> Result<SettingsItem, SettingsInvalidPathError>;
+        /// Writes into the `SettingsRegistry`.
+        ///
+        /// This function either overwrites an existing item or creates a new one.
+        /// Afterwards the old value is extracted.
+        fn write(
+            &mut self,
+            path: &SettingsPath,
+            item: SettingsItem,
+        ) -> Result<Option<SettingsItem>, SettingsInvalidPathError>;
 
-    /// Removes an item from the `SettingsRegistry`.
-    fn remove(
-        &mut self,
-        path: &SettingsPath,
-    ) -> Result<Option<SettingsItem>, SettingsInvalidPathError>;
+        /// Reads or initializes an item from the `SettingsRegistry`.
+        ///
+        /// See [`ISettingsRegistryInner::read`] and [`ISettingsRegistryInner::write`].
+        fn read_or(
+            &mut self,
+            path: &SettingsPath,
+            default: SettingsItem,
+        ) -> Result<SettingsItem, SettingsInvalidPathError>;
 
-    /// Registers a callback to an item.
-    ///
-    /// # Note
-    ///
-    /// The callback may only call into the registry via the provided reference.
-    fn register_callback(
-        &mut self,
-        path: &SettingsPath,
-        f: SettingsEventCallback,
-    ) -> Result<SettingsEventCallbackId, SettingsInvalidPathError>;
+        /// Removes an item from the `SettingsRegistry`.
+        fn remove(
+            &mut self,
+            path: &SettingsPath,
+        ) -> Result<Option<SettingsItem>, SettingsInvalidPathError>;
 
-    /// Unregisters a callback from an item.
-    fn unregister_callback(&mut self, id: SettingsEventCallbackId) -> fimo_module::Result<()>;
+        /// Registers a callback to an item.
+        ///
+        /// # Note
+        ///
+        /// The callback may only call into the registry via the provided reference.
+        fn register_callback(
+            &mut self,
+            path: &SettingsPath,
+            f: SettingsEventCallback,
+        ) -> Result<SettingsEventCallbackId, SettingsInvalidPathError>;
+
+        /// Unregisters a callback from an item.
+        fn unregister_callback(&mut self, id: SettingsEventCallbackId) -> fimo_module::Result<()>;
+    }
 }
 
 /// An event callback with read access to the registry.

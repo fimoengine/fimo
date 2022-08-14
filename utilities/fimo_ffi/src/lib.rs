@@ -10,12 +10,16 @@
     // https://github.com/rust-lang/rust-clippy/issues/8867
     clippy::derive_partial_eq_without_eq,
 )]
-#![feature(const_slice_from_raw_parts)]
+#![feature(const_maybe_uninit_assume_init_read)]
+#![feature(const_slice_from_raw_parts_mut)]
 #![feature(const_precise_live_drops)]
 #![feature(const_ptr_offset_from)]
 #![feature(try_trait_v2_residual)]
+#![feature(const_transmute_copy)]
 #![feature(const_slice_ptr_len)]
 #![feature(alloc_layout_extra)]
+#![feature(const_char_convert)]
+#![feature(const_refs_to_cell)]
 #![feature(strict_provenance)]
 #![feature(const_trait_impl)]
 #![feature(must_not_suspend)]
@@ -25,6 +29,7 @@
 #![feature(dropck_eyepatch)]
 #![feature(specialization)]
 #![feature(const_mut_refs)]
+#![feature(const_ptr_read)]
 #![feature(layout_for_ptr)]
 #![feature(negative_impls)]
 #![feature(allocator_api)]
@@ -33,9 +38,11 @@
 #![feature(cfg_sanitize)]
 #![feature(ptr_metadata)]
 #![feature(try_trait_v2)]
+#![feature(const_deref)]
 #![feature(slice_range)]
 #![feature(trusted_len)]
 #![feature(new_uninit)]
+#![feature(const_box)]
 #![feature(fn_traits)]
 #![feature(once_cell)]
 #![feature(c_unwind)]
@@ -47,9 +54,11 @@ pub mod cell;
 pub mod error;
 pub mod ffi_fn;
 pub mod fmt;
+pub mod marshal;
 pub mod obj_arc;
 pub mod obj_box;
 pub mod optional;
+pub mod path;
 pub mod ptr;
 pub mod result;
 pub mod span;
@@ -64,7 +73,7 @@ pub use ffi_fn::FfiFn;
 pub use obj_arc::{ObjArc, ObjWeak};
 pub use obj_box::ObjBox;
 pub use optional::Optional;
-pub use ptr::{interface, vtable, DynObj, ObjectId};
+pub use ptr::{interface, DynObj, ObjectId};
 pub use result::Result;
 pub use span::{ConstSpan, MutSpan};
 pub use string::String;

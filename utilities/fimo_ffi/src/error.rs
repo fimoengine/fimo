@@ -1,38 +1,22 @@
 //! Error type.
-use crate::fmt::{FmtWrapper, Formatter, IDebug, IDebugVTable, IDisplay, IDisplayVTable};
-use crate::ptr::{from_raw, into_raw, FetchVTable, RawObj};
-use crate::{interface, DynObj, ObjBox, ObjectId, Optional, ReprC};
+use crate::fmt::{FmtWrapper, Formatter, IDebug, IDisplay};
+use crate::ptr::FetchVTable;
+use crate::{interface, DynObj, ObjBox, ObjectId};
 use std::ops::{Deref, DerefMut};
 
-/// [`Error`]: std::error::Error equivalent for [`DynObj`] objects.
-#[interface(
-    uuid = "4c9db273-b5f5-4edf-9658-4739f2bd4bc5",
-    vtable = "IErrorVTable",
-    generate(IDebugVTable, IDisplayVTable)
-)]
-pub trait IError: IDebug + IDisplay {
-    /// The lower-level source of this error, if any.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<RawObj<dyn IError + 'static>>",
-        into = "source_into",
-        from = "source_from"
+interface! {
+    #![interface_cfg(
+        abi(explicit(abi = "C-unwind")),
+        uuid = "4c9db273-b5f5-4edf-9658-4739f2bd4bc5",
     )]
-    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
-        None
+
+    /// [`Error`]: std::error::Error equivalent for [`DynObj`] objects.
+    pub frozen interface IError: IDebug @ frozen version("0.0") + IDisplay @ frozen version("0.0") {
+        /// The lower-level source of this error, if any.
+        fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
+            None
+        }
     }
-}
-
-#[inline]
-fn source_into(s: Option<&DynObj<dyn IError + 'static>>) -> Optional<RawObj<dyn IError + 'static>> {
-    s.map(|s| into_raw(s)).into()
-}
-
-#[inline]
-fn source_from(s: Optional<RawObj<dyn IError + 'static>>) -> Option<&DynObj<dyn IError + 'static>> {
-    let source = s.into_rust()?;
-    unsafe { Some(&*from_raw(source)) }
 }
 
 impl<'a, T: IError + ?Sized> IError for &'a T {
@@ -269,14 +253,14 @@ impl<T: IError + ?Sized> Deref for ErrorWrapper<T> {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        &*self.inner
+        &self.inner
     }
 }
 
 impl<T: IError + ?Sized> DerefMut for ErrorWrapper<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.inner
+        &mut self.inner
     }
 }
 

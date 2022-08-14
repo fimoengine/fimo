@@ -1,10 +1,11 @@
 //! Definition of an object-aware box type.
-use crate::obj_arc::{CGlobal, DropSpec};
+use crate::marshal::CTypeBridge;
 use crate::ptr::{
     CastInto, DowncastSafe, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId,
-    RawObjMut,
+    OpaqueObj,
 };
-use std::alloc::{handle_alloc_error, Allocator, Global, Layout};
+use crate::{ReprC, ReprRust};
+use std::alloc::{handle_alloc_error, AllocError, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp::Ordering;
 use std::error::Error;
@@ -24,16 +25,117 @@ pub struct ObjBox<T: ?Sized, A: Allocator = Global>(Unique<T>, A);
 struct Unique<T: ?Sized>(NonNull<T>, PhantomData<T>);
 
 impl<T: ?Sized> Unique<T> {
-    fn new(ptr: NonNull<T>) -> Self {
-        Self(ptr, Default::default())
+    const fn new(ptr: NonNull<T>) -> Self {
+        Self(ptr, PhantomData)
     }
 
-    fn as_ptr(&self) -> *mut T {
+    const fn as_ptr(&self) -> *mut T {
         self.0.as_ptr()
     }
 
-    fn as_nonnull(&self) -> NonNull<T> {
+    const fn as_nonnull(&self) -> NonNull<T> {
         self.0
+    }
+}
+
+/// FFI-safe wrapper around the [`Global`] allocator.
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, Default)]
+pub struct CGlobal {
+    pub(crate) _v: u8,
+}
+
+impl ReprC for CGlobal {
+    type T = Global;
+
+    fn into_rust(self) -> Self::T {
+        Global
+    }
+
+    fn from_rust(_: Self::T) -> Self {
+        Default::default()
+    }
+}
+
+impl ReprRust for Global {
+    type T = CGlobal;
+
+    fn into_c(self) -> Self::T {
+        Default::default()
+    }
+
+    fn from_c(_: Self::T) -> Self {
+        Global
+    }
+}
+
+unsafe impl const CTypeBridge for Global {
+    type Type = CGlobal;
+
+    fn marshal(self) -> Self::Type {
+        CGlobal { _v: 0 }
+    }
+
+    unsafe fn demarshal(_x: Self::Type) -> Self {
+        Global
+    }
+}
+
+unsafe impl const Allocator for CGlobal
+where
+    Global: ~const Allocator,
+{
+    #[inline(always)]
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        Global.allocate(layout)
+    }
+
+    #[inline(always)]
+    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        Global.allocate_zeroed(layout)
+    }
+
+    #[inline(always)]
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        Global.deallocate(ptr, layout)
+    }
+
+    #[inline(always)]
+    unsafe fn grow(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        Global.grow(ptr, old_layout, new_layout)
+    }
+
+    #[inline(always)]
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        Global.grow_zeroed(ptr, old_layout, new_layout)
+    }
+
+    #[inline(always)]
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, AllocError> {
+        Global.shrink(ptr, old_layout, new_layout)
+    }
+
+    #[inline(always)]
+    fn by_ref(&self) -> &Self
+    where
+        Self: Sized,
+    {
+        self
     }
 }
 
@@ -187,7 +289,7 @@ impl<T, A: Allocator> ObjBox<MaybeUninit<T>, A> {
     /// # Safety
     ///
     /// See [Box::assume_init()].
-    pub unsafe fn assume_init(self) -> ObjBox<T, A> {
+    pub const unsafe fn assume_init(self) -> ObjBox<T, A> {
         let (raw, alloc) = ObjBox::into_raw_parts(self);
         ObjBox::from_raw_parts(raw as *mut T, alloc)
     }
@@ -199,7 +301,7 @@ impl<T: ?Sized> ObjBox<T, Global> {
     /// # Safety
     ///
     /// See [Box::from_raw()].
-    pub unsafe fn from_raw(raw: *mut T) -> ObjBox<T, Global> {
+    pub const unsafe fn from_raw(raw: *mut T) -> ObjBox<T, Global> {
         ObjBox::from_raw_parts(raw, Global)
     }
 }
@@ -210,14 +312,14 @@ impl<T: ?Sized, A: Allocator> ObjBox<T, A> {
     /// # Safety
     ///
     /// See [Box::from_raw_in()].
-    pub unsafe fn from_raw_parts(raw: *mut T, alloc: A) -> ObjBox<T, A> {
+    pub const unsafe fn from_raw_parts(raw: *mut T, alloc: A) -> ObjBox<T, A> {
         ObjBox(Unique::new(NonNull::new_unchecked(raw)), alloc)
     }
 
     /// Consumes the `ObjBox`, returning a wrapped raw pointer.
     ///
     /// See [Box::into_raw()].
-    pub fn into_raw(b: ObjBox<T, A>) -> *mut T {
+    pub const fn into_raw(b: ObjBox<T, A>) -> *mut T {
         let ptr = b.0.as_ptr();
         std::mem::forget(b);
         ptr
@@ -226,7 +328,7 @@ impl<T: ?Sized, A: Allocator> ObjBox<T, A> {
     /// Consumes the `ObjBox`, returning a wrapped raw pointer and the allocator.
     ///
     /// See [Box::into_raw_with_allocator()].
-    pub fn into_raw_parts(b: ObjBox<T, A>) -> (*mut T, A) {
+    pub const fn into_raw_parts(b: ObjBox<T, A>) -> (*mut T, A) {
         let ptr = b.0.as_ptr();
         let alloc = unsafe { std::ptr::read(&b.1) };
         std::mem::forget(b);
@@ -234,14 +336,14 @@ impl<T: ?Sized, A: Allocator> ObjBox<T, A> {
     }
 
     /// Returns a reference to the underlying allocator.
-    pub fn allocator(b: &ObjBox<T, A>) -> &A {
+    pub const fn allocator(b: &ObjBox<T, A>) -> &A {
         &b.1
     }
 
     /// Consumes and leaks the `ObjBox`, returning a mutable reference `&'a mut T`.
     ///
     /// See [`Box::leak`].
-    pub fn leak<'a>(b: ObjBox<T, A>) -> &'a mut T
+    pub const fn leak<'a>(b: ObjBox<T, A>) -> &'a mut T
     where
         T: 'a,
     {
@@ -252,27 +354,27 @@ impl<T: ?Sized, A: Allocator> ObjBox<T, A> {
 unsafe impl<T: ?Sized + Send, A: Allocator + Send> Send for ObjBox<T, A> {}
 unsafe impl<T: ?Sized + Sync, A: Allocator + Sync> Sync for ObjBox<T, A> {}
 
-impl<T: ?Sized, A: Allocator> AsRef<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> const AsRef<T> for ObjBox<T, A> {
     fn as_ref(&self) -> &T {
-        &**self
+        self
     }
 }
 
-impl<T: ?Sized, A: Allocator> AsMut<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> const AsMut<T> for ObjBox<T, A> {
     fn as_mut(&mut self) -> &mut T {
-        &mut **self
+        self
     }
 }
 
-impl<T: ?Sized, A: Allocator> Borrow<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> const Borrow<T> for ObjBox<T, A> {
     fn borrow(&self) -> &T {
-        &**self
+        self
     }
 }
 
-impl<T: ?Sized, A: Allocator> BorrowMut<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> const BorrowMut<T> for ObjBox<T, A> {
     fn borrow_mut(&mut self) -> &mut T {
-        &mut **self
+        self
     }
 }
 
@@ -304,7 +406,7 @@ impl<T: Display + ?Sized, A: Allocator> Display for ObjBox<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> Deref for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> const Deref for ObjBox<T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -312,7 +414,7 @@ impl<T: ?Sized, A: Allocator> Deref for ObjBox<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> DerefMut for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> const DerefMut for ObjBox<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.0.as_ptr() }
     }
@@ -370,6 +472,36 @@ impl<Args, F: FnMut<Args>, A: Allocator> FnMut<Args> for ObjBox<F, A> {
 impl<Args, F: Fn<Args>, A: Allocator> Fn<Args> for ObjBox<F, A> {
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
         <F as Fn<Args>>::call(self, args)
+    }
+}
+
+impl<T: ?Sized> ReprC for ObjBox<T, CGlobal> {
+    type T = ObjBox<T, Global>;
+
+    #[inline]
+    fn into_rust(self) -> Self::T {
+        let (ptr, alloc) = ObjBox::into_raw_parts(self);
+        unsafe { ObjBox::from_raw_parts(ptr, alloc.into_rust()) }
+    }
+
+    #[inline]
+    fn from_rust(t: Self::T) -> Self {
+        let (ptr, alloc) = ObjBox::into_raw_parts(t);
+        unsafe { ObjBox::from_raw_parts(ptr, alloc.into_c()) }
+    }
+}
+
+impl<T: ?Sized> ReprRust for ObjBox<T, Global> {
+    type T = ObjBox<T, CGlobal>;
+
+    #[inline]
+    fn into_c(self) -> Self::T {
+        ObjBox::from_rust(self)
+    }
+
+    #[inline]
+    fn from_c(t: Self::T) -> Self {
+        ObjBox::into_rust(t)
     }
 }
 
@@ -467,17 +599,44 @@ impl<T: Eq + ?Sized, A: Allocator> Eq for ObjBox<T, A> {}
 
 impl<T: ?Sized, A: Allocator + 'static> Unpin for ObjBox<T, A> {}
 
+unsafe impl<T: ?Sized, A: Allocator> const CTypeBridge for ObjBox<T, A>
+where
+    A: ~const CTypeBridge,
+    A::Type: Allocator,
+{
+    default type Type = ObjBox<T, A::Type>;
+
+    default fn marshal(self) -> Self::Type {
+        let (ptr, alloc) = ObjBox::into_raw_parts(self);
+        let b = unsafe { ObjBox::from_raw_parts(ptr, alloc.marshal()) };
+        let b = std::mem::ManuallyDrop::new(b);
+
+        // Safety: We know that we only implement the whole trait,
+        // therefore we know that the output expects a `b`.
+        unsafe { std::mem::transmute_copy(&b) }
+    }
+
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        // Safety: See above.
+        let x = std::mem::ManuallyDrop::new(x);
+        let x = std::mem::transmute_copy(&x);
+
+        let (ptr, alloc) = ObjBox::into_raw_parts(x);
+        ObjBox::from_raw_parts(ptr, A::demarshal(alloc))
+    }
+}
+
 /// FFI-safe wrapper for an `ObjBox<DynObj<T>>`.
 #[repr(C)]
-pub struct RawObjBox<T, A: Allocator = CGlobal> {
-    ptr: T,
+pub struct RawObjBox<A: Allocator = CGlobal> {
+    ptr: OpaqueObj,
     alloc: ManuallyDrop<A>,
 }
 
-impl<T: ?Sized, A: Allocator> RawObjBox<RawObjMut<T>, A> {
+impl<A: Allocator> RawObjBox<A> {
     /// Consumes the `RawObjBox<T>` and turns it into a raw pointer.
     #[inline]
-    pub fn into_raw_parts(self) -> (RawObjMut<T>, A) {
+    pub const fn into_raw_parts(self) -> (OpaqueObj, A) {
         let ptr = unsafe { std::ptr::read(&self.ptr) };
         let alloc = unsafe { std::ptr::read(&self.alloc) };
         std::mem::forget(self);
@@ -491,7 +650,7 @@ impl<T: ?Sized, A: Allocator> RawObjBox<RawObjMut<T>, A> {
     ///
     /// See [`ObjBox::from_raw_parts`].
     #[inline]
-    pub unsafe fn from_raw_parts(ptr: RawObjMut<T>, alloc: A) -> RawObjBox<RawObjMut<T>, A> {
+    pub const unsafe fn from_raw_parts(ptr: OpaqueObj, alloc: A) -> RawObjBox<A> {
         Self {
             ptr,
             alloc: ManuallyDrop::new(alloc),
@@ -499,63 +658,39 @@ impl<T: ?Sized, A: Allocator> RawObjBox<RawObjMut<T>, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> From<ObjBox<DynObj<T>, A>> for RawObjBox<RawObjMut<T>, A> {
-    fn from(v: ObjBox<DynObj<T>, A>) -> Self {
-        let (ptr, alloc) = ObjBox::into_raw_parts(v);
-        let ptr = crate::ptr::into_raw_mut(ptr);
-        unsafe { RawObjBox::from_raw_parts(ptr, alloc) }
+unsafe impl<T: ?Sized, A: Allocator> const CTypeBridge for ObjBox<DynObj<T>, A>
+where
+    A: ~const CTypeBridge,
+    A::Type: Allocator,
+{
+    type Type = RawObjBox<A::Type>;
+
+    fn marshal(self) -> Self::Type {
+        let (ptr, alloc) = ObjBox::into_raw_parts(self);
+        unsafe { RawObjBox::from_raw_parts(ptr.marshal(), alloc.marshal()) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let (ptr, alloc) = RawObjBox::into_raw_parts(x);
+        ObjBox::from_raw_parts(<&mut DynObj<T>>::demarshal(ptr), A::demarshal(alloc))
     }
 }
 
-impl<T: ?Sized> From<ObjBox<DynObj<T>, Global>> for RawObjBox<RawObjMut<T>, CGlobal> {
-    fn from(v: ObjBox<DynObj<T>, Global>) -> Self {
-        let (ptr, _) = ObjBox::into_raw_parts(v);
-        let ptr = crate::ptr::into_raw_mut(ptr);
-        unsafe { RawObjBox::from_raw_parts(ptr, CGlobal { _v: 0 }) }
-    }
-}
-
-impl<T: ?Sized, A: Allocator> From<RawObjBox<RawObjMut<T>, A>> for ObjBox<DynObj<T>, A> {
-    fn from(v: RawObjBox<RawObjMut<T>, A>) -> Self {
-        let (ptr, alloc) = v.into_raw_parts();
-        let ptr = crate::ptr::from_raw_mut(ptr);
-        unsafe { ObjBox::from_raw_parts(ptr, alloc) }
-    }
-}
-
-impl<T: ?Sized> From<RawObjBox<RawObjMut<T>, CGlobal>> for ObjBox<DynObj<T>, Global> {
-    fn from(v: RawObjBox<RawObjMut<T>, CGlobal>) -> Self {
-        let (ptr, _) = v.into_raw_parts();
-        let ptr = crate::ptr::from_raw_mut(ptr);
-        unsafe { ObjBox::from_raw_parts(ptr, Global) }
-    }
-}
-
-impl<T: Debug, A: Allocator> Debug for RawObjBox<T, A> {
+impl<A: Allocator> Debug for RawObjBox<A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "(RawObjBox)")
     }
 }
 
-impl<T, A: Allocator> DropSpec for RawObjBox<T, A> {
-    default fn drop_inner(&mut self) {
-        unimplemented!()
-    }
-}
-
-impl<T: ?Sized, A: Allocator> DropSpec for RawObjBox<RawObjMut<T>, A> {
-    fn drop_inner(&mut self) {
-        let ptr = self.ptr;
-        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
-        let copy = unsafe { RawObjBox::from_raw_parts(ptr, alloc) };
-        let copy: ObjBox<DynObj<T>, A> = copy.into();
-        drop(copy)
-    }
-}
-
-unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawObjBox<T, A> {
+impl<A: Allocator> Drop for RawObjBox<A> {
     fn drop(&mut self) {
-        self.drop_inner()
+        // let the box handle the deallocation.
+
+        // Safety: All DynObj's share the same layout therefore we can type erase it.
+        let ptr = unsafe { <&mut DynObj<()>>::demarshal(self.ptr) };
+        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
+        let erased_box = unsafe { ObjBox::from_raw_parts(ptr, alloc) };
+        drop(erased_box)
     }
 }
 

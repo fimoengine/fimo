@@ -5,8 +5,10 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-#![feature(unsize)]
+#![feature(const_ptr_offset_from)]
+#![feature(const_trait_impl)]
 #![feature(c_unwind)]
+#![feature(unsize)]
 
 mod interfaces;
 
@@ -44,10 +46,30 @@ impl std::fmt::Display for ModuleInfo {
     }
 }
 
+/// Descriptor of a dependency.
+#[repr(C)]
+#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterfaceDependency {
+    /// Name of the interface.
+    pub name: fimo_ffi::String,
+    /// Version of the interface.
+    pub version: Version,
+    /// Available interface extensions.
+    pub extensions: fimo_ffi::Vec<fimo_ffi::String>,
+    /// Dependency is optional.
+    pub optional: bool,
+}
+
+impl std::fmt::Display for InterfaceDependency {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "name: {}, version: {}", self.name, self.version)
+    }
+}
+
 /// A descriptor for a module interface.
 #[repr(C)]
 #[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModuleInterfaceDescriptor {
+pub struct InterfaceDescriptor {
     /// Name of the interface.
     pub name: fimo_ffi::String,
     /// Version of the interface.
@@ -56,7 +78,7 @@ pub struct ModuleInterfaceDescriptor {
     pub extensions: fimo_ffi::Vec<fimo_ffi::String>,
 }
 
-impl ModuleInterfaceDescriptor {
+impl InterfaceDescriptor {
     /// Constructs a new descriptor.
     #[inline]
     pub fn new(
@@ -72,7 +94,7 @@ impl ModuleInterfaceDescriptor {
     }
 }
 
-impl std::fmt::Display for ModuleInterfaceDescriptor {
+impl std::fmt::Display for InterfaceDescriptor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "name: {}, version: {}", self.name, self.version)
     }
@@ -172,11 +194,9 @@ impl InterfaceQuery {
         self.extensions.push(extension.into());
         self
     }
-}
 
-impl InterfaceQuery {
-    /// Checks whether a [`ModuleInterfaceDescriptor`] matches the query.
-    pub fn query_matches(&self, desc: &ModuleInterfaceDescriptor) -> bool {
+    /// Checks whether a [`InterfaceDescriptor`] matches the query.
+    pub fn query_matches(&self, desc: &InterfaceDescriptor) -> bool {
         if desc.name == self.name && self.version.query_matches(desc.version) {
             return self
                 .extensions
@@ -185,6 +205,26 @@ impl InterfaceQuery {
         }
 
         false
+    }
+}
+
+impl From<InterfaceDescriptor> for InterfaceQuery {
+    fn from(v: InterfaceDescriptor) -> Self {
+        Self {
+            name: v.name,
+            version: VersionQuery::Minimum(v.version),
+            extensions: v.extensions,
+        }
+    }
+}
+
+impl From<&'_ InterfaceDescriptor> for InterfaceQuery {
+    fn from(v: &InterfaceDescriptor) -> Self {
+        Self {
+            name: v.name.clone(),
+            version: VersionQuery::Minimum(v.version),
+            extensions: v.extensions.clone(),
+        }
     }
 }
 

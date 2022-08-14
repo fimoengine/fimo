@@ -2,7 +2,7 @@
 
 use fimo_ffi::{DynObj, ObjArc};
 use fimo_module::loader::{RustLoader, MODULE_LOADER_TYPE};
-use fimo_module::{Error, IModule, IModuleLoader, ModuleInterfaceDescriptor};
+use fimo_module::{Error, IModule, IModuleLoader, InterfaceDescriptor};
 use fimo_module::{FimoInterface, IModuleInstance, IModuleInterface};
 use std::any::TypeId;
 use std::collections::BTreeMap;
@@ -53,7 +53,7 @@ macro_rules! lib_path {
 pub struct ModuleDatabase {
     core: ObjArc<DynObj<dyn IFimoCore>>,
     core_instance: ObjArc<DynObj<dyn IModuleInstance>>,
-    paths: BTreeMap<ModuleInterfaceDescriptor, PathBuf>,
+    paths: BTreeMap<InterfaceDescriptor, PathBuf>,
 }
 
 impl ModuleDatabase {

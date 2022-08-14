@@ -520,6 +520,7 @@ impl<T: ?Sized> RefCell<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -527,13 +528,11 @@ impl<T: ?Sized> RefCell<T> {
     /// use fimo_ffi::cell::RefCell;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase {
-    ///     fn add(&self, num: usize) -> usize;
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {
+    ///         fn add(&self, num: usize) -> usize;
+    ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
@@ -579,6 +578,7 @@ impl<T: ?Sized> RefCell<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -586,13 +586,11 @@ impl<T: ?Sized> RefCell<T> {
     /// use fimo_ffi::cell::RefCell;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase {
-    ///     fn set(&mut self, num: usize);
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {
+    ///         fn set(&mut self, num: usize);
+    ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
@@ -751,6 +749,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -758,12 +757,10 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -797,6 +794,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -804,12 +802,10 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -843,6 +839,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -850,12 +847,10 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -883,6 +878,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -890,12 +886,10 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -930,6 +924,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -937,12 +932,10 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1494,6 +1487,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -1501,13 +1495,11 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// use fimo_ffi::cell::AtomicRefCell;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase {
-    ///     fn add(&self, num: usize) -> usize;
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {
+    ///         fn add(&self, num: usize) -> usize;
+    ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
@@ -1553,20 +1545,20 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     /// use fimo_ffi::cell::AtomicRefCell;
     ///
+    ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase {
-    ///     fn set(&mut self, num: usize);
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {
+    ///         fn set(&mut self, num: usize);
+    ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
@@ -1725,6 +1717,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -1732,12 +1725,10 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1771,6 +1762,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -1778,12 +1770,10 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1817,6 +1807,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -1824,12 +1815,10 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1857,6 +1846,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -1864,12 +1854,10 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1904,6 +1892,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, ObjectId, interface};
@@ -1911,12 +1900,10 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]

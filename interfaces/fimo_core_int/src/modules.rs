@@ -1,34 +1,33 @@
 //! Specification of a module registry.
 use fimo_module::fimo_ffi::ptr::{CastInto, IBaseExt};
 use fimo_module::fimo_ffi::{interface, DynObj, FfiFn, ObjArc};
-use fimo_module::{IModuleInterface, IModuleLoader, InterfaceQuery, ModuleInterfaceDescriptor};
+use fimo_module::{IModuleInterface, IModuleLoader, InterfaceDescriptor, InterfaceQuery};
 use std::fmt::{Debug, Formatter};
 use std::mem::MaybeUninit;
 use std::ops::Deref;
 
-/// Interface to a module registry.
-#[interface(
-    uuid = "1eb872f8-a966-40a6-844d-9db4b08bf6db",
-    vtable = "IModuleRegistryVTable",
-    generate()
-)]
-pub trait IModuleRegistry: Send + Sync {
-    /// Enters the inner registry, possibly locking it.
-    ///
-    /// # Deadlock
-    ///
-    /// The function may only call into the registry with the provided inner reference.
-    fn enter_impl(&self, f: FfiFn<'_, dyn FnOnce(&'_ DynObj<dyn IModuleRegistryInner + '_>) + '_>);
+interface! {
+    #![interface_cfg(uuid = "1eb872f8-a966-40a6-844d-9db4b08bf6db")]
 
-    /// Enters the inner registry with write access, possibly locking it.
-    ///
-    /// # Deadlock
-    ///
-    /// The function may only call into the registry with the provided inner reference.
-    fn enter_mut_impl(
-        &self,
-        f: FfiFn<'_, dyn FnOnce(&'_ mut DynObj<dyn IModuleRegistryInner + '_>) + '_>,
-    );
+    /// Interface to a module registry.
+    pub frozen interface IModuleRegistry: marker Send + marker Sync {
+        /// Enters the inner registry, possibly locking it.
+        ///
+        /// # Deadlock
+        ///
+        /// The function may only call into the registry with the provided inner reference.
+        fn enter_impl(&self, f: FfiFn<'_, dyn FnOnce(&'_ DynObj<dyn IModuleRegistryInner + '_>) + '_>);
+
+        /// Enters the inner registry with write access, possibly locking it.
+        ///
+        /// # Deadlock
+        ///
+        /// The function may only call into the registry with the provided inner reference.
+        fn enter_mut_impl(
+            &self,
+            f: FfiFn<'_, dyn FnOnce(&'_ mut DynObj<dyn IModuleRegistryInner + '_>) + '_>,
+        );
+    }
 }
 
 /// Object unsafe extension trait for implementations of [`IModuleRegistry`].
@@ -215,7 +214,7 @@ pub trait IModuleRegistryExt: IModuleRegistry {
     /// The callback may only call into the registry over the provided reference.
     fn register_interface_callback<F>(
         &self,
-        desc: &ModuleInterfaceDescriptor,
+        desc: &InterfaceDescriptor,
         f: F,
     ) -> fimo_module::Result<InterfaceCallbackHandle<'_, Self>>
     where
@@ -245,117 +244,116 @@ pub trait IModuleRegistryExt: IModuleRegistry {
     /// Extracts an interface from the `ModuleRegistry`.
     fn get_interface_from_descriptor(
         &self,
-        desc: &ModuleInterfaceDescriptor,
+        desc: &InterfaceDescriptor,
     ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
         self.enter(move |inner| inner.get_interface_from_descriptor(desc))
     }
 
     /// Extracts all interface descriptors that match a query.
-    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor> {
+    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<InterfaceDescriptor> {
         self.enter(move |inner| inner.query_interfaces(query))
     }
 }
 
 impl<T: IModuleRegistry + ?Sized> IModuleRegistryExt for T {}
 
-/// Type-erased module registry.
-#[interface(
-    uuid = "1eb872f8-a966-40a6-844d-9db4b08bf6db",
-    vtable = "IModuleRegistryInnerVTable",
-    generate()
-)]
-pub trait IModuleRegistryInner: Send + Sync {
-    /// Registers a new module loader with the `ModuleRegistry`.
-    ///
-    /// The registered loader will be available to the rest of the `ModuleRegistry`.
-    fn register_loader(
-        &mut self,
-        r#type: &str,
-        loader: &'static DynObj<dyn IModuleLoader>,
-    ) -> fimo_module::Result<LoaderId>;
+interface! {
+    #![interface_cfg(uuid = "1eb872f8-a966-40a6-844d-9db4b08bf6db")]
 
-    /// Unregisters an existing module loader from the `ModuleRegistry`.
-    ///
-    /// Notifies all registered callbacks before returning.
-    fn unregister_loader(
-        &mut self,
-        id: LoaderId,
-    ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>>;
+    /// Type-erased module registry.
+    pub frozen interface IModuleRegistryInner: marker Send + marker Sync {
+        /// Registers a new module loader with the `ModuleRegistry`.
+        ///
+        /// The registered loader will be available to the rest of the `ModuleRegistry`.
+        fn register_loader(
+            &mut self,
+            r#type: &str,
+            loader: &'static DynObj<dyn IModuleLoader>,
+        ) -> fimo_module::Result<LoaderId>;
 
-    /// Registers a [`LoaderCallback`] with the `ModuleRegistry`.
-    ///
-    /// The callback will be called in case the loader is removed.
-    ///
-    /// # Deadlock
-    ///
-    /// The callback may only call into the registry over the provided reference.
-    fn register_loader_callback(
-        &mut self,
-        r#type: &str,
-        f: LoaderCallback,
-    ) -> fimo_module::Result<LoaderCallbackId>;
+        /// Unregisters an existing module loader from the `ModuleRegistry`.
+        ///
+        /// Notifies all registered callbacks before returning.
+        fn unregister_loader(
+            &mut self,
+            id: LoaderId,
+        ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>>;
 
-    /// Unregisters a [`LoaderCallback`] from the `ModuleRegistry`.
-    ///
-    /// The callback will not be called.
-    fn unregister_loader_callback(&mut self, id: LoaderCallbackId) -> fimo_module::Result<()>;
+        /// Registers a [`LoaderCallback`] with the `ModuleRegistry`.
+        ///
+        /// The callback will be called in case the loader is removed.
+        ///
+        /// # Deadlock
+        ///
+        /// The callback may only call into the registry over the provided reference.
+        fn register_loader_callback(
+            &mut self,
+            r#type: &str,
+            f: LoaderCallback,
+        ) -> fimo_module::Result<LoaderCallbackId>;
 
-    /// Fetches the loader associated with the type.
-    fn get_loader_from_type(
-        &self,
-        r#type: &str,
-    ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>>;
+        /// Unregisters a [`LoaderCallback`] from the `ModuleRegistry`.
+        ///
+        /// The callback will not be called.
+        fn unregister_loader_callback(&mut self, id: LoaderCallbackId) -> fimo_module::Result<()>;
 
-    /// Registers a new service with the `ModuleRegistry`.
-    ///
-    /// The service will be bound to every existing and new interface, if
-    /// the interface is registered with the inherit flag.
-    fn register_service(
-        &mut self,
-        service: &'static DynObj<dyn IModuleInterface>,
-    ) -> fimo_module::Result<()>;
+        /// Fetches the loader associated with the type.
+        fn get_loader_from_type(
+            &self,
+            r#type: &str,
+        ) -> fimo_module::Result<&'static DynObj<dyn IModuleLoader>>;
 
-    /// Registers a new interface with the `ModuleRegistry`.
-    fn register_interface(
-        &mut self,
-        inherit_services: bool,
-        i: ObjArc<DynObj<dyn IModuleInterface>>,
-    ) -> fimo_module::Result<InterfaceId>;
+        /// Registers a new service with the `ModuleRegistry`.
+        ///
+        /// The service will be bound to every existing and new interface, if
+        /// the interface is registered with the inherit flag.
+        fn register_service(
+            &mut self,
+            service: &'static DynObj<dyn IModuleInterface>,
+        ) -> fimo_module::Result<()>;
 
-    /// Unregisters an existing interface from the `ModuleRegistry`.
-    ///
-    /// This function calls the [`InterfaceCallback`] that are registered
-    /// with the interface before removing it.
-    fn unregister_interface(
-        &mut self,
-        id: InterfaceId,
-    ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>>;
+        /// Registers a new interface with the `ModuleRegistry`.
+        fn register_interface(
+            &mut self,
+            inherit_services: bool,
+            i: ObjArc<DynObj<dyn IModuleInterface>>,
+        ) -> fimo_module::Result<InterfaceId>;
 
-    /// Registers an [`InterfaceCallback`] with the `ModuleRegistry`.
-    ///
-    /// The callback will be called in case the interface is removed from the `ModuleRegistry`.
-    ///
-    /// # Deadlock
-    ///
-    /// The callback may only call into the registry over the provided reference.
-    fn register_interface_callback(
-        &mut self,
-        desc: &ModuleInterfaceDescriptor,
-        f: InterfaceCallback,
-    ) -> fimo_module::Result<InterfaceCallbackId>;
+        /// Unregisters an existing interface from the `ModuleRegistry`.
+        ///
+        /// This function calls the [`InterfaceCallback`] that are registered
+        /// with the interface before removing it.
+        fn unregister_interface(
+            &mut self,
+            id: InterfaceId,
+        ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>>;
 
-    /// Unregisters an [`InterfaceCallback`] from the `ModuleRegistry` without calling it.
-    fn unregister_interface_callback(&mut self, id: InterfaceCallbackId)
-        -> fimo_module::Result<()>;
+        /// Registers an [`InterfaceCallback`] with the `ModuleRegistry`.
+        ///
+        /// The callback will be called in case the interface is removed from the `ModuleRegistry`.
+        ///
+        /// # Deadlock
+        ///
+        /// The callback may only call into the registry over the provided reference.
+        fn register_interface_callback(
+            &mut self,
+            desc: &InterfaceDescriptor,
+            f: InterfaceCallback,
+        ) -> fimo_module::Result<InterfaceCallbackId>;
 
-    /// Extracts an interface from the `ModuleRegistry`.
-    fn get_interface_from_descriptor(
-        &self,
-        desc: &ModuleInterfaceDescriptor,
-    ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>>;
+        /// Unregisters an [`InterfaceCallback`] from the `ModuleRegistry` without calling it.
+        fn unregister_interface_callback(&mut self, id: InterfaceCallbackId)
+            -> fimo_module::Result<()>;
 
-    /// Extracts all interface descriptors that match a query.
-    fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<ModuleInterfaceDescriptor>;
+        /// Extracts an interface from the `ModuleRegistry`.
+        fn get_interface_from_descriptor(
+            &self,
+            desc: &InterfaceDescriptor,
+        ) -> fimo_module::Result<ObjArc<DynObj<dyn IModuleInterface>>>;
+
+        /// Extracts all interface descriptors that match a query.
+        fn query_interfaces(&self, query: &InterfaceQuery) -> Vec<InterfaceDescriptor>;
+    }
 }
 
 /// Handle to a registered loader.
@@ -506,7 +504,7 @@ impl<'a, T: IModuleInterface + ?Sized, R: IModuleRegistry + ?Sized> Deref
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &*self.interface
+        &self.interface
     }
 }
 
