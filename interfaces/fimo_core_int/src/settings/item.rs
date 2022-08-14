@@ -47,7 +47,7 @@ pub enum SettingsItem<T: SettingsItemMetadata = ()> {
 }
 
 /// Value of a [`SettingsItem`].
-#[derive(Debug, Clone, PartialOrd, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SettingsItemVal<T, M: SettingsItemMetadata = ()> {
     v: T,

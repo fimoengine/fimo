@@ -1,5 +1,6 @@
 //! FFI safe closure implementations.
 
+use crate::marshal::CTypeBridge;
 use crate::tuple::ReprRust;
 use crate::ObjBox;
 use std::alloc::{Allocator, Global};
@@ -8,7 +9,34 @@ use std::marker::{PhantomData, Unsize};
 use std::mem::{ManuallyDrop, MaybeUninit};
 
 #[repr(C)]
-struct RawFfiFnInner<T: ?Sized, Meta> {
+#[doc(hidden)]
+#[allow(missing_debug_implementations)]
+pub struct OpaqueFn<Meta> {
+    ptr: *mut (),
+    metadata: MaybeUninit<Meta>,
+    drop: unsafe extern "C-unwind" fn(*mut (), Meta),
+    call_once: unsafe extern "C-unwind" fn(*mut (), Meta, *const (), *mut ()),
+    call_mut: Option<unsafe extern "C-unwind" fn(*mut (), *mut Meta, *const (), *mut ())>,
+    call: Option<unsafe extern "C-unwind" fn(*mut (), *const Meta, *const (), *mut ())>,
+    drop_ramp:
+        unsafe extern "C-unwind" fn(*mut (), Meta, unsafe extern "C-unwind" fn(*mut (), Meta)),
+}
+
+impl<Meta> Drop for OpaqueFn<Meta> {
+    fn drop(&mut self) {
+        unsafe {
+            (self.drop_ramp)(
+                self.ptr as *mut _,
+                self.metadata.assume_init_read(),
+                self.drop,
+            )
+        }
+    }
+}
+
+#[repr(C)]
+#[doc(hidden)]
+pub struct RawFfiFnInner<T: ?Sized, Meta> {
     ptr: *mut (),
     metadata: MaybeUninit<Meta>,
     drop: unsafe extern "C-unwind" fn(*mut (), Meta),
@@ -20,7 +48,7 @@ struct RawFfiFnInner<T: ?Sized, Meta> {
 
 impl<T: ?Sized, Meta> RawFfiFnInner<T, Meta> {
     #[inline]
-    unsafe fn new(
+    const unsafe fn new(
         ptr: *mut (),
         metadata: Meta,
         drop: unsafe extern "C-unwind" fn(*mut (), Meta),
@@ -59,6 +87,54 @@ impl<T: ?Sized, Meta> RawFfiFnInner<T, Meta> {
 unsafe impl<T: Send + ?Sized, Meta: Send> Send for RawFfiFnInner<T, Meta> {}
 
 unsafe impl<T: Sync + ?Sized, Meta: Sync> Sync for RawFfiFnInner<T, Meta> {}
+
+unsafe impl<T: ?Sized, Meta> const CTypeBridge for RawFfiFnInner<T, Meta>
+where
+    Meta: ~const CTypeBridge,
+{
+    type Type = OpaqueFn<Meta::Type>;
+
+    #[inline]
+    fn marshal(self) -> Self::Type {
+        let this = std::mem::ManuallyDrop::new(self);
+
+        unsafe extern "C-unwind" fn drop_ramp<Meta: CTypeBridge>(
+            ptr: *mut (),
+            meta: Meta::Type,
+            drop_fn: unsafe extern "C-unwind" fn(*mut (), Meta::Type),
+        ) {
+            let meta = Meta::demarshal(meta);
+            let drop_fn: unsafe extern "C-unwind" fn(*mut (), Meta) = std::mem::transmute(drop_fn);
+            drop_fn(ptr, meta)
+        }
+
+        unsafe {
+            OpaqueFn {
+                ptr: this.ptr,
+                metadata: MaybeUninit::new(this.metadata.assume_init_read().marshal()),
+                drop: std::mem::transmute(this.drop),
+                call_once: std::mem::transmute(this.call_once),
+                call_mut: std::mem::transmute(this.call_mut),
+                call: std::mem::transmute(this.call),
+                drop_ramp: drop_ramp::<Meta>,
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let x = std::mem::ManuallyDrop::new(x);
+
+        Self::new(
+            x.ptr,
+            Meta::demarshal(x.metadata.assume_init_read()),
+            std::mem::transmute(x.drop),
+            std::mem::transmute(x.call_once),
+            std::mem::transmute(x.call_mut),
+            std::mem::transmute(x.call),
+        )
+    }
+}
 
 impl<T: ?Sized, Meta> Drop for RawFfiFnInner<T, Meta> {
     #[inline]
@@ -498,6 +574,25 @@ impl<T: ?Sized, Meta: Default> RawFfiFn<T, Meta> {
     }
 }
 
+unsafe impl<T: ?Sized, Meta> const CTypeBridge for RawFfiFn<T, Meta>
+where
+    RawFfiFnInner<T, Meta>: ~const CTypeBridge,
+{
+    type Type = <RawFfiFnInner<T, Meta> as CTypeBridge>::Type;
+
+    #[inline]
+    fn marshal(self) -> Self::Type {
+        self.inner.marshal()
+    }
+
+    #[inline]
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        Self {
+            inner: <RawFfiFnInner<T, Meta> as CTypeBridge>::demarshal(x),
+        }
+    }
+}
+
 impl<'a, T: ?Sized + 'a, Meta: 'a> Debug for RawFfiFn<T, Meta> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawFfiFn")
@@ -701,6 +796,26 @@ impl<T: Fn<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> Fn<Arg
 {
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
         unsafe { self.raw.call(args) }
+    }
+}
+
+unsafe impl<'a, T: ?Sized, Meta> const CTypeBridge for FfiFn<'a, T, Meta>
+where
+    RawFfiFn<T, Meta>: ~const CTypeBridge,
+{
+    type Type = <RawFfiFn<T, Meta> as CTypeBridge>::Type;
+
+    #[inline]
+    fn marshal(self) -> Self::Type {
+        self.raw.marshal()
+    }
+
+    #[inline]
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        Self {
+            raw: <RawFfiFn<T, Meta> as CTypeBridge>::demarshal(x),
+            _phantom: PhantomData,
+        }
     }
 }
 

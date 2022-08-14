@@ -17,6 +17,10 @@ use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeBounds};
 use std::ptr::NonNull;
 use std::slice::SliceIndex;
 
+use crate::marshal::CTypeBridge;
+use crate::obj_box::CGlobal;
+use crate::{ReprC, ReprRust};
+
 /// Creates a [`Vec`] containing the arguments.
 ///
 /// `vec!` allows `Vec`s to be defined with the same syntax as array expressions.
@@ -201,7 +205,7 @@ impl<T> Vec<T> {
     /// }
     /// ```
     #[inline]
-    pub unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self {
+    pub const unsafe fn from_raw_parts(ptr: *mut T, length: usize, capacity: usize) -> Self {
         Self::from_raw_parts_in(ptr, length, capacity, Global)
     }
 }
@@ -352,7 +356,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// }
     /// ```
     #[inline]
-    pub unsafe fn from_raw_parts_in(ptr: *mut T, length: usize, capacity: usize, alloc: A) -> Self {
+    pub const unsafe fn from_raw_parts_in(
+        ptr: *mut T,
+        length: usize,
+        capacity: usize,
+        alloc: A,
+    ) -> Self {
         Self {
             buf: RawVec::from_raw_parts_in(ptr, capacity, alloc),
             len: length,
@@ -393,7 +402,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// };
     /// assert_eq!(rebuilt, [4294967295, 0, 1]);
     /// ```
-    pub fn into_raw_parts(self) -> (*mut T, usize, usize) {
+    pub const fn into_raw_parts(self) -> (*mut T, usize, usize) {
         let mut m = std::mem::ManuallyDrop::new(self);
         (m.as_mut_ptr(), m.len(), m.capacity())
     }
@@ -436,7 +445,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// };
     /// assert_eq!(rebuilt, [4294967295, 0, 1]);
     /// ```
-    pub fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A) {
+    pub const fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A) {
         let mut m = std::mem::ManuallyDrop::new(self);
         let len = m.len();
         let cap = m.capacity();
@@ -456,7 +465,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(vec.capacity(), 10);
     /// ```
     #[inline]
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.buf.capacity()
     }
 
@@ -682,7 +691,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// io::sink().write(buffer.as_slice()).unwrap();
     /// ```
     #[inline]
-    pub fn as_slice(&self) -> &[T] {
+    pub const fn as_slice(&self) -> &[T] {
         self
     }
 
@@ -700,7 +709,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// io::repeat(0b101).read_exact(buffer.as_mut_slice()).unwrap();
     /// ```
     #[inline]
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
+    pub const fn as_mut_slice(&mut self) -> &mut [T] {
         self
     }
 
@@ -732,7 +741,7 @@ impl<T, A: Allocator> Vec<T, A> {
     ///
     /// [`as_mut_ptr`]: Vec::as_mut_ptr
     #[inline]
-    pub fn as_ptr(&self) -> *const T {
+    pub const fn as_ptr(&self) -> *const T {
         self.buf.ptr()
     }
 
@@ -762,13 +771,13 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(&*x, &[0, 1, 2, 3]);
     /// ```
     #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut T {
+    pub const fn as_mut_ptr(&mut self) -> *mut T {
         self.buf.ptr()
     }
 
     /// Returns a reference to the underlying allocator.
     #[inline]
-    pub fn allocator(&self) -> &A {
+    pub const fn allocator(&self) -> &A {
         self.buf.allocator()
     }
 
@@ -853,7 +862,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// Normally, here, one would use [`clear`] instead to correctly drop
     /// the contents and thus not leak memory.
     #[inline]
-    pub unsafe fn set_len(&mut self, new_len: usize) {
+    pub const unsafe fn set_len(&mut self, new_len: usize) {
         debug_assert!(new_len <= self.capacity());
         self.len = new_len;
     }
@@ -1466,7 +1475,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(a.len(), 3);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.len
     }
 
@@ -1483,7 +1492,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert!(!v.is_empty());
     /// ```
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -1604,7 +1613,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(static_ref, &[2, 2, 3]);
     /// ```
     #[inline]
-    pub fn leak<'a>(self) -> &'a mut [T]
+    pub const fn leak<'a>(self) -> &'a mut [T]
     where
         A: 'a,
     {
@@ -2295,37 +2304,37 @@ impl<T: PartialEq, A: Allocator> Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> AsMut<[T]> for Vec<T, A> {
+impl<T, A: Allocator> const AsMut<[T]> for Vec<T, A> {
     fn as_mut(&mut self) -> &mut [T] {
         self
     }
 }
 
-impl<T, A: Allocator> AsMut<Vec<T, A>> for Vec<T, A> {
+impl<T, A: Allocator> const AsMut<Vec<T, A>> for Vec<T, A> {
     fn as_mut(&mut self) -> &mut Vec<T, A> {
         self
     }
 }
 
-impl<T, A: Allocator> AsRef<[T]> for Vec<T, A> {
+impl<T, A: Allocator> const AsRef<[T]> for Vec<T, A> {
     fn as_ref(&self) -> &[T] {
         self
     }
 }
 
-impl<T, A: Allocator> AsRef<Vec<T, A>> for Vec<T, A> {
+impl<T, A: Allocator> const AsRef<Vec<T, A>> for Vec<T, A> {
     fn as_ref(&self) -> &Vec<T, A> {
         self
     }
 }
 
-impl<T, A: Allocator> Borrow<[T]> for Vec<T, A> {
+impl<T, A: Allocator> const Borrow<[T]> for Vec<T, A> {
     fn borrow(&self) -> &[T] {
         self
     }
 }
 
-impl<T, A: Allocator> BorrowMut<[T]> for Vec<T, A> {
+impl<T, A: Allocator> const BorrowMut<[T]> for Vec<T, A> {
     fn borrow_mut(&mut self) -> &mut [T] {
         self
     }
@@ -2433,19 +2442,22 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     }
 }
 
-impl<T: Debug, A: Allocator> Debug for Vec<T, A> {
+impl<T, A: Allocator> const Debug for Vec<T, A>
+where
+    [T]: ~const Debug,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&**self, f)
     }
 }
 
-impl<T> Default for Vec<T> {
+impl<T> const Default for Vec<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, A: Allocator> Deref for Vec<T, A> {
+impl<T, A: Allocator> const Deref for Vec<T, A> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -2453,7 +2465,7 @@ impl<T, A: Allocator> Deref for Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> DerefMut for Vec<T, A> {
+impl<T, A: Allocator> const DerefMut for Vec<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len) }
     }
@@ -2531,7 +2543,7 @@ impl<'a> From<&'a str> for Vec<u8> {
     }
 }
 
-impl<T, A: Allocator, const N: usize> From<Box<[T; N], A>> for Vec<T, A> {
+impl<T, A: Allocator, const N: usize> const From<Box<[T; N], A>> for Vec<T, A> {
     /// Convert a boxed array into a vector by transferring ownership of
     /// the existing heap allocation.
     ///
@@ -2548,7 +2560,7 @@ impl<T, A: Allocator, const N: usize> From<Box<[T; N], A>> for Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
+impl<T, A: Allocator> const From<Box<[T], A>> for Vec<T, A> {
     /// Convert a boxed slice into a vector by transferring ownership of
     /// the existing heap allocation.
     ///
@@ -2643,6 +2655,54 @@ impl<T, A: Allocator, const N: usize> TryFrom<Vec<T, A>> for [T; N] {
         // tells the `Vec` not to also drop them.
         let array = unsafe { std::ptr::read(vec.as_ptr() as *const [T; N]) };
         Ok(array)
+    }
+}
+
+impl<T> ReprC for Vec<T, CGlobal> {
+    type T = Vec<T, Global>;
+
+    #[inline]
+    fn into_rust(self) -> Self::T {
+        let (ptr, length, capacity, alloc) = Vec::into_raw_parts_with_alloc(self);
+        unsafe { Vec::from_raw_parts_in(ptr, length, capacity, alloc.into_rust()) }
+    }
+
+    #[inline]
+    fn from_rust(t: Self::T) -> Self {
+        let (ptr, length, capacity, alloc) = Vec::into_raw_parts_with_alloc(t);
+        unsafe { Vec::from_raw_parts_in(ptr, length, capacity, alloc.into_c()) }
+    }
+}
+
+impl<T> ReprRust for Vec<T, Global> {
+    type T = Vec<T, CGlobal>;
+
+    #[inline]
+    fn into_c(self) -> Self::T {
+        Vec::from_rust(self)
+    }
+
+    #[inline]
+    fn from_c(t: Self::T) -> Self {
+        Vec::into_rust(t)
+    }
+}
+
+unsafe impl<T, A: Allocator> const CTypeBridge for Vec<T, A>
+where
+    A: ~const CTypeBridge,
+    A::Type: Allocator,
+{
+    type Type = Vec<T, A::Type>;
+
+    fn marshal(self) -> Self::Type {
+        let (ptr, len, cap, alloc) = Vec::into_raw_parts_with_alloc(self);
+        unsafe { Vec::from_raw_parts_in(ptr, len, cap, alloc.marshal()) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let (ptr, len, cap, alloc) = Vec::into_raw_parts_with_alloc(x);
+        Vec::from_raw_parts_in(ptr, len, cap, A::demarshal(alloc))
     }
 }
 
@@ -2781,7 +2841,10 @@ impl<T> FromIterator<T> for Vec<T, Global> {
 /// let s: &[u8] = &[0xa8, 0x3c, 0x09];
 /// assert_eq!(b.hash_one(v), b.hash_one(s));
 /// ```
-impl<T: Hash, A: Allocator> Hash for Vec<T, A> {
+impl<T, A: Allocator> const Hash for Vec<T, A>
+where
+    [T]: ~const Hash,
+{
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
     }
@@ -3391,7 +3454,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 
     #[inline]
-    pub fn from_raw_parts_in(ptr: *mut T, capacity: usize, alloc: A) -> Self {
+    pub const fn from_raw_parts_in(ptr: *mut T, capacity: usize, alloc: A) -> Self {
         Self {
             buf: unsafe { NonNull::new_unchecked(ptr) },
             cap: capacity,
@@ -3441,7 +3504,7 @@ impl<T, A: Allocator> RawVec<T, A> {
         handle_reserve(self.shrink(amount));
     }
 
-    pub fn into_box(self, len: usize) -> Box<[MaybeUninit<T>], A> {
+    pub const fn into_box(self, len: usize) -> Box<[MaybeUninit<T>], A> {
         // Sanity-check one half of the safety requirement (we cannot check the other half).
         debug_assert!(
             len <= self.capacity(),
@@ -3456,7 +3519,7 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 
     #[inline(always)]
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         if std::mem::size_of::<T>() == 0 {
             usize::MAX
         } else {
@@ -3465,12 +3528,12 @@ impl<T, A: Allocator> RawVec<T, A> {
     }
 
     #[inline]
-    pub fn ptr(&self) -> *mut T {
+    pub const fn ptr(&self) -> *mut T {
         self.buf.as_ptr()
     }
 
     #[inline]
-    pub fn allocator(&self) -> &A {
+    pub const fn allocator(&self) -> &A {
         &self.alloc
     }
 
@@ -3489,7 +3552,7 @@ impl<T, A: Allocator> RawVec<T, A> {
 
     /// Returns if the buffer needs to grow to fulfill the needed extra capacity.
     /// Mainly used to make inlining reserve-calls possible without inlining `grow`.
-    fn needs_to_grow(&self, len: usize, additional: usize) -> bool {
+    const fn needs_to_grow(&self, len: usize, additional: usize) -> bool {
         additional > self.capacity().wrapping_sub(len)
     }
 

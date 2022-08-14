@@ -8,6 +8,8 @@ use std::ops::{Deref, DerefMut};
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::ptr::NonNull;
 
+use crate::marshal::CTypeBridge;
+
 /// An immutable span.
 ///
 /// Equivalent to a `&'a [T]`
@@ -78,9 +80,21 @@ impl<'a, T> const From<MutSpan<'a, T>> for ConstSpan<'a, T> {
     }
 }
 
+unsafe impl<'a, T> const CTypeBridge for &'a [T] {
+    type Type = ConstSpan<'a, T>;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
+    }
+}
+
 impl<'a, T> AsRef<[T]> for ConstSpan<'a, T> {
     fn as_ref(&self) -> &[T] {
-        &**self
+        self
     }
 }
 
@@ -207,15 +221,27 @@ impl<'a, T> const From<MutSpan<'a, T>> for &'a mut [T] {
     }
 }
 
+unsafe impl<'a, T> const CTypeBridge for &'a mut [T] {
+    type Type = MutSpan<'a, T>;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
+    }
+}
+
 impl<'a, T> AsRef<[T]> for MutSpan<'a, T> {
     fn as_ref(&self) -> &[T] {
-        &**self
+        self
     }
 }
 
 impl<'a, T> AsMut<[T]> for MutSpan<'a, T> {
     fn as_mut(&mut self) -> &mut [T] {
-        &mut **self
+        self
     }
 }
 
@@ -417,6 +443,18 @@ impl<T> const From<ConstSpanPtr<T>> for *const [T] {
     }
 }
 
+unsafe impl<T> const CTypeBridge for *const [T] {
+    type Type = ConstSpanPtr<T>;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
+    }
+}
+
 /// A mutable span pointer.
 ///
 /// Equivalent to a `*mut [T]`
@@ -575,6 +613,18 @@ impl<T> const From<MutSpanPtr<T>> for *mut [T] {
     #[inline]
     fn from(s: MutSpanPtr<T>) -> Self {
         std::ptr::slice_from_raw_parts_mut(s.ptr, s.len)
+    }
+}
+
+unsafe impl<T> const CTypeBridge for *mut [T] {
+    type Type = MutSpanPtr<T>;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
     }
 }
 

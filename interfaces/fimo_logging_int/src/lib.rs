@@ -6,11 +6,12 @@
     rustdoc::broken_intra_doc_links
 )]
 #![feature(const_ptr_offset_from)]
+#![feature(const_trait_impl)]
 #![feature(negative_impls)]
 #![feature(unsize)]
 
 use fimo_ffi::{interface, DynObj, ObjBox, ObjectId, ReleaseType, Version};
-use fimo_module::{FimoInterface, IModuleInterface, IModuleInterfaceVTable};
+use fimo_module::{FimoInterface, IModuleInterface};
 use std::{
     fmt::{Arguments, Display},
     io::Write,
@@ -26,19 +27,14 @@ const UNINITIALIZED: usize = 0;
 const INITIALIZING: usize = 1;
 const INITIALIZED: usize = 2;
 
-/// The logging interface.
-#[interface(
-    uuid = "6a146db2-e2b0-4a03-878a-242475cb6650",
-    vtable = "ILoggingInterfaceVTable",
-    generate(IModuleInterfaceVTable)
-)]
-pub trait IFimoLogging: IModuleInterface {
-    /// Fetches a reference to the logger.
-    #[vtable_info(
-        return_type = "*const DynObj<dyn ILogger>",
-        from_expr = "unsafe { &*res }"
-    )]
-    fn logger(&self) -> &DynObj<dyn ILogger>;
+interface! {
+    #![interface_cfg(uuid = "6a146db2-e2b0-4a03-878a-242475cb6650")]
+
+    /// The logging interface.
+    pub frozen interface IFimoLogging: IModuleInterface @ frozen version("0.0") {
+        /// Fetches a reference to the logger.
+        fn logger(&self) -> &DynObj<dyn ILogger>;
+    }
 }
 
 impl<'a> FimoInterface for dyn IFimoLogging + 'a {
@@ -49,165 +45,163 @@ impl<'a> FimoInterface for dyn IFimoLogging + 'a {
     const EXTENSIONS: &'static [&'static str] = &[];
 }
 
-/// Interface of a logger.
-#[interface(
-    uuid = "db526e53-2bec-4405-b5c1-d373c38a2ea9",
-    vtable = "ILoggerVTable",
-    generate()
-)]
-pub trait ILogger: Send + Sync {
-    /// Adds a new backend to the logger.
-    fn add_backend(
-        &self,
-        logger: ObjBox<DynObj<dyn ILoggerBackend>>,
-    ) -> fimo_module::Result<BackendId>;
+interface! {
+    #![interface_cfg(uuid = "db526e53-2bec-4405-b5c1-d373c38a2ea9")]
 
-    /// Removes a registered backend.
-    fn remove_backend(&self, id: BackendId) -> fimo_module::Result<()>;
+    /// Interface of a logger.
+    pub frozen interface ILogger: marker Send + marker Sync {
+        /// Adds a new backend to the logger.
+        fn add_backend(
+            &self,
+            logger: ObjBox<DynObj<dyn ILoggerBackend>>,
+        ) -> fimo_module::Result<BackendId>;
 
-    /// Creates a new channel where messages can be logged to.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `parent` is invalid.
-    fn create_channel(
-        &self,
-        key: &str,
-        description: &'static str,
-        parent: Channel,
-        level: LevelFilter,
-    ) -> fimo_module::Result<Channel>;
+        /// Removes a registered backend.
+        fn remove_backend(&self, id: BackendId) -> fimo_module::Result<()>;
 
-    /// Returns all channels.
-    fn get_channels(&self) -> Vec<Channel>;
+        /// Creates a new channel where messages can be logged to.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `parent` is invalid.
+        fn create_channel(
+            &self,
+            key: &str,
+            description: &'static str,
+            parent: Channel,
+            level: LevelFilter,
+        ) -> fimo_module::Result<Channel>;
 
-    /// Searches for a channel by key.
-    fn get_channel(&self, key: &str) -> Option<Channel>;
+        /// Returns all channels.
+        fn get_channels(&self) -> Vec<Channel>;
 
-    /// Returns the description and level registered with a channel.
-    fn channel_info(&self, channel: Channel) -> Option<(&'static str, LevelFilter)>;
+        /// Searches for a channel by key.
+        fn get_channel(&self, key: &str) -> Option<Channel>;
 
-    /// Changes the level of a channel.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `channel` is invalid.
-    fn set_channel_level(&self, channel: Channel, level: LevelFilter) -> fimo_module::Result<()>;
+        /// Returns the description and level registered with a channel.
+        fn channel_info(&self, channel: Channel) -> Option<(&'static str, LevelFilter)>;
 
-    /// Creates a new span.
-    fn create_span(
-        &self,
-        metadata: SpanMetadata<'static>,
-        args: Arguments<'_>,
-    ) -> fimo_module::Result<SpanId>;
+        /// Changes the level of a channel.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `channel` is invalid.
+        fn set_channel_level(&self, channel: Channel, level: LevelFilter) -> fimo_module::Result<()>;
 
-    /// Removes span from the logger.
-    ///
-    /// The span must not be entered.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `span` is invalid.
-    fn delete_span(&self, span: SpanId) -> fimo_module::Result<()>;
+        /// Creates a new span.
+        fn create_span(
+            &self,
+            metadata: SpanMetadata<'static>,
+            args: Arguments<'_>,
+        ) -> fimo_module::Result<SpanId>;
 
-    /// Enters a new span.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `span` is invalid.
-    fn enter_span(&self, span: SpanId) -> fimo_module::Result<()>;
+        /// Removes span from the logger.
+        ///
+        /// The span must not be entered.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `span` is invalid.
+        fn delete_span(&self, span: SpanId) -> fimo_module::Result<()>;
 
-    /// Exits the current span.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `current` is not the current span or is invalid.
-    fn exit_span(&self, current: SpanId) -> fimo_module::Result<()>;
+        /// Enters a new span.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `span` is invalid.
+        fn enter_span(&self, span: SpanId) -> fimo_module::Result<()>;
 
-    /// Branches the active stack span and switches to the new one.
-    ///
-    /// The original branch remains immutable, until all branches are
-    /// joined or truncated.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `current` is not the current stack or is invalid.
-    fn branch_span_stack(&self, current: SpanStackId) -> fimo_module::Result<SpanStackId>;
+        /// Exits the current span.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `current` is not the current span or is invalid.
+        fn exit_span(&self, current: SpanId) -> fimo_module::Result<()>;
 
-    /// Removes all branches originating from the current stack.
-    ///
-    /// Does not attempt to cleanup the spans created by the branches.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `current` is not the current stack or is invalid.
-    fn truncate_branched_stacks(&self, current: SpanStackId) -> fimo_module::Result<()>;
+        /// Branches the active stack span and switches to the new one.
+        ///
+        /// The original branch remains immutable, until all branches are
+        /// joined or truncated.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `current` is not the current stack or is invalid.
+        fn branch_span_stack(&self, current: SpanStackId) -> fimo_module::Result<SpanStackId>;
 
-    /// Joins a branched stack back to its parent.
-    ///
-    /// Can only be called when the current stack is empty.
-    /// Is a noop if called with `SpanStackId::Thread` and the stack is joinable.
-    ///
-    /// # Panics
-    ///
-    /// May panic if `current` is not the current stack or is invalid.
-    fn join_stack(&self, current: SpanStackId) -> fimo_module::Result<()>;
+        /// Removes all branches originating from the current stack.
+        ///
+        /// Does not attempt to cleanup the spans created by the branches.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `current` is not the current stack or is invalid.
+        fn truncate_branched_stacks(&self, current: SpanStackId) -> fimo_module::Result<()>;
 
-    /// Sets the active span stack.
-    ///
-    /// # Panics
-    ///
-    /// May panic if either id is invalid, or if `current` is not the current stack.
-    fn switch_span_stack(&self, current: SpanStackId, new: SpanStackId) -> fimo_module::Result<()>;
+        /// Joins a branched stack back to its parent.
+        ///
+        /// Can only be called when the current stack is empty.
+        /// Is a noop if called with `SpanStackId::Thread` and the stack is joinable.
+        ///
+        /// # Panics
+        ///
+        /// May panic if `current` is not the current stack or is invalid.
+        fn join_stack(&self, current: SpanStackId) -> fimo_module::Result<()>;
 
-    /// Determines if a log message with the specified metadata would be logged.
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool;
+        /// Sets the active span stack.
+        ///
+        /// # Panics
+        ///
+        /// May panic if either id is invalid, or if `current` is not the current stack.
+        fn switch_span_stack(&self, current: SpanStackId, new: SpanStackId) -> fimo_module::Result<()>;
 
-    /// Logs a new record to the logger.
-    fn log(&self, record: &Record<'_>);
+        /// Determines if a log message with the specified metadata would be logged.
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool;
 
-    /// Flushes the messages written to the logger.
-    fn flush(&self);
+        /// Logs a new record to the logger.
+        fn log(&self, record: &Record<'_>);
 
-    /// Marks that the current thread has resumed it's execution.
-    ///
-    /// A thread is marked as running by default, but can be suspended with
-    /// [`suspend`](#method.suspend).
-    fn resume(&self) -> fimo_module::Result<()>;
+        /// Flushes the messages written to the logger.
+        fn flush(&self);
 
-    /// Suspends the current thread.
-    ///
-    /// Calling into the logger using a suspended thread may result in an error.
-    fn suspend(&self) -> fimo_module::Result<()>;
+        /// Marks that the current thread has resumed it's execution.
+        ///
+        /// A thread is marked as running by default, but can be suspended with
+        /// [`suspend`](#method.suspend).
+        fn resume(&self) -> fimo_module::Result<()>;
+
+        /// Suspends the current thread.
+        ///
+        /// Calling into the logger using a suspended thread may result in an error.
+        fn suspend(&self) -> fimo_module::Result<()>;
+    }
 }
 
-/// Backend of the logger interface.
-///
-/// Backends are responsible for logging messages.
-#[interface(
-    uuid = "a44d9a8b-87cb-45e1-9a29-615574886d8a",
-    vtable = "ILoggerBackendVTable",
-    generate()
-)]
-pub trait ILoggerBackend: Send + Sync {
-    /// Registers a channel with the backend.
-    fn create_channel(&mut self, channel: Channel, key: &str);
+interface! {
+    #![interface_cfg(uuid = "a44d9a8b-87cb-45e1-9a29-615574886d8a")]
 
-    /// Sets the parent of a channel.
+    /// Backend of the logger interface.
     ///
-    /// Channels without a parent default to using [`Channel::GLOBAL`] as their parent.
-    fn set_channel_parent(&mut self, channel: Channel, parent: Channel);
+    /// Backends are responsible for logging messages.
+    pub frozen interface ILoggerBackend: marker Send + marker Sync {
+        /// Registers a channel with the backend.
+        fn create_channel(&mut self, channel: Channel, key: &str);
 
-    /// Logs a new record to the backend.
-    fn log(
-        &mut self,
-        record: &Record<'_>,
-        span_args: &Arguments<'_>,
-        span_metadata: &SpanMetadata<'_>,
-    );
+        /// Sets the parent of a channel.
+        ///
+        /// Channels without a parent default to using [`Channel::GLOBAL`] as their parent.
+        fn set_channel_parent(&mut self, channel: Channel, parent: Channel);
 
-    /// Flushes the messages from the backend.
-    fn flush(&mut self);
+        /// Logs a new record to the backend.
+        fn log(
+            &mut self,
+            record: &Record<'_>,
+            span_args: &Arguments<'_>,
+            span_metadata: &SpanMetadata<'_>,
+        );
+
+        /// Flushes the messages from the backend.
+        fn flush(&mut self);
+    }
 }
 
 /// An enum representing the available verbosity levels of the logger.

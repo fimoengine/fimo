@@ -2,12 +2,8 @@
 
 use atomic::Atomic;
 use fimo_ffi::cell::AtomicRefCell;
-use fimo_ffi::ffi_fn::RawFfiFn;
-use fimo_ffi::obj_box::RawObjBox;
-use fimo_ffi::ptr::{IBase, RawObj, RawObjMut};
-use fimo_ffi::str::ConstStrPtr;
-use fimo_ffi::tuple::Tuple2;
-use fimo_ffi::{interface, ConstStr, DynObj, FfiFn, ObjBox, ObjectId, Optional, ReprC};
+use fimo_ffi::ptr::IBase;
+use fimo_ffi::{interface, ConstStr, DynObj, FfiFn, ObjBox, ObjectId};
 use std::any::Any;
 use std::fmt::Write;
 use std::fmt::{Debug, Display, Formatter};
@@ -283,88 +279,59 @@ pub struct PseudoTask(pub *const ());
 unsafe impl Send for PseudoTask {}
 unsafe impl Sync for PseudoTask {}
 
-/// Interface of a raw task.
-#[interface(
-    uuid = "fa8ec56f-9c02-4ad1-9845-814310169d73",
-    vtable = "IRawTaskVTable",
-    generate()
-)]
-pub trait IRawTask: IBase + Send + Sync {
-    /// Returns the optional name of the task.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<ConstStrPtr>",
-        into_expr = "Optional::from_rust(res.map(|d| d.into()))",
-        from_expr = "unsafe { res.into_rust().map(|d| d.deref().into()) }"
+interface! {
+    #![interface_cfg(
+        abi(explicit(abi = "C-unwind")),
+        uuid = "fa8ec56f-9c02-4ad1-9845-814310169d73",
     )]
-    fn name(&self) -> Option<&str>;
 
-    /// Shorthand for `self.name().unwrap_or("unnamed")`.
-    #[inline]
-    #[vtable_info(ignore)]
-    fn resolved_name(&self) -> &str {
-        self.name().unwrap_or("unnamed")
-    }
+    /// Interface of a raw task.
+    pub frozen interface IRawTask: marker IBase + marker Send + marker Sync {
+        /// Returns the optional name of the task.
+        fn name(&self) -> Option<&str>;
 
-    /// Returns the starting priority of the task.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn priority(&self) -> TaskPriority;
+        /// Shorthand for `self.name().unwrap_or("unnamed")`.
+        #[inline]
+        #[interface_cfg(mapping = "exclude")]
+        fn resolved_name(&self) -> &str {
+            self.name().unwrap_or("unnamed")
+        }
 
-    /// Returns the spawn location of the task.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<Location<'static>>",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    fn spawn_location(&self) -> Option<Location<'static>>;
+        /// Returns the starting priority of the task.
+        fn priority(&self) -> TaskPriority;
 
-    /// Returns a reference to the context.
-    ///
-    /// # Intended usage
-    ///
-    /// This method is intended to be used primarely by owners of unregistered tasks
-    /// or while holding a lock to the scheduler. Under these circumstances the runtime
-    /// guarantees that a call to [`try_borrow`][try_borrow] succeeds.
-    ///
-    /// Calling the [`try_borrow_mut`][try_borrow_mut] method may cause a panic as multiple
-    /// workers try to access the context. Therefore the [`try_borrow_mut`][try_borrow_mut]
-    /// method is reserved for use by the scheduler and owners of unregistered tasks.
-    ///
-    /// Using these functions without, even indirectly, without the proper preconditions may
-    /// cause undefined behavior.
-    ///
-    /// [try_borrow]: AtomicRefCell::try_borrow
-    /// [try_borrow_mut]: AtomicRefCell::try_borrow_mut
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "*const AtomicRefCell<DynObj<dyn ISchedulerContext + 'static>>",
-        into_expr = "
-            std::mem::transmute
-                ::<*const AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>, 
-                    *const AtomicRefCell<DynObj<dyn ISchedulerContext + 'static>>>(res)",
-        from_expr = "
-            unsafe {
-                let res = std::mem::transmute
-                    ::<*const AtomicRefCell<DynObj<dyn ISchedulerContext + 'static>>, 
-                        *const AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>>(res);
-                &*res
-            }"
-    )]
-    fn context(&self) -> &AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>;
+        /// Returns the spawn location of the task.
+        fn spawn_location(&self) -> Option<Location<'static>>;
 
-    /// Returns an atomic view to the context.
-    ///
-    /// Should be preferred over [`context`](#method.context) as it allows accessing
-    /// parts of the [`ISchedulerContext`] without borrowing it.
-    #[inline]
-    #[vtable_info(ignore)]
-    fn context_atomic(&self) -> AtomicISchedulerContext<'_> {
-        let context = self.context();
-        AtomicISchedulerContext { context }
+        /// Returns a reference to the context.
+        ///
+        /// # Intended usage
+        ///
+        /// This method is intended to be used primarely by owners of unregistered tasks
+        /// or while holding a lock to the scheduler. Under these circumstances the runtime
+        /// guarantees that a call to [`try_borrow`][try_borrow] succeeds.
+        ///
+        /// Calling the [`try_borrow_mut`][try_borrow_mut] method may cause a panic as multiple
+        /// workers try to access the context. Therefore the [`try_borrow_mut`][try_borrow_mut]
+        /// method is reserved for use by the scheduler and owners of unregistered tasks.
+        ///
+        /// Using these functions without, even indirectly, without the proper preconditions may
+        /// cause undefined behavior.
+        ///
+        /// [try_borrow]: AtomicRefCell::try_borrow
+        /// [try_borrow_mut]: AtomicRefCell::try_borrow_mut
+        fn context(&self) -> &AtomicRefCell<DynObj<dyn ISchedulerContext + '_>>;
+
+        /// Returns an atomic view to the context.
+        ///
+        /// Should be preferred over [`context`](#method.context) as it allows accessing
+        /// parts of the [`ISchedulerContext`] without borrowing it.
+        #[inline]
+        #[interface_cfg(mapping = "exclude")]
+        fn context_atomic(&self) -> AtomicISchedulerContext<'_> {
+            let context = self.context();
+            AtomicISchedulerContext { context }
+        }
     }
 }
 
@@ -374,6 +341,20 @@ pub trait IRawTask: IBase + Send + Sync {
 pub struct Timestamp {
     high: u64,
     low: u64,
+}
+
+impl Timestamp {
+    /// Converts the timestamp to a `SystemTime`.
+    #[inline]
+    pub fn to_system_time(self) -> SystemTime {
+        self.into()
+    }
+
+    /// Converts the `SystemTime` to a timestamp.
+    #[inline]
+    pub fn from_system_time(time: SystemTime) -> Self {
+        time.into()
+    }
 }
 
 impl From<u128> for Timestamp {
@@ -604,14 +585,14 @@ impl<'a> ISchedulerContext for SchedulerContextInner<'a> {
     }
 
     #[inline]
-    fn resume_time(&self) -> SystemTime {
-        let timestamp = Timestamp::from(self.resume_time.load(Ordering::Acquire));
-        timestamp.into()
+    fn resume_time(&self) -> Timestamp {
+        Timestamp::from(self.resume_time.load(Ordering::Acquire))
     }
 
     #[inline]
-    fn set_resume_time(&self, time: SystemTime) {
+    fn set_resume_time(&self, time: Timestamp) {
         let time: u128 = time
+            .to_system_time()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
@@ -740,298 +721,223 @@ impl Drop for SchedulerContextInner<'_> {
     }
 }
 
-/// Interface of a scheduler context.
-#[interface(
-    uuid = "f0e48d5e-d826-4122-ae14-d8430ad3e796",
-    vtable = "ISchedulerContextVTable",
-    generate()
-)]
-pub trait ISchedulerContext: IBase + Send + Sync {
-    /// Extracts the handle to the task.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn handle(&self) -> MaybeUninit<TaskHandle>;
-
-    /// Checks whether the context has been marked as registered.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn is_registered(&self) -> bool;
-
-    /// Marks the context as registered.
-    ///
-    /// # Panics
-    ///
-    /// May panic if the task is already registered.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn register(
-        &mut self,
-        handle: TaskHandle,
-        #[vtable_info(
-            type = "Optional<RawObjBox<RawObjMut<dyn IBase + Send + Sync + 'static>>>",
-            into_expr = "let p_2 = Optional::from_rust(p_2.map(|d| d.into()));",
-            from_expr = "let p_2 = p_2.into_rust().map(|d| d.into());"
-        )]
-        scheduler_data: Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
-    );
-
-    /// Marks the context as unregistered.
-    ///
-    /// # Panics
-    ///
-    /// May panic if the task is not registered.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Tuple2<TaskHandle, Optional<RawObjBox<RawObjMut<dyn IBase + Send + Sync + 'static>>>>",
-        into_expr = "Tuple2(res.0, Optional::from_rust(res.1.map(|d| d.into())))",
-        from_expr = "(res.0, res.1.into_rust().map(|d| d.into()))"
+interface! {
+    #![interface_cfg(
+        abi(explicit(abi = "C-unwind")),
+        uuid = "f0e48d5e-d826-4122-ae14-d8430ad3e796",
     )]
-    unsafe fn unregister(
-        &mut self,
-    ) -> (
-        TaskHandle,
-        Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
-    );
 
-    /// Extracts the resume time.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Timestamp",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    fn resume_time(&self) -> SystemTime;
+    /// Interface of a scheduler context.
+    pub frozen interface ISchedulerContext : marker IBase + marker Send + marker Sync {
+        /// Extracts the handle to the task.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn handle(&self) -> MaybeUninit<TaskHandle>;
 
-    /// Advances the internal timer to the provided time.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    /// The runtime may not be notified if this is called outside of the scheduler.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn set_resume_time(
-        &self,
-        #[vtable_info(type = "Timestamp", into = "Into::into", from = "Into::into")]
-        time: SystemTime,
-    );
+        /// Checks whether the context has been marked as registered.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn is_registered(&self) -> bool;
 
-    /// Extracts the assigned worker.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<WorkerId>",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    fn worker(&self) -> Option<WorkerId>;
+        /// Marks the context as registered.
+        ///
+        /// # Panics
+        ///
+        /// May panic if the task is already registered.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        unsafe fn register(
+            &mut self,
+            handle: TaskHandle,
+            scheduler_data: Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
+        );
 
-    /// Sets a new worker.
-    ///
-    /// Passing in `None` will automatically select an appropriate worker.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if any of the following conditions are violated:
-    ///
-    /// * A worker associated with the provided [`WorkerId`] does not exist.
-    /// * The task has yielded it's execution and has cached thread-local variables.
-    /// * Is used by someone other than the runtime implementation and the task is registered.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn set_worker(
-        &self,
-        #[vtable_info(type = "Optional<WorkerId>", into = "Into::into", from = "Into::into")]
-        worker: Option<WorkerId>,
-    );
+        /// Marks the context as unregistered.
+        ///
+        /// # Panics
+        ///
+        /// May panic if the task is not registered.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        #[allow(clippy::type_complexity)]
+        unsafe fn unregister(
+            &mut self,
+        ) -> (
+            TaskHandle,
+            Option<ObjBox<DynObj<dyn IBase + Send + Sync + 'static>>>,
+        );
 
-    /// Requests for the task to be blocked.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn request_block(&self);
+        /// Extracts the resume time.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn resume_time(&self) -> Timestamp;
 
-    /// Requests for the task to be aborted.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    ///
-    /// # Safety
-    ///
-    /// Aborting a task may lead to uninitialized data.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn request_abort(&self);
+        /// Advances the internal timer to the provided time.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        /// The runtime may not be notified if this is called outside of the scheduler.
+        fn set_resume_time(&self, time: Timestamp);
 
-    /// Shows the requests.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn peek_request(&self) -> StatusRequest;
+        /// Extracts the assigned worker.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn worker(&self) -> Option<WorkerId>;
 
-    /// Clears the requests and returns it.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn clear_request(&self) -> StatusRequest;
+        /// Sets a new worker.
+        ///
+        /// Passing in `None` will automatically select an appropriate worker.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if any of the following conditions are violated:
+        ///
+        /// * A worker associated with the provided [`WorkerId`] does not exist.
+        /// * The task has yielded it's execution and has cached thread-local variables.
+        /// * Is used by someone other than the runtime implementation and the task is registered.
+        unsafe fn set_worker(&self, worker: Option<WorkerId>);
 
-    /// Extracts the current run status.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn run_status(&self) -> TaskRunStatus;
+        /// Requests for the task to be blocked.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn request_block(&self);
 
-    /// Sets a new run status.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn set_run_status(&self, status: TaskRunStatus);
+        /// Requests for the task to be aborted.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        ///
+        /// # Safety
+        ///
+        /// Aborting a task may lead to uninitialized data.
+        unsafe fn request_abort(&self);
 
-    /// Extracts the current schedule status.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn schedule_status(&self) -> TaskScheduleStatus;
+        /// Shows the requests.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn peek_request(&self) -> StatusRequest;
 
-    /// Sets a new schedule status.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn set_schedule_status(&self, status: TaskScheduleStatus);
+        /// Clears the requests and returns it.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        unsafe fn clear_request(&self) -> StatusRequest;
 
-    /// Checks whether the task is empty.
-    ///
-    /// # Note
-    ///
-    /// May change after the task is registered with a runtime.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn is_empty_task(&self) -> bool;
+        /// Extracts the current run status.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn run_status(&self) -> TaskRunStatus;
 
-    /// Takes the entry function of the task.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<RawFfiFn<dyn FnOnce() + Send + 'static>>",
-        into_expr = "let res = Optional::from_rust(res)?; 
-            Optional::Some(std::mem::transmute(res.into_raw()))",
-        from_expr = "let res = res.into_rust()?; Some(res.assume_valid())"
-    )]
-    unsafe fn take_entry_function(&mut self) -> Option<FfiFn<'_, dyn FnOnce() + Send + '_>>;
+        /// Sets a new run status.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        unsafe fn set_run_status(&self, status: TaskRunStatus);
 
-    /// Checks whether the task is panicking.
-    ///
-    /// # Note
-    ///
-    /// Must be implemented atomically.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn is_panicking(&self) -> bool;
+        /// Extracts the current schedule status.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn schedule_status(&self) -> TaskScheduleStatus;
 
-    /// Sets the panicking flag.
-    ///
-    /// # Panics
-    ///
-    /// May panic if the flag is already set.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if not called from a task scheduler.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    unsafe fn set_panic(
-        &mut self,
-        #[vtable_info(
-            type = "Optional<RawObjBox<RawObjMut<dyn IBase + Send + 'static>>>",
-            into_expr = "let p_1 = Optional::from_rust(p_1.map(|v| v.into()));",
-            from_expr = "let p_1 = p_1.into_rust().map(|v| v.into())"
-        )]
-        panic: Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>,
-    );
+        /// Sets a new schedule status.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        unsafe fn set_schedule_status(&self, status: TaskScheduleStatus);
 
-    /// Takes the panic data from the task.
-    ///
-    /// # Panics
-    ///
-    /// May panic if the task is registered.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if the task has not completed or aborted it's execution.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<RawObjBox<RawObjMut<dyn IBase + Send + 'static>>>",
-        into_expr = "let res = Optional::from_rust(res)?; Optional::Some(res.into())",
-        from_expr = "let res = res.into_rust()?; Some(res.into())"
-    )]
-    unsafe fn take_panic_data(&mut self) -> Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>;
+        /// Checks whether the task is empty.
+        ///
+        /// # Note
+        ///
+        /// May change after the task is registered with a runtime.
+        fn is_empty_task(&self) -> bool;
 
-    /// Calls the cleanup function.
-    #[vtable_info(unsafe, abi = r#"extern "C-unwind""#)]
-    fn cleanup(&mut self);
+        /// Takes the entry function of the task.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        unsafe fn take_entry_function(&mut self) -> Option<FfiFn<'_, dyn FnOnce() + Send + '_>>;
 
-    /// Fetches a reference to the scheduler data.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<RawObj<dyn IBase + Send + Sync + 'static>>",
-        into_expr = "let res = Optional::from_rust(res)?; Optional::Some(fimo_ffi::ptr::into_raw(res))",
-        from_expr = "let res = res.into_rust()?; unsafe { Some(&*fimo_ffi::ptr::from_raw(res)) }"
-    )]
-    fn scheduler_data(&self) -> Option<&DynObj<dyn IBase + Send + Sync + 'static>>;
+        /// Checks whether the task is panicking.
+        ///
+        /// # Note
+        ///
+        /// Must be implemented atomically.
+        fn is_panicking(&self) -> bool;
+
+        /// Sets the panicking flag.
+        ///
+        /// # Panics
+        ///
+        /// May panic if the flag is already set.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if not called from a task scheduler.
+        unsafe fn set_panic(
+            &mut self,
+            panic: Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>,
+        );
+
+        /// Takes the panic data from the task.
+        ///
+        /// # Panics
+        ///
+        /// May panic if the task is registered.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if the task has not completed or aborted it's execution.
+        unsafe fn take_panic_data(&mut self) -> Option<ObjBox<DynObj<dyn IBase + Send + 'static>>>;
+
+        /// Calls the cleanup function.
+        fn cleanup(&mut self);
+
+        /// Fetches a reference to the scheduler data.
+        fn scheduler_data(&self) -> Option<&DynObj<dyn IBase + Send + Sync + 'static>>;
+    }
 }
 
 /// Access to the atomic member functions of [`ISchedulerContext`].
@@ -1060,7 +966,7 @@ impl AtomicISchedulerContext<'_> {
 
     /// Extracts the resume time.
     #[inline]
-    pub fn resume_time(&self) -> SystemTime {
+    pub fn resume_time(&self) -> Timestamp {
         let ptr = self.context.as_ptr();
         // SAFETY: the function is atomic and therefore causes no data races.
         unsafe { (*ptr).resume_time() }
@@ -1141,19 +1047,18 @@ impl Debug for AtomicISchedulerContext<'_> {
     }
 }
 
-/// Interface of rust panics.
-#[interface(
-    uuid = "c16e06dc-1558-47a2-912e-ee59a3d1375e",
-    vtable = "IRustPanicDataVTable",
-    generate()
-)]
-pub trait IRustPanicData: IBase + Send {
-    /// Takes the rust panic data.
-    ///
-    /// # Safety
-    ///
-    /// May only be called once.
-    unsafe fn take_rust_panic_impl(&mut self) -> Box<dyn Any + Send + 'static>;
+interface! {
+    #![interface_cfg(uuid = "c16e06dc-1558-47a2-912e-ee59a3d1375e")]
+
+    /// Interface of rust panics.
+    pub frozen interface IRustPanicData: marker IBase + marker Send {
+        /// Takes the rust panic data.
+        ///
+        /// # Safety
+        ///
+        /// May only be called once.
+        unsafe fn take_rust_panic_impl(&mut self) -> Box<dyn Any + Send + 'static>;
+    }
 }
 
 /// Extension trait for implementations of [`IRustPanicData`].

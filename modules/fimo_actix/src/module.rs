@@ -64,8 +64,11 @@ impl IModuleInterface for FimoActixInterface {
     }
 
     #[inline]
-    fn extensions(&self) -> &[&str] {
+    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
         <dyn IFimoActix>::EXTENSIONS
+            .iter()
+            .map(|&s| s.into())
+            .collect()
     }
 
     #[inline]

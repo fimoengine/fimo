@@ -4,6 +4,7 @@ use std::hash::Hash;
 use std::marker::Destruct;
 use std::ops::{FromResidual, Residual, Try};
 
+use crate::marshal::CTypeBridge;
 use crate::tuple::{ReprC, ReprRust};
 
 /// An optional value.
@@ -427,6 +428,27 @@ impl<T> const From<Optional<T>> for Option<T> {
     #[inline]
     fn from(val: Optional<T>) -> Self {
         <Optional<T> as ReprC>::into_rust(val)
+    }
+}
+
+unsafe impl<T> const CTypeBridge for Option<T>
+where
+    T: ~const CTypeBridge,
+{
+    type Type = Optional<T::Type>;
+
+    fn marshal(self) -> Self::Type {
+        match self {
+            Some(x) => Optional::Some(x.marshal()),
+            None => Optional::None,
+        }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        match x {
+            Optional::Some(x) => Some(T::demarshal(x)),
+            Optional::None => None,
+        }
     }
 }
 

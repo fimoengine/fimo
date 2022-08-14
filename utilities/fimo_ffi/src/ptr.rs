@@ -1,5 +1,5 @@
 //! Object pointer implementation.
-
+use crate::marshal::CTypeBridge;
 use crate::ConstStr;
 use std::alloc::Layout;
 use std::cmp::Ordering;
@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::{PhantomData, Unsize};
 use std::ptr::NonNull;
 
-pub use fimo_ffi_codegen::{interface, vtable, ObjectId};
+pub use fimo_ffi_codegen::{interface, ObjectId};
 pub use uuid::Uuid;
 
 /// Marks that the layout of a type is compatible with an [`ObjMetadata`].
@@ -48,6 +48,9 @@ pub trait ObjectId {
     /// Unique id of the object.
     const OBJECT_ID: Uuid;
 
+    /// Version of the object.
+    const OBJECT_VERSION: usize = 0;
+
     /// Name of the object.
     const OBJECT_NAME: &'static str = std::any::type_name::<Self>();
 }
@@ -59,6 +62,15 @@ pub trait ObjInterfaceBase {
 
     /// Unique id of the interface.
     const INTERFACE_ID: Uuid;
+
+    /// Interface is frozen.
+    const IS_FROZEN: bool = false;
+
+    /// Major version of the interface.
+    const INTERFACE_VERSION_MAJOR: u32 = 0;
+
+    /// Minor version of the interface.
+    const INTERFACE_VERSION_MINOR: u32 = 0;
 
     /// Name of the interface.
     const INTERFACE_NAME: &'static str = std::any::type_name::<Self>();
@@ -87,7 +99,7 @@ where
 ///
 /// This trait is not transitive, i.e. defining conversions `A -> B` and `B -> C` does not imply
 /// that `A -> C`. Such conversions must be manually implemented.
-pub trait CastInto<Dyn: ObjInterface + ?Sized>: ObjInterface + Unsize<Dyn> {
+pub trait CastInto<Dyn: ObjInterface + ?Sized>: ObjInterface {
     /// Retrieves a super vtable to the same object.
     fn cast_into(obj: ObjMetadata<Self>) -> ObjMetadata<Dyn>;
 }
@@ -100,28 +112,28 @@ pub trait CastInto<Dyn: ObjInterface + ?Sized>: ObjInterface + Unsize<Dyn> {
 ///
 /// This trait is not transitive, i.e. defining conversions `A -> B` and `B -> C` does not imply
 /// that `A -> C`. Such conversions must be manually implemented.
-pub trait CastFrom<Dyn: ObjInterface + Unsize<Self> + ?Sized>: ObjInterface {
+pub trait CastFrom<Dyn: ObjInterface + ?Sized>: ObjInterface {
     /// Casts the vtable to the super vtable of the same object.
     fn cast_from(obj: ObjMetadata<Dyn>) -> ObjMetadata<Self>;
 }
 
-impl<T, U> CastFrom<U> for T
+impl<T, U> const CastFrom<U> for T
 where
     T: ObjInterface + ?Sized,
     U: ObjInterface + Unsize<T> + ?Sized,
-    <U::Base as ObjInterfaceBase>::VTable: InnerVTable<<T::Base as ObjInterfaceBase>::VTable>,
+    U::Base: ~const IntoInterface<<T::Base as ObjInterfaceBase>::VTable>,
 {
     fn cast_from(obj: ObjMetadata<U>) -> ObjMetadata<T> {
         let vtable = obj.vtable();
-        let inner = vtable.inner();
-        ObjMetadata::new(inner)
+        let inner_vtable = <U::Base>::into_vtable(vtable);
+        ObjMetadata::new(inner_vtable)
     }
 }
 
-impl<T, U> CastInto<U> for T
+impl<T, U> const CastInto<U> for T
 where
     T: ObjInterface + Unsize<U> + ?Sized,
-    U: CastFrom<T> + ?Sized,
+    U: ~const CastFrom<T> + ?Sized,
 {
     #[inline(always)]
     default fn cast_into(obj: ObjMetadata<Self>) -> ObjMetadata<U> {
@@ -143,7 +155,14 @@ where
 /// amount of bytes specified in the `offset` field of the vtable head:
 ///
 /// ```compile_fail
-/// use fimo_ffi::ptr::{VTableHead, ObjMetadataCompatible, InnerVTable};
+/// use fimo_ffi::ptr::{ObjInterfaceBase, Uuid, VTableHead, ObjMetadataCompatible, IntoInterface};
+///
+/// trait Interface {}
+///
+/// impl ObjInterfaceBase for dyn Interface {
+///     type VTable = VTable;
+///     const INTERFACE_ID: Uuid = Uuid::from_bytes([0; 16]);
+/// }
 ///
 /// #[repr(C)]
 /// struct Inner {
@@ -155,15 +174,15 @@ where
 /// #[repr(C)]
 /// struct VTable {
 ///     head: VTableHead,
-///     inner: &'static VTableInner,
+///     inner: &'static Inner,
 ///     // more fields ..
 /// }
 ///
 /// unsafe impl ObjMetadataCompatible for VTable {}
 ///
-/// impl InnerVTable<Inner> for VTable {
-///     fn inner(&self) -> &Inner {
-///         self.inner
+/// impl IntoInterface<Inner> for dyn Interface {
+///     fn into_vtable(vtable: &Self::VTable) -> &Inner {
+///         vtable.inner
 ///     }
 /// }
 ///
@@ -173,7 +192,14 @@ where
 /// While the following vtable is valid:
 ///
 /// ```
-/// use fimo_ffi::ptr::{VTableHead, ObjMetadataCompatible, InnerVTable};
+/// use fimo_ffi::ptr::{ObjInterfaceBase, Uuid, VTableHead, ObjMetadataCompatible, IntoInterface};
+///
+/// trait Interface {}
+///
+/// impl ObjInterfaceBase for dyn Interface {
+///     type VTable = VTable;
+///     const INTERFACE_ID: Uuid = Uuid::from_bytes([0; 16]);
+/// }
 ///
 /// #[repr(C)]
 /// struct Inner {
@@ -201,30 +227,24 @@ where
 ///
 /// unsafe impl ObjMetadataCompatible for VTable {}
 ///
-/// impl InnerVTable<Inner> for VTable {
-///     fn inner(&self) -> &Inner {
+/// impl IntoInterface<Inner> for dyn Interface {
+///     fn into_vtable(vtable: &Self::VTable) -> &Inner {
 ///         // safety: because both `VTable` and `Inner` are `repr(C)`
 ///         // and `inner` is the first field of the vtable we can simply
 ///         // transmute the reference directly.
-///         unsafe { std::mem::transmute(self) }
+///         unsafe { std::mem::transmute(vtable) }
 ///     }
 /// }
 ///
-/// impl InnerVTable<Other> for VTable {
-///     fn inner(&self) -> &Other {
-///         &self.other
+/// impl IntoInterface<Other> for dyn Interface {
+///     fn into_vtable(vtable: &Self::VTable) -> &Other {
+///         &vtable.other
 ///     }
 /// }
 /// ```
-pub trait InnerVTable<Table: ObjMetadataCompatible>: ObjMetadataCompatible {
+pub trait IntoInterface<T: ObjMetadataCompatible>: ObjInterfaceBase {
     /// Fetches a reference to the inner vtable.
-    fn inner(&self) -> &Table;
-}
-
-impl<T: ObjMetadataCompatible> InnerVTable<T> for T {
-    default fn inner(&self) -> &T {
-        self
-    }
+    fn into_vtable(vtable: &Self::VTable) -> &T;
 }
 
 /// The metadata for a `Dyn = dyn SomeTrait` object type.
@@ -239,7 +259,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Constructs a new `ObjMetadata` with a given vtable.
     #[inline]
-    pub fn new(vtable: &'static <Dyn::Base as ObjInterfaceBase>::VTable) -> Self
+    pub const fn new(vtable: &'static <Dyn::Base as ObjInterfaceBase>::VTable) -> Self
     where
         Dyn: ObjInterface + 'a,
     {
@@ -247,13 +267,13 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
             // safety: the safety is guaranteed with the
             // implementation of ObjMetadataCompatible.
             vtable_ptr: unsafe { &*(vtable as *const _ as *const VTableHead) },
-            phantom: Default::default(),
+            phantom: PhantomData,
         }
     }
 
     /// Returns a vtable that is compatible with the current interface.
     #[inline]
-    pub fn vtable(self) -> &'static <Dyn::Base as ObjInterfaceBase>::VTable
+    pub const fn vtable(self) -> &'static <Dyn::Base as ObjInterfaceBase>::VTable
     where
         Dyn: ObjInterface + 'a,
     {
@@ -264,9 +284,9 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns the vtable to a parent object.
     #[inline]
-    pub fn super_vtable<T>(self) -> &'a <T::Base as ObjInterfaceBase>::VTable
+    pub const fn super_vtable<T>(self) -> &'a <T::Base as ObjInterfaceBase>::VTable
     where
-        Dyn: CastInto<T> + 'a,
+        Dyn: ~const CastInto<T> + 'a,
         T: ObjInterface + ?Sized + 'a,
     {
         let s = self.cast_super::<T>();
@@ -279,14 +299,16 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     where
         U: DowncastSafe + ObjectId + Unsize<Dyn>,
     {
-        (self.object_id() == U::OBJECT_ID) && (U::OBJECT_ID != Self::HIDDEN_UUID)
+        (self.object_id() == U::OBJECT_ID)
+            && (U::OBJECT_ID != Self::HIDDEN_UUID)
+            && (self.object_version() == U::OBJECT_VERSION)
     }
 
     /// Returns the super vtable.
     #[inline]
-    pub fn cast_super<U>(self) -> ObjMetadata<U>
+    pub const fn cast_super<U>(self) -> ObjMetadata<U>
     where
-        Dyn: CastInto<U> + 'a,
+        Dyn: ~const CastInto<U> + 'a,
         U: ObjInterface + ?Sized + 'a,
     {
         CastInto::cast_into(self)
@@ -302,6 +324,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     {
         (self.interface_id() == U::Base::INTERFACE_ID)
             && (U::Base::INTERFACE_ID != Self::HIDDEN_UUID)
+            && (self.interface_version_major() == U::Base::INTERFACE_VERSION_MAJOR)
     }
 
     /// Returns the metadata for the contained interface if it is of type `U`.
@@ -331,56 +354,74 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns the size of the type associated with this vtable.
     #[inline]
-    pub fn size_of(self) -> usize {
+    pub const fn size_of(self) -> usize {
         self.vtable_ptr.__internal_object_size
     }
 
     /// Returns the alignment of the type associated with this vtable.
     #[inline]
-    pub fn align_of(self) -> usize {
+    pub const fn align_of(self) -> usize {
         self.vtable_ptr.__internal_object_alignment
     }
 
     /// Returns the layout of the type associated with this vtable.
     #[inline]
-    pub fn layout(self) -> Layout {
+    pub const fn layout(self) -> Layout {
         unsafe { Layout::from_size_align_unchecked(self.size_of(), self.align_of()) }
     }
 
     /// Returns the id of the type associated with this vtable.
     #[inline]
-    pub fn object_id(self) -> Uuid {
+    pub const fn object_id(self) -> Uuid {
         Uuid::from_bytes(self.vtable_ptr.__internal_object_id)
     }
 
     /// Returns the name of the type associated with this vtable.
     #[inline]
-    pub fn object_name(self) -> &'static str {
+    pub const fn object_name(self) -> &'static str {
         self.vtable_ptr.__internal_object_name.into()
+    }
+
+    /// Returns the version of the type associated with this vtable.
+    #[inline]
+    pub const fn object_version(self) -> usize {
+        self.vtable_ptr.__internal_object_version
     }
 
     /// Returns the id of the interface implemented with this vtable.
     #[inline]
-    pub fn interface_id(self) -> Uuid {
+    pub const fn interface_id(self) -> Uuid {
         Uuid::from_bytes(self.vtable_ptr.__internal_interface_id)
     }
 
     /// Returns the name of the interface implemented with this vtable.
     #[inline]
-    pub fn interface_name(self) -> &'static str {
+    pub const fn interface_name(self) -> &'static str {
         self.vtable_ptr.__internal_interface_name.into()
+    }
+
+    /// Returns the major version number of the interface implemented with this vtable.
+    #[inline]
+    pub const fn interface_version_major(self) -> u32 {
+        self.vtable_ptr.__internal_interface_version_major
+    }
+
+    /// Returns the minor version number of the interface implemented with this vtable.
+    #[inline]
+    pub const fn interface_version_minor(self) -> u32 {
+        self.vtable_ptr.__internal_interface_version_minor
     }
 
     /// Offset from the downcasted vtable pointer to the current vtable.
     #[inline]
-    pub fn vtable_offset(self) -> usize {
+    pub const fn vtable_offset(self) -> usize {
         self.vtable_ptr.__internal_vtable_offset
     }
 }
 
-unsafe impl<Dyn: ?Sized> Send for ObjMetadata<Dyn> {}
+unsafe impl<Dyn: ?Sized> const Send for ObjMetadata<Dyn> {}
 
-unsafe impl<Dyn: ?Sized> Sync for ObjMetadata<Dyn> {}
+unsafe impl<Dyn: ?Sized> const Sync for ObjMetadata<Dyn> {}
 
 impl<Dyn: ?Sized> Debug for ObjMetadata<Dyn> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -390,11 +431,11 @@ impl<Dyn: ?Sized> Debug for ObjMetadata<Dyn> {
     }
 }
 
-impl<Dyn: ?Sized> Unpin for ObjMetadata<Dyn> {}
+impl<Dyn: ?Sized> const Unpin for ObjMetadata<Dyn> {}
 
-impl<Dyn: ?Sized> Copy for ObjMetadata<Dyn> {}
+impl<Dyn: ?Sized> const Copy for ObjMetadata<Dyn> {}
 
-impl<Dyn: ?Sized> Clone for ObjMetadata<Dyn> {
+impl<Dyn: ?Sized> const Clone for ObjMetadata<Dyn> {
     fn clone(&self) -> Self {
         Self {
             vtable_ptr: self.vtable_ptr,
@@ -448,6 +489,163 @@ pub struct DynObj<Dyn: ?Sized> {
     _ptr: PhantomData<RawObj<Dyn>>,
     // makes `DynObj` into a DST with size 0 and alignment 1.
     _inner: [()],
+}
+
+impl<Dyn: ?Sized> From<RawObj<Dyn>> for *const DynObj<Dyn> {
+    #[inline]
+    fn from(x: RawObj<Dyn>) -> Self {
+        from_raw(x)
+    }
+}
+
+impl<Dyn: ?Sized> From<RawObjMut<Dyn>> for *mut DynObj<Dyn> {
+    #[inline]
+    fn from(x: RawObjMut<Dyn>) -> Self {
+        from_raw_mut(x)
+    }
+}
+
+/// Type erased interface type.
+#[repr(C)]
+#[derive(Clone, Copy)]
+#[allow(missing_debug_implementations)]
+pub struct OpaqueObj {
+    v: RawObj<()>,
+}
+
+unsafe impl<Dyn: ?Sized> CTypeBridge for *const DynObj<Dyn> {
+    type Type = OpaqueObj;
+
+    fn marshal(self) -> Self::Type {
+        unsafe {
+            let raw = into_raw(self);
+            std::mem::transmute(raw)
+        }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let raw = std::mem::transmute::<_, RawObj<Dyn>>(x);
+        from_raw(raw)
+    }
+}
+
+unsafe impl<Dyn: ?Sized> CTypeBridge for *mut DynObj<Dyn> {
+    type Type = OpaqueObj;
+
+    fn marshal(self) -> Self::Type {
+        unsafe {
+            let raw = into_raw_mut(self);
+            std::mem::transmute(raw)
+        }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let raw = std::mem::transmute::<_, RawObjMut<Dyn>>(x);
+        from_raw_mut(raw)
+    }
+}
+
+unsafe impl<'a, Dyn: ?Sized> CTypeBridge for &'a DynObj<Dyn> {
+    type Type = OpaqueObj;
+
+    fn marshal(self) -> Self::Type {
+        unsafe {
+            let raw = into_raw(self);
+            std::mem::transmute(raw)
+        }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let raw = std::mem::transmute::<_, RawObj<Dyn>>(x);
+        &*from_raw(raw)
+    }
+}
+
+unsafe impl<'a, Dyn: ?Sized> CTypeBridge for &'a mut DynObj<Dyn> {
+    type Type = OpaqueObj;
+
+    fn marshal(self) -> Self::Type {
+        unsafe {
+            let raw = into_raw_mut(self);
+            std::mem::transmute(raw)
+        }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let raw = std::mem::transmute::<_, RawObjMut<Dyn>>(x);
+        &mut *from_raw_mut(raw)
+    }
+}
+
+#[doc(hidden)]
+pub trait ToPtr<'a, T: ?Sized> {
+    type Type;
+
+    unsafe fn to_ptr(self) -> Self::Type;
+}
+
+/// Thin pointer to a `DynObj`.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThisPtr<'a, Dyn: ?Sized> {
+    ptr: *const (),
+    _phantom: PhantomData<&'a Dyn>,
+}
+
+impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> const ToPtr<'b, U> for &'a DynObj<T> {
+    type Type = ThisPtr<'b, U>;
+
+    #[inline(always)]
+    unsafe fn to_ptr(self) -> Self::Type {
+        ThisPtr {
+            ptr: self as *const _ as *const _,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> const ToPtr<'b, U> for &'a mut DynObj<T> {
+    type Type = MutThisPtr<'b, U>;
+
+    #[inline(always)]
+    unsafe fn to_ptr(self) -> Self::Type {
+        MutThisPtr {
+            ptr: self as *mut _ as *mut _,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, Dyn: ?Sized> ThisPtr<'a, Dyn> {
+    /// Casts the pointer to a reference to a `T`.
+    ///
+    /// # Safety
+    ///
+    /// Only safe if the pointer points to a `T`.
+    #[inline(always)]
+    pub const unsafe fn cast<T>(self) -> &'a T {
+        &*(self.ptr.cast())
+    }
+}
+
+/// Mutable thin pointer to a `DynObj`.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct MutThisPtr<'a, Dyn: ?Sized> {
+    ptr: *mut (),
+    _phantom: PhantomData<&'a mut Dyn>,
+}
+
+impl<'a, Dyn: ?Sized + 'a> MutThisPtr<'a, Dyn> {
+    /// Casts the pointer to a mutable reference to a `T`.
+    ///
+    /// # Safety
+    ///
+    /// Only safe if the pointer points to a `T`.
+    #[inline(always)]
+    pub const unsafe fn cast<T>(self) -> &'a mut T {
+        &mut *(self.ptr.cast())
+    }
 }
 
 // constructing and destructuring of `DynObj` pointers.
@@ -720,6 +918,13 @@ pub fn object_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
     metadata.object_name()
 }
 
+/// Returns the version of the type associated with this vtable.
+#[inline]
+pub fn object_version<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> usize {
+    let metadata = metadata(obj);
+    metadata.object_version()
+}
+
 /// Returns the id of the interface implemented with this vtable.
 #[inline]
 pub fn interface_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid {
@@ -734,6 +939,20 @@ pub fn interface_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
     metadata.interface_name()
 }
 
+/// Returns the major version number of the interface implemented with this vtable.
+#[inline]
+pub fn interface_version_major<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> u32 {
+    let metadata = metadata(obj);
+    metadata.interface_version_major()
+}
+
+/// Returns the minor version number of the interface implemented with this vtable.
+#[inline]
+pub fn interface_version_minor<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> u32 {
+    let metadata = metadata(obj);
+    metadata.interface_version_minor()
+}
+
 /// Raw representation of an immutable object.
 #[repr(C)]
 #[allow(missing_debug_implementations)]
@@ -742,13 +961,13 @@ pub struct RawObj<Dyn: ?Sized> {
     metadata: ObjMetadata<Dyn>,
 }
 
-unsafe impl<Dyn: Send + ?Sized> Send for RawObj<Dyn> {}
+unsafe impl<Dyn: Send + ?Sized> const Send for RawObj<Dyn> {}
 
-unsafe impl<Dyn: Sync + ?Sized> Sync for RawObj<Dyn> {}
+unsafe impl<Dyn: Sync + ?Sized> const Sync for RawObj<Dyn> {}
 
-impl<Dyn: ?Sized> Copy for RawObj<Dyn> {}
+impl<Dyn: ?Sized> const Copy for RawObj<Dyn> {}
 
-impl<Dyn: ?Sized> Clone for RawObj<Dyn> {
+impl<Dyn: ?Sized> const Clone for RawObj<Dyn> {
     fn clone(&self) -> Self {
         Self {
             ptr: self.ptr,
@@ -757,14 +976,31 @@ impl<Dyn: ?Sized> Clone for RawObj<Dyn> {
     }
 }
 
-impl<Dyn: Unpin + ?Sized> Unpin for RawObj<Dyn> {}
+impl<Dyn: Unpin + ?Sized> const Unpin for RawObj<Dyn> {}
+
+impl<Dyn: ?Sized> From<&DynObj<Dyn>> for RawObj<Dyn> {
+    #[inline]
+    fn from(x: &DynObj<Dyn>) -> Self {
+        into_raw(x)
+    }
+}
+
+impl<Dyn: ?Sized> From<*const DynObj<Dyn>> for RawObj<Dyn> {
+    #[inline]
+    fn from(x: *const DynObj<Dyn>) -> Self {
+        into_raw(x)
+    }
+}
 
 /// Forms a raw object pointer from a data address and metadata.
 ///
 /// The pointer is safe to dereference if the metadata and pointer come from the same underlying
 /// erased type and the object is still alive.
 #[inline]
-pub fn raw_from_raw_parts<Dyn: ?Sized>(ptr: *const (), metadata: ObjMetadata<Dyn>) -> RawObj<Dyn> {
+pub const fn raw_from_raw_parts<Dyn: ?Sized>(
+    ptr: *const (),
+    metadata: ObjMetadata<Dyn>,
+) -> RawObj<Dyn> {
     RawObj {
         ptr: unsafe { NonNull::new_unchecked(ptr as *mut _) },
         metadata,
@@ -779,13 +1015,13 @@ pub struct RawObjMut<Dyn: ?Sized> {
     metadata: ObjMetadata<Dyn>,
 }
 
-unsafe impl<Dyn: Send + ?Sized> Send for RawObjMut<Dyn> {}
+unsafe impl<Dyn: Send + ?Sized> const Send for RawObjMut<Dyn> {}
 
-unsafe impl<Dyn: Sync + ?Sized> Sync for RawObjMut<Dyn> {}
+unsafe impl<Dyn: Sync + ?Sized> const Sync for RawObjMut<Dyn> {}
 
-impl<Dyn: ?Sized> Copy for RawObjMut<Dyn> {}
+impl<Dyn: ?Sized> const Copy for RawObjMut<Dyn> {}
 
-impl<Dyn: ?Sized> Clone for RawObjMut<Dyn> {
+impl<Dyn: ?Sized> const Clone for RawObjMut<Dyn> {
     fn clone(&self) -> Self {
         Self {
             ptr: self.ptr,
@@ -794,14 +1030,28 @@ impl<Dyn: ?Sized> Clone for RawObjMut<Dyn> {
     }
 }
 
-impl<Dyn: Unpin + ?Sized> Unpin for RawObjMut<Dyn> {}
+impl<Dyn: Unpin + ?Sized> const Unpin for RawObjMut<Dyn> {}
+
+impl<Dyn: ?Sized> From<&mut DynObj<Dyn>> for RawObjMut<Dyn> {
+    #[inline]
+    fn from(x: &mut DynObj<Dyn>) -> Self {
+        into_raw_mut(x)
+    }
+}
+
+impl<Dyn: ?Sized> From<*mut DynObj<Dyn>> for RawObjMut<Dyn> {
+    #[inline]
+    fn from(x: *mut DynObj<Dyn>) -> Self {
+        into_raw_mut(x)
+    }
+}
 
 /// Forms a mutable raw object pointer from a data address and metadata.
 ///
 /// The pointer is safe to dereference if the metadata and pointer come from the same underlying
 /// erased type and the object is still alive.
 #[inline]
-pub fn raw_from_raw_parts_mut<Dyn: ?Sized>(
+pub const fn raw_from_raw_parts_mut<Dyn: ?Sized>(
     ptr: *mut (),
     metadata: ObjMetadata<Dyn>,
 ) -> RawObjMut<Dyn> {
@@ -809,6 +1059,87 @@ pub fn raw_from_raw_parts_mut<Dyn: ?Sized>(
         ptr: unsafe { NonNull::new_unchecked(ptr as _) },
         metadata,
     }
+}
+
+/// Generic vtable representation.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GenericVTable<Head: ObjMetadataCompatible, Data: 'static> {
+    head: Head,
+    data: Data,
+}
+
+/// Helper trait for supporting vtables with dynamic offsets to the data section.
+///
+/// # Safety
+///
+/// An implementation must ensure that the offset returned by [`DynamicDataOffset::data_offset`],
+/// when applied to a pointer to the start of the vtable, points to the start of the data section.
+pub unsafe trait DynamicDataOffset: ObjMetadataCompatible {
+    /// Returns the offset in bytes from the start of the vtable to the start of the data section.
+    fn data_offset(&self) -> usize;
+}
+
+trait VTableDataSpec<Data> {
+    fn get_data(&self) -> &Data;
+}
+
+impl<Head, Data> const VTableDataSpec<Data> for GenericVTable<Head, Data>
+where
+    Head: ObjMetadataCompatible,
+    Data: 'static,
+{
+    default fn get_data(&self) -> &Data {
+        &self.data
+    }
+}
+
+impl<Head, Data> const VTableDataSpec<Data> for GenericVTable<Head, Data>
+where
+    Head: ~const DynamicDataOffset,
+    Data: 'static,
+{
+    default fn get_data(&self) -> &Data {
+        let this: *const u8 = (self as *const Self).cast();
+        let offset = self.head.data_offset();
+
+        // SAFETY: We offload the correctness to the implementation of `DynamicDataOffset`.
+        unsafe {
+            let data_ptr: *const Data = this.add(offset).cast();
+            &*data_ptr
+        }
+    }
+}
+
+impl<Head, Data> GenericVTable<Head, Data>
+where
+    Head: ObjMetadataCompatible,
+    Data: 'static,
+{
+    /// Constructs a new vtable.
+    #[inline]
+    pub const fn new(head: Head, data: Data) -> Self {
+        Self { head, data }
+    }
+
+    /// Fetches a reference to the head section.
+    #[inline]
+    pub const fn head(&self) -> &Head {
+        &self.head
+    }
+
+    /// Fetches a reference to the data section.
+    #[inline]
+    pub const fn data(&self) -> &Data {
+        self.get_data()
+    }
+}
+
+unsafe impl<Head, Data> ObjMetadataCompatible for GenericVTable<Head, Data>
+where
+    Head: ObjMetadataCompatible,
+    Data: 'static,
+{
 }
 
 /// The common head of all vtables.
@@ -828,10 +1159,16 @@ pub struct VTableHead {
     pub __internal_object_id: [u8; 16],
     /// Name of the underlying object type.
     pub __internal_object_name: ConstStr<'static>,
+    /// Version of the underlying object type.
+    pub __internal_object_version: usize,
     /// Unique interface id.
     pub __internal_interface_id: [u8; 16],
     /// Name of the interface type.
     pub __internal_interface_name: ConstStr<'static>,
+    /// Major version of the interface.
+    pub __internal_interface_version_major: u32,
+    /// Minor version of the interface.
+    pub __internal_interface_version_minor: u32,
     /// Offset from the downcasted vtable pointer to the current vtable pointer.
     pub __internal_vtable_offset: usize,
 }
@@ -848,6 +1185,15 @@ impl VTableHead {
 
     /// Constructs a new vtable with a custom offset.
     pub const fn new_embedded<'a, T, Dyn>(offset: usize) -> Self
+    where
+        T: ObjectId + Unsize<Dyn> + 'a,
+        Dyn: ObjInterface + ?Sized + 'a,
+    {
+        Self::new_embedded_::<T, Dyn>(offset, 0)
+    }
+
+    /// Constructs a new vtable with a custom offset.
+    pub const fn new_embedded_<'a, T, Dyn>(offset: usize, minor_version: u32) -> Self
     where
         T: ObjectId + Unsize<Dyn> + 'a,
         Dyn: ObjInterface + ?Sized + 'a,
@@ -870,10 +1216,13 @@ impl VTableHead {
             __internal_object_name: unsafe {
                 crate::str::from_utf8_unchecked(T::OBJECT_NAME.as_bytes())
             },
+            __internal_object_version: T::OBJECT_VERSION,
             __internal_interface_id: *Dyn::Base::INTERFACE_ID.as_bytes(),
             __internal_interface_name: unsafe {
                 crate::str::from_utf8_unchecked(Dyn::Base::INTERFACE_NAME.as_bytes())
             },
+            __internal_interface_version_major: Dyn::Base::INTERFACE_VERSION_MAJOR,
+            __internal_interface_version_minor: minor_version,
             __internal_vtable_offset: offset,
         }
     }
@@ -881,11 +1230,17 @@ impl VTableHead {
 
 unsafe impl ObjMetadataCompatible for VTableHead {}
 
-/// Base trait for all objects.
-#[interface(vtable = "IBaseVTable", no_dyn_impl, generate())]
-pub trait IBase {}
+interface! {
+    #![interface_cfg(no_dyn_impl)]
+
+    /// Base trait for all objects.
+    pub frozen interface IBase {}
+}
 
 impl<T: ?Sized> IBase for T {}
+
+#[doc(hidden)]
+pub const fn __assert_ibase<T: IBase + ?Sized>() {}
 
 /// Helper trait for a [`DynObj<dyn IBase>`].
 pub trait IBaseExt<'a, Dyn: IBase + ?Sized + 'a> {

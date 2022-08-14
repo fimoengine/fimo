@@ -7,6 +7,7 @@
 )]
 #![feature(const_ptr_offset_from)]
 #![feature(strict_provenance)]
+#![feature(const_trait_impl)]
 #![feature(negative_impls)]
 #![feature(const_mut_refs)]
 #![feature(thread_local)]
@@ -17,7 +18,7 @@
 use crate::raw::TaskHandle;
 use crate::runtime::{IRuntime, IRuntimeExt};
 use fimo_ffi::{interface, DynObj};
-use fimo_module::{FimoInterface, IModuleInterface, IModuleInterfaceVTable, ReleaseType, Version};
+use fimo_module::{FimoInterface, IModuleInterface, ReleaseType, Version};
 
 pub mod sync;
 
@@ -25,19 +26,16 @@ pub mod raw;
 pub mod runtime;
 pub mod task;
 
-/// Type-erased `fimo-tasks` interface.
-#[interface(
-    uuid = "e4a1d023-2261-4b8f-b237-9bf25c8c65ef",
-    vtable = "IFimoTasksVTable",
-    generate(IModuleInterfaceVTable)
-)]
-pub trait IFimoTasks: IModuleInterface {
-    /// Fetches a reference to the task runtime.
-    #[vtable_info(
-        return_type = "*const DynObj<dyn IRuntime>",
-        from_expr = "unsafe { &*res }"
+interface! {
+    #![interface_cfg(
+        uuid = "e4a1d023-2261-4b8f-b237-9bf25c8c65ef",
     )]
-    fn runtime(&self) -> &DynObj<dyn IRuntime>;
+
+    /// Type-erased `fimo-tasks` interface.
+    pub frozen interface IFimoTasks: IModuleInterface @ frozen version("0.0") {
+        /// Fetches a reference to the task runtime.
+        fn runtime(&self) -> &DynObj<dyn IRuntime>;
+    }
 }
 
 impl<'a> FimoInterface for dyn IFimoTasks + 'a {

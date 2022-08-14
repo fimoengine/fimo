@@ -6,13 +6,14 @@
     rustdoc::broken_intra_doc_links
 )]
 #![feature(const_ptr_offset_from)]
+#![feature(const_trait_impl)]
 #![feature(unsize)]
 
 use actix_web::Scope;
 
 pub use actix_web as actix;
 use fimo_ffi::{interface, FfiFn, ReleaseType, Version};
-use fimo_module::{FimoInterface, IModuleInterface, IModuleInterfaceVTable};
+use fimo_module::{FimoInterface, IModuleInterface};
 
 /// Status of the server.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -50,51 +51,50 @@ pub enum ServerEvent {
     Aborted,
 }
 
-/// The fimo-actix interface.
-#[interface(
-    uuid = "85fa7a5f-959d-40c6-8d7a-ccd4dea654cf",
-    vtable = "IFimoActixVTable",
-    generate(IModuleInterfaceVTable)
-)]
-pub trait IFimoActix: IModuleInterface {
-    /// Starts the server if it is not running.
-    fn start(&self) -> ServerStatus;
+interface! {
+    #![interface_cfg(uuid = "85fa7a5f-959d-40c6-8d7a-ccd4dea654cf")]
 
-    /// Stops the server if it is running.
-    fn stop(&self) -> ServerStatus;
+    /// The fimo-actix interface.
+    pub frozen interface IFimoActix : IModuleInterface @ frozen version("0.0") {
+        /// Starts the server if it is not running.
+        fn start(&self) -> ServerStatus;
 
-    /// Pauses the server if it is running.
-    fn pause(&self) -> ServerStatus;
+        /// Stops the server if it is running.
+        fn stop(&self) -> ServerStatus;
 
-    /// Resumes the server if it is paused.
-    fn resume(&self) -> ServerStatus;
+        /// Pauses the server if it is running.
+        fn pause(&self) -> ServerStatus;
 
-    /// Restarts the server if it is running.
-    fn restart(&self) -> ServerStatus;
+        /// Resumes the server if it is paused.
+        fn resume(&self) -> ServerStatus;
 
-    /// Fetches the status of the server.
-    fn get_server_status(&self) -> ServerStatus;
+        /// Restarts the server if it is running.
+        fn restart(&self) -> ServerStatus;
 
-    /// Registers a new scope for the server.
-    ///
-    /// The provided builder function is called, when the server is starting.
-    /// The builder may not call into the interface.
-    fn register_scope_raw(
-        &self,
-        path: &str,
-        builder: ScopeBuilder,
-    ) -> fimo_module::Result<ScopeBuilderId>;
+        /// Fetches the status of the server.
+        fn get_server_status(&self) -> ServerStatus;
 
-    /// Unregisters a scope.
-    fn unregister_scope_raw(&self, id: ScopeBuilderId) -> fimo_module::Result<()>;
+        /// Registers a new scope for the server.
+        ///
+        /// The provided builder function is called, when the server is starting.
+        /// The builder may not call into the interface.
+        fn register_scope_raw(
+            &self,
+            path: &str,
+            builder: ScopeBuilder,
+        ) -> fimo_module::Result<ScopeBuilderId>;
 
-    /// Registers a callback that is called every time the server status changes.
-    ///
-    /// The function may not call into the interface.
-    fn register_callback_raw(&self, f: Callback) -> fimo_module::Result<CallbackId>;
+        /// Unregisters a scope.
+        fn unregister_scope_raw(&self, id: ScopeBuilderId) -> fimo_module::Result<()>;
 
-    /// Unregisters a callback.
-    fn unregister_callback_raw(&self, id: CallbackId) -> fimo_module::Result<()>;
+        /// Registers a callback that is called every time the server status changes.
+        ///
+        /// The function may not call into the interface.
+        fn register_callback_raw(&self, f: Callback) -> fimo_module::Result<CallbackId>;
+
+        /// Unregisters a callback.
+        fn unregister_callback_raw(&self, id: CallbackId) -> fimo_module::Result<()>;
+    }
 }
 
 impl FimoInterface for dyn IFimoActix {

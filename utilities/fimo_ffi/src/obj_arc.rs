@@ -3,12 +3,14 @@
 // found in the std library, which is dual-licensed under Apache 2.0 and MIT
 // terms.
 
-use crate::obj_box::{ObjBox, PtrDrop, WriteCloneIntoRaw};
+use crate::marshal::CTypeBridge;
+use crate::obj_box::{CGlobal, ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::ptr::{
     CastInto, DowncastSafe, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId,
-    RawObj,
+    OpaqueObj,
 };
-use std::alloc::{AllocError, Allocator, Global, Layout};
+use crate::{ReprC, ReprRust};
+use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::error::Error;
@@ -228,19 +230,18 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::{CastInto, FetchVTable, IBase};
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase {
-    ///     fn add(&self, num: usize) -> usize;
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {
+    ///         fn add(&self, num: usize) -> usize;
+    ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
@@ -348,18 +349,17 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -388,18 +388,17 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -426,18 +425,17 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -626,7 +624,7 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
 
         ObjArc {
             ptr: NonNull::new_unchecked(arc_ptr),
-            phantom: Default::default(),
+            phantom: PhantomData,
             alloc,
         }
     }
@@ -643,7 +641,7 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     /// assert_eq!(unsafe { &*x_ptr }, "hello");
     /// ```
     #[inline]
-    pub fn into_raw(this: ObjArc<T, A>) -> *const T {
+    pub const fn into_raw(this: ObjArc<T, A>) -> *const T {
         let ptr: *const T = unsafe { std::ptr::addr_of!((*this.ptr.as_ptr()).data) };
         std::mem::forget(this);
         ptr
@@ -664,7 +662,7 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     /// assert_eq!(unsafe { &*x_ptr }, "hello");
     /// ```
     #[inline]
-    pub fn into_raw_parts(this: ObjArc<T, A>) -> (*const T, A) {
+    pub const fn into_raw_parts(this: ObjArc<T, A>) -> (*const T, A) {
         let (ptr, alloc): (*const T, A) = unsafe {
             (
                 std::ptr::addr_of!((*this.ptr.as_ptr()).data),
@@ -691,7 +689,7 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn as_ptr(this: &ObjArc<T, A>) -> *const T {
+    pub const fn as_ptr(this: &ObjArc<T, A>) -> *const T {
         unsafe { std::ptr::addr_of!((*this.ptr.as_ptr()).data) }
     }
 
@@ -709,7 +707,7 @@ impl<T: ?Sized, A: Allocator> ObjArc<T, A> {
     /// let alloc = ObjArc::allocator(&x);
     /// ```
     #[inline]
-    pub fn allocator(this: &ObjArc<T, A>) -> &A {
+    pub const fn allocator(this: &ObjArc<T, A>) -> &A {
         &this.alloc
     }
 
@@ -1106,25 +1104,25 @@ impl<T: Clone, A: Allocator + Clone> ObjArc<T, A> {
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjArc<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> const Send for ObjArc<T, A> {}
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjArc<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> const Sync for ObjArc<T, A> {}
 
-impl<T: RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> UnwindSafe for ObjArc<T, A> {}
+impl<T: RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> const UnwindSafe for ObjArc<T, A> {}
 
-impl<T: ?Sized, A: Allocator> Unpin for ObjArc<T, A> {}
+impl<T: ?Sized, A: Allocator> const Unpin for ObjArc<T, A> {}
 
 impl<T: ?Sized, A: Allocator> AsRef<T> for ObjArc<T, A> {
     #[inline]
     fn as_ref(&self) -> &T {
-        &**self
+        self
     }
 }
 
 impl<T: ?Sized, A: Allocator> Borrow<T> for ObjArc<T, A> {
     #[inline]
     fn borrow(&self) -> &T {
-        &**self
+        self
     }
 }
 
@@ -1267,10 +1265,66 @@ impl<T: Error, A: Allocator> Error for ObjArc<T, A> {
     }
 }
 
+impl<T: ?Sized> ReprC for ObjArc<T, CGlobal> {
+    type T = ObjArc<T, Global>;
+
+    #[inline]
+    fn into_rust(self) -> Self::T {
+        let (ptr, alloc) = ObjArc::into_raw_parts(self);
+        unsafe { ObjArc::from_raw_parts(ptr, alloc.into_rust()) }
+    }
+
+    #[inline]
+    fn from_rust(t: Self::T) -> Self {
+        let (ptr, alloc) = ObjArc::into_raw_parts(t);
+        unsafe { ObjArc::from_raw_parts(ptr, alloc.into_c()) }
+    }
+}
+
+impl<T: ?Sized> ReprRust for ObjArc<T, Global> {
+    type T = ObjArc<T, CGlobal>;
+
+    #[inline]
+    fn into_c(self) -> Self::T {
+        ObjArc::from_rust(self)
+    }
+
+    #[inline]
+    fn from_c(t: Self::T) -> Self {
+        ObjArc::into_rust(t)
+    }
+}
+
 impl<T> From<T> for ObjArc<T> {
     #[inline]
     fn from(t: T) -> Self {
         ObjArc::new(t)
+    }
+}
+
+unsafe impl<T: ?Sized, A: Allocator> CTypeBridge for ObjArc<T, A>
+where
+    A: CTypeBridge,
+    A::Type: Allocator,
+{
+    default type Type = ObjArc<T, A::Type>;
+
+    default fn marshal(self) -> Self::Type {
+        let (ptr, alloc) = ObjArc::into_raw_parts(self);
+        let a = unsafe { ObjArc::from_raw_parts(ptr, alloc.marshal()) };
+        let a = std::mem::ManuallyDrop::new(a);
+
+        // Safety: We know that the types match, as we are the only implementors of the trait,
+        unsafe { std::mem::transmute_copy(&a) }
+    }
+
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        // Safety: See above.
+        let x = std::mem::ManuallyDrop::new(x);
+        let x: ObjArc<T, A::Type> = std::mem::transmute_copy(&x);
+
+        let (ptr, alloc) = ObjArc::into_raw_parts(x);
+        ObjArc::from_raw_parts(ptr, A::demarshal(alloc))
     }
 }
 
@@ -1396,19 +1450,18 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase {
-    ///     fn add(&self, num: usize) -> usize;
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {
+    ///         fn add(&self, num: usize) -> usize;
+    ///     }
     /// }
     ///
     /// // Define a custom object implementing the interface.
@@ -1518,18 +1571,17 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1559,18 +1611,17 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase { }
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1599,18 +1650,17 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
-    /// #[interface(
-    ///     uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44",
-    ///     vtable = "ObjVTable",
-    ///     generate()
-    /// )]
-    /// trait Obj: IBase { }
+    /// interface! {
+    ///     #![interface_cfg(uuid = "59dc47cf-fd2e-4d58-bcd4-5a31adc68a44")]
+    ///     interface Obj: marker IBase {}
+    /// }
     ///
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
@@ -1979,9 +2029,9 @@ impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjWeak<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> const Send for ObjWeak<T, A> {}
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjWeak<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> const Sync for ObjWeak<T, A> {}
 
 impl<T: ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
     fn clone(&self) -> Self {
@@ -2020,6 +2070,62 @@ impl<T: ?Sized + Debug, A: Allocator> Debug for ObjWeak<T, A> {
 impl<T, A: Allocator + Default> Default for ObjWeak<T, A> {
     fn default() -> Self {
         ObjWeak::new_in(Default::default())
+    }
+}
+
+impl<T: ?Sized> ReprC for ObjWeak<T, CGlobal> {
+    type T = ObjWeak<T, Global>;
+
+    #[inline]
+    fn into_rust(self) -> Self::T {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(self);
+        unsafe { ObjWeak::from_raw_parts(ptr, alloc.into_rust()) }
+    }
+
+    #[inline]
+    fn from_rust(t: Self::T) -> Self {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(t);
+        unsafe { ObjWeak::from_raw_parts(ptr, alloc.into_c()) }
+    }
+}
+
+impl<T: ?Sized> ReprRust for ObjWeak<T, Global> {
+    type T = ObjWeak<T, CGlobal>;
+
+    #[inline]
+    fn into_c(self) -> Self::T {
+        ObjWeak::from_rust(self)
+    }
+
+    #[inline]
+    fn from_c(t: Self::T) -> Self {
+        ObjWeak::into_rust(t)
+    }
+}
+
+unsafe impl<T: ?Sized, A: Allocator> CTypeBridge for ObjWeak<T, A>
+where
+    A: CTypeBridge,
+    A::Type: Allocator,
+{
+    default type Type = ObjWeak<T, A::Type>;
+
+    default fn marshal(self) -> Self::Type {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(self);
+        let a = unsafe { ObjWeak::from_raw_parts(ptr, alloc.marshal()) };
+        let a = std::mem::ManuallyDrop::new(a);
+
+        // Safety: We know that the types match, as we are the only implementors of the trait,
+        unsafe { std::mem::transmute_copy(&a) }
+    }
+
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        // Safety: See above.
+        let x = std::mem::ManuallyDrop::new(x);
+        let x: ObjWeak<T, A::Type> = std::mem::transmute_copy(&x);
+
+        let (ptr, alloc) = ObjWeak::into_raw_parts(x);
+        ObjWeak::from_raw_parts(ptr, A::demarshal(alloc))
     }
 }
 
@@ -2111,79 +2217,17 @@ fn is_dangling<T: ?Sized>(ptr: *mut T) -> bool {
     address == usize::MAX
 }
 
-/// FFI-safe wrapper around the [`Global`] allocator.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug)]
-pub struct CGlobal {
-    pub(crate) _v: u8,
-}
-
-unsafe impl Allocator for CGlobal {
-    #[inline(always)]
-    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        Global.allocate(layout)
-    }
-
-    #[inline(always)]
-    fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        Global.allocate_zeroed(layout)
-    }
-
-    #[inline(always)]
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        Global.deallocate(ptr, layout)
-    }
-
-    #[inline(always)]
-    unsafe fn grow(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        Global.grow(ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn grow_zeroed(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        Global.grow_zeroed(ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    unsafe fn shrink(
-        &self,
-        ptr: NonNull<u8>,
-        old_layout: Layout,
-        new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, AllocError> {
-        Global.shrink(ptr, old_layout, new_layout)
-    }
-
-    #[inline(always)]
-    fn by_ref(&self) -> &Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-}
-
 /// FFI-safe wrapper for an `ObjArc<DynObj<T>>`.
 #[repr(C)]
-pub struct RawObjArc<T, A: Allocator = CGlobal> {
-    ptr: T,
+pub struct RawObjArc<A: Allocator = CGlobal> {
+    ptr: OpaqueObj,
     alloc: ManuallyDrop<A>,
 }
 
-impl<T: ?Sized, A: Allocator> RawObjArc<RawObj<T>, A> {
+impl<A: Allocator> RawObjArc<A> {
     /// Consumes the `RawObjArc<T>` and turns it into a raw pointer.
     #[inline]
-    pub fn into_raw_parts(self) -> (RawObj<T>, A) {
+    pub fn into_raw_parts(self) -> (OpaqueObj, A) {
         let ptr = unsafe { std::ptr::read(&self.ptr) };
         let alloc = unsafe { std::ptr::read(&self.alloc) };
         std::mem::forget(self);
@@ -2197,7 +2241,7 @@ impl<T: ?Sized, A: Allocator> RawObjArc<RawObj<T>, A> {
     ///
     /// See [`std::sync::Weak::from_raw`].
     #[inline]
-    pub unsafe fn from_raw_parts(ptr: RawObj<T>, alloc: A) -> RawObjArc<RawObj<T>, A> {
+    pub unsafe fn from_raw_parts(ptr: OpaqueObj, alloc: A) -> RawObjArc<A> {
         Self {
             ptr,
             alloc: ManuallyDrop::new(alloc),
@@ -2205,81 +2249,53 @@ impl<T: ?Sized, A: Allocator> RawObjArc<RawObj<T>, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> From<ObjArc<DynObj<T>, A>> for RawObjArc<RawObj<T>, A> {
-    fn from(v: ObjArc<DynObj<T>, A>) -> Self {
-        let (ptr, alloc) = ObjArc::into_raw_parts(v);
-        let ptr = crate::ptr::into_raw(ptr);
-        unsafe { RawObjArc::from_raw_parts(ptr, alloc) }
+unsafe impl<T: ?Sized, A: Allocator> CTypeBridge for ObjArc<DynObj<T>, A>
+where
+    A: CTypeBridge,
+    A::Type: Allocator,
+{
+    type Type = RawObjArc<A::Type>;
+
+    fn marshal(self) -> Self::Type {
+        let (ptr, alloc) = ObjArc::into_raw_parts(self);
+        unsafe { RawObjArc::from_raw_parts(ptr.marshal(), alloc.marshal()) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let (ptr, alloc) = x.into_raw_parts();
+        ObjArc::from_raw_parts(<&DynObj<T>>::demarshal(ptr), A::demarshal(alloc))
     }
 }
 
-impl<T: ?Sized> From<ObjArc<DynObj<T>, Global>> for RawObjArc<RawObj<T>, CGlobal> {
-    fn from(v: ObjArc<DynObj<T>, Global>) -> Self {
-        let (ptr, _) = ObjArc::into_raw_parts(v);
-        let ptr = crate::ptr::into_raw(ptr);
-        unsafe { RawObjArc::from_raw_parts(ptr, CGlobal { _v: 0 }) }
-    }
-}
-
-impl<T: ?Sized, A: Allocator> From<RawObjArc<RawObj<T>, A>> for ObjArc<DynObj<T>, A> {
-    fn from(v: RawObjArc<RawObj<T>, A>) -> Self {
-        let (ptr, alloc) = v.into_raw_parts();
-        let ptr = crate::ptr::from_raw(ptr);
-        unsafe { ObjArc::from_raw_parts(ptr, alloc) }
-    }
-}
-
-impl<T: ?Sized> From<RawObjArc<RawObj<T>, CGlobal>> for ObjArc<DynObj<T>, Global> {
-    fn from(v: RawObjArc<RawObj<T>, CGlobal>) -> Self {
-        let (ptr, _) = v.into_raw_parts();
-        let ptr = crate::ptr::from_raw(ptr);
-        unsafe { ObjArc::from_raw_parts(ptr, Global) }
-    }
-}
-
-impl<T: Debug, A: Allocator> Debug for RawObjArc<T, A> {
+impl<A: Allocator> Debug for RawObjArc<A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "(RawObjArc)")
     }
 }
 
-impl<T, A: Allocator> DropSpec for RawObjArc<T, A> {
-    default fn drop_inner(&mut self) {
-        unimplemented!()
-    }
-}
-
-impl<T: ?Sized, A: Allocator> DropSpec for RawObjArc<RawObj<T>, A> {
-    fn drop_inner(&mut self) {
-        let ptr = self.ptr;
-        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
-        let copy = unsafe { RawObjArc::from_raw_parts(ptr, alloc) };
-        let copy: ObjArc<DynObj<T>, A> = copy.into();
-        drop(copy)
-    }
-}
-
-unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawObjArc<T, A> {
+impl<A: Allocator> Drop for RawObjArc<A> {
     fn drop(&mut self) {
-        self.drop_inner()
-    }
-}
+        // let the objark handle the deallocation.
 
-pub(crate) trait DropSpec {
-    fn drop_inner(&mut self);
+        // Safety: All DynObj's share the same layout therefore we can type erase it.
+        let ptr = unsafe { <&mut DynObj<()>>::demarshal(self.ptr) };
+        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
+        let erased_box = unsafe { ObjArc::from_raw_parts(ptr, alloc) };
+        drop(erased_box)
+    }
 }
 
 /// FFI-safe wrapper for an `ObjWeak<DynObj<T>>`.
 #[repr(C)]
-pub struct RawObjWeak<T, A: Allocator = CGlobal> {
-    ptr: T,
+pub struct RawObjWeak<A: Allocator = CGlobal> {
+    ptr: OpaqueObj,
     alloc: ManuallyDrop<A>,
 }
 
-impl<T: ?Sized, A: Allocator> RawObjWeak<RawObj<T>, A> {
+impl<A: Allocator> RawObjWeak<A> {
     /// Consumes the `RawObjWeak<T>` and turns it into a raw pointer.
     #[inline]
-    pub fn into_raw_parts(self) -> (RawObj<T>, A) {
+    pub fn into_raw_parts(self) -> (OpaqueObj, A) {
         let ptr = unsafe { std::ptr::read(&self.ptr) };
         let alloc = unsafe { std::ptr::read(&self.alloc) };
         std::mem::forget(self);
@@ -2293,7 +2309,7 @@ impl<T: ?Sized, A: Allocator> RawObjWeak<RawObj<T>, A> {
     ///
     /// See [`std::sync::Weak::from_raw`].
     #[inline]
-    pub unsafe fn from_raw_parts(ptr: RawObj<T>, alloc: A) -> RawObjWeak<RawObj<T>, A> {
+    pub unsafe fn from_raw_parts(ptr: OpaqueObj, alloc: A) -> RawObjWeak<A> {
         Self {
             ptr,
             alloc: ManuallyDrop::new(alloc),
@@ -2301,62 +2317,38 @@ impl<T: ?Sized, A: Allocator> RawObjWeak<RawObj<T>, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> From<ObjWeak<DynObj<T>, A>> for RawObjWeak<RawObj<T>, A> {
-    fn from(v: ObjWeak<DynObj<T>, A>) -> Self {
-        let (ptr, alloc) = v.into_raw_parts();
-        let ptr = crate::ptr::into_raw(ptr);
-        unsafe { RawObjWeak::from_raw_parts(ptr, alloc) }
+unsafe impl<T: ?Sized, A: Allocator> CTypeBridge for ObjWeak<DynObj<T>, A>
+where
+    A: CTypeBridge,
+    A::Type: Allocator,
+{
+    type Type = RawObjWeak<A::Type>;
+
+    fn marshal(self) -> Self::Type {
+        let (ptr, alloc) = ObjWeak::into_raw_parts(self);
+        unsafe { RawObjWeak::from_raw_parts(ptr.marshal(), alloc.marshal()) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let (ptr, alloc) = x.into_raw_parts();
+        ObjWeak::from_raw_parts(<&DynObj<T>>::demarshal(ptr), A::demarshal(alloc))
     }
 }
 
-impl<T: ?Sized> From<ObjWeak<DynObj<T>, Global>> for RawObjWeak<RawObj<T>, CGlobal> {
-    fn from(v: ObjWeak<DynObj<T>, Global>) -> Self {
-        let (ptr, _) = v.into_raw_parts();
-        let ptr = crate::ptr::into_raw(ptr);
-        unsafe { RawObjWeak::from_raw_parts(ptr, CGlobal { _v: 0 }) }
-    }
-}
-
-impl<T: ?Sized, A: Allocator> From<RawObjWeak<RawObj<T>, A>> for ObjWeak<DynObj<T>, A> {
-    fn from(v: RawObjWeak<RawObj<T>, A>) -> Self {
-        let (ptr, alloc) = v.into_raw_parts();
-        let ptr = crate::ptr::from_raw(ptr);
-        unsafe { ObjWeak::from_raw_parts(ptr, alloc) }
-    }
-}
-
-impl<T: ?Sized> From<RawObjWeak<RawObj<T>, CGlobal>> for ObjWeak<DynObj<T>, Global> {
-    fn from(v: RawObjWeak<RawObj<T>, CGlobal>) -> Self {
-        let (ptr, _) = v.into_raw_parts();
-        let ptr = crate::ptr::from_raw(ptr);
-        unsafe { ObjWeak::from_raw_parts(ptr, Global) }
-    }
-}
-
-impl<T: Debug, A: Allocator> Debug for RawObjWeak<T, A> {
+impl<A: Allocator> Debug for RawObjWeak<A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "(RawObjWeak)")
     }
 }
 
-impl<T, A: Allocator> DropSpec for RawObjWeak<T, A> {
-    default fn drop_inner(&mut self) {
-        unimplemented!()
-    }
-}
-
-impl<T: ?Sized, A: Allocator> DropSpec for RawObjWeak<RawObj<T>, A> {
-    fn drop_inner(&mut self) {
-        let ptr = self.ptr;
-        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
-        let copy = unsafe { RawObjWeak::from_raw_parts(ptr, alloc) };
-        let copy: ObjWeak<DynObj<T>, A> = copy.into();
-        drop(copy)
-    }
-}
-
-unsafe impl<#[may_dangle] T, A: Allocator> Drop for RawObjWeak<T, A> {
+impl<A: Allocator> Drop for RawObjWeak<A> {
     fn drop(&mut self) {
-        self.drop_inner()
+        // let the objweak handle the deallocation.
+
+        // Safety: All DynObj's share the same layout therefore we can type erase it.
+        let ptr = unsafe { <&mut DynObj<()>>::demarshal(self.ptr) };
+        let alloc = unsafe { ManuallyDrop::take(&mut self.alloc) };
+        let erased_box = unsafe { ObjWeak::from_raw_parts(ptr, alloc) };
+        drop(erased_box)
     }
 }

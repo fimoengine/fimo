@@ -1,12 +1,11 @@
 //! Task runtime interface.
 
 use crate::raw::{
-    IRawTask, ISchedulerContext, PseudoTask, TaskHandle, TaskScheduleStatus, WorkerId,
+    IRawTask, ISchedulerContext, PseudoTask, TaskHandle, TaskScheduleStatus, Timestamp, WorkerId,
 };
 use crate::task::{Builder, JoinHandle, RawTaskWrapper, Task};
-use fimo_ffi::ptr::{IBase, RawObj};
-use fimo_ffi::span::ConstSpanPtr;
-use fimo_ffi::{interface, ConstSpan, DynObj, FfiFn, ObjBox, ObjectId, Optional, ReprC};
+use fimo_ffi::ptr::IBase;
+use fimo_ffi::{interface, DynObj, FfiFn, ObjBox, ObjectId};
 use log::trace;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
@@ -94,54 +93,53 @@ impl NotifyResult {
     }
 }
 
-/// Interface of a task runtime.
-#[interface(
-    uuid = "095a88ff-f45a-4cf8-a8f2-e18eb028a7de",
-    vtable = "IRuntimeVTable",
-    generate()
-)]
-pub trait IRuntime: Send + Sync {
-    /// Retrieves the id of the current worker.
-    fn worker_id(&self) -> Option<WorkerId>;
+interface! {
+    #![interface_cfg(uuid = "095a88ff-f45a-4cf8-a8f2-e18eb028a7de")]
 
-    /// Acquires a reference to the scheduler.
-    ///
-    /// The task will block, until the scheduler can be acquired.
-    ///
-    /// # Deadlock
-    ///
-    /// Trying to access the scheduler by other means than
-    /// the provided reference may result in a deadlock.
-    ///
-    /// # Notes
-    ///
-    /// The closure is not allowed to panic.
-    #[allow(clippy::type_complexity)]
-    fn enter_scheduler_impl(
-        &self,
-        f: FfiFn<
-            '_,
-            dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, Option<&DynObj<dyn IRawTask + '_>>) + '_,
-        >,
-    );
+    /// Interface of a task runtime.
+    pub frozen interface IRuntime: marker Send + marker Sync {
+        /// Retrieves the id of the current worker.
+        fn worker_id(&self) -> Option<WorkerId>;
 
-    /// Yields the current task to the runtime.
-    ///
-    /// Yields the current task to the runtime, allowing other tasks to be
-    /// run on the current worker. On the next run of the scheduler it will call
-    /// the provided function.
-    ///
-    /// # Notes
-    ///
-    /// The closure is not allowed to panic.
-    #[allow(clippy::type_complexity)]
-    fn yield_and_enter_impl(
-        &self,
-        f: FfiFn<
-            '_,
-            dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, &DynObj<dyn IRawTask + '_>) + Send + '_,
-        >,
-    );
+        /// Acquires a reference to the scheduler.
+        ///
+        /// The task will block, until the scheduler can be acquired.
+        ///
+        /// # Deadlock
+        ///
+        /// Trying to access the scheduler by other means than
+        /// the provided reference may result in a deadlock.
+        ///
+        /// # Notes
+        ///
+        /// The closure is not allowed to panic.
+        #[allow(clippy::type_complexity)]
+        fn enter_scheduler_impl(
+            &self,
+            f: FfiFn<
+                '_,
+                dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, Option<&DynObj<dyn IRawTask + '_>>) + '_,
+            >,
+        );
+
+        /// Yields the current task to the runtime.
+        ///
+        /// Yields the current task to the runtime, allowing other tasks to be
+        /// run on the current worker. On the next run of the scheduler it will call
+        /// the provided function.
+        ///
+        /// # Notes
+        ///
+        /// The closure is not allowed to panic.
+        #[allow(clippy::type_complexity)]
+        fn yield_and_enter_impl(
+            &self,
+            f: FfiFn<
+                '_,
+                dyn FnOnce(&mut DynObj<dyn IScheduler + '_>, &DynObj<dyn IRawTask + '_>) + Send + '_,
+            >,
+        );
+    }
 }
 
 /// Extension trait for implementations of [`IRuntime`].
@@ -382,7 +380,9 @@ pub trait IRuntimeExt: IRuntime {
         self.yield_and_enter(move |_, curr| {
             trace!("Yielding task {:?} until {:?}", curr.resolved_name(), until);
             // we are inside the scheduler so the call to `borrow` is guaranteed to succeed.
-            curr.context().borrow().set_resume_time(until)
+            curr.context()
+                .borrow()
+                .set_resume_time(Timestamp::from_system_time(until))
         })
     }
 
@@ -531,328 +531,196 @@ pub trait IRuntimeExt: IRuntime {
 
 impl<T: IRuntime + ?Sized> IRuntimeExt for T {}
 
-/// Interface of a scheduler.
-#[interface(
-    uuid = "095a88ff-f45a-4cf8-a8f2-e18eb028a7de",
-    vtable = "ISchedulerVTable",
-    generate()
-)]
-pub trait IScheduler: Sync {
-    /// Fetches the id's of all available workers.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "ConstSpanPtr<WorkerId>",
-        into = "Into::into",
-        from_expr = "unsafe { res.deref().into() }"
+interface! {
+    #![interface_cfg(
+        abi(explicit(abi = "C-unwind")),
+        uuid = "095a88ff-f45a-4cf8-a8f2-e18eb028a7de",
     )]
-    fn worker_ids(&self) -> &[WorkerId];
 
-    /// Fetches the task associated with a handle.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<RawObj<dyn IRawTask + 'static>>",
-        into_expr = "let res = Optional::from_rust(res)?; Optional::Some(std::mem::transmute(fimo_ffi::ptr::into_raw(res)))",
-        from_expr = "let res = res.into_rust()?; unsafe { Some(&*(std::mem::transmute::<_, *const DynObj<dyn IRawTask + '_>>(fimo_ffi::ptr::from_raw(res)))) }"
-    )]
-    fn get_task_from_handle(&self, handle: TaskHandle) -> Option<&DynObj<dyn IRawTask + '_>>;
+    /// Interface of a scheduler.
+    pub frozen interface IScheduler: marker Sync {
+        /// Fetches the id's of all available workers.
+        fn worker_ids(&self) -> &[WorkerId];
 
-    /// Fetches the pseudo task associated with a handle.
-    ///
-    /// # Safety
-    ///
-    /// The pseudo task will be invalidated if the associated task is unregistered.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "Optional<PseudoTask>",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    unsafe fn get_pseudo_task_from_handle(&self, handle: TaskHandle) -> Option<PseudoTask>;
+        /// Fetches the task associated with a handle.
+        fn get_task_from_handle(&self, handle: TaskHandle) -> Option<&DynObj<dyn IRawTask + '_>>;
 
-    /// Registers a task with the runtime for execution.
-    ///
-    /// This function effectively tries to transfer the ownership of the task
-    /// to the runtime. On success, the caller may request the runtime to give
-    /// up the ownership of the task by calling the [`unregister_task`](#method.unregister_task)
-    /// method.
-    ///
-    /// The task may be modified by the method even in the case that it doen't succeed.
-    /// In case of failure, the task should be seen as invalid and be dropped.
-    ///
-    /// # Safety
-    ///
-    /// Behavior is undefined if any of the following conditions are violated:
-    ///
-    /// * The task must be valid.
-    /// * The same task may not be registered multiple times.
-    /// * The task may not be moved while owned by the runtime.
-    /// * The task must be kept alive until the runtime relinquishes the ownership.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<u8>",
-        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
-        from_expr = "let _ = res.into_rust()?; Ok(())"
-    )]
-    unsafe fn register_task(
-        &mut self,
-        #[vtable_info(
-            type = "RawObj<dyn IRawTask + '_>",
-            into = "fimo_ffi::ptr::into_raw",
-            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
-        )]
-        task: &DynObj<dyn IRawTask + '_>,
-        #[vtable_info(
-            type = "ConstSpan<'_, TaskHandle>",
-            into = "Into::into",
-            from = "Into::into"
-        )]
-        wait_on: &[TaskHandle],
-    ) -> fimo_module::Result<()>;
+        /// Fetches the pseudo task associated with a handle.
+        ///
+        /// # Safety
+        ///
+        /// The pseudo task will be invalidated if the associated task is unregistered.
+        unsafe fn get_pseudo_task_from_handle(&self, handle: TaskHandle) -> Option<PseudoTask>;
 
-    /// Unregisters a task from the task runtime.
-    ///
-    /// Requests for the runtime to give up its ownership of the task.
-    /// For this method to complete, the task must have run to completion
-    /// (i. e. is finished or aborted). On success the task is invalidated
-    /// and the ownership returned to the caller.
-    ///
-    /// # Safety
-    ///
-    /// This method can be thought of the task equivalent of the `free` function
-    /// which deallocates a memory allocation. Following this analogy the task
-    /// must have been registered with the runtime with a call to
-    /// [`register_task`](#method.register_task). Further, a caller must ensure
-    /// that they are the original owners of the task and are not merely borrowing
-    /// it by the likes of [`find_task`](#method.find_task) or any other means.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<u8>",
-        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
-        from_expr = "let _ = res.into_rust()?; Ok(())"
-    )]
-    unsafe fn unregister_task(
-        &mut self,
-        #[vtable_info(
-            type = "RawObj<dyn IRawTask + '_>",
-            into = "fimo_ffi::ptr::into_raw",
-            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
-        )]
-        task: &DynObj<dyn IRawTask + '_>,
-    ) -> fimo_module::Result<()>;
+        /// Registers a task with the runtime for execution.
+        ///
+        /// This function effectively tries to transfer the ownership of the task
+        /// to the runtime. On success, the caller may request the runtime to give
+        /// up the ownership of the task by calling the [`unregister_task`](#method.unregister_task)
+        /// method.
+        ///
+        /// The task may be modified by the method even in the case that it doen't succeed.
+        /// In case of failure, the task should be seen as invalid and be dropped.
+        ///
+        /// # Safety
+        ///
+        /// Behavior is undefined if any of the following conditions are violated:
+        ///
+        /// * The task must be valid.
+        /// * The same task may not be registered multiple times.
+        /// * The task may not be moved while owned by the runtime.
+        /// * The task must be kept alive until the runtime relinquishes the ownership.
+        unsafe fn register_task(&mut self, task: &DynObj<dyn IRawTask + '_>, wait_on: &[TaskHandle])
+            -> fimo_module::Result<()>;
 
-    /// Allocates or fetches a [`PseudoTask`] bound to the given address.
-    ///
-    ///
-    /// On success, the caller may request the runtime to unbind to provided address
-    /// by calling the method.
-    ///
-    /// # Safety
-    ///
-    /// Condition:
-    ///
-    /// * The address must be controlled by the caller until it is unbound.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<PseudoTask>",
-        into_expr = "let t = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(t)",
-        from_expr = "let t = res.into_rust()?; Ok(t)"
-    )]
-    unsafe fn register_or_fetch_pseudo_task(
-        &mut self,
-        addr: *const (),
-    ) -> fimo_module::Result<PseudoTask>;
+        /// Unregisters a task from the task runtime.
+        ///
+        /// Requests for the runtime to give up its ownership of the task.
+        /// For this method to complete, the task must have run to completion
+        /// (i. e. is finished or aborted). On success the task is invalidated
+        /// and the ownership returned to the caller.
+        ///
+        /// # Safety
+        ///
+        /// This method can be thought of the task equivalent of the `free` function
+        /// which deallocates a memory allocation. Following this analogy the task
+        /// must have been registered with the runtime with a call to
+        /// [`register_task`](#method.register_task). Further, a caller must ensure
+        /// that they are the original owners of the task and are not merely borrowing
+        /// it by the likes of [`find_task`](#method.find_task) or any other means.
+        unsafe fn unregister_task(&mut self, task: &DynObj<dyn IRawTask + '_>) -> fimo_module::Result<()>;
 
-    /// Unregisters a pseudo task from the task runtime.
-    ///
-    /// Invalidates the pseudo task and unbinds the bound address.
-    ///
-    /// # Safety
-    ///
-    /// This method can be thought of the task equivalent of the `free` function
-    /// which deallocates a memory allocation. Following this analogy the task
-    /// must have been registered with the runtime with a call to
-    /// [`register_or_fetch_pseudo_task`](#method.register_or_fetch_pseudo_task).
-    /// Further, a caller must ensure that they are the original owners of the task
-    /// and are not merely borrowing it.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<u8>",
-        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
-        from_expr = "let _ = res.into_rust()?; Ok(())"
-    )]
-    unsafe fn unregister_pseudo_task(&mut self, task: PseudoTask) -> fimo_module::Result<()>;
+        /// Allocates or fetches a [`PseudoTask`] bound to the given address.
+        ///
+        ///
+        /// On success, the caller may request the runtime to unbind to provided address
+        /// by calling the method.
+        ///
+        /// # Safety
+        ///
+        /// Condition:
+        ///
+        /// * The address must be controlled by the caller until it is unbound.
+        unsafe fn register_or_fetch_pseudo_task(&mut self, addr: *const ()) -> fimo_module::Result<PseudoTask>;
 
-    /// Unregisters a pseudo task from the task runtime if it is empty.
-    ///
-    /// Invalidates the pseudo task and unbinds the bound address if it is in
-    /// an empty state, like after the first call to [`register_or_fetch_pseudo_task`].
-    /// Returns whether the pseudo task was unregistered.
-    ///
-    /// # Safety
-    ///
-    /// This method can be thought of the task equivalent of the `free` function
-    /// which deallocates a memory allocation. Following this analogy the task
-    /// must have been registered with the runtime with a call to
-    /// [`register_or_fetch_pseudo_task`](#method.register_or_fetch_pseudo_task).
-    /// Further, a caller must ensure that they are the original owners of the task
-    /// and are not merely borrowing it.
-    ///
-    /// [`register_or_fetch_pseudo_task`]: #method.register_or_fetch_pseudo_task
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<bool>",
-        into_expr = "let v = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(v)",
-        from_expr = "let v = res.into_rust()?; Ok(v)"
-    )]
-    unsafe fn unregister_pseudo_task_if_empty(
-        &mut self,
-        task: PseudoTask,
-    ) -> fimo_module::Result<bool>;
+        /// Unregisters a pseudo task from the task runtime.
+        ///
+        /// Invalidates the pseudo task and unbinds the bound address.
+        ///
+        /// # Safety
+        ///
+        /// This method can be thought of the task equivalent of the `free` function
+        /// which deallocates a memory allocation. Following this analogy the task
+        /// must have been registered with the runtime with a call to
+        /// [`register_or_fetch_pseudo_task`](#method.register_or_fetch_pseudo_task).
+        /// Further, a caller must ensure that they are the original owners of the task
+        /// and are not merely borrowing it.
+        unsafe fn unregister_pseudo_task(&mut self, task: PseudoTask) -> fimo_module::Result<()>;
 
-    /// Registers a block for a task until the pseudo task releases it.
-    ///
-    /// A task may not wait on a pseudo task multiple times.
-    /// After being woken up `data_addr` is initialized with a message from the task that woke it up.
-    ///
-    /// # Note
-    ///
-    /// Does not guarantee that the task will wait immediately if it is already scheduled.
-    ///
-    /// # Safety
-    ///
-    /// Both tasks must be registered with the runtime.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<u8>",
-        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
-        from_expr = "let _ = res.into_rust()?; Ok(())"
-    )]
-    unsafe fn wait_task_on(
-        &mut self,
-        #[vtable_info(
-            type = "RawObj<dyn IRawTask + '_>",
-            into = "fimo_ffi::ptr::into_raw",
-            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
-        )]
-        task: &DynObj<dyn IRawTask + '_>,
-        on: PseudoTask,
-        #[vtable_info(
-            type = "Optional<&mut MaybeUninit<WakeupToken>>",
-            into = "Into::into",
-            from = "Into::into"
-        )]
-        data_addr: Option<&mut MaybeUninit<WakeupToken>>,
-        token: WaitToken,
-    ) -> fimo_module::Result<()>;
+        /// Unregisters a pseudo task from the task runtime if it is empty.
+        ///
+        /// Invalidates the pseudo task and unbinds the bound address if it is in
+        /// an empty state, like after the first call to [`register_or_fetch_pseudo_task`].
+        /// Returns whether the pseudo task was unregistered.
+        ///
+        /// # Safety
+        ///
+        /// This method can be thought of the task equivalent of the `free` function
+        /// which deallocates a memory allocation. Following this analogy the task
+        /// must have been registered with the runtime with a call to
+        /// [`register_or_fetch_pseudo_task`](#method.register_or_fetch_pseudo_task).
+        /// Further, a caller must ensure that they are the original owners of the task
+        /// and are not merely borrowing it.
+        ///
+        /// [`register_or_fetch_pseudo_task`]: #method.register_or_fetch_pseudo_task
+        unsafe fn unregister_pseudo_task_if_empty(&mut self, task: PseudoTask)
+            -> fimo_module::Result<bool>;
 
-    /// Wakes up one task.
-    ///
-    /// Wakes up the task with the highest priority, that is waiting on the provided pseudo task.
-    ///
-    /// # Safety
-    ///
-    /// The pseudo task must be registered with the runtime.
-    /// Further, the closure `data_callback` may not panic or call into the scheduler.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<NotifyResult>",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    unsafe fn notify_one(
-        &mut self,
-        task: PseudoTask,
-        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
-    ) -> fimo_module::Result<NotifyResult>;
+        /// Registers a block for a task until the pseudo task releases it.
+        ///
+        /// A task may not wait on a pseudo task multiple times.
+        /// After being woken up `data_addr` is initialized with a message from the task that woke it up.
+        ///
+        /// # Note
+        ///
+        /// Does not guarantee that the task will wait immediately if it is already scheduled.
+        ///
+        /// # Safety
+        ///
+        /// Both tasks must be registered with the runtime.
+        unsafe fn wait_task_on(
+            &mut self,
+            task: &DynObj<dyn IRawTask + '_>,
+            on: PseudoTask,
+            data_addr: Option<&mut MaybeUninit<WakeupToken>>,
+            token: WaitToken,
+        ) -> fimo_module::Result<()>;
 
-    /// Wakes up all tasks.
-    ///
-    /// Wakes up all waiting tasks. Returns the number of tasks that were woken up.
-    ///
-    /// # Safety
-    ///
-    /// The pseudo task must be registered with the runtime.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<usize>",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    unsafe fn notify_all(
-        &mut self,
-        task: PseudoTask,
-        data: WakeupToken,
-    ) -> fimo_module::Result<usize>;
+        /// Wakes up one task.
+        ///
+        /// Wakes up the task with the highest priority, that is waiting on the provided pseudo task.
+        ///
+        /// # Safety
+        ///
+        /// The pseudo task must be registered with the runtime.
+        /// Further, the closure `data_callback` may not panic or call into the scheduler.
+        unsafe fn notify_one(
+            &mut self,
+            task: PseudoTask,
+            data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+        ) -> fimo_module::Result<NotifyResult>;
 
-    /// Notifies a number of tasks depending on the result of a filter function.
-    ///
-    /// The `filter` function is called for each task in the queue or until
-    /// [`NotifyFilterOp::Stop`] is returned. This function is passed the
-    /// [`WaitToken`] associated with a particular task, which is notified if
-    /// [`NotifyFilterOp::Notify`] is returned.
-    ///
-    /// The `data_callback` function is passed an [`NotifyResult`] indicating the
-    /// number of tasks that were notified and whether there are still waiting
-    /// tasks in the queue. This [`NotifyResult`] value is also returned by
-    /// `notify_filter`.
-    ///
-    /// The `data_callback` function should return an UnparkToken value which will
-    /// be passed to all tasks that are notified. If no task is notified then the
-    /// returned value is ignored.
-    ///
-    /// # Safety
-    ///
-    /// The pseudo task must be registered with the runtime.
-    /// Further, `filter` and `data_callback` may not panic or call into the scheduler.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<NotifyResult>",
-        into = "Into::into",
-        from = "Into::into"
-    )]
-    unsafe fn notify_filter(
-        &mut self,
-        task: PseudoTask,
-        filter: FfiFn<'_, dyn FnMut(WaitToken) -> NotifyFilterOp + '_, u8>,
-        data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
-    ) -> fimo_module::Result<NotifyResult>;
+        /// Wakes up all tasks.
+        ///
+        /// Wakes up all waiting tasks. Returns the number of tasks that were woken up.
+        ///
+        /// # Safety
+        ///
+        /// The pseudo task must be registered with the runtime.
+        unsafe fn notify_all(
+            &mut self,
+            task: PseudoTask,
+            data: WakeupToken,
+        ) -> fimo_module::Result<usize>;
 
-    /// Unblocks a blocked task.
-    ///
-    /// Once unblocked, the task may resume it's execution.
-    /// May error if the task is not blocked.
-    ///
-    /// # Safety
-    ///
-    /// The task must be registered with the runtime.
-    #[vtable_info(
-        unsafe,
-        abi = r#"extern "C-unwind""#,
-        return_type = "fimo_module::FFIResult<u8>",
-        into_expr = "let _ = fimo_module::FFIResult::from_rust(res)?; fimo_module::FFIResult::Ok(0)",
-        from_expr = "let _ = res.into_rust()?; Ok(())"
-    )]
-    unsafe fn unblock_task(
-        &mut self,
-        #[vtable_info(
-            type = "RawObj<dyn IRawTask + '_>",
-            into = "fimo_ffi::ptr::into_raw",
-            from_expr = "let p_1 = &*fimo_ffi::ptr::from_raw(p_1);"
-        )]
-        task: &DynObj<dyn IRawTask + '_>,
-    ) -> fimo_module::Result<()>;
+        /// Notifies a number of tasks depending on the result of a filter function.
+        ///
+        /// The `filter` function is called for each task in the queue or until
+        /// [`NotifyFilterOp::Stop`] is returned. This function is passed the
+        /// [`WaitToken`] associated with a particular task, which is notified if
+        /// [`NotifyFilterOp::Notify`] is returned.
+        ///
+        /// The `data_callback` function is passed an [`NotifyResult`] indicating the
+        /// number of tasks that were notified and whether there are still waiting
+        /// tasks in the queue. This [`NotifyResult`] value is also returned by
+        /// `notify_filter`.
+        ///
+        /// The `data_callback` function should return an UnparkToken value which will
+        /// be passed to all tasks that are notified. If no task is notified then the
+        /// returned value is ignored.
+        ///
+        /// # Safety
+        ///
+        /// The pseudo task must be registered with the runtime.
+        /// Further, `filter` and `data_callback` may not panic or call into the scheduler.
+        unsafe fn notify_filter(
+            &mut self,
+            task: PseudoTask,
+            filter: FfiFn<'_, dyn FnMut(WaitToken) -> NotifyFilterOp + '_, u8>,
+            data_callback: FfiFn<'_, dyn FnOnce(NotifyResult) -> WakeupToken + '_, u8>,
+        ) -> fimo_module::Result<NotifyResult>;
+
+        /// Unblocks a blocked task.
+        ///
+        /// Once unblocked, the task may resume it's execution.
+        /// May error if the task is not blocked.
+        ///
+        /// # Safety
+        ///
+        /// The task must be registered with the runtime.
+        unsafe fn unblock_task(&mut self, task: &DynObj<dyn IRawTask + '_>)
+            -> fimo_module::Result<()>;
+    }
 }
 
 /// Returns whether a thread is a managed by a runtime.

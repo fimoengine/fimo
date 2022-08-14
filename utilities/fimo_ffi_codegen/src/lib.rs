@@ -1,113 +1,231 @@
+#![feature(once_cell)]
+
 use proc_macro::TokenStream;
 
 mod interface;
 mod object;
-mod vtable;
 
-/// Marks a trait as a `DynObj` interface.
+/// Defines a new interface.
 ///
-/// The attribute `#[interface(uuid = "...", vtable = "...", generate(...))` must be placed
-/// on an object safe trait whose generic parameters only consist of lifetimes.
+/// # Interface
 ///
-/// The uuid can be specified with the `uuid = "..."` key-value pair, where the
-/// supplied string is a valid uuid, hyphenated or not. The uuid must be unique among all interface
-/// definitions. Not adding an uuid "hides" the interface and disables the downcasting from a
-/// `DynObj<T>` to a `DynObj<Self>`.
+/// If successfull, the interface definition is transformed into a coresponding
+/// trait with the same name and bounds, and a vtable. The resulting vtable is
+/// then compatible to be used with a `DynObj`. The definition of a interface
+/// resembles trait definitions, but does not support any generic arguments.
 ///
-/// Further, the attribute requires a path to the vtable specified with the `vtable = "..."`
-/// key-value pair. The vtable can be declared with the [`#[vtable]`](macro@vtable) attribute or
-/// by adding the `generate_vtable` key to the attribute.
-///
-/// The `generate` key accepts an arbitrary number of existing vtables and generates a vtable
-/// containing function pointers for all member functions defined in the trait and implements the trait for `DynObj`.
-/// The `#[vtable_info(...)]` attribute can be added to every member function and parameter and controlls how they
-/// are mapped for the vtable.
-///
-/// # Member functions keys
-///
-/// * `unsafe` marks the function in the vtable as unsafe. If not set, it inherits the unsafety of the member function.
-/// * `ignore` skips the member from inclusion in the vtable.
-/// * `lifetimes = "for<...>"` adds additional lifetimes the function definition in the vtable.
-/// * `abi = r#"extern "...""#` changes the abi of the function in the vtable.
-/// * `return_type = "Type"` changes the return type of the member in the vtable.
-/// * `into = "Path"` maps the result from the return type of the trait to the one in the vtable.
-/// * `into_expr = "Expressions"` Applies a list of expressions and returns the result. Is applied after `into`.
-/// * `from = "Path"` like `into` but in reverse.
-/// * `from_expr = "Expressions"` like `into_expr` but in reverse.
-///
-/// # Parameter keys
-///
-/// * `type = "Type"` changes the type of the parameter in the vtable.
-/// * `into = "Path"` maps the result from the type of the trait to the one in the vtable.
-/// * `into_expr = "Expressions"` Applies a list of expressions and writes the result in `p_i` where
-///     `i` is the zero-indexed index of the parameter. Is applied after `into`.
-/// * `from = "Path"` like `into` but in reverse.
-/// * `from_expr = "Expressions"` like `into_expr` but in reverse.
-///
-/// The generated function renames the parameters to `p_i` and writes the result into the `res` variable.
-/// The types `&self`/`&mut self` are mapped to `*const ()`/`*mut ()`.
-///
-/// # Examples
+/// ## Example syntax
 ///
 /// ```ignore
-/// #![feature(unsize)]
-///
-/// use fimo_ffi_codegen::{interface, vtable};
-///
-/// #[interface(
-///     uuid = "50edd609-7e2f-4834-b80d-2fb70e345bab",
-///     vtable = "TraitVTable",
-///     generate()
-/// )]
-/// trait Trait: Send {
-///     fn do_something(&self);
-/// }
-///
-/// #[interface(
-///     uuid = "50edd609-7e2f-4834-b80d-2fb70e345bab",
-///     vtable = "OtherTraitVTable",
-///     generate(TraitVTable)
-/// )]
-/// trait OtherTrait: Trait {
-///     // is not included in the vtable.
-///     #[vtable_info(ignore)]
-///     fn ignored(&mut self);
-///
-///     // is mapped to `map_ptr: fn(*const ()) -> *const usize`.
-///     // `&usize` coerces to `*const usize` so we dont need the `into` function.
-///     #[vtable_info(return_type = "*const usize", from_expr = "unsafe { &*res }")]
-///     fn map_ptr(&self) -> &usize;
-///
-///     // is mapped to `map_u32: fn(*const ()) -> u32`.
-///     #[vtable_info(return_type = "u32", into = "Into::into", from_expr = "res != 0")]
-///     fn map_u32(&self) -> bool;
-/// }
-///
-/// fn call<T: OtherTrait>(ptr: *const ()) -> bool {
-///     let t = unsafe { &*(ptr as *const T) };
-///     t.map_explicit()
+/// pub frozen interface InterfaceName: marker Marker + OtherInterface @ frozen version("1.5") {
+///     fn method_1(&self, param: usize);
+///     fn method_2(&mut self) -> usize;
+///     fn method_3<'a>(&'a self, n: &'a ()) -> &'a ();
+///     ...
 /// }
 /// ```
-#[proc_macro_attribute]
-pub fn interface(args: TokenStream, input: TokenStream) -> TokenStream {
-    interface::interface_impl(args, input)
-}
-
-/// Generates a vtable compatible with a `ObjMetadata`.
 ///
-/// The attribute must be placed on a named struct or unit struct definition
-/// and must contain the implemented trait, e.g. `#[vtable(interface = "for<'a, 'b> Trait<'a, 'b>")]`.
-/// Structs using this attribute specify `#[repr(C)]` automatically.
+/// ## Bounds
 ///
-/// A struct can specify that it embeds other vtables by adding the `#[super_vtable(is = "...")]`
-/// attribute to the vtable fields. Embedded vtables are either primary or secondary vtables.
-/// A vtable `T` implements `impl<U> InnerVTable<U> for T where Primary: InnerVTable<U> { ... }`
-/// and `impl InnerVTable<Primary> for T { ... }`, while for secondary vtables it only implements
-/// `impl InnerVTable<Secondary> for T { ... }`. There can only exist up to one primary vtables but
-/// there can be an arbitrary amount of secondary ones.
-#[proc_macro_attribute]
-pub fn vtable(args: TokenStream, input: TokenStream) -> TokenStream {
-    vtable::vtable_impl(args, input)
+/// Similarly to traits, interfaces allow specifying bounds. The bounds
+/// are either marker bounds or other interface bounds.
+///
+/// ### Marker Bounds
+///
+/// Marker bounds are traits from a predefined list of marker traits.
+/// Currently the list consists of the following traits:
+///
+/// - `Send`: [`Send`] trait.
+/// - `Sync`: [`Sync`] trait.
+/// - `Unpin`: [`Unpin`] trait.
+/// - `IBase`: Base trait for all interfaces.
+///     Is required if the interface does not specify any interface bounds.
+///
+/// ### Interface Bounds
+///
+/// Interface bounds are bounds to already defined interfaces.
+/// Each bound must also specify a version with the syntax `version("major.minor")`
+/// and whether the bound should be frozen to the specified version.
+/// The frozen keyword can only be added if the bound itself is also marked as frozen.
+/// Specifying an incompatible version will result in a compilation error.
+///
+/// ## Frozen interfaces
+///
+/// When an interface is marked as frozen it signifies that its definition
+/// won't be altered without increasing the major interface version.
+/// Once marked as frozen, the interface can be added as a frozen interface bound
+/// to other interfaces. Freezing a bound may enable some optimizations regarding
+/// the layout of a vtable and when accessing embedded vtables.
+///
+/// ## Members
+///
+/// Interfaces can specify zero or more interface methods.
+/// The syntax is equivalent to trait methods.
+///
+/// ### Generics
+///
+/// Interface methods can specify generic lifetime parameters.
+/// Lifetimes starting with two underscores (`__`) are reserved.
+/// As we require the resulting trait to be object safe, we do not allow generic
+/// type parameters. As an alternative, one can specify an extension trait containing
+/// a generic version of a method and implement it for all the types that implement
+/// the interface trait.
+///
+/// # Configuration
+///
+/// The attribute `#![interface_cfg(...)` can be placed as the first element
+/// inside the macro, and allows to configure settings pertaining to the interface,
+/// like the version a uuid and a default abi.
+///
+/// The attribute `#[interface_cfg(...)` can be specified on methods and
+/// method parameters, and controlls how the method is mapped to a vtable.
+/// If no attribute is specified it defaults to inheriting the settings from the
+/// parent scope.
+///
+/// ## Interface CFG
+///
+/// ### Version
+///
+/// Unlike traits, interfaces carry some abi stability guarantees even if an interface
+/// is modified. ABI compatible modifications are signaled by modifying the minor version,
+/// while ABI breaks are recorded by the major version.
+///
+/// The minor version is inferred by the contained methods, while the major version is
+/// specified as a global config. If no version is specified, it defaults to the
+/// version `0.0`.
+///
+/// ### VTable Name
+///
+/// A global config allows to specify the identifier of the vtable to be generated.
+/// If none is specified, it defaults to the name of the interface concatenated with
+/// `VTable`, i. e. for an interface `Interface` it defaults to `InterfaceVTable`.
+/// Given a name `Name`, the macro reserves the names `Name`, `NameHead` and `NameData`.
+///
+/// ### Calling Convention
+///
+/// By default, the the function pointers in the vtable adopt the calling
+/// convention of the method. Otherwise it is also possible to specify it explicitly.
+///
+/// #### Example
+///
+/// - abi = "inherit": Inherit from config from parent.
+/// - abi(explicit(abi = "ABI")): Explitit calling convention, i. e. `"C"` or `"Rust"`.
+///
+/// ### Marshaling
+///
+/// Method parameters and return types must be marshalled and subsequently be demarshalled,
+/// when passing through the vtable shims. The marshalling is controlled by implementing a
+/// trait with the signature below for each type we intend to use as a parameter or as a
+/// return type. If no marshaler is specified, a default marshaler depending on the calling
+/// convention of the method is used.
+///
+/// #### Marshaler
+///
+/// ```ignore
+/// trait CustomMarshaler {
+///     /// Type to marshal to.
+///     type Type;
+///
+///     /// Marshals the type.
+///     fn marshal(self) -> Self::Type;
+///
+///     /// Demarshals the type.
+///     ///
+///     /// # Safety
+///     ///
+///     /// The marshaling operation represents a non injective mapping
+///     /// from the type `T` to an arbitrary type `U`. Therefore it is likely,
+///     /// that multiple types are mapped to the same `U` type.
+///     ///
+///     /// When calling this method, one must ensure that the same marshaler
+///     /// is used for both marshalling and demarshalling, i. e. `T::marshal`
+///     /// followed by `T::demarshal`, or that the marshaler is able to work
+///     /// with the value one intends to demarshal.
+///     unsafe fn demarshal(x: Self::Type) -> Self;
+/// }
+/// ```
+///
+/// #### Default Marshaler
+///
+/// Defined default marshalers:
+///
+/// - `extern "Rust"` => `fimo_ffi::marshal::RustTypeBridge` (No implementation necessary).
+/// - `extern "C"` or `extern "C-unwind"` => `fimo_ffi::marshal::CTypeBridge`.
+///
+/// #### Example
+///
+/// - marshal = "auto": Use default marshaler.
+///
+/// ### Method VTable Mapping
+///
+/// Amongst the settings that can be customized is the `mapping` parameter.
+/// This setting confgures wheter and how a method is mapped to a vtable.
+/// If none is specified, the macro defaults to adding the method to the vtable.
+///
+/// #### Example
+///
+/// - mapping = "include": Include method in the vtable (Default).
+/// - mapping = "exclude": Don't add the method to the vtable.
+/// - mapping(optional()): Marks the method as being optional.
+///     Uses the default implementation if the method is not present in the vtable.
+/// - mapping(optional(replace = "...")): Marks the method as being optional.
+///     Calls the method specified in replace if the method is not present in the vtable.
+///
+/// ### UUID
+///
+/// Interfaces can be marked with a uuid. The uuid must be unique among all interfaces.
+/// If left unspecified, it defaults to the zero uuid. A non-zero uuid in conjuction with
+/// the major version uniquely identify an interface and allow for it to be downcasted at
+/// runtime.
+///
+/// ## Global CFG
+///
+/// Allowed parameters in `#![interface_cfg]`:
+///
+/// - version = "...": Major version of the interface.
+/// - vtable = "Name": Name of the vtable.
+/// - no_dyn_impl: Skip implementation for `DynObj`. Implementation detail.
+/// - abi: Default calling convention of the methods. See above for the syntax.
+/// - marshal: Default marshaler for the interface. See above for the syntax.
+/// - uuid = "...": UUID of the interface.
+///
+/// ## Method CFG
+///
+/// Allowed parameters in `#[interface_cfg]`:
+///
+/// - since_minor = "...": Minor version when a method was added to the interface.
+/// - abi: Calling convention of the method. See above for the syntax.
+/// - mapping: Mapping strategy for the method. See above for the syntax.
+/// - marshal: Default marshaler for the method. See above for the syntax.
+/// - phantom_parameter = "...": Adds a parameter wrapped in a `PhantomData`. Used for
+///     resolving unconstrained lifetime errors in the return type.
+///
+/// ## Parameter CFG
+///
+/// Allowed parameters in `#[interface_cfg]`:
+///
+/// - marshal: Marshaler for the parameter. See above for the syntax.
+///
+/// # ABI Stability
+///
+/// Extending an interface does not break any backwards compatibility, if the interface
+/// is not marked as frozen, the new methods are added at the end and they are marked
+/// to require a higher minor version.
+///
+/// Once backwards compatiblity has been broken, one must increase the major version of
+/// the interface and may remove the minor version attributes on the methods.
+/// The following modifications are not backwards compatible:
+///
+/// - Changing the interface visibility.
+/// - Removing the `frozen` modifier from the interface.
+/// - Modifying any trait bound, including reordering.
+/// - Modifying any existing interface method, including reordering.
+/// - Adding methods before or inbetween existing methods.
+/// - Adding methods at the end without specifying a higher minor version with
+///     the `since_minor` parameter.
+#[proc_macro]
+pub fn interface(input: TokenStream) -> TokenStream {
+    interface::interface_impl(input)
 }
 
 /// Implements the traits necessary for coercing a type to a `DynObj`.

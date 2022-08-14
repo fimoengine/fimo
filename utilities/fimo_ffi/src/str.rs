@@ -1,4 +1,5 @@
 //! Implementation of string types and utility functions.
+use crate::marshal::CTypeBridge;
 use crate::span::{ConstSpanPtr, MutSpanPtr};
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp::Ordering;
@@ -78,6 +79,18 @@ impl<'a> const From<ConstStr<'a>> for &'a str {
     }
 }
 
+unsafe impl<'a> const CTypeBridge for &'a str {
+    type Type = ConstStr<'a>;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
+    }
+}
+
 impl Debug for ConstStr<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&**self, f)
@@ -92,37 +105,37 @@ impl Display for ConstStr<'_> {
 
 impl Hash for ConstStr<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (&**self).hash(state)
+        (**self).hash(state)
     }
 }
 
 impl PartialEq<ConstStr<'_>> for ConstStr<'_> {
     fn eq(&self, other: &ConstStr<'_>) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 
 impl PartialEq<MutStr<'_>> for ConstStr<'_> {
     fn eq(&self, other: &MutStr<'_>) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 
 impl PartialEq<str> for ConstStr<'_> {
     fn eq(&self, other: &str) -> bool {
-        (&**self).eq(other)
+        (**self).eq(other)
     }
 }
 
 impl PartialEq<&str> for ConstStr<'_> {
     fn eq(&self, other: &&str) -> bool {
-        (&**self).eq(*other)
+        (**self).eq(*other)
     }
 }
 
 impl PartialEq<&mut str> for ConstStr<'_> {
     fn eq(&self, other: &&mut str) -> bool {
-        (&**self).eq(*other)
+        (**self).eq(*other)
     }
 }
 
@@ -130,37 +143,37 @@ impl Eq for ConstStr<'_> {}
 
 impl PartialOrd<ConstStr<'_>> for ConstStr<'_> {
     fn partial_cmp(&self, other: &ConstStr<'_>) -> Option<Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<MutStr<'_>> for ConstStr<'_> {
     fn partial_cmp(&self, other: &MutStr<'_>) -> Option<Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<str> for ConstStr<'_> {
     fn partial_cmp(&self, other: &str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&str> for ConstStr<'_> {
     fn partial_cmp(&self, other: &&str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&mut str> for ConstStr<'_> {
     fn partial_cmp(&self, other: &&mut str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl Ord for ConstStr<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 
@@ -237,6 +250,18 @@ impl<'a> const From<MutStr<'a>> for &'a mut str {
     }
 }
 
+unsafe impl<'a> const CTypeBridge for &'a mut str {
+    type Type = MutStr<'a>;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
+    }
+}
+
 impl Debug for MutStr<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&**self, f)
@@ -251,37 +276,37 @@ impl Display for MutStr<'_> {
 
 impl Hash for MutStr<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        (&**self).hash(state)
+        (**self).hash(state)
     }
 }
 
 impl PartialEq<ConstStr<'_>> for MutStr<'_> {
     fn eq(&self, other: &ConstStr<'_>) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 
 impl PartialEq<MutStr<'_>> for MutStr<'_> {
     fn eq(&self, other: &MutStr<'_>) -> bool {
-        (&**self).eq(&**other)
+        (**self).eq(&**other)
     }
 }
 
 impl PartialEq<str> for MutStr<'_> {
     fn eq(&self, other: &str) -> bool {
-        (&**self).eq(other)
+        (**self).eq(other)
     }
 }
 
 impl PartialEq<&str> for MutStr<'_> {
     fn eq(&self, other: &&str) -> bool {
-        (&**self).eq(*other)
+        (**self).eq(*other)
     }
 }
 
 impl PartialEq<&mut str> for MutStr<'_> {
     fn eq(&self, other: &&mut str) -> bool {
-        (&**self).eq(*other)
+        (**self).eq(*other)
     }
 }
 
@@ -289,37 +314,37 @@ impl Eq for MutStr<'_> {}
 
 impl PartialOrd<ConstStr<'_>> for MutStr<'_> {
     fn partial_cmp(&self, other: &ConstStr<'_>) -> Option<Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<MutStr<'_>> for MutStr<'_> {
     fn partial_cmp(&self, other: &MutStr<'_>) -> Option<Ordering> {
-        (&**self).partial_cmp(&**other)
+        (**self).partial_cmp(&**other)
     }
 }
 
 impl PartialOrd<str> for MutStr<'_> {
     fn partial_cmp(&self, other: &str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&str> for MutStr<'_> {
     fn partial_cmp(&self, other: &&str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl PartialOrd<&mut str> for MutStr<'_> {
     fn partial_cmp(&self, other: &&mut str) -> Option<Ordering> {
-        (&**self).partial_cmp(other)
+        (**self).partial_cmp(other)
     }
 }
 
 impl Ord for MutStr<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        (&**self).cmp(&**other)
+        (**self).cmp(&**other)
     }
 }
 
@@ -386,6 +411,18 @@ impl const From<*mut str> for ConstStrPtr {
 impl const From<ConstStrPtr> for *const str {
     fn from(s: ConstStrPtr) -> Self {
         std::ptr::from_raw_parts(s.ptr.as_ptr() as _, s.ptr.len())
+    }
+}
+
+unsafe impl const CTypeBridge for *const str {
+    type Type = ConstStrPtr;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
     }
 }
 
@@ -472,6 +509,18 @@ impl const From<MutStrPtr> for *mut str {
     #[inline]
     fn from(s: MutStrPtr) -> Self {
         std::ptr::from_raw_parts_mut(s.ptr.as_ptr() as _, s.ptr.len())
+    }
+}
+
+unsafe impl const CTypeBridge for *mut str {
+    type Type = MutStrPtr;
+
+    fn marshal(self) -> Self::Type {
+        self.into()
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x.into()
     }
 }
 

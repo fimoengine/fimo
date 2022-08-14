@@ -4,9 +4,9 @@ use numtoa::NumToA;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
-use std::lazy::SyncLazy;
+use std::sync::LazyLock;
 
-static VERSION_VALIDATOR: SyncLazy<regex::Regex> = SyncLazy::new(|| {
+static VERSION_VALIDATOR: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<release_type>(unstable|beta))(\.(?P<release_number>\d+))?)?(\+(?P<build>\d+))?").unwrap()
 });
 
