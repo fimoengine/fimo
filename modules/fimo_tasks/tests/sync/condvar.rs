@@ -211,7 +211,7 @@ fn two_mutexes() {
         drop(g);
         rx.recv().unwrap();
         let _g = m.lock();
-        let _guard = PanicGuard(&*c);
+        let _guard = PanicGuard(&c);
         c.wait(&mut m3.lock());
 
         Ok(())
@@ -248,7 +248,7 @@ fn two_mutexes_disjoint() {
             },
             &[],
         )?;
-        let _ = c.wait(&mut g);
+        c.wait(&mut g);
         drop(g);
 
         Ok(())

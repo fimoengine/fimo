@@ -447,12 +447,6 @@ impl TaskManager {
         let addr_key = addr.addr();
         let entry = self.pseudo_tasks.entry(addr_key);
 
-        // SAFETY: We are extending the lifetime of the provided task.
-        // We know that it is sound because of the contract of the register function,
-        // which states that the task may not be moved for the entire duration
-        // for which it is registered with the runtime.
-        let task = std::mem::transmute(task);
-
         // initialize the entry if it does not exit.
         let _ = entry.or_insert(PseudoTaskData {
             waiters: Default::default(),

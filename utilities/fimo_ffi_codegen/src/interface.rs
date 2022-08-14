@@ -998,6 +998,7 @@ impl InterfaceContext {
         let vtable = quote! {
             #[doc = #doc]
             #[repr(transparent)]
+            #[allow(clippy::type_complexity)]
             #trait_vis struct #vtable_ident {
                 #[doc = r"Internal vtable implementation."]
                 pub inner: ::fimo_ffi::ptr::GenericVTable<#vtable_head_ident, #vtable_data_ident>,
@@ -1103,7 +1104,7 @@ impl InterfaceContext {
 
                     if idx == 0 {
                         head_impls.push(quote! {
-                            impl<'__private_this, T> const ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this 
+                            impl<'__private_this, T> const ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this
                             where
                                 T: ::fimo_ffi::ptr::ObjMetadataCompatible,
                                 dyn #i_path: ~const ::fimo_ffi::ptr::IntoInterface<T>,
@@ -1138,7 +1139,7 @@ impl InterfaceContext {
                     }
                 } else if idx == 0 {
                     head_impls.push(quote! {
-                        impl<'__private_this, T> const ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this 
+                        impl<'__private_this, T> const ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this
                         where
                             T: ::fimo_ffi::ptr::ObjMetadataCompatible,
                             dyn #i_path: ~const ::fimo_ffi::ptr::IntoInterface<T>,
@@ -1365,6 +1366,7 @@ impl InterfaceContext {
 
                 method_idents.push(ident.clone());
                 vtable_shims.push(quote!{
+                    #[allow(clippy::type_complexity)]
                     unsafe #abi fn #ident #impl_gen (__private_this: #receiver, #(#input_names: #inputs),* #phantom_parameter) -> #output {
                         let __private_this = __private_this.cast::<T>();
                         #(#demarshal_expr;)*
@@ -1372,6 +1374,7 @@ impl InterfaceContext {
                         let __private_res = __private_this.#ident( #(#input_names),* );
                         #marshaler::marshal(__private_res)
                     }
+                    #[allow(clippy::useless_transmute)]
                     let #ident = unsafe { std::mem::transmute(#ident::<T> as *const ()) };
                 });
             }
