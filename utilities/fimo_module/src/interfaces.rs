@@ -219,7 +219,7 @@ interface! {
 #[inline]
 pub fn try_downcast<'a, T, U>(obj: &fimo_ffi::DynObj<U>) -> Result<&DynObj<T>>
 where
-    T: FimoInterface + Unsize<dyn IBase> + ?Sized + 'a,
+    T: FimoInterface + Unsize<dyn IBase + 'a> + ?Sized + 'a,
     U: CastInto<dyn IModuleInterface + 'a> + ?Sized,
 {
     let obj: &DynObj<dyn IModuleInterface + 'a> = obj.cast_super();
@@ -264,7 +264,7 @@ where
 #[inline]
 pub fn try_downcast_arc<'a, T, U>(obj: ObjArc<DynObj<U>>) -> Result<ObjArc<DynObj<T>>>
 where
-    T: FimoInterface + Unsize<dyn IBase> + ?Sized + 'a,
+    T: FimoInterface + Unsize<dyn IBase + 'a> + ?Sized + 'a,
     U: CastInto<dyn IModuleInterface + 'a> + ?Sized,
 {
     // the inner object always equals the original object, except for the different vtable.

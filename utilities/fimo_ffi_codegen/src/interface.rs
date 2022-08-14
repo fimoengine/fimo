@@ -1086,7 +1086,7 @@ impl InterfaceContext {
                     const #const_ptr_name: *const #i_ty = unsafe { ::std::ptr::addr_of!((*UNINIT_PTR).#i_name) };
                     const #const_offset_name: usize =
                         unsafe { (#const_ptr_name as *const u8).offset_from(UNINIT_PTR as *const u8) as usize };
-                    let #i_name: #i_ty = #i_ty::new_for_embedded::<T, Dyn>(__internal_this_offset + #const_offset_name);
+                    let #i_name: #i_ty = #i_ty::new_for_embedded::<T>(__internal_this_offset + #const_offset_name);
                 });
                 interface_new_impl_table_args.push(quote!(#i_name: #i_name,));
 
@@ -1236,19 +1236,18 @@ impl InterfaceContext {
                     where
                         T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_inner,
                     {
-                        Self::new_embedded::<T, #dyn_trait_ident>(0)
+                        Self::new_embedded::<T>(0)
                     }
 
                     #[doc = r"Constructs a new instance of the vtable head section with a custom offset value."]
-                    pub const fn new_embedded<'__private_inner, T, Dyn>(__internal_this_offset: usize,) -> Self
+                    pub const fn new_embedded<'__private_inner, T>(__internal_this_offset: usize,) -> Self
                     where
-                        T: #trait_ident + ::fimo_ffi::ptr::ObjectId + std::marker::Unsize<Dyn> + '__private_inner,
-                        Dyn: ::fimo_ffi::ptr::ObjInterface + ?Sized + '__private_inner,
+                        T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_inner,
                     {
                         #(#interface_new_impl)*
 
                         Self {
-                            __internal_head: ::fimo_ffi::ptr::VTableHead::new_embedded_::<'__private_inner, T, Dyn>(
+                            __internal_head: ::fimo_ffi::ptr::VTableHead::new_embedded_::<'__private_inner, T, #dyn_trait_ident>(
                                 __internal_this_offset,
                                 Self::VERSION_MINOR,
                             ),
@@ -1293,15 +1292,15 @@ impl InterfaceContext {
                     #[repr(C)]
                     #[doc = #doc]
                     #trait_vis struct #vtable_data_ident {
-                        #[doc = r"Padding."]
-                        pub padding: u8
+                        #[doc = r"Invalid function pointer. Properly aligns the data segment."]
+                        pub uninit: ::std::mem::MaybeUninit<fn()>,
                     }
 
                     impl #vtable_data_ident {
                         #[doc = r"Constructs a new instance of the vtable data section."]
                         pub const fn new(#(#method_names: #method_types),*) -> Self {
                             Self {
-                                padding: 0
+                                uninit: ::std::mem::MaybeUninit::uninit()
                             }
                         }
                     }
@@ -1383,18 +1382,12 @@ impl InterfaceContext {
                 #(#vtable_shims)*
 
                 Self::new(
-                    #vtable_head_ident::new_embedded::<T, Dyn>(offset),
+                    #vtable_head_ident::new_embedded::<T>(offset),
                     #vtable_data_ident::new(
                         #(#method_idents),*
                     ),
                 )
             }
-        };
-
-        let dyn_trait_ident = if static_self_bound {
-            quote!(dyn #trait_ident + 'static)
-        } else {
-            quote!(dyn #trait_ident + '__private_this)
         };
 
         quote! {
@@ -1407,16 +1400,15 @@ impl InterfaceContext {
                 where
                     T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_this,
                 {
-                    Self::new_for_embedded::<'__private_this, T, #dyn_trait_ident>(0)
+                    Self::new_for_embedded::<'__private_this, T>(0)
                 }
 
-                #[doc = "Constructs a new vtable for a type implementing the base trait and interface with a custom offset."]
+                #[doc = "Constructs a new vtable for a type implementing the base trait with a custom offset."]
                 #[inline]
                 #[allow(clippy::let_unit_value)]
-                pub const fn new_for_embedded<'__private_this, T, Dyn>(offset: usize) -> Self
+                pub const fn new_for_embedded<'__private_this, T>(offset: usize) -> Self
                 where
-                    T: #trait_ident + ::fimo_ffi::ptr::ObjectId + std::marker::Unsize<Dyn> + '__private_this,
-                    Dyn: ::fimo_ffi::ptr::ObjInterface + ?Sized + '__private_this,
+                    T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_this,
                 {
                     #new_for_impl
                 }

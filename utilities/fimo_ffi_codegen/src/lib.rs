@@ -39,7 +39,7 @@ mod object;
 /// - `Sync`: [`Sync`] trait.
 /// - `Unpin`: [`Unpin`] trait.
 /// - `IBase`: Base trait for all interfaces.
-///     Is required if the interface does not specify any interface bounds.
+///     Is required, if the interface does not specify any interface bounds.
 ///
 /// ### Interface Bounds
 ///
@@ -108,8 +108,8 @@ mod object;
 ///
 /// #### Example
 ///
-/// - abi = "inherit": Inherit from config from parent.
-/// - abi(explicit(abi = "ABI")): Explitit calling convention, i. e. `"C"` or `"Rust"`.
+/// - `abi = "inherit"`: Inherit from config from parent.
+/// - `abi(explicit(abi = "ABI"))`: Explitit calling convention, i. e. `"C"` or `"Rust"`.
 ///
 /// ### Marshaling
 ///
@@ -154,7 +154,7 @@ mod object;
 ///
 /// #### Example
 ///
-/// - marshal = "auto": Use default marshaler.
+/// - `marshal = "auto"`: Use default marshaler.
 ///
 /// ### Method VTable Mapping
 ///
@@ -164,11 +164,11 @@ mod object;
 ///
 /// #### Example
 ///
-/// - mapping = "include": Include method in the vtable (Default).
-/// - mapping = "exclude": Don't add the method to the vtable.
-/// - mapping(optional()): Marks the method as being optional.
+/// - `mapping = "include"`: Include method in the vtable (Default).
+/// - `mapping = "exclude"`: Don't add the method to the vtable.
+/// - `mapping(optional())`: Marks the method as being optional.
 ///     Uses the default implementation if the method is not present in the vtable.
-/// - mapping(optional(replace = "...")): Marks the method as being optional.
+/// - `mapping(optional(replace = "..."))`: Marks the method as being optional.
 ///     Calls the method specified in replace if the method is not present in the vtable.
 ///
 /// ### UUID
@@ -180,31 +180,31 @@ mod object;
 ///
 /// ## Global CFG
 ///
-/// Allowed parameters in `#![interface_cfg]`:
+/// Allowed parameters in `#![interface_cfg(...)]`:
 ///
-/// - version = "...": Major version of the interface.
-/// - vtable = "Name": Name of the vtable.
-/// - no_dyn_impl: Skip implementation for `DynObj`. Implementation detail.
-/// - abi: Default calling convention of the methods. See above for the syntax.
-/// - marshal: Default marshaler for the interface. See above for the syntax.
-/// - uuid = "...": UUID of the interface.
+/// - `version = "..."`: Major version of the interface.
+/// - `vtable = "Name"`: Name of the vtable.
+/// - `no_dyn_impl`: Skip implementation for `DynObj`. Implementation detail.
+/// - `abi`: Default calling convention of the methods. See above for the syntax.
+/// - `marshal`: Default marshaler for the interface. See above for the syntax.
+/// - `uuid = "..."`: UUID of the interface.
 ///
 /// ## Method CFG
 ///
-/// Allowed parameters in `#[interface_cfg]`:
+/// Allowed parameters in `#[interface_cfg(...)]`:
 ///
-/// - since_minor = "...": Minor version when a method was added to the interface.
-/// - abi: Calling convention of the method. See above for the syntax.
-/// - mapping: Mapping strategy for the method. See above for the syntax.
-/// - marshal: Default marshaler for the method. See above for the syntax.
-/// - phantom_parameter = "...": Adds a parameter wrapped in a `PhantomData`. Used for
+/// - `since_minor = "..."`: Minor version when a method was added to the interface.
+/// - `abi`: Calling convention of the method. See above for the syntax.
+/// - `mapping`: Mapping strategy for the method. See above for the syntax.
+/// - `marshal`: Default marshaler for the method. See above for the syntax.
+/// - `phantom_parameter = "..."`: Adds a parameter wrapped in a `PhantomData`. Used for
 ///     resolving unconstrained lifetime errors in the return type.
 ///
 /// ## Parameter CFG
 ///
-/// Allowed parameters in `#[interface_cfg]`:
+/// Allowed parameters in `#[interface_cfg(...)]`:
 ///
-/// - marshal: Marshaler for the parameter. See above for the syntax.
+/// - `marshal`: Marshaler for the parameter. See above for the syntax.
 ///
 /// # ABI Stability
 ///
