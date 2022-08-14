@@ -314,9 +314,42 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
         CastInto::cast_into(self)
     }
 
-    /// Returns if the a certain interface is implemented.
+    /// Checks whether the current metadata belongs to the outermost interface.
+    #[inline]
+    pub fn is_root_metadata(self) -> bool {
+        self.vtable_ptr.__internal_vtable_offset == 0
+    }
+
+    /// Returns the metadata to the outermost interface.
+    #[inline]
+    pub fn get_root_metadata(self) -> ObjMetadata<dyn IBase + 'a> {
+        let vtable_ptr = self.vtable_ptr as *const _ as *const u8;
+        let vtable_ptr = vtable_ptr.wrapping_sub(self.vtable_offset());
+        let vtable_ptr = vtable_ptr as *const VTableHead;
+
+        // SAFETY: By construction we ensure that the offset points to the same allocation.
+        unsafe {
+            ObjMetadata {
+                vtable_ptr: &*vtable_ptr,
+                phantom: PhantomData,
+            }
+        }
+    }
+
+    /// Returns if the current or root metadata belongs to a certain interface.
     #[inline]
     pub fn is_interface<'b, U>(self) -> bool
+    where
+        'a: 'b,
+        'b: 'a,
+        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
+    {
+        self.current_is_interface::<U>() || self.get_root_metadata().current_is_interface::<U>()
+    }
+
+    /// Returns if the current metadata belongs to a certain interface.
+    #[inline]
+    pub fn current_is_interface<'b, U>(self) -> bool
     where
         'a: 'b,
         'b: 'a,
@@ -333,22 +366,26 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     where
         'a: 'b,
         'b: 'a,
-        U: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'b,
+        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
     {
-        if self.is_interface::<U>() {
-            let vtable_ptr = self.vtable_ptr as *const _ as *const u8;
-            let vtable_ptr = vtable_ptr.wrapping_sub(self.vtable_offset());
-            let vtable_ptr = vtable_ptr as *const VTableHead;
-
-            // safety: by construction we ensure that the offset points to the same allocation.
-            unsafe {
+        // If the current metadata already belongs to the interface we
+        // simply reinterpret it.
+        if self.current_is_interface::<U>() {
+            Some(ObjMetadata {
+                vtable_ptr: self.vtable_ptr,
+                phantom: PhantomData,
+            })
+        } else {
+            // Otherwise we check whether the root metadata describes the interface.
+            let root = self.get_root_metadata();
+            if root.current_is_interface::<U>() {
                 Some(ObjMetadata {
-                    vtable_ptr: &*vtable_ptr,
+                    vtable_ptr: root.vtable_ptr,
                     phantom: PhantomData,
                 })
+            } else {
+                None
             }
-        } else {
-            None
         }
     }
 
@@ -831,7 +868,7 @@ pub fn is_interface<'a, 'b, T, Dyn>(obj: *const DynObj<Dyn>) -> bool
 where
     'a: 'b,
     'b: 'a,
-    T: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'b,
+    T: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
     Dyn: ?Sized + 'a,
 {
     let metadata = metadata(obj);
@@ -844,7 +881,7 @@ pub fn downcast_interface<'a, 'b, T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*co
 where
     'a: 'b,
     'b: 'a,
-    T: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'b,
+    T: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
     Dyn: ?Sized + 'a,
 {
     let metadata = metadata(obj);
@@ -859,7 +896,7 @@ pub fn downcast_interface_mut<'a, 'b, T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*
 where
     'a: 'b,
     'b: 'a,
-    T: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'b,
+    T: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
     Dyn: ?Sized + 'a,
 {
     let metadata = metadata(obj);
@@ -1274,17 +1311,17 @@ pub trait IBaseExt<'a, Dyn: IBase + ?Sized + 'a> {
     /// Returns if the a certain interface is implemented.
     fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'a;
+        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized + 'a;
 
     /// Returns the downcasted interface if it is of type `U`.
     fn downcast_interface<U>(&self) -> Option<&DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'a;
+        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized + 'a;
 
     /// Returns the mutable downcasted interface if it is of type `U`.
     fn downcast_interface_mut<U>(&mut self) -> Option<&mut DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'a;
+        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized + 'a;
 }
 
 impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
@@ -1337,7 +1374,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized + 'a,
     {
         is_interface::<U, _>(self)
     }
@@ -1345,7 +1382,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast_interface<U>(&self) -> Option<&DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized + 'a,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast_interface::<U, _>(self).map(|u| unsafe { &*u })
@@ -1354,7 +1391,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast_interface_mut<U>(&mut self) -> Option<&mut DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized + 'a,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast_interface_mut::<U, _>(self).map(|u| unsafe { &mut *u })

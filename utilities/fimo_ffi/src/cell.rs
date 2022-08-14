@@ -632,7 +632,7 @@ impl<T: ?Sized> RefCell<T> {
     }
 }
 
-impl<T: ?Sized> RefCell<DynObj<T>> {
+impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// Returns whether the contained object is of type `U`.
     ///
     /// # Examples
@@ -867,7 +867,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     #[inline]
     pub fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let obj = self.as_ptr();
         crate::ptr::is_interface::<U, _>(obj)
@@ -906,7 +906,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface<U>(&self) -> Option<&RefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface::<U, _>(obj) {
@@ -952,7 +952,7 @@ impl<T: ?Sized> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface_mut<U>(&mut self) -> Option<&mut RefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface_mut::<U, _>(obj) {
@@ -1600,7 +1600,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     }
 }
 
-impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
+impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// Returns whether the contained object is of type `U`.
     ///
     /// # Examples
@@ -1835,7 +1835,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let obj = self.as_ptr();
         crate::ptr::is_interface::<U, _>(obj)
@@ -1874,7 +1874,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface<U>(&self) -> Option<&AtomicRefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface::<U, _>(obj) {
@@ -1920,7 +1920,7 @@ impl<T: ?Sized> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface_mut<U>(&mut self) -> Option<&mut AtomicRefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface_mut::<U, _>(obj) {

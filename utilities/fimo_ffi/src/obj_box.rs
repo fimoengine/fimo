@@ -262,7 +262,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn is_interface<U>(b: &Self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         crate::ptr::is_interface::<U, _>(&**b)
     }
@@ -271,7 +271,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn downcast_interface<U>(b: Self) -> Option<ObjBox<DynObj<U>, A>>
     where
-        U: DowncastSafeInterface + Unsize<T> + ?Sized + 'a,
+        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         if let Some(ptr) = crate::ptr::downcast_interface_mut(ptr) {
