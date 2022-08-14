@@ -205,7 +205,7 @@ fn bind_core(
     mut server: ObjArc<FimoActixInterface>,
     core: ObjArc<DynObj<dyn IFimoCore>>,
 ) -> ObjArc<FimoActixInterface> {
-    let (builder, callback) = core_bindings::scope_builder(&*core);
+    let (builder, callback) = core_bindings::scope_builder(&core);
     let scope = server
         .register_scope("/core", builder)
         .expect("could not register `core` scope");

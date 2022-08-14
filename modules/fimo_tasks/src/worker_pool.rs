@@ -313,7 +313,7 @@ impl TaskWorker {
 
                     // SAFETY: The stack will outlive the context.
                     unsafe {
-                        Context::new(&*stack, worker_main).resume(0);
+                        Context::new(&stack, worker_main).resume(0);
                     }
 
                     // remove and deallocate published worker.

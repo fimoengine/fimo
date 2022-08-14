@@ -16,6 +16,7 @@ interface! {
         /// # Deadlock
         ///
         /// The function may only call into the registry with the provided inner reference.
+        #[allow(clippy::type_complexity)]
         fn enter_impl(&self, f: FfiFn<'_, dyn FnOnce(&'_ DynObj<dyn IModuleRegistryInner + '_>) + '_>);
 
         /// Enters the inner registry with write access, possibly locking it.
@@ -23,6 +24,7 @@ interface! {
         /// # Deadlock
         ///
         /// The function may only call into the registry with the provided inner reference.
+        #[allow(clippy::type_complexity)]
         fn enter_mut_impl(
             &self,
             f: FfiFn<'_, dyn FnOnce(&'_ mut DynObj<dyn IModuleRegistryInner + '_>) + '_>,
