@@ -202,6 +202,9 @@ where
 /// impl ObjInterfaceBase for dyn Interface {
 ///     type VTable = VTable;
 ///     const INTERFACE_ID: Uuid = Uuid::from_bytes([0; 16]);
+///     const IS_FROZEN: bool = true;
+///     const INTERFACE_VERSION_MAJOR: u32 = 0;
+///     const INTERFACE_VERSION_MINOR: u32 = 0;
 /// }
 ///
 /// #[repr(C)]
@@ -239,6 +242,9 @@ where
 /// impl ObjInterfaceBase for dyn Interface {
 ///     type VTable = VTable;
 ///     const INTERFACE_ID: Uuid = Uuid::from_bytes([0; 16]);
+///     const IS_FROZEN: bool = true;
+///     const INTERFACE_VERSION_MAJOR: u32 = 0;
+///     const INTERFACE_VERSION_MINOR: u32 = 0;
 /// }
 ///
 /// #[repr(C)]
