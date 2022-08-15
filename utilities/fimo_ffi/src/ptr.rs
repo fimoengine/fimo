@@ -55,6 +55,46 @@ pub trait ObjectId {
     const OBJECT_NAME: &'static str = std::any::type_name::<Self>();
 }
 
+// We require a way to identify at runtime whether a type implements
+// any of the predefined marker bounds, which are `Send`, `Sync` and
+// `Unpin`. This is required, because we'd like to downcast from a
+// `DynObj<dyn T>` to a `DynObj<dyn U + Marker>` only if the object
+// which implements `U` also implements `Marker`.
+const NONE_MARKER: usize = 0b0000;
+const SEND_MARKER: usize = 0b0001;
+const SYNC_MARKER: usize = 0b0010;
+const UNPIN_MARKER: usize = 0b0100;
+
+trait MarkerBounds {
+    const IMPLEMENTED_MARKERS: usize;
+}
+
+trait MaybeImpl<T: ?Sized> {
+    const IMPLEMENTED: usize;
+}
+
+impl<T: ?Sized, U: ?Sized> MaybeImpl<U> for T {
+    default const IMPLEMENTED: usize = NONE_MARKER;
+}
+
+impl<T: Send + ?Sized> MaybeImpl<dyn Send> for T {
+    const IMPLEMENTED: usize = SEND_MARKER;
+}
+
+impl<T: Sync + ?Sized> MaybeImpl<dyn Sync> for T {
+    const IMPLEMENTED: usize = SYNC_MARKER;
+}
+
+impl<T: Unpin + ?Sized> MaybeImpl<dyn Unpin> for T {
+    const IMPLEMENTED: usize = UNPIN_MARKER;
+}
+
+impl<T: ?Sized> MarkerBounds for T {
+    const IMPLEMENTED_MARKERS: usize = <T as MaybeImpl<dyn Send>>::IMPLEMENTED
+        | <T as MaybeImpl<dyn Sync>>::IMPLEMENTED
+        | <T as MaybeImpl<dyn Unpin>>::IMPLEMENTED;
+}
+
 /// Specifies a new interface type.
 pub trait ObjInterfaceBase {
     /// VTable of the interface.
@@ -64,13 +104,13 @@ pub trait ObjInterfaceBase {
     const INTERFACE_ID: Uuid;
 
     /// Interface is frozen.
-    const IS_FROZEN: bool = false;
+    const IS_FROZEN: bool;
 
     /// Major version of the interface.
-    const INTERFACE_VERSION_MAJOR: u32 = 0;
+    const INTERFACE_VERSION_MAJOR: u32;
 
     /// Minor version of the interface.
-    const INTERFACE_VERSION_MINOR: u32 = 0;
+    const INTERFACE_VERSION_MINOR: u32;
 
     /// Name of the interface.
     const INTERFACE_NAME: &'static str = std::any::type_name::<Self>();
@@ -358,6 +398,8 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
         (self.interface_id() == U::Base::INTERFACE_ID)
             && (U::Base::INTERFACE_ID != Self::HIDDEN_UUID)
             && (self.interface_version_major() == U::Base::INTERFACE_VERSION_MAJOR)
+            && ((self.object_markers() & <U as MarkerBounds>::IMPLEMENTED_MARKERS)
+                == <U as MarkerBounds>::IMPLEMENTED_MARKERS)
     }
 
     /// Returns the metadata for the contained interface if it is of type `U`.
@@ -411,6 +453,12 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub const fn object_id(self) -> Uuid {
         Uuid::from_bytes(self.vtable_ptr.__internal_object_id)
+    }
+
+    /// Returns the implemented marker bounds of the object.
+    #[inline]
+    pub const fn object_markers(self) -> usize {
+        self.vtable_ptr.__internal_object_markers
     }
 
     /// Returns the name of the type associated with this vtable.
@@ -1218,6 +1266,8 @@ pub struct VTableHead {
     pub __internal_object_alignment: usize,
     /// Unique object id.
     pub __internal_object_id: [u8; 16],
+    /// Implemented marker bounds of the object.
+    pub __internal_object_markers: usize,
     /// Name of the underlying object type.
     pub __internal_object_name: ConstStr<'static>,
     /// Version of the underlying object type.
@@ -1279,6 +1329,7 @@ impl VTableHead {
             },
             __internal_object_version: T::OBJECT_VERSION,
             __internal_interface_id: *Dyn::Base::INTERFACE_ID.as_bytes(),
+            __internal_object_markers: T::IMPLEMENTED_MARKERS,
             __internal_interface_name: unsafe {
                 crate::str::from_utf8_unchecked(Dyn::Base::INTERFACE_NAME.as_bytes())
             },
