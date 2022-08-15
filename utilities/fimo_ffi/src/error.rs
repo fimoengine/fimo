@@ -1,5 +1,6 @@
 //! Error type.
 use crate::fmt::{FmtWrapper, Formatter, IDebug, IDisplay};
+use crate::marshal::CTypeBridge;
 use crate::ptr::FetchVTable;
 use crate::{interface, DynObj, ObjBox, ObjectId};
 use std::ops::{Deref, DerefMut};
@@ -284,6 +285,7 @@ impl<T: IError + ?Sized> std::error::Error for ErrorWrapper<T> {}
 
 /// Error type for modules.
 #[repr(C)]
+#[derive(CTypeBridge)]
 pub struct Error {
     repr: ErrorRepr,
 }
@@ -449,7 +451,7 @@ impl IError for Error {
 ///
 /// [gRPC status codes]: https://github.com/grpc/grpc/blob/master/doc/statuscodes.md#status-codes-and-their-use-in-grpc
 #[repr(i8)]
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, CTypeBridge)]
 pub enum ErrorKind {
     /// The operation was cancelled.
     Cancelled = 1,

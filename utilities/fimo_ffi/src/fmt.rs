@@ -190,7 +190,7 @@ impl<T: IDisplay + ?Sized> IDisplay for &'_ mut T {
 
 /// Possible alignments returned by [`IFormatter::align`].
 #[repr(u32)]
-#[derive(Debug)]
+#[derive(Debug, CTypeBridge)]
 pub enum Alignment {
     /// Indication that contents should be left-aligned.
     Left,
@@ -486,7 +486,7 @@ interface! {
 
 /// The error type which is returned from formatting a message into a stream.
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, CTypeBridge)]
 pub struct Error {
     // C doesn't support ZSTs, instead we use the smallest possible C type.
     _e: u8,

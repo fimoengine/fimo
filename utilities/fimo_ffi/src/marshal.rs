@@ -1,4 +1,5 @@
 //! Marshalling utilities.
+pub use fimo_ffi_codegen::CTypeBridge;
 
 /// Bridge for Rust to Rust types.
 pub trait RustTypeBridge {
@@ -31,7 +32,8 @@ impl<T> const RustTypeBridge for T {
 /// # Safety
 ///
 /// Implementations must always implement the entire trait
-/// without making use of the default implementations.
+/// without making use of the default implementations or use
+/// all default implementations.
 pub unsafe trait CTypeBridge {
     /// Type to marshal to.
     type Type;
@@ -54,30 +56,84 @@ pub unsafe trait CTypeBridge {
     unsafe fn demarshal(x: Self::Type) -> Self;
 }
 
-unsafe impl<T> const CTypeBridge for T {
-    default type Type = Self;
+macro_rules! identity_impls {
+    ($($T:ident),+) => {
+        $(
+            unsafe impl const CTypeBridge for $T {
+                type Type = Self;
 
-    #[inline(always)]
-    default fn marshal(self) -> Self::Type {
-        let this = std::mem::ManuallyDrop::new(self);
-        unsafe { std::mem::transmute_copy(&this) }
+                #[inline(always)]
+                fn marshal(self) -> Self::Type {
+                    self
+                }
+
+                #[inline(always)]
+                unsafe fn demarshal(x: Self::Type) -> Self {
+                    x
+                }
+            }
+        )+
+    };
+}
+
+// Implement for the identity mapping for primitive whose layout
+// matches the c layout.
+identity_impls! {
+    bool,
+    f32,
+    f64,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize
+}
+
+// Implementation for primitive types whose layout differ.
+
+/// C compatible [`i128`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, CTypeBridge)]
+pub struct I128C {
+    lower: u64,
+    higher: u64,
+}
+
+/// C compatible [`u128`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, CTypeBridge)]
+pub struct U128C {
+    lower: u64,
+    higher: u64,
+}
+
+unsafe impl const CTypeBridge for i128 {
+    type Type = I128C;
+
+    fn marshal(self) -> Self::Type {
+        unsafe { std::mem::transmute(self) }
     }
 
-    #[inline(always)]
-    default unsafe fn demarshal(x: Self::Type) -> Self {
-        let x = std::mem::ManuallyDrop::new(x);
-        std::mem::transmute_copy(&x)
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        std::mem::transmute(x)
     }
 }
 
-unsafe impl const CTypeBridge for () {
-    type Type = u8;
+unsafe impl const CTypeBridge for u128 {
+    type Type = U128C;
 
     fn marshal(self) -> Self::Type {
-        0
+        unsafe { std::mem::transmute(self) }
     }
 
-    unsafe fn demarshal(_x: Self::Type) -> Self {}
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        std::mem::transmute(x)
+    }
 }
 
 unsafe impl const CTypeBridge for char {
@@ -104,5 +160,263 @@ where
 
     unsafe fn demarshal(x: Self::Type) -> Self {
         x.map(|x| T::demarshal(x))
+    }
+}
+
+// Specialize for pointer types.
+unsafe impl<T: ?Sized> const CTypeBridge for *const T
+where
+    *const T: ~const private::CPointerRep,
+{
+    default type Type = <*const T as private::CPointerRep>::T;
+
+    #[inline]
+    default fn marshal(self) -> Self::Type {
+        let x = <*const T as private::CPointerRep>::split(self);
+        let x = std::mem::ManuallyDrop::new(x);
+        unsafe { std::mem::transmute_copy(&x) }
+    }
+
+    #[inline]
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        let x = std::mem::ManuallyDrop::new(x);
+        let x: <*const T as private::CPointerRep>::T = std::mem::transmute_copy(&x);
+        <*const T as private::CPointerRep>::reconstruct(x)
+    }
+}
+
+unsafe impl<T: ?Sized> const CTypeBridge for *mut T
+where
+    *mut T: ~const private::CPointerRep,
+{
+    default type Type = <*mut T as private::CPointerRep>::T;
+
+    #[inline]
+    default fn marshal(self) -> Self::Type {
+        let x = <*mut T as private::CPointerRep>::split(self);
+        let x = std::mem::ManuallyDrop::new(x);
+        unsafe { std::mem::transmute_copy(&x) }
+    }
+
+    #[inline]
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        let x = std::mem::ManuallyDrop::new(x);
+        let x: <*mut T as private::CPointerRep>::T = std::mem::transmute_copy(&x);
+        <*mut T as private::CPointerRep>::reconstruct(x)
+    }
+}
+
+unsafe impl<'a, T: ?Sized> const CTypeBridge for &'a T
+where
+    &'a T: ~const private::CPointerRep,
+{
+    default type Type = <&'a T as private::CPointerRep>::T;
+
+    #[inline]
+    default fn marshal(self) -> Self::Type {
+        let x = <&'a T as private::CPointerRep>::split(self);
+        let x = std::mem::ManuallyDrop::new(x);
+        unsafe { std::mem::transmute_copy(&x) }
+    }
+
+    #[inline]
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        let x = std::mem::ManuallyDrop::new(x);
+        let x: <&'a T as private::CPointerRep>::T = std::mem::transmute_copy(&x);
+        <&'a T as private::CPointerRep>::reconstruct(x)
+    }
+}
+
+unsafe impl<'a, T: ?Sized> const CTypeBridge for &'a mut T
+where
+    &'a mut T: ~const private::CPointerRep,
+{
+    default type Type = <&'a mut T as private::CPointerRep>::T;
+
+    #[inline]
+    default fn marshal(self) -> Self::Type {
+        let x = <&'a mut T as private::CPointerRep>::split(self);
+        let x = std::mem::ManuallyDrop::new(x);
+        unsafe { std::mem::transmute_copy(&x) }
+    }
+
+    #[inline]
+    default unsafe fn demarshal(x: Self::Type) -> Self {
+        let x = std::mem::ManuallyDrop::new(x);
+        let x: <&'a mut T as private::CPointerRep>::T = std::mem::transmute_copy(&x);
+        <&'a mut T as private::CPointerRep>::reconstruct(x)
+    }
+}
+
+// Implement for wrappers
+unsafe impl<T> const CTypeBridge for std::mem::ManuallyDrop<T>
+where
+    T: ~const CTypeBridge,
+{
+    type Type = std::mem::ManuallyDrop<T::Type>;
+
+    fn marshal(self) -> Self::Type {
+        let inner = std::mem::ManuallyDrop::into_inner(self);
+        std::mem::ManuallyDrop::new(inner.marshal())
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let inner = std::mem::ManuallyDrop::into_inner(x);
+        std::mem::ManuallyDrop::new(T::demarshal(inner))
+    }
+}
+
+unsafe impl<T> const CTypeBridge for std::mem::MaybeUninit<T>
+where
+    T: ~const CTypeBridge<Type = T>,
+{
+    type Type = Self;
+
+    fn marshal(self) -> Self::Type {
+        self
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        x
+    }
+}
+
+mod private {
+    use super::CTypeBridge;
+
+    pub trait CPointerRep {
+        type T;
+
+        fn split(self) -> Self::T;
+
+        unsafe fn reconstruct(x: Self::T) -> Self;
+    }
+
+    impl<T: ?Sized> const CPointerRep for *const T
+    where
+        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+    {
+        default type T = <(*const (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::Type;
+
+        #[inline]
+        default fn split(self) -> Self::T {
+            let x: (*const (), <T as std::ptr::Pointee>::Metadata) =
+                (self.cast(), std::ptr::metadata(self));
+            let x = x.marshal();
+            let x = std::mem::ManuallyDrop::new(x);
+
+            // SAFETY: We know that the two types are the same.
+            unsafe { std::mem::transmute_copy(&x) }
+        }
+
+        #[inline]
+        default unsafe fn reconstruct(x: Self::T) -> Self {
+            let x = std::mem::ManuallyDrop::new(x);
+
+            // SAFETY: We know that the two types are the same.
+            let x: <(*const (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::Type =
+                std::mem::transmute_copy(&x);
+            let (ptr, metadata) =
+                <(*const (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::demarshal(x);
+            std::ptr::from_raw_parts(ptr.cast(), metadata)
+        }
+    }
+
+    impl<T: Sized> const CPointerRep for *const T
+    where
+        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+    {
+        type T = *const ();
+
+        fn split(self) -> Self::T {
+            self.cast()
+        }
+
+        unsafe fn reconstruct(x: Self::T) -> Self {
+            x.cast()
+        }
+    }
+
+    impl<T: ?Sized> const CPointerRep for *mut T
+    where
+        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+    {
+        default type T = <(*mut (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::Type;
+
+        #[inline]
+        default fn split(self) -> Self::T {
+            let x: (*mut (), <T as std::ptr::Pointee>::Metadata) =
+                (self.cast(), std::ptr::metadata(self));
+            let x = x.marshal();
+            let x = std::mem::ManuallyDrop::new(x);
+
+            // SAFETY: We know that the two types are the same.
+            unsafe { std::mem::transmute_copy(&x) }
+        }
+
+        #[inline]
+        default unsafe fn reconstruct(x: Self::T) -> Self {
+            let x = std::mem::ManuallyDrop::new(x);
+
+            // SAFETY: We know that the two types are the same.
+            let x: <(*mut (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::Type =
+                std::mem::transmute_copy(&x);
+            let (ptr, metadata) =
+                <(*mut (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::demarshal(x);
+            std::ptr::from_raw_parts_mut(ptr.cast(), metadata)
+        }
+    }
+
+    impl<T: Sized> const CPointerRep for *mut T
+    where
+        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+    {
+        type T = *mut ();
+
+        #[inline]
+        fn split(self) -> Self::T {
+            self.cast()
+        }
+
+        #[inline]
+        unsafe fn reconstruct(x: Self::T) -> Self {
+            x.cast()
+        }
+    }
+
+    impl<'a, T: ?Sized> const CPointerRep for &'a T
+    where
+        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+    {
+        type T = <*const T as CPointerRep>::T;
+
+        #[inline]
+        fn split(self) -> Self::T {
+            <*const T as CPointerRep>::split(self)
+        }
+
+        #[inline]
+        unsafe fn reconstruct(x: Self::T) -> Self {
+            let x: *const T = <*const T as CPointerRep>::reconstruct(x);
+            &*x
+        }
+    }
+
+    impl<'a, T: ?Sized> const CPointerRep for &'a mut T
+    where
+        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+    {
+        type T = <*mut T as CPointerRep>::T;
+
+        #[inline]
+        fn split(self) -> Self::T {
+            <*mut T as CPointerRep>::split(self)
+        }
+
+        #[inline]
+        unsafe fn reconstruct(x: Self::T) -> Self {
+            let x: *mut T = <*mut T as CPointerRep>::reconstruct(x);
+            &mut *x
+        }
     }
 }

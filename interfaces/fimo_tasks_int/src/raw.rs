@@ -2,6 +2,7 @@
 
 use atomic::Atomic;
 use fimo_ffi::cell::AtomicRefCell;
+use fimo_ffi::marshal::CTypeBridge;
 use fimo_ffi::ptr::IBase;
 use fimo_ffi::{interface, ConstStr, DynObj, FfiFn, ObjBox, ObjectId};
 use std::any::Any;
@@ -14,7 +15,7 @@ use std::time::{Duration, SystemTime};
 
 /// Handle to a task.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub struct TaskHandle {
     /// Id of the task.
     pub id: usize,
@@ -30,7 +31,7 @@ impl Display for TaskHandle {
 
 /// Priority of a task.
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub struct TaskPriority(pub isize);
 
 impl Display for TaskPriority {
@@ -41,7 +42,7 @@ impl Display for TaskPriority {
 
 /// Id of a worker.
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub struct WorkerId(usize);
 
 impl WorkerId {
@@ -68,7 +69,7 @@ impl Display for WorkerId {
 
 /// Run status of a task.
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub enum TaskRunStatus {
     /// The task is not running.
     Idle,
@@ -80,7 +81,7 @@ pub enum TaskRunStatus {
 
 /// Scheduler status of a task.
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub enum TaskScheduleStatus {
     /// The task is blocked and can not be resumed.
     Blocked,
@@ -273,7 +274,7 @@ impl Default for Builder {
 ///
 /// Useful for the implementation of synchronization primitives.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, CTypeBridge)]
 pub struct PseudoTask(pub *const ());
 
 unsafe impl Send for PseudoTask {}
@@ -337,7 +338,7 @@ interface! {
 
 /// A timestamp in nanoseconds from the unix epoch.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, CTypeBridge)]
 pub struct Timestamp {
     high: u64,
     low: u64,
@@ -402,7 +403,7 @@ impl From<Timestamp> for SystemTime {
 
 /// Location in a file.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, CTypeBridge)]
 pub struct Location<'a> {
     file: ConstStr<'a>,
     line: u32,
@@ -449,7 +450,7 @@ impl<'a> Location<'a> {
 
 /// Request for a status change.
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub enum StatusRequest {
     /// No request.
     None,

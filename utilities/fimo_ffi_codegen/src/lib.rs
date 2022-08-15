@@ -2,8 +2,18 @@
 
 use proc_macro::TokenStream;
 
+mod ctypebridge;
 mod interface;
 mod object;
+
+/// Implements the `CTypeBridge` trait.
+///
+/// Implements the `CTypeBridge` trait by applying an identity mapping for the
+/// marshaling and demarshaling operations.
+#[proc_macro_derive(CTypeBridge)]
+pub fn ctypebridge(input: TokenStream) -> TokenStream {
+    ctypebridge::bridge_impl(input)
+}
 
 /// Defines a new interface.
 ///

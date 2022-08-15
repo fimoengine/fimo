@@ -7,7 +7,7 @@ use std::{
 
 /// A type that represents either success ([`Result::Ok`]) or failure ([`Result::Err`]).
 #[repr(C, i8)]
-#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, CTypeBridge)]
 #[must_use = "this `Result` may be an `Err` variant, which should be handled"]
 pub enum Result<T, E> {
     /// An `Ok` variant.

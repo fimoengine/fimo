@@ -71,7 +71,7 @@ macro_rules! tuple_impls {
     )+) => {
         $(
             #[repr(C)]
-            #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+            #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash, CTypeBridge)]
             $(#[$attr])*
             pub struct $Tuple<$($T),+>($(pub $T),+);
 
@@ -133,26 +133,44 @@ macro_rules! tuple_impls {
 
 /// Tuple with zero generic types.
 #[repr(C)]
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
-pub struct Tuple0();
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash, CTypeBridge)]
+pub struct Tuple0(pub u8);
 
 impl ReprRust for () {
     type T = Tuple0;
 
+    #[inline]
     fn into_c(self) -> Self::T {
-        Tuple0()
+        Tuple0(0)
     }
 
+    #[inline]
     fn from_c(_t: Self::T) -> Self {}
 }
 
 impl ReprC for Tuple0 {
     type T = ();
 
+    #[inline]
     fn into_rust(self) -> Self::T {}
 
+    #[inline]
     fn from_rust(_t: Self::T) -> Self {
-        Tuple0()
+        Tuple0(0)
+    }
+}
+
+unsafe impl const CTypeBridge for () {
+    type Type = Tuple0;
+
+    #[inline]
+    fn marshal(self) -> Self::Type {
+        Tuple0(0)
+    }
+
+    #[inline]
+    unsafe fn demarshal(_x: Self::Type) -> Self {
+        ()
     }
 }
 

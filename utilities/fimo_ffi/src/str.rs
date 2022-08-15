@@ -13,7 +13,7 @@ use std::panic::{RefUnwindSafe, UnwindSafe};
 ///
 /// String slices are always valid UTF-8.
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, CTypeBridge)]
 pub struct ConstStr<'a> {
     ptr: ConstStrPtr,
     _phantom: PhantomData<&'a str>,
@@ -181,7 +181,7 @@ impl Ord for ConstStr<'_> {
 ///
 /// String slices are always valid UTF-8.
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, CTypeBridge)]
 pub struct MutStr<'a> {
     ptr: MutStrPtr,
     _phantom: PhantomData<&'a mut str>,
@@ -352,7 +352,7 @@ impl Ord for MutStr<'_> {
 ///
 /// Equivalent to a `*const str`
 #[repr(C)]
-#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Default)]
+#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Default, CTypeBridge)]
 pub struct ConstStrPtr {
     ptr: ConstSpanPtr<u8>,
 }
@@ -430,7 +430,7 @@ unsafe impl const CTypeBridge for *const str {
 ///
 /// Equivalent to a `*mut str`
 #[repr(C)]
-#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Default)]
+#[derive(Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq, Default, CTypeBridge)]
 pub struct MutStrPtr {
     ptr: MutSpanPtr<u8>,
 }
