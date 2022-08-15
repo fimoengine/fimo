@@ -403,14 +403,15 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// // Define a custom object implementing the interface.
     /// #[derive(ObjectId)]
     /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
-    /// struct MyObj(usize);
+    /// struct MyObj(usize, *const ());
     ///
     /// impl Obj for MyObj { }
     ///
-    /// let x = ObjArc::new(MyObj(5));
+    /// let x = ObjArc::new(MyObj(5, std::ptr::null()));
     /// let x: ObjArc<DynObj<dyn Obj>> = ObjArc::coerce_obj(x);
     /// let x: ObjArc<DynObj<dyn IBase>> = ObjArc::cast_super(x);
     /// assert_eq!(ObjArc::is_interface::<dyn Obj>(&x), true);
+    /// assert_eq!(ObjArc::is_interface::<dyn Obj + Send>(&x), false);
     /// assert_eq!(ObjArc::is_interface::<dyn IBase>(&x), false);
     #[inline]
     pub fn is_interface<U>(a: &Self) -> bool
