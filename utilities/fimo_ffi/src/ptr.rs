@@ -544,10 +544,34 @@ impl<Dyn: ?Sized> From<RawObjMut<Dyn>> for *mut DynObj<Dyn> {
 
 /// Type erased interface type.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, CTypeBridge)]
 #[allow(missing_debug_implementations)]
 pub struct OpaqueObj {
     v: RawObj<()>,
+}
+
+unsafe impl<Dyn: ?Sized> CTypeBridge for RawObj<Dyn> {
+    type Type = OpaqueObj;
+
+    fn marshal(self) -> Self::Type {
+        unsafe { std::mem::transmute(self) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        std::mem::transmute(x)
+    }
+}
+
+unsafe impl<Dyn: ?Sized> CTypeBridge for RawObjMut<Dyn> {
+    type Type = OpaqueObj;
+
+    fn marshal(self) -> Self::Type {
+        unsafe { std::mem::transmute(self) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        std::mem::transmute(x)
+    }
 }
 
 unsafe impl<Dyn: ?Sized> CTypeBridge for *const DynObj<Dyn> {
@@ -623,7 +647,7 @@ pub trait ToPtr<'a, T: ?Sized> {
 
 /// Thin pointer to a `DynObj`.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, CTypeBridge)]
 pub struct ThisPtr<'a, Dyn: ?Sized> {
     ptr: *const (),
     _phantom: PhantomData<&'a Dyn>,
@@ -667,7 +691,7 @@ impl<'a, Dyn: ?Sized> ThisPtr<'a, Dyn> {
 
 /// Mutable thin pointer to a `DynObj`.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, CTypeBridge)]
 pub struct MutThisPtr<'a, Dyn: ?Sized> {
     ptr: *mut (),
     _phantom: PhantomData<&'a mut Dyn>,

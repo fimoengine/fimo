@@ -34,7 +34,7 @@ use crate::tuple::{ReprC, ReprRust};
 /// };
 /// ```
 #[repr(C, i8)]
-#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, CTypeBridge)]
 pub enum Optional<T> {
     /// Empty variant.
     None,

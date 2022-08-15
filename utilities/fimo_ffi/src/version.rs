@@ -1,5 +1,6 @@
 //! Implementation of the
 //! [version specification](https://fimoengine.github.io/emf-rfcs/0004-versioning-specification.html).
+use crate::marshal::CTypeBridge;
 use numtoa::NumToA;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -12,7 +13,7 @@ static VERSION_VALIDATOR: LazyLock<regex::Regex> = LazyLock::new(|| {
 
 /// A version.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, CTypeBridge)]
 pub struct Version {
     /// Major version.
     pub major: i32,
@@ -30,7 +31,9 @@ pub struct Version {
 
 /// Errors of the version api.
 #[repr(i8)]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize, CTypeBridge,
+)]
 pub enum ReleaseType {
     /// Stable release.
     #[serde(rename = "stable")]

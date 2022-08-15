@@ -14,7 +14,7 @@ use crate::marshal::CTypeBridge;
 ///
 /// Equivalent to a `&'a [T]`
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, CTypeBridge)]
 pub struct ConstSpan<'a, T> {
     inner: ConstSpanPtr<T>,
     _phantom: PhantomData<&'a [T]>,
@@ -152,7 +152,7 @@ impl<T: Ord> Ord for ConstSpan<'_, T> {
 ///
 /// Equivalent to a `&'a mut [T]`
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, CTypeBridge)]
 pub struct MutSpan<'a, T> {
     inner: MutSpanPtr<T>,
     _phantom: PhantomData<&'a mut [T]>,
@@ -299,6 +299,7 @@ impl<T: Ord> Ord for MutSpan<'_, T> {
 ///
 /// Equivalent to a `*const [T]`
 #[repr(C)]
+#[derive(CTypeBridge)]
 pub struct ConstSpanPtr<T> {
     ptr: *const T,
     len: usize,
@@ -459,6 +460,7 @@ unsafe impl<T> const CTypeBridge for *const [T] {
 ///
 /// Equivalent to a `*mut [T]`
 #[repr(C)]
+#[derive(CTypeBridge)]
 pub struct MutSpanPtr<T> {
     ptr: *mut T,
     len: usize,

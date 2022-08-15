@@ -4,6 +4,7 @@ use crate::raw::{
     IRawTask, ISchedulerContext, PseudoTask, TaskHandle, TaskScheduleStatus, Timestamp, WorkerId,
 };
 use crate::task::{Builder, JoinHandle, RawTaskWrapper, Task};
+use fimo_ffi::marshal::CTypeBridge;
 use fimo_ffi::ptr::IBase;
 use fimo_ffi::{interface, DynObj, FfiFn, ObjBox, ObjectId};
 use log::trace;
@@ -17,7 +18,7 @@ static RUNTIME: std::cell::Cell<Option<*const DynObj<dyn IRuntime>>> = std::cell
 
 /// Data passed to a task upon wakeup.
 #[repr(C, u8)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub enum WakeupToken {
     /// Wake up without any data.
     None,
@@ -39,7 +40,7 @@ unsafe impl Sync for WakeupToken {}
 
 /// Data provided by a task during a wait operation.
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub struct WaitToken(pub *const ());
 
 impl WaitToken {
@@ -59,7 +60,7 @@ impl Default for WaitToken {
 
 /// Operation that `notify_filter` should perform for each task.
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub enum NotifyFilterOp {
     /// Notifies the task and continues the filter operation.
     Notify,
@@ -71,7 +72,7 @@ pub enum NotifyFilterOp {
 
 /// Result of some `notify_*` functions.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, PartialEq, Eq, CTypeBridge)]
 pub struct NotifyResult {
     /// Number of tasks notified by the operation.
     pub notified_tasks: usize,

@@ -2,6 +2,7 @@
 // This is a modified implementation of the `String` type found in
 // the std library, which is dual-licensed under Apache 2.0 and MIT terms.
 // All rights go to the contributors of the Rust project.
+use crate::marshal::CTypeBridge;
 use crate::Vec;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -477,7 +478,7 @@ impl<A: Allocator> String<A> {
     /// assert_eq!(rebuilt, "hello");
     /// ```
     #[inline]
-    pub fn into_raw_parts_with_alloc(self) -> (*mut u8, usize, usize, A) {
+    pub const fn into_raw_parts_with_alloc(self) -> (*mut u8, usize, usize, A) {
         self.vec.into_raw_parts_with_alloc()
     }
 
@@ -531,7 +532,7 @@ impl<A: Allocator> String<A> {
     /// ```
     #[inline]
     #[must_use]
-    pub unsafe fn from_raw_parts_in(
+    pub const unsafe fn from_raw_parts_in(
         buf: *mut u8,
         length: usize,
         capacity: usize,
@@ -574,7 +575,7 @@ impl<A: Allocator> String<A> {
     /// ```
     #[inline]
     #[must_use]
-    pub unsafe fn from_utf8_unchecked(bytes: Vec<u8, A>) -> String<A> {
+    pub const unsafe fn from_utf8_unchecked(bytes: Vec<u8, A>) -> String<A> {
         String { vec: bytes }
     }
 
@@ -596,7 +597,7 @@ impl<A: Allocator> String<A> {
     /// ```
     #[inline]
     #[must_use]
-    pub fn into_bytes(self) -> Vec<u8, A> {
+    pub const fn into_bytes(self) -> Vec<u8, A> {
         self.vec
     }
 
@@ -706,7 +707,7 @@ impl<A: Allocator> String<A> {
     /// assert!(s.capacity() >= 10);
     /// ```
     #[inline]
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.vec.capacity()
     }
 
@@ -905,7 +906,7 @@ impl<A: Allocator> String<A> {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         &self.vec
     }
     /// Shortens this `String` to the specified length.
@@ -1205,7 +1206,7 @@ impl<A: Allocator> String<A> {
     /// assert_eq!(s, "olleh");
     /// ```
     #[inline]
-    pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<u8, A> {
+    pub const unsafe fn as_mut_vec(&mut self) -> &mut Vec<u8, A> {
         &mut self.vec
     }
 
@@ -1228,7 +1229,7 @@ impl<A: Allocator> String<A> {
     /// assert_eq!(fancy_f.chars().count(), 3);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.vec.len()
     }
 
@@ -1248,7 +1249,7 @@ impl<A: Allocator> String<A> {
     /// assert!(!v.is_empty());
     /// ```
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.vec.is_empty()
     }
 
@@ -1664,6 +1665,24 @@ impl FromStr for String {
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(String::from(s))
+    }
+}
+
+unsafe impl<A: Allocator> const CTypeBridge for String<A>
+where
+    A: ~const CTypeBridge,
+    A::Type: Allocator,
+{
+    type Type = String<A::Type>;
+
+    fn marshal(self) -> Self::Type {
+        let (ptr, len, cap, alloc) = String::into_raw_parts_with_alloc(self);
+        unsafe { String::from_raw_parts_in(ptr, len, cap, alloc.marshal()) }
+    }
+
+    unsafe fn demarshal(x: Self::Type) -> Self {
+        let (ptr, len, cap, alloc) = String::into_raw_parts_with_alloc(x);
+        String::from_raw_parts_in(ptr, len, cap, A::demarshal(alloc))
     }
 }
 

@@ -10,6 +10,8 @@
 #![feature(c_unwind)]
 #![feature(unsize)]
 
+use fimo_ffi::marshal::CTypeBridge;
+
 mod interfaces;
 
 pub mod loader;
@@ -32,7 +34,9 @@ pub type FFIResult<T> = fimo_ffi::result::Result<T, Error>;
 
 /// Module information.
 #[repr(C)]
-#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, CTypeBridge,
+)]
 pub struct ModuleInfo {
     /// Module name.
     pub name: fimo_ffi::String,
@@ -48,7 +52,9 @@ impl std::fmt::Display for ModuleInfo {
 
 /// Descriptor of a dependency.
 #[repr(C)]
-#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, CTypeBridge,
+)]
 pub struct InterfaceDependency {
     /// Name of the interface.
     pub name: fimo_ffi::String,
@@ -68,7 +74,9 @@ impl std::fmt::Display for InterfaceDependency {
 
 /// A descriptor for a module interface.
 #[repr(C)]
-#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, CTypeBridge,
+)]
 pub struct InterfaceDescriptor {
     /// Name of the interface.
     pub name: fimo_ffi::String,
@@ -102,7 +110,9 @@ impl std::fmt::Display for InterfaceDescriptor {
 
 /// A version query.
 #[repr(C, i8)]
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, CTypeBridge,
+)]
 pub enum VersionQuery {
     /// Matches any version.
     Any,
@@ -167,7 +177,9 @@ impl VersionQuery {
 
 /// A query for an interface.
 #[repr(C)]
-#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, CTypeBridge,
+)]
 pub struct InterfaceQuery {
     /// Name of the interface.
     pub name: fimo_ffi::String,
