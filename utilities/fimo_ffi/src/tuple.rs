@@ -169,9 +169,7 @@ unsafe impl const CTypeBridge for () {
     }
 
     #[inline]
-    unsafe fn demarshal(_x: Self::Type) -> Self {
-        ()
-    }
+    unsafe fn demarshal(_x: Self::Type) -> Self {}
 }
 
 impl Debug for Tuple0 {

@@ -1228,9 +1228,6 @@ impl InterfaceContext {
                 }
 
                 impl #vtable_head_ident {
-                    #[doc = r"Minor version of the vtable."]
-                    pub const VERSION_MINOR: u32 = 0;
-
                     #[doc = r"Constructs a new instance of the vtable head section."]
                     pub const fn new<'__private_inner, T>() -> Self
                     where
@@ -1247,9 +1244,8 @@ impl InterfaceContext {
                         #(#interface_new_impl)*
 
                         Self {
-                            __internal_head: ::fimo_ffi::ptr::VTableHead::new_embedded_::<'__private_inner, T, #dyn_trait_ident>(
+                            __internal_head: ::fimo_ffi::ptr::VTableHead::new_embedded::<'__private_inner, T, #dyn_trait_ident>(
                                 __internal_this_offset,
-                                Self::VERSION_MINOR,
                             ),
                             #(#interface_new_impl_offset_args)*
                             #(#interface_new_impl_table_args)*
@@ -1640,6 +1636,18 @@ pub fn interface_impl(input: TokenStream) -> TokenStream {
     dyn_trait_idents
         .push(syn::parse_quote!(dyn #trait_ident + Send + Sync + Unpin + '__private_inner));
 
+    let mut base_marker_providers: Vec<syn::Type> = Vec::new();
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase));
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Send));
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Sync));
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Unpin));
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Send + Sync));
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Send + Unpin));
+    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Sync + Unpin));
+    base_marker_providers.push(syn::parse_quote!(
+        dyn ::fimo_ffi::ptr::IBase + Send + Sync + Unpin
+    ));
+
     // We check if the interface is frozen by looking for the frozen keyword.
     let is_frozen = input.frozen_token.is_some();
 
@@ -1678,6 +1686,7 @@ pub fn interface_impl(input: TokenStream) -> TokenStream {
         #(
             impl<'__private_inner> ::fimo_ffi::ptr::ObjInterface for #dyn_trait_idents {
                 type Base = #dyn_trait_base;
+                type MarkerProvider = #base_marker_providers;
             }
         )*
 

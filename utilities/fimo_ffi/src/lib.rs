@@ -14,6 +14,7 @@
 #![feature(const_slice_from_raw_parts_mut)]
 #![feature(const_precise_live_drops)]
 #![feature(const_ptr_offset_from)]
+#![feature(maybe_uninit_as_bytes)]
 #![feature(try_trait_v2_residual)]
 #![feature(const_transmute_copy)]
 #![feature(const_slice_ptr_len)]
@@ -59,6 +60,7 @@ pub mod obj_arc;
 pub mod obj_box;
 pub mod optional;
 pub mod path;
+pub mod provider;
 pub mod ptr;
 pub mod result;
 pub mod span;
