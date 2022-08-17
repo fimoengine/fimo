@@ -120,6 +120,12 @@ pub trait ObjInterfaceBase {
 pub trait ObjInterface {
     /// Base type that specifies the used vtable.
     type Base: ObjInterfaceBase + ?Sized;
+
+    #[doc(hidden)]
+    type MarkerProvider: ObjInterface + ?Sized;
+
+    #[doc(hidden)]
+    const MARKER_BOUNDS: usize = <Self::MarkerProvider as MarkerBounds>::IMPLEMENTED_MARKERS;
 }
 
 /// Indicates that an object can be coerced to a [`DynObj`].
@@ -295,6 +301,7 @@ pub trait IntoInterface<T: ObjMetadataCompatible>: ObjInterfaceBase {
 
 /// The metadata for a `Dyn = dyn SomeTrait` object type.
 #[repr(transparent)]
+#[derive(Copy, CTypeBridge)]
 pub struct ObjMetadata<Dyn: ?Sized> {
     vtable_ptr: &'static VTableHead,
     phantom: PhantomData<Dyn>,
@@ -345,9 +352,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     where
         U: DowncastSafe + ObjectId + Unsize<Dyn>,
     {
-        (self.object_id() == U::OBJECT_ID)
-            && (U::OBJECT_ID != Self::HIDDEN_UUID)
-            && (self.object_version() == U::OBJECT_VERSION)
+        self.vtable_ptr.is::<U>()
     }
 
     /// Returns the super vtable.
@@ -363,22 +368,15 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Checks whether the current metadata belongs to the outermost interface.
     #[inline]
     pub fn is_root_metadata(self) -> bool {
-        self.vtable_ptr.__internal_vtable_offset == 0
+        self.vtable_ptr.vtable_offset == 0
     }
 
     /// Returns the metadata to the outermost interface.
     #[inline]
     pub fn get_root_metadata(self) -> ObjMetadata<dyn IBase + 'a> {
-        let vtable_ptr = self.vtable_ptr as *const _ as *const u8;
-        let vtable_ptr = vtable_ptr.wrapping_sub(self.vtable_offset());
-        let vtable_ptr = vtable_ptr as *const VTableHead;
-
-        // SAFETY: By construction we ensure that the offset points to the same allocation.
-        unsafe {
-            ObjMetadata {
-                vtable_ptr: &*vtable_ptr,
-                phantom: PhantomData,
-            }
+        ObjMetadata {
+            vtable_ptr: self.vtable_ptr.get_root_head(),
+            phantom: PhantomData,
         }
     }
 
@@ -390,7 +388,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
         'b: 'a,
         U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
     {
-        self.current_is_interface::<U>() || self.get_root_metadata().current_is_interface::<U>()
+        self.vtable_ptr.is_interface::<U>() || self.vtable_ptr.get_root_head().is_interface::<U>()
     }
 
     /// Returns if the current metadata belongs to a certain interface.
@@ -401,11 +399,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
         'b: 'a,
         U: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'b,
     {
-        (self.interface_id() == U::Base::INTERFACE_ID)
-            && (U::Base::INTERFACE_ID != Self::HIDDEN_UUID)
-            && (self.interface_version_major() == U::Base::INTERFACE_VERSION_MAJOR)
-            && ((self.object_markers() & <U as MarkerBounds>::IMPLEMENTED_MARKERS)
-                == <U as MarkerBounds>::IMPLEMENTED_MARKERS)
+        self.vtable_ptr.is_interface::<U>()
     }
 
     /// Returns the metadata for the contained interface if it is of type `U`.
@@ -440,13 +434,13 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Returns the size of the type associated with this vtable.
     #[inline]
     pub const fn size_of(self) -> usize {
-        self.vtable_ptr.__internal_object_size
+        self.vtable_ptr.object_info.size
     }
 
     /// Returns the alignment of the type associated with this vtable.
     #[inline]
     pub const fn align_of(self) -> usize {
-        self.vtable_ptr.__internal_object_alignment
+        self.vtable_ptr.object_info.alignment
     }
 
     /// Returns the layout of the type associated with this vtable.
@@ -458,55 +452,55 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Returns the id of the type associated with this vtable.
     #[inline]
     pub const fn object_id(self) -> Uuid {
-        Uuid::from_bytes(self.vtable_ptr.__internal_object_id)
+        Uuid::from_bytes(self.vtable_ptr.object_info.id)
     }
 
     /// Returns the implemented marker bounds of the object.
     #[inline]
     pub const fn object_markers(self) -> usize {
-        self.vtable_ptr.__internal_object_markers
+        self.vtable_ptr.object_info.markers
     }
 
     /// Returns the name of the type associated with this vtable.
     #[inline]
     pub const fn object_name(self) -> &'static str {
-        self.vtable_ptr.__internal_object_name.into()
+        self.vtable_ptr.object_info.name.into()
     }
 
     /// Returns the version of the type associated with this vtable.
     #[inline]
     pub const fn object_version(self) -> usize {
-        self.vtable_ptr.__internal_object_version
+        self.vtable_ptr.object_info.version
     }
 
     /// Returns the id of the interface implemented with this vtable.
     #[inline]
     pub const fn interface_id(self) -> Uuid {
-        Uuid::from_bytes(self.vtable_ptr.__internal_interface_id)
+        Uuid::from_bytes(self.vtable_ptr.interface_info.id)
     }
 
     /// Returns the name of the interface implemented with this vtable.
     #[inline]
     pub const fn interface_name(self) -> &'static str {
-        self.vtable_ptr.__internal_interface_name.into()
+        self.vtable_ptr.interface_info.name.into()
     }
 
     /// Returns the major version number of the interface implemented with this vtable.
     #[inline]
     pub const fn interface_version_major(self) -> u32 {
-        self.vtable_ptr.__internal_interface_version_major
+        self.vtable_ptr.interface_info.version_major
     }
 
     /// Returns the minor version number of the interface implemented with this vtable.
     #[inline]
     pub const fn interface_version_minor(self) -> u32 {
-        self.vtable_ptr.__internal_interface_version_minor
+        self.vtable_ptr.interface_info.version_minor
     }
 
     /// Offset from the downcasted vtable pointer to the current vtable.
     #[inline]
     pub const fn vtable_offset(self) -> usize {
-        self.vtable_ptr.__internal_vtable_offset
+        self.vtable_ptr.vtable_offset
     }
 }
 
@@ -993,7 +987,7 @@ where
 #[inline]
 pub unsafe fn drop_in_place<Dyn: ?Sized>(obj: *mut DynObj<Dyn>) {
     let metadata = metadata(obj);
-    if let Some(drop) = metadata.vtable_ptr.__internal_drop_in_place {
+    if let Some(drop) = metadata.vtable_ptr.object_info.drop_in_place {
         (drop)(obj as *mut ())
     }
 }
@@ -1257,37 +1251,118 @@ where
 {
 }
 
-/// The common head of all vtables.
+/// Information pertaining to the object a vtable stems from.
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, CTypeBridge)]
 #[allow(missing_debug_implementations)]
-pub struct VTableHead {
+pub struct VTableObjectInfo {
     /// Dropping procedure for the object.
     ///
     /// Consumes the pointer.
-    pub __internal_drop_in_place: Option<unsafe extern "C-unwind" fn(*mut ())>,
+    pub drop_in_place: Option<unsafe extern "C-unwind" fn(*mut ())>,
     /// Size of the object.
-    pub __internal_object_size: usize,
+    pub size: usize,
     /// Alignment of the object.
-    pub __internal_object_alignment: usize,
+    pub alignment: usize,
     /// Unique object id.
-    pub __internal_object_id: [u8; 16],
+    pub id: [u8; 16],
     /// Implemented marker bounds of the object.
-    pub __internal_object_markers: usize,
+    pub markers: usize,
     /// Name of the underlying object type.
-    pub __internal_object_name: ConstStr<'static>,
+    pub name: ConstStr<'static>,
     /// Version of the underlying object type.
-    pub __internal_object_version: usize,
+    pub version: usize,
+}
+
+impl VTableObjectInfo {
+    pub(crate) const fn new<T: ObjectId>() -> Self {
+        unsafe extern "C-unwind" fn drop_ptr<T>(ptr: *mut ()) {
+            std::ptr::drop_in_place(ptr as *mut T)
+        }
+
+        let drop = if std::mem::needs_drop::<T>() {
+            Some(drop_ptr::<T> as _)
+        } else {
+            None
+        };
+
+        Self {
+            drop_in_place: drop,
+            size: std::mem::size_of::<T>(),
+            alignment: std::mem::align_of::<T>(),
+            id: *T::OBJECT_ID.as_bytes(),
+            markers: T::IMPLEMENTED_MARKERS,
+            name: unsafe { crate::str::from_utf8_unchecked(T::OBJECT_NAME.as_bytes()) },
+            version: T::OBJECT_VERSION,
+        }
+    }
+
+    pub(crate) fn is<T: DowncastSafe + ObjectId>(&self) -> bool {
+        (&self.id == T::OBJECT_ID.as_bytes())
+            && (T::OBJECT_ID != ObjMetadata::<()>::HIDDEN_UUID)
+            && (self.version == T::OBJECT_VERSION)
+    }
+}
+
+/// Information pertaining to the interface mapped by the vtable.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, CTypeBridge, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VTableInterfaceInfo {
     /// Unique interface id.
-    pub __internal_interface_id: [u8; 16],
+    pub id: [u8; 16],
     /// Name of the interface type.
-    pub __internal_interface_name: ConstStr<'static>,
+    pub name: ConstStr<'static>,
     /// Major version of the interface.
-    pub __internal_interface_version_major: u32,
+    pub version_major: u32,
     /// Minor version of the interface.
-    pub __internal_interface_version_minor: u32,
+    pub version_minor: u32,
+}
+
+impl VTableInterfaceInfo {
+    pub(crate) const fn new<T: ObjInterface + ?Sized>() -> Self {
+        Self {
+            id: *T::Base::INTERFACE_ID.as_bytes(),
+            name: unsafe { crate::str::from_utf8_unchecked(T::Base::INTERFACE_NAME.as_bytes()) },
+            version_major: T::Base::INTERFACE_VERSION_MAJOR,
+            version_minor: T::Base::INTERFACE_VERSION_MINOR,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is<T>(&self, object_markers: usize) -> bool
+    where
+        T: DowncastSafeInterface + ?Sized,
+    {
+        (&self.id == T::Base::INTERFACE_ID.as_bytes())
+            && (T::Base::INTERFACE_ID != ObjMetadata::<()>::HIDDEN_UUID)
+            && (self.version_major == T::Base::INTERFACE_VERSION_MAJOR)
+            && ((object_markers & <T as MarkerBounds>::IMPLEMENTED_MARKERS)
+                == <T as MarkerBounds>::IMPLEMENTED_MARKERS)
+    }
+
+    #[inline]
+    pub(crate) fn is_equal<T>(&self, interface_markers: usize) -> bool
+    where
+        T: DowncastSafeInterface + ?Sized,
+    {
+        (&self.id == T::Base::INTERFACE_ID.as_bytes())
+            && (T::Base::INTERFACE_ID != ObjMetadata::<()>::HIDDEN_UUID)
+            && (self.version_major == T::Base::INTERFACE_VERSION_MAJOR)
+            && (<T as ObjInterface>::MARKER_BOUNDS == interface_markers)
+    }
+}
+
+/// The common head of all vtables.
+#[repr(C)]
+#[derive(Copy, Clone, CTypeBridge)]
+#[allow(missing_debug_implementations)]
+pub struct VTableHead {
+    /// Information pertaining to the mapped object.
+    pub object_info: VTableObjectInfo,
+    /// Information pertaining to the mapped interface.
+    pub interface_info: VTableInterfaceInfo,
     /// Offset from the downcasted vtable pointer to the current vtable pointer.
-    pub __internal_vtable_offset: usize,
+    pub vtable_offset: usize,
 }
 
 impl VTableHead {
@@ -1306,43 +1381,34 @@ impl VTableHead {
         T: ObjectId + Unsize<Dyn> + 'a,
         Dyn: ObjInterface + ?Sized + 'a,
     {
-        Self::new_embedded_::<T, Dyn>(offset, 0)
+        Self {
+            object_info: VTableObjectInfo::new::<T>(),
+            interface_info: VTableInterfaceInfo::new::<Dyn>(),
+            vtable_offset: offset,
+        }
     }
 
-    /// Constructs a new vtable with a custom offset.
-    pub const fn new_embedded_<'a, T, Dyn>(offset: usize, minor_version: u32) -> Self
+    #[inline]
+    pub(crate) fn is<T: DowncastSafe + ObjectId>(&self) -> bool {
+        self.object_info.is::<T>()
+    }
+
+    #[inline]
+    pub(crate) fn get_root_head(&self) -> &Self {
+        let vtable_ptr = self as *const _ as *const u8;
+        let vtable_ptr = vtable_ptr.wrapping_sub(self.vtable_offset);
+        let vtable_ptr = vtable_ptr as *const VTableHead;
+
+        // SAFETY: By construction we ensure that the offset points to the same allocation.
+        unsafe { &*vtable_ptr }
+    }
+
+    #[inline]
+    pub(crate) fn is_interface<T>(&self) -> bool
     where
-        T: ObjectId + Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
+        T: DowncastSafeInterface + ?Sized,
     {
-        unsafe extern "C-unwind" fn drop_ptr<T>(ptr: *mut ()) {
-            std::ptr::drop_in_place(ptr as *mut T)
-        }
-
-        let drop = if std::mem::needs_drop::<T>() {
-            Some(drop_ptr::<T> as _)
-        } else {
-            None
-        };
-
-        Self {
-            __internal_drop_in_place: drop,
-            __internal_object_size: std::mem::size_of::<T>(),
-            __internal_object_alignment: std::mem::align_of::<T>(),
-            __internal_object_id: *T::OBJECT_ID.as_bytes(),
-            __internal_object_name: unsafe {
-                crate::str::from_utf8_unchecked(T::OBJECT_NAME.as_bytes())
-            },
-            __internal_object_version: T::OBJECT_VERSION,
-            __internal_interface_id: *Dyn::Base::INTERFACE_ID.as_bytes(),
-            __internal_object_markers: T::IMPLEMENTED_MARKERS,
-            __internal_interface_name: unsafe {
-                crate::str::from_utf8_unchecked(Dyn::Base::INTERFACE_NAME.as_bytes())
-            },
-            __internal_interface_version_major: Dyn::Base::INTERFACE_VERSION_MAJOR,
-            __internal_interface_version_minor: minor_version,
-            __internal_vtable_offset: offset,
-        }
+        self.interface_info.is::<T>(self.object_info.markers)
     }
 }
 
