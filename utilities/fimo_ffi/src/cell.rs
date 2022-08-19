@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    ptr::{CastInto, DowncastSafe, DowncastSafeInterface, FetchVTable, ObjInterface},
+    ptr::{CastInto, DowncastSafeInterface, FetchVTable, ObjInterface},
     DynObj, ObjectId,
 };
 
@@ -661,7 +661,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn is<U>(&self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         fimo_ffi::ptr::is::<U, _>(obj)
@@ -695,7 +695,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast<U>(&self) -> Option<&RefCell<U>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -733,7 +733,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_mut<U>(&mut self) -> Option<&mut RefCell<U>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -1629,7 +1629,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn is<U>(&self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         fimo_ffi::ptr::is::<U, _>(obj)
@@ -1663,7 +1663,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast<U>(&self) -> Option<&AtomicRefCell<U>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -1701,7 +1701,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_mut<U>(&mut self) -> Option<&mut AtomicRefCell<U>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {

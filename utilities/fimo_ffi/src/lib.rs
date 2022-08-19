@@ -26,7 +26,9 @@
 #![feature(must_not_suspend)]
 #![feature(try_reserve_kind)]
 #![feature(unboxed_closures)]
+#![feature(const_ptr_write)]
 #![feature(const_type_name)]
+#![feature(core_intrinsics)]
 #![feature(dropck_eyepatch)]
 #![feature(specialization)]
 #![feature(const_mut_refs)]
@@ -35,6 +37,7 @@
 #![feature(negative_impls)]
 #![feature(allocator_api)]
 #![feature(const_convert)]
+#![feature(const_type_id)]
 #![feature(slice_ptr_len)]
 #![feature(cfg_sanitize)]
 #![feature(ptr_metadata)]
@@ -43,6 +46,7 @@
 #![feature(slice_range)]
 #![feature(trusted_len)]
 #![feature(new_uninit)]
+#![feature(const_heap)]
 #![feature(const_box)]
 #![feature(fn_traits)]
 #![feature(once_cell)]
@@ -67,6 +71,7 @@ pub mod span;
 pub mod str;
 pub mod string;
 pub mod tuple;
+pub mod type_id;
 pub mod vec;
 pub mod version;
 

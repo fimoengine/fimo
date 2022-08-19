@@ -6,9 +6,9 @@
 use crate::marshal::CTypeBridge;
 use crate::obj_box::{CGlobal, ObjBox, PtrDrop, WriteCloneIntoRaw};
 use crate::ptr::{
-    CastInto, DowncastSafe, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId,
-    OpaqueObj,
+    CastInto, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId, OpaqueObj,
 };
+use crate::type_id::StableTypeId;
 use crate::{ReprC, ReprRust};
 use std::alloc::{Allocator, Global, Layout};
 use std::borrow::Borrow;
@@ -53,6 +53,9 @@ macro_rules! acquire {
 
 /// A reference-counted pointer type for heap allocation, akin to an [`std::sync::Arc`].
 #[repr(C)]
+#[derive(StableTypeId)]
+#[name("ObjArc")]
+#[uuid("c6d433e0-0e98-4e4f-a8a1-7879ecca597f")]
 pub struct ObjArc<T: ?Sized, A: Allocator = Global> {
     ptr: NonNull<ObjArcInner<T>>,
     phantom: PhantomData<ObjArcInner<T>>,
@@ -301,7 +304,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(a: &Self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         crate::ptr::is::<U, _>(&**a)
     }
@@ -333,7 +336,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(a: Self) -> Option<ObjArc<U, A>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         if let Some(ptr) = crate::ptr::downcast::<U, _>(ptr) {
@@ -1393,6 +1396,9 @@ impl<T: Ord + ?Sized, A: Allocator> Ord for ObjArc<T, A> {
 /// `ObjWeak` is a version of [`ObjArc`] that holds a non-owning reference to
 /// the managed allocation, akin to a [`std::sync::Weak`].
 #[repr(C)]
+#[derive(StableTypeId)]
+#[name("ObjWeak")]
+#[uuid("f8055a8f-d6d0-425a-86dc-887da2044d92")]
 pub struct ObjWeak<T: ?Sized, A: Allocator = Global> {
     // This is a `NonNull` to allow optimizing the size of this type in enums,
     // but it is not necessarily a valid pointer.
@@ -1524,7 +1530,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(w: &Self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         crate::ptr::is::<U, _>(w.as_ptr())
     }
@@ -1556,7 +1562,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(w: Self) -> Option<ObjWeak<U, A>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         if let Some(ptr) = crate::ptr::downcast::<U, _>(ptr) {
@@ -2158,6 +2164,9 @@ unsafe impl<#[may_dangle] T: ?Sized, A: Allocator> Drop for ObjWeak<T, A> {
 
 #[repr(C)]
 #[allow(missing_debug_implementations)]
+#[derive(StableTypeId)]
+#[name("ObjArcInner")]
+#[uuid("a70f9d9f-5733-41b7-8a0d-0a673d190d4a")]
 struct ObjArcInner<T: ?Sized> {
     strong: atomic::AtomicUsize,
 
@@ -2190,6 +2199,9 @@ unsafe impl<T: ?Sized + Sync + Send> Sync for ObjArcInner<T> {}
 /// Helper type to allow accessing the reference counts without
 /// making any assertions about the data field.
 #[allow(missing_debug_implementations)]
+#[derive(StableTypeId)]
+#[name("WeakInner")]
+#[uuid("d960c231-64a8-437a-9d1d-abc7a9d2926b")]
 struct WeakInner<'a> {
     weak: &'a atomic::AtomicUsize,
     strong: &'a atomic::AtomicUsize,

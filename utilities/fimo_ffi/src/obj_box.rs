@@ -1,8 +1,9 @@
 //! Definition of an object-aware box type.
+use fimo_ffi_codegen::StableTypeId;
+
 use crate::marshal::CTypeBridge;
 use crate::ptr::{
-    CastInto, DowncastSafe, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId,
-    OpaqueObj,
+    CastInto, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId, OpaqueObj,
 };
 use crate::{ReprC, ReprRust};
 use std::alloc::{handle_alloc_error, AllocError, Allocator, Global, Layout};
@@ -18,10 +19,16 @@ use std::ptr::NonNull;
 
 /// A pointer type for heap allocation, akin to a [`Box`].
 #[repr(C)]
+#[derive(StableTypeId)]
+#[name("ObjBox")]
+#[uuid("b33d7848-f0d8-46b4-b64a-b6ccbfeb52b8")]
 pub struct ObjBox<T: ?Sized, A: Allocator = Global>(Unique<T>, A);
 
 #[repr(transparent)]
 #[allow(missing_debug_implementations)]
+#[derive(StableTypeId)]
+#[name("Unique")]
+#[uuid("09ec942f-d35d-4d19-85f3-d3e08265d26f")]
 struct Unique<T: ?Sized>(NonNull<T>, PhantomData<T>);
 
 impl<T: ?Sized> Unique<T> {
@@ -226,7 +233,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(b: &Self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         crate::ptr::is::<U, _>(&**b)
     }
@@ -235,7 +242,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(b: Self) -> Option<ObjBox<U, A>>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         if let Some(ptr) = crate::ptr::downcast_mut::<U, _>(ptr) {
