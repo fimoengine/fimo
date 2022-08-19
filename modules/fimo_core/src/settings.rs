@@ -4,7 +4,8 @@ use fimo_core_int::settings::{
     SettingsEventCallbackId, SettingsInvalidPathError, SettingsItem, SettingsItemMetadata,
     SettingsItemType, SettingsPath, SettingsPathBuf,
 };
-use fimo_ffi::{DynObj, FfiFn, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, FfiFn, Object};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
@@ -12,11 +13,10 @@ use std::ops::RangeFrom;
 use std::ptr::NonNull;
 
 /// The settings registry.
-#[derive(Debug, ObjectId)]
-#[fetch_vtable(
-    uuid = "4b43ec0b-04b6-4a2f-aa05-012b8be7dd2a",
-    interfaces(ISettingsRegistry)
-)]
+#[derive(Debug, Object, StableTypeId)]
+#[name("SettingsRegistry")]
+#[uuid("4b43ec0b-04b6-4a2f-aa05-012b8be7dd2a")]
+#[interfaces(ISettingsRegistry)]
 pub struct SettingsRegistry {
     inner: parking_lot::RwLock<SettingsRegistryInner>,
 }
@@ -137,11 +137,10 @@ impl SettingsItemMetadata for Metadata {
     }
 }
 
-#[derive(Debug, ObjectId)]
-#[fetch_vtable(
-    uuid = "66967a3a-0802-47e0-968f-df838c8e5651",
-    interfaces(ISettingsRegistryInner)
-)]
+#[derive(Debug, Object, StableTypeId)]
+#[name("SettingsRegistryInner")]
+#[uuid("66967a3a-0802-47e0-968f-df838c8e5651")]
+#[interfaces(ISettingsRegistryInner)]
 struct SettingsRegistryInner {
     root: SettingsItem<Metadata>,
     id_gen: RangeFrom<usize>,

@@ -2,7 +2,7 @@
 use crate::fmt::{FmtWrapper, Formatter, IDebug, IDisplay};
 use crate::marshal::CTypeBridge;
 use crate::ptr::FetchVTable;
-use crate::{interface, DynObj, ObjBox, ObjectId};
+use crate::{interface, DynObj, ObjBox, Object};
 use std::ops::{Deref, DerefMut};
 
 interface! {
@@ -59,8 +59,8 @@ impl From<crate::String> for ObjBox<DynObj<dyn IError>> {
 impl From<crate::String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
     #[inline]
     fn from(v: crate::String) -> Self {
-        #[derive(ObjectId)]
-        #[fetch_vtable(interfaces(IError))]
+        #[derive(Object)]
+        #[interfaces(IError)]
         struct StringError {
             v: crate::String,
         }
@@ -100,8 +100,8 @@ impl From<String> for ObjBox<DynObj<dyn IError>> {
 impl From<String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
     #[inline]
     fn from(v: String) -> Self {
-        #[derive(ObjectId)]
-        #[fetch_vtable(interfaces(IError))]
+        #[derive(Object)]
+        #[interfaces(IError)]
         struct StringError {
             v: String,
         }
@@ -133,8 +133,8 @@ impl From<String> for ObjBox<DynObj<dyn IError + Send + Sync>> {
 impl<'a, T: IError + 'a> From<T> for ObjBox<DynObj<dyn IError + 'a>> {
     #[inline]
     default fn from(v: T) -> Self {
-        #[derive(ObjectId)]
-        #[fetch_vtable(interfaces(IError))]
+        #[derive(Object)]
+        #[interfaces(IError)]
         struct ErrorWrapper<'a> {
             e: Box<dyn IError + 'a>,
         }
@@ -175,8 +175,8 @@ impl<'a, T: IError + FetchVTable<dyn IError + 'a> + 'a> From<T>
 impl<'a, T: IError + Send + Sync + 'a> From<T> for ObjBox<DynObj<dyn IError + Send + Sync + 'a>> {
     #[inline]
     default fn from(v: T) -> Self {
-        #[derive(ObjectId)]
-        #[fetch_vtable(interfaces(IError))]
+        #[derive(Object)]
+        #[interfaces(IError)]
         struct ErrorSendSync<'a> {
             e: Box<dyn IError + Send + Sync + 'a>,
         }

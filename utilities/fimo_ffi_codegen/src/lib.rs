@@ -300,7 +300,7 @@ pub fn interface(input: TokenStream) -> TokenStream {
 ///     }
 /// }
 /// ```
-#[proc_macro_derive(ObjectId, attributes(fetch_vtable))]
+#[proc_macro_derive(Object, attributes(interfaces))]
 pub fn object(input: TokenStream) -> TokenStream {
     object::object_impl(input)
 }

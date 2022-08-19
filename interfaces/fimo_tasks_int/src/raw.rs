@@ -4,7 +4,8 @@ use atomic::Atomic;
 use fimo_ffi::cell::AtomicRefCell;
 use fimo_ffi::marshal::CTypeBridge;
 use fimo_ffi::ptr::IBase;
-use fimo_ffi::{interface, ConstStr, DynObj, FfiFn, ObjBox, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{interface, ConstStr, DynObj, FfiFn, ObjBox, Object};
 use std::any::Any;
 use std::fmt::Write;
 use std::fmt::{Debug, Display, Formatter};
@@ -100,8 +101,10 @@ pub enum TaskScheduleStatus {
 }
 
 /// Representation of a raw task.
-#[derive(ObjectId)]
-#[fetch_vtable(uuid = "eb91ee4a-22d2-4b91-9e06-0994f0d79b0f", interfaces(IRawTask))]
+#[derive(Object, StableTypeId)]
+#[name("RawTaskInner")]
+#[uuid("eb91ee4a-22d2-4b91-9e06-0994f0d79b0f")]
+#[interfaces(IRawTask)]
 pub struct RawTaskInner<'a> {
     info: TaskInfo,
     data: AtomicRefCell<SchedulerContextInner<'a>>,
@@ -460,11 +463,10 @@ pub enum StatusRequest {
     Abort,
 }
 
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "9424aef3-bc9a-4b0d-a877-68a6c76f08ae",
-    interfaces(ISchedulerContext)
-)]
+#[derive(Object, StableTypeId)]
+#[name("SchedulerContextInner")]
+#[uuid("9424aef3-bc9a-4b0d-a877-68a6c76f08ae")]
+#[interfaces(ISchedulerContext)]
 pub(crate) struct SchedulerContextInner<'a> {
     is_empty: bool,
     panicking: Atomic<bool>,

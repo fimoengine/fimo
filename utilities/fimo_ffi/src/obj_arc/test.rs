@@ -1,5 +1,7 @@
+use fimo_ffi_codegen::StableTypeId;
+
 use crate::ptr::IBase;
-use crate::{DynObj, ObjArc, ObjWeak, ObjectId};
+use crate::{DynObj, ObjArc, ObjWeak, Object};
 use std::cell::RefCell;
 
 #[test]
@@ -83,8 +85,8 @@ fn drop_sized() {
 
 #[test]
 fn drop_obj() {
-    #[derive(ObjectId)]
-    #[fetch_vtable(uuid = "6e3178d1-ad1e-4071-aa82-d732eefe118f")]
+    #[derive(Object, StableTypeId)]
+    #[uuid("6e3178d1-ad1e-4071-aa82-d732eefe118f")]
     struct TestObj(ObjArc<RefCell<usize>>);
     impl Drop for TestObj {
         fn drop(&mut self) {

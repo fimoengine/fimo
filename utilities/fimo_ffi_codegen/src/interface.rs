@@ -1231,7 +1231,7 @@ impl InterfaceContext {
                     #[doc = r"Constructs a new instance of the vtable head section."]
                     pub const fn new<'__private_inner, T>() -> Self
                     where
-                        T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_inner,
+                        T: #trait_ident + '__private_inner,
                     {
                         Self::new_embedded::<T>(0)
                     }
@@ -1239,7 +1239,7 @@ impl InterfaceContext {
                     #[doc = r"Constructs a new instance of the vtable head section with a custom offset value."]
                     pub const fn new_embedded<'__private_inner, T>(__internal_this_offset: usize,) -> Self
                     where
-                        T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_inner,
+                        T: #trait_ident + '__private_inner,
                     {
                         #(#interface_new_impl)*
 
@@ -1353,9 +1353,9 @@ impl InterfaceContext {
                 let demarshal_expr = &method.demarshal;
 
                 let mut generics = method.generics.clone();
-                generics.params.push(
-                    syn::parse_quote!(T: #trait_ident + ::fimo_ffi::ptr::ObjectId + #receiver_lt),
-                );
+                generics
+                    .params
+                    .push(syn::parse_quote!(T: #trait_ident + #receiver_lt));
 
                 let (impl_gen, _, _) = generics.split_for_impl();
 
@@ -1394,7 +1394,7 @@ impl InterfaceContext {
                 #[inline]
                 pub const fn new_for<'__private_this, T> () -> Self
                 where
-                    T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_this,
+                    T: #trait_ident + '__private_this,
                 {
                     Self::new_for_embedded::<'__private_this, T>(0)
                 }
@@ -1404,7 +1404,7 @@ impl InterfaceContext {
                 #[allow(clippy::let_unit_value)]
                 pub const fn new_for_embedded<'__private_this, T>(offset: usize) -> Self
                 where
-                    T: #trait_ident + ::fimo_ffi::ptr::ObjectId + '__private_this,
+                    T: #trait_ident + '__private_this,
                 {
                     #new_for_impl
                 }

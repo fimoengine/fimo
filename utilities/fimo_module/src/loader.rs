@@ -2,7 +2,8 @@
 use crate::{Error, ErrorKind, IModule, IModuleLoader};
 use fimo_ffi::error::wrap_error;
 use fimo_ffi::ptr::{coerce_obj, IBase};
-use fimo_ffi::{DynObj, ObjArc, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, ObjArc, Object};
 use libloading::Library;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -76,11 +77,10 @@ impl Debug for ModuleDeclaration {
 }
 
 /// A Rust module loader.
-#[derive(Debug, ObjectId)]
-#[fetch_vtable(
-    uuid = "1aef7722-f3a9-43e9-a27b-753510e42700",
-    interfaces(IModuleLoader)
-)]
+#[derive(Debug, Object, StableTypeId)]
+#[name("RustLoader")]
+#[uuid("1aef7722-f3a9-43e9-a27b-753510e42700")]
+#[interfaces(IModuleLoader)]
 pub struct RustLoader {
     inner: RawLoader,
 }

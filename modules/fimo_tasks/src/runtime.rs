@@ -3,7 +3,8 @@ use crate::spin_wait::SpinWait;
 use crate::worker_pool::{yield_to_worker, WORKER};
 use crate::TaskScheduler;
 use fimo_ffi::ptr::IBaseExt;
-use fimo_ffi::{DynObj, FfiFn, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, FfiFn, Object};
 use fimo_logging_int::{error, info, trace};
 use fimo_module::Error;
 use fimo_tasks_int::raw::{IRawTask, WorkerId};
@@ -99,8 +100,10 @@ impl Default for Builder {
 }
 
 /// A runtime for running tasks.
-#[derive(Debug, ObjectId)]
-#[fetch_vtable(uuid = "99bab93c-0db6-4979-a8fd-2b298df4e3ec", interfaces(IRuntime))]
+#[derive(Debug, Object, StableTypeId)]
+#[name("Runtime")]
+#[uuid("99bab93c-0db6-4979-a8fd-2b298df4e3ec")]
+#[interfaces(IRuntime)]
 pub struct Runtime {
     scheduler: Arc<Mutex<TaskScheduler>>,
 }

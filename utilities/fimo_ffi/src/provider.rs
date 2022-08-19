@@ -80,7 +80,7 @@ mod private {
     use crate::marshal::CTypeBridge;
     use crate::ptr::IBase;
     use crate::type_id::StableTypeId;
-    use crate::{interface, ObjectId, Optional};
+    use crate::{interface, Object, Optional};
 
     use super::{Demand, IProvider};
 
@@ -157,8 +157,8 @@ mod private {
         }
     }
 
-    #[derive(ObjectId)]
-    #[fetch_vtable(interfaces(IErased))]
+    #[derive(Object)]
+    #[interfaces(IErased)]
     struct ValueRequest<'a> {
         id: StableTypeId,
         result_ptr: *mut [MaybeUninit<u8>],
@@ -179,8 +179,8 @@ mod private {
         }
     }
 
-    #[derive(ObjectId)]
-    #[fetch_vtable(interfaces(IErased))]
+    #[derive(Object)]
+    #[interfaces(IErased)]
     struct RefRequest<'a> {
         id: StableTypeId,
         result_ptr: *mut [MaybeUninit<u8>],
@@ -211,18 +211,16 @@ mod private {
     /// use fimo_ffi::ptr::IBase;
     /// use fimo_ffi::marshal::CTypeBridge;
     /// use fimo_ffi::provider::{IProvider, Demand, request_value};
-    /// use fimo_ffi::{ObjBox, ObjArc, ObjectId, interface, DynObj};
+    /// use fimo_ffi::{ObjBox, ObjArc, Object, interface, DynObj};
     ///
-    /// #[derive(CTypeBridge, ObjectId)]
-    /// #[fetch_vtable(uuid = "82eeae84-5c20-46e6-8314-89d03b5a6766")]
+    /// #[derive(CTypeBridge, Object)]
     /// struct A(bool);
     ///
-    /// #[derive(CTypeBridge, ObjectId)]
-    /// #[fetch_vtable(uuid = "2d73c0c5-7d35-4473-8d22-1a7168f710c7")]
+    /// #[derive(CTypeBridge, Object)]
     /// struct B(usize);
     ///
-    /// #[derive(CTypeBridge, ObjectId)]
-    /// #[fetch_vtable(uuid = "18d6157b-7cb5-4a55-ae66-05e985921db1", interfaces(IC))]
+    /// #[derive(CTypeBridge, Object)]
+    /// #[interfaces(IC)]
     /// struct C(f32);
     ///
     /// impl IC for C {
@@ -301,18 +299,16 @@ mod private {
     ///
     /// use fimo_ffi::ptr::{IBase, coerce_obj};
     /// use fimo_ffi::provider::{IProvider, Demand, request_ref};
-    /// use fimo_ffi::{ObjBox, ObjArc, ObjectId, interface, DynObj};
+    /// use fimo_ffi::{ObjBox, ObjArc, Object, interface, DynObj};
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "82eeae84-5c20-46e6-8314-89d03b5a6766")]
+    /// #[derive(Object)]
     /// struct A(bool);
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "2d73c0c5-7d35-4473-8d22-1a7168f710c7")]
+    /// #[derive(Object)]
     /// struct B(usize);
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "18d6157b-7cb5-4a55-ae66-05e985921db1", interfaces(IC))]
+    /// #[derive(Object)]
+    /// #[interfaces(IC)]
     /// struct C(f32);
     ///
     /// impl IC for C {

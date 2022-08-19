@@ -7,15 +7,18 @@ use crate::{
 use fimo_ffi::error::{Error, ErrorKind, IError};
 use fimo_ffi::fmt::{IDebug, IDisplay};
 use fimo_ffi::ptr::{coerce_obj, IBase, IBaseExt};
-use fimo_ffi::{DynObj, ObjArc, ObjWeak, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, ObjArc, ObjWeak, Object};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::path::Path;
 
 /// A generic module.
-#[derive(ObjectId)]
-#[fetch_vtable(uuid = "54ccece6-c648-42e5-807b-553049080256", interfaces(IModule))]
+#[derive(Object, StableTypeId)]
+#[name("Module")]
+#[uuid("54ccece6-c648-42e5-807b-553049080256")]
+#[interfaces(IModule)]
 pub struct Module {
     info: ModuleInfo,
     root: Box<[PathChar]>,
@@ -203,11 +206,10 @@ impl Debug for InstanceBuilder {
 }
 
 /// Implementation of a generic module instance.
-#[derive(Debug, ObjectId)]
-#[fetch_vtable(
-    uuid = "8323b969-b6f8-475e-906b-bb29d8af7978",
-    interfaces(IModuleInstance)
-)]
+#[derive(Debug, Object, StableTypeId)]
+#[name("Instance")]
+#[uuid("8323b969-b6f8-475e-906b-bb29d8af7978")]
+#[interfaces(IModuleInstance)]
 pub struct Instance {
     available_interfaces: Vec<InterfaceDescriptor>,
     interfaces: HashMap<InterfaceDescriptor, Mutex<Interface>>,
