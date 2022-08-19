@@ -5,9 +5,7 @@
 
 use crate::marshal::CTypeBridge;
 use crate::obj_box::{CGlobal, ObjBox, PtrDrop, WriteCloneIntoRaw};
-use crate::ptr::{
-    CastInto, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId, OpaqueObj,
-};
+use crate::ptr::{CastInto, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, OpaqueObj};
 use crate::type_id::StableTypeId;
 use crate::{ReprC, ReprRust};
 use std::alloc::{Allocator, Global, Layout};
@@ -236,7 +234,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
     /// use fimo_ffi::ptr::{CastInto, FetchVTable, IBase};
     ///
     /// // Define a custom interface.
@@ -248,8 +246,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj {
@@ -284,16 +282,14 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// ```
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, DynObj, ObjectId};
+    /// use fimo_ffi::{ObjArc, DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = ObjArc::new(SomeObj);
@@ -304,7 +300,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(a: &Self) -> bool
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         crate::ptr::is::<U, _>(&**a)
     }
@@ -316,16 +312,14 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// ```
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, DynObj, ObjectId};
+    /// use fimo_ffi::{ObjArc, DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = ObjArc::new(SomeObj);
@@ -336,7 +330,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(a: Self) -> Option<ObjArc<U, A>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         if let Some(ptr) = crate::ptr::downcast::<U, _>(ptr) {
@@ -355,7 +349,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
@@ -365,8 +359,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -394,7 +388,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
@@ -404,8 +398,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize, *const ());
     ///
     /// impl Obj for MyObj { }
@@ -432,7 +426,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
@@ -442,8 +436,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1460,7 +1454,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     ///
     /// // Define a custom interface.
@@ -1472,8 +1466,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj {
@@ -1510,16 +1504,14 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// ```
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId};
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "202338a2-996f-4bb2-87d1-6902aee6f334")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = ObjArc::new(SomeObj);
@@ -1530,7 +1522,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(w: &Self) -> bool
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         crate::ptr::is::<U, _>(w.as_ptr())
     }
@@ -1542,16 +1534,14 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// ```
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId};
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "202338a2-996f-4bb2-87d1-6902aee6f334")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = ObjArc::new(SomeObj);
@@ -1562,7 +1552,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(w: Self) -> Option<ObjWeak<U, A>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         if let Some(ptr) = crate::ptr::downcast::<U, _>(ptr) {
@@ -1581,7 +1571,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
@@ -1591,8 +1581,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1621,7 +1611,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
@@ -1631,8 +1621,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1660,7 +1650,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, ObjectId, interface};
+    /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
     /// use fimo_ffi::ptr::IBase;
     ///
     /// // Define a custom interface.
@@ -1670,8 +1660,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }

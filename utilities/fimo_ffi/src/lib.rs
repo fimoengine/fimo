@@ -80,7 +80,7 @@ pub use ffi_fn::FfiFn;
 pub use obj_arc::{ObjArc, ObjWeak};
 pub use obj_box::ObjBox;
 pub use optional::Optional;
-pub use ptr::{interface, DynObj, ObjectId};
+pub use ptr::{interface, DynObj, Object};
 pub use result::Result;
 pub use span::{ConstSpan, MutSpan};
 pub use string::String;

@@ -10,7 +10,8 @@ use fimo_core_int::settings::{
 use fimo_core_int::IFimoCore;
 use fimo_ffi::error::{Error, ErrorKind};
 use fimo_ffi::ptr::{IBase, IBaseExt};
-use fimo_ffi::{DynObj, ObjArc, ObjectId, Version};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, ObjArc, Object, Version};
 use fimo_module::{
     FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
 };
@@ -24,11 +25,10 @@ mod core_bindings;
 pub const MODULE_NAME: &str = "fimo_actix";
 
 /// Struct implementing the `fimo-actix` interface.
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "d7eeb555-6cdc-412e-9d2b-b10f3069c298",
-    interfaces(IModuleInterface, IFimoActix)
-)]
+#[derive(Object, StableTypeId)]
+#[name("FimoActixInterface")]
+#[uuid("d7eeb555-6cdc-412e-9d2b-b10f3069c298")]
+#[interfaces(IModuleInterface, IFimoActix)]
 pub struct FimoActixInterface {
     server: FimoActixServer<String>,
     parent: ObjArc<DynObj<dyn IModuleInstance>>,

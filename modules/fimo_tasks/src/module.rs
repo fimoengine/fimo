@@ -2,7 +2,8 @@ use crate::{Builder, Runtime};
 use fimo_core_int::settings::{ISettingsRegistryExt, SettingsItem, SettingsPath};
 use fimo_core_int::IFimoCore;
 use fimo_ffi::ptr::IBaseExt;
-use fimo_ffi::{DynObj, ObjArc, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, ObjArc, Object};
 use fimo_module::{
     Error, ErrorKind, FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader,
     ModuleInfo,
@@ -15,11 +16,10 @@ use std::sync::Arc;
 const MODULE_NAME: &str = "fimo_tasks";
 
 /// Implementation of the `fimo-tasks` interface.
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "4d7a5ec0-3acd-42c5-9f18-a4694961985a",
-    interfaces(IModuleInterface, IFimoTasks)
-)]
+#[derive(Object, StableTypeId)]
+#[name("TasksInterface")]
+#[uuid("4d7a5ec0-3acd-42c5-9f18-a4694961985a")]
+#[interfaces(IModuleInterface, IFimoTasks)]
 pub struct TasksInterface {
     runtime: Arc<Runtime>,
     parent: ObjArc<DynObj<dyn IModuleInstance>>,

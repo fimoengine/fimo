@@ -13,7 +13,7 @@ use std::{
 
 use crate::{
     ptr::{CastInto, DowncastSafeInterface, FetchVTable, ObjInterface},
-    DynObj, ObjectId,
+    DynObj,
 };
 
 /// A mutable memory location with dynamically checked borrow rules
@@ -523,7 +523,7 @@ impl<T: ?Sized> RefCell<T> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     /// use fimo_ffi::cell::RefCell;
     ///
@@ -536,8 +536,8 @@ impl<T: ?Sized> RefCell<T> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj {
@@ -581,7 +581,7 @@ impl<T: ?Sized> RefCell<T> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     /// use fimo_ffi::cell::RefCell;
     ///
@@ -594,8 +594,8 @@ impl<T: ?Sized> RefCell<T> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj {
@@ -641,16 +641,14 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::cell::RefCell;
-    /// use fimo_ffi::{DynObj, ObjectId};
+    /// use fimo_ffi::{DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = RefCell::new(SomeObj);
@@ -661,7 +659,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn is<U>(&self) -> bool
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         fimo_ffi::ptr::is::<U, _>(obj)
@@ -675,16 +673,14 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::cell::RefCell;
-    /// use fimo_ffi::{DynObj, ObjectId};
+    /// use fimo_ffi::{DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = RefCell::new(SomeObj);
@@ -695,7 +691,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast<U>(&self) -> Option<&RefCell<U>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -713,16 +709,14 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::cell::RefCell;
-    /// use fimo_ffi::{DynObj, ObjectId};
+    /// use fimo_ffi::{DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let mut x = RefCell::new(SomeObj);
@@ -733,7 +727,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_mut<U>(&mut self) -> Option<&mut RefCell<U>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -752,7 +746,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::RefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -763,8 +757,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -797,7 +791,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::RefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -808,8 +802,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -842,7 +836,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::RefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -853,8 +847,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -881,7 +875,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::RefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -892,8 +886,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -927,7 +921,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::RefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -938,8 +932,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1490,7 +1484,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     /// use fimo_ffi::cell::AtomicRefCell;
     ///
@@ -1503,8 +1497,8 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj {
@@ -1548,7 +1542,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::ptr::{CastInto, IBase};
     /// use fimo_ffi::cell::AtomicRefCell;
     ///
@@ -1562,8 +1556,8 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj {
@@ -1609,16 +1603,14 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::cell::AtomicRefCell;
-    /// use fimo_ffi::{DynObj, ObjectId};
+    /// use fimo_ffi::{DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = AtomicRefCell::new(SomeObj);
@@ -1629,7 +1621,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn is<U>(&self) -> bool
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         fimo_ffi::ptr::is::<U, _>(obj)
@@ -1643,16 +1635,14 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::cell::AtomicRefCell;
-    /// use fimo_ffi::{DynObj, ObjectId};
+    /// use fimo_ffi::{DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let x = AtomicRefCell::new(SomeObj);
@@ -1663,7 +1653,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast<U>(&self) -> Option<&AtomicRefCell<U>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -1681,16 +1671,14 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::cell::AtomicRefCell;
-    /// use fimo_ffi::{DynObj, ObjectId};
+    /// use fimo_ffi::{DynObj, Object};
     /// use fimo_ffi::ptr::{ObjInterface, IBase};
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f")]
+    /// #[derive(Object)]
     /// struct SomeObj;
     ///
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "b745c60c-e258-4edc-86a9-9fb6b1191ce9")]
+    /// #[derive(Object)]
     /// struct OtherObj;
     ///
     /// let mut x = AtomicRefCell::new(SomeObj);
@@ -1701,7 +1689,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_mut<U>(&mut self) -> Option<&mut AtomicRefCell<U>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let obj = self.as_ptr();
         if crate::ptr::downcast::<U, _>(obj).is_some() {
@@ -1720,7 +1708,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::AtomicRefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -1731,8 +1719,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1765,7 +1753,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::AtomicRefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -1776,8 +1764,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1810,7 +1798,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::AtomicRefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -1821,8 +1809,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1849,7 +1837,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::AtomicRefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -1860,8 +1848,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }
@@ -1895,7 +1883,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
-    /// use fimo_ffi::{DynObj, ObjectId, interface};
+    /// use fimo_ffi::{DynObj, Object, interface};
     /// use fimo_ffi::cell::AtomicRefCell;
     /// use fimo_ffi::ptr::IBase;
     ///
@@ -1906,8 +1894,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     /// }
     ///
     /// // Define a custom object implementing the interface.
-    /// #[derive(ObjectId)]
-    /// #[fetch_vtable(uuid = "7ecb22c2-9426-46da-a7cb-8ad99eef582f", interfaces(Obj))]
+    /// #[derive(Object)]
+    /// #[interfaces(Obj)]
     /// struct MyObj(usize);
     ///
     /// impl Obj for MyObj { }

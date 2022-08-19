@@ -2,7 +2,8 @@
 
 use crate::Logger;
 use fimo_ffi::ptr::{IBase, IBaseExt};
-use fimo_ffi::{DynObj, ObjArc, ObjectId, Version};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, ObjArc, Object, Version};
 use fimo_logging_int::{IFimoLogging, ILogger};
 use fimo_module::{
     FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
@@ -15,12 +16,10 @@ use std::path::Path;
 pub const MODULE_NAME: &str = "fimo_logging";
 
 /// Struct implementing the `fimo-logging` interface.
-// TODO: Change uuid.
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "8e68e497-4dd1-481c-afe2-db7c063ae9f4",
-    interfaces(IModuleInterface, IFimoLogging)
-)]
+#[derive(Object, StableTypeId)]
+#[name("LoggingInterface")]
+#[uuid("85cbdb52-3ffb-4dff-b893-e90bfb1e6ac1")]
+#[interfaces(IModuleInterface, IFimoLogging)]
 pub struct LoggingInterface {
     logger: Logger,
     parent: ObjArc<DynObj<dyn IModuleInstance>>,

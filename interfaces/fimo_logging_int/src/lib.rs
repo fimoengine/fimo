@@ -10,7 +10,7 @@
 #![feature(negative_impls)]
 #![feature(unsize)]
 
-use fimo_ffi::{interface, DynObj, ObjBox, ObjectId, ReleaseType, Version};
+use fimo_ffi::{interface, DynObj, ObjBox, Object, ReleaseType, Version};
 use fimo_module::{FimoInterface, IModuleInterface};
 use std::{
     fmt::{Arguments, Display},
@@ -1182,8 +1182,8 @@ pub fn __private_api_span<'a>(
     )
 }
 
-#[derive(ObjectId)]
-#[fetch_vtable(interfaces(ILogger))]
+#[derive(Object)]
+#[interfaces(ILogger)]
 struct NoopLogger;
 
 impl ILogger for NoopLogger {
@@ -1296,8 +1296,8 @@ impl ILogger for NoopLogger {
 }
 
 /// Backend for logging into the console.
-#[derive(Clone, Debug, ObjectId)]
-#[fetch_vtable(interfaces(ILoggerBackend))]
+#[derive(Clone, Debug, Object)]
+#[interfaces(ILoggerBackend)]
 pub struct ConsoleBackend {
     colored: bool,
     max_target_width: usize,

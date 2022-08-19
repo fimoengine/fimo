@@ -1,6 +1,7 @@
 //! Object pointer implementation.
 use crate::marshal::CTypeBridge;
-use crate::ConstStr;
+use crate::type_id::StableTypeId;
+use crate::{ConstStr, Optional};
 use std::alloc::Layout;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
@@ -8,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::{PhantomData, Unsize};
 use std::ptr::NonNull;
 
-pub use fimo_ffi_codegen::{interface, ObjectId};
+pub use fimo_ffi_codegen::{interface, Object};
 pub use uuid::{uuid, Uuid};
 
 /// Marks that the layout of a type is compatible with an [`ObjMetadata`].
@@ -43,16 +44,21 @@ where
 {
 }
 
-/// Specifies a new object type.
-pub trait ObjectId {
+trait ObjectId {
     /// Unique id of the object.
-    const OBJECT_ID: Uuid;
-
-    /// Version of the object.
-    const OBJECT_VERSION: usize = 0;
+    const OBJECT_ID: Optional<StableTypeId>;
 
     /// Name of the object.
     const OBJECT_NAME: &'static str = std::any::type_name::<Self>();
+}
+
+impl<T: ?Sized> ObjectId for T {
+    default const OBJECT_ID: Optional<StableTypeId> = Optional::None;
+    default const OBJECT_NAME: &'static str = std::any::type_name::<Self>();
+}
+
+impl<T: DowncastSafe + ?Sized + 'static> ObjectId for T {
+    const OBJECT_ID: Optional<StableTypeId> = Optional::Some(StableTypeId::of::<T>());
 }
 
 // We require a way to identify at runtime whether a type implements
@@ -129,7 +135,7 @@ pub trait ObjInterface {
 }
 
 /// Indicates that an object can be coerced to a [`DynObj`].
-pub trait FetchVTable<Dyn>: ObjectId + Unsize<Dyn>
+pub trait FetchVTable<Dyn>: Unsize<Dyn>
 where
     Dyn: ObjInterfaceBase + ?Sized,
 {
@@ -308,8 +314,6 @@ pub struct ObjMetadata<Dyn: ?Sized> {
 }
 
 impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
-    const HIDDEN_UUID: Uuid = Uuid::from_bytes([0; 16]);
-
     /// Constructs a new `ObjMetadata` with a given vtable.
     #[inline]
     pub const fn new(vtable: &'static <Dyn::Base as ObjInterfaceBase>::VTable) -> Self
@@ -350,7 +354,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn is<U>(self) -> bool
     where
-        U: ObjectId + Unsize<Dyn> + 'static,
+        U: Unsize<Dyn> + 'static,
     {
         self.vtable_ptr.is::<U>()
     }
@@ -451,8 +455,8 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns the id of the type associated with this vtable.
     #[inline]
-    pub const fn object_id(self) -> Uuid {
-        Uuid::from_bytes(self.vtable_ptr.object_info.id)
+    pub const fn object_id(self) -> Option<StableTypeId> {
+        self.vtable_ptr.object_info.id.into()
     }
 
     /// Returns the implemented marker bounds of the object.
@@ -465,12 +469,6 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub const fn object_name(self) -> &'static str {
         self.vtable_ptr.object_info.name.into()
-    }
-
-    /// Returns the version of the type associated with this vtable.
-    #[inline]
-    pub const fn object_version(self) -> usize {
-        self.vtable_ptr.object_info.version
     }
 
     /// Returns the id of the interface implemented with this vtable.
@@ -875,7 +873,7 @@ where
 #[inline]
 pub fn is<T, Dyn>(obj: *const DynObj<Dyn>) -> bool
 where
-    T: ObjectId + Unsize<Dyn> + 'static,
+    T: Unsize<Dyn> + 'static,
     Dyn: ?Sized,
 {
     let metadata = metadata(obj);
@@ -886,7 +884,7 @@ where
 #[inline]
 pub fn downcast<T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const T>
 where
-    T: ObjectId + Unsize<Dyn> + 'static,
+    T: Unsize<Dyn> + 'static,
     Dyn: ?Sized,
 {
     if is::<T, Dyn>(obj) {
@@ -900,7 +898,7 @@ where
 #[inline]
 pub fn downcast_mut<T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut T>
 where
-    T: ObjectId + Unsize<Dyn> + 'static,
+    T: Unsize<Dyn> + 'static,
     Dyn: ?Sized,
 {
     if is::<T, Dyn>(obj) {
@@ -1015,7 +1013,7 @@ pub fn layout_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> Layout {
 
 /// Returns the id of the type associated with this vtable.
 #[inline]
-pub fn object_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid {
+pub fn object_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> Option<StableTypeId> {
     let metadata = metadata(obj);
     metadata.object_id()
 }
@@ -1025,13 +1023,6 @@ pub fn object_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid {
 pub fn object_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
     let metadata = metadata(obj);
     metadata.object_name()
-}
-
-/// Returns the version of the type associated with this vtable.
-#[inline]
-pub fn object_version<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> usize {
-    let metadata = metadata(obj);
-    metadata.object_version()
 }
 
 /// Returns the id of the interface implemented with this vtable.
@@ -1265,17 +1256,15 @@ pub struct VTableObjectInfo {
     /// Alignment of the object.
     pub alignment: usize,
     /// Unique object id.
-    pub id: [u8; 16],
+    pub id: Optional<StableTypeId>,
     /// Implemented marker bounds of the object.
     pub markers: usize,
     /// Name of the underlying object type.
     pub name: ConstStr<'static>,
-    /// Version of the underlying object type.
-    pub version: usize,
 }
 
 impl VTableObjectInfo {
-    pub(crate) const fn new<T: ObjectId>() -> Self {
+    const fn new<T>() -> Self {
         unsafe extern "C-unwind" fn drop_ptr<T>(ptr: *mut ()) {
             std::ptr::drop_in_place(ptr as *mut T)
         }
@@ -1290,17 +1279,14 @@ impl VTableObjectInfo {
             drop_in_place: drop,
             size: std::mem::size_of::<T>(),
             alignment: std::mem::align_of::<T>(),
-            id: *T::OBJECT_ID.as_bytes(),
+            id: <T as ObjectId>::OBJECT_ID,
             markers: T::IMPLEMENTED_MARKERS,
             name: unsafe { crate::str::from_utf8_unchecked(T::OBJECT_NAME.as_bytes()) },
-            version: T::OBJECT_VERSION,
         }
     }
 
-    pub(crate) fn is<T: ObjectId + 'static>(&self) -> bool {
-        (&self.id == T::OBJECT_ID.as_bytes())
-            && (T::OBJECT_ID != ObjMetadata::<()>::HIDDEN_UUID)
-            && (self.version == T::OBJECT_VERSION)
+    pub(crate) fn is<T: 'static>(&self) -> bool {
+        self.id == <T as ObjectId>::OBJECT_ID
     }
 }
 
@@ -1319,7 +1305,9 @@ pub struct VTableInterfaceInfo {
 }
 
 impl VTableInterfaceInfo {
-    pub(crate) const fn new<T: ObjInterface + ?Sized>() -> Self {
+    const HIDDEN_UUID: Uuid = Uuid::from_bytes([0; 16]);
+
+    const fn new<T: ObjInterface + ?Sized>() -> Self {
         Self {
             id: *T::Base::INTERFACE_ID.as_bytes(),
             name: unsafe { crate::str::from_utf8_unchecked(T::Base::INTERFACE_NAME.as_bytes()) },
@@ -1334,7 +1322,7 @@ impl VTableInterfaceInfo {
         T: DowncastSafeInterface + ?Sized,
     {
         (&self.id == T::Base::INTERFACE_ID.as_bytes())
-            && (T::Base::INTERFACE_ID != ObjMetadata::<()>::HIDDEN_UUID)
+            && (T::Base::INTERFACE_ID != Self::HIDDEN_UUID)
             && (self.version_major == T::Base::INTERFACE_VERSION_MAJOR)
             && ((object_markers & <T as MarkerBounds>::IMPLEMENTED_MARKERS)
                 == <T as MarkerBounds>::IMPLEMENTED_MARKERS)
@@ -1358,7 +1346,7 @@ impl VTableHead {
     /// Constructs a new vtable.
     pub const fn new<'a, T, Dyn>() -> Self
     where
-        T: ObjectId + Unsize<Dyn> + 'a,
+        T: Unsize<Dyn> + 'a,
         Dyn: ObjInterface + ?Sized + 'a,
     {
         Self::new_embedded::<'a, T, Dyn>(0)
@@ -1367,7 +1355,7 @@ impl VTableHead {
     /// Constructs a new vtable with a custom offset.
     pub const fn new_embedded<'a, T, Dyn>(offset: usize) -> Self
     where
-        T: ObjectId + Unsize<Dyn> + 'a,
+        T: Unsize<Dyn> + 'a,
         Dyn: ObjInterface + ?Sized + 'a,
     {
         Self {
@@ -1378,7 +1366,7 @@ impl VTableHead {
     }
 
     #[inline]
-    pub(crate) fn is<T: ObjectId + 'static>(&self) -> bool {
+    pub(crate) fn is<T: 'static>(&self) -> bool {
         self.object_info.is::<T>()
     }
 
@@ -1420,17 +1408,17 @@ pub trait IBaseExt<'a, Dyn: IBase + ?Sized + 'a> {
     /// Returns if the contained type matches.
     fn is<U>(&self) -> bool
     where
-        U: ObjectId + Unsize<Dyn> + 'static;
+        U: Unsize<Dyn> + 'static;
 
     /// Returns the downcasted object if it is of type `U`.
     fn downcast<U>(&self) -> Option<&U>
     where
-        U: ObjectId + Unsize<Dyn> + 'static;
+        U: Unsize<Dyn> + 'static;
 
     /// Returns the mutable downcasted object if it is of type `U`.
     fn downcast_mut<U>(&mut self) -> Option<&mut U>
     where
-        U: ObjectId + Unsize<Dyn> + 'static;
+        U: Unsize<Dyn> + 'static;
 
     /// Returns the super object.
     fn cast_super<U>(&self) -> &DynObj<U>
@@ -1464,7 +1452,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn is<U>(&self) -> bool
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         is::<U, _>(self)
     }
@@ -1472,7 +1460,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast<U>(&self) -> Option<&U>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast::<U, _>(self).map(|u| unsafe { &*u })
@@ -1481,7 +1469,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast_mut<U>(&mut self) -> Option<&mut U>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast_mut::<U, _>(self).map(|u| unsafe { &mut *u })

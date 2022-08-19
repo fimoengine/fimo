@@ -1,8 +1,10 @@
 //! Utilities for formatting.
 
+use fimo_ffi_codegen::StableTypeId;
+
 use crate::marshal::CTypeBridge;
 use crate::ptr::{coerce_obj_mut, IBase};
-use crate::{interface, DynObj, ObjArc, ObjBox, ObjectId};
+use crate::{interface, DynObj, ObjArc, ObjBox, Object};
 use std::fmt::{Arguments, Debug};
 use std::ops::{Deref, DerefMut};
 
@@ -380,8 +382,10 @@ unsafe impl<'lt, 'a> CTypeBridge for &'lt mut Formatter<'a> {
     }
 }
 
-#[derive(ObjectId)]
-#[fetch_vtable(uuid = "bfd8655b-3746-412d-a874-7af026932817", interfaces(IFormatter))]
+#[derive(Object, StableTypeId)]
+#[name("FormatterWrapper")]
+#[uuid("bfd8655b-3746-412d-a874-7af026932817")]
+#[interfaces(IFormatter)]
 struct FormatterWrapper<'a, 'b> {
     fmt: &'a mut std::fmt::Formatter<'b>,
 }

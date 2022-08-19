@@ -1,7 +1,8 @@
 use crate::worker_pool::WorkerPool;
 use crate::Runtime;
 use context::Context;
-use fimo_ffi::{DynObj, FfiFn, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, FfiFn, Object};
 use fimo_logging_int::{debug, error, info, trace};
 use fimo_module::Error;
 use fimo_tasks_int::raw::{
@@ -22,8 +23,10 @@ use stack_allocator::StackAllocator;
 use task_manager::{AssertValidTask, Msg, MsgData, TaskManager};
 
 /// Task scheduler.
-#[derive(ObjectId)]
-#[fetch_vtable(uuid = "7f2cb683-26b4-46cb-a91d-3cbecf295ad8", interfaces(IScheduler))]
+#[derive(Object, StableTypeId)]
+#[name("TaskScheduler")]
+#[uuid("7f2cb683-26b4-46cb-a91d-3cbecf295ad8")]
+#[interfaces(IScheduler)]
 pub struct TaskScheduler {
     _unique_addr: Box<u8>,
     scheduler_task: PseudoTask,

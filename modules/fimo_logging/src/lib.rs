@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
 };
 
-use fimo_ffi::{DynObj, ObjBox, ObjectId};
+use fimo_ffi::{type_id::StableTypeId, DynObj, ObjBox, Object};
 use fimo_logging_int::{
     BackendId, Channel, ILogger, ILoggerBackend, Level, LevelFilter, Metadata, Record, SpanId,
     SpanMetadata, SpanMetadataBuilder, SpanStackId,
@@ -31,9 +31,10 @@ thread_local! {
 }
 
 /// Logger implementation.
-// TODO: Change uuid.
-#[derive(ObjectId)]
-#[fetch_vtable(uuid = "8e68e497-4dd1-481c-afe2-db7c063ae9f4", interfaces(ILogger))]
+#[derive(Object, StableTypeId)]
+#[name("Logger")]
+#[uuid("1ea067c1-988a-4deb-aadb-764ea3737912")]
+#[interfaces(ILogger)]
 pub struct Logger {
     inner: RwLock<LoggerInner>,
 }

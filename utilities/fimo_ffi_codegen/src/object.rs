@@ -1,21 +1,9 @@
-use darling::FromDeriveInput;
 use proc_macro::TokenStream;
 use quote::quote;
 use std::str::FromStr;
 use syn::spanned::Spanned;
 use syn::{parse_macro_input, parse_quote, DeriveInput};
 use uuid::Uuid;
-
-#[derive(FromDeriveInput)]
-#[darling(attributes(fetch_vtable))]
-struct Input {
-    ident: syn::Ident,
-    generics: syn::Generics,
-    #[darling(default, map = "uuid_from_string")]
-    uuid: Option<darling::Result<Uuid>>,
-    #[darling(default)]
-    interfaces: darling::util::PathList,
-}
 
 pub(crate) fn uuid_from_string(uuid: String) -> Option<darling::Result<Uuid>> {
     match Uuid::from_str(uuid.as_str()) {
@@ -24,26 +12,56 @@ pub(crate) fn uuid_from_string(uuid: String) -> Option<darling::Result<Uuid>> {
     }
 }
 
+#[allow(unused)]
+struct InterfaceListAttribute {
+    paren_token: syn::token::Paren,
+    interfaces: syn::punctuated::Punctuated<syn::Path, syn::Token!(,)>,
+}
+
+impl InterfaceListAttribute {
+    fn from_derive_input(input: &syn::DeriveInput) -> syn::Result<Option<Self>> {
+        let parser = |input: syn::parse::ParseStream| {
+            let content;
+            let paren_token = syn::parenthesized!(content in input);
+            let interfaces = content.call(syn::punctuated::Punctuated::parse_terminated)?;
+            Ok((paren_token, interfaces))
+        };
+
+        for attr in &input.attrs {
+            if attr.style != syn::AttrStyle::Outer {
+                continue;
+            }
+
+            if let Some(ident) = attr.path.get_ident() {
+                if ident == "interfaces" {
+                    let (paren_token, interfaces) =
+                        syn::parse::Parser::parse2(parser, attr.tokens.clone())?;
+
+                    return Ok(Some(Self {
+                        paren_token,
+                        interfaces,
+                    }));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+}
+
 pub fn object_impl(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let Input {
-        ident,
-        mut generics,
-        uuid,
-        interfaces,
-    } = match Input::from_derive_input(&input) {
-        Ok(v) => v,
-        Err(e) => {
-            return TokenStream::from(e.write_errors());
-        }
-    };
 
-    let is_downcast_safe = generics.params.iter().count() == 0;
+    let interfaces = match InterfaceListAttribute::from_derive_input(&input) {
+        Ok(x) => x.map(|x| x.interfaces).unwrap_or_default(),
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     // Check that only generic lifetimes are used, if any. This is required because of
     // the need to assign a unique uuid to every type. To every lifetime we add the bound
     // `'inner` transforming the possible generic argument `<'a, 'b: 'a>` to
     // `<'a: 'inner, b: 'a + 'inner>`.
+    let mut generics = input.generics;
     for generic in &mut generics.params {
         if matches!(generic, syn::GenericParam::Type(_)) {
             return syn::Error::new(generic.span(), "only generic lifetimes are supported")
@@ -83,6 +101,7 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
     }
 
     // Type<'a, 'b>
+    let ident = input.ident;
     let ty: syn::Type = parse_quote!(#ident #boundless_generics);
 
     // Type<'_, '_>
@@ -91,28 +110,11 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
     // `<'a: 'inner, 'b: 'a + 'inner>` -> `<'a: 'inner, 'b: 'a + 'inner, 'inner>`
     generics.params.push(parse_quote!('inner));
 
-    let uuid = match uuid.unwrap_or(Ok(Uuid::from_bytes([0; 16]))) {
-        Ok(v) => *v.as_bytes(),
-        Err(e) => {
-            return TokenStream::from(e.write_errors());
-        }
-    };
-
     let mut impls: Vec<_> = Vec::new();
-
-    // Implement the `ObjectId` trait for the generic type.
-    impls.push(quote! {
-        impl #generics_no_inner ::fimo_ffi::ptr::ObjectId for #ty {
-            const OBJECT_ID: ::fimo_ffi::ptr::Uuid = ::fimo_ffi::ptr::Uuid::from_bytes([#(#uuid),*]);
-        }
-    });
-
     // Implement the `DowncastSafe` trait for the type.
-    if is_downcast_safe {
-        impls.push(quote! {
-            unsafe impl #generics_no_inner ::fimo_ffi::ptr::DowncastSafe for #ty { }
-        });
-    }
+    impls.push(quote! {
+        unsafe impl #generics_no_inner ::fimo_ffi::ptr::DowncastSafe for #ty where #ty: 'static { }
+    });
 
     // Implement the `FetchVTable<dyn IBase + '_>` trait for the generic type.
     impls.push(quote! {

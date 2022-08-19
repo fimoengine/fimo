@@ -3,7 +3,8 @@ use context::Context;
 use fimo_ffi::cell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use fimo_ffi::ffi_fn::RawFfiFn;
 use fimo_ffi::ptr::IBaseExt;
-use fimo_ffi::{DynObj, FfiFn, ObjBox, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, FfiFn, ObjBox, Object};
 use fimo_logging_int::{debug, error, info, trace, SpanStackId};
 use fimo_module::{Error, ErrorKind};
 use fimo_tasks_int::raw::{
@@ -1139,8 +1140,9 @@ impl<'a> SchedulerContext<'a> {
     }
 }
 
-#[derive(Debug, ObjectId)]
-#[fetch_vtable(uuid = "c68fe659-beef-4341-9b75-f54b0ef387ff")]
+#[derive(Debug, Object, StableTypeId)]
+#[name("ContextData")]
+#[uuid("c68fe659-beef-4341-9b75-f54b0ef387ff")]
 pub(crate) struct ContextData {
     shared: AtomicRefCell<SharedContext>,
     private: AtomicRefCell<PrivateContext>,
@@ -1361,11 +1363,10 @@ impl Ord for Waiter {
     }
 }
 
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "d2e5a6f3-d5a0-41f0-a6b1-62d543c5c46b",
-    interfaces(IRustPanicData)
-)]
+#[derive(Object, StableTypeId)]
+#[name("PanicData")]
+#[uuid("d2e5a6f3-d5a0-41f0-a6b1-62d543c5c46b")]
+#[interfaces(IRustPanicData)]
 pub(crate) struct PanicData {
     data: Option<Box<dyn Any + Send + 'static>>,
 }

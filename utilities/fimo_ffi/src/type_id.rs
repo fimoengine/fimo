@@ -29,13 +29,27 @@ trait StableTypeIdProvider: 'static {
     const ID: u128;
 }
 
-impl<T: TypeInfo + ?Sized> StableTypeIdProvider for T {
+impl<T: TypeInfoPriv + ?Sized> StableTypeIdProvider for T {
     const ID: u128 = hash_type_info::<T>();
 }
 
 /// Trait collecting the type information used for computing
 /// a stable type id.
 pub trait TypeInfo: 'static {
+    /// Seed id of the type.
+    const ID: uuid::Uuid;
+
+    /// Variant of the type.
+    const VARIANT: usize = 0;
+
+    /// Type name.
+    const NAME: &'static str = std::any::type_name::<Self>();
+
+    /// Ids of the members.
+    const MEMBER_IDS: &'static [StableTypeId] = &[];
+}
+
+trait TypeInfoPriv: 'static {
     /// Seed id of the type.
     const ID: uuid::Uuid;
 
@@ -139,11 +153,18 @@ tuple_impl! {
 }
 
 // General implementation uses generates an unstable id by hashing a [`std::any::TypeId`].
-impl<T: ?Sized + 'static> TypeInfo for T {
+impl<T: ?Sized + 'static> TypeInfoPriv for T {
     default const ID: uuid::Uuid = uuid::uuid!("eec3abd9-46af-4bde-a6f0-27ff0652d3ea");
     default const VARIANT: usize = unsafe { std::mem::transmute(std::any::TypeId::of::<T>()) };
     default const NAME: &'static str = std::any::type_name::<Self>();
     default const MEMBER_IDS: &'static [StableTypeId] = &[];
+}
+
+impl<T: TypeInfo + ?Sized + 'static> TypeInfoPriv for T {
+    default const ID: uuid::Uuid = <T as TypeInfo>::ID;
+    default const VARIANT: usize = <T as TypeInfo>::VARIANT;
+    default const NAME: &'static str = <T as TypeInfo>::NAME;
+    default const MEMBER_IDS: &'static [StableTypeId] = <T as TypeInfo>::MEMBER_IDS;
 }
 
 impl TypeInfo for str {
@@ -163,7 +184,7 @@ impl<T: 'static, const N: usize> TypeInfo for [T; N] {
     const MEMBER_IDS: &'static [StableTypeId] = &[StableTypeId::of::<T>()];
 }
 
-const fn hash_type_info<T: TypeInfo + ?Sized>() -> u128 {
+const fn hash_type_info<T: TypeInfoPriv + ?Sized>() -> u128 {
     use std::intrinsics::{const_allocate, const_deallocate};
     use std::ptr::copy_nonoverlapping;
 

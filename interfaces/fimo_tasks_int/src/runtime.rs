@@ -6,7 +6,8 @@ use crate::raw::{
 use crate::task::{Builder, JoinHandle, RawTaskWrapper, Task};
 use fimo_ffi::marshal::CTypeBridge;
 use fimo_ffi::ptr::IBase;
-use fimo_ffi::{interface, DynObj, FfiFn, ObjBox, ObjectId};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{interface, DynObj, FfiFn, ObjBox, Object};
 use log::trace;
 use std::mem::MaybeUninit;
 use std::pin::Pin;
@@ -189,8 +190,9 @@ pub trait IRuntimeExt: IRuntime {
             trace!("Entering the runtime");
 
             // task synchronisation is implemented with condition variables.
-            #[derive(ObjectId)]
-            #[fetch_vtable(uuid = "47c0e60c-8cd9-4dd1-8b21-79037a93278c")]
+            #[derive(Object, StableTypeId)]
+            #[name("CleanupData")]
+            #[uuid("47c0e60c-8cd9-4dd1-8b21-79037a93278c")]
             struct CleanupData {
                 condvar: Condvar,
                 completed: Mutex<bool>,

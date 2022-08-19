@@ -5,7 +5,8 @@ use fimo_core_int::modules::IModuleRegistry;
 use fimo_core_int::settings::ISettingsRegistry;
 use fimo_core_int::IFimoCore;
 use fimo_ffi::ptr::{IBase, IBaseExt};
-use fimo_ffi::{DynObj, ObjArc, ObjectId, Version};
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::{DynObj, ObjArc, Object, Version};
 use fimo_module::{
     FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
 };
@@ -17,11 +18,10 @@ use std::path::Path;
 pub const MODULE_NAME: &str = "fimo_core";
 
 /// Struct implementing the `fimo-core` interface.
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "8e68e497-4dd1-481c-afe2-db7c063ae9f4",
-    interfaces(IModuleInterface, IFimoCore)
-)]
+#[derive(Object, StableTypeId)]
+#[name("CoreInterface")]
+#[uuid("8e68e497-4dd1-481c-afe2-db7c063ae9f4")]
+#[interfaces(IModuleInterface, IFimoCore)]
 pub struct CoreInterface {
     core: Core,
     parent: ObjArc<DynObj<dyn IModuleInstance>>,

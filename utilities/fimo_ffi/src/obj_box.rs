@@ -2,9 +2,7 @@
 use fimo_ffi_codegen::StableTypeId;
 
 use crate::marshal::CTypeBridge;
-use crate::ptr::{
-    CastInto, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, ObjectId, OpaqueObj,
-};
+use crate::ptr::{CastInto, DowncastSafeInterface, DynObj, FetchVTable, ObjInterface, OpaqueObj};
 use crate::{ReprC, ReprRust};
 use std::alloc::{handle_alloc_error, AllocError, Allocator, Global, Layout};
 use std::borrow::{Borrow, BorrowMut};
@@ -233,7 +231,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn is<U>(b: &Self) -> bool
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         crate::ptr::is::<U, _>(&**b)
     }
@@ -242,7 +240,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn downcast<U>(b: Self) -> Option<ObjBox<U, A>>
     where
-        U: ObjectId + Unsize<T> + 'static,
+        U: Unsize<T> + 'static,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         if let Some(ptr) = crate::ptr::downcast_mut::<U, _>(ptr) {

@@ -3,7 +3,8 @@ use fimo_core_int::modules::{
     IModuleRegistry, IModuleRegistryExt, IModuleRegistryInner, InterfaceCallback,
     InterfaceCallbackId, InterfaceId, LoaderCallback, LoaderCallbackId, LoaderId,
 };
-use fimo_ffi::ObjectId;
+use fimo_ffi::type_id::StableTypeId;
+use fimo_ffi::Object;
 use fimo_ffi::{DynObj, FfiFn, ObjArc};
 use fimo_module::{
     Error, ErrorKind, IModule, IModuleInstance, IModuleInterface, IModuleLoader,
@@ -21,11 +22,10 @@ use std::path::Path;
 pub const MODULE_MANIFEST_PATH: &str = "module.json";
 
 /// The module registry.
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "43cdc830-1706-4234-bedc-29a51e751dc7",
-    interfaces(IModuleRegistry)
-)]
+#[derive(Object, StableTypeId)]
+#[name("ModuleRegistry")]
+#[uuid("43cdc830-1706-4234-bedc-29a51e751dc7")]
+#[interfaces(IModuleRegistry)]
 pub struct ModuleRegistry {
     inner: parking_lot::RwLock<ModuleRegistryInner>,
 }
@@ -84,11 +84,10 @@ impl std::fmt::Debug for ModuleRegistry {
     }
 }
 
-#[derive(ObjectId)]
-#[fetch_vtable(
-    uuid = "f9077e25-43e1-4857-be2b-fcd430802e46",
-    interfaces(IModuleRegistryInner)
-)]
+#[derive(Object, StableTypeId)]
+#[name("ModuleRegistryInner")]
+#[uuid("f9077e25-43e1-4857-be2b-fcd430802e46")]
+#[interfaces(IModuleRegistryInner)]
 struct ModuleRegistryInner {
     loader_id_gen: RangeFrom<IdWrapper<LoaderId>>,
     loader_callback_id_gen: RangeFrom<IdWrapper<LoaderCallbackId>>,
