@@ -5,6 +5,7 @@ use proc_macro::TokenStream;
 mod ctypebridge;
 mod interface;
 mod object;
+mod stable_type_id;
 
 /// Implements the `CTypeBridge` trait.
 ///
@@ -13,6 +14,11 @@ mod object;
 #[proc_macro_derive(CTypeBridge)]
 pub fn ctypebridge(input: TokenStream) -> TokenStream {
     ctypebridge::bridge_impl(input)
+}
+
+#[proc_macro_derive(StableTypeId, attributes(uuid, name, generation, ignored))]
+pub fn stable_type_id(input: TokenStream) -> TokenStream {
+    stable_type_id::stable_id(input)
 }
 
 /// Defines a new interface.

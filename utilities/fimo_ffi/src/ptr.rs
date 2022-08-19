@@ -9,7 +9,7 @@ use std::marker::{PhantomData, Unsize};
 use std::ptr::NonNull;
 
 pub use fimo_ffi_codegen::{interface, ObjectId};
-pub use uuid::Uuid;
+pub use uuid::{uuid, Uuid};
 
 /// Marks that the layout of a type is compatible with an [`ObjMetadata`].
 ///
@@ -350,7 +350,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn is<U>(self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<Dyn>,
+        U: ObjectId + Unsize<Dyn> + 'static,
     {
         self.vtable_ptr.is::<U>()
     }
@@ -875,7 +875,7 @@ where
 #[inline]
 pub fn is<T, Dyn>(obj: *const DynObj<Dyn>) -> bool
 where
-    T: DowncastSafe + ObjectId + Unsize<Dyn>,
+    T: ObjectId + Unsize<Dyn> + 'static,
     Dyn: ?Sized,
 {
     let metadata = metadata(obj);
@@ -886,7 +886,7 @@ where
 #[inline]
 pub fn downcast<T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const T>
 where
-    T: DowncastSafe + ObjectId + Unsize<Dyn>,
+    T: ObjectId + Unsize<Dyn> + 'static,
     Dyn: ?Sized,
 {
     if is::<T, Dyn>(obj) {
@@ -900,7 +900,7 @@ where
 #[inline]
 pub fn downcast_mut<T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut T>
 where
-    T: DowncastSafe + ObjectId + Unsize<Dyn>,
+    T: ObjectId + Unsize<Dyn> + 'static,
     Dyn: ?Sized,
 {
     if is::<T, Dyn>(obj) {
@@ -1297,7 +1297,7 @@ impl VTableObjectInfo {
         }
     }
 
-    pub(crate) fn is<T: DowncastSafe + ObjectId>(&self) -> bool {
+    pub(crate) fn is<T: ObjectId + 'static>(&self) -> bool {
         (&self.id == T::OBJECT_ID.as_bytes())
             && (T::OBJECT_ID != ObjMetadata::<()>::HIDDEN_UUID)
             && (self.version == T::OBJECT_VERSION)
@@ -1339,17 +1339,6 @@ impl VTableInterfaceInfo {
             && ((object_markers & <T as MarkerBounds>::IMPLEMENTED_MARKERS)
                 == <T as MarkerBounds>::IMPLEMENTED_MARKERS)
     }
-
-    #[inline]
-    pub(crate) fn is_equal<T>(&self, interface_markers: usize) -> bool
-    where
-        T: DowncastSafeInterface + ?Sized,
-    {
-        (&self.id == T::Base::INTERFACE_ID.as_bytes())
-            && (T::Base::INTERFACE_ID != ObjMetadata::<()>::HIDDEN_UUID)
-            && (self.version_major == T::Base::INTERFACE_VERSION_MAJOR)
-            && (<T as ObjInterface>::MARKER_BOUNDS == interface_markers)
-    }
 }
 
 /// The common head of all vtables.
@@ -1389,7 +1378,7 @@ impl VTableHead {
     }
 
     #[inline]
-    pub(crate) fn is<T: DowncastSafe + ObjectId>(&self) -> bool {
+    pub(crate) fn is<T: ObjectId + 'static>(&self) -> bool {
         self.object_info.is::<T>()
     }
 
@@ -1431,17 +1420,17 @@ pub trait IBaseExt<'a, Dyn: IBase + ?Sized + 'a> {
     /// Returns if the contained type matches.
     fn is<U>(&self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<Dyn>;
+        U: ObjectId + Unsize<Dyn> + 'static;
 
     /// Returns the downcasted object if it is of type `U`.
     fn downcast<U>(&self) -> Option<&U>
     where
-        U: DowncastSafe + ObjectId + Unsize<Dyn>;
+        U: ObjectId + Unsize<Dyn> + 'static;
 
     /// Returns the mutable downcasted object if it is of type `U`.
     fn downcast_mut<U>(&mut self) -> Option<&mut U>
     where
-        U: DowncastSafe + ObjectId + Unsize<Dyn>;
+        U: ObjectId + Unsize<Dyn> + 'static;
 
     /// Returns the super object.
     fn cast_super<U>(&self) -> &DynObj<U>
@@ -1475,7 +1464,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn is<U>(&self) -> bool
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         is::<U, _>(self)
     }
@@ -1483,7 +1472,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast<U>(&self) -> Option<&U>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast::<U, _>(self).map(|u| unsafe { &*u })
@@ -1492,7 +1481,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast_mut<U>(&mut self) -> Option<&mut U>
     where
-        U: DowncastSafe + ObjectId + Unsize<T>,
+        U: ObjectId + Unsize<T> + 'static,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast_mut::<U, _>(self).map(|u| unsafe { &mut *u })
