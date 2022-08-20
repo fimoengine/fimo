@@ -16,6 +16,24 @@ pub fn ctypebridge(input: TokenStream) -> TokenStream {
     ctypebridge::bridge_impl(input)
 }
 
+/// Customizes the `StableTypeId` of a struct.
+///
+/// The `StableTypeId` of a struct is computed by recursively computing the
+/// `StableTypeId` of all it's fields and hashing them with a seed uuid, the
+/// struct name and generation. Going from a tuple struct to a struct with named
+/// fields, or vice versa, may change the `StableTypeId`. Any `#[repr(...)]`
+/// attribute won't be considered.
+///
+/// # Struct Attributes
+///
+/// - `#[uuid("...")]`: Assigns a seed uuid. (Required)
+/// - `#[name("...")]`: Assigns a fixed name to the struct.
+///     Defaults to [`std::any::type_name()`].
+/// - `#[generation(...)]`: Version of the struct. Defaults to `0`.
+///
+/// # Fields Attributes
+///
+/// - `#[ignored]`: Ignores a field when computing the hash.
 #[proc_macro_derive(StableTypeId, attributes(uuid, name, generation, ignored))]
 pub fn stable_type_id(input: TokenStream) -> TokenStream {
     stable_type_id::stable_id(input)
@@ -246,19 +264,11 @@ pub fn interface(input: TokenStream) -> TokenStream {
 
 /// Implements the traits necessary for coercing a type to a `DynObj`.
 ///
-/// Adds `ObjectId` and multiple optional `FetchInterface<_>` implementations to a type.
+/// Optionally adds multiple `FetchInterface<_>` implementations to a type.
 /// Generic types are allowed as long as they require no generic type arguments.
+/// Generic types do not support downcasting.
 ///
-/// The attribute requires a single `#[fetch_vtable(...)]` attribute on the type definition.
-/// The attribute specifies an optional uuid and an arbitrary amount of traits for which the
-/// coercion will be implemented.
-///
-/// The uuid can be specified with the `uuid = "..."` key value pair, where the
-/// supplied string is a valid uuid, hyphenated or not. The uuid must be unique among all object
-/// definitions. Not adding an uuid "hides" the type and disables the downcasting from a `DynObj`
-/// to the concrete type. This is useful for types where no downcasting will ever be required.
-///
-/// Interfaces can be specified with the `interfaces(Trait1, Trait2, ..., TraitN)` syntax.
+/// Interfaces can be specified with the `#[interfaces(Trait1, Trait2, ..., TraitN)]` attribute.
 /// Each interface implements the trait:
 ///
 /// ```ignore
@@ -281,9 +291,9 @@ pub fn interface(input: TokenStream) -> TokenStream {
 ///     /// Constructs a new standalone vtable.
 ///     pub const fn new_for<'a, T>() -> Self
 ///     where
-///         T: Trait + ObjectId + 'a,
+///         T: Trait + 'a,
 ///     {
-///         Self::new_for_embedded::<'a, T, dyn Trait>(0)
+///         Self::new_for_embedded::<'a, T>(0)
 ///     }
 ///
 ///     /// Constructs the vtable when it is embedded inside another vtable.
@@ -291,10 +301,9 @@ pub fn interface(input: TokenStream) -> TokenStream {
 ///     /// standalone vtable to the start of this embedded vtable. In case
 ///     /// this vtable embeds other vtables they must be constructed with
 ///     /// the offset set to `offset + offset_in_trait_vtable`.
-///     pub const fn new_for_embedded<'a, T, Dyn>(offset: usize) -> Self
+///     pub const fn new_for_embedded<'a, T>(offset: usize) -> Self
 ///     where
-///         T: Trait + ObjectId + Unsize<Dyn> + 'a,
-///         Dyn: ObjInterface + ?Sized + 'a,
+///         T: Trait + Unsize<Dyn> + 'a,
 ///     {
 ///         ...
 ///     }
