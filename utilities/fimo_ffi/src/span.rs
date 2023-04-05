@@ -30,7 +30,7 @@ impl<'a, T: RefUnwindSafe> RefUnwindSafe for ConstSpan<'a, T> {}
 
 impl<'a, T: UnwindSafe> UnwindSafe for ConstSpan<'a, T> {}
 
-impl<'a, T> const Deref for ConstSpan<'a, T> {
+impl<'a, T> Deref for ConstSpan<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -39,14 +39,14 @@ impl<'a, T> const Deref for ConstSpan<'a, T> {
     }
 }
 
-impl<'a, T> const Borrow<[T]> for ConstSpan<'a, T> {
+impl<'a, T> Borrow<[T]> for ConstSpan<'a, T> {
     fn borrow(&self) -> &[T] {
         let ptr: *const [T] = self.inner.into();
         unsafe { &*ptr }
     }
 }
 
-impl<'a, T> const From<&'a [T]> for ConstSpan<'a, T> {
+impl<'a, T> From<&'a [T]> for ConstSpan<'a, T> {
     fn from(s: &'a [T]) -> Self {
         Self {
             inner: s.into(),
@@ -55,7 +55,7 @@ impl<'a, T> const From<&'a [T]> for ConstSpan<'a, T> {
     }
 }
 
-impl<'a, T> const From<&'a mut [T]> for ConstSpan<'a, T> {
+impl<'a, T> From<&'a mut [T]> for ConstSpan<'a, T> {
     fn from(s: &'a mut [T]) -> Self {
         Self {
             inner: s.into(),
@@ -64,14 +64,14 @@ impl<'a, T> const From<&'a mut [T]> for ConstSpan<'a, T> {
     }
 }
 
-impl<'a, T> const From<ConstSpan<'a, T>> for &'a [T] {
+impl<'a, T> From<ConstSpan<'a, T>> for &'a [T] {
     fn from(s: ConstSpan<'a, T>) -> Self {
         let ptr: *const [T] = s.inner.into();
         unsafe { &*ptr }
     }
 }
 
-impl<'a, T> const From<MutSpan<'a, T>> for ConstSpan<'a, T> {
+impl<'a, T> From<MutSpan<'a, T>> for ConstSpan<'a, T> {
     fn from(s: MutSpan<'a, T>) -> Self {
         Self {
             inner: s.inner.into(),
@@ -80,7 +80,7 @@ impl<'a, T> const From<MutSpan<'a, T>> for ConstSpan<'a, T> {
     }
 }
 
-unsafe impl<'a, T> const CTypeBridge for &'a [T] {
+unsafe impl<'a, T> CTypeBridge for &'a [T] {
     type Type = ConstSpan<'a, T>;
 
     fn marshal(self) -> Self::Type {
@@ -168,7 +168,7 @@ impl<'a, T: RefUnwindSafe> RefUnwindSafe for MutSpan<'a, T> {}
 
 impl<'a, T: UnwindSafe> UnwindSafe for MutSpan<'a, T> {}
 
-impl<'a, T> const Deref for MutSpan<'a, T> {
+impl<'a, T> Deref for MutSpan<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -177,28 +177,28 @@ impl<'a, T> const Deref for MutSpan<'a, T> {
     }
 }
 
-impl<'a, T> const DerefMut for MutSpan<'a, T> {
+impl<'a, T> DerefMut for MutSpan<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let ptr: *mut [T] = self.inner.into();
         unsafe { &mut *ptr }
     }
 }
 
-impl<'a, T> const Borrow<[T]> for MutSpan<'a, T> {
+impl<'a, T> Borrow<[T]> for MutSpan<'a, T> {
     fn borrow(&self) -> &[T] {
         let ptr: *const [T] = self.inner.into();
         unsafe { &*ptr }
     }
 }
 
-impl<'a, T> const BorrowMut<[T]> for MutSpan<'a, T> {
+impl<'a, T> BorrowMut<[T]> for MutSpan<'a, T> {
     fn borrow_mut(&mut self) -> &mut [T] {
         let ptr: *mut [T] = self.inner.into();
         unsafe { &mut *ptr }
     }
 }
 
-impl<'a, T> const From<&'a mut [T]> for MutSpan<'a, T> {
+impl<'a, T> From<&'a mut [T]> for MutSpan<'a, T> {
     fn from(s: &'a mut [T]) -> Self {
         Self {
             inner: s.into(),
@@ -207,21 +207,21 @@ impl<'a, T> const From<&'a mut [T]> for MutSpan<'a, T> {
     }
 }
 
-impl<'a, T> const From<MutSpan<'a, T>> for &'a [T] {
+impl<'a, T> From<MutSpan<'a, T>> for &'a [T] {
     fn from(s: MutSpan<'a, T>) -> Self {
         let ptr: *const [T] = s.inner.into();
         unsafe { &*ptr }
     }
 }
 
-impl<'a, T> const From<MutSpan<'a, T>> for &'a mut [T] {
+impl<'a, T> From<MutSpan<'a, T>> for &'a mut [T] {
     fn from(s: MutSpan<'a, T>) -> Self {
         let ptr: *mut [T] = s.inner.into();
         unsafe { &mut *ptr }
     }
 }
 
-unsafe impl<'a, T> const CTypeBridge for &'a mut [T] {
+unsafe impl<'a, T> CTypeBridge for &'a mut [T] {
     type Type = MutSpan<'a, T>;
 
     fn marshal(self) -> Self::Type {
@@ -333,9 +333,9 @@ impl<T> ConstSpanPtr<T> {
     }
 }
 
-impl<T> const Copy for ConstSpanPtr<T> {}
+impl<T> Copy for ConstSpanPtr<T> {}
 
-impl<T> const Clone for ConstSpanPtr<T> {
+impl<T> Clone for ConstSpanPtr<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -402,49 +402,49 @@ impl<T> Pointer for ConstSpanPtr<T> {
     }
 }
 
-impl<T> const Default for ConstSpanPtr<T> {
+impl<T> Default for ConstSpanPtr<T> {
     #[inline]
     fn default() -> Self {
         ptr_from_raw_parts(NonNull::dangling().as_ptr(), 0)
     }
 }
 
-impl<T> const From<&'_ [T]> for ConstSpanPtr<T> {
+impl<T> From<&'_ [T]> for ConstSpanPtr<T> {
     #[inline]
     fn from(s: &'_ [T]) -> Self {
         ptr_from_raw_parts(s as *const _ as *const T, s.len())
     }
 }
 
-impl<T> const From<&'_ mut [T]> for ConstSpanPtr<T> {
+impl<T> From<&'_ mut [T]> for ConstSpanPtr<T> {
     #[inline]
     fn from(s: &'_ mut [T]) -> Self {
         ptr_from_raw_parts(s as *mut _ as *mut T, s.len())
     }
 }
 
-impl<T> const From<*const [T]> for ConstSpanPtr<T> {
+impl<T> From<*const [T]> for ConstSpanPtr<T> {
     #[inline]
     fn from(s: *const [T]) -> Self {
         ptr_from_raw_parts(s as *const T, s.len())
     }
 }
 
-impl<T> const From<*mut [T]> for ConstSpanPtr<T> {
+impl<T> From<*mut [T]> for ConstSpanPtr<T> {
     #[inline]
     fn from(s: *mut [T]) -> Self {
         ptr_from_raw_parts(s as *mut T, s.len())
     }
 }
 
-impl<T> const From<ConstSpanPtr<T>> for *const [T] {
+impl<T> From<ConstSpanPtr<T>> for *const [T] {
     #[inline]
     fn from(s: ConstSpanPtr<T>) -> Self {
         std::ptr::slice_from_raw_parts(s.ptr, s.len)
     }
 }
 
-unsafe impl<T> const CTypeBridge for *const [T] {
+unsafe impl<T> CTypeBridge for *const [T] {
     type Type = ConstSpanPtr<T>;
 
     fn marshal(self) -> Self::Type {
@@ -480,6 +480,15 @@ impl<T> MutSpanPtr<T> {
         self.ptr
     }
 
+    /// Constructs a [`ConstSpanPtr`] from the current pointer.
+    #[inline]
+    pub const fn as_const_span_ptr(self) -> ConstSpanPtr<T> {
+        ConstSpanPtr {
+            ptr: self.ptr,
+            len: self.len,
+        }
+    }
+
     /// Dereferences the `MutSpanPtr` to a [`ConstSpan`].
     ///
     /// # Safety
@@ -488,7 +497,10 @@ impl<T> MutSpanPtr<T> {
     #[inline]
     pub const unsafe fn deref<'a>(self) -> ConstSpan<'a, T> {
         ConstSpan {
-            inner: self.into(),
+            inner: ConstSpanPtr {
+                ptr: self.ptr,
+                len: self.len,
+            },
             _phantom: PhantomData,
         }
     }
@@ -507,9 +519,9 @@ impl<T> MutSpanPtr<T> {
     }
 }
 
-impl<T> const Copy for MutSpanPtr<T> {}
+impl<T> Copy for MutSpanPtr<T> {}
 
-impl<T> const Clone for MutSpanPtr<T> {
+impl<T> Clone for MutSpanPtr<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -576,49 +588,49 @@ impl<T> Pointer for MutSpanPtr<T> {
     }
 }
 
-impl<T> const Default for MutSpanPtr<T> {
+impl<T> Default for MutSpanPtr<T> {
     #[inline]
     fn default() -> Self {
         ptr_from_raw_parts_mut(NonNull::dangling().as_ptr(), 0)
     }
 }
 
-impl<T> const From<&'_ mut [T]> for MutSpanPtr<T> {
+impl<T> From<&'_ mut [T]> for MutSpanPtr<T> {
     #[inline]
     fn from(s: &'_ mut [T]) -> Self {
         ptr_from_raw_parts_mut(s as *mut _ as *mut T, s.len())
     }
 }
 
-impl<T> const From<*mut [T]> for MutSpanPtr<T> {
+impl<T> From<*mut [T]> for MutSpanPtr<T> {
     #[inline]
     fn from(s: *mut [T]) -> Self {
         ptr_from_raw_parts_mut(s as *mut T, s.len())
     }
 }
 
-impl<T> const From<MutSpanPtr<T>> for ConstSpanPtr<T> {
+impl<T> From<MutSpanPtr<T>> for ConstSpanPtr<T> {
     #[inline]
     fn from(s: MutSpanPtr<T>) -> Self {
         ptr_from_raw_parts(s.ptr, s.len)
     }
 }
 
-impl<T> const From<MutSpanPtr<T>> for *const [T] {
+impl<T> From<MutSpanPtr<T>> for *const [T] {
     #[inline]
     fn from(s: MutSpanPtr<T>) -> Self {
         std::ptr::slice_from_raw_parts(s.ptr, s.len)
     }
 }
 
-impl<T> const From<MutSpanPtr<T>> for *mut [T] {
+impl<T> From<MutSpanPtr<T>> for *mut [T] {
     #[inline]
     fn from(s: MutSpanPtr<T>) -> Self {
         std::ptr::slice_from_raw_parts_mut(s.ptr, s.len)
     }
 }
 
-unsafe impl<T> const CTypeBridge for *mut [T] {
+unsafe impl<T> CTypeBridge for *mut [T] {
     type Type = MutSpanPtr<T>;
 
     fn marshal(self) -> Self::Type {

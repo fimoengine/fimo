@@ -402,9 +402,13 @@ impl<T, A: Allocator> Vec<T, A> {
     /// };
     /// assert_eq!(rebuilt, [4294967295, 0, 1]);
     /// ```
-    pub const fn into_raw_parts(self) -> (*mut T, usize, usize) {
-        let mut m = std::mem::ManuallyDrop::new(self);
-        (m.as_mut_ptr(), m.len(), m.capacity())
+    pub const fn into_raw_parts(mut self) -> (*mut T, usize, usize) {
+        let ptr = self.as_mut_ptr();
+        let len = self.len();
+        let capacity = self.capacity();
+
+        let mut _m = std::mem::ManuallyDrop::new(self);
+        (ptr, len, capacity)
     }
 
     /// Decomposes a `Vec<T>` into its raw components.
@@ -445,12 +449,12 @@ impl<T, A: Allocator> Vec<T, A> {
     /// };
     /// assert_eq!(rebuilt, [4294967295, 0, 1]);
     /// ```
-    pub const fn into_raw_parts_with_alloc(self) -> (*mut T, usize, usize, A) {
-        let mut m = std::mem::ManuallyDrop::new(self);
-        let len = m.len();
-        let cap = m.capacity();
-        let ptr = m.as_mut_ptr();
-        let alloc = unsafe { std::ptr::read(m.allocator()) };
+    pub const fn into_raw_parts_with_alloc(mut self) -> (*mut T, usize, usize, A) {
+        let len = self.len();
+        let cap = self.capacity();
+        let ptr = self.as_mut_ptr();
+        let alloc = unsafe { std::ptr::read(self.allocator()) };
+        let mut _m = std::mem::ManuallyDrop::new(self);
         (ptr, len, cap, alloc)
     }
 
@@ -691,7 +695,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// io::sink().write(buffer.as_slice()).unwrap();
     /// ```
     #[inline]
-    pub const fn as_slice(&self) -> &[T] {
+    pub fn as_slice(&self) -> &[T] {
         self
     }
 
@@ -709,7 +713,7 @@ impl<T, A: Allocator> Vec<T, A> {
     /// io::repeat(0b101).read_exact(buffer.as_mut_slice()).unwrap();
     /// ```
     #[inline]
-    pub const fn as_mut_slice(&mut self) -> &mut [T] {
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
         self
     }
 
@@ -1613,12 +1617,14 @@ impl<T, A: Allocator> Vec<T, A> {
     /// assert_eq!(static_ref, &[2, 2, 3]);
     /// ```
     #[inline]
-    pub const fn leak<'a>(self) -> &'a mut [T]
+    pub const fn leak<'a>(mut self) -> &'a mut [T]
     where
         A: 'a,
     {
-        let mut m = std::mem::ManuallyDrop::new(self);
-        unsafe { std::slice::from_raw_parts_mut(m.as_mut_ptr(), m.len) }
+        let ptr = self.as_mut_ptr();
+        let len = self.len();
+        let mut _m = std::mem::ManuallyDrop::new(self);
+        unsafe { std::slice::from_raw_parts_mut(ptr, len) }
     }
 
     /// Returns the remaining spare capacity of the vector as a slice of
@@ -2304,37 +2310,37 @@ impl<T: PartialEq, A: Allocator> Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> const AsMut<[T]> for Vec<T, A> {
+impl<T, A: Allocator> AsMut<[T]> for Vec<T, A> {
     fn as_mut(&mut self) -> &mut [T] {
         self
     }
 }
 
-impl<T, A: Allocator> const AsMut<Vec<T, A>> for Vec<T, A> {
+impl<T, A: Allocator> AsMut<Vec<T, A>> for Vec<T, A> {
     fn as_mut(&mut self) -> &mut Vec<T, A> {
         self
     }
 }
 
-impl<T, A: Allocator> const AsRef<[T]> for Vec<T, A> {
+impl<T, A: Allocator> AsRef<[T]> for Vec<T, A> {
     fn as_ref(&self) -> &[T] {
         self
     }
 }
 
-impl<T, A: Allocator> const AsRef<Vec<T, A>> for Vec<T, A> {
+impl<T, A: Allocator> AsRef<Vec<T, A>> for Vec<T, A> {
     fn as_ref(&self) -> &Vec<T, A> {
         self
     }
 }
 
-impl<T, A: Allocator> const Borrow<[T]> for Vec<T, A> {
+impl<T, A: Allocator> Borrow<[T]> for Vec<T, A> {
     fn borrow(&self) -> &[T] {
         self
     }
 }
 
-impl<T, A: Allocator> const BorrowMut<[T]> for Vec<T, A> {
+impl<T, A: Allocator> BorrowMut<[T]> for Vec<T, A> {
     fn borrow_mut(&mut self) -> &mut [T] {
         self
     }
@@ -2442,22 +2448,22 @@ impl<T: Clone, A: Allocator + Clone> Clone for Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> const Debug for Vec<T, A>
+impl<T, A: Allocator> Debug for Vec<T, A>
 where
-    [T]: ~const Debug,
+    [T]: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&**self, f)
     }
 }
 
-impl<T> const Default for Vec<T> {
+impl<T> Default for Vec<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, A: Allocator> const Deref for Vec<T, A> {
+impl<T, A: Allocator> Deref for Vec<T, A> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
@@ -2465,7 +2471,7 @@ impl<T, A: Allocator> const Deref for Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> const DerefMut for Vec<T, A> {
+impl<T, A: Allocator> DerefMut for Vec<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr(), self.len) }
     }
@@ -2543,7 +2549,7 @@ impl<'a> From<&'a str> for Vec<u8> {
     }
 }
 
-impl<T, A: Allocator, const N: usize> const From<Box<[T; N], A>> for Vec<T, A> {
+impl<T, A: Allocator, const N: usize> From<Box<[T; N], A>> for Vec<T, A> {
     /// Convert a boxed array into a vector by transferring ownership of
     /// the existing heap allocation.
     ///
@@ -2560,7 +2566,7 @@ impl<T, A: Allocator, const N: usize> const From<Box<[T; N], A>> for Vec<T, A> {
     }
 }
 
-impl<T, A: Allocator> const From<Box<[T], A>> for Vec<T, A> {
+impl<T, A: Allocator> From<Box<[T], A>> for Vec<T, A> {
     /// Convert a boxed slice into a vector by transferring ownership of
     /// the existing heap allocation.
     ///
@@ -2688,9 +2694,9 @@ impl<T> ReprRust for Vec<T, Global> {
     }
 }
 
-unsafe impl<T, A: Allocator> const CTypeBridge for Vec<T, A>
+unsafe impl<T, A: Allocator> CTypeBridge for Vec<T, A>
 where
-    A: ~const CTypeBridge,
+    A: CTypeBridge,
     A::Type: Allocator,
 {
     type Type = Vec<T, A::Type>;
@@ -2841,9 +2847,9 @@ impl<T> FromIterator<T> for Vec<T, Global> {
 /// let s: &[u8] = &[0xa8, 0x3c, 0x09];
 /// assert_eq!(b.hash_one(v), b.hash_one(s));
 /// ```
-impl<T, A: Allocator> const Hash for Vec<T, A>
+impl<T, A: Allocator> Hash for Vec<T, A>
 where
-    [T]: ~const Hash,
+    [T]: Hash,
 {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
@@ -3511,10 +3517,12 @@ impl<T, A: Allocator> RawVec<T, A> {
             "`len` must be smaller than or equal to `self.capacity()`"
         );
 
-        let me = std::mem::ManuallyDrop::new(self);
+        let ptr = self.ptr();
+        let alloc = unsafe { std::ptr::read(&self.alloc) };
+        let _m = std::mem::ManuallyDrop::new(self);
         unsafe {
-            let slice = std::slice::from_raw_parts_mut(me.ptr() as *mut MaybeUninit<T>, len);
-            Box::from_raw_in(slice, std::ptr::read(&me.alloc))
+            let slice = std::slice::from_raw_parts_mut(ptr as *mut MaybeUninit<T>, len);
+            Box::from_raw_in(slice, alloc)
         }
     }
 

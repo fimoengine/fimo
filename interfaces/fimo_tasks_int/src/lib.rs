@@ -5,9 +5,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-#![feature(const_ptr_offset_from)]
 #![feature(strict_provenance)]
-#![feature(const_trait_impl)]
 #![feature(negative_impls)]
 #![feature(const_mut_refs)]
 #![feature(thread_local)]

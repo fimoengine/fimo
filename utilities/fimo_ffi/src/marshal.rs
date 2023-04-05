@@ -13,7 +13,7 @@ pub trait RustTypeBridge {
     fn demarshal(x: Self::Type) -> Self;
 }
 
-impl<T> const RustTypeBridge for T {
+impl<T> RustTypeBridge for T {
     type Type = Self;
 
     #[inline(always)]
@@ -59,7 +59,7 @@ pub unsafe trait CTypeBridge {
 macro_rules! identity_impls {
     ($($T:ident),+) => {
         $(
-            unsafe impl const CTypeBridge for $T {
+            unsafe impl CTypeBridge for $T {
                 type Type = Self;
 
                 #[inline(always)]
@@ -112,7 +112,7 @@ pub struct U128C {
     higher: u64,
 }
 
-unsafe impl const CTypeBridge for i128 {
+unsafe impl CTypeBridge for i128 {
     type Type = I128C;
 
     fn marshal(self) -> Self::Type {
@@ -124,7 +124,7 @@ unsafe impl const CTypeBridge for i128 {
     }
 }
 
-unsafe impl const CTypeBridge for u128 {
+unsafe impl CTypeBridge for u128 {
     type Type = U128C;
 
     fn marshal(self) -> Self::Type {
@@ -136,7 +136,7 @@ unsafe impl const CTypeBridge for u128 {
     }
 }
 
-unsafe impl const CTypeBridge for char {
+unsafe impl CTypeBridge for char {
     type Type = u32;
 
     fn marshal(self) -> Self::Type {
@@ -164,9 +164,9 @@ where
 }
 
 // Specialize for pointer types.
-unsafe impl<T: ?Sized> const CTypeBridge for *const T
+unsafe impl<T: ?Sized> CTypeBridge for *const T
 where
-    *const T: ~const private::CPointerRep,
+    *const T: private::CPointerRep,
 {
     default type Type = <*const T as private::CPointerRep>::T;
 
@@ -185,9 +185,9 @@ where
     }
 }
 
-unsafe impl<T: ?Sized> const CTypeBridge for *mut T
+unsafe impl<T: ?Sized> CTypeBridge for *mut T
 where
-    *mut T: ~const private::CPointerRep,
+    *mut T: private::CPointerRep,
 {
     default type Type = <*mut T as private::CPointerRep>::T;
 
@@ -206,9 +206,9 @@ where
     }
 }
 
-unsafe impl<'a, T: ?Sized> const CTypeBridge for &'a T
+unsafe impl<'a, T: ?Sized> CTypeBridge for &'a T
 where
-    &'a T: ~const private::CPointerRep,
+    &'a T: private::CPointerRep,
 {
     default type Type = <&'a T as private::CPointerRep>::T;
 
@@ -227,9 +227,9 @@ where
     }
 }
 
-unsafe impl<'a, T: ?Sized> const CTypeBridge for &'a mut T
+unsafe impl<'a, T: ?Sized> CTypeBridge for &'a mut T
 where
-    &'a mut T: ~const private::CPointerRep,
+    &'a mut T: private::CPointerRep,
 {
     default type Type = <&'a mut T as private::CPointerRep>::T;
 
@@ -249,9 +249,9 @@ where
 }
 
 // Implement for wrappers
-unsafe impl<T> const CTypeBridge for std::mem::ManuallyDrop<T>
+unsafe impl<T> CTypeBridge for std::mem::ManuallyDrop<T>
 where
-    T: ~const CTypeBridge,
+    T: CTypeBridge,
 {
     type Type = std::mem::ManuallyDrop<T::Type>;
 
@@ -266,9 +266,9 @@ where
     }
 }
 
-unsafe impl<T> const CTypeBridge for std::mem::MaybeUninit<T>
+unsafe impl<T> CTypeBridge for std::mem::MaybeUninit<T>
 where
-    T: ~const CTypeBridge<Type = T>,
+    T: CTypeBridge<Type = T>,
 {
     type Type = Self;
 
@@ -292,9 +292,9 @@ mod private {
         unsafe fn reconstruct(x: Self::T) -> Self;
     }
 
-    impl<T: ?Sized> const CPointerRep for *const T
+    impl<T: ?Sized> CPointerRep for *const T
     where
-        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+        <T as std::ptr::Pointee>::Metadata: CTypeBridge,
     {
         default type T = <(*const (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::Type;
 
@@ -322,9 +322,9 @@ mod private {
         }
     }
 
-    impl<T: Sized> const CPointerRep for *const T
+    impl<T: Sized> CPointerRep for *const T
     where
-        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+        <T as std::ptr::Pointee>::Metadata: CTypeBridge,
     {
         type T = *const ();
 
@@ -337,9 +337,9 @@ mod private {
         }
     }
 
-    impl<T: ?Sized> const CPointerRep for *mut T
+    impl<T: ?Sized> CPointerRep for *mut T
     where
-        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+        <T as std::ptr::Pointee>::Metadata: CTypeBridge,
     {
         default type T = <(*mut (), <T as std::ptr::Pointee>::Metadata) as CTypeBridge>::Type;
 
@@ -367,9 +367,9 @@ mod private {
         }
     }
 
-    impl<T: Sized> const CPointerRep for *mut T
+    impl<T: Sized> CPointerRep for *mut T
     where
-        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+        <T as std::ptr::Pointee>::Metadata: CTypeBridge,
     {
         type T = *mut ();
 
@@ -384,9 +384,9 @@ mod private {
         }
     }
 
-    impl<'a, T: ?Sized> const CPointerRep for &'a T
+    impl<'a, T: ?Sized> CPointerRep for &'a T
     where
-        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+        <T as std::ptr::Pointee>::Metadata: CTypeBridge,
     {
         type T = <*const T as CPointerRep>::T;
 
@@ -402,9 +402,9 @@ mod private {
         }
     }
 
-    impl<'a, T: ?Sized> const CPointerRep for &'a mut T
+    impl<'a, T: ?Sized> CPointerRep for &'a mut T
     where
-        <T as std::ptr::Pointee>::Metadata: ~const CTypeBridge,
+        <T as std::ptr::Pointee>::Metadata: CTypeBridge,
     {
         type T = <*mut T as CPointerRep>::T;
 

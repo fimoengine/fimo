@@ -695,7 +695,7 @@ impl InterfaceContext {
         let phantom_parameter = method_args
             .phantom_parameter
             .as_ref()
-            .map(|p| quote!(__private_phantom: std::marker::PhantomData<#p>,));
+            .map(|p| quote!(__private_phantom: std::marker::PhantomData<#p>));
 
         // Parse and adapt the return type.
         let return_type = Self::parse_return_type(&method.sig.output, &rec_lifetime, &marshaler)?;
@@ -717,12 +717,12 @@ impl InterfaceContext {
 
         let (vtable_ty, optional) = match method_args.mapping {
             VTableMapping::Include => (
-                syn::parse_quote_spanned!(method.span() => #gen unsafe #abi fn (#receiver, #(#inputs),* #phantom_parameter) -> #return_type),
+                syn::parse_quote_spanned!(method.span() => #gen unsafe #abi fn (#receiver #(, #inputs)*, #phantom_parameter) -> #return_type),
                 None,
             ),
             VTableMapping::Exclude => unreachable!(),
             VTableMapping::Optional { replace } => (
-                syn::parse_quote_spanned!(method.span() => Option<#gen unsafe #abi fn (#receiver, #(#inputs),* #phantom_parameter) -> #return_type>),
+                syn::parse_quote_spanned!(method.span() => Option<#gen unsafe #abi fn (#receiver #(, #inputs)*, #phantom_parameter) -> #return_type>),
                 Some(replace),
             ),
         };
@@ -1021,7 +1021,7 @@ impl InterfaceContext {
 
                 #[doc = r"Fetches a reference to the data section."]
                 #[inline]
-                pub const fn data(&self) -> &#vtable_data_ident {
+                pub fn data(&self) -> &#vtable_data_ident {
                     self.inner.data()
                 }
             }
@@ -1034,7 +1034,7 @@ impl InterfaceContext {
             let mut head_impls = Vec::new();
             if trait_ident != "IBase" {
                 head_impls.push(quote! {
-                    impl<'__private_this> const ::fimo_ffi::ptr::IntoInterface<#vtable_ident> for dyn #trait_ident + '__private_this {
+                    impl<'__private_this> ::fimo_ffi::ptr::IntoInterface<#vtable_ident> for dyn #trait_ident + '__private_this {
                         #[inline]
                         fn into_vtable(vtable: &Self::VTable) -> &#vtable_ident {
                             vtable
@@ -1045,7 +1045,7 @@ impl InterfaceContext {
 
             if interfaces.is_empty() {
                 head_impls.push(quote! {
-                    impl<'__private_this> const ::fimo_ffi::ptr::IntoInterface<::fimo_ffi::ptr::IBaseVTable> for dyn #trait_ident + '__private_this {
+                    impl<'__private_this> ::fimo_ffi::ptr::IntoInterface<::fimo_ffi::ptr::IBaseVTable> for dyn #trait_ident + '__private_this {
                         #[inline]
                         fn into_vtable(vtable: &Self::VTable) -> &::fimo_ffi::ptr::IBaseVTable {
                             unsafe { std::mem::transmute(vtable) }
@@ -1104,10 +1104,10 @@ impl InterfaceContext {
 
                     if idx == 0 {
                         head_impls.push(quote! {
-                            impl<'__private_this, T> const ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this
+                            impl<'__private_this, T> ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this
                             where
                                 T: ::fimo_ffi::ptr::ObjMetadataCompatible,
-                                dyn #i_path: ~const ::fimo_ffi::ptr::IntoInterface<T>,
+                                dyn #i_path: ::fimo_ffi::ptr::IntoInterface<T>,
                             {
                                 #[inline]
                                 fn into_vtable(vtable: &Self::VTable) -> &T {
@@ -1123,7 +1123,7 @@ impl InterfaceContext {
                         });
                     } else {
                         head_impls.push(quote! {
-                            impl<'__private_this> const ::fimo_ffi::ptr::IntoInterface<#i_ty> for dyn #trait_ident + '__private_this {
+                            impl<'__private_this> ::fimo_ffi::ptr::IntoInterface<#i_ty> for dyn #trait_ident + '__private_this {
                                 #[inline]
                                 fn into_vtable(vtable: &Self::VTable) -> &#i_ty {
                                     let head = vtable.head();
@@ -1139,10 +1139,10 @@ impl InterfaceContext {
                     }
                 } else if idx == 0 {
                     head_impls.push(quote! {
-                        impl<'__private_this, T> const ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this
+                        impl<'__private_this, T> ::fimo_ffi::ptr::IntoInterface<T> for dyn #trait_ident + '__private_this
                         where
                             T: ::fimo_ffi::ptr::ObjMetadataCompatible,
-                            dyn #i_path: ~const ::fimo_ffi::ptr::IntoInterface<T>,
+                            dyn #i_path: ::fimo_ffi::ptr::IntoInterface<T>,
                         {
                             #[inline]
                             fn into_vtable(vtable: &Self::VTable) -> &T {
@@ -1153,7 +1153,7 @@ impl InterfaceContext {
                     });
                 } else {
                     head_impls.push(quote! {
-                        impl<'__private_this> const ::fimo_ffi::ptr::IntoInterface<#i_ty> for dyn #trait_ident + '__private_this {
+                        impl<'__private_this> ::fimo_ffi::ptr::IntoInterface<#i_ty> for dyn #trait_ident + '__private_this {
                             #[inline]
                             fn into_vtable(vtable: &Self::VTable) -> &#i_ty {
                                 let head = vtable.head();
@@ -1196,7 +1196,7 @@ impl InterfaceContext {
                 head_impls.insert(
                     0,
                     quote! {
-                        unsafe impl const ::fimo_ffi::ptr::DynamicDataOffset for #vtable_head_ident {
+                        unsafe impl ::fimo_ffi::ptr::DynamicDataOffset for #vtable_head_ident {
                             #[inline]
                             fn data_offset(&self) -> usize {
                                 self.__internal_data_offset
@@ -1362,7 +1362,7 @@ impl InterfaceContext {
                 method_idents.push(ident.clone());
                 vtable_shims.push(quote!{
                     #[allow(clippy::type_complexity)]
-                    unsafe #abi fn #ident #impl_gen (__private_this: #receiver, #(#input_names: #inputs),* #phantom_parameter) -> #output {
+                    unsafe #abi fn #ident #impl_gen (__private_this: #receiver #(, #input_names: #inputs)*, #phantom_parameter) -> #output {
                         let __private_this = __private_this.cast::<T>();
                         #(#demarshal_expr;)*
 
@@ -1461,7 +1461,7 @@ impl InterfaceContext {
                 let phantom_call = m
                     .phantom_parameter
                     .as_ref()
-                    .map(|_| quote!(std::marker::PhantomData,));
+                    .map(|_| quote!(std::marker::PhantomData));
 
                 let call = if m.optional.is_none() {
                     quote! {
@@ -1473,7 +1473,7 @@ impl InterfaceContext {
 
                                 #(#marshal_expr;)*
 
-                                let __private_res = (__private_vtable_data.#ident)(__private_this, #(#input_names),* #phantom_call);
+                                let __private_res = (__private_vtable_data.#ident)(__private_this #(, #input_names)*, #phantom_call);
                                 #marshaler::demarshal(__private_res)
                             }
                         }
@@ -1489,7 +1489,7 @@ impl InterfaceContext {
                                         let __private_this = ::fimo_ffi::ptr::ToPtr::to_ptr(self);
                                         #(#marshal_expr;)*
 
-                                        let __private_res = (__private_ptr)(__private_this, #(#input_names),* #phantom_call);
+                                        let __private_res = (__private_ptr)(__private_this #(, #input_names)*, #phantom_call);
                                         #marshaler::marshal(__private_res)
                                     }
                                 } else {
@@ -1508,7 +1508,7 @@ impl InterfaceContext {
                                         let __private_this = ::fimo_ffi::ptr::ToPtr::to_ptr(self);
                                         #(#marshal_expr;)*
 
-                                        let __private_res = (__private_ptr)(__private_this, #(#input_names),* #phantom_call);
+                                        let __private_res = (__private_ptr)(__private_this #(, #input_names)*, #phantom_call);
                                         #marshaler::marshal(__private_res)
                                     }
                                 } else {

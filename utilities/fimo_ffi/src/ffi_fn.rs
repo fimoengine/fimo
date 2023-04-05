@@ -5,7 +5,7 @@ use crate::tuple::ReprRust;
 use crate::ObjBox;
 use std::alloc::{Allocator, Global};
 use std::fmt::{Debug, Formatter};
-use std::marker::{PhantomData, Unsize};
+use std::marker::{PhantomData, Tuple, Unsize};
 use std::mem::{ManuallyDrop, MaybeUninit};
 
 #[repr(C)]
@@ -88,9 +88,9 @@ unsafe impl<T: Send + ?Sized, Meta: Send> Send for RawFfiFnInner<T, Meta> {}
 
 unsafe impl<T: Sync + ?Sized, Meta: Sync> Sync for RawFfiFnInner<T, Meta> {}
 
-unsafe impl<T: ?Sized, Meta> const CTypeBridge for RawFfiFnInner<T, Meta>
+unsafe impl<T: ?Sized, Meta> CTypeBridge for RawFfiFnInner<T, Meta>
 where
-    Meta: ~const CTypeBridge,
+    Meta: CTypeBridge,
 {
     type Type = OpaqueFn<Meta::Type>;
 
@@ -187,7 +187,7 @@ impl<T: ?Sized, Meta> RawFfiFn<T, Meta> {
     /// assert_eq!(n.get(), 10);
     /// ```
     #[inline]
-    pub fn r#box<F: FnOnce<Args, Output = Output> + Unsize<T>, Args: ReprRust, Output>(
+    pub fn r#box<F: FnOnce<Args, Output = Output> + Unsize<T>, Args: ReprRust + Tuple, Output>(
         f: Box<F, Meta>,
     ) -> Self
     where
@@ -233,7 +233,7 @@ impl<T: ?Sized, Meta> RawFfiFn<T, Meta> {
     /// assert_eq!(n.get(), 10);
     /// ```
     #[inline]
-    pub fn obj_box<F: FnOnce<Args, Output = Output> + Unsize<T>, Args: ReprRust, Output>(
+    pub fn obj_box<F: FnOnce<Args, Output = Output> + Unsize<T>, Args: ReprRust + Tuple, Output>(
         f: ObjBox<F, Meta>,
     ) -> Self
     where
@@ -287,7 +287,7 @@ impl<T: ?Sized, Meta> RawFfiFn<T, Meta> {
     #[inline]
     pub unsafe fn new_value_in<
         F: FnOnce<Args, Output = Output> + Unsize<T>,
-        Args: ReprRust,
+        Args: ReprRust + Tuple,
         Output,
     >(
         f: &mut MaybeUninit<F>,
@@ -330,7 +330,7 @@ impl<T: ?Sized, Meta> RawFfiFn<T, Meta> {
     /// assert_eq!(n.get(), 10);
     /// ```
     #[inline]
-    pub unsafe extern "rust-call" fn call_once<Args: ReprRust, O>(self, args: Args) -> O
+    pub unsafe extern "rust-call" fn call_once<Args: ReprRust + Tuple, O>(self, args: Args) -> O
     where
         T: FnOnce<Args, Output = O>,
     {
@@ -382,7 +382,7 @@ impl<T: ?Sized, Meta> RawFfiFn<T, Meta> {
     /// assert_eq!(n.get(), 5);
     /// ```
     #[inline]
-    pub unsafe extern "rust-call" fn call_mut<Args: ReprRust, O>(&mut self, args: Args) -> O
+    pub unsafe extern "rust-call" fn call_mut<Args: ReprRust + Tuple, O>(&mut self, args: Args) -> O
     where
         T: FnMut<Args, Output = O>,
     {
@@ -434,7 +434,7 @@ impl<T: ?Sized, Meta> RawFfiFn<T, Meta> {
     /// assert_eq!(n.get(), 5);
     /// ```
     #[inline]
-    pub unsafe extern "rust-call" fn call<Args: ReprRust, O>(&self, args: Args) -> O
+    pub unsafe extern "rust-call" fn call<Args: ReprRust + Tuple, O>(&self, args: Args) -> O
     where
         T: Fn<Args, Output = O>,
     {
@@ -565,7 +565,7 @@ impl<T: ?Sized, Meta: Default> RawFfiFn<T, Meta> {
     #[inline]
     pub unsafe fn new_value<
         F: FnOnce<Args, Output = Output> + Unsize<T>,
-        Args: ReprRust,
+        Args: ReprRust + Tuple,
         Output,
     >(
         f: &mut MaybeUninit<F>,
@@ -574,9 +574,9 @@ impl<T: ?Sized, Meta: Default> RawFfiFn<T, Meta> {
     }
 }
 
-unsafe impl<T: ?Sized, Meta> const CTypeBridge for RawFfiFn<T, Meta>
+unsafe impl<T: ?Sized, Meta> CTypeBridge for RawFfiFn<T, Meta>
 where
-    RawFfiFnInner<T, Meta>: ~const CTypeBridge,
+    RawFfiFnInner<T, Meta>: CTypeBridge,
 {
     type Type = <RawFfiFnInner<T, Meta> as CTypeBridge>::Type;
 
@@ -634,7 +634,11 @@ impl<'a, T: ?Sized + 'a, Meta> FfiFn<'a, T, Meta> {
     /// assert_eq!(n.get(), 15);
     /// ```
     #[inline]
-    pub fn r#box<F: FnOnce<Args, Output = Output> + Unsize<T> + 'a, Args: ReprRust, Output>(
+    pub fn r#box<
+        F: FnOnce<Args, Output = Output> + Unsize<T> + 'a,
+        Args: ReprRust + Tuple,
+        Output,
+    >(
         f: Box<F, Meta>,
     ) -> FfiFn<'a, T, Meta>
     where
@@ -670,7 +674,11 @@ impl<'a, T: ?Sized + 'a, Meta> FfiFn<'a, T, Meta> {
     /// assert_eq!(n.get(), 15);
     /// ```
     #[inline]
-    pub fn obj_box<F: FnOnce<Args, Output = Output> + Unsize<T> + 'a, Args: ReprRust, Output>(
+    pub fn obj_box<
+        F: FnOnce<Args, Output = Output> + Unsize<T> + 'a,
+        Args: ReprRust + Tuple,
+        Output,
+    >(
         f: ObjBox<F, Meta>,
     ) -> FfiFn<'a, T, Meta>
     where
@@ -710,7 +718,7 @@ impl<'a, T: ?Sized + 'a, Meta> FfiFn<'a, T, Meta> {
     #[inline]
     pub unsafe fn new_value_in<
         F: FnOnce<Args, Output = Output> + Unsize<T>,
-        Args: ReprRust,
+        Args: ReprRust + Tuple,
         Output,
     >(
         f: &'a mut MaybeUninit<F>,
@@ -752,7 +760,7 @@ impl<'a, T: ?Sized, Meta: Default> FfiFn<'a, T, Meta> {
     #[inline]
     pub unsafe fn new_value<
         F: FnOnce<Args, Output = Output> + Unsize<T>,
-        Args: ReprRust,
+        Args: ReprRust + Tuple,
         Output,
     >(
         f: &'a mut MaybeUninit<F>,
@@ -773,7 +781,7 @@ impl<'a, T: ?Sized + 'a, Meta: 'a> Debug for FfiFn<'a, T, Meta> {
     }
 }
 
-impl<T: FnOnce<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> FnOnce<Args>
+impl<T: FnOnce<Args, Output = Output> + ?Sized, Args: ReprRust + Tuple, Output, Meta> FnOnce<Args>
     for FfiFn<'_, T, Meta>
 {
     type Output = Output;
@@ -783,7 +791,7 @@ impl<T: FnOnce<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> Fn
     }
 }
 
-impl<T: FnMut<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> FnMut<Args>
+impl<T: FnMut<Args, Output = Output> + ?Sized, Args: ReprRust + Tuple, Output, Meta> FnMut<Args>
     for FfiFn<'_, T, Meta>
 {
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
@@ -791,7 +799,7 @@ impl<T: FnMut<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> FnM
     }
 }
 
-impl<T: Fn<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> Fn<Args>
+impl<T: Fn<Args, Output = Output> + ?Sized, Args: ReprRust + Tuple, Output, Meta> Fn<Args>
     for FfiFn<'_, T, Meta>
 {
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
@@ -799,9 +807,9 @@ impl<T: Fn<Args, Output = Output> + ?Sized, Args: ReprRust, Output, Meta> Fn<Arg
     }
 }
 
-unsafe impl<'a, T: ?Sized, Meta> const CTypeBridge for FfiFn<'a, T, Meta>
+unsafe impl<'a, T: ?Sized, Meta> CTypeBridge for FfiFn<'a, T, Meta>
 where
-    RawFfiFn<T, Meta>: ~const CTypeBridge,
+    RawFfiFn<T, Meta>: CTypeBridge,
 {
     type Type = <RawFfiFn<T, Meta> as CTypeBridge>::Type;
 
@@ -830,7 +838,9 @@ trait GetFnTraits<Meta> {
     fn get() -> FnInfo<Meta>;
 }
 
-impl<T: FnOnce<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for (T, Args, O) {
+impl<T: FnOnce<Args, Output = O>, Args: ReprRust + Tuple, O, Meta> GetFnTraits<Meta>
+    for (T, Args, O)
+{
     default fn get() -> FnInfo<Meta> {
         FnInfo {
             call_once: <T as FnTraits<Meta>>::call_once::<Args, O>,
@@ -841,7 +851,9 @@ impl<T: FnOnce<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for
     }
 }
 
-impl<T: FnMut<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for (T, Args, O) {
+impl<T: FnMut<Args, Output = O>, Args: ReprRust + Tuple, O, Meta> GetFnTraits<Meta>
+    for (T, Args, O)
+{
     default fn get() -> FnInfo<Meta> {
         FnInfo {
             call_once: <T as FnTraits<Meta>>::call_once::<Args, O>,
@@ -852,7 +864,7 @@ impl<T: FnMut<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for 
     }
 }
 
-impl<T: Fn<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for (T, Args, O) {
+impl<T: Fn<Args, Output = O>, Args: ReprRust + Tuple, O, Meta> GetFnTraits<Meta> for (T, Args, O) {
     default fn get() -> FnInfo<Meta> {
         FnInfo {
             call_once: <T as FnTraits<Meta>>::call_once::<Args, O>,
@@ -864,7 +876,7 @@ impl<T: Fn<Args, Output = O>, Args: ReprRust, O, Meta> GetFnTraits<Meta> for (T,
 }
 
 trait FnTraits<Meta> {
-    unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_once<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         meta: Meta,
         args: *const (),
@@ -872,7 +884,7 @@ trait FnTraits<Meta> {
     ) where
         Self: FnOnce<Args, Output = Output>;
 
-    unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_mut<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         meta: *mut Meta,
         args: *const (),
@@ -880,7 +892,7 @@ trait FnTraits<Meta> {
     ) where
         Self: FnMut<Args, Output = Output>;
 
-    unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         meta: *const Meta,
         args: *const (),
@@ -892,7 +904,7 @@ trait FnTraits<Meta> {
 }
 
 impl<T, Meta> FnTraits<Meta> for T {
-    default unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
+    default unsafe extern "C-unwind" fn call_once<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         _meta: Meta,
         args: *const (),
@@ -906,7 +918,7 @@ impl<T, Meta> FnTraits<Meta> for T {
         output.write(<Self as FnOnce<Args>>::call_once(f, args))
     }
 
-    default unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
+    default unsafe extern "C-unwind" fn call_mut<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         _meta: *mut Meta,
         args: *const (),
@@ -920,7 +932,7 @@ impl<T, Meta> FnTraits<Meta> for T {
         output.write(<Self as FnMut<Args>>::call_mut(f, args))
     }
 
-    default unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
+    default unsafe extern "C-unwind" fn call<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         _meta: *const Meta,
         args: *const (),
@@ -942,7 +954,7 @@ impl<T, Meta> FnTraits<Meta> for T {
 
 impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
     #[inline]
-    unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_once<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         meta: Meta,
         args: *const (),
@@ -958,7 +970,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
         output.write(<Self as FnOnce<Args>>::call_once(f, args))
     }
 
-    unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_mut<Args: ReprRust + Tuple, Output>(
         _f: *mut (),
         _meta: *mut Meta,
         _args: *const (),
@@ -969,7 +981,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
         unimplemented!()
     }
 
-    unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call<Args: ReprRust + Tuple, Output>(
         _f: *mut (),
         _meta: *const Meta,
         _args: *const (),
@@ -989,7 +1001,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for Box<T, Meta> {
 
 impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
     #[inline]
-    unsafe extern "C-unwind" fn call_once<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_once<Args: ReprRust + Tuple, Output>(
         f: *mut (),
         meta: Meta,
         args: *const (),
@@ -1005,7 +1017,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
         output.write(<Self as FnOnce<Args>>::call_once(f, args))
     }
 
-    unsafe extern "C-unwind" fn call_mut<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call_mut<Args: ReprRust + Tuple, Output>(
         _f: *mut (),
         _meta: *mut Meta,
         _args: *const (),
@@ -1016,7 +1028,7 @@ impl<T, Meta: Allocator> FnTraits<Meta> for ObjBox<T, Meta> {
         unimplemented!()
     }
 
-    unsafe extern "C-unwind" fn call<Args: ReprRust, Output>(
+    unsafe extern "C-unwind" fn call<Args: ReprRust + Tuple, Output>(
         _f: *mut (),
         _meta: *const Meta,
         _args: *const (),

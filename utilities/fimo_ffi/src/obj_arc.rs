@@ -1102,13 +1102,13 @@ impl<T: Clone, A: Allocator + Clone> ObjArc<T, A> {
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> const Send for ObjArc<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjArc<T, A> {}
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> const Sync for ObjArc<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjArc<T, A> {}
 
-impl<T: RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> const UnwindSafe for ObjArc<T, A> {}
+impl<T: RefUnwindSafe + ?Sized, A: Allocator + UnwindSafe> UnwindSafe for ObjArc<T, A> {}
 
-impl<T: ?Sized, A: Allocator> const Unpin for ObjArc<T, A> {}
+impl<T: ?Sized, A: Allocator> Unpin for ObjArc<T, A> {}
 
 impl<T: ?Sized, A: Allocator> AsRef<T> for ObjArc<T, A> {
     #[inline]
@@ -2026,9 +2026,9 @@ impl<T: ?Sized, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> const Send for ObjWeak<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Send> Send for ObjWeak<T, A> {}
 
-unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> const Sync for ObjWeak<T, A> {}
+unsafe impl<T: ?Sized + Sync + Send, A: Allocator + Sync> Sync for ObjWeak<T, A> {}
 
 impl<T: ?Sized, A: Allocator + Clone> Clone for ObjWeak<T, A> {
     fn clone(&self) -> Self {

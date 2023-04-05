@@ -5,8 +5,6 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-#![feature(const_ptr_offset_from)]
-#![feature(const_trait_impl)]
 #![feature(negative_impls)]
 #![feature(unsize)]
 
@@ -1165,12 +1163,12 @@ pub fn __private_api_enabled(level: Level, target: &str) -> bool {
 }
 
 #[doc(hidden)]
-pub fn __private_api_span<'a>(
+pub fn __private_api_span(
     level: Level,
     channel: Channel,
     name: &'static str,
     target: &'static str,
-    args: Arguments<'a>,
+    args: Arguments<'_>,
 ) -> Span {
     Span::new(
         SpanMetadata::builder(name)

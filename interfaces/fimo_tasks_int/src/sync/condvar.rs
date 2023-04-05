@@ -44,7 +44,7 @@ impl Condvar {
     /// [`notify_one`]: Self::notify_one
     /// [`notify_all`]: Self::notify_all
     #[inline]
-    pub fn wait<'a, T>(&self, guard: &mut MutexGuard<'a, T>) {
+    pub fn wait<T>(&self, guard: &mut MutexGuard<'_, T>) {
         let runtime = current_runtime().unwrap();
         let raw = guard.as_raw();
 
@@ -107,7 +107,7 @@ impl Condvar {
     /// [`notify_one`]: Self::notify_one
     /// [`notify_all`]: Self::notify_all
     #[inline]
-    pub fn wait_while<'a, T, F>(&self, guard: &mut MutexGuard<'a, T>, mut condition: F)
+    pub fn wait_while<T, F>(&self, guard: &mut MutexGuard<'_, T>, mut condition: F)
     where
         F: FnMut(&mut T) -> bool,
     {

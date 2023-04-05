@@ -19,6 +19,14 @@ pub struct ConstStr<'a> {
     _phantom: PhantomData<&'a str>,
 }
 
+impl<'a> ConstStr<'a> {
+    /// Casts the reference to a [`&str`].
+    pub const fn as_ref(&self) -> &'a str {
+        let str = self.ptr.as_str_ptr();
+        unsafe { &*str }
+    }
+}
+
 unsafe impl<'a> Send for ConstStr<'a> {}
 
 unsafe impl<'a> Sync for ConstStr<'a> {}
@@ -29,7 +37,7 @@ impl<'a> RefUnwindSafe for ConstStr<'a> {}
 
 impl<'a> UnwindSafe for ConstStr<'a> {}
 
-impl const Deref for ConstStr<'_> {
+impl Deref for ConstStr<'_> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -38,14 +46,14 @@ impl const Deref for ConstStr<'_> {
     }
 }
 
-impl const Borrow<str> for ConstStr<'_> {
+impl Borrow<str> for ConstStr<'_> {
     fn borrow(&self) -> &str {
         let str: *const str = self.ptr.into();
         unsafe { &*str }
     }
 }
 
-impl const From<&str> for ConstStr<'_> {
+impl From<&str> for ConstStr<'_> {
     fn from(s: &str) -> Self {
         Self {
             ptr: s.into(),
@@ -54,7 +62,7 @@ impl const From<&str> for ConstStr<'_> {
     }
 }
 
-impl const From<&mut str> for ConstStr<'_> {
+impl From<&mut str> for ConstStr<'_> {
     fn from(s: &mut str) -> Self {
         Self {
             ptr: s.into(),
@@ -63,7 +71,7 @@ impl const From<&mut str> for ConstStr<'_> {
     }
 }
 
-impl const From<MutStr<'_>> for ConstStr<'_> {
+impl From<MutStr<'_>> for ConstStr<'_> {
     fn from(s: MutStr<'_>) -> Self {
         Self {
             ptr: s.ptr.into(),
@@ -72,14 +80,14 @@ impl const From<MutStr<'_>> for ConstStr<'_> {
     }
 }
 
-impl<'a> const From<ConstStr<'a>> for &'a str {
+impl<'a> From<ConstStr<'a>> for &'a str {
     fn from(s: ConstStr<'a>) -> Self {
         let str: *const str = s.ptr.into();
         unsafe { &*str }
     }
 }
 
-unsafe impl<'a> const CTypeBridge for &'a str {
+unsafe impl<'a> CTypeBridge for &'a str {
     type Type = ConstStr<'a>;
 
     fn marshal(self) -> Self::Type {
@@ -187,6 +195,20 @@ pub struct MutStr<'a> {
     _phantom: PhantomData<&'a mut str>,
 }
 
+impl<'a> MutStr<'a> {
+    /// Casts the reference to a [`&str`].
+    pub const fn as_ref(&self) -> &'a str {
+        let str = self.ptr.as_str_ptr();
+        unsafe { &*str }
+    }
+
+    /// Casts the reference to a [`&str`].
+    pub const fn as_ref_mut(&mut self) -> &'a str {
+        let str = self.ptr.as_str_ptr_mut();
+        unsafe { &mut *str }
+    }
+}
+
 unsafe impl<'a> Send for MutStr<'a> {}
 
 unsafe impl<'a> Sync for MutStr<'a> {}
@@ -197,7 +219,7 @@ impl<'a> RefUnwindSafe for MutStr<'a> {}
 
 impl<'a> UnwindSafe for MutStr<'a> {}
 
-impl const Deref for MutStr<'_> {
+impl Deref for MutStr<'_> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
@@ -206,28 +228,28 @@ impl const Deref for MutStr<'_> {
     }
 }
 
-impl const DerefMut for MutStr<'_> {
+impl DerefMut for MutStr<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let str: *mut str = self.ptr.into();
         unsafe { &mut *str }
     }
 }
 
-impl const Borrow<str> for MutStr<'_> {
+impl Borrow<str> for MutStr<'_> {
     fn borrow(&self) -> &str {
         let str: *const str = self.ptr.into();
         unsafe { &*str }
     }
 }
 
-impl const BorrowMut<str> for MutStr<'_> {
+impl BorrowMut<str> for MutStr<'_> {
     fn borrow_mut(&mut self) -> &mut str {
         let str: *mut str = self.ptr.into();
         unsafe { &mut *str }
     }
 }
 
-impl const From<&mut str> for MutStr<'_> {
+impl From<&mut str> for MutStr<'_> {
     fn from(s: &mut str) -> Self {
         Self {
             ptr: s.into(),
@@ -236,21 +258,21 @@ impl const From<&mut str> for MutStr<'_> {
     }
 }
 
-impl<'a> const From<MutStr<'a>> for &'a str {
+impl<'a> From<MutStr<'a>> for &'a str {
     fn from(s: MutStr<'a>) -> Self {
         let str: *const str = s.ptr.into();
         unsafe { &*str }
     }
 }
 
-impl<'a> const From<MutStr<'a>> for &'a mut str {
+impl<'a> From<MutStr<'a>> for &'a mut str {
     fn from(s: MutStr<'a>) -> Self {
         let str: *mut str = s.ptr.into();
         unsafe { &mut *str }
     }
 }
 
-unsafe impl<'a> const CTypeBridge for &'a mut str {
+unsafe impl<'a> CTypeBridge for &'a mut str {
     type Type = MutStr<'a>;
 
     fn marshal(self) -> Self::Type {
@@ -358,6 +380,12 @@ pub struct ConstStrPtr {
 }
 
 impl ConstStrPtr {
+    /// Constructs a [`*const str`] from the current pointer.
+    #[inline]
+    pub const fn as_str_ptr(self) -> *const str {
+        std::ptr::from_raw_parts(self.ptr.as_ptr() as _, self.ptr.len())
+    }
+
     /// Dereferences the `ConstStrPtr` to a [`ConstStr`].
     ///
     /// # Safety
@@ -384,37 +412,37 @@ impl Pointer for ConstStrPtr {
     }
 }
 
-impl const From<&'_ str> for ConstStrPtr {
+impl From<&'_ str> for ConstStrPtr {
     fn from(s: &'_ str) -> Self {
         ptr_from_raw_parts(s.as_ptr(), s.len())
     }
 }
 
-impl const From<&'_ mut str> for ConstStrPtr {
+impl From<&'_ mut str> for ConstStrPtr {
     fn from(s: &'_ mut str) -> Self {
         ptr_from_raw_parts(s.as_ptr(), s.len())
     }
 }
 
-impl const From<*const str> for ConstStrPtr {
+impl From<*const str> for ConstStrPtr {
     fn from(s: *const str) -> Self {
-        ptr_from_raw_parts(s as *const _ as *const u8, std::ptr::metadata(s))
+        ptr_from_raw_parts(s as *const _ as *const u8, std::ptr::metadata(s) as _)
     }
 }
 
-impl const From<*mut str> for ConstStrPtr {
+impl From<*mut str> for ConstStrPtr {
     fn from(s: *mut str) -> Self {
-        ptr_from_raw_parts(s as *const _ as *const u8, std::ptr::metadata(s))
+        ptr_from_raw_parts(s as *const _ as *const u8, std::ptr::metadata(s) as _)
     }
 }
 
-impl const From<ConstStrPtr> for *const str {
+impl From<ConstStrPtr> for *const str {
     fn from(s: ConstStrPtr) -> Self {
         std::ptr::from_raw_parts(s.ptr.as_ptr() as _, s.ptr.len())
     }
 }
 
-unsafe impl const CTypeBridge for *const str {
+unsafe impl CTypeBridge for *const str {
     type Type = ConstStrPtr;
 
     fn marshal(self) -> Self::Type {
@@ -436,6 +464,26 @@ pub struct MutStrPtr {
 }
 
 impl MutStrPtr {
+    /// Constructs a [`ConstStrPtr`] from the current pointer.
+    #[inline]
+    pub const fn as_const_ptr(self) -> ConstStrPtr {
+        ConstStrPtr {
+            ptr: self.ptr.as_const_span_ptr(),
+        }
+    }
+
+    /// Constructs a [`*const str`] from the current pointer.
+    #[inline]
+    pub const fn as_str_ptr(self) -> *const str {
+        std::ptr::from_raw_parts(self.ptr.as_ptr() as _, self.ptr.len())
+    }
+
+    /// Constructs a [`*mut str`] from the current pointer.
+    #[inline]
+    pub const fn as_str_ptr_mut(self) -> *mut str {
+        std::ptr::from_raw_parts_mut(self.ptr.as_ptr() as _, self.ptr.len())
+    }
+
     /// Dereferences the `MutStrPtr` to a [`ConstStr`].
     ///
     /// # Safety
@@ -444,7 +492,7 @@ impl MutStrPtr {
     #[inline]
     pub const unsafe fn deref<'a>(self) -> ConstStr<'a> {
         ConstStr {
-            ptr: self.into(),
+            ptr: self.as_const_ptr(),
             _phantom: PhantomData,
         }
     }
@@ -477,42 +525,42 @@ impl Pointer for MutStrPtr {
     }
 }
 
-impl const From<&'_ mut str> for MutStrPtr {
+impl From<&'_ mut str> for MutStrPtr {
     #[inline]
     fn from(s: &'_ mut str) -> Self {
         From::from(s as *mut _)
     }
 }
 
-impl const From<*mut str> for MutStrPtr {
+impl From<*mut str> for MutStrPtr {
     #[inline]
     fn from(s: *mut str) -> Self {
-        ptr_from_raw_parts_mut(s as *mut u8, std::ptr::metadata(s))
+        ptr_from_raw_parts_mut(s as *mut u8, std::ptr::metadata(s) as _)
     }
 }
 
-impl const From<MutStrPtr> for ConstStrPtr {
+impl From<MutStrPtr> for ConstStrPtr {
     #[inline]
     fn from(s: MutStrPtr) -> Self {
         ptr_from_raw_parts(s.ptr.as_ptr(), s.ptr.len())
     }
 }
 
-impl const From<MutStrPtr> for *const str {
+impl From<MutStrPtr> for *const str {
     #[inline]
     fn from(s: MutStrPtr) -> Self {
         std::ptr::from_raw_parts(s.ptr.as_ptr() as _, s.ptr.len())
     }
 }
 
-impl const From<MutStrPtr> for *mut str {
+impl From<MutStrPtr> for *mut str {
     #[inline]
     fn from(s: MutStrPtr) -> Self {
         std::ptr::from_raw_parts_mut(s.ptr.as_ptr() as _, s.ptr.len())
     }
 }
 
-unsafe impl const CTypeBridge for *mut str {
+unsafe impl CTypeBridge for *mut str {
     type Type = MutStrPtr;
 
     fn marshal(self) -> Self::Type {

@@ -54,7 +54,7 @@ impl<'a> Demand<'a> {
     }
 }
 
-unsafe impl<'a, 'b> const CTypeBridge for &'b mut Demand<'a> {
+unsafe impl<'a, 'b> CTypeBridge for &'b mut Demand<'a> {
     type Type = <&'b mut DynObj<dyn IBase + 'a> as CTypeBridge>::Type;
 
     fn marshal(self) -> Self::Type {
