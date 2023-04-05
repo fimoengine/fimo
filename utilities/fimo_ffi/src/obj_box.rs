@@ -10,7 +10,7 @@ use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Pointer};
 use std::hash::{Hash, Hasher};
-use std::marker::{PhantomData, Unsize};
+use std::marker::{PhantomData, Tuple, Unsize};
 use std::mem::{align_of_val_raw, size_of_val_raw, ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
@@ -74,7 +74,7 @@ impl ReprRust for Global {
     }
 }
 
-unsafe impl const CTypeBridge for Global {
+unsafe impl CTypeBridge for Global {
     type Type = CGlobal;
 
     fn marshal(self) -> Self::Type {
@@ -86,9 +86,9 @@ unsafe impl const CTypeBridge for Global {
     }
 }
 
-unsafe impl const Allocator for CGlobal
+unsafe impl Allocator for CGlobal
 where
-    Global: ~const Allocator,
+    Global: Allocator,
 {
     #[inline(always)]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
@@ -359,25 +359,25 @@ impl<T: ?Sized, A: Allocator> ObjBox<T, A> {
 unsafe impl<T: ?Sized + Send, A: Allocator + Send> Send for ObjBox<T, A> {}
 unsafe impl<T: ?Sized + Sync, A: Allocator + Sync> Sync for ObjBox<T, A> {}
 
-impl<T: ?Sized, A: Allocator> const AsRef<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> AsRef<T> for ObjBox<T, A> {
     fn as_ref(&self) -> &T {
         self
     }
 }
 
-impl<T: ?Sized, A: Allocator> const AsMut<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> AsMut<T> for ObjBox<T, A> {
     fn as_mut(&mut self) -> &mut T {
         self
     }
 }
 
-impl<T: ?Sized, A: Allocator> const Borrow<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> Borrow<T> for ObjBox<T, A> {
     fn borrow(&self) -> &T {
         self
     }
 }
 
-impl<T: ?Sized, A: Allocator> const BorrowMut<T> for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> BorrowMut<T> for ObjBox<T, A> {
     fn borrow_mut(&mut self) -> &mut T {
         self
     }
@@ -411,7 +411,7 @@ impl<T: Display + ?Sized, A: Allocator> Display for ObjBox<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> const Deref for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> Deref for ObjBox<T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -419,7 +419,7 @@ impl<T: ?Sized, A: Allocator> const Deref for ObjBox<T, A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> const DerefMut for ObjBox<T, A> {
+impl<T: ?Sized, A: Allocator> DerefMut for ObjBox<T, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.0.as_ptr() }
     }
@@ -456,7 +456,7 @@ impl<T: Error> Error for ObjBox<T, Global> {
     }
 }
 
-impl<Args, F: FnOnce<Args>, A: Allocator> FnOnce<Args> for ObjBox<F, A> {
+impl<Args: Tuple, F: FnOnce<Args>, A: Allocator> FnOnce<Args> for ObjBox<F, A> {
     type Output = <F as FnOnce<Args>>::Output;
 
     extern "rust-call" fn call_once(self, args: Args) -> Self::Output {
@@ -468,13 +468,13 @@ impl<Args, F: FnOnce<Args>, A: Allocator> FnOnce<Args> for ObjBox<F, A> {
     }
 }
 
-impl<Args, F: FnMut<Args>, A: Allocator> FnMut<Args> for ObjBox<F, A> {
+impl<Args: Tuple, F: FnMut<Args>, A: Allocator> FnMut<Args> for ObjBox<F, A> {
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
         <F as FnMut<Args>>::call_mut(self, args)
     }
 }
 
-impl<Args, F: Fn<Args>, A: Allocator> Fn<Args> for ObjBox<F, A> {
+impl<Args: Tuple, F: Fn<Args>, A: Allocator> Fn<Args> for ObjBox<F, A> {
     extern "rust-call" fn call(&self, args: Args) -> Self::Output {
         <F as Fn<Args>>::call(self, args)
     }
@@ -604,9 +604,9 @@ impl<T: Eq + ?Sized, A: Allocator> Eq for ObjBox<T, A> {}
 
 impl<T: ?Sized, A: Allocator + 'static> Unpin for ObjBox<T, A> {}
 
-unsafe impl<T: ?Sized, A: Allocator> const CTypeBridge for ObjBox<T, A>
+unsafe impl<T: ?Sized, A: Allocator> CTypeBridge for ObjBox<T, A>
 where
-    A: ~const CTypeBridge,
+    A: CTypeBridge,
     A::Type: Allocator,
 {
     default type Type = ObjBox<T, A::Type>;
@@ -663,9 +663,9 @@ impl<A: Allocator> RawObjBox<A> {
     }
 }
 
-unsafe impl<T: ?Sized, A: Allocator> const CTypeBridge for ObjBox<DynObj<T>, A>
+unsafe impl<T: ?Sized, A: Allocator> CTypeBridge for ObjBox<DynObj<T>, A>
 where
-    A: ~const CTypeBridge,
+    A: CTypeBridge,
     A::Type: Allocator,
 {
     type Type = RawObjBox<A::Type>;

@@ -7,7 +7,7 @@ use crate::{
 use std::path::Path;
 
 // FIXME: Relies on an implementation detail of the standard library.
-unsafe impl<'a> const CTypeBridge for &'a Path {
+unsafe impl<'a> CTypeBridge for &'a Path {
     type Type = ConstSpan<'a, u8>;
 
     fn marshal(self) -> Self::Type {
@@ -24,7 +24,7 @@ unsafe impl<'a> const CTypeBridge for &'a Path {
 }
 
 // FIXME: Relies on an implementation detail of the standard library.
-unsafe impl<'a> const CTypeBridge for &'a mut Path {
+unsafe impl<'a> CTypeBridge for &'a mut Path {
     type Type = MutSpan<'a, u8>;
 
     fn marshal(self) -> Self::Type {
@@ -41,7 +41,7 @@ unsafe impl<'a> const CTypeBridge for &'a mut Path {
 }
 
 // FIXME: Relies on an implementation detail of the standard library.
-unsafe impl const CTypeBridge for *const Path {
+unsafe impl CTypeBridge for *const Path {
     type Type = ConstSpanPtr<u8>;
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -59,7 +59,7 @@ unsafe impl const CTypeBridge for *const Path {
 }
 
 // FIXME: Relies on an implementation detail of the standard library.
-unsafe impl const CTypeBridge for *mut Path {
+unsafe impl CTypeBridge for *mut Path {
     type Type = MutSpanPtr<u8>;
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]

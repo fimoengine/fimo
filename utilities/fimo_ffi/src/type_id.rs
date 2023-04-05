@@ -11,7 +11,6 @@ pub use fimo_ffi_codegen::StableTypeId;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, StableTypeId, CTypeBridge)]
 #[uuid("f439d7b5-1a5a-481c-ad07-2c499c05c913")]
 pub struct StableTypeId {
-    #[ignored]
     id: [u8; 16],
 }
 

@@ -169,11 +169,11 @@ pub trait CastFrom<Dyn: ObjInterface + ?Sized>: ObjInterface {
     fn cast_from(obj: ObjMetadata<Dyn>) -> ObjMetadata<Self>;
 }
 
-impl<T, U> const CastFrom<U> for T
+impl<T, U> CastFrom<U> for T
 where
     T: ObjInterface + ?Sized,
     U: ObjInterface + Unsize<T> + ?Sized,
-    U::Base: ~const IntoInterface<<T::Base as ObjInterfaceBase>::VTable>,
+    U::Base: IntoInterface<<T::Base as ObjInterfaceBase>::VTable>,
 {
     fn cast_from(obj: ObjMetadata<U>) -> ObjMetadata<T> {
         let vtable = obj.vtable();
@@ -182,10 +182,10 @@ where
     }
 }
 
-impl<T, U> const CastInto<U> for T
+impl<T, U> CastInto<U> for T
 where
     T: ObjInterface + Unsize<U> + ?Sized,
-    U: ~const CastFrom<T> + ?Sized,
+    U: CastFrom<T> + ?Sized,
 {
     #[inline(always)]
     default fn cast_into(obj: ObjMetadata<Self>) -> ObjMetadata<U> {
@@ -341,9 +341,9 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns the vtable to a parent object.
     #[inline]
-    pub const fn super_vtable<T>(self) -> &'a <T::Base as ObjInterfaceBase>::VTable
+    pub fn super_vtable<T>(self) -> &'a <T::Base as ObjInterfaceBase>::VTable
     where
-        Dyn: ~const CastInto<T> + 'a,
+        Dyn: CastInto<T> + 'a,
         T: ObjInterface + ?Sized + 'a,
     {
         let s = self.cast_super::<T>();
@@ -361,9 +361,9 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns the super vtable.
     #[inline]
-    pub const fn cast_super<U>(self) -> ObjMetadata<U>
+    pub fn cast_super<U>(self) -> ObjMetadata<U>
     where
-        Dyn: ~const CastInto<U> + 'a,
+        Dyn: CastInto<U> + 'a,
         U: ObjInterface + ?Sized + 'a,
     {
         CastInto::cast_into(self)
@@ -456,7 +456,10 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Returns the id of the type associated with this vtable.
     #[inline]
     pub const fn object_id(self) -> Option<StableTypeId> {
-        self.vtable_ptr.object_info.id.into()
+        match self.vtable_ptr.object_info.id {
+            Optional::None => None,
+            Optional::Some(x) => Some(x),
+        }
     }
 
     /// Returns the implemented marker bounds of the object.
@@ -468,7 +471,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Returns the name of the type associated with this vtable.
     #[inline]
     pub const fn object_name(self) -> &'static str {
-        self.vtable_ptr.object_info.name.into()
+        self.vtable_ptr.object_info.name.as_ref()
     }
 
     /// Returns the id of the interface implemented with this vtable.
@@ -480,7 +483,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     /// Returns the name of the interface implemented with this vtable.
     #[inline]
     pub const fn interface_name(self) -> &'static str {
-        self.vtable_ptr.interface_info.name.into()
+        self.vtable_ptr.interface_info.name.as_ref()
     }
 
     /// Returns the major version number of the interface implemented with this vtable.
@@ -502,9 +505,9 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     }
 }
 
-unsafe impl<Dyn: ?Sized> const Send for ObjMetadata<Dyn> {}
+unsafe impl<Dyn: ?Sized> Send for ObjMetadata<Dyn> {}
 
-unsafe impl<Dyn: ?Sized> const Sync for ObjMetadata<Dyn> {}
+unsafe impl<Dyn: ?Sized> Sync for ObjMetadata<Dyn> {}
 
 impl<Dyn: ?Sized> Debug for ObjMetadata<Dyn> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -514,11 +517,11 @@ impl<Dyn: ?Sized> Debug for ObjMetadata<Dyn> {
     }
 }
 
-impl<Dyn: ?Sized> const Unpin for ObjMetadata<Dyn> {}
+impl<Dyn: ?Sized> Unpin for ObjMetadata<Dyn> {}
 
-impl<Dyn: ?Sized> const Copy for ObjMetadata<Dyn> {}
+impl<Dyn: ?Sized> Copy for ObjMetadata<Dyn> {}
 
-impl<Dyn: ?Sized> const Clone for ObjMetadata<Dyn> {
+impl<Dyn: ?Sized> Clone for ObjMetadata<Dyn> {
     fn clone(&self) -> Self {
         Self {
             vtable_ptr: self.vtable_ptr,
@@ -699,7 +702,7 @@ pub struct ThisPtr<'a, Dyn: ?Sized> {
     _phantom: PhantomData<&'a Dyn>,
 }
 
-impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> const ToPtr<'b, U> for &'a DynObj<T> {
+impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> ToPtr<'b, U> for &'a DynObj<T> {
     type Type = ThisPtr<'b, U>;
 
     #[inline(always)]
@@ -711,7 +714,7 @@ impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> const ToPtr<'b, U> for &'a DynObj<T> {
     }
 }
 
-impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> const ToPtr<'b, U> for &'a mut DynObj<T> {
+impl<'a, 'b, T: ?Sized, U: ?Sized + 'b> ToPtr<'b, U> for &'a mut DynObj<T> {
     type Type = MutThisPtr<'b, U>;
 
     #[inline(always)]
@@ -789,7 +792,7 @@ pub fn from_raw_parts_mut<Dyn: ?Sized>(
 #[inline]
 pub fn metadata<Dyn: ?Sized>(ptr: *const DynObj<Dyn>) -> ObjMetadata<Dyn> {
     let metadata = std::ptr::metadata(ptr);
-    let metadata_ptr = std::ptr::from_exposed_addr(metadata as usize);
+    let metadata_ptr = std::ptr::from_exposed_addr(metadata as _);
     let metadata = unsafe { &*metadata_ptr };
     ObjMetadata {
         vtable_ptr: metadata,
@@ -1061,13 +1064,13 @@ pub struct RawObj<Dyn: ?Sized> {
     metadata: ObjMetadata<Dyn>,
 }
 
-unsafe impl<Dyn: Send + ?Sized> const Send for RawObj<Dyn> {}
+unsafe impl<Dyn: Send + ?Sized> Send for RawObj<Dyn> {}
 
-unsafe impl<Dyn: Sync + ?Sized> const Sync for RawObj<Dyn> {}
+unsafe impl<Dyn: Sync + ?Sized> Sync for RawObj<Dyn> {}
 
-impl<Dyn: ?Sized> const Copy for RawObj<Dyn> {}
+impl<Dyn: ?Sized> Copy for RawObj<Dyn> {}
 
-impl<Dyn: ?Sized> const Clone for RawObj<Dyn> {
+impl<Dyn: ?Sized> Clone for RawObj<Dyn> {
     fn clone(&self) -> Self {
         Self {
             ptr: self.ptr,
@@ -1076,7 +1079,7 @@ impl<Dyn: ?Sized> const Clone for RawObj<Dyn> {
     }
 }
 
-impl<Dyn: Unpin + ?Sized> const Unpin for RawObj<Dyn> {}
+impl<Dyn: Unpin + ?Sized> Unpin for RawObj<Dyn> {}
 
 impl<Dyn: ?Sized> From<&DynObj<Dyn>> for RawObj<Dyn> {
     #[inline]
@@ -1115,13 +1118,13 @@ pub struct RawObjMut<Dyn: ?Sized> {
     metadata: ObjMetadata<Dyn>,
 }
 
-unsafe impl<Dyn: Send + ?Sized> const Send for RawObjMut<Dyn> {}
+unsafe impl<Dyn: Send + ?Sized> Send for RawObjMut<Dyn> {}
 
-unsafe impl<Dyn: Sync + ?Sized> const Sync for RawObjMut<Dyn> {}
+unsafe impl<Dyn: Sync + ?Sized> Sync for RawObjMut<Dyn> {}
 
-impl<Dyn: ?Sized> const Copy for RawObjMut<Dyn> {}
+impl<Dyn: ?Sized> Copy for RawObjMut<Dyn> {}
 
-impl<Dyn: ?Sized> const Clone for RawObjMut<Dyn> {
+impl<Dyn: ?Sized> Clone for RawObjMut<Dyn> {
     fn clone(&self) -> Self {
         Self {
             ptr: self.ptr,
@@ -1130,7 +1133,7 @@ impl<Dyn: ?Sized> const Clone for RawObjMut<Dyn> {
     }
 }
 
-impl<Dyn: Unpin + ?Sized> const Unpin for RawObjMut<Dyn> {}
+impl<Dyn: Unpin + ?Sized> Unpin for RawObjMut<Dyn> {}
 
 impl<Dyn: ?Sized> From<&mut DynObj<Dyn>> for RawObjMut<Dyn> {
     #[inline]
@@ -1184,7 +1187,7 @@ trait VTableDataSpec<Data> {
     fn get_data(&self) -> &Data;
 }
 
-impl<Head, Data> const VTableDataSpec<Data> for GenericVTable<Head, Data>
+impl<Head, Data> VTableDataSpec<Data> for GenericVTable<Head, Data>
 where
     Head: ObjMetadataCompatible,
     Data: 'static,
@@ -1194,9 +1197,9 @@ where
     }
 }
 
-impl<Head, Data> const VTableDataSpec<Data> for GenericVTable<Head, Data>
+impl<Head, Data> VTableDataSpec<Data> for GenericVTable<Head, Data>
 where
-    Head: ~const DynamicDataOffset,
+    Head: DynamicDataOffset,
     Data: 'static,
 {
     default fn get_data(&self) -> &Data {
@@ -1230,7 +1233,7 @@ where
 
     /// Fetches a reference to the data section.
     #[inline]
-    pub const fn data(&self) -> &Data {
+    pub fn data(&self) -> &Data {
         self.get_data()
     }
 }

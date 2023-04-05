@@ -56,7 +56,7 @@ fn notify_all() -> Result<(), Error> {
             let tx = tx.clone();
             ParallelBuilder::new().num_tasks(Some(N)).spawn(
                 move || {
-                    let &(ref lock, ref cond) = &*data;
+                    let (ref lock, ref cond) = &*data;
                     let mut cnt = lock.lock();
                     *cnt += 1;
                     if *cnt == N {
@@ -72,7 +72,7 @@ fn notify_all() -> Result<(), Error> {
         };
         drop(tx);
 
-        let &(ref lock, ref cond) = &*data;
+        let (ref lock, ref cond) = &*data;
         rx.recv().unwrap();
         let mut cnt = lock.lock();
         *cnt = 0;
@@ -142,7 +142,7 @@ fn notify_all_return() -> Result<(), Error> {
             let tx = tx.clone();
             ParallelBuilder::new().num_tasks(Some(N)).spawn(
                 move || {
-                    let &(ref lock, ref cond) = &*data;
+                    let (ref lock, ref cond) = &*data;
                     let mut cnt = lock.lock();
                     *cnt += 1;
                     if *cnt == N {
@@ -158,7 +158,7 @@ fn notify_all_return() -> Result<(), Error> {
         };
         drop(tx);
 
-        let &(ref lock, ref cond) = &*data;
+        let (ref lock, ref cond) = &*data;
         rx.recv().unwrap();
         let mut cnt = lock.lock();
         *cnt = 0;

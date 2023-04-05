@@ -101,7 +101,7 @@ pub fn load_fimo_manifest(manifest_path: &Path) -> Result<FimoWorkspace, Box<dyn
 
     for pattern in &manifest.workspace.modules {
         let glob = Glob::new(pattern).expect("Failed to read glob pattern");
-        for entry in glob.walk(&manifest_dir) {
+        for entry in glob.walk(manifest_dir) {
             let entry = entry.unwrap();
             let module = entry.path();
             let module_manifest_path = module.join("FimoModule.toml");
@@ -126,7 +126,7 @@ pub fn load_fimo_manifest(manifest_path: &Path) -> Result<FimoWorkspace, Box<dyn
         let mut include = Vec::new();
         for pattern in &test.include {
             let glob = Glob::new(pattern).expect("Failed to read glob pattern");
-            for entry in glob.walk(&manifest_dir) {
+            for entry in glob.walk(manifest_dir) {
                 let entry = entry.unwrap();
                 let path = entry.path();
                 if !path.exists() || !path.is_dir() {

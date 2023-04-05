@@ -99,7 +99,7 @@ macro_rules! tuple_impls {
                 }
             }
 
-            unsafe impl<$($T: ~const CTypeBridge),+> const CTypeBridge for ($($T),+,)
+            unsafe impl<$($T: CTypeBridge),+> CTypeBridge for ($($T),+,)
             {
                 type Type = $Tuple<$($T::Type),+>;
 
@@ -160,7 +160,7 @@ impl ReprC for Tuple0 {
     }
 }
 
-unsafe impl const CTypeBridge for () {
+unsafe impl CTypeBridge for () {
     type Type = Tuple0;
 
     #[inline]

@@ -5,8 +5,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
-#![feature(const_ptr_offset_from)]
-#![feature(const_trait_impl)]
+#![feature(map_many_mut)]
 #![feature(c_unwind)]
 #![feature(unsize)]
 

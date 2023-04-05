@@ -201,10 +201,10 @@ where
     }
 }
 
-impl<T, E> const Clone for Result<T, E>
+impl<T, E> Clone for Result<T, E>
 where
-    T: ~const Clone,
-    E: ~const Clone,
+    T: Clone,
+    E: Clone,
 {
     #[inline]
     fn clone(&self) -> Self {
@@ -215,7 +215,7 @@ where
     }
 }
 
-impl<T, E> const From<std::result::Result<T, E>> for Result<T, E> {
+impl<T, E> From<std::result::Result<T, E>> for Result<T, E> {
     #[inline]
     fn from(val: std::result::Result<T, E>) -> Self {
         match val {
@@ -225,17 +225,17 @@ impl<T, E> const From<std::result::Result<T, E>> for Result<T, E> {
     }
 }
 
-impl<T, E> const From<Result<T, E>> for std::result::Result<T, E> {
+impl<T, E> From<Result<T, E>> for std::result::Result<T, E> {
     #[inline]
     fn from(val: Result<T, E>) -> Self {
         val.into_rust()
     }
 }
 
-unsafe impl<T, E> const CTypeBridge for std::result::Result<T, E>
+unsafe impl<T, E> CTypeBridge for std::result::Result<T, E>
 where
-    T: ~const CTypeBridge,
-    E: ~const CTypeBridge,
+    T: CTypeBridge,
+    E: CTypeBridge,
 {
     type Type = Result<T::Type, E::Type>;
 
@@ -254,7 +254,7 @@ where
     }
 }
 
-impl<T, E> const ReprC for Result<T, E> {
+impl<T, E> ReprC for Result<T, E> {
     type T = std::result::Result<T, E>;
 
     #[inline]
@@ -274,7 +274,7 @@ impl<T, E> const ReprC for Result<T, E> {
     }
 }
 
-impl<T, E> const ReprRust for std::result::Result<T, E> {
+impl<T, E> ReprRust for std::result::Result<T, E> {
     type T = Result<T, E>;
 
     #[inline]
@@ -288,7 +288,7 @@ impl<T, E> const ReprRust for std::result::Result<T, E> {
     }
 }
 
-impl<T, E> const Try for Result<T, E> {
+impl<T, E> Try for Result<T, E> {
     type Output = T;
 
     type Residual = Result<std::convert::Infallible, E>;
@@ -307,7 +307,7 @@ impl<T, E> const Try for Result<T, E> {
     }
 }
 
-impl<T, E> const FromResidual for Result<T, E> {
+impl<T, E> FromResidual for Result<T, E> {
     #[inline]
     fn from_residual(residual: Result<std::convert::Infallible, E>) -> Self {
         match residual {
@@ -317,7 +317,7 @@ impl<T, E> const FromResidual for Result<T, E> {
     }
 }
 
-impl<T, E> const Residual<T> for Result<std::convert::Infallible, E> {
+impl<T, E> Residual<T> for Result<std::convert::Infallible, E> {
     type TryType = Result<T, E>;
 }
 

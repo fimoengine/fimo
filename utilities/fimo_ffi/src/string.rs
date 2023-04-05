@@ -906,7 +906,7 @@ impl<A: Allocator> String<A> {
     /// assert_eq!(&[104, 101, 108, 108, 111], s.as_bytes());
     /// ```
     #[inline]
-    pub const fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.vec
     }
     /// Shortens this `String` to the specified length.
@@ -1668,9 +1668,9 @@ impl FromStr for String {
     }
 }
 
-unsafe impl<A: Allocator> const CTypeBridge for String<A>
+unsafe impl<A: Allocator> CTypeBridge for String<A>
 where
-    A: ~const CTypeBridge,
+    A: CTypeBridge,
     A::Type: Allocator,
 {
     type Type = String<A::Type>;

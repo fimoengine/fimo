@@ -1100,7 +1100,7 @@ impl<T: ?Sized + std::fmt::Debug> std::fmt::Debug for RefCell<T> {
     }
 }
 
-impl<T> const From<T> for RefCell<T> {
+impl<T> From<T> for RefCell<T> {
     fn from(t: T) -> RefCell<T> {
         RefCell::new(t)
     }
@@ -2065,7 +2065,7 @@ impl<T: ?Sized + std::fmt::Debug> std::fmt::Debug for AtomicRefCell<T> {
     }
 }
 
-impl<T> const From<T> for AtomicRefCell<T> {
+impl<T> From<T> for AtomicRefCell<T> {
     fn from(t: T) -> AtomicRefCell<T> {
         AtomicRefCell::new(t)
     }

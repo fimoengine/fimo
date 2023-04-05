@@ -210,7 +210,7 @@ impl<'a, T: IError + Send + Sync + FetchVTable<dyn IError + 'a> + 'a> From<T>
     #[inline]
     fn from(v: T) -> Self {
         let obj = ObjBox::new(v);
-        ObjBox::coerce_obj(obj)
+        ObjBox::<DynObj<dyn IError + Send + Sync>>::coerce_obj(obj)
     }
 }
 
@@ -537,7 +537,7 @@ impl std::fmt::Debug for CustomError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CustomError")
             .field("kind", &self.kind)
-            .field("error", FmtWrapper::new_ref(&self.error))
+            .field("error", FmtWrapper::new_ref(&self.error) as _)
             .finish()
     }
 }
