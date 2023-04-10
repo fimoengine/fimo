@@ -85,3 +85,9 @@ pub use string::String;
 pub use tuple::{ReprC, ReprRust};
 pub use vec::Vec;
 pub use version::{ReleaseType, Version};
+
+/// Version of the fimo standard library.
+pub const FIMO_VERSION: Version = Version::new_short(0, 1, 0);
+
+/// Version of the fimo standard library used when checking for compatability.
+pub const FIMO_VERSION_COMPAT: Version = Version::new_short(0, 1, 0);
