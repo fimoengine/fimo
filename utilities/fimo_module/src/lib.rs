@@ -13,8 +13,10 @@ use fimo_ffi::marshal::CTypeBridge;
 
 mod interfaces;
 
+pub mod context;
 pub mod loader;
 pub mod module;
+pub mod module_;
 
 pub use interfaces::*;
 
@@ -113,8 +115,6 @@ impl std::fmt::Display for InterfaceDescriptor {
     Copy, Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq, Serialize, Deserialize, CTypeBridge,
 )]
 pub enum VersionQuery {
-    /// Matches any version.
-    Any,
     /// Query for an exact version.
     Exact(Version),
     /// Query for a minimum version.
@@ -141,10 +141,6 @@ impl VersionQuery {
     /// use fimo_ffi::Version;
     /// use fimo_module::VersionQuery;
     ///
-    /// let q = VersionQuery::Any;
-    /// assert!(q.query_matches(Version::new_short(1, 0, 0)));
-    /// assert!(q.query_matches(Version::new_short(0, 0, 5)));
-    ///
     /// let q = VersionQuery::Exact(Version::new_short(1, 0, 0));
     /// assert!(q.query_matches(Version::new_short(1, 0, 0)));
     /// assert!(!q.query_matches(Version::new_short(1, 0, 5)));
@@ -166,7 +162,6 @@ impl VersionQuery {
     #[inline]
     pub fn query_matches(&self, version: Version) -> bool {
         match *self {
-            VersionQuery::Any => true,
             VersionQuery::Exact(v) => v == version,
             VersionQuery::Minimum(v) => v.is_compatible(&version),
             VersionQuery::Range { min, max } => min.is_compatible(&version) && (version <= max),
