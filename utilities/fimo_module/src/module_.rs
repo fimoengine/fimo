@@ -1,6 +1,6 @@
 //! Implementation of a [`ModuleBuilderBuilder`].
 use crate::{
-    context::{IInterface, IInterfaceBuilder, IModuleBuilder, InterfaceContext},
+    context::{IInterface, IInterfaceBuilder, IInterfaceContext, IModuleBuilder},
     InterfaceQuery, ModuleInfo,
 };
 use fimo_ffi::{
@@ -147,7 +147,10 @@ struct InterfaceBuilder {
     dependencies: Vec<InterfaceQuery>,
     optional_dependencies: Vec<InterfaceQuery>,
     #[allow(clippy::type_complexity)]
-    build: fn(&Path, InterfaceContext) -> crate::Result<ObjBox<DynObj<dyn IInterface>>>,
+    build: for<'a> fn(
+        &Path,
+        &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>>,
 }
 
 impl InterfaceBuilder {
@@ -172,10 +175,10 @@ impl InterfaceBuilder {
         let dependencies = dependencies.into_iter().collect();
         let optional_dependencies = optional_dependencies.into_iter().collect();
 
-        fn construct<T>(
+        fn construct<'a, T>(
             module_root: &Path,
-            context: InterfaceContext,
-        ) -> crate::Result<ObjBox<DynObj<dyn IInterface>>>
+            context: &'a DynObj<dyn IInterfaceContext + 'a>,
+        ) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>>
         where
             T: Interface,
         {
@@ -219,8 +222,8 @@ impl IInterfaceBuilder for InterfaceBuilder {
 
     fn build<'a>(
         &self,
-        context: InterfaceContext,
-    ) -> crate::Result<ObjBox<DynObj<dyn IInterface>>> {
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>> {
         (self.build)(&self.path, context)
     }
 }
@@ -238,12 +241,13 @@ impl Debug for InterfaceBuilder {
 }
 
 /// Helper trait for constructing an interface.
-pub trait Interface:
-    IInterface
-    + FetchVTable<<dyn IInterface as ObjInterface<'static>>::Base>
-    + Unsize<dyn IInterface>
-    + 'static
-{
+pub trait Interface {
+    /// Type of the constructed interface.
+    type Result<'a>: IInterface
+        + FetchVTable<<(dyn IInterface + 'a) as ObjInterface<'a>>::Base>
+        + Unsize<dyn IInterface + 'a>
+        + 'a;
+
     /// Name of the interface.
     const NAME: &'static str;
     /// Implemented version.
@@ -259,5 +263,8 @@ pub trait Interface:
     fn optional_dependencies(feature: Option<&str>) -> Vec<InterfaceQuery>;
 
     /// Constructs the interface.
-    fn construct(module_root: &Path, context: InterfaceContext) -> crate::Result<ObjBox<Self>>;
+    fn construct<'a>(
+        module_root: &Path,
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> crate::Result<ObjBox<Self::Result<'a>>>;
 }

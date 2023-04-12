@@ -1,45 +1,12 @@
 //! Implementation of an [`AppContext`].
-use std::ops::Deref;
 use std::path::Path;
 
 use crate::{InterfaceDescriptor, InterfaceQuery, ModuleInfo};
-use fimo_ffi::marshal::CTypeBridge;
 use fimo_ffi::provider::IProvider;
 use fimo_ffi::ptr::IBase;
 use fimo_ffi::{interface, DynObj, ObjBox, Version};
 
 pub use private::{AppContext, LoaderManifest, ModuleDeclaration};
-
-/// Lifetime-extended wrapper of an [`IInterfaceContext`].
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct InterfaceContext {
-    context: *const DynObj<dyn IInterfaceContext>,
-}
-
-impl Deref for InterfaceContext {
-    type Target = DynObj<dyn IInterfaceContext>;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.context }
-    }
-}
-
-unsafe impl Send for InterfaceContext where for<'a> &'a DynObj<dyn IInterfaceContext>: Send {}
-unsafe impl Sync for InterfaceContext where for<'a> &'a DynObj<dyn IInterfaceContext>: Sync {}
-
-unsafe impl CTypeBridge for InterfaceContext {
-    type Type = <*const DynObj<dyn IInterfaceContext> as CTypeBridge>::Type;
-
-    fn marshal(self) -> Self::Type {
-        self.context.marshal()
-    }
-
-    unsafe fn demarshal(x: Self::Type) -> Self {
-        let context = CTypeBridge::demarshal(x);
-        Self { context }
-    }
-}
 
 interface! {
     #![interface_cfg(
@@ -54,16 +21,16 @@ interface! {
             &mut self,
             path: &Path,
             features: &[fimo_ffi::String],
-        ) -> crate::Result<&DynObj<dyn IModule>>;
+        ) -> crate::Result<&DynObj<dyn IModule + '_>>;
 
         /// Fetches all modules that are loaded into the context.
-        fn loaded_modules(&self) -> fimo_ffi::Vec<&DynObj<dyn IModule>>;
+        fn loaded_modules(&self) -> fimo_ffi::Vec<&DynObj<dyn IModule + '_>>;
 
         /// Checks if an interface is present in the context.
         fn has_interface(&self, query: InterfaceQuery) -> bool;
 
         /// Fetches an interface that matches the query.
-        fn get_interface(&self, query: InterfaceQuery) -> crate::Result<&DynObj<dyn IInterface>>;
+        fn get_interface(&self, query: InterfaceQuery) -> crate::Result<&DynObj<dyn IInterface + '_>>;
     }
 }
 
@@ -79,7 +46,7 @@ interface! {
         fn has_interface(&self, query: InterfaceQuery) -> bool;
 
         /// Fetches an interface that matches the query.
-        fn get_interface(&self, query: InterfaceQuery) -> crate::Result<&DynObj<dyn IInterface>>;
+        fn get_interface(&self, query: InterfaceQuery) -> crate::Result<&DynObj<dyn IInterface + '_>>;
     }
 }
 
@@ -125,7 +92,7 @@ interface! {
         fn features(&self) -> &[fimo_ffi::String];
 
         /// Fetches all [`IInterfaceBuilder`] contained in the module.
-        fn interfaces(&self) -> &[&DynObj<dyn IInterfaceBuilder>];
+        fn interfaces(&self) -> &[&DynObj<dyn IInterfaceBuilder + '_>];
     }
 }
 
@@ -163,7 +130,8 @@ interface! {
         fn optional_dependencies(&self) -> &[InterfaceQuery];
 
         /// Builds an instance of the interface.
-        fn build(&self, context: InterfaceContext) -> crate::Result<ObjBox<DynObj<dyn IInterface>>>;
+        #[interface_cfg(phantom_parameter = "&'a ()")]
+        fn build<'a>(&self, context: &'a DynObj<dyn IInterfaceContext + 'a>) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>>;
     }
 }
 
@@ -217,6 +185,7 @@ mod private {
         fmt::{Debug, Formatter},
         fs::File,
         io::BufReader,
+        marker::PhantomData,
         path::{Path, PathBuf},
         ptr::NonNull,
         sync::OnceLock,
@@ -234,10 +203,11 @@ mod private {
                     load_fn: __private_load_module,
                 };
 
-            unsafe extern "C-unwind" fn __private_load_module(
+            unsafe extern "C-unwind" fn __private_load_module<'a>(
                 path: <&std::path::Path as $crate::fimo_ffi::marshal::CTypeBridge>::Type,
                 features: <&[$crate::fimo_ffi::String] as $crate::fimo_ffi::marshal::CTypeBridge>::Type,
-            ) -> <$crate::Result<$crate::fimo_ffi::ObjBox<$crate::fimo_ffi::DynObj<dyn $crate::context::IModuleBuilder>>> as $crate::fimo_ffi::marshal::CTypeBridge>::Type {
+                _: std::marker::PhantomData<&'a ()>
+            ) -> <$crate::Result<$crate::fimo_ffi::ObjBox<$crate::fimo_ffi::DynObj<dyn $crate::context::IModuleBuilder + 'a>>> as $crate::fimo_ffi::marshal::CTypeBridge>::Type {
                 let path: &std::path::Path = $crate::fimo_ffi::marshal::CTypeBridge::demarshal(path);
                 let features: &[$crate::fimo_ffi::String] = $crate::fimo_ffi::marshal::CTypeBridge::demarshal(features);
                 let res: $crate::Result<$crate::fimo_ffi::ObjBox<$crate::fimo_ffi::DynObj<dyn $crate::context::IModuleBuilder>>> = $load(path, features);
@@ -269,7 +239,10 @@ mod private {
             self.interfaces.contains(query)
         }
 
-        fn get_interface(&self, query: InterfaceQuery) -> crate::Result<&DynObj<dyn IInterface>> {
+        fn get_interface(
+            &self,
+            query: InterfaceQuery,
+        ) -> crate::Result<&DynObj<dyn IInterface + '_>> {
             if let Some((_, x)) = self.interfaces.get(query.clone()) {
                 let interface_ptr = ObjArc::as_ptr(x);
                 let interface_ptr = fimo_ffi::ptr::coerce_obj_raw(interface_ptr);
@@ -299,9 +272,15 @@ mod private {
     unsafe impl Sync for Interface where DynObj<dyn IInterfaceBuilder>: Sync {}
 
     impl Interface {
-        fn new(context: InterfaceContext, builder: &DynObj<dyn IInterfaceBuilder>) -> Self {
+        fn new(context: InterfaceContext, builder: &DynObj<dyn IInterfaceBuilder + '_>) -> Self {
             // Safety: We can artificially prolong the lifetime of the builder, because
             // we know that the builder will be dropped before the module containing it.
+            let builder = unsafe {
+                std::mem::transmute::<
+                    &DynObj<dyn IInterfaceBuilder + '_>,
+                    &DynObj<dyn IInterfaceBuilder>,
+                >(builder)
+            };
             let builder = NonNull::from(builder);
 
             Self {
@@ -311,20 +290,25 @@ mod private {
             }
         }
 
-        fn init_interface(&self) -> &DynObj<dyn IInterface> {
+        fn init_interface(&self) -> &DynObj<dyn IInterface + '_> {
             self.interface.get_or_init(|| {
                 let context = fimo_ffi::ptr::coerce_obj(&self.context);
-                let context = super::InterfaceContext { context };
                 let x = self.builder().build(context).unwrap();
-                x
+
+                unsafe {
+                    std::mem::transmute::<
+                        ObjBox<DynObj<dyn IInterface + '_>>,
+                        ObjBox<DynObj<dyn IInterface>>,
+                    >(x)
+                }
             })
         }
 
-        fn get_interface(&self) -> Option<&DynObj<dyn IInterface>> {
+        fn get_interface(&self) -> Option<&DynObj<dyn IInterface + '_>> {
             self.interface.get().map(|x| &**x)
         }
 
-        fn builder(&self) -> &DynObj<dyn IInterfaceBuilder> {
+        fn builder(&self) -> &DynObj<dyn IInterfaceBuilder + '_> {
             // Safety: We know that the builder is still alive at this point.
             unsafe { self.builder.as_ref() }
         }
@@ -377,7 +361,18 @@ mod private {
     }
 
     impl Module {
-        fn new(builder: ObjBox<DynObj<dyn IModuleBuilder>>, lib: ObjBox<Library>) -> Self {
+        fn new(builder: ObjBox<DynObj<dyn IModuleBuilder + '_>>, lib: ObjBox<Library>) -> Self {
+            // Safety: We know that `builder` stems from `lib`, so
+            // it is valid as long as `lib` remains alive. Since we
+            // don't let anyonce access the builder it is safe to extend
+            // the lifetime.
+            let builder = unsafe {
+                std::mem::transmute::<
+                    ObjBox<DynObj<dyn IModuleBuilder + '_>>,
+                    ObjBox<DynObj<dyn IModuleBuilder>>,
+                >(builder)
+            };
+
             let mut interfaces = vec![];
             for &x in builder.interfaces() {
                 interfaces.push(x.descriptor());
@@ -439,11 +434,12 @@ mod private {
         pub fimo_version: Version,
         /// Load function.
         #[allow(clippy::type_complexity)]
-        pub load_fn: unsafe extern "C-unwind" fn(
+        pub load_fn: for<'a> unsafe extern "C-unwind" fn(
             <&Path as CTypeBridge>::Type,
             <&[fimo_ffi::String] as CTypeBridge>::Type,
+            PhantomData<&'a ()>,
         ) -> <crate::Result<
-            ObjBox<DynObj<dyn IModuleBuilder>>,
+            ObjBox<DynObj<dyn IModuleBuilder + 'a>>,
         > as CTypeBridge>::Type,
     }
 
@@ -463,10 +459,10 @@ mod private {
             &self,
             path: &Path,
             features: &[fimo_ffi::String],
-        ) -> crate::Result<ObjBox<DynObj<dyn IModuleBuilder>>> {
+        ) -> crate::Result<ObjBox<DynObj<dyn IModuleBuilder + '_>>> {
             let path = CTypeBridge::marshal(path);
             let features = CTypeBridge::marshal(features);
-            let x = (self.load_fn)(path, features);
+            let x = (self.load_fn)(path, features, PhantomData);
             CTypeBridge::demarshal(x)
         }
     }
