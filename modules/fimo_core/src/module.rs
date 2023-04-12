@@ -8,7 +8,7 @@ use fimo_ffi::provider::IProvider;
 use fimo_ffi::ptr::{IBase, IBaseExt};
 use fimo_ffi::type_id::StableTypeId;
 use fimo_ffi::{DynObj, ObjArc, ObjBox, Object, ReleaseType, Version};
-use fimo_module::context::{IInterface, InterfaceContext};
+use fimo_module::context::{IInterface, IInterfaceContext};
 use fimo_module::module_::{Interface, ModuleBuilderBuilder};
 use fimo_module::{
     FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
@@ -130,22 +130,31 @@ fn load_module(
 }
 
 /// Struct implementing the `fimo-core` interface.
-#[derive(Debug, Object, StableTypeId)]
+#[derive(Object, StableTypeId)]
 #[name("CoreInterface")]
 #[uuid("d8ea3d1e-3286-4c4b-ac51-12dca7daa624")]
 #[interfaces(IInterface, _IFimoCore)]
-pub struct CoreInterface_ {
+pub struct CoreInterface_<'a> {
     core: Core,
-    _context: InterfaceContext,
+    _context: &'a DynObj<dyn IInterfaceContext + 'a>,
 }
 
-impl IProvider for CoreInterface_ {
-    fn provide<'a>(&'a self, demand: &mut fimo_ffi::provider::Demand<'a>) {
-        demand.provide_ref::<DynObj<dyn _IFimoCore>>(fimo_ffi::ptr::coerce_obj(self));
+impl<'a> Debug for CoreInterface_<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreInterface_")
+            .field("core", &self.core)
+            .field("_context", &(self._context as *const _))
+            .finish()
     }
 }
 
-impl IInterface for CoreInterface_ {
+impl<'a> IProvider for CoreInterface_<'a> {
+    fn provide<'b>(&'b self, demand: &mut fimo_ffi::provider::Demand<'b>) {
+        demand.provide_obj::<dyn _IFimoCore + 'b>(fimo_ffi::ptr::coerce_obj(self));
+    }
+}
+
+impl<'a> IInterface for CoreInterface_<'a> {
     fn name(&self) -> &str {
         CoreInterface_::NAME
     }
@@ -159,7 +168,7 @@ impl IInterface for CoreInterface_ {
     }
 }
 
-impl _IFimoCore for CoreInterface_ {
+impl<'a> _IFimoCore for CoreInterface_<'a> {
     #[inline]
     fn modules(&self) -> &DynObj<dyn IModuleRegistry + '_> {
         fimo_ffi::ptr::coerce_obj(self.core.as_module_registry())
@@ -171,7 +180,9 @@ impl _IFimoCore for CoreInterface_ {
     }
 }
 
-impl Interface for CoreInterface_ {
+impl Interface for CoreInterface_<'_> {
+    type Result<'a> = CoreInterface_<'a>;
+
     const NAME: &'static str = "fimo::interfaces::core";
 
     const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
@@ -188,11 +199,11 @@ impl Interface for CoreInterface_ {
         vec![]
     }
 
-    fn construct(
+    fn construct<'a>(
         _module_root: &Path,
-        context: InterfaceContext,
-    ) -> fimo_module::Result<ObjBox<Self>> {
-        Ok(ObjBox::new(Self {
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> fimo_module::Result<ObjBox<Self::Result<'a>>> {
+        Ok(ObjBox::new(CoreInterface_ {
             core: Default::default(),
             _context: context,
         }))
@@ -201,6 +212,6 @@ impl Interface for CoreInterface_ {
 
 fimo_module::module!(|path, features| {
     Ok(ModuleBuilderBuilder::new(MODULE_NAME, "version")
-        .with_interface::<CoreInterface_>()
+        .with_interface::<CoreInterface_<'_>>()
         .build(path, features))
 });
