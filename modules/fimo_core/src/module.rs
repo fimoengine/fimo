@@ -3,10 +3,13 @@
 use crate::Core;
 use fimo_core_int::modules::IModuleRegistry;
 use fimo_core_int::settings::ISettingsRegistry;
-use fimo_core_int::IFimoCore;
+use fimo_core_int::{IFimoCore, _IFimoCore};
+use fimo_ffi::provider::IProvider;
 use fimo_ffi::ptr::{IBase, IBaseExt};
 use fimo_ffi::type_id::StableTypeId;
-use fimo_ffi::{DynObj, ObjArc, Object, Version};
+use fimo_ffi::{DynObj, ObjArc, ObjBox, Object, ReleaseType, Version};
+use fimo_module::context::{IInterface, InterfaceContext};
+use fimo_module::module_::{Interface, ModuleBuilderBuilder};
 use fimo_module::{
     FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
 };
@@ -125,3 +128,79 @@ fn load_module(
     });
     Ok(ObjArc::coerce_obj(module))
 }
+
+/// Struct implementing the `fimo-core` interface.
+#[derive(Debug, Object, StableTypeId)]
+#[name("CoreInterface")]
+#[uuid("d8ea3d1e-3286-4c4b-ac51-12dca7daa624")]
+#[interfaces(IInterface, _IFimoCore)]
+pub struct CoreInterface_ {
+    core: Core,
+    _context: InterfaceContext,
+}
+
+impl IProvider for CoreInterface_ {
+    fn provide<'a>(&'a self, demand: &mut fimo_ffi::provider::Demand<'a>) {
+        demand.provide_ref::<DynObj<dyn _IFimoCore>>(fimo_ffi::ptr::coerce_obj(self));
+    }
+}
+
+impl IInterface for CoreInterface_ {
+    fn name(&self) -> &str {
+        CoreInterface_::NAME
+    }
+
+    fn version(&self) -> Version {
+        CoreInterface_::VERSION
+    }
+
+    fn extensions(&self) -> &[fimo_ffi::String] {
+        &[]
+    }
+}
+
+impl _IFimoCore for CoreInterface_ {
+    #[inline]
+    fn modules(&self) -> &DynObj<dyn IModuleRegistry + '_> {
+        fimo_ffi::ptr::coerce_obj(self.core.as_module_registry())
+    }
+
+    #[inline]
+    fn settings(&self) -> &DynObj<dyn ISettingsRegistry + '_> {
+        fimo_ffi::ptr::coerce_obj(self.core.as_settings_registry())
+    }
+}
+
+impl Interface for CoreInterface_ {
+    const NAME: &'static str = "fimo::interfaces::core";
+
+    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
+
+    fn extensions(_feature: Option<&str>) -> Vec<String> {
+        vec![]
+    }
+
+    fn dependencies(_feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        vec![]
+    }
+
+    fn optional_dependencies(_feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        vec![]
+    }
+
+    fn construct(
+        _module_root: &Path,
+        context: InterfaceContext,
+    ) -> fimo_module::Result<ObjBox<Self>> {
+        Ok(ObjBox::new(Self {
+            core: Default::default(),
+            _context: context,
+        }))
+    }
+}
+
+fimo_module::module!(|path, features| {
+    Ok(ModuleBuilderBuilder::new(MODULE_NAME, "version")
+        .with_interface::<CoreInterface_>()
+        .build(path, features))
+});

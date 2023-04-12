@@ -6,6 +6,7 @@
     rustdoc::broken_intra_doc_links
 )]
 #![feature(step_trait)]
+#![feature(c_unwind)]
 
 pub mod modules;
 pub mod settings;

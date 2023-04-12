@@ -1,5 +1,5 @@
 use crate::{Error, ErrorKind, InterfaceDescriptor, ModuleInfo, PathChar, Result};
-use fimo_ffi::ptr::{metadata, CastInto, DowncastSafeInterface, IBase, IBaseExt, ObjInterface};
+use fimo_ffi::ptr::{metadata, CastInto, DowncastSafeInterface, IBase, IBaseExt};
 use fimo_ffi::{interface, DynObj, ObjArc, Version};
 use std::marker::Unsize;
 use std::path::{Path, PathBuf};
@@ -153,7 +153,7 @@ interface! {
 }
 
 /// Marker trait for interfaces.
-pub trait FimoInterface: IModuleInterface + ObjInterface + DowncastSafeInterface {
+pub trait FimoInterface<'a>: IModuleInterface + DowncastSafeInterface<'a> {
     /// Name of the interface.
     const NAME: &'static str;
     /// Version of the interface.
@@ -219,8 +219,8 @@ interface! {
 #[inline]
 pub fn try_downcast<'a, T, U>(obj: &fimo_ffi::DynObj<U>) -> Result<&DynObj<T>>
 where
-    T: FimoInterface + Unsize<dyn IBase + 'a> + ?Sized + 'a,
-    U: CastInto<dyn IModuleInterface + 'a> + ?Sized,
+    T: FimoInterface<'a> + Unsize<dyn IBase + 'a> + ?Sized,
+    U: CastInto<'a, dyn IModuleInterface + 'a> + ?Sized,
 {
     let obj: &DynObj<dyn IModuleInterface + 'a> = obj.cast_super();
 
@@ -264,8 +264,8 @@ where
 #[inline]
 pub fn try_downcast_arc<'a, T, U>(obj: ObjArc<DynObj<U>>) -> Result<ObjArc<DynObj<T>>>
 where
-    T: FimoInterface + Unsize<dyn IBase + 'a> + ?Sized + 'a,
-    U: CastInto<dyn IModuleInterface + 'a> + ?Sized,
+    T: FimoInterface<'a> + Unsize<dyn IBase + 'a> + ?Sized,
+    U: CastInto<'a, dyn IModuleInterface + 'a> + ?Sized,
 {
     // the inner object always equals the original object, except for the different vtable.
     // because of that we can simply perform the casting ourselves and rebuild the arc.

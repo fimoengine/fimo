@@ -95,7 +95,7 @@ interface! {
     }
 }
 
-impl FimoInterface for dyn IFimoActix {
+impl<'a> FimoInterface<'a> for dyn IFimoActix + 'a {
     const NAME: &'static str = "fimo::interfaces::actix::fimo_actix";
     const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
     const EXTENSIONS: &'static [&'static str] = &[];

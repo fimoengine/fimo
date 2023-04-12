@@ -1210,6 +1210,11 @@ impl InterfaceContext {
                 "Head section of the {} vtable",
                 vtable_ident.get_ident().unwrap()
             );
+            let lifetime_bound = if static_self_bound {
+                quote!('static)
+            } else {
+                quote!('__private_inner)
+            };
             let dyn_trait_ident = if static_self_bound {
                 quote!(dyn #trait_ident + 'static)
             } else {
@@ -1231,6 +1236,7 @@ impl InterfaceContext {
                     #[doc = r"Constructs a new instance of the vtable head section."]
                     pub const fn new<'__private_inner, T>() -> Self
                     where
+                        '__private_inner: #lifetime_bound,
                         T: #trait_ident + '__private_inner,
                     {
                         Self::new_embedded::<T>(0)
@@ -1239,6 +1245,7 @@ impl InterfaceContext {
                     #[doc = r"Constructs a new instance of the vtable head section with a custom offset value."]
                     pub const fn new_embedded<'__private_inner, T>(__internal_this_offset: usize,) -> Self
                     where
+                        '__private_inner: #lifetime_bound,
                         T: #trait_ident + '__private_inner,
                     {
                         #(#interface_new_impl)*
@@ -1541,6 +1548,11 @@ impl InterfaceContext {
         };
 
         let bounds = &trait_item.supertraits;
+        let lifetime_bound = if static_self_bound {
+            quote!('static)
+        } else {
+            quote!('__private_inner)
+        };
         let dyn_trait_ident = if static_self_bound {
             quote!(dyn #trait_ident + 'static)
         } else {
@@ -1550,8 +1562,9 @@ impl InterfaceContext {
         quote! {
             impl<'__private_inner, T> #trait_ident for ::fimo_ffi::ptr::DynObj<T>
             where
+                '__private_inner: #lifetime_bound,
                 T: #trait_ident + ?Sized + '__private_inner,
-                T: ::fimo_ffi::ptr::CastInto<#dyn_trait_ident>,
+                T: ::fimo_ffi::ptr::CastInto<'__private_inner, #dyn_trait_ident>,
                 ::fimo_ffi::ptr::DynObj<T>: #bounds,
             {
                 #trait_impl
@@ -1636,18 +1649,6 @@ pub fn interface_impl(input: TokenStream) -> TokenStream {
     dyn_trait_idents
         .push(syn::parse_quote!(dyn #trait_ident + Send + Sync + Unpin + '__private_inner));
 
-    let mut base_marker_providers: Vec<syn::Type> = Vec::new();
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase));
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Send));
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Sync));
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Unpin));
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Send + Sync));
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Send + Unpin));
-    base_marker_providers.push(syn::parse_quote!(dyn ::fimo_ffi::ptr::IBase + Sync + Unpin));
-    base_marker_providers.push(syn::parse_quote!(
-        dyn ::fimo_ffi::ptr::IBase + Send + Sync + Unpin
-    ));
-
     // We check if the interface is frozen by looking for the frozen keyword.
     let is_frozen = input.frozen_token.is_some();
 
@@ -1684,9 +1685,8 @@ pub fn interface_impl(input: TokenStream) -> TokenStream {
         }
 
         #(
-            impl<'__private_inner> ::fimo_ffi::ptr::ObjInterface for #dyn_trait_idents {
+            impl<'__private_inner> ::fimo_ffi::ptr::ObjInterface<'__private_inner> for #dyn_trait_idents {
                 type Base = #dyn_trait_base;
-                type MarkerProvider = #base_marker_providers;
             }
         )*
 

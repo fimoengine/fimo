@@ -557,10 +557,10 @@ impl<T: ?Sized> RefCell<T> {
     /// }
     /// ```
     #[inline]
-    pub fn coerce_obj<U>(&self) -> &RefCell<DynObj<U>>
+    pub fn coerce_obj<'a, U>(&self) -> &RefCell<DynObj<U>>
     where
-        T: FetchVTable<U::Base> + Unsize<U>,
-        U: ObjInterface + ?Sized,
+        T: FetchVTable<U::Base> + Unsize<U> + 'a,
+        U: ObjInterface<'a> + ?Sized,
     {
         let vtable = T::fetch_interface();
         let metadata = crate::ptr::ObjMetadata::<U>::new(vtable);
@@ -615,10 +615,10 @@ impl<T: ?Sized> RefCell<T> {
     /// assert_eq!(x.get_mut().0, 5)
     /// ```
     #[inline]
-    pub fn coerce_obj_mut<U>(&mut self) -> &mut RefCell<DynObj<U>>
+    pub fn coerce_obj_mut<'a, U>(&mut self) -> &mut RefCell<DynObj<U>>
     where
-        T: FetchVTable<U::Base> + Unsize<U>,
-        U: ObjInterface + ?Sized,
+        T: FetchVTable<U::Base> + Unsize<U> + 'a,
+        U: ObjInterface<'a> + ?Sized,
     {
         let vtable = T::fetch_interface();
         let metadata = crate::ptr::ObjMetadata::<U>::new(vtable);
@@ -632,7 +632,7 @@ impl<T: ?Sized> RefCell<T> {
     }
 }
 
-impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
+impl<'a, T: ObjInterface<'a> + ?Sized> RefCell<DynObj<T>> {
     /// Returns whether the contained object is of type `U`.
     ///
     /// # Examples
@@ -770,8 +770,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn cast_super<U>(&self) -> &RefCell<DynObj<U>>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let obj = self.as_ptr();
         let obj = crate::ptr::cast_super::<U, _>(obj);
@@ -815,8 +815,8 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn cast_super_mut<U>(&mut self) -> &mut RefCell<DynObj<U>>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let obj = self.as_ptr();
         let obj = crate::ptr::cast_super_mut::<U, _>(obj);
@@ -861,7 +861,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let obj = self.as_ptr();
         crate::ptr::is_interface::<U, _>(obj)
@@ -900,7 +900,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface<U>(&self) -> Option<&RefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface::<U, _>(obj) {
@@ -946,7 +946,7 @@ impl<'a, T: ?Sized + 'a> RefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface_mut<U>(&mut self) -> Option<&mut RefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface_mut::<U, _>(obj) {
@@ -1518,10 +1518,10 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// }
     /// ```
     #[inline]
-    pub fn coerce_obj<U>(&self) -> &AtomicRefCell<DynObj<U>>
+    pub fn coerce_obj<'a, U>(&self) -> &AtomicRefCell<DynObj<U>>
     where
-        T: FetchVTable<U::Base> + Unsize<U>,
-        U: ObjInterface + ?Sized,
+        T: FetchVTable<U::Base> + Unsize<U> + 'a,
+        U: ObjInterface<'a> + ?Sized,
     {
         let vtable = T::fetch_interface();
         let metadata = crate::ptr::ObjMetadata::<U>::new(vtable);
@@ -1577,10 +1577,10 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// assert_eq!(x.get_mut().0, 5)
     /// ```
     #[inline]
-    pub fn coerce_obj_mut<U>(&mut self) -> &mut AtomicRefCell<DynObj<U>>
+    pub fn coerce_obj_mut<'a, U>(&mut self) -> &mut AtomicRefCell<DynObj<U>>
     where
-        T: FetchVTable<U::Base> + Unsize<U>,
-        U: ObjInterface + ?Sized,
+        T: FetchVTable<U::Base> + Unsize<U> + 'a,
+        U: ObjInterface<'a> + ?Sized,
     {
         let vtable = T::fetch_interface();
         let metadata = crate::ptr::ObjMetadata::<U>::new(vtable);
@@ -1594,7 +1594,7 @@ impl<T: ?Sized> AtomicRefCell<T> {
     }
 }
 
-impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
+impl<'a, T: ObjInterface<'a> + ?Sized> AtomicRefCell<DynObj<T>> {
     /// Returns whether the contained object is of type `U`.
     ///
     /// # Examples
@@ -1732,8 +1732,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn cast_super<U>(&self) -> &AtomicRefCell<DynObj<U>>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let obj = self.as_ptr();
         let obj = crate::ptr::cast_super::<U, _>(obj);
@@ -1777,8 +1777,8 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn cast_super_mut<U>(&mut self) -> &mut AtomicRefCell<DynObj<U>>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let obj = self.as_ptr();
         let obj = crate::ptr::cast_super_mut::<U, _>(obj);
@@ -1823,7 +1823,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let obj = self.as_ptr();
         crate::ptr::is_interface::<U, _>(obj)
@@ -1862,7 +1862,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface<U>(&self) -> Option<&AtomicRefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface::<U, _>(obj) {
@@ -1908,7 +1908,7 @@ impl<'a, T: ?Sized + 'a> AtomicRefCell<DynObj<T>> {
     #[inline]
     pub fn downcast_interface_mut<U>(&mut self) -> Option<&mut AtomicRefCell<DynObj<U>>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let obj = self.as_ptr();
         if let Some(obj) = crate::ptr::downcast_interface_mut::<U, _>(obj) {

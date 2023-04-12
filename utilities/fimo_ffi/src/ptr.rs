@@ -35,11 +35,11 @@ pub unsafe trait DowncastSafe {}
 ///
 /// Is automatically implemented if [`DowncastSafe`] is implemented for
 /// the base interface.
-pub unsafe trait DowncastSafeInterface: ObjInterface {}
+pub unsafe trait DowncastSafeInterface<'a>: ObjInterface<'a> {}
 
-unsafe impl<T> DowncastSafeInterface for T
+unsafe impl<'a, T> DowncastSafeInterface<'a> for T
 where
-    T: ObjInterface + ?Sized,
+    T: ObjInterface<'a> + ?Sized,
     T::Base: DowncastSafe,
 {
 }
@@ -123,15 +123,12 @@ pub trait ObjInterfaceBase {
 }
 
 /// Indicated that a type is usable with a [`DynObj`].
-pub trait ObjInterface {
+pub trait ObjInterface<'a>: 'a {
     /// Base type that specifies the used vtable.
     type Base: ObjInterfaceBase + ?Sized;
 
     #[doc(hidden)]
-    type MarkerProvider: ObjInterface + ?Sized;
-
-    #[doc(hidden)]
-    const MARKER_BOUNDS: usize = <Self::MarkerProvider as MarkerBounds>::IMPLEMENTED_MARKERS;
+    const MARKER_BOUNDS: usize = <Self as MarkerBounds>::IMPLEMENTED_MARKERS;
 }
 
 /// Indicates that an object can be coerced to a [`DynObj`].
@@ -151,7 +148,7 @@ where
 ///
 /// This trait is not transitive, i.e. defining conversions `A -> B` and `B -> C` does not imply
 /// that `A -> C`. Such conversions must be manually implemented.
-pub trait CastInto<Dyn: ObjInterface + ?Sized>: ObjInterface {
+pub trait CastInto<'a, Dyn: ObjInterface<'a> + ?Sized>: ObjInterface<'a> {
     /// Retrieves a super vtable to the same object.
     fn cast_into(obj: ObjMetadata<Self>) -> ObjMetadata<Dyn>;
 }
@@ -164,15 +161,15 @@ pub trait CastInto<Dyn: ObjInterface + ?Sized>: ObjInterface {
 ///
 /// This trait is not transitive, i.e. defining conversions `A -> B` and `B -> C` does not imply
 /// that `A -> C`. Such conversions must be manually implemented.
-pub trait CastFrom<Dyn: ObjInterface + ?Sized>: ObjInterface {
+pub trait CastFrom<'a, Dyn: ObjInterface<'a> + ?Sized>: ObjInterface<'a> {
     /// Casts the vtable to the super vtable of the same object.
     fn cast_from(obj: ObjMetadata<Dyn>) -> ObjMetadata<Self>;
 }
 
-impl<T, U> CastFrom<U> for T
+impl<'a, T, U> CastFrom<'a, U> for T
 where
-    T: ObjInterface + ?Sized,
-    U: ObjInterface + Unsize<T> + ?Sized,
+    T: ObjInterface<'a> + ?Sized,
+    U: ObjInterface<'a> + Unsize<T> + ?Sized,
     U::Base: IntoInterface<<T::Base as ObjInterfaceBase>::VTable>,
 {
     fn cast_from(obj: ObjMetadata<U>) -> ObjMetadata<T> {
@@ -182,10 +179,10 @@ where
     }
 }
 
-impl<T, U> CastInto<U> for T
+impl<'a, T, U> CastInto<'a, U> for T
 where
-    T: ObjInterface + Unsize<U> + ?Sized,
-    U: CastFrom<T> + ?Sized,
+    T: ObjInterface<'a> + Unsize<U> + ?Sized,
+    U: CastFrom<'a, T> + ?Sized,
 {
     #[inline(always)]
     default fn cast_into(obj: ObjMetadata<Self>) -> ObjMetadata<U> {
@@ -313,13 +310,10 @@ pub struct ObjMetadata<Dyn: ?Sized> {
     phantom: PhantomData<Dyn>,
 }
 
-impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
+impl<'a, Dyn: ObjInterface<'a> + ?Sized> ObjMetadata<Dyn> {
     /// Constructs a new `ObjMetadata` with a given vtable.
     #[inline]
-    pub const fn new(vtable: &'static <Dyn::Base as ObjInterfaceBase>::VTable) -> Self
-    where
-        Dyn: ObjInterface + 'a,
-    {
+    pub const fn new(vtable: &'static <Dyn::Base as ObjInterfaceBase>::VTable) -> Self {
         Self {
             // safety: the safety is guaranteed with the
             // implementation of ObjMetadataCompatible.
@@ -330,10 +324,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns a vtable that is compatible with the current interface.
     #[inline]
-    pub const fn vtable(self) -> &'static <Dyn::Base as ObjInterfaceBase>::VTable
-    where
-        Dyn: ObjInterface + 'a,
-    {
+    pub const fn vtable(self) -> &'static <Dyn::Base as ObjInterfaceBase>::VTable {
         // safety: the safety is guaranteed with the
         // implementation of ObjMetadataCompatible.
         unsafe { &*(self.vtable_ptr as *const _ as *const _) }
@@ -343,8 +334,8 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn super_vtable<T>(self) -> &'a <T::Base as ObjInterfaceBase>::VTable
     where
-        Dyn: CastInto<T> + 'a,
-        T: ObjInterface + ?Sized + 'a,
+        Dyn: CastInto<'a, T>,
+        T: ObjInterface<'a> + ?Sized,
     {
         let s = self.cast_super::<T>();
         s.vtable()
@@ -363,8 +354,8 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn cast_super<U>(self) -> ObjMetadata<U>
     where
-        Dyn: CastInto<U> + 'a,
-        U: ObjInterface + ?Sized + 'a,
+        Dyn: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         CastInto::cast_into(self)
     }
@@ -386,22 +377,18 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
 
     /// Returns if the current or root metadata belongs to a certain interface.
     #[inline]
-    pub fn is_interface<'b, U>(self) -> bool
+    pub fn is_interface<U>(self) -> bool
     where
-        'a: 'b,
-        'b: 'a,
-        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
+        U: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized,
     {
         self.vtable_ptr.is_interface::<U>() || self.vtable_ptr.get_root_head().is_interface::<U>()
     }
 
     /// Returns if the current metadata belongs to a certain interface.
     #[inline]
-    pub fn current_is_interface<'b, U>(self) -> bool
+    pub fn current_is_interface<U>(self) -> bool
     where
-        'a: 'b,
-        'b: 'a,
-        U: DowncastSafeInterface + Unsize<Dyn> + ?Sized + 'b,
+        U: DowncastSafeInterface<'a> + Unsize<Dyn> + ?Sized,
     {
         self.vtable_ptr.is_interface::<U>()
     }
@@ -410,9 +397,7 @@ impl<'a, Dyn: 'a + ?Sized> ObjMetadata<Dyn> {
     #[inline]
     pub fn downcast_interface<'b, U>(self) -> Option<ObjMetadata<U>>
     where
-        'a: 'b,
-        'b: 'a,
-        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
+        U: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized,
     {
         // If the current metadata already belongs to the interface we
         // simply reinterpret it.
@@ -828,20 +813,20 @@ pub fn from_raw_mut<Dyn: ?Sized>(ptr: RawObjMut<Dyn>) -> *mut DynObj<Dyn> {
 
 /// Coerces an object reference to a [`DynObj`] reference.
 #[inline]
-pub fn coerce_obj<T, Dyn>(obj: &T) -> &DynObj<Dyn>
+pub fn coerce_obj<'a, T, Dyn>(obj: &T) -> &DynObj<Dyn>
 where
     T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjInterface + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     unsafe { &*coerce_obj_raw(obj) }
 }
 
 /// Coerces a object pointer to a [`DynObj`] pointer.
 #[inline]
-pub fn coerce_obj_raw<T, Dyn>(obj: *const T) -> *const DynObj<Dyn>
+pub fn coerce_obj_raw<'a, T, Dyn>(obj: *const T) -> *const DynObj<Dyn>
 where
     T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjInterface + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     let vtable = T::fetch_interface();
     let metadata = ObjMetadata::<Dyn>::new(vtable);
@@ -850,20 +835,20 @@ where
 
 /// Coerces a mutable object reference to a [`DynObj`] reference.
 #[inline]
-pub fn coerce_obj_mut<T, Dyn>(obj: &mut T) -> &mut DynObj<Dyn>
+pub fn coerce_obj_mut<'a, T, Dyn>(obj: &mut T) -> &mut DynObj<Dyn>
 where
     T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjInterface + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     unsafe { &mut *coerce_obj_mut_raw(obj) }
 }
 
 /// Coerces a mutable object pointer to a [`DynObj`] pointer.
 #[inline]
-pub fn coerce_obj_mut_raw<T, Dyn>(obj: *mut T) -> *mut DynObj<Dyn>
+pub fn coerce_obj_mut_raw<'a, T, Dyn>(obj: *mut T) -> *mut DynObj<Dyn>
 where
     T: FetchVTable<Dyn::Base> + Unsize<Dyn>,
-    Dyn: ObjInterface + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     let vtable = T::fetch_interface();
     let metadata = ObjMetadata::<Dyn>::new(vtable);
@@ -874,10 +859,10 @@ where
 
 /// Returns whether the contained object is of type `T`.
 #[inline]
-pub fn is<T, Dyn>(obj: *const DynObj<Dyn>) -> bool
+pub fn is<'a, T, Dyn>(obj: *const DynObj<Dyn>) -> bool
 where
     T: Unsize<Dyn> + 'static,
-    Dyn: ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     let metadata = metadata(obj);
     metadata.is::<T>()
@@ -885,10 +870,10 @@ where
 
 /// Returns a pointer to the downcasted object if it is of type `T`.
 #[inline]
-pub fn downcast<T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const T>
+pub fn downcast<'a, T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const T>
 where
     T: Unsize<Dyn> + 'static,
-    Dyn: ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     if is::<T, Dyn>(obj) {
         Some(obj as *const T)
@@ -899,10 +884,10 @@ where
 
 /// Returns a mutable pointer to the downcasted object if it is of type `T`.
 #[inline]
-pub fn downcast_mut<T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut T>
+pub fn downcast_mut<'a, T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut T>
 where
     T: Unsize<Dyn> + 'static,
-    Dyn: ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     if is::<T, Dyn>(obj) {
         Some(obj as *mut T)
@@ -915,8 +900,8 @@ where
 #[inline]
 pub fn cast_super<'a, T, U>(obj: *const DynObj<U>) -> *const DynObj<T>
 where
-    T: ObjInterface + ?Sized + 'a,
-    U: CastInto<T> + ?Sized + 'a,
+    T: ObjInterface<'a> + ?Sized,
+    U: CastInto<'a, T> + ?Sized,
 {
     let metadata = metadata(obj);
     let metadata = metadata.cast_super::<T>();
@@ -927,8 +912,8 @@ where
 #[inline]
 pub fn cast_super_mut<'a, T, U>(obj: *mut DynObj<U>) -> *mut DynObj<T>
 where
-    T: ObjInterface + ?Sized + 'a,
-    U: CastInto<T> + ?Sized + 'a,
+    T: ObjInterface<'a> + ?Sized,
+    U: CastInto<'a, T> + ?Sized,
 {
     let metadata = metadata(obj);
     let metadata = metadata.cast_super::<T>();
@@ -937,12 +922,10 @@ where
 
 /// Returns if the a certain interface is implemented.
 #[inline]
-pub fn is_interface<'a, 'b, T, Dyn>(obj: *const DynObj<Dyn>) -> bool
+pub fn is_interface<'a, T, Dyn>(obj: *const DynObj<Dyn>) -> bool
 where
-    'a: 'b,
-    'b: 'a,
-    T: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
-    Dyn: ?Sized + 'a,
+    T: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     let metadata = metadata(obj);
     metadata.is_interface::<T>()
@@ -950,12 +933,10 @@ where
 
 /// Returns a pointer to the downcasted interface if it is of type `T`.
 #[inline]
-pub fn downcast_interface<'a, 'b, T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const DynObj<T>>
+pub fn downcast_interface<'a, T, Dyn>(obj: *const DynObj<Dyn>) -> Option<*const DynObj<T>>
 where
-    'a: 'b,
-    'b: 'a,
-    T: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
-    Dyn: ?Sized + 'a,
+    T: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     let metadata = metadata(obj);
     metadata
@@ -965,12 +946,10 @@ where
 
 /// Returns a mutable pointer to the downcasted interface if it is of type `T`.
 #[inline]
-pub fn downcast_interface_mut<'a, 'b, T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut DynObj<T>>
+pub fn downcast_interface_mut<'a, T, Dyn>(obj: *mut DynObj<Dyn>) -> Option<*mut DynObj<T>>
 where
-    'a: 'b,
-    'b: 'a,
-    T: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'b> + ?Sized + 'b,
-    Dyn: ?Sized + 'a,
+    T: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized,
+    Dyn: ObjInterface<'a> + ?Sized,
 {
     let metadata = metadata(obj);
     metadata
@@ -995,63 +974,90 @@ pub unsafe fn drop_in_place<Dyn: ?Sized>(obj: *mut DynObj<Dyn>) {
 
 /// Returns the size of the type associated with this vtable.
 #[inline]
-pub fn size_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> usize {
+pub fn size_of_val<'a, Dyn>(obj: *const DynObj<Dyn>) -> usize
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.size_of()
 }
 
 /// Retrieves the alignment of the object.
 #[inline]
-pub fn align_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> usize {
+pub fn align_of_val<'a, Dyn>(obj: *const DynObj<Dyn>) -> usize
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.align_of()
 }
 
 /// Retrieves the layout of the contained type.
 #[inline]
-pub fn layout_of_val<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> Layout {
+pub fn layout_of_val<'a, Dyn>(obj: *const DynObj<Dyn>) -> Layout
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.layout()
 }
 
 /// Returns the id of the type associated with this vtable.
 #[inline]
-pub fn object_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> Option<StableTypeId> {
+pub fn object_id<'a, Dyn>(obj: *const DynObj<Dyn>) -> Option<StableTypeId>
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.object_id()
 }
 
 /// Returns the name of the type associated with this vtable.
 #[inline]
-pub fn object_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
+pub fn object_name<'a, Dyn>(obj: *const DynObj<Dyn>) -> &'static str
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.object_name()
 }
 
 /// Returns the id of the interface implemented with this vtable.
 #[inline]
-pub fn interface_id<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid {
+pub fn interface_id<'a, Dyn>(obj: *const DynObj<Dyn>) -> crate::ptr::Uuid
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.interface_id()
 }
 
 /// Returns the name of the interface implemented with this vtable.
 #[inline]
-pub fn interface_name<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> &'static str {
+pub fn interface_name<'a, Dyn>(obj: *const DynObj<Dyn>) -> &'static str
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.interface_name()
 }
 
 /// Returns the major version number of the interface implemented with this vtable.
 #[inline]
-pub fn interface_version_major<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> u32 {
+pub fn interface_version_major<'a, Dyn>(obj: *const DynObj<Dyn>) -> u32
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.interface_version_major()
 }
 
 /// Returns the minor version number of the interface implemented with this vtable.
 #[inline]
-pub fn interface_version_minor<Dyn: ?Sized>(obj: *const DynObj<Dyn>) -> u32 {
+pub fn interface_version_minor<'a, Dyn>(obj: *const DynObj<Dyn>) -> u32
+where
+    Dyn: ObjInterface<'a> + ?Sized,
+{
     let metadata = metadata(obj);
     metadata.interface_version_minor()
 }
@@ -1310,7 +1316,7 @@ pub struct VTableInterfaceInfo {
 impl VTableInterfaceInfo {
     const HIDDEN_UUID: Uuid = Uuid::from_bytes([0; 16]);
 
-    const fn new<T: ObjInterface + ?Sized>() -> Self {
+    pub(crate) const fn new<'a, T: ObjInterface<'a> + ?Sized>() -> Self {
         Self {
             id: *T::Base::INTERFACE_ID.as_bytes(),
             name: unsafe { crate::str::from_utf8_unchecked(T::Base::INTERFACE_NAME.as_bytes()) },
@@ -1320,9 +1326,9 @@ impl VTableInterfaceInfo {
     }
 
     #[inline]
-    pub(crate) fn is<T>(&self, object_markers: usize) -> bool
+    pub(crate) fn is<'a, T>(&self, object_markers: usize) -> bool
     where
-        T: DowncastSafeInterface + ?Sized,
+        T: DowncastSafeInterface<'a> + ?Sized,
     {
         (&self.id == T::Base::INTERFACE_ID.as_bytes())
             && (T::Base::INTERFACE_ID != Self::HIDDEN_UUID)
@@ -1350,7 +1356,7 @@ impl VTableHead {
     pub const fn new<'a, T, Dyn>() -> Self
     where
         T: Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
+        Dyn: ObjInterface<'a> + ?Sized,
     {
         Self::new_embedded::<'a, T, Dyn>(0)
     }
@@ -1359,7 +1365,7 @@ impl VTableHead {
     pub const fn new_embedded<'a, T, Dyn>(offset: usize) -> Self
     where
         T: Unsize<Dyn> + 'a,
-        Dyn: ObjInterface + ?Sized + 'a,
+        Dyn: ObjInterface<'a> + ?Sized,
     {
         Self {
             object_info: VTableObjectInfo::new::<T>(),
@@ -1384,9 +1390,9 @@ impl VTableHead {
     }
 
     #[inline]
-    pub(crate) fn is_interface<T>(&self) -> bool
+    pub(crate) fn is_interface<'a, T>(&self) -> bool
     where
-        T: DowncastSafeInterface + ?Sized,
+        T: DowncastSafeInterface<'a> + ?Sized,
     {
         self.interface_info.is::<T>(self.object_info.markers)
     }
@@ -1407,7 +1413,7 @@ impl<T: ?Sized> IBase for T {}
 pub const fn __assert_ibase<T: IBase + ?Sized>() {}
 
 /// Helper trait for a [`DynObj<dyn IBase>`].
-pub trait IBaseExt<'a, Dyn: IBase + ?Sized + 'a> {
+pub trait IBaseExt<'a, Dyn: ObjInterface<'a> + IBase + ?Sized> {
     /// Returns if the contained type matches.
     fn is<U>(&self) -> bool
     where
@@ -1426,32 +1432,32 @@ pub trait IBaseExt<'a, Dyn: IBase + ?Sized + 'a> {
     /// Returns the super object.
     fn cast_super<U>(&self) -> &DynObj<U>
     where
-        Dyn: CastInto<U> + 'a,
-        U: ObjInterface + ?Sized + 'a;
+        Dyn: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized;
 
     /// Returns the mutable super object.
     fn cast_super_mut<U>(&mut self) -> &mut DynObj<U>
     where
-        Dyn: CastInto<U> + 'a,
-        U: ObjInterface + ?Sized + 'a;
+        Dyn: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized;
 
     /// Returns if the a certain interface is implemented.
     fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized + 'a;
+        U: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized;
 
     /// Returns the downcasted interface if it is of type `U`.
     fn downcast_interface<U>(&self) -> Option<&DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized + 'a;
+        U: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized;
 
     /// Returns the mutable downcasted interface if it is of type `U`.
     fn downcast_interface_mut<U>(&mut self) -> Option<&mut DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized + 'a;
+        U: DowncastSafeInterface<'a> + Unsize<Dyn> + Unsize<dyn IBase + 'a> + ?Sized;
 }
 
-impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
+impl<'a, T: ObjInterface<'a> + ?Sized> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn is<U>(&self) -> bool
     where
@@ -1481,8 +1487,8 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn cast_super<U>(&self) -> &DynObj<U>
     where
-        T: CastInto<U> + 'a,
-        U: ObjInterface + ?Sized + 'a,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         // safety: the pointer stems from the reference so it is always safe
         unsafe { &*cast_super::<U, _>(self) }
@@ -1491,8 +1497,8 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn cast_super_mut<U>(&mut self) -> &mut DynObj<U>
     where
-        T: CastInto<U> + 'a,
-        U: ObjInterface + ?Sized + 'a,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         // safety: the pointer stems from the reference so it is always safe
         unsafe { &mut *cast_super_mut::<U, _>(self) }
@@ -1501,7 +1507,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn is_interface<U>(&self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized,
     {
         is_interface::<U, _>(self)
     }
@@ -1509,7 +1515,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast_interface<U>(&self) -> Option<&DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast_interface::<U, _>(self).map(|u| unsafe { &*u })
@@ -1518,7 +1524,7 @@ impl<'a, T: ?Sized + 'a> IBaseExt<'a, T> for DynObj<T> {
     #[inline]
     fn downcast_interface_mut<U>(&mut self) -> Option<&mut DynObj<U>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn IBase + 'a> + ?Sized,
     {
         // safety: the pointer stems from the reference so it is always safe
         downcast_interface_mut::<U, _>(self).map(|u| unsafe { &mut *u })

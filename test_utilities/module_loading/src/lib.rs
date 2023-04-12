@@ -105,7 +105,7 @@ impl ModuleDatabase {
         })
     }
 
-    pub fn interface_path<I: FimoInterface + ?Sized>(&self) -> Option<&Path> {
+    pub fn interface_path<'a, I: FimoInterface<'a> + ?Sized>(&self) -> Option<&Path> {
         self.paths.get(&I::new_descriptor()).map(|p| p.as_path())
     }
 
@@ -117,7 +117,11 @@ impl ModuleDatabase {
         &self,
     ) -> Result<InterfaceHandle<'_, DynObj<I>, DynObj<dyn IModuleRegistry + '_>>, Error>
     where
-        I: CastInto<dyn IModuleInterface> + Unsize<dyn IBase> + FimoInterface + ?Sized + 'static,
+        I: CastInto<'static, dyn IModuleInterface>
+            + Unsize<dyn IBase>
+            + FimoInterface<'static>
+            + ?Sized
+            + 'static,
     {
         if TypeId::of::<I>() == TypeId::of::<dyn IFimoCore>() {
             panic!("Can not create core")
@@ -151,7 +155,11 @@ impl ModuleDatabase {
 
     pub fn new_service<S>(&self) -> Result<&'static DynObj<S>, Error>
     where
-        S: CastInto<dyn IModuleInterface> + Unsize<dyn IBase> + FimoInterface + ?Sized + 'static,
+        S: CastInto<'static, dyn IModuleInterface>
+            + Unsize<dyn IBase>
+            + FimoInterface<'static>
+            + ?Sized
+            + 'static,
     {
         if TypeId::of::<S>() == TypeId::of::<dyn IFimoCore>() {
             panic!("Can not create core")

@@ -13,6 +13,7 @@ pub mod settings;
 
 use crate::modules::IModuleRegistry;
 use crate::settings::ISettingsRegistry;
+use fimo_module::context::IInterface;
 use fimo_module::fimo_ffi::{interface, DynObj};
 use fimo_module::{FimoInterface, IModuleInterface, ReleaseType, Version};
 
@@ -29,7 +30,20 @@ interface! {
     }
 }
 
-impl FimoInterface for dyn IFimoCore {
+interface! {
+    #![interface_cfg(uuid = "eaa46386-ff47-405f-beaf-488e5eeaa004")]
+
+    /// Type-erased `fimo-core` interface.
+    pub frozen interface _IFimoCore: IInterface @ version("0.0") {
+        /// Returns the contained [`IModuleRegistry`].
+        fn modules(&self) -> &DynObj<dyn IModuleRegistry + '_>;
+
+        /// Returns the contained [`ISettingsRegistry`].
+        fn settings(&self) -> &DynObj<dyn ISettingsRegistry + '_>;
+    }
+}
+
+impl<'a> FimoInterface<'a> for dyn IFimoCore + 'a {
     const NAME: &'static str = "fimo::interfaces::core::fimo_core";
     const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
     const EXTENSIONS: &'static [&'static str] = &[];

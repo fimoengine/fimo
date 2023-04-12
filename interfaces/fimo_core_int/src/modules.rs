@@ -87,7 +87,7 @@ pub trait IModuleRegistryExt: IModuleRegistry {
         loader: &'static DynObj<T>,
     ) -> fimo_module::Result<LoaderHandle<'_, DynObj<T>, Self>>
     where
-        T: CastInto<dyn IModuleLoader>,
+        T: CastInto<'static, dyn IModuleLoader>,
         DynObj<T>: IModuleLoader,
     {
         self.enter_mut(move |inner| {
@@ -163,7 +163,7 @@ pub trait IModuleRegistryExt: IModuleRegistry {
     /// Registers a new service with the `ModuleRegistry`.
     fn register_service<T: ?Sized>(&self, service: &'static DynObj<T>) -> fimo_module::Result<()>
     where
-        T: CastInto<dyn IModuleInterface>,
+        T: CastInto<'static, dyn IModuleInterface>,
         DynObj<T>: IModuleInterface,
     {
         self.enter_mut(move |inner| {
@@ -179,7 +179,7 @@ pub trait IModuleRegistryExt: IModuleRegistry {
         i: ObjArc<DynObj<T>>,
     ) -> fimo_module::Result<InterfaceHandle<'_, DynObj<T>, Self>>
     where
-        T: CastInto<dyn IModuleInterface>,
+        T: CastInto<'static, dyn IModuleInterface>,
         DynObj<T>: IModuleInterface,
     {
         self.enter_mut(move |inner| {
