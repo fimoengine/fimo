@@ -35,7 +35,7 @@ interface! {
     }
 }
 
-impl<'a> FimoInterface for dyn IFimoLogging + 'a {
+impl<'a> FimoInterface<'a> for dyn IFimoLogging + 'a {
     const NAME: &'static str = "fimo::interfaces::core::fimo_logging";
 
     const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);

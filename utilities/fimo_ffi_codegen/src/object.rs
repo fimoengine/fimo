@@ -134,9 +134,9 @@ pub fn object_impl(input: TokenStream) -> TokenStream {
             impl #generics ::fimo_ffi::ptr::FetchVTable<dyn #interface + 'inner> for #ty
             where #ty: 'inner
             {
-                fn fetch_interface() -> &'static <<(dyn #interface + 'inner) as ::fimo_ffi::ptr::ObjInterface>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable {
-                    static VTABLE: <<(dyn #interface) as ::fimo_ffi::ptr::ObjInterface>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable
-                        = <<(dyn #interface) as ::fimo_ffi::ptr::ObjInterface>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable::new_for::<#elided_ty>();
+                fn fetch_interface() -> &'static <<(dyn #interface + 'inner) as ::fimo_ffi::ptr::ObjInterface<'inner>>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable {
+                    static VTABLE: <<(dyn #interface) as ::fimo_ffi::ptr::ObjInterface<'_>>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable
+                        = <<(dyn #interface) as ::fimo_ffi::ptr::ObjInterface<'_>>::Base as ::fimo_ffi::ptr::ObjInterfaceBase>::VTable::new_for::<#elided_ty>();
                     &VTABLE
                 }
             }

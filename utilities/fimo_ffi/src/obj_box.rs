@@ -214,13 +214,12 @@ impl<T, A: Allocator> ObjBox<T, A> {
     }
 }
 
-impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
+impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjBox<DynObj<T>, A> {
     /// Coerces a `ObjBox<U, A>` to an `ObjBox<DynObj<T>, A>`.
     #[inline]
     pub fn coerce_obj<U>(b: ObjBox<U, A>) -> Self
     where
         U: FetchVTable<T::Base> + Unsize<T> + 'a,
-        T: ObjInterface,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         let obj = crate::ptr::coerce_obj_mut_raw(ptr);
@@ -255,8 +254,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn cast_super<U>(b: Self) -> ObjBox<DynObj<U>, A>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized + 'a,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         let ptr = crate::ptr::cast_super_mut::<U, _>(ptr);
@@ -267,7 +266,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn is_interface<U>(b: &Self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         crate::ptr::is_interface::<U, _>(&**b)
     }
@@ -276,7 +275,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjBox<DynObj<T>, A> {
     #[inline]
     pub fn downcast_interface<U>(b: Self) -> Option<ObjBox<DynObj<U>, A>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let (ptr, alloc) = ObjBox::into_raw_parts(b);
         if let Some(ptr) = crate::ptr::downcast_interface_mut(ptr) {
@@ -724,7 +723,7 @@ impl<T: ?Sized> ConstructLayoutRaw for T {
 
 // `DynObj<T>` and it's wrappers do not work with the current type-system.
 // As a workaround we manually retrieve to layout of the object.
-impl<T: ?Sized> ConstructLayoutRaw for DynObj<T> {
+impl<'a, T: ObjInterface<'a> + ?Sized> ConstructLayoutRaw for DynObj<T> {
     #[inline]
     unsafe fn size_of_val_raw(ptr: *const Self) -> usize {
         crate::ptr::size_of_val(ptr)

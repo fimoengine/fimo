@@ -239,7 +239,10 @@ impl Debug for InterfaceBuilder {
 
 /// Helper trait for constructing an interface.
 pub trait Interface:
-    IInterface + FetchVTable<<dyn IInterface as ObjInterface>::Base> + Unsize<dyn IInterface> + 'static
+    IInterface
+    + FetchVTable<<dyn IInterface as ObjInterface<'static>>::Base>
+    + Unsize<dyn IInterface>
+    + 'static
 {
     /// Name of the interface.
     const NAME: &'static str;

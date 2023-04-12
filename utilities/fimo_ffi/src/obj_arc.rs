@@ -225,7 +225,7 @@ impl<T, A: Allocator> ObjArc<T, A> {
     }
 }
 
-impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
+impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjArc<DynObj<T>, A> {
     /// Coerces a `ObjArc<U, A>` to an `ObjArc<DynObj<T>, A>`.
     ///
     /// # Examples
@@ -268,7 +268,6 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     pub fn coerce_obj<U>(a: ObjArc<U, A>) -> Self
     where
         U: FetchVTable<T::Base> + Unsize<T> + 'a,
-        T: ObjInterface,
     {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let obj = crate::ptr::coerce_obj_raw(ptr);
@@ -372,8 +371,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn cast_super<U>(a: Self) -> ObjArc<DynObj<U>, A>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized + 'a,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         let ptr = crate::ptr::cast_super::<U, _>(ptr);
@@ -413,7 +412,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn is_interface<U>(a: &Self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         crate::ptr::is_interface::<U, _>(&**a)
     }
@@ -450,7 +449,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjArc<DynObj<T>, A> {
     #[inline]
     pub fn downcast_interface<U>(a: Self) -> Option<ObjArc<DynObj<U>, A>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let (ptr, alloc) = ObjArc::into_raw_parts(a);
         if let Some(ptr) = crate::ptr::downcast_interface(ptr) {
@@ -1445,7 +1444,7 @@ impl<T, A: Allocator> ObjWeak<T, A> {
     }
 }
 
-impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
+impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// Coerces a `ObjArc<U, A>` to an `ObjArc<DynObj<T>, A>`.
     ///
     /// # Examples
@@ -1490,7 +1489,6 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     pub fn coerce_obj<U>(w: ObjWeak<U, A>) -> Self
     where
         U: FetchVTable<T::Base> + Unsize<T> + 'a,
-        T: ObjInterface,
     {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         let obj = crate::ptr::coerce_obj_raw(ptr);
@@ -1595,8 +1593,8 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn cast_super<U>(w: Self) -> ObjWeak<DynObj<U>, A>
     where
-        T: CastInto<U>,
-        U: ObjInterface + ?Sized + 'a,
+        T: CastInto<'a, U>,
+        U: ObjInterface<'a> + ?Sized,
     {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         let ptr = crate::ptr::cast_super::<U, _>(ptr);
@@ -1637,7 +1635,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn is_interface<U>(w: &Self) -> bool
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         crate::ptr::is_interface::<U, _>(w.as_ptr())
     }
@@ -1676,7 +1674,7 @@ impl<'a, T: ?Sized + 'a, A: Allocator> ObjWeak<DynObj<T>, A> {
     #[inline]
     pub fn downcast_interface<U>(w: Self) -> Option<ObjWeak<DynObj<U>, A>>
     where
-        U: DowncastSafeInterface + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized + 'a,
+        U: DowncastSafeInterface<'a> + Unsize<T> + Unsize<dyn crate::ptr::IBase + 'a> + ?Sized,
     {
         let (ptr, alloc) = ObjWeak::into_raw_parts(w);
         if let Some(ptr) = crate::ptr::downcast_interface(ptr) {
