@@ -25,7 +25,6 @@ fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", op
 rand = "0.8.5"
 pretty_env_logger = "0.4.0"
 fimo_logging = { path = "../fimo_logging" }
-module_loading = { path = "../../test_utilities/module_loading" }
 
 [features]
 default = []

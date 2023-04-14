@@ -11,14 +11,8 @@
 
 use fimo_ffi::marshal::CTypeBridge;
 
-mod interfaces;
-
 pub mod context;
-pub mod loader;
 pub mod module;
-pub mod module_;
-
-pub use interfaces::*;
 
 pub use fimo_ffi;
 pub use fimo_ffi::error::{self, Error, ErrorKind};
@@ -241,3 +235,67 @@ pub type PathChar = u8;
 /// Type of a path character.
 #[cfg(windows)]
 pub type PathChar = u16;
+
+/// Helper trait for building a [`InterfaceQuery`].
+pub trait Queryable {
+    /// Name of the interface.
+    const NAME: &'static str;
+
+    /// Currently defined version of the interface.
+    const CURRENT_VERSION: Version;
+
+    /// Extensions available to the interface.
+    const EXTENSIONS: &'static [(Option<Version>, &'static str)];
+}
+
+/// Helper type for building an [`InterfaceQuery`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QueryBuilder;
+
+impl QueryBuilder {
+    /// Name of the [`Queryable`].
+    pub const fn name<Q: Queryable + ?Sized>(&self) -> &'static str {
+        Q::NAME
+    }
+
+    /// Current defined version of the [`Queryable`].
+    pub const fn current_version<Q: Queryable + ?Sized>(&self) -> Version {
+        Q::CURRENT_VERSION
+    }
+
+    /// Construct an [`InterfaceQuery`] that is compatible with the current version.
+    pub fn query_current<Q: Queryable + ?Sized>(&self) -> InterfaceQuery {
+        self.query_version::<Q>(VersionQuery::Minimum(Q::CURRENT_VERSION))
+    }
+
+    /// Construct an [`InterfaceQuery`] that only matches the current version.
+    pub fn query_current_exact<Q: Queryable + ?Sized>(&self) -> InterfaceQuery {
+        self.query_version::<Q>(VersionQuery::Exact(Q::CURRENT_VERSION))
+    }
+
+    /// Constructs an [`InterfaceQuery`] that matches a [`VersionQuery`].
+    pub fn query_version<Q: Queryable + ?Sized>(&self, version: VersionQuery) -> InterfaceQuery {
+        let extensions_version = match version {
+            VersionQuery::Exact(x) | VersionQuery::Minimum(x) => {
+                assert!(x <= Q::CURRENT_VERSION);
+                x
+            }
+            VersionQuery::Range { min, max } => {
+                assert!(min.is_compatible(&max));
+                assert!(max <= Q::CURRENT_VERSION);
+                min
+            }
+        };
+
+        let mut query = InterfaceQuery::new(Q::NAME, version);
+        for (ext_version, ext_name) in Q::EXTENSIONS {
+            if let Some(ext_version) = ext_version {
+                if ext_version.is_compatible(&extensions_version) {
+                    query = query.with(ext_name);
+                }
+            }
+        }
+
+        query
+    }
+}

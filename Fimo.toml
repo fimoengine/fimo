@@ -1,7 +1,0 @@
-[workspace]
-name = "fimo"
-modules = ["modules/*"]
-
-[test]
-runner = "cargo"
-include = ["interfaces/*", "utilities/*"]

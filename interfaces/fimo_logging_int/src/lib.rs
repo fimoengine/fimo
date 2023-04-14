@@ -8,8 +8,8 @@
 #![feature(negative_impls)]
 #![feature(unsize)]
 
-use fimo_ffi::{interface, DynObj, ObjBox, Object, ReleaseType, Version};
-use fimo_module::{FimoInterface, IModuleInterface};
+use fimo_ffi::{interface, DynObj, ObjBox, Object};
+use fimo_module::{context::IInterface, Queryable};
 use std::{
     fmt::{Arguments, Display},
     io::Write,
@@ -25,22 +25,20 @@ const UNINITIALIZED: usize = 0;
 const INITIALIZING: usize = 1;
 const INITIALIZED: usize = 2;
 
+impl Queryable for dyn IFimoLogging + '_ {
+    const NAME: &'static str = "fimo::interfaces::logging";
+    const CURRENT_VERSION: fimo_ffi::Version = fimo_ffi::Version::new_short(0, 1, 0);
+    const EXTENSIONS: &'static [(Option<fimo_ffi::Version>, &'static str)] = &[];
+}
+
 interface! {
     #![interface_cfg(uuid = "6a146db2-e2b0-4a03-878a-242475cb6650")]
 
     /// The logging interface.
-    pub frozen interface IFimoLogging: IModuleInterface @ frozen version("0.0") {
+    pub frozen interface IFimoLogging: IInterface @ version("0.0") {
         /// Fetches a reference to the logger.
         fn logger(&self) -> &DynObj<dyn ILogger>;
     }
-}
-
-impl<'a> FimoInterface<'a> for dyn IFimoLogging + 'a {
-    const NAME: &'static str = "fimo::interfaces::core::fimo_logging";
-
-    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
-
-    const EXTENSIONS: &'static [&'static str] = &[];
 }
 
 interface! {

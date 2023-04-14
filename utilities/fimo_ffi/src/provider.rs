@@ -381,7 +381,7 @@ mod private {
     /// assert!(request_value::<ObjArc<DynObj<dyn IC + Sync + Unpin>>>(&p).is_none());
     /// assert!(request_value::<ObjArc<DynObj<dyn IC + Send + Sync + Unpin>>>(&p).is_none());
     /// ```
-    pub fn request_value<'a, T>(provider: &'a impl IProvider) -> Option<T>
+    pub fn request_value<'a, T>(provider: &'a (impl IProvider + ?Sized)) -> Option<T>
     where
         T: CTypeBridge + 'static,
     {
@@ -471,7 +471,7 @@ mod private {
     /// assert!(request_ref::<DynObj<dyn IC + Sync + Unpin>>(&p).is_none());
     /// assert!(request_ref::<DynObj<dyn IC + Send + Sync + Unpin>>(&p).is_none());
     /// ```
-    pub fn request_ref<'a, T>(provider: &'a impl IProvider) -> Option<&'a T>
+    pub fn request_ref<'a, T>(provider: &'a (impl IProvider + ?Sized)) -> Option<&'a T>
     where
         &'a T: CTypeBridge,
         T: ?Sized + 'static,
@@ -495,14 +495,14 @@ mod private {
     /// # Example
     ///
     /// ```
-    /// use std::marker::PhantomData;
-    /// use fimo_ffi::ptr::{IBase, coerce_obj};
-    /// use fimo_ffi::provider::{IProvider, Demand, request_obj};
+    /// use fimo_ffi::provider::{request_obj, Demand, IProvider};
+    /// use fimo_ffi::ptr::{coerce_obj, IBase};
     /// use fimo_ffi::{interface, Object};
+    /// use std::marker::PhantomData;
     ///
     /// #[derive(Object)]
     /// #[interfaces(IA)]
-    /// struct A<'a>(PhantomData<&'a ()>);
+    /// struct A<'a>(&'a usize);
     ///
     /// #[derive(Object)]
     /// #[interfaces(IB)]
@@ -522,41 +522,46 @@ mod private {
     /// }
     ///
     /// struct Provider<'a>(A<'a>, B<'a>);
-    ///
     /// impl<'x> IProvider for Provider<'x> {
     ///     fn provide<'a>(&'a self, demand: &mut Demand<'a>) {
-    ///         demand.provide_obj::<dyn IA + Send>(coerce_obj(&self.0))
-    ///               .provide_obj::<dyn IB + Unpin>(coerce_obj(&self.1));
+    ///         demand
+    ///             .provide_obj::<dyn IA + Send>(coerce_obj(&self.0))
+    ///             .provide_obj::<dyn IB + Unpin>(coerce_obj(&self.1));
     ///     }
     /// }
     ///
-    /// let p = Provider(A(PhantomData), B(PhantomData, PhantomData));
+    /// fn inner<'a>(x: &'a usize) {
+    ///     let p: Provider<'a> = Provider(A(x), B(PhantomData, PhantomData));
     ///
-    /// // Provider provides a `&DynObj<dyn IA + Send>`,
-    /// // but as A is `Send + Sync + Unpin`, the provider
-    /// // matches with all.
-    /// assert!(request_obj::<dyn IA>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Send>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Sync>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Unpin>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Send + Sync>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Send + Unpin>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Sync + Unpin>(&p).is_some());
-    /// assert!(request_obj::<dyn IA + Send + Sync + Unpin>(&p).is_some());
+    ///     // Provider provides a `&DynObj<dyn IA + Send>`,
+    ///     // but as A is `Send + Sync + Unpin`, the provider
+    ///     // matches with all.
+    ///     assert!(request_obj::<dyn IA>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Send>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Sync>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Unpin>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Send + Sync>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Send + Unpin>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Sync + Unpin>(&p).is_some());
+    ///     assert!(request_obj::<dyn IA + Send + Sync + Unpin>(&p).is_some());
     ///
-    /// // Provider provides a `&DynObj<dyn IB + Unpin>`,
-    /// // but as Object is `!Send + !Sync`, the provider
-    /// // matches only with `dyn IB` and `dyn IB + Unpin`.
-    /// assert!(request_obj::<dyn IB>(&p).is_some());
-    /// assert!(request_obj::<dyn IB + Send>(&p).is_none());
-    /// assert!(request_obj::<dyn IB + Sync>(&p).is_none());
-    /// assert!(request_obj::<dyn IB + Unpin>(&p).is_some());
-    /// assert!(request_obj::<dyn IB + Send + Sync>(&p).is_none());
-    /// assert!(request_obj::<dyn IB + Send + Unpin>(&p).is_none());
-    /// assert!(request_obj::<dyn IB + Sync + Unpin>(&p).is_none());
-    /// assert!(request_obj::<dyn IB + Send + Sync + Unpin>(&p).is_none());
+    ///     // Provider provides a `&DynObj<dyn IB + Unpin>`,
+    ///     // but as Object is `!Send + !Sync`, the provider
+    ///     // matches only with `dyn IB` and `dyn IB + Unpin`.
+    ///     assert!(request_obj::<dyn IB>(&p).is_some());
+    ///     assert!(request_obj::<dyn IB + Send>(&p).is_none());
+    ///     assert!(request_obj::<dyn IB + Sync>(&p).is_none());
+    ///     assert!(request_obj::<dyn IB + Unpin>(&p).is_some());
+    ///     assert!(request_obj::<dyn IB + Send + Sync>(&p).is_none());
+    ///     assert!(request_obj::<dyn IB + Send + Unpin>(&p).is_none());
+    ///     assert!(request_obj::<dyn IB + Sync + Unpin>(&p).is_none());
+    ///     assert!(request_obj::<dyn IB + Send + Sync + Unpin>(&p).is_none());
+    /// }
+    ///
+    /// let x = Box::new(5);
+    /// inner(&x)
     /// ```
-    pub fn request_obj<'a, T>(provider: &'a impl IProvider) -> Option<&'a DynObj<T>>
+    pub fn request_obj<'a, T>(provider: &'a (impl IProvider + ?Sized)) -> Option<&'a DynObj<T>>
     where
         T: DowncastSafeInterface<'a> + ?Sized,
     {
@@ -572,74 +577,5 @@ mod private {
         provider.provide(demand);
 
         unsafe { Option::demarshal(result.assume_init()) }
-    }
-
-    #[test]
-    fn test_request_obj() {
-        use fimo_ffi::provider::{request_obj, Demand, IProvider};
-        use fimo_ffi::ptr::{coerce_obj, IBase};
-        use fimo_ffi::{interface, Object};
-        use std::marker::PhantomData;
-
-        #[derive(Object)]
-        #[interfaces(IA)]
-        struct A<'a>(&'a usize);
-
-        #[derive(Object)]
-        #[interfaces(IB)]
-        struct B<'a>(PhantomData<&'a ()>, PhantomData<*const ()>);
-
-        impl<'a> IA for A<'a> {}
-        impl<'a> IB for B<'a> {}
-
-        interface! {
-            #![interface_cfg(uuid = "18d6157b-7cb5-4a55-ae66-05e985921db1")]
-            interface IA: marker IBase {}
-        }
-
-        interface! {
-            #![interface_cfg(uuid = "95fab0a7-c8a6-44ae-8657-9e048bac2900")]
-            interface IB: marker IBase {}
-        }
-
-        struct Provider<'a>(A<'a>, B<'a>);
-        impl<'x> IProvider for Provider<'x> {
-            fn provide<'a>(&'a self, demand: &mut Demand<'a>) {
-                demand
-                    .provide_obj::<dyn IA + Send>(coerce_obj(&self.0))
-                    .provide_obj::<dyn IB + Unpin>(coerce_obj(&self.1));
-            }
-        }
-
-        fn inner<'a>(x: &'a usize) {
-            let p: Provider<'a> = Provider(A(x), B(PhantomData, PhantomData));
-
-            // Provider provides a `&DynObj<dyn IA + Send>`,
-            // but as A is `Send + Sync + Unpin`, the provider
-            // matches with all.
-            assert!(request_obj::<dyn IA>(&p).is_some());
-            assert!(request_obj::<dyn IA + Send>(&p).is_some());
-            assert!(request_obj::<dyn IA + Sync>(&p).is_some());
-            assert!(request_obj::<dyn IA + Unpin>(&p).is_some());
-            assert!(request_obj::<dyn IA + Send + Sync>(&p).is_some());
-            assert!(request_obj::<dyn IA + Send + Unpin>(&p).is_some());
-            assert!(request_obj::<dyn IA + Sync + Unpin>(&p).is_some());
-            assert!(request_obj::<dyn IA + Send + Sync + Unpin>(&p).is_some());
-
-            // Provider provides a `&DynObj<dyn IB + Unpin>`,
-            // but as Object is `!Send + !Sync`, the provider
-            // matches only with `dyn IB` and `dyn IB + Unpin`.
-            assert!(request_obj::<dyn IB>(&p).is_some());
-            assert!(request_obj::<dyn IB + Send>(&p).is_none());
-            assert!(request_obj::<dyn IB + Sync>(&p).is_none());
-            assert!(request_obj::<dyn IB + Unpin>(&p).is_some());
-            assert!(request_obj::<dyn IB + Send + Sync>(&p).is_none());
-            assert!(request_obj::<dyn IB + Send + Unpin>(&p).is_none());
-            assert!(request_obj::<dyn IB + Sync + Unpin>(&p).is_none());
-            assert!(request_obj::<dyn IB + Send + Sync + Unpin>(&p).is_none());
-        }
-
-        let x = Box::new(5);
-        inner(&x)
     }
 }

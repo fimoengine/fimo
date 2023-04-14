@@ -1,120 +1,124 @@
 use crate::{Builder, Runtime};
 use fimo_core_int::settings::{ISettingsRegistryExt, SettingsItem, SettingsPath};
 use fimo_core_int::IFimoCore;
-use fimo_ffi::ptr::IBaseExt;
+use fimo_ffi::provider::{request_obj, IProvider};
 use fimo_ffi::type_id::StableTypeId;
-use fimo_ffi::{DynObj, ObjArc, Object};
-use fimo_module::{
-    Error, ErrorKind, FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader,
-    ModuleInfo,
-};
+use fimo_ffi::{DynObj, ObjBox, Object, Version};
+use fimo_module::context::{IInterface, IInterfaceContext};
+use fimo_module::module::{Interface, ModuleBuilderBuilder};
+use fimo_module::{Error, ErrorKind, QueryBuilder, VersionQuery};
 use fimo_tasks_int::IFimoTasks;
 use std::fmt::{Debug, Formatter};
 use std::path::Path;
 use std::sync::Arc;
 
-const MODULE_NAME: &str = "fimo_tasks";
-
 /// Implementation of the `fimo-tasks` interface.
 #[derive(Object, StableTypeId)]
 #[name("TasksInterface")]
 #[uuid("4d7a5ec0-3acd-42c5-9f18-a4694961985a")]
-#[interfaces(IModuleInterface, IFimoTasks)]
-pub struct TasksInterface {
+#[interfaces(IInterface, IFimoTasks)]
+pub struct TasksInterface<'a> {
     runtime: Arc<Runtime>,
-    parent: ObjArc<DynObj<dyn IModuleInstance>>,
+    context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    _core: &'a DynObj<dyn IFimoCore + 'a>,
 }
 
-impl Debug for TasksInterface {
+impl Debug for TasksInterface<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(FimoActixInterface)")
+        f.debug_struct("TasksInterface")
+            .field("runtime", &self.runtime)
+            .field("context", &(self.context as *const _))
+            .field("_core", &(self._core as *const _))
+            .finish()
     }
 }
 
-impl IModuleInterface for TasksInterface {
-    fn as_inner(&self) -> &DynObj<dyn fimo_ffi::ptr::IBase + Send + Sync> {
-        let inner = fimo_ffi::ptr::coerce_obj::<_, dyn IFimoTasks + Send + Sync>(self);
-        inner.cast_super()
+impl IProvider for TasksInterface<'_> {
+    fn provide<'a>(&'a self, demand: &mut fimo_ffi::provider::Demand<'a>) {
+        demand.provide_obj::<dyn IFimoTasks + 'a>(fimo_ffi::ptr::coerce_obj(self));
     }
+}
 
+impl IInterface for TasksInterface<'_> {
     fn name(&self) -> &str {
-        <dyn IFimoTasks>::NAME
+        Self::NAME
     }
 
-    fn version(&self) -> fimo_ffi::Version {
-        <dyn IFimoTasks>::VERSION
+    fn version(&self) -> Version {
+        Self::VERSION
     }
 
-    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
-        <dyn IFimoTasks>::EXTENSIONS
-            .iter()
-            .map(|&s| s.into())
-            .collect()
-    }
-
-    fn extension(&self, _name: &str) -> Option<&DynObj<dyn fimo_ffi::ptr::IBase + Send + Sync>> {
-        None
-    }
-
-    fn instance(&self) -> ObjArc<DynObj<dyn IModuleInstance>> {
-        self.parent.clone()
+    fn extensions(&self) -> &[fimo_ffi::String] {
+        &[]
     }
 }
 
-impl IFimoTasks for TasksInterface {
+impl IFimoTasks for TasksInterface<'_> {
     fn runtime(&self) -> &DynObj<dyn fimo_tasks_int::runtime::IRuntime> {
         fimo_ffi::ptr::coerce_obj(&*self.runtime)
     }
 }
 
-fn module_info() -> ModuleInfo {
-    ModuleInfo {
-        name: MODULE_NAME.into(),
-        version: <dyn IFimoTasks>::VERSION.into(),
+const REQUIRED_CORE_VERSION: VersionQuery = VersionQuery::Minimum(Version::new_short(0, 1, 0));
+
+impl Interface for TasksInterface<'_> {
+    type Result<'a> = TasksInterface<'a>;
+    const NAME: &'static str = QueryBuilder.name::<dyn IFimoTasks>();
+    const VERSION: Version = Version::new_short(0, 1, 0);
+
+    fn extensions(_feature: Option<&str>) -> Vec<String> {
+        vec![]
+    }
+
+    fn dependencies(feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        if feature.is_none() {
+            vec![QueryBuilder.query_version::<dyn IFimoCore>(REQUIRED_CORE_VERSION)]
+        } else {
+            vec![]
+        }
+    }
+
+    fn optional_dependencies(_feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        vec![]
+    }
+
+    fn construct<'a>(
+        _module_root: &Path,
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> fimo_module::Result<ObjBox<Self::Result<'a>>> {
+        let core = context
+            .get_interface(QueryBuilder.query_version::<dyn IFimoCore>(REQUIRED_CORE_VERSION))?;
+        let core = request_obj::<dyn IFimoCore + 'a>(core)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "The core interface was not found"))?;
+
+        let settings_path = SettingsPath::new("fimo-tasks").unwrap();
+        let settings = core
+            .settings()
+            .read_or(settings_path, ModuleSettings::default())
+            .map_err(|_| Error::from(ErrorKind::FailedPrecondition))?;
+
+        let runtime = Builder::new()
+            .stack_size(settings.stack_size)
+            .allocated_tasks(settings.pre_allocated_stacks)
+            .free_threshold(settings.task_free_threshold)
+            .workers(settings.workers)
+            .build()?;
+
+        Ok(ObjBox::new(TasksInterface {
+            runtime,
+            context,
+            _core: core,
+        }))
     }
 }
 
-fimo_module::rust_module!(load_module);
-
-fn load_module(
-    loader: &'static DynObj<dyn IModuleLoader>,
-    path: &Path,
-) -> fimo_module::Result<ObjArc<DynObj<dyn IModule>>> {
-    let module = fimo_module::module::Module::new(module_info(), path, loader, |module| {
-        let builder = fimo_module::module::InstanceBuilder::new(module);
-
-        let desc = <dyn IFimoTasks>::new_descriptor();
-        let deps = &[<dyn IFimoCore>::new_descriptor()];
-        let f = |instance, mut deps: Vec<_>| {
-            // we only have one dependency so it must reside as the first element of the vec.
-            let core = fimo_module::try_downcast_arc::<dyn IFimoCore, _>(deps.remove(0))?;
-
-            let settings_path = SettingsPath::new("fimo-tasks").unwrap();
-            let settings = core
-                .settings()
-                .read_or(settings_path, ModuleSettings::default())
-                .map_err(|_| Error::from(ErrorKind::FailedPrecondition))?;
-
-            let runtime = Builder::new()
-                .stack_size(settings.stack_size)
-                .allocated_tasks(settings.pre_allocated_stacks)
-                .free_threshold(settings.task_free_threshold)
-                .workers(settings.workers)
-                .build()?;
-
-            let interface = ObjArc::new(TasksInterface {
-                runtime,
-                parent: ObjArc::coerce_obj(instance),
-            });
-
-            Ok(ObjArc::coerce_obj(interface))
-        };
-
-        let instance = builder.interface(desc, deps, f).build();
-        Ok(instance)
-    });
-    Ok(ObjArc::coerce_obj(module))
-}
+fimo_module::module!(|path, features| {
+    Ok(
+        ModuleBuilderBuilder::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+            .with_interface::<TasksInterface<'_>>()
+            .build(path, features),
+    )
+});
 
 #[derive(Copy, Clone)]
 struct ModuleSettings {
