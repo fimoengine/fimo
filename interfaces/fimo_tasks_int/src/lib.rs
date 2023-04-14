@@ -16,7 +16,8 @@
 use crate::raw::TaskHandle;
 use crate::runtime::{IRuntime, IRuntimeExt};
 use fimo_ffi::{interface, DynObj};
-use fimo_module::{FimoInterface, IModuleInterface, ReleaseType, Version};
+use fimo_module::context::IInterface;
+use fimo_module::Queryable;
 
 pub mod sync;
 
@@ -24,24 +25,22 @@ pub mod raw;
 pub mod runtime;
 pub mod task;
 
+impl Queryable for dyn IFimoTasks + '_ {
+    const NAME: &'static str = "fimo::interfaces::tasks";
+    const CURRENT_VERSION: fimo_ffi::Version = fimo_ffi::Version::new_short(0, 1, 0);
+    const EXTENSIONS: &'static [(Option<fimo_ffi::Version>, &'static str)] = &[];
+}
+
 interface! {
     #![interface_cfg(
         uuid = "e4a1d023-2261-4b8f-b237-9bf25c8c65ef",
     )]
 
     /// Type-erased `fimo-tasks` interface.
-    pub frozen interface IFimoTasks: IModuleInterface @ frozen version("0.0") {
+    pub frozen interface IFimoTasks: IInterface @ version("0.0") {
         /// Fetches a reference to the task runtime.
         fn runtime(&self) -> &DynObj<dyn IRuntime>;
     }
-}
-
-impl<'a> FimoInterface<'a> for dyn IFimoTasks + 'a {
-    const NAME: &'static str = "fimo::interfaces::core::fimo_tasks";
-
-    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
-
-    const EXTENSIONS: &'static [&'static str] = &[];
 }
 
 /// Extension trait for implementations of [`IFimoTasks`].

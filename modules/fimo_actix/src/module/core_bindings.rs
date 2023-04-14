@@ -66,11 +66,11 @@ async fn settings_events(data: web::Data<CoreSettings>) -> impl Responder {
     HttpResponse::Ok().json(&inner.events)
 }
 
-pub(crate) fn scope_builder(
-    core: &DynObj<dyn IFimoCore>,
+pub(crate) fn scope_builder<'a>(
+    core: &'a DynObj<dyn IFimoCore + '_>,
 ) -> (
     impl Fn(Scope) -> Scope + Send + Sync,
-    SettingsEventCallbackHandle<'_, DynObj<dyn ISettingsRegistry + '_>>,
+    SettingsEventCallbackHandle<'a, DynObj<dyn ISettingsRegistry + 'a>>,
 ) {
     let (tx, rx) = std::sync::mpsc::channel();
     let callback = move |inner: &'_ DynObj<dyn ISettingsRegistryInner + '_>,

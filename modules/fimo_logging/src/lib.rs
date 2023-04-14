@@ -5,6 +5,7 @@
     missing_debug_implementations,
     rustdoc::broken_intra_doc_links
 )]
+#![feature(c_unwind)]
 
 use std::{
     borrow::Cow,

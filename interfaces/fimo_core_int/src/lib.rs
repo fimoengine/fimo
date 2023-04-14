@@ -8,43 +8,25 @@
 #![feature(const_mut_refs)]
 #![feature(unsize)]
 
-pub mod modules;
 pub mod settings;
 
-use crate::modules::IModuleRegistry;
 use crate::settings::ISettingsRegistry;
 use fimo_module::context::IInterface;
 use fimo_module::fimo_ffi::{interface, DynObj};
-use fimo_module::{FimoInterface, IModuleInterface, ReleaseType, Version};
+use fimo_module::Queryable;
 
-interface! {
-    #![interface_cfg(uuid = "c2173cd4-767c-4ac2-a8ac-52a2cbebda0a")]
-
-    /// Type-erased `fimo-core` interface.
-    pub frozen interface IFimoCore: IModuleInterface @ frozen version("0.0") {
-        /// Returns the contained [`IModuleRegistry`].
-        fn modules(&self) -> &DynObj<dyn IModuleRegistry + '_>;
-
-        /// Returns the contained [`ISettingsRegistry`].
-        fn settings(&self) -> &DynObj<dyn ISettingsRegistry + '_>;
-    }
+impl Queryable for dyn IFimoCore + '_ {
+    const NAME: &'static str = "fimo::interfaces::core";
+    const CURRENT_VERSION: fimo_ffi::Version = fimo_ffi::Version::new_short(0, 1, 0);
+    const EXTENSIONS: &'static [(Option<fimo_ffi::Version>, &'static str)] = &[];
 }
 
 interface! {
     #![interface_cfg(uuid = "eaa46386-ff47-405f-beaf-488e5eeaa004")]
 
     /// Type-erased `fimo-core` interface.
-    pub frozen interface _IFimoCore: IInterface @ version("0.0") {
-        /// Returns the contained [`IModuleRegistry`].
-        fn modules(&self) -> &DynObj<dyn IModuleRegistry + '_>;
-
+    pub frozen interface IFimoCore: IInterface @ version("0.0") {
         /// Returns the contained [`ISettingsRegistry`].
         fn settings(&self) -> &DynObj<dyn ISettingsRegistry + '_>;
     }
-}
-
-impl<'a> FimoInterface<'a> for dyn IFimoCore + 'a {
-    const NAME: &'static str = "fimo::interfaces::core::fimo_core";
-    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
-    const EXTENSIONS: &'static [&'static str] = &[];
 }

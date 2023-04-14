@@ -491,7 +491,8 @@ mod private {
             unsafe {
                 match manifest {
                     LoaderManifest::V0 { library_path, .. } => {
-                        self.load_module_raw(library_path.as_path(), features)
+                        let library_path = path.join(library_path);
+                        self.load_module_raw(&library_path, features)
                     }
                 }
             }
@@ -536,6 +537,7 @@ mod private {
 
     #[derive(Debug, Clone)]
     enum ResourceData {
+        Root,
         Inteface(ObjArc<Interface>),
         Module(ObjArc<Module>),
     }
@@ -550,6 +552,7 @@ mod private {
             match &resource {
                 ResourceData::Inteface(x) => Self(ObjArc::as_ptr(x) as usize),
                 ResourceData::Module(x) => Self(ObjArc::as_ptr(x) as usize),
+                ResourceData::Root => Self::ROOT_ID,
             }
         }
     }
@@ -659,10 +662,11 @@ mod private {
         }
 
         /// Enters the `AppContext`.
-        pub fn enter(&mut self, f: impl FnOnce(&mut DynObj<dyn IContext>)) {
+        pub fn enter<T>(&mut self, f: impl FnOnce(&mut DynObj<dyn IContext>) -> T) -> T {
             let context = fimo_ffi::ptr::coerce_obj_mut(&mut self.context);
-            f(context);
+            let res = f(context);
             self.context.shutdown();
+            res
         }
     }
 
@@ -682,7 +686,10 @@ mod private {
 
     impl Context {
         fn new() -> Self {
-            todo!()
+            Self {
+                loader: Loader,
+                resources: ResourceMap::new(),
+            }
         }
 
         fn shutdown(&mut self) {
@@ -841,6 +848,23 @@ mod private {
     }
 
     impl ResourceMap {
+        fn new() -> Self {
+            let mut map = ResourceMap {
+                modules: Default::default(),
+                interfaces: InterfaceMap::new(),
+                dependency_map: StableDiGraph::with_capacity(1, 1),
+                resources: Default::default(),
+            };
+
+            let node = map.dependency_map.add_node(Resource {
+                id: ResourceId::ROOT_ID,
+                data: ResourceData::Root,
+            });
+            map.resources.insert(ResourceId::ROOT_ID, node);
+
+            map
+        }
+
         fn add_interface(
             &mut self,
             interface: Interface,
@@ -1035,12 +1059,15 @@ mod private {
 
                     match &resource.data {
                         ResourceData::Inteface(_) => {
+                            dirty = true;
                             self.remove_interface(resource.id).unwrap();
                         }
                         ResourceData::Module(_) => {
+                            dirty = true;
                             self.remove_module(resource.id).unwrap();
                             modules.push(resource);
                         }
+                        _ => {}
                     }
                 }
             }

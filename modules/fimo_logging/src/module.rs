@@ -1,119 +1,93 @@
 //! Exports the `fimo_core` module.
 
 use crate::Logger;
-use fimo_ffi::ptr::{IBase, IBaseExt};
+use fimo_ffi::provider::IProvider;
 use fimo_ffi::type_id::StableTypeId;
-use fimo_ffi::{DynObj, ObjArc, Object, Version};
+use fimo_ffi::{DynObj, ObjBox, Object, Version};
 use fimo_logging_int::{IFimoLogging, ILogger};
-use fimo_module::{
-    FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
-};
+use fimo_module::context::{IInterface, IInterfaceContext};
+use fimo_module::module::{Interface, ModuleBuilderBuilder};
+use fimo_module::QueryBuilder;
 use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
 use std::path::Path;
-
-/// Name of the module.
-pub const MODULE_NAME: &str = "fimo_logging";
 
 /// Struct implementing the `fimo-logging` interface.
 #[derive(Object, StableTypeId)]
 #[name("LoggingInterface")]
 #[uuid("85cbdb52-3ffb-4dff-b893-e90bfb1e6ac1")]
-#[interfaces(IModuleInterface, IFimoLogging)]
-pub struct LoggingInterface {
+#[interfaces(IInterface, IFimoLogging)]
+pub struct LoggingInterface<'a> {
     logger: Logger,
-    parent: ObjArc<DynObj<dyn IModuleInstance>>,
+    _context: &'a DynObj<dyn IInterfaceContext + 'a>,
 }
 
-impl Debug for LoggingInterface {
+impl Debug for LoggingInterface<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(LoggingInterface)")
+        f.debug_struct("LoggingInterface")
+            .field("logger", &self.logger)
+            .field("_context", &(self._context as *const _))
+            .finish()
     }
 }
 
-impl Deref for LoggingInterface {
-    type Target = Logger;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.logger
+impl IProvider for LoggingInterface<'_> {
+    fn provide<'a>(&'a self, demand: &mut fimo_ffi::provider::Demand<'a>) {
+        demand.provide_obj::<dyn IFimoLogging + 'a>(fimo_ffi::ptr::coerce_obj(self));
     }
 }
 
-impl DerefMut for LoggingInterface {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.logger
-    }
-}
-
-impl IModuleInterface for LoggingInterface {
-    #[inline]
-    fn as_inner(&self) -> &DynObj<dyn IBase + Send + Sync> {
-        fimo_ffi::ptr::coerce_obj::<_, dyn IFimoLogging + Send + Sync>(self).cast_super()
-    }
-
-    #[inline]
+impl IInterface for LoggingInterface<'_> {
     fn name(&self) -> &str {
-        <dyn IFimoLogging>::NAME
+        Self::NAME
     }
 
-    #[inline]
     fn version(&self) -> Version {
-        <dyn IFimoLogging>::VERSION
+        Self::VERSION
     }
 
-    #[inline]
-    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
-        <dyn IFimoLogging>::EXTENSIONS
-            .iter()
-            .map(|&s| s.into())
-            .collect()
-    }
-
-    #[inline]
-    fn extension(&self, _name: &str) -> Option<&DynObj<dyn IBase + Send + Sync>> {
-        None
-    }
-
-    #[inline]
-    fn instance(&self) -> ObjArc<DynObj<dyn IModuleInstance>> {
-        self.parent.clone()
+    fn extensions(&self) -> &[fimo_ffi::String] {
+        &[]
     }
 }
 
-impl IFimoLogging for LoggingInterface {
+impl IFimoLogging for LoggingInterface<'_> {
     fn logger(&self) -> &DynObj<dyn ILogger> {
         fimo_ffi::ptr::coerce_obj(&self.logger)
     }
 }
 
-fn module_info() -> ModuleInfo {
-    ModuleInfo {
-        name: MODULE_NAME.into(),
-        version: <dyn IFimoLogging>::VERSION.into(),
+impl Interface for LoggingInterface<'_> {
+    type Result<'a> = LoggingInterface<'a>;
+    const NAME: &'static str = QueryBuilder.name::<dyn IFimoLogging>();
+    const VERSION: Version = Version::new_short(0, 1, 0);
+
+    fn extensions(_feature: Option<&str>) -> Vec<String> {
+        vec![]
+    }
+
+    fn dependencies(_feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        vec![]
+    }
+
+    fn optional_dependencies(_feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        vec![]
+    }
+
+    fn construct<'a>(
+        _module_root: &Path,
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> fimo_module::Result<ObjBox<Self::Result<'a>>> {
+        Ok(ObjBox::new(LoggingInterface {
+            logger: Default::default(),
+            _context: context,
+        }))
     }
 }
 
-fimo_module::rust_module!(load_module);
-
-fn load_module(
-    loader: &'static DynObj<dyn IModuleLoader>,
-    path: &Path,
-) -> fimo_module::Result<ObjArc<DynObj<dyn IModule>>> {
-    let module = fimo_module::module::Module::new(module_info(), path, loader, |module| {
-        let builder = fimo_module::module::InstanceBuilder::new(module);
-        let instance = builder
-            .empty(<dyn IFimoLogging>::new_descriptor(), |instance| {
-                let logging = LoggingInterface {
-                    logger: Default::default(),
-                    parent: ObjArc::coerce_obj(instance),
-                };
-                let logging = ObjArc::new(logging);
-                Ok(ObjArc::coerce_obj(logging))
-            })
-            .build();
-        Ok(instance)
-    });
-    Ok(ObjArc::coerce_obj(module))
-}
+fimo_module::module!(|path, features| {
+    Ok(
+        ModuleBuilderBuilder::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+            .with_interface::<LoggingInterface<'_>>()
+            .build(path, features),
+    )
+});

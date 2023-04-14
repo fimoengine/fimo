@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "bin/*",
+    "xtask",
+    "fimo_tests",
     "modules/*",
     "utilities/*",
-    "interfaces/*",
-    "test_utilities/*"
+    "interfaces/*"
 ]

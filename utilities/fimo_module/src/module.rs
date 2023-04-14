@@ -1,429 +1,270 @@
-//! Implementation of generic modules.
-
+//! Implementation of a [`ModuleBuilderBuilder`].
 use crate::{
-    IModule, IModuleInstance, IModuleInterface, IModuleLoader, InterfaceDescriptor, ModuleInfo,
-    PathChar,
+    context::{IInterface, IInterfaceBuilder, IInterfaceContext, IModuleBuilder},
+    InterfaceQuery, ModuleInfo,
 };
-use fimo_ffi::error::{Error, ErrorKind, IError};
-use fimo_ffi::fmt::{IDebug, IDisplay};
-use fimo_ffi::ptr::{coerce_obj, IBase, IBaseExt};
-use fimo_ffi::type_id::StableTypeId;
-use fimo_ffi::{DynObj, ObjArc, ObjWeak, Object};
-use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet};
-use std::fmt::{Debug, Formatter};
-use std::path::Path;
+use fimo_ffi::{
+    ptr::{FetchVTable, ObjInterface},
+    DynObj, ObjBox, Object, Version,
+};
+use std::{
+    collections::HashSet,
+    fmt::Debug,
+    marker::Unsize,
+    path::{Path, PathBuf},
+};
 
-/// A generic module.
-#[derive(Object, StableTypeId)]
-#[name("Module")]
-#[uuid("54ccece6-c648-42e5-807b-553049080256")]
-#[interfaces(IModule)]
-pub struct Module {
+/// Builder for a [`IModuleBuilder`].
+pub struct ModuleBuilderBuilder {
     info: ModuleInfo,
-    root: Box<[PathChar]>,
-    parent: &'static DynObj<dyn IModuleLoader>,
-    build: Box<dyn Fn(ObjArc<Module>) -> crate::Result<ObjArc<Instance>> + Send + Sync>,
-    service_handler: Option<ServiceHandler>,
+    features: HashSet<String>,
+    #[allow(clippy::type_complexity)]
+    builders: Vec<Box<dyn FnOnce(&Path, &[String]) -> InterfaceBuilder>>,
 }
 
-type ServiceHandler = Box<dyn Fn(&'static DynObj<dyn IModuleInterface>) + Send + Sync>;
-
-impl Module {
-    /// Builds a new `Module`.
-    pub fn new<F>(
-        info: ModuleInfo,
-        root: &Path,
-        parent: &'static DynObj<dyn IModuleLoader>,
-        f: F,
-    ) -> ObjArc<Module>
-    where
-        F: Fn(ObjArc<Module>) -> crate::Result<ObjArc<Instance>> + Send + Sync + 'static,
-    {
-        let path: Box<[PathChar]>;
-        #[cfg(windows)]
-        {
-            use std::os::windows::ffi::OsStrExt;
-            let os_str = root.as_os_str();
-            let buf: Vec<PathChar> = OsStrExt::encode_wide(os_str).collect();
-            path = buf.into();
+impl ModuleBuilderBuilder {
+    /// Constructs a new instance.
+    pub fn new(name: &str, version: &str) -> Self {
+        Self {
+            info: ModuleInfo {
+                name: name.into(),
+                version: version.into(),
+            },
+            features: Default::default(),
+            builders: Default::default(),
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt;
+    }
 
-            let os_str = root.as_os_str();
-            let bytes = OsStrExt::as_bytes(os_str);
-            path = bytes.into();
+    /// Defines a new feature for the module.
+    pub fn with_feature(mut self, feature: &str) -> Self {
+        self.features.insert(feature.into());
+        self
+    }
+
+    /// Defines a new interface that will be instantiated with the module.
+    pub fn with_interface<T>(mut self) -> Self
+    where
+        T: Interface,
+    {
+        let builder = Box::new(|path: &'_ _, feat: &'_ _| InterfaceBuilder::new::<T>(path, feat));
+        self.builders.push(builder);
+        self
+    }
+
+    /// Builds the [`IModuleBuilder`].
+    pub fn build(
+        mut self,
+        path: &Path,
+        features: &[fimo_ffi::String],
+    ) -> ObjBox<DynObj<dyn IModuleBuilder>> {
+        let path = path.to_path_buf();
+        self.features.retain(|f| features.iter().any(|x| &**x == f));
+        let enabled_features = self.features.into_iter().collect::<Vec<_>>();
+
+        let mut builders = vec![];
+        for builder in self.builders {
+            builders.push(builder(&path, &enabled_features));
         }
 
-        let build = Box::new(f);
+        let mut interfaces = vec![];
+        for builder in &builders {
+            let builder = fimo_ffi::ptr::coerce_obj::<_, dyn IInterfaceBuilder>(builder);
 
-        ObjArc::new(Self {
-            info,
-            root: path,
-            parent,
-            build,
-            service_handler: None,
-        })
-    }
+            // Safety: We can extend the lifetime because we know that `builders` will outlive `interfaces`.
+            unsafe {
+                interfaces.push(&*(builder as *const _));
+            }
+        }
 
-    /// Adds a new service handler to the module.
-    ///
-    /// The service handler is called each time a new service is bound
-    /// to the module.
-    pub fn with_service_handler<H>(&mut self, handler: H)
-    where
-        H: Fn(&'static DynObj<dyn IModuleInterface>) + Send + Sync + 'static,
-    {
-        self.service_handler = Some(Box::new(handler))
-    }
-}
+        let features = enabled_features.into_iter().map(Into::into).collect();
 
-impl Debug for Module {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Module").field(&self.info).finish()
+        let builder = ModuleBuilder {
+            path,
+            info: self.info,
+            features,
+            interfaces,
+            _builders: builders,
+        };
+        let builder = ObjBox::new(builder);
+        ObjBox::coerce_obj(builder)
     }
 }
 
-impl IModule for Module {
-    fn as_inner(&self) -> &DynObj<dyn IBase + Send + Sync> {
-        coerce_obj::<_, dyn IModule + Send + Sync>(self).cast_super()
+impl Debug for ModuleBuilderBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModuleBuilderBuilder")
+            .field("info", &self.info)
+            .field("features", &self.features)
+            .finish_non_exhaustive()
     }
+}
 
-    fn module_path_slice(&self) -> &[PathChar] {
-        &self.root
+#[derive(Object)]
+#[interfaces(IModuleBuilder)]
+struct ModuleBuilder {
+    path: PathBuf,
+    info: ModuleInfo,
+    features: Vec<fimo_ffi::String>,
+    interfaces: Vec<&'static DynObj<dyn IInterfaceBuilder>>,
+    _builders: Vec<InterfaceBuilder>,
+}
+
+impl IModuleBuilder for ModuleBuilder {
+    fn module_path(&self) -> &std::path::Path {
+        &self.path
     }
 
     fn module_info(&self) -> &ModuleInfo {
         &self.info
     }
 
-    fn module_loader(&self) -> &'static DynObj<dyn IModuleLoader> {
-        self.parent
+    fn features(&self) -> &[fimo_ffi::String] {
+        &self.features
     }
 
-    fn bind_service(&self, service: &'static DynObj<dyn IModuleInterface>) {
-        if let Some(handler) = &self.service_handler {
-            handler(service)
+    fn interfaces(&self) -> &[&fimo_ffi::DynObj<dyn IInterfaceBuilder>] {
+        &self.interfaces
+    }
+}
+
+impl Debug for ModuleBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModuleBuilder")
+            .field("path", &self.path)
+            .field("info", &self.info)
+            .field("features", &self.features)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Object, PartialEq, PartialOrd, Eq, Ord)]
+#[interfaces(IInterfaceBuilder)]
+struct InterfaceBuilder {
+    path: PathBuf,
+    name: &'static str,
+    version: Version,
+    extensions: Vec<fimo_ffi::String>,
+    dependencies: Vec<InterfaceQuery>,
+    optional_dependencies: Vec<InterfaceQuery>,
+    #[allow(clippy::type_complexity)]
+    build: for<'a> fn(
+        &Path,
+        &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>>,
+}
+
+impl InterfaceBuilder {
+    fn new<T>(path: &Path, features: &[String]) -> Self
+    where
+        T: Interface,
+    {
+        let mut extensions = HashSet::new();
+        let mut dependencies = HashSet::new();
+        let mut optional_dependencies = HashSet::new();
+
+        extensions.extend(<T as Interface>::extensions(None));
+        dependencies.extend(<T as Interface>::dependencies(None));
+        optional_dependencies.extend(<T as Interface>::optional_dependencies(None));
+        for feature in features {
+            extensions.extend(<T as Interface>::extensions(Some(feature)));
+            dependencies.extend(<T as Interface>::dependencies(Some(feature)));
+            optional_dependencies.extend(<T as Interface>::optional_dependencies(Some(feature)));
         }
-    }
 
-    fn new_instance(&self) -> crate::Result<ObjArc<DynObj<dyn IModuleInstance>>> {
-        // A `Module` always lives inside an `ObjArc` so we try to manually clone it.
-        let cloned = unsafe {
-            let this = ObjArc::from_raw(self);
-            let tmp = this.clone();
-            std::mem::forget(this);
-            tmp
-        };
+        let extensions = extensions.into_iter().map(fimo_ffi::String::from).collect();
+        let dependencies = dependencies.into_iter().collect();
+        let optional_dependencies = optional_dependencies.into_iter().collect();
 
-        let instance = (self.build)(cloned)?;
-        Ok(ObjArc::coerce_obj(instance))
-    }
-}
+        fn construct<'a, T>(
+            module_root: &Path,
+            context: &'a DynObj<dyn IInterfaceContext + 'a>,
+        ) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>>
+        where
+            T: Interface,
+        {
+            let x = T::construct(module_root, context)?;
+            let x = ObjBox::coerce_obj(x);
+            crate::Result::Ok(x)
+        }
 
-/// Builder for an [`Instance`].
-pub struct InstanceBuilder {
-    parent: ObjArc<Module>,
-    interfaces: HashMap<InterfaceDescriptor, (Vec<InterfaceDescriptor>, Box<InterfaceBuildFn>)>,
-}
-
-impl InstanceBuilder {
-    /// Constructs a new `InstanceBuilder`.
-    pub fn new(module: ObjArc<Module>) -> Self {
         Self {
-            parent: module,
-            interfaces: Default::default(),
+            path: path.to_path_buf(),
+            name: T::NAME,
+            version: T::VERSION,
+            extensions,
+            dependencies,
+            optional_dependencies,
+            build: construct::<T>,
         }
     }
-
-    /// Adds a new interface without dependencies to the `InstanceBuilder`.
-    pub fn empty<F: Send + 'static>(self, desc: InterfaceDescriptor, mut f: F) -> Self
-    where
-        F: FnMut(ObjArc<Instance>) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>>,
-    {
-        let f = move |i, _| f(i);
-        self.interface(desc, Default::default(), f)
-    }
-
-    /// Adds a new interface to the `InstanceBuilder`.
-    pub fn interface<F: Send + 'static>(
-        mut self,
-        desc: InterfaceDescriptor,
-        deps: &[InterfaceDescriptor],
-        f: F,
-    ) -> Self
-    where
-        F: FnMut(
-            ObjArc<Instance>,
-            Vec<ObjArc<DynObj<dyn IModuleInterface>>>,
-        ) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>>,
-    {
-        // remove duplicate dependencies.
-        let mut set: HashSet<_> = deps.iter().cloned().collect();
-        let deps: Vec<_> = set.drain().collect();
-        let f = Box::new(f);
-        self.interfaces.insert(desc, (deps, f));
-        self
-    }
-
-    /// Builds an [`Instance`].
-    pub fn build(self) -> ObjArc<Instance> {
-        let InstanceBuilder { parent, interfaces } = self;
-        let inter = interfaces;
-
-        let available_interfaces = inter.keys().cloned().collect();
-        let mut interfaces = HashMap::new();
-        let mut interface_deps = HashMap::new();
-
-        for (i, (deps, build)) in inter {
-            let dependencies = deps.iter().map(|dep| (dep.clone(), None)).collect();
-
-            let interface = Interface {
-                build,
-                dependencies,
-                interface: None,
-            };
-
-            interfaces.insert(i.clone(), Mutex::new(interface));
-            interface_deps.insert(i, deps);
-        }
-
-        ObjArc::new(Instance {
-            available_interfaces,
-            interfaces,
-            interface_deps,
-            parent,
-        })
-    }
 }
 
-impl Debug for InstanceBuilder {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(InstanceBuilder)")
-    }
-}
-
-/// Implementation of a generic module instance.
-#[derive(Debug, Object, StableTypeId)]
-#[name("Instance")]
-#[uuid("8323b969-b6f8-475e-906b-bb29d8af7978")]
-#[interfaces(IModuleInstance)]
-pub struct Instance {
-    available_interfaces: Vec<InterfaceDescriptor>,
-    interfaces: HashMap<InterfaceDescriptor, Mutex<Interface>>,
-    interface_deps: HashMap<InterfaceDescriptor, Vec<InterfaceDescriptor>>,
-    // Drop the module for last
-    parent: ObjArc<Module>,
-}
-
-impl IModuleInstance for Instance {
-    fn as_inner(&self) -> &DynObj<dyn IBase + Send + Sync> {
-        coerce_obj::<_, dyn IModuleInstance + Send + Sync>(self).cast_super()
+impl IInterfaceBuilder for InterfaceBuilder {
+    fn name(&self) -> &str {
+        self.name
     }
 
-    fn module(&self) -> ObjArc<DynObj<dyn IModule>> {
-        ObjArc::coerce_obj(self.parent.clone())
+    fn version(&self) -> fimo_ffi::Version {
+        self.version
     }
 
-    fn available_interfaces(&self) -> &[InterfaceDescriptor] {
-        &self.available_interfaces
+    fn extensions(&self) -> &[fimo_ffi::String] {
+        &self.extensions
     }
 
-    fn interface(
+    fn dependencies(&self) -> &[InterfaceQuery] {
+        &self.dependencies
+    }
+
+    fn optional_dependencies(&self) -> &[InterfaceQuery] {
+        &self.optional_dependencies
+    }
+
+    fn build<'a>(
         &self,
-        i: &InterfaceDescriptor,
-    ) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
-        if let Some(interface) = self.interfaces.get(i) {
-            // A `Instance` always lives inside an `ObjArc` so we try to manually clone it.
-            let cloned = unsafe {
-                let this = ObjArc::from_raw(self);
-                let tmp = this.clone();
-                std::mem::forget(this);
-                tmp
-            };
-
-            let mut interface = interface.lock();
-            interface.build_interface(cloned).map_err(|e| {
-                let e = GetInterfaceError::ConstructionError {
-                    interface: i.clone(),
-                    error: e,
-                };
-                Error::new(ErrorKind::Unknown, e)
-            })
-        } else {
-            let err = GetInterfaceError::UnknownInterface(UnknownInterfaceError {
-                interface: i.clone(),
-            });
-            Err(Error::new(ErrorKind::NotFound, err))
-        }
-    }
-
-    fn dependencies(&self, i: &InterfaceDescriptor) -> crate::Result<&[InterfaceDescriptor]> {
-        if let Some(deps) = self.interface_deps.get(i) {
-            Ok(deps.as_slice())
-        } else {
-            let err = UnknownInterfaceError {
-                interface: i.clone(),
-            };
-            Err(Error::new(ErrorKind::NotFound, err))
-        }
-    }
-
-    fn bind_interface(
-        &self,
-        desc: &InterfaceDescriptor,
-        interface: ObjArc<DynObj<dyn IModuleInterface>>,
-    ) -> crate::Result<()> {
-        if let Some(inter) = self.interfaces.get(desc) {
-            let mut inter = inter.lock();
-            inter.set_dependency(interface)
-        } else {
-            let err = UnknownInterfaceError {
-                interface: desc.clone(),
-            };
-            Err(Error::new(ErrorKind::NotFound, err))
-        }
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> crate::Result<ObjBox<DynObj<dyn IInterface + 'a>>> {
+        (self.build)(&self.path, context)
     }
 }
 
-type InterfaceBuildFn = dyn FnMut(
-        ObjArc<Instance>,
-        Vec<ObjArc<DynObj<dyn IModuleInterface>>>,
-    ) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>>
-    + Send;
-type DependencyMap = HashMap<InterfaceDescriptor, Option<ObjWeak<DynObj<dyn IModuleInterface>>>>;
-
-struct Interface {
-    build: Box<InterfaceBuildFn>,
-    dependencies: DependencyMap,
-    interface: Option<ObjWeak<DynObj<dyn IModuleInterface>>>,
-}
-
-impl Interface {
-    fn set_dependency(&mut self, i: ObjArc<DynObj<dyn IModuleInterface>>) -> crate::Result<()> {
-        let desc = i.descriptor();
-        if let Some(dep) = self.dependencies.get_mut(&desc) {
-            *dep = Some(ObjArc::downgrade(&i));
-            Ok(())
-        } else {
-            Err(Error::new(
-                ErrorKind::NotFound,
-                format!("unknown dependency: {:?}", desc),
-            ))
-        }
-    }
-
-    fn build_interface(
-        &mut self,
-        module: ObjArc<Instance>,
-    ) -> crate::Result<ObjArc<DynObj<dyn IModuleInterface>>> {
-        let i = self.interface.clone().map(|i| i.upgrade());
-        if let Some(i) = i.flatten() {
-            Ok(i)
-        } else {
-            let mut dependencies = Vec::with_capacity(self.dependencies.len());
-            for (desc, dep) in &self.dependencies {
-                if let Some(dep) = dep.as_ref().and_then(|d| d.upgrade()) {
-                    dependencies.push(dep);
-                } else {
-                    return Err(Error::new(
-                        ErrorKind::FailedPrecondition,
-                        format!("missing dependency: {:?}", desc),
-                    ));
-                }
-            }
-
-            let i = (self.build)(module, dependencies)?;
-            self.interface = Some(ObjArc::downgrade(&i));
-            Ok(i)
-        }
-    }
-}
-
-impl Debug for Interface {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Interface")
-            .field("dependencies", &self.dependencies.keys())
-            .finish()
-    }
-}
-
-/// Error resulting from an unknown interface.
-#[derive(Clone, Debug, Hash, Ord, PartialOrd, PartialEq, Eq)]
-pub struct UnknownInterfaceError {
-    interface: InterfaceDescriptor,
-}
-
-impl std::fmt::Display for UnknownInterfaceError {
+impl Debug for InterfaceBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unknown interface: {}", self.interface)
+        f.debug_struct("InterfaceBuilder")
+            .field("name", &self.name)
+            .field("version", &self.version)
+            .field("extensions", &self.extensions)
+            .field("dependencies", &self.dependencies)
+            .field("optional_dependencies", &self.optional_dependencies)
+            .finish_non_exhaustive()
     }
 }
 
-impl IDebug for UnknownInterfaceError {
-    fn fmt(&self, f: &mut fimo_ffi::fmt::Formatter<'_>) -> Result<(), fimo_ffi::fmt::Error> {
-        write!(f, "{:?}", self)
-    }
-}
+/// Helper trait for constructing an interface.
+pub trait Interface {
+    /// Type of the constructed interface.
+    type Result<'a>: IInterface
+        + FetchVTable<<(dyn IInterface + 'a) as ObjInterface<'a>>::Base>
+        + Unsize<dyn IInterface + 'a>
+        + 'a;
 
-impl IDisplay for UnknownInterfaceError {
-    fn fmt(&self, f: &mut fimo_ffi::fmt::Formatter<'_>) -> Result<(), fimo_ffi::fmt::Error> {
-        write!(f, "{}", self)
-    }
-}
+    /// Name of the interface.
+    const NAME: &'static str;
+    /// Implemented version.
+    const VERSION: Version;
 
-impl IError for UnknownInterfaceError {}
+    /// Extensions implemented with each feature.
+    fn extensions(feature: Option<&str>) -> Vec<String>;
 
-/// Error that can occur when retrieving an interface from an [Instance].
-#[derive(Debug)]
-pub enum GetInterfaceError {
-    /// Error resulting from an unknown interface.
-    UnknownInterface(UnknownInterfaceError),
-    /// Error resulting from the unsuccessful construction of an interface.
-    ConstructionError {
-        /// Interface tried to construct.
-        interface: InterfaceDescriptor,
-        /// Resulting error.
-        error: Error,
-    },
-}
+    /// Dependencies required by each feature.
+    fn dependencies(feature: Option<&str>) -> Vec<InterfaceQuery>;
 
-impl std::fmt::Display for GetInterfaceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GetInterfaceError::UnknownInterface(err) => std::fmt::Display::fmt(err, f),
-            GetInterfaceError::ConstructionError { interface, error } => {
-                write!(
-                    f,
-                    "construction error: interface: {}, error: `{}`",
-                    interface, error
-                )
-            }
-        }
-    }
-}
+    /// Optional dependencies consumable by each feature.
+    fn optional_dependencies(feature: Option<&str>) -> Vec<InterfaceQuery>;
 
-impl IDebug for GetInterfaceError {
-    fn fmt(&self, f: &mut fimo_ffi::fmt::Formatter<'_>) -> Result<(), fimo_ffi::fmt::Error> {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl IDisplay for GetInterfaceError {
-    fn fmt(&self, f: &mut fimo_ffi::fmt::Formatter<'_>) -> Result<(), fimo_ffi::fmt::Error> {
-        write!(f, "{}", self)
-    }
-}
-
-impl IError for GetInterfaceError {
-    fn source(&self) -> Option<&DynObj<dyn IError + 'static>> {
-        match self {
-            GetInterfaceError::UnknownInterface(_) => None,
-            GetInterfaceError::ConstructionError { error, .. } => {
-                error.get_ref().map(DynObj::cast_super)
-            }
-        }
-    }
+    /// Constructs the interface.
+    fn construct<'a>(
+        module_root: &Path,
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> crate::Result<ObjBox<Self::Result<'a>>>;
 }

@@ -9,80 +9,76 @@ use fimo_core_int::settings::{
 };
 use fimo_core_int::IFimoCore;
 use fimo_ffi::error::{Error, ErrorKind};
-use fimo_ffi::ptr::{IBase, IBaseExt};
+use fimo_ffi::provider::{request_obj, IProvider};
 use fimo_ffi::type_id::StableTypeId;
-use fimo_ffi::{DynObj, ObjArc, Object, Version};
-use fimo_module::{
-    FimoInterface, IModule, IModuleInstance, IModuleInterface, IModuleLoader, ModuleInfo,
-};
+use fimo_ffi::{DynObj, ObjBox, Object, Version};
+use fimo_module::context::{IInterface, IInterfaceContext};
+use fimo_module::module::{Interface, ModuleBuilderBuilder};
+use fimo_module::{QueryBuilder, VersionQuery};
 use std::fmt::{Debug, Formatter};
 use std::path::Path;
 
 #[cfg(feature = "module")]
 mod core_bindings;
 
-/// Name of the module.
-pub const MODULE_NAME: &str = "fimo_actix";
-
 /// Struct implementing the `fimo-actix` interface.
 #[derive(Object, StableTypeId)]
 #[name("FimoActixInterface")]
 #[uuid("d7eeb555-6cdc-412e-9d2b-b10f3069c298")]
-#[interfaces(IModuleInterface, IFimoActix)]
-pub struct FimoActixInterface {
+#[interfaces(IInterface, IFimoActix)]
+pub struct ActixInterface<'a> {
     server: FimoActixServer<String>,
-    parent: ObjArc<DynObj<dyn IModuleInstance>>,
+    context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    core: &'a DynObj<dyn IFimoCore + 'a>,
     #[allow(clippy::type_complexity)]
-    core: Option<(
-        ObjArc<DynObj<dyn IFimoCore>>,
-        SettingsEventCallbackId,
-        ScopeBuilderId,
-    )>,
+    scope_builder: Option<(SettingsEventCallbackId, ScopeBuilderId)>,
 }
 
-impl Debug for FimoActixInterface {
+impl Debug for ActixInterface<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(FimoActixInterface)")
+        f.debug_struct("FimoActixInterface")
+            .field("server", &self.server)
+            .field("context", &(self.context as *const _))
+            .finish_non_exhaustive()
     }
 }
 
-impl IModuleInterface for FimoActixInterface {
-    #[inline]
-    fn as_inner(&self) -> &DynObj<dyn IBase + Send + Sync> {
-        let inner = fimo_ffi::ptr::coerce_obj::<_, dyn IFimoActix + Send + Sync>(self);
-        inner.cast_super()
-    }
+impl Drop for ActixInterface<'_> {
+    fn drop(&mut self) {
+        if let Some((id, scope_id)) = self.scope_builder.take() {
+            let registry = self.core.settings();
+            let handle = unsafe { SettingsEventCallbackHandle::from_raw_parts(id, registry) };
+            registry
+                .unregister_callback(handle)
+                .expect("could not unregister the core binding");
 
-    #[inline]
+            self.unregister_scope_raw(scope_id)
+                .expect("could not unregister the core scope");
+        }
+    }
+}
+
+impl IProvider for ActixInterface<'_> {
+    fn provide<'a>(&'a self, demand: &mut fimo_ffi::provider::Demand<'a>) {
+        demand.provide_obj::<dyn IFimoActix + 'a>(fimo_ffi::ptr::coerce_obj(self));
+    }
+}
+
+impl IInterface for ActixInterface<'_> {
     fn name(&self) -> &str {
-        <dyn IFimoActix>::NAME
+        ActixInterface::NAME
     }
 
-    #[inline]
     fn version(&self) -> Version {
-        <dyn IFimoActix>::VERSION
+        ActixInterface::VERSION
     }
 
-    #[inline]
-    fn extensions(&self) -> fimo_ffi::Vec<fimo_ffi::String> {
-        <dyn IFimoActix>::EXTENSIONS
-            .iter()
-            .map(|&s| s.into())
-            .collect()
-    }
-
-    #[inline]
-    fn extension(&self, _name: &str) -> Option<&DynObj<dyn IBase + Send + Sync>> {
-        None
-    }
-
-    #[inline]
-    fn instance(&self) -> ObjArc<DynObj<dyn IModuleInstance>> {
-        self.parent.clone()
+    fn extensions(&self) -> &[fimo_ffi::String] {
+        &[]
     }
 }
 
-impl IFimoActix for FimoActixInterface {
+impl IFimoActix for ActixInterface<'_> {
     #[inline]
     fn start(&self) -> ServerStatus {
         self.server.start()
@@ -138,84 +134,77 @@ impl IFimoActix for FimoActixInterface {
     }
 }
 
-impl Drop for FimoActixInterface {
-    fn drop(&mut self) {
-        if let Some((core, id, scope_id)) = self.core.take() {
-            let registry = core.settings();
-            let handle = unsafe { SettingsEventCallbackHandle::from_raw_parts(id, registry) };
-            registry
-                .unregister_callback(handle)
-                .expect("could not unregister the core binding");
+const REQUIRED_CORE_VERSION: VersionQuery = VersionQuery::Minimum(Version::new_short(0, 1, 0));
 
-            self.unregister_scope_raw(scope_id)
-                .expect("could not unregister the core scope");
+impl Interface for ActixInterface<'_> {
+    type Result<'a> = ActixInterface<'a>;
+    const NAME: &'static str = QueryBuilder.name::<dyn IFimoActix>();
+    const VERSION: Version = Version::new_short(0, 1, 0);
+
+    fn extensions(_feature: Option<&str>) -> Vec<String> {
+        vec![]
+    }
+
+    fn dependencies(feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        if feature.is_none() {
+            vec![QueryBuilder.query_version::<dyn IFimoCore>(REQUIRED_CORE_VERSION)]
+        } else {
+            vec![]
         }
     }
-}
 
-fn module_info() -> ModuleInfo {
-    ModuleInfo {
-        name: MODULE_NAME.into(),
-        version: <dyn IFimoActix>::VERSION.into(),
+    fn optional_dependencies(_feature: Option<&str>) -> Vec<fimo_module::InterfaceQuery> {
+        vec![]
+    }
+
+    fn construct<'a>(
+        _module_root: &Path,
+        context: &'a DynObj<dyn IInterfaceContext + 'a>,
+    ) -> fimo_module::Result<ObjBox<Self::Result<'a>>> {
+        let core = context
+            .get_interface(QueryBuilder.query_version::<dyn IFimoCore>(REQUIRED_CORE_VERSION))?;
+        let core = request_obj::<dyn IFimoCore + 'a>(core)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "The core interface was not found"))?;
+
+        let settings_path = SettingsPath::new("fimo-actix").unwrap();
+        let settings = core
+            .settings()
+            .read_or(settings_path, ModuleSettings::default())
+            .map_err(|_| Error::from(ErrorKind::FailedPrecondition))?;
+
+        let address = format!("127.0.0.1:{}", settings.port);
+        let mut server = ActixInterface {
+            server: FimoActixServer::new(address),
+            context,
+            core,
+            scope_builder: None,
+        };
+
+        if settings.bind_core {
+            bind_core(&mut server, core);
+        }
+
+        Ok(ObjBox::new(server))
     }
 }
 
-fimo_module::rust_module!(load_module);
+fimo_module::module!(|path, features| {
+    Ok(
+        ModuleBuilderBuilder::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+            .with_interface::<ActixInterface<'_>>()
+            .build(path, features),
+    )
+});
 
-fn load_module(
-    loader: &'static DynObj<dyn IModuleLoader>,
-    path: &Path,
-) -> fimo_module::Result<ObjArc<DynObj<dyn IModule>>> {
-    let module = fimo_module::module::Module::new(module_info(), path, loader, |module| {
-        let builder = fimo_module::module::InstanceBuilder::new(module);
-
-        let desc = <dyn IFimoActix>::new_descriptor();
-        let deps = &[<dyn IFimoCore>::new_descriptor()];
-        let f = |instance, mut deps: Vec<_>| {
-            // we only have one dependency so it must reside as the first element of the vec.
-            let core = fimo_module::try_downcast_arc::<dyn IFimoCore, _>(deps.remove(0))?;
-
-            let settings_path = SettingsPath::new("fimo-actix").unwrap();
-            let settings = core
-                .settings()
-                .read_or(settings_path, ModuleSettings::default())
-                .map_err(|_| Error::from(ErrorKind::FailedPrecondition))?;
-
-            let address = format!("127.0.0.1:{}", settings.port);
-            let mut server = ObjArc::new(FimoActixInterface {
-                server: FimoActixServer::new(address),
-                parent: ObjArc::coerce_obj(instance),
-                core: None,
-            });
-
-            if settings.bind_core {
-                server = bind_core(server, core)
-            }
-
-            Ok(ObjArc::coerce_obj(server))
-        };
-
-        let instance = builder.interface(desc, deps, f).build();
-        Ok(instance)
-    });
-    Ok(ObjArc::coerce_obj(module))
-}
-
-fn bind_core(
-    mut server: ObjArc<FimoActixInterface>,
-    core: ObjArc<DynObj<dyn IFimoCore>>,
-) -> ObjArc<FimoActixInterface> {
-    let (builder, callback) = core_bindings::scope_builder(&core);
+fn bind_core<'a>(server: &mut ActixInterface<'a>, core: &DynObj<dyn IFimoCore + 'a>) {
+    let (builder, callback) = core_bindings::scope_builder(core);
     let scope = server
         .register_scope("/core", builder)
         .expect("could not register `core` scope");
 
     let (scope_id, _) = scope.into_raw_parts();
-    let inner = ObjArc::get_mut(&mut server).unwrap();
     let (id, _) = callback.into_raw_parts();
-    inner.core = Some((core, id, scope_id));
-
-    server
+    server.scope_builder = Some((id, scope_id));
 }
 
 #[derive(Copy, Clone)]

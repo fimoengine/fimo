@@ -10,8 +10,8 @@
 use actix_web::Scope;
 
 pub use actix_web as actix;
-use fimo_ffi::{interface, FfiFn, ReleaseType, Version};
-use fimo_module::{FimoInterface, IModuleInterface};
+use fimo_ffi::{interface, FfiFn};
+use fimo_module::{context::IInterface, Queryable};
 
 /// Status of the server.
 #[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
@@ -49,11 +49,17 @@ pub enum ServerEvent {
     Aborted,
 }
 
+impl Queryable for dyn IFimoActix + '_ {
+    const NAME: &'static str = "fimo::interfaces::actix";
+    const CURRENT_VERSION: fimo_ffi::Version = fimo_ffi::Version::new_short(0, 1, 0);
+    const EXTENSIONS: &'static [(Option<fimo_ffi::Version>, &'static str)] = &[];
+}
+
 interface! {
     #![interface_cfg(uuid = "85fa7a5f-959d-40c6-8d7a-ccd4dea654cf")]
 
     /// The fimo-actix interface.
-    pub frozen interface IFimoActix : IModuleInterface @ frozen version("0.0") {
+    pub frozen interface IFimoActix : IInterface @ version("0.0") {
         /// Starts the server if it is not running.
         fn start(&self) -> ServerStatus;
 
@@ -93,12 +99,6 @@ interface! {
         /// Unregisters a callback.
         fn unregister_callback_raw(&self, id: CallbackId) -> fimo_module::Result<()>;
     }
-}
-
-impl<'a> FimoInterface<'a> for dyn IFimoActix + 'a {
-    const NAME: &'static str = "fimo::interfaces::actix::fimo_actix";
-    const VERSION: Version = Version::new_long(0, 1, 0, ReleaseType::Unstable, 0);
-    const EXTENSIONS: &'static [&'static str] = &[];
 }
 
 /// Extension trait for all implementors of [`IFimoActix`].

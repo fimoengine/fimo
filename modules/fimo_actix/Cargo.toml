@@ -10,20 +10,15 @@ categories = ["game-development"]
 crate-type = ["lib", "dylib"]
 
 [dependencies]
-futures = "0.3.17"
 actix-rt = "2.6.0"
 parking_lot = "0.11"
+futures = { version = "0.3.17", optional = true }
 serde = { version = "1.0.123", features = ["derive"] }
 fimo_ffi = { version = "0.1.0", path = "../../utilities/fimo_ffi" }
 fimo_module = { version = "0.1.0", path = "../../utilities/fimo_module" }
 fimo_actix_int = { version = "0.1.0", path = "../../interfaces/fimo_actix_int" }
 fimo_core_int = { version = "0.1.0", path = "../../interfaces/fimo_core_int", optional = true }
 
-[dev-dependencies]
-serde_json = "1.0.68"
-reqwest = { version = "0.11.4", features = ["blocking"] }
-module_loading = { path = "../../test_utilities/module_loading", features = ["fimo_actix_int"] }
-
 [features]
 default = []
-module = ["fimo_core_int"]
+module = [ "futures", "fimo_core_int"]
