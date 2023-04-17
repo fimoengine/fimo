@@ -60,7 +60,7 @@ impl TaskHarness {
 
     pub fn task_build(&self) -> TaskResult<()> {
         self.task_prepare()?;
-        self.cargo("build --all-features --all-targets --workspace --exclude xtask")?;
+        self.cargo("build --all-features --workspace --exclude xtask")?;
         self.create_modules("debug")?;
         Ok(())
     }
@@ -75,7 +75,6 @@ impl TaskHarness {
 
     pub fn task_ci(&self) -> TaskResult<()> {
         self.cargo("fmt --all -- --check")?;
-        self.cargo("check --all-targets --all-features")?;
         self.cargo("clippy --all-targets --all-features --no-deps -- -D warnings")?;
         self.task_test()
     }
