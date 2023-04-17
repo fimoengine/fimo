@@ -52,7 +52,7 @@ impl TaskScheduler {
 
         // Allocate a box to generate a new unique address.
         let addr = Box::new(0);
-        let addr_ptr = &addr as *const _ as *const ();
+        let addr_ptr = &*addr as *const u8 as *const ();
 
         let mut this = Self {
             _unique_addr: addr,
