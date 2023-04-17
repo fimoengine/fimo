@@ -231,7 +231,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
@@ -345,7 +344,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
@@ -384,7 +382,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
@@ -422,7 +419,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjArc<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, DynObj, Object, interface};
@@ -1450,7 +1446,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
@@ -1566,7 +1561,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
@@ -1606,7 +1600,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};
@@ -1645,7 +1638,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized, A: Allocator> ObjWeak<DynObj<T>, A> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{ObjArc, ObjWeak, DynObj, Object, interface};

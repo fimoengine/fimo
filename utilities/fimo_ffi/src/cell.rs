@@ -520,7 +520,6 @@ impl<T: ?Sized> RefCell<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -578,7 +577,6 @@ impl<T: ?Sized> RefCell<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -743,7 +741,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -788,7 +785,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -833,7 +829,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -872,7 +867,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -918,7 +912,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> RefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1481,7 +1474,6 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1539,7 +1531,6 @@ impl<T: ?Sized> AtomicRefCell<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1705,7 +1696,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1750,7 +1740,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1795,7 +1784,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1834,7 +1822,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};
@@ -1880,7 +1867,6 @@ impl<'a, T: ObjInterface<'a> + ?Sized> AtomicRefCell<DynObj<T>> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
     /// #![feature(unsize)]
     ///
     /// use fimo_ffi::{DynObj, Object, interface};

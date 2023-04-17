@@ -314,8 +314,6 @@ mod private {
     /// # Example
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
-    ///
     /// use fimo_ffi::ptr::IBase;
     /// use fimo_ffi::marshal::CTypeBridge;
     /// use fimo_ffi::provider::{IProvider, Demand, request_value};
@@ -403,8 +401,6 @@ mod private {
     /// # Example
     ///
     /// ```
-    /// #![feature(const_trait_impl)]
-    ///
     /// use fimo_ffi::ptr::{IBase, coerce_obj};
     /// use fimo_ffi::provider::{IProvider, Demand, request_ref};
     /// use fimo_ffi::{ObjBox, ObjArc, Object, interface, DynObj};
