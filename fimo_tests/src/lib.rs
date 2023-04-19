@@ -8,7 +8,6 @@ use fimo_module::context::{AppContext, IContext};
 
 /// Builder for a test context.
 pub struct ContextBuilder {
-    actix: bool,
     core: bool,
     logging: bool,
     tasks: bool,
@@ -27,18 +26,11 @@ impl ContextBuilder {
             .expect("FIMO_MODULES_PATHS is an invalid JSON string");
 
         Self {
-            actix: false,
             core: false,
             logging: false,
             tasks: false,
             paths,
         }
-    }
-
-    /// Adds the `actix` module.
-    pub fn with_actix(mut self) -> Self {
-        self.actix = true;
-        self
     }
 
     /// Adds the `core` module.
@@ -79,12 +71,6 @@ impl ContextBuilder {
                 context
                     .load_module(self.module_path("logging"), &[])
                     .expect("Could not load the logging module");
-            }
-
-            if self.actix {
-                context
-                    .load_module(self.module_path("actix"), &[])
-                    .expect("Could not load the actix module");
             }
 
             if self.tasks {
