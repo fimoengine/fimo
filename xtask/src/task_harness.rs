@@ -7,7 +7,7 @@ use crate::{TaskError, TaskResult};
 const CARGO_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 const PRINT_PREFIX: &str = "[xtask]";
 const MODULES_PATHS_ENV: &str = "FIMO_MODULES_PATHS";
-const MODULES: &[&str] = &["fimo_actix", "fimo_core", "fimo_logging", "fimo_tasks"];
+const MODULES: &[&str] = &["fimo_core", "fimo_logging", "fimo_tasks"];
 
 pub struct TaskHarness {
     root: PathBuf,
