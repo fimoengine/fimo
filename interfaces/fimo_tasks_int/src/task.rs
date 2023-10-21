@@ -97,8 +97,8 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
 
         // join the task.
         let mut this = ManuallyDrop::new(self);
-        let res = unsafe { this.join_ref() };
-        res
+
+        unsafe { this.join_ref() }
     }
 
     /// Joins the task by reference.
@@ -117,11 +117,11 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
         let raw = self.handle.as_raw();
 
         // wait for the task to complete.
-        assert!(matches!(runtime.wait_on(handle), Ok(_)));
+        assert!(runtime.wait_on(handle).is_ok());
 
         // unregister the completed task.
         runtime.enter_scheduler(|s, _| {
-            assert!(matches!(s.unregister_task(raw), Ok(_)));
+            assert!(s.unregister_task(raw).is_ok());
         });
 
         let context = &mut *raw.context().borrow_mut();
@@ -145,7 +145,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
         );
 
         let runtime = unsafe { get_runtime() };
-        assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
+        assert!(runtime.wait_on(self.handle()).is_ok());
 
         // We are outside of the scheduler, so we must use `context_atomic`.
         let context = self.as_raw().context_atomic();
@@ -169,7 +169,7 @@ impl<T: RawTaskWrapper<Output = R>, R> JoinHandle<T> {
         );
 
         let runtime = unsafe { get_runtime() };
-        assert!(matches!(runtime.wait_on(self.handle()), Ok(_)));
+        assert!(runtime.wait_on(self.handle()).is_ok());
 
         // We are outside of the scheduler, so we must use `context_atomic`.
         let context = self.as_raw().context_atomic();
@@ -242,7 +242,7 @@ impl<T: RawTaskWrapper> Drop for JoinHandle<T> {
             self.handle(),
             self.as_raw().resolved_name()
         );
-        unsafe { assert!(matches!(self.join_ref(), Ok(_))) };
+        unsafe { assert!(self.join_ref().is_ok()) };
     }
 }
 

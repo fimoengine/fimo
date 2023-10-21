@@ -962,7 +962,7 @@ impl<A: Allocator> String<A> {
     /// ```
     #[inline]
     pub fn pop(&mut self) -> Option<char> {
-        let ch = self.chars().rev().next()?;
+        let ch = self.chars().next_back()?;
         let new_len = self.len() - ch.len_utf8();
         unsafe {
             self.vec.set_len(new_len);
@@ -1826,7 +1826,7 @@ impl<A: Allocator> Eq for String<A> {}
 impl<A: Allocator> PartialOrd for String<A> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        PartialOrd::partial_cmp(&self.vec, &other.vec)
+        Some(self.cmp(other))
     }
 }
 

@@ -280,7 +280,7 @@ fn block() -> Result<(), Error> {
         t.unblock()?;
 
         let res = t.join();
-        assert!(matches!(res, Ok(_)));
+        assert!(res.is_ok());
 
         Ok(())
     })

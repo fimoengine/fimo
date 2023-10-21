@@ -235,7 +235,7 @@ pub trait IRuntimeExt: IRuntime {
                 // SAFETY: The handle was the original owner of the task and now it has been
                 // transferred to us, so we are allowed to unregister it.
                 self.enter_scheduler(|s, _| unsafe {
-                    assert!(matches!(s.unregister_task(task), Ok(_)));
+                    assert!(s.unregister_task(task).is_ok());
                 });
 
                 let mut context = task.context().borrow_mut();

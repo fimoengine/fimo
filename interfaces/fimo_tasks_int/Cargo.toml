@@ -1,9 +1,10 @@
 [package]
 name = "fimo_tasks_int"
-version = "0.1.0"
+version = { workspace = true }
 edition = "2018"
+license = { workspace = true }
+repository = { workspace = true }
 description = "`fimo-tasks` interface definition"
-license = "MIT OR Apache-2.0"
 categories = ["game-development"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

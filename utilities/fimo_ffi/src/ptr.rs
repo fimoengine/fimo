@@ -508,10 +508,7 @@ impl<Dyn: ?Sized> Copy for ObjMetadata<Dyn> {}
 
 impl<Dyn: ?Sized> Clone for ObjMetadata<Dyn> {
     fn clone(&self) -> Self {
-        Self {
-            vtable_ptr: self.vtable_ptr,
-            phantom: self.phantom,
-        }
+        *self
     }
 }
 
@@ -1078,10 +1075,7 @@ impl<Dyn: ?Sized> Copy for RawObj<Dyn> {}
 
 impl<Dyn: ?Sized> Clone for RawObj<Dyn> {
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            metadata: self.metadata,
-        }
+        *self
     }
 }
 
@@ -1132,10 +1126,7 @@ impl<Dyn: ?Sized> Copy for RawObjMut<Dyn> {}
 
 impl<Dyn: ?Sized> Clone for RawObjMut<Dyn> {
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            metadata: self.metadata,
-        }
+        *self
     }
 }
 

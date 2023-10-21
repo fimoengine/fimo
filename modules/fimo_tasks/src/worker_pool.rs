@@ -654,55 +654,53 @@ pub(crate) unsafe fn yield_to_worker(msg_data: MsgData<'_>) {
 }
 
 pub(crate) extern "C" fn task_main(thread_context: Transfer) -> ! {
-    loop {
-        // SAFETY: `WORKER` is always initialized during the execution of a worker.
-        let worker = unsafe { WORKER.get().unwrap_unchecked() };
+    // SAFETY: `WORKER` is always initialized during the execution of a worker.
+    let worker = unsafe { WORKER.get().unwrap_unchecked() };
 
-        // Fetch the worker, write back the thread context and take the entry function.
-        // SAFETY: `WORKER` is always initialized during the execution of a worker and
-        // the current task was initialized prior to calling this function.
-        let task = unsafe { worker.current_task.get().unwrap_unchecked().into_task() };
+    // Fetch the worker, write back the thread context and take the entry function.
+    // SAFETY: `WORKER` is always initialized during the execution of a worker and
+    // the current task was initialized prior to calling this function.
+    let task = unsafe { worker.current_task.get().unwrap_unchecked().into_task() };
 
-        // Create a new branch for the current task. Branching the stack makes it
-        // immutable, so we first switch to the main branch.
-        let logger = logger();
-        logger
-            .switch_span_stack(worker.shared_data().branch, SpanStackId::THREAD)
-            .expect("could not swap to the main branch");
-        let task_branch = logger
-            .branch_span_stack(SpanStackId::THREAD)
-            .expect("could not create the task span branch");
+    // Create a new branch for the current task. Branching the stack makes it
+    // immutable, so we first switch to the main branch.
+    let logger = logger();
+    logger
+        .switch_span_stack(worker.shared_data().branch, SpanStackId::THREAD)
+        .expect("could not swap to the main branch");
+    let task_branch = logger
+        .branch_span_stack(SpanStackId::THREAD)
+        .expect("could not create the task span branch");
 
-        let f = {
-            let context = task.context().borrow();
-            let data = context.scheduler_data();
-            let mut shared = data.shared_data_mut();
-            shared.set_context(thread_context.context);
-            shared.set_branch(task_branch);
-            shared.take_entry_func()
-        };
+    let f = {
+        let context = task.context().borrow();
+        let data = context.scheduler_data();
+        let mut shared = data.shared_data_mut();
+        shared.set_context(thread_context.context);
+        shared.set_branch(task_branch);
+        shared.take_entry_func()
+    };
 
-        if let Some(f) = f {
-            let f = std::panic::AssertUnwindSafe(f);
-            if let Err(e) = std::panic::catch_unwind(f) {
-                // If there was an error we wrap it up in our custom wrapper and write it
-                // into the shared context portion.
-                let e = PanicData::new(e);
-                {
-                    let context = task.context().borrow();
-                    let data = context.scheduler_data();
-                    let mut shared = data.shared_data_mut();
-                    shared.set_panic(e);
-                }
-
-                // SAFETY: The preconditions are satisfied by the worker loop.
-                unsafe { yield_to_worker(MsgData::Completed { aborted: true }) }
+    if let Some(f) = f {
+        let f = std::panic::AssertUnwindSafe(f);
+        if let Err(e) = std::panic::catch_unwind(f) {
+            // If there was an error we wrap it up in our custom wrapper and write it
+            // into the shared context portion.
+            let e = PanicData::new(e);
+            {
+                let context = task.context().borrow();
+                let data = context.scheduler_data();
+                let mut shared = data.shared_data_mut();
+                shared.set_panic(e);
             }
+
+            // SAFETY: The preconditions are satisfied by the worker loop.
+            unsafe { yield_to_worker(MsgData::Completed { aborted: true }) }
         }
-
-        // SAFETY: The preconditions are satisfied by the worker loop.
-        unsafe { yield_to_worker(MsgData::Completed { aborted: false }) }
-
-        unreachable!()
     }
+
+    // SAFETY: The preconditions are satisfied by the worker loop.
+    unsafe { yield_to_worker(MsgData::Completed { aborted: false }) }
+
+    unreachable!()
 }
