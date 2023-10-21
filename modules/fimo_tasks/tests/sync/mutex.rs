@@ -68,14 +68,14 @@ fn try_lock() -> Result<(), Error> {
     enter_and_init_runtime(|| {
         let m = Mutex::new(5);
         let l = m.try_lock();
-        assert!(matches!(l, Some(_)));
+        assert!(l.is_some());
 
         let l2 = m.try_lock();
-        assert!(matches!(l2, None));
+        assert!(l2.is_none());
 
         drop(l);
         let l = m.try_lock();
-        assert!(matches!(l, Some(_)));
+        assert!(l.is_some());
 
         Ok(())
     })

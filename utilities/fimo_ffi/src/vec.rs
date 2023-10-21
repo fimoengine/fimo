@@ -1899,6 +1899,7 @@ macro_rules! impl_is_zero {
         unsafe impl IsZero for $t {
             #[inline]
             #[allow(clippy::bool_comparison)]
+            #[allow(clippy::redundant_closure_call)]
             fn is_zero(&self) -> bool {
                 $is_zero(*self)
             }
@@ -2837,7 +2838,6 @@ impl<T> FromIterator<T> for Vec<T, Global> {
 /// as required by the `core::borrow::Borrow` implementation.
 ///
 /// ```
-/// #![feature(build_hasher_simple_hash_one)]
 /// use std::hash::BuildHasher;
 /// use fimo_ffi::vec::Vec;
 /// use fimo_ffi::vec;
@@ -3004,10 +3004,12 @@ impl<'de, T: Deserialize<'de>, A: Allocator + Default> Deserialize<'de> for Vec<
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let mut values = Vec::with_capacity_in(
-                    serde::__private::size_hint::cautious(seq.size_hint()),
-                    Default::default(),
-                );
+                let capacity = if std::mem::size_of::<T>() == 0 {
+                    0
+                } else {
+                    seq.size_hint().unwrap_or(0)
+                };
+                let mut values = Vec::with_capacity_in(capacity, Default::default());
 
                 while let Some(value) = seq.next_element()? {
                     values.push(value);
@@ -3044,8 +3046,12 @@ impl<'de, T: Deserialize<'de>, A: Allocator + Default> Deserialize<'de> for Vec<
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let hint = serde::__private::size_hint::cautious(seq.size_hint());
-                if let Some(additional) = hint.checked_sub(self.0.len()) {
+                let capacity = if std::mem::size_of::<T>() == 0 {
+                    0
+                } else {
+                    seq.size_hint().unwrap_or(0)
+                };
+                if let Some(additional) = capacity.checked_sub(self.0.len()) {
                     self.0.reserve(additional);
                 }
 

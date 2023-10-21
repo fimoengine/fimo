@@ -53,7 +53,7 @@ trait TypeInfoPriv: 'static {
     const ID: uuid::Uuid;
 
     /// Variant of the type.
-    const VARIANT: usize = 0;
+    const VARIANT: u128 = 0;
 
     /// Type name.
     const NAME: &'static str = std::any::type_name::<Self>();
@@ -154,14 +154,14 @@ tuple_impl! {
 // General implementation uses generates an unstable id by hashing a [`std::any::TypeId`].
 impl<T: ?Sized + 'static> TypeInfoPriv for T {
     default const ID: uuid::Uuid = uuid::uuid!("eec3abd9-46af-4bde-a6f0-27ff0652d3ea");
-    default const VARIANT: usize = unsafe { std::mem::transmute(std::any::TypeId::of::<T>()) };
+    default const VARIANT: u128 = unsafe { std::mem::transmute(std::any::TypeId::of::<T>()) };
     default const NAME: &'static str = std::any::type_name::<Self>();
     default const MEMBER_IDS: &'static [StableTypeId] = &[];
 }
 
 impl<T: TypeInfo + ?Sized + 'static> TypeInfoPriv for T {
     default const ID: uuid::Uuid = <T as TypeInfo>::ID;
-    default const VARIANT: usize = <T as TypeInfo>::VARIANT;
+    default const VARIANT: u128 = <T as TypeInfo>::VARIANT as _;
     default const NAME: &'static str = <T as TypeInfo>::NAME;
     default const MEMBER_IDS: &'static [StableTypeId] = <T as TypeInfo>::MEMBER_IDS;
 }
@@ -198,7 +198,7 @@ const fn hash_type_info<T: TypeInfoPriv + ?Sized>() -> u128 {
         ptr = ptr.add(16);
 
         // Copy type variant.
-        let variant: [u8; 8] = T::VARIANT.to_ne_bytes();
+        let variant: [u8; 16] = T::VARIANT.to_ne_bytes();
         copy_nonoverlapping(variant.as_ptr(), ptr, 8);
         ptr = ptr.add(8);
 

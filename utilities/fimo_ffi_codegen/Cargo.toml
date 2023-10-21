@@ -1,9 +1,10 @@
 [package]
 name = "fimo_ffi_codegen"
-version = "0.1.0"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 description = "Code generation crate for the fimo_ffi crate"
-license = "MIT OR Apache-2.0"
 categories = ["game-development"]
 
 [lib]

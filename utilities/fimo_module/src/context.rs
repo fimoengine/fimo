@@ -434,6 +434,7 @@ mod private {
         pub fimo_version: Version,
         /// Load function.
         #[allow(clippy::type_complexity)]
+        #[allow(improper_ctypes_definitions)]
         pub load_fn: for<'a> unsafe extern "C-unwind" fn(
             <&Path as CTypeBridge>::Type,
             <&[fimo_ffi::String] as CTypeBridge>::Type,
@@ -445,15 +446,15 @@ mod private {
 
     impl ModuleDeclaration {
         /// Path from a module root to the manifest.
-        pub const MODULE_MANIFEST_PATH: &str = "module.json";
+        pub const MODULE_MANIFEST_PATH: &'static str = "module.json";
 
         /// Name of the module declaration.
-        pub const MODULE_DECLARATION_NAME: &str = "MODULE_DECLARATION";
+        pub const MODULE_DECLARATION_NAME: &'static str = "MODULE_DECLARATION";
 
         /// Redeclaration of [`fimo_ffi::FIMO_VERSION_COMPAT`].
         pub const FIMO_VERSION_COMPAT: Version = fimo_ffi::FIMO_VERSION_COMPAT;
 
-        const MODULE_DECLARATION_NAME_WITH_NULL: &[u8] = b"MODULE_DECLARATION\0";
+        const MODULE_DECLARATION_NAME_WITH_NULL: &'static [u8] = b"MODULE_DECLARATION\0";
 
         unsafe fn load(
             &self,

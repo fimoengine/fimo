@@ -338,16 +338,7 @@ impl<T> Copy for ConstSpanPtr<T> {}
 impl<T> Clone for ConstSpanPtr<T> {
     #[inline]
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            len: self.len,
-        }
-    }
-
-    #[inline]
-    fn clone_from(&mut self, source: &Self) {
-        self.ptr = source.ptr;
-        self.len = source.len;
+        *self
     }
 }
 
@@ -373,9 +364,7 @@ impl<T> Eq for ConstSpanPtr<T> {}
 impl<T> PartialOrd for ConstSpanPtr<T> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let ptr: *const [T] = (*self).into();
-        let other: *const [T] = (*other).into();
-        PartialOrd::partial_cmp(&ptr, &other)
+        Some(self.cmp(other))
     }
 }
 
@@ -524,16 +513,7 @@ impl<T> Copy for MutSpanPtr<T> {}
 impl<T> Clone for MutSpanPtr<T> {
     #[inline]
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            len: self.len,
-        }
-    }
-
-    #[inline]
-    fn clone_from(&mut self, source: &Self) {
-        self.ptr = source.ptr;
-        self.len = source.len;
+        *self
     }
 }
 
@@ -559,9 +539,7 @@ impl<T> Eq for MutSpanPtr<T> {}
 impl<T> PartialOrd for MutSpanPtr<T> {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let ptr: *const [T] = (*self).into();
-        let other: *const [T] = (*other).into();
-        PartialOrd::partial_cmp(&ptr, &other)
+        Some(self.cmp(other))
     }
 }
 

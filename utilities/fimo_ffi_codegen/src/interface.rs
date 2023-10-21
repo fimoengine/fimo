@@ -962,7 +962,7 @@ impl InterfaceContext {
             .name
             .as_ref()
             .map(|n| n.value())
-            .unwrap_or_else(String::new)
+            .unwrap_or_default()
             .as_str()
         {
             "" | "Rust" => Ok(syn::parse_quote!(::fimo_ffi::marshal::RustTypeBridge)),
@@ -1667,6 +1667,7 @@ pub fn interface_impl(input: TokenStream) -> TokenStream {
     let vtable_impl =
         context.generate_vtable(&item, input.has_static_bound(), &input.get_interfaces());
 
+    #[allow(unused_mut)]
     quote! {
         #item
 

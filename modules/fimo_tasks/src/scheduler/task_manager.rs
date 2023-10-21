@@ -378,7 +378,7 @@ impl TaskManager {
         let (handle, data) = context.unregister();
         let private = data.private_data();
 
-        assert!(matches!(self.tasks.remove(&handle), Some(_)));
+        assert!(self.tasks.remove(&handle).is_some());
         debug_assert!(private.dependencies.is_empty());
 
         self.free_handle(handle);
@@ -1352,7 +1352,7 @@ impl Eq for Waiter {}
 impl PartialOrd for Waiter {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 
