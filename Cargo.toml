@@ -1,10 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["xtask", "fimo_tests", "modules/*", "utilities/*", "interfaces/*"]
+members = ["library/*", "src/*"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/fimoengine/fimo"
 
@@ -83,4 +84,4 @@ unused_self = "warn"
 useless_transmute = "warn"
 verbose_file_reads = "warn"
 zero_sized_map_values = "warn"
-undocumented_unsafe_blocks = "forbid"
+undocumented_unsafe_blocks = "deny"
