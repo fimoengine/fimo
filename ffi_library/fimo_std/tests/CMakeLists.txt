@@ -1,4 +1,5 @@
-list(APPEND TEST_TARGETS test_empty)
+list(APPEND TEST_TARGETS test_ascii)
+list(APPEND TEST_TARGETS test_unicode)
 
 list(APPEND TEST_LIBS "${CMOCKA_LIBRARIES}")
 list(APPEND TEST_LIBS fimo_std)
