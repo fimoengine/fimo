@@ -14,6 +14,7 @@ set(FIMO_STD_HEADERS
     include/fimo_std/internal/unicode.h
 
     # Public headers
+    include/fimo_std/array_list.h
     include/fimo_std/char.h
     include/fimo_std/error.h
     include/fimo_std/memory.h
@@ -26,6 +27,7 @@ set(FIMO_STD_SRC
     src/internal/unicode.c
 
     # Public header implementations
+    src/array_list.c
     src/char.c
     src/error.c
     src/memory.c
