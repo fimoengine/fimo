@@ -11,11 +11,13 @@ add_subdirectory(third_party)
 
 set(FIMO_STD_HEADERS
     # Internal headers
+    include/fimo_std/internal/context.h
     include/fimo_std/internal/unicode.h
 
     # Public headers
     include/fimo_std/array_list.h
     include/fimo_std/char.h
+    include/fimo_std/context.h
     include/fimo_std/error.h
     include/fimo_std/graph.h
     include/fimo_std/memory.h
@@ -27,11 +29,13 @@ set(FIMO_STD_HEADERS
 
 set(FIMO_STD_SRC
     # Internal header implementations
+    src/internal/context.c
     src/internal/unicode.c
 
     # Public header implementations
     src/array_list.c
     src/char.c
+    src/context.c
     src/error.c
     src/graph.c
     src/memory.c
