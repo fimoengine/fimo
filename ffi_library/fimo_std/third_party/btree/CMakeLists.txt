@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.15)
+project(BTree)
+
+add_library(btree STATIC btree.c)
+set_property(TARGET btree PROPERTY LINKER_LANGUAGE C)
+set_property(TARGET btree PROPERTY C_STANDARD 17)
+set_property(TARGET btree PROPERTY C_STANDARD_REQUIRED ON)
+set_property(TARGET btree PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+target_include_directories(btree PUBLIC include)
+
+if (MSVC)
+    if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(btree PUBLIC /experimental:c11atomics)
+    endif()
+endif()
