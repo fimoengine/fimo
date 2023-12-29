@@ -12,6 +12,7 @@ add_subdirectory(third_party)
 set(FIMO_STD_HEADERS
     # Internal headers
     include/fimo_std/internal/context.h
+    include/fimo_std/internal/module.h
     include/fimo_std/internal/tracing.h
     include/fimo_std/internal/unicode.h
 
@@ -22,6 +23,7 @@ set(FIMO_STD_HEADERS
     include/fimo_std/error.h
     include/fimo_std/graph.h
     include/fimo_std/memory.h
+    include/fimo_std/module.h
     include/fimo_std/refcount.h
     include/fimo_std/time.h
     include/fimo_std/tracing.h
@@ -32,6 +34,7 @@ set(FIMO_STD_HEADERS
 set(FIMO_STD_SRC
     # Internal header implementations
     src/internal/context.c
+    src/internal/module.c
     src/internal/tracing.c
     src/internal/unicode.c
 
@@ -42,6 +45,7 @@ set(FIMO_STD_SRC
     src/error.c
     src/graph.c
     src/memory.c
+    src/module.c
     src/refcount.c
     src/time.c
     src/tracing.c
