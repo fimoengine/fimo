@@ -10,6 +10,11 @@ enable_language(C)
 add_subdirectory(third_party)
 
 set(FIMO_STD_HEADERS
+    # Internal headers
+    include/fimo_std/internal/unicode.h
+
+    # Public headers
+    include/fimo_std/char.h
     include/fimo_std/error.h
     include/fimo_std/memory.h
     include/fimo_std/utils.h
@@ -17,6 +22,11 @@ set(FIMO_STD_HEADERS
 )
 
 set(FIMO_STD_SRC
+    # Internal header implementations
+    src/internal/unicode.c
+
+    # Public header implementations
+    src/char.c
     src/error.c
     src/memory.c
     src/version.c
