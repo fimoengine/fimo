@@ -18,6 +18,7 @@ set(FIMO_STD_HEADERS
     include/fimo_std/char.h
     include/fimo_std/error.h
     include/fimo_std/memory.h
+    include/fimo_std/refcount.h
     include/fimo_std/time.h
     include/fimo_std/utils.h
     include/fimo_std/version.h
@@ -32,6 +33,7 @@ set(FIMO_STD_SRC
     src/char.c
     src/error.c
     src/memory.c
+    src/refcount.c
     src/time.c
     src/version.c
 )
