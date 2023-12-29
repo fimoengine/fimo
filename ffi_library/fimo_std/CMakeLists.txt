@@ -10,10 +10,12 @@ enable_language(C)
 add_subdirectory(third_party)
 
 set(FIMO_STD_HEADERS
+    include/fimo_std/error.h
     include/fimo_std/utils.h
 )
 
 set(FIMO_STD_SRC
+    src/error.c
 )
 
 option(FIMO_MACRO_HELPER_FUNCTIONS "Enable helper functions from macros" OFF)
