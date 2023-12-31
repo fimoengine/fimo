@@ -282,7 +282,7 @@ pub fn to_result(error: bindings::FimoError) -> Result {
 pub fn to_result_indirect<T>(f: impl FnOnce(&mut bindings::FimoError) -> T) -> Result<T> {
     let mut error = Error::EOK.into_error();
     let result = f(&mut error);
-    if error.0 > 0 {
+    if error.0 != bindings::FimoError::FIMO_EOK.0 {
         Err(Error::from_error(error))
     } else {
         Ok(result)

@@ -62,12 +62,11 @@ FIMO_MUST_USE FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t
         return (FimoMallocBuffer) { .ptr = NULL, .buff_size = 0 };
     }
 
-#if !defined(_WIN32) && !defined(WIN32)
-    // Alignment must be smaller or a multiple of sizeof(void*)
+    // Alignment must be a multiple of sizeof(void*)
+    alignment = alignment < sizeof(void*) ? sizeof(void*) : alignment;
     if (alignment > sizeof(void*)) {
         alignment = (alignment + (sizeof(void*) - 1)) & ~(sizeof(void*) - 1);
     }
-#endif // !defined(_WIN32) && !defined(WIN32)
 
     // Align to the alignment.
     size = (size + (alignment - 1)) & ~(alignment - 1);
