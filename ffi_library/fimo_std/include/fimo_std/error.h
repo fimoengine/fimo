@@ -9,6 +9,25 @@
 extern "C" {
 #endif // __cplusplus
 
+#define FIMO_IGNORE_(expr, var) \
+    do {                        \
+        FimoError var = (expr); \
+        (void)var;              \
+    } while (0)
+
+/**
+ * Ignores a `FimoError` result.
+ *
+ * Many functions are annotated with the `FIMO_MUST_USE`
+ * attribute, which makes the compiler emit a warning,
+ * in case the result is not used. Most compilers allow
+ * suppressing the warning by using `(void)expr`, but
+ * this does not work in GCC.
+ *
+ * @param expr expression to ignore
+ */
+#define FIMO_IGNORE(expr) FIMO_IGNORE_(expr, FIMO_VAR(_fimo_ignored))
+
 /**
  * Posix error codes.
  */
