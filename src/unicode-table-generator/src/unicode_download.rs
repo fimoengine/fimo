@@ -1,17 +1,26 @@
 use crate::UNICODE_DIRECTORY;
-use std::path::Path;
-use std::process::{Command, Output};
+use std::{
+    path::Path,
+    process::{Command, Output},
+};
 
 static URL_PREFIX: &str = "https://www.unicode.org/Public/UCD/latest/ucd/";
 
 static README: &str = "ReadMe.txt";
 
-static RESOURCES: &[&str] =
-    &["DerivedCoreProperties.txt", "PropList.txt", "UnicodeData.txt", "SpecialCasing.txt"];
+static RESOURCES: &[&str] = &[
+    "DerivedCoreProperties.txt",
+    "PropList.txt",
+    "UnicodeData.txt",
+    "SpecialCasing.txt",
+];
 
 #[track_caller]
 fn fetch(url: &str) -> Output {
-    let output = Command::new("curl").arg(URL_PREFIX.to_owned() + url).output().unwrap();
+    let output = Command::new("curl")
+        .arg(URL_PREFIX.to_owned() + url)
+        .output()
+        .unwrap();
     if !output.status.success() {
         panic!(
             "Failed to run curl to fetch {url}: stderr: {}",
