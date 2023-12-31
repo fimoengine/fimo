@@ -1,3 +1,4 @@
+list(APPEND TEST_TARGETS test_memory)
 list(APPEND TEST_TARGETS test_ascii)
 list(APPEND TEST_TARGETS test_unicode)
 
