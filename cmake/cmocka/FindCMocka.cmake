@@ -1,5 +1,7 @@
 set (CMOCKA_PATH "" CACHE STRING "Custom CMocka path")
 
+message(STATUS "Cmocka path ${CMOCKA_PATH}")
+
 # Search for the CMocka include directory
 find_path(CMOCKA_INCLUDE_DIR
   NAMES cmocka.h
