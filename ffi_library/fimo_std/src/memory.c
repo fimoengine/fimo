@@ -56,8 +56,8 @@ FIMO_MUST_USE FimoMallocBuffer fimo_calloc_sized(size_t size, FimoError* error)
 FIMO_MUST_USE FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoError* error)
 {
     if (size == 0 || alignment == 0 || ((alignment & (alignment - 1)) != 0)) {
-        if (error && size != 0) {
-            *error = FIMO_EINVAL;
+        if (error) {
+            *error = size == 0 ? FIMO_EOK : FIMO_EINVAL;
         }
         return (FimoMallocBuffer) { .ptr = NULL, .buff_size = 0 };
     }
