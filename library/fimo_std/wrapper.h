@@ -5,7 +5,6 @@
 #include <fimo_std/graph.h>
 #include <fimo_std/memory.h>
 #include <fimo_std/module.h>
-#include <fimo_std/mutex.h>
 #include <fimo_std/refcount.h>
 #include <fimo_std/time.h>
 #include <fimo_std/tracing.h>
