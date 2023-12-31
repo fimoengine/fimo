@@ -6,14 +6,34 @@
 #include <stdatomic.h>
 
 #ifdef _WIN32
-__declspec(allocate("fi_mod$a")) const FimoModuleExport* fimo_internal_modules_section_start = NULL;
-__declspec(allocate("fi_mod$z")) const FimoModuleExport* fimo_internal_modules_section_end = NULL;
+__declspec(allocate("fi_mod$a"))
+    const FimoModuleExport* fimo_internal_modules_section_start
+    = NULL;
+__declspec(allocate("fi_mod$z"))
+    const FimoModuleExport* fimo_internal_modules_section_end
+    = NULL;
+
+#define FIMO_INTERNAL_MODULES_SECTION_START fimo_internal_modules_section_start
+#define FIMO_INTERNAL_MODULES_SECTION_END fimo_internal_modules_section_end
+#elif __APPLE__
+// Allocate a dummy module to force the creation of the section symbols.
+const FimoModuleExport* fimo_internal_modules_dummy_module
+    __attribute__((section(FIMO_MODULE_SECTION)))
+    = NULL;
+
+extern const FimoModuleExport*
+    fimo_internal_modules_section_start __asm("section$start$__DATA$__fimo_module");
+extern const FimoModuleExport*
+    fimo_internal_modules_section_end __asm("section$end$__DATA$__fimo_module");
 
 #define FIMO_INTERNAL_MODULES_SECTION_START fimo_internal_modules_section_start
 #define FIMO_INTERNAL_MODULES_SECTION_END fimo_internal_modules_section_end
 #else
 // Allocate a dummy module to force the creation of the section symbols.
-const FimoModuleExport* fimo_internal_modules_dummy_module __attribute__((section(FIMO_MODULE_SECTION))) = NULL;
+const FimoModuleExport* fimo_internal_modules_dummy_module
+    __attribute__((section(FIMO_MODULE_SECTION)))
+    = NULL;
+
 extern const FimoModuleExport* __start_fimo_module;
 extern const FimoModuleExport* __stop_fimo_module;
 
@@ -66,7 +86,7 @@ FIMO_MUST_USE FimoError fimo_internal_module_param_set_private(void* context, co
         if (context) {
             FIMO_INTERNAL_TRACING_EMIT_ERROR(context, __func__, "module",
                 "invalid null parameter, module='%p', value='%p', param='%p'",
-                module, value, param)
+                (void*)module, value, param)
         }
         return FIMO_EINVAL;
     }
@@ -74,8 +94,8 @@ FIMO_MUST_USE FimoError fimo_internal_module_param_set_private(void* context, co
     FimoInternalContext* ctx = (FimoInternalContext*)context;
     FimoInternalModuleParam* p = (FimoInternalModuleParam*)param;
     FIMO_INTERNAL_TRACING_EMIT_TRACE(ctx, __func__, "module",
-        "module='%p', param='%p', owner='%d', read='%d', write='%d', type='%d'",
-        module, p, p->owner, p->read, p->write, p->type)
+        "module='%p', param='%p', owner='%p', read='%d', write='%d', type='%d'",
+        (void*)module, (void*)p, (void*)p->owner, p->read, p->write, p->type)
 
     if (p->owner != module) {
         FIMO_INTERNAL_TRACING_EMIT_ERROR(ctx, __func__, "module",
@@ -120,7 +140,7 @@ FIMO_MUST_USE FimoError fimo_internal_module_param_get_private(void* context, co
         if (context) {
             FIMO_INTERNAL_TRACING_EMIT_ERROR(context, __func__, "module",
                 "invalid null parameter, module='%p', value='%p', param='%p'",
-                module, value, param)
+                (void*)module, (void*)value, (void*)param)
         }
         return FIMO_EINVAL;
     }
@@ -128,8 +148,8 @@ FIMO_MUST_USE FimoError fimo_internal_module_param_get_private(void* context, co
     FimoInternalContext* ctx = (FimoInternalContext*)context;
     const FimoInternalModuleParam* p = (const FimoInternalModuleParam*)param;
     FIMO_INTERNAL_TRACING_EMIT_TRACE(ctx, __func__, "module",
-        "module='%p', param='%p', owner='%d', read='%d', write='%d', type='%d'",
-        module, p, p->owner, p->read, p->write, p->type)
+        "module='%p', param='%p', owner='%p', read='%d', write='%d', type='%d'",
+        (void*)module, (void*)p, (void*)p->owner, p->read, p->write, p->type)
 
     if (p->owner != module) {
         FIMO_INTERNAL_TRACING_EMIT_ERROR(ctx, __func__, "module",

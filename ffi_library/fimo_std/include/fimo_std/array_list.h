@@ -25,7 +25,7 @@ typedef struct FimoArrayList {
  * @return Empty array.
  */
 FIMO_MUST_USE
-FimoArrayList fimo_array_list_new();
+FimoArrayList fimo_array_list_new(void);
 
 /**
  * Creates a new empty array with a minimum capacity.

@@ -28,6 +28,11 @@ extern "C" {
  * Name of the section where the modules will be stored to.
  */
 #define FIMO_MODULE_SECTION "fi_mod$u"
+#elif __APPLE__
+/**
+ * Name of the section where the modules will be stored to.
+ */
+#define FIMO_MODULE_SECTION "__DATA,__fimo_module"
 #else
 /**
  * Name of the section where the modules will be stored to.
@@ -397,11 +402,15 @@ extern "C" {
 #define FIMO_MODULE_EXPORT_ABI 0
 
 #ifdef _WIN32
-#define FIMO_MODULE_EXPORT_MODULE__(name) \
-    __declspec(allocate(FIMO_MODULE_SECTION)) const FimoModuleExport* FIMO_VAR(name) = &name;
+#define FIMO_MODULE_EXPORT_MODULE__(name)      \
+    __declspec(allocate(FIMO_MODULE_SECTION))  \
+        const FimoModuleExport* FIMO_VAR(name) \
+        = &name;
 #else
-#define FIMO_MODULE_EXPORT_MODULE__(name) \
-    const FimoModuleExport* FIMO_VAR(name) __attribute__((section(FIMO_MODULE_SECTION))) = &name;
+#define FIMO_MODULE_EXPORT_MODULE__(name)                   \
+    const FimoModuleExport* FIMO_VAR(name)                  \
+        __attribute__((used, section(FIMO_MODULE_SECTION))) \
+        = &name;
 #endif
 
 #define FIMO_MODULE_EXPORT_MODULE_(name, ...)   \

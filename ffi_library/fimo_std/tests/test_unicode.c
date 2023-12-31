@@ -19164,7 +19164,7 @@ static void whitespace_false(void** state) {
     }
 }
 
-int main() {
+int main(void) {
     int result = 0;
     const struct CMUnitTest alphabetic_tests[] = {
         cmocka_unit_test(alphabetic_true),
