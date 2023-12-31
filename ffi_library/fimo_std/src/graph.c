@@ -365,7 +365,7 @@ error_node_alloc:
     }
 error_data_alloc:
     if (node_from_free_list) {
-        fimo_array_list_push(&graph->node_free_list, sizeof(FimoU64),
+        (void)fimo_array_list_push(&graph->node_free_list, sizeof(FimoU64),
             &node_idx);
     } else {
         graph->next_node_idx--;

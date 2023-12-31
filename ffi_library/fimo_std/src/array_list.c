@@ -30,7 +30,7 @@
 #define MAX_BUFFER_SIZE_ SIZE_MAX >> 1
 
 FIMO_MUST_USE
-FimoArrayList fimo_array_list_new()
+FimoArrayList fimo_array_list_new(void)
 {
     return (FimoArrayList) {
         .elements = NULL,

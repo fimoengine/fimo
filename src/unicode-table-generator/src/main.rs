@@ -490,7 +490,7 @@ fn generate_tests(ranges: &[(&str, Vec<Range<u32>>)]) -> String {
         s.push_str("}\n\n");
     }
 
-    s.push_str("int main() {\n");
+    s.push_str("int main(void) {\n");
     s.push_str("    int result = 0;\n");
 
     #[rustfmt::skip]
