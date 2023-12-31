@@ -6,8 +6,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  ci:
-    name: "Ci suite"
+  tests:
+    name: "Test suite"
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -15,15 +15,82 @@ jobs:
         rust:
           - nightly
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+
+      - name: Clone cmocka repository
+        if: runner.os == 'Windows'
+        run: git clone https://git.cryptomilk.org/projects/cmocka.git cmocka
+
+      - name: Install (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install libcmocka-dev ninja-build
+      - name: Install (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmocka ninja
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install ninja
+          mkdir external_bins
+          cd cmocka
+          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/external_bins/cmocka
+          cmake --build build
+          cmake --install build
+          cd ${{ github.workspace }}
+
+      - name: Run FFI tests
+        run: |
+          if [ "RUNNER_OS" == "Windows" ]; then
+            cmake -S ffi_library -B build -DCMOCKA_PATH=${{ github.workspace }}/external_bins/cmocka
+          else
+            cmake -S ffi_library -B build
+          fi
+          cmake --build build
+          ctest --test-dir build
+        shell: bash
+
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt, clippy
-      - uses: taiki-e/install-action@nextest
-      - uses: actions-rs/cargo@v1
+      
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
         with:
-          command: xtask
-          args: ci
+          command: test
+  
+  lints:
+    name: Lints
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+        rust:
+          - nightly
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: Run cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Run cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings

@@ -424,7 +424,7 @@ bool fimo_char_is_ascii_whitespace(FimoChar ch)
 FIMO_MUST_USE
 bool fimo_char_is_ascii_control(FimoChar ch)
 {
-    return ('\0' <= ch && ch <= '\x1F')
+    return (ch <= '\x1F')
         || (ch == '\x7F');
 }
 

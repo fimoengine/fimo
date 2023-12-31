@@ -432,10 +432,12 @@ impl Canonicalized {
         // We'll probably always have some slack though so this loop will still
         // be needed.
         for &w in unique_words {
-            if !unique_mapping.contains_key(&w) {
-                assert!(unique_mapping
-                    .insert(w, UniqueMapping::Canonical(canonical_words.len()))
-                    .is_none());
+            if let std::collections::hash_map::Entry::Vacant(e) = unique_mapping.entry(w) {
+                assert!({
+                    e.insert(UniqueMapping::Canonical(canonical_words.len()));
+                    None::<UniqueMapping>
+                }
+                .is_none());
                 canonical_words.push(w);
             }
         }
