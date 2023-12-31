@@ -365,8 +365,8 @@ error_node_alloc:
     }
 error_data_alloc:
     if (node_from_free_list) {
-        (void)fimo_array_list_push(&graph->node_free_list, sizeof(FimoU64),
-            &node_idx);
+        FIMO_IGNORE(fimo_array_list_push(&graph->node_free_list, sizeof(FimoU64),
+            &node_idx));
     } else {
         graph->next_node_idx--;
     }
@@ -533,8 +533,8 @@ error_inv_adjacency_set:
                                              }));
 error_adjacency_set:
     if (edge_idx_from_free_list) {
-        (void)fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64),
-            &edge_idx);
+        FIMO_IGNORE(fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64),
+            &edge_idx));
     } else {
         graph->next_edge_idx--;
     }
@@ -720,7 +720,7 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
 
         while (!fimo_array_list_is_empty(&edge_buffer)) {
             FimoU64 edge;
-            (void)fimo_array_list_pop_back(&edge_buffer, sizeof(FimoU64), &edge);
+            FIMO_IGNORE(fimo_array_list_pop_back(&edge_buffer, sizeof(FimoU64), &edge));
             void* edge_data = NULL;
             error = fimo_graph_remove_edge(graph, edge, &edge_data);
             if (FIMO_IS_ERROR(error)) {
@@ -785,7 +785,7 @@ FimoError fimo_graph_remove_edge(FimoGraph* graph, FimoU64 edge,
     FimoU64 dst = e->dst;
     *edge_data = e->data;
 
-    (void)fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64), &edge);
+    FIMO_IGNORE(fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64), &edge));
     fimo_free((void*)e);
 
     struct FimoGraphNode_* src_node = (void*)btree_get(graph->nodes, &(struct FimoGraphNode_) {
@@ -1380,10 +1380,10 @@ FimoError fimo_graph_clear(FimoGraph* graph)
     btree_ascend(graph->edges, NULL, edge_free_, graph);
     btree_clear(graph->edges);
 
-    (void)fimo_array_list_resize(&graph->node_free_list, sizeof(FimoU64), 0);
+    FIMO_IGNORE(fimo_array_list_resize(&graph->node_free_list, sizeof(FimoU64), 0));
     graph->next_node_idx = 0;
 
-    (void)fimo_array_list_resize(&graph->edge_free_list, sizeof(FimoU64), 0);
+    FIMO_IGNORE(fimo_array_list_resize(&graph->edge_free_list, sizeof(FimoU64), 0));
     graph->next_edge_idx = 0;
 
     return FIMO_EOK;
@@ -1420,7 +1420,7 @@ FimoError fimo_graph_clear_edges(FimoGraph* graph)
     btree_ascend(graph->edges, NULL, edge_free_, graph);
     btree_clear(graph->edges);
 
-    (void)fimo_array_list_resize_exact(&graph->edge_free_list, sizeof(FimoU64), 0);
+    FIMO_IGNORE(fimo_array_list_resize(&graph->edge_free_list, sizeof(FimoU64), 0));
     graph->next_edge_idx = 0;
 
     return FIMO_EOK;
