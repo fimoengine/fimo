@@ -36,14 +36,14 @@ jobs:
           mkdir external_bins
           cd cmocka
           cmake -S . -B build -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/external_bins/cmocka
-          cmake --build build
+          cmake --build build --config Release
           cmake --install build
           cd ${{ github.workspace }}
 
       - name: Run FFI tests
         run: |
-          if [ "RUNNER_OS" == "Windows" ]; then
-            cmake -S ffi_library -B build -DCMOCKA_PATH=${{ github.workspace }}/external_bins/cmocka
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            cmake -S ffi_library -B build -DCMOCKA_PATH='${{ github.workspace }}/external_bins/cmocka'
           else
             cmake -S ffi_library -B build
           fi
