@@ -31,8 +31,8 @@ typedef struct FimoRefCount {
  * reaches INTPTR_MAX, to safeguard against overflow.
  */
 typedef struct FimoAtomicRefCount {
-    atomic_uintptr_t strong_refs;
-    atomic_uintptr_t weak_refs;
+    _Atomic(uintptr_t) strong_refs;
+    _Atomic(uintptr_t) weak_refs;
 } FimoAtomicRefCount;
 
 #define FIMO_REFCOUNT_INIT                \
