@@ -42,7 +42,17 @@ uintptr_t fimo_strong_count_atomic(const FimoAtomicRefCount* count)
 }
 
 FIMO_MUST_USE
-uintptr_t fimo_weak_count(const FimoRefCount* count)
+uintptr_t fimo_weak_count_guarded(const FimoRefCount* count)
+{
+    if (count->strong_refs == 0) {
+        return 0;
+    } else {
+        return count->weak_refs - 1;
+    }
+}
+
+FIMO_MUST_USE
+uintptr_t fimo_weak_count_unguarded(const FimoRefCount* count)
 {
     return count->weak_refs - 1;
 }
@@ -84,24 +94,6 @@ void fimo_increase_strong_count_atomic(FimoAtomicRefCount* count)
     uintptr_t old_count = atomic_fetch_add_explicit(&count->strong_refs, 1, memory_order_relaxed);
     if (old_count > MAX_REFCOUNT) {
         fprintf(stderr, "FimoRefCount strong count saturated\n");
-        abort();
-    }
-}
-
-void fimo_increase_weak_count(FimoRefCount* count)
-{
-    uintptr_t old_count = count->weak_refs++;
-    if (old_count > MAX_REFCOUNT) {
-        fprintf(stderr, "FimoRefCount weak count saturated\n");
-        abort();
-    }
-}
-
-void fimo_increase_weak_count_atomic(FimoAtomicRefCount* count)
-{
-    uintptr_t old_count = atomic_fetch_add_explicit(&count->weak_refs, 1, memory_order_relaxed);
-    if (old_count > MAX_REFCOUNT) {
-        fprintf(stderr, "FimoRefCount weak count saturated\n");
         abort();
     }
 }
