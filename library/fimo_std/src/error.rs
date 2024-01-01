@@ -1,6 +1,6 @@
 //! Fimo error codes.
 
-use core::{ffi::CStr, fmt};
+use core::{ffi::CStr, fmt, mem::MaybeUninit};
 
 use crate::bindings;
 
@@ -285,6 +285,32 @@ pub fn to_result_indirect<T>(f: impl FnOnce(&mut bindings::FimoError) -> T) -> R
     if error.0 != bindings::FimoError::FIMO_EOK.0 {
         Err(Error::from_error(error))
     } else {
+        Ok(result)
+    }
+}
+
+/// Constructs a [`Result`] by calling a closure that may indicate an error.
+///
+/// Like [`to_result_indirect`], this is usefull when calling C functions that expect a
+/// writable error pointer as one of their arguments, with the difference that the data
+/// is initialized in place.
+///
+/// # Safety
+///
+/// The closure must initialize the data or write an error in the first parameter.
+pub unsafe fn to_result_indirect_in_place<T>(
+    f: impl FnOnce(&mut bindings::FimoError, &mut MaybeUninit<T>),
+) -> Result<T> {
+    let mut data = MaybeUninit::<T>::uninit();
+    let mut error = Error::EOK.into_error();
+    f(&mut error, &mut data);
+    if error.0 != bindings::FimoError::FIMO_EOK.0 {
+        Err(Error::from_error(error))
+    } else {
+        // Safety: By the contract of this function the data
+        // must have been initialized, if the function does
+        // not return an error.
+        let result = unsafe { data.assume_init() };
         Ok(result)
     }
 }
