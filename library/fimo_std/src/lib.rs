@@ -9,3 +9,4 @@ pub mod bindings;
 pub mod error;
 pub mod ffi;
 pub mod refcount;
+pub mod version;
