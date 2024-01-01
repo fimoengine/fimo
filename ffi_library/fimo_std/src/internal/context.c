@@ -101,11 +101,14 @@ FIMO_MUST_USE
 FimoError fimo_internal_context_dealloc(void* ptr)
 {
     FimoInternalContext* context = (FimoInternalContext*)ptr;
-    if (!context || fimo_weak_count_atomic_unguarded(&context->ref_count) != 0) {
+    if (!context
+        || fimo_strong_count_atomic(&context->ref_count) != 0
+        || fimo_weak_count_atomic_unguarded(&context->ref_count) != 0) {
         return FIMO_EINVAL;
     }
 
-    fimo_free_aligned_sized(context, _Alignof(FimoInternalContext), sizeof(FimoInternalContext));
+    fimo_free_aligned_sized(context, _Alignof(FimoInternalContext),
+        sizeof(FimoInternalContext));
     return FIMO_EOK;
 }
 

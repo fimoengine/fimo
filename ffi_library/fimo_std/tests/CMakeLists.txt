@@ -1,5 +1,6 @@
-list(APPEND TEST_TARGETS test_memory)
 list(APPEND TEST_TARGETS test_ascii)
+list(APPEND TEST_TARGETS test_context)
+list(APPEND TEST_TARGETS test_memory)
 list(APPEND TEST_TARGETS test_unicode)
 
 list(APPEND TEST_LIBS "${CMOCKA_LIBRARIES}")
