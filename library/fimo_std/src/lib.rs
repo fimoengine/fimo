@@ -6,6 +6,7 @@ extern crate alloc;
 
 pub mod allocator;
 pub mod bindings;
+pub mod context;
 pub mod error;
 pub mod ffi;
 pub mod refcount;
