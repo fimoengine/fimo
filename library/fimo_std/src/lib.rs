@@ -8,3 +8,4 @@ pub mod allocator;
 pub mod bindings;
 pub mod error;
 pub mod ffi;
+pub mod refcount;
