@@ -82,7 +82,7 @@ FIMO_MUST_USE FimoError fimo_version_parse_str(const char* str, size_t str_len, 
  * Calculates the string length required to represent the version as a string.
  *
  * If `version` is `NULL`, this function returns `0`. The returned length is
- * large enough for a call to @ref fimo_version_write_str with the same version
+ * large enough for a call to `fimo_version_write_str` with the same version
  * instance. The returned length does not include the zero-terminator.
  *
  * @param version version to check
@@ -95,7 +95,7 @@ FIMO_MUST_USE size_t fimo_version_str_len(const FimoVersion* version);
  * Calculates the string length required to represent the version as a string.
  *
  * If `version` is `NULL`, this function returns `0`. The returned length is
- * large enough for a call to @ref fimo_version_write_str_long with the same
+ * large enough for a call to `fimo_version_write_str_long` with the same
  * version instance. The returned length does not include the zero-terminator.
  *
  * @param version version to check
