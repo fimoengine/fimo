@@ -7,6 +7,12 @@
 
 #include <fimo_std/memory.h>
 
+#ifdef _WIN32
+#define MIN_ALIGNMENT 16
+#else
+#define MIN_ALIGNMENT _Alignof(max_align_t)
+#endif
+
 static void malloc_test(void** state)
 {
     (void)state;
@@ -18,13 +24,13 @@ static void malloc_test(void** state)
     buff = fimo_malloc(sizeof(long long), &error);
     assert_non_null(buff);
     assert_false(FIMO_IS_ERROR(error));
-    assert_true((uintptr_t)buff % _Alignof(max_align_t) == 0);
+    assert_true((uintptr_t)buff % MIN_ALIGNMENT == 0);
     fimo_free(buff);
 
     FimoMallocBuffer buffer = fimo_malloc_sized(1339, NULL);
     assert_non_null(buffer.ptr);
     assert_true(buffer.buff_size >= 1339);
-    assert_true((uintptr_t)buffer.ptr % _Alignof(max_align_t) == 0);
+    assert_true((uintptr_t)buffer.ptr % MIN_ALIGNMENT == 0);
     fimo_free(buffer.ptr);
 }
 
@@ -39,7 +45,7 @@ static void calloc_test(void** state)
     buff = fimo_calloc(10 * sizeof(long long), &error);
     assert_non_null(buff);
     assert_false(FIMO_IS_ERROR(error));
-    assert_true((uintptr_t)buff % _Alignof(max_align_t) == 0);
+    assert_true((uintptr_t)buff % MIN_ALIGNMENT == 0);
     for (int i = 0; i < 10; i++) {
         assert_true(buff[i] == 0);
     }
@@ -48,7 +54,7 @@ static void calloc_test(void** state)
     FimoMallocBuffer buffer = fimo_calloc_sized(1339, NULL);
     assert_non_null(buffer.ptr);
     assert_true(buffer.buff_size >= 1339);
-    assert_true((uintptr_t)buffer.ptr % _Alignof(max_align_t) == 0);
+    assert_true((uintptr_t)buffer.ptr % MIN_ALIGNMENT == 0);
     buff = buffer.ptr;
     for (int i = 0; i < (int)(buffer.buff_size / sizeof(long long)); i++) {
         assert_true(buff[i] == 0);
