@@ -95,7 +95,8 @@ if (ENABLE_TESTS)
     add_subdirectory(tests)
 endif()
 
+include(GNUInstallDirs)
 install(TARGETS fimo_std
     ARCHIVE
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo/fimo_std
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo_std
 )
