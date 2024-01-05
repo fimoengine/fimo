@@ -6,16 +6,12 @@ project(
 )
 enable_language(C)
 
+find_package(Threads REQUIRED)
+
 # Third party libraries
 add_subdirectory(third_party)
 
-set(FIMO_STD_HEADERS
-    # Internal headers
-    include/fimo_std/internal/context.h
-    include/fimo_std/internal/module.h
-    include/fimo_std/internal/tracing.h
-    include/fimo_std/internal/unicode.h
-
+set(FIMO_STD_PUBLIC_HEADERS
     # Public headers
     include/fimo_std/array_list.h
     include/fimo_std/char.h
@@ -30,6 +26,16 @@ set(FIMO_STD_HEADERS
     include/fimo_std/utils.h
     include/fimo_std/version.h
 )
+
+set(FIMO_STD_PRIVATE_HEADERS
+    # Internal headers
+    include/fimo_std/internal/context.h
+    include/fimo_std/internal/module.h
+    include/fimo_std/internal/tracing.h
+    include/fimo_std/internal/unicode.h
+)
+
+list(APPEND FIMO_STD_HEADERS ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_PRIVATE_HEADERS})
 
 set(FIMO_STD_SRC
     # Internal header implementations
@@ -55,7 +61,8 @@ set(FIMO_STD_SRC
 option(FIMO_MACRO_HELPER_FUNCTIONS "Enable helper functions from macros" OFF)
 
 add_library(fimo_std STATIC ${FIMO_STD_HEADERS} ${FIMO_STD_SRC})
-target_link_libraries(fimo_std btree hashmap tinycthread)
+target_link_libraries(fimo_std PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
+set_property(TARGET fimo_std PROPERTY PUBLIC_HEADER ${FIMO_STD_PUBLIC_HEADERS})
 set_property(TARGET fimo_std PROPERTY LINKER_LANGUAGE C)
 set_property(TARGET fimo_std PROPERTY C_STANDARD 17)
 set_property(TARGET fimo_std PROPERTY C_STANDARD_REQUIRED ON)
@@ -71,15 +78,15 @@ endif()
 
 if (MSVC)
     if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(fimo_std PUBLIC /std:c17)
         target_compile_options(fimo_std PUBLIC /experimental:c11atomics)
     endif()
 
-    target_compile_options(fimo_std PUBLIC /W4 /WX /utf-8)
+    target_compile_options(fimo_std PUBLIC /W4 /WX /utf-8 /Brepro)
 else()
     target_compile_options(fimo_std PUBLIC -Wno-documentation-unknown-command)
     target_compile_options(fimo_std PUBLIC -Wno-declaration-after-statement)
     target_compile_options(fimo_std PUBLIC -Wall -Wextra -pedantic -Werror)
-    target_compile_options(fimo_std PUBLIC -pthread)
     target_compile_options(fimo_std PUBLIC -fexec-charset=UTF-8)
     target_compile_options(fimo_std PUBLIC -finput-charset=UTF-8)
 endif()
@@ -89,7 +96,6 @@ if (ENABLE_TESTS)
 endif()
 
 install(TARGETS fimo_std
-    RUNTIME
     ARCHIVE
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo/fimo_std
 )

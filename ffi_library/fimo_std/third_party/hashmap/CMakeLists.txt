@@ -1,9 +1,12 @@
-cmake_minimum_required(VERSION 3.15)
-project(Hashmap)
-
-add_library(hashmap STATIC hashmap.c)
+add_library(hashmap OBJECT hashmap.c)
 set_property(TARGET hashmap PROPERTY LINKER_LANGUAGE C)
 set_property(TARGET hashmap PROPERTY C_STANDARD 17)
 set_property(TARGET hashmap PROPERTY C_STANDARD_REQUIRED ON)
 set_property(TARGET hashmap PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 target_include_directories(hashmap PUBLIC include)
+
+if (MSVC)
+    if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(hashmap PUBLIC /std:c17)
+    endif()
+endif()
