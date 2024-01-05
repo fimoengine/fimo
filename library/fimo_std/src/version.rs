@@ -4,7 +4,8 @@ use core::fmt::Display;
 
 use crate::{
     bindings,
-    error::{to_result, to_result_indirect_in_place, Error}, ffi::FFITransferable,
+    error::{to_result, to_result_indirect_in_place, Error},
+    ffi::FFITransferable,
 };
 
 #[repr(transparent)]
