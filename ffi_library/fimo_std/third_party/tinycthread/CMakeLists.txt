@@ -1,8 +1,10 @@
-cmake_minimum_required(VERSION 3.15)
-project(TinyCThread)
-
 find_package(Threads REQUIRED)
-
-add_library(tinycthread STATIC source/tinycthread.c)
+add_library(tinycthread OBJECT source/tinycthread.c)
 target_link_libraries(tinycthread ${CMAKE_THREAD_LIBS_INIT})
 target_include_directories(tinycthread PUBLIC include)
+
+if (MSVC)
+    if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(tinycthread PUBLIC /std:c17)
+    endif()
+endif()

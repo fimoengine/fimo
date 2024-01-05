@@ -1,7 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
-project(BTree)
-
-add_library(btree STATIC btree.c)
+add_library(btree OBJECT btree.c)
 set_property(TARGET btree PROPERTY LINKER_LANGUAGE C)
 set_property(TARGET btree PROPERTY C_STANDARD 17)
 set_property(TARGET btree PROPERTY C_STANDARD_REQUIRED ON)
@@ -10,6 +7,7 @@ target_include_directories(btree PUBLIC include)
 
 if (MSVC)
     if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(btree PUBLIC /std:c17)
         target_compile_options(btree PUBLIC /experimental:c11atomics)
     endif()
 endif()
