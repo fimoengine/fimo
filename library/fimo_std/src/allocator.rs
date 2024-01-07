@@ -8,6 +8,18 @@ use crate::{bindings, error::to_result_indirect};
 #[derive(Debug)]
 pub struct FimoAllocator;
 
+impl FimoAllocator {
+    /// Default alignment of the allocator, when no value is specified.
+    #[cfg(windows)]
+    #[allow(unused)]
+    pub(crate) const DEFAULT_ALIGNMENT: usize = 16;
+
+    /// Default alignment of the allocator, when no value is specified.
+    #[cfg(any(unix, wasm))]
+    #[allow(unused)]
+    pub(crate) const DEFAULT_ALIGNMENT: usize = core::mem::align_of::<libc::max_align_t>();
+}
+
 // Safety: We follow the specified contract
 unsafe impl GlobalAlloc for FimoAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {

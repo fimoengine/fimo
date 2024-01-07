@@ -14,6 +14,9 @@ workspace = true
 [dependencies.paste]
 version = "1.0.14"
 
+[target.'cfg(any(unix, wasm))'.dependencies.libc]
+version = "0.2.151"
+
 [build-dependencies.cmake]
 version = "0.1.5"
 
