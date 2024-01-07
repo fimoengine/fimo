@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_policy(SET CMP0141 NEW)
 project(
     fimo_std
     VERSION 0.1.0
@@ -71,6 +72,8 @@ target_include_directories(fimo_std PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>  # <prefix>/include
 )
+set_property(TARGET fimo_std PROPERTY
+  MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 
 if(FIMO_MACRO_HELPER_FUNCTIONS)
     target_compile_definitions(fimo_std PUBLIC FIMO_MACRO_HELPER_FUNCTIONS=TRUE)
