@@ -1,5 +1,7 @@
 //! Fimo context.
 
+use core::mem::ManuallyDrop;
+
 use crate::{
     bindings,
     error::{to_result, to_result_indirect},
@@ -111,7 +113,8 @@ impl Drop for Context {
 
 impl crate::ffi::FFITransferable<bindings::FimoContext> for Context {
     fn into_ffi(self) -> bindings::FimoContext {
-        self.0
+        let this = ManuallyDrop::new(self);
+        this.0
     }
 
     unsafe fn from_ffi(ffi: bindings::FimoContext) -> Self {
