@@ -295,6 +295,18 @@ pub fn to_result_indirect<T>(f: impl FnOnce(&mut bindings::FimoError) -> T) -> R
 /// writable error pointer as one of their arguments, with the difference that the data
 /// is initialized in place.
 ///
+/// ```ignore
+/// # use fimo_std::error:to_result_indirect;
+/// # use fimo_std::bindings;
+/// extern "C" {
+///     fn my_func(error: *mut bindings::FimoError, data: *mut u32);
+/// }
+///
+/// unsafe {
+///     to_result_indirect_in_place(|error, data| my_func(error, data.as_mut_ptr()))
+/// };
+/// ```
+///
 /// # Safety
 ///
 /// The closure must initialize the data or write an error in the first parameter.
