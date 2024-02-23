@@ -278,8 +278,8 @@ void fimo_graph_free(FimoGraph* graph)
     btree_ascend(graph->edges, NULL, edge_free_, graph);
     btree_free(graph->edges);
 
-    fimo_array_list_free(&graph->node_free_list, sizeof(FimoU64));
-    fimo_array_list_free(&graph->edge_free_list, sizeof(FimoU64));
+    fimo_array_list_free(&graph->node_free_list, sizeof(FimoU64), alignof(FimoU64), NULL);
+    fimo_array_list_free(&graph->edge_free_list, sizeof(FimoU64), alignof(FimoU64), NULL);
 
     fimo_free_aligned_sized(graph, _Alignof(FimoGraph),
         sizeof(FimoGraph));
@@ -324,7 +324,7 @@ FimoError fimo_graph_add_node(FimoGraph* graph, const void* node_data,
     bool node_from_free_list = true;
     if (!fimo_array_list_is_empty(&graph->node_free_list)) {
         error = fimo_array_list_pop_back(&graph->node_free_list,
-            sizeof(FimoU64), &node_idx);
+            sizeof(FimoU64), &node_idx, NULL);
         if (FIMO_IS_ERROR(error)) {
             return error;
         }
@@ -366,7 +366,7 @@ error_node_alloc:
 error_data_alloc:
     if (node_from_free_list) {
         FIMO_IGNORE(fimo_array_list_push(&graph->node_free_list, sizeof(FimoU64),
-            &node_idx));
+            alignof(FimoU64), &node_idx, NULL));
     } else {
         graph->next_node_idx--;
     }
@@ -472,7 +472,7 @@ FimoError fimo_graph_add_edge(FimoGraph* graph, FimoU64 src_node,
     FimoU64 edge_idx;
     bool edge_idx_from_free_list = true;
     if (!fimo_array_list_is_empty(&graph->edge_free_list)) {
-        error = fimo_array_list_pop_back(&graph->edge_free_list, sizeof(FimoU64), &edge_idx);
+        error = fimo_array_list_pop_back(&graph->edge_free_list, sizeof(FimoU64), &edge_idx, NULL);
         if (FIMO_IS_ERROR(error)) {
             goto error_edge_idx_fetch;
         }
@@ -534,7 +534,7 @@ error_inv_adjacency_set:
 error_adjacency_set:
     if (edge_idx_from_free_list) {
         FIMO_IGNORE(fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64),
-            &edge_idx));
+            alignof(FimoU64), &edge_idx, NULL));
     } else {
         graph->next_edge_idx--;
     }
@@ -654,7 +654,8 @@ static bool collect_edges_(const void* item, void* data)
 {
     struct CollectEdgesData_* d = data;
     const struct FimoGraphNodeAdj_* adj = item;
-    d->error = fimo_array_list_push(d->edges, sizeof(FimoU64), &adj->edge);
+    d->error = fimo_array_list_push(d->edges, sizeof(FimoU64), alignof(FimoU64),
+        (void*)&adj->edge, NULL);
     if (FIMO_IS_ERROR(d->error)) {
         return false;
     }
@@ -678,7 +679,8 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
         goto error_node_not_found;
     }
 
-    error = fimo_array_list_reserve(&graph->node_free_list, sizeof(FimoU64), 1);
+    error = fimo_array_list_reserve(&graph->node_free_list, sizeof(FimoU64),
+        alignof(FimoU64), 1, NULL);
     if (FIMO_IS_ERROR(error)) {
         goto error_node_free_list_resize;
     }
@@ -692,7 +694,7 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
     }
 
     error = fimo_array_list_reserve(&graph->edge_free_list, sizeof(FimoU64),
-        edge_count);
+        alignof(FimoU64), edge_count, NULL);
     if (FIMO_IS_ERROR(error)) {
         goto error_edge_free_list_resize;
     }
@@ -700,7 +702,7 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
     if (edge_count != 0) {
         FimoArrayList edge_buffer;
         error = fimo_array_list_with_capacity(edge_count, sizeof(FimoU64),
-            &edge_buffer);
+            alignof(FimoU64), &edge_buffer);
         if (FIMO_IS_ERROR(error)) {
             goto error_edge_buffer_alloc;
         }
@@ -720,7 +722,7 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
 
         while (!fimo_array_list_is_empty(&edge_buffer)) {
             FimoU64 edge;
-            FIMO_IGNORE(fimo_array_list_pop_back(&edge_buffer, sizeof(FimoU64), &edge));
+            FIMO_IGNORE(fimo_array_list_pop_back(&edge_buffer, sizeof(FimoU64), &edge, NULL));
             void* edge_data = NULL;
             error = fimo_graph_remove_edge(graph, edge, &edge_data);
             if (FIMO_IS_ERROR(error)) {
@@ -729,14 +731,14 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
             fimo_free_sized(edge_data, graph->edge_size);
         }
 
-        fimo_array_list_free(&edge_buffer, sizeof(FimoU64));
+        fimo_array_list_free(&edge_buffer, sizeof(FimoU64), alignof(FimoU64), NULL);
         goto success_edges_removed;
 
     error_remove_edge:;
         perror("critical error while removing the edges from the graph");
         exit(EXIT_FAILURE);
     error_collect_edges:
-        fimo_array_list_free(&edge_buffer, sizeof(FimoU64));
+        fimo_array_list_free(&edge_buffer, sizeof(FimoU64), alignof(FimoU64), NULL);
         goto error_edge_buffer_alloc;
     }
 success_edges_removed:;
@@ -747,8 +749,7 @@ success_edges_removed:;
     *node_data = n->data;
 
     error = fimo_array_list_push(&graph->node_free_list, sizeof(FimoU64),
-        &node);
-    fimo_free((void*)n);
+        alignof(FimoU64), &node, NULL);
 
     return error;
 
@@ -768,7 +769,8 @@ FimoError fimo_graph_remove_edge(FimoGraph* graph, FimoU64 edge,
     }
 
     FimoError error = FIMO_EOK;
-    error = fimo_array_list_reserve(&graph->edge_free_list, sizeof(FimoU64), 1);
+    error = fimo_array_list_reserve(&graph->edge_free_list, sizeof(FimoU64),
+        alignof(FimoU64), 1, NULL);
     if (FIMO_IS_ERROR(error)) {
         goto error_free_list_resize;
     }
@@ -785,8 +787,8 @@ FimoError fimo_graph_remove_edge(FimoGraph* graph, FimoU64 edge,
     FimoU64 dst = e->dst;
     *edge_data = e->data;
 
-    FIMO_IGNORE(fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64), &edge));
-    fimo_free((void*)e);
+    FIMO_IGNORE(fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64),
+        alignof(FimoU64), &edge, NULL));
 
     struct FimoGraphNode_* src_node = (void*)btree_get(graph->nodes, &(struct FimoGraphNode_) {
                                                                          .key = src,
@@ -1380,10 +1382,12 @@ FimoError fimo_graph_clear(FimoGraph* graph)
     btree_ascend(graph->edges, NULL, edge_free_, graph);
     btree_clear(graph->edges);
 
-    FIMO_IGNORE(fimo_array_list_resize(&graph->node_free_list, sizeof(FimoU64), 0));
+    FIMO_IGNORE(fimo_array_list_set_capacity(&graph->node_free_list, sizeof(FimoU64),
+        alignof(FimoU64), 0, NULL, NULL));
     graph->next_node_idx = 0;
 
-    FIMO_IGNORE(fimo_array_list_resize(&graph->edge_free_list, sizeof(FimoU64), 0));
+    FIMO_IGNORE(fimo_array_list_set_capacity(&graph->edge_free_list, sizeof(FimoU64),
+        alignof(FimoU64), 0, NULL, NULL));
     graph->next_edge_idx = 0;
 
     return FIMO_EOK;
@@ -1420,7 +1424,8 @@ FimoError fimo_graph_clear_edges(FimoGraph* graph)
     btree_ascend(graph->edges, NULL, edge_free_, graph);
     btree_clear(graph->edges);
 
-    FIMO_IGNORE(fimo_array_list_resize(&graph->edge_free_list, sizeof(FimoU64), 0));
+    FIMO_IGNORE(fimo_array_list_set_capacity(&graph->edge_free_list, sizeof(FimoU64),
+        alignof(FimoU64), 0, NULL, NULL));
     graph->next_edge_idx = 0;
 
     return FIMO_EOK;
@@ -1679,7 +1684,8 @@ static bool clone_adjacency_(const void* item, void* data)
             return false;
         }
 
-        d->error = fimo_array_list_push(d->node_stack, sizeof(FimoU64), &adj->key);
+        d->error = fimo_array_list_push(d->node_stack, sizeof(FimoU64),
+            alignof(FimoU64), (void*)&adj->key, NULL);
         if (FIMO_IS_ERROR(d->error)) {
             return false;
         }
@@ -1719,12 +1725,14 @@ FimoError fimo_graph_clone_reachable_subgraph(const FimoGraph* graph,
     }
 
     FimoArrayList node_stack;
-    error = fimo_array_list_with_capacity(1, sizeof(FimoU64), &node_stack);
+    error = fimo_array_list_with_capacity(1, sizeof(FimoU64),
+        alignof(FimoU64), &node_stack);
     if (FIMO_IS_ERROR(error)) {
         goto error_node_stack_alloc;
     }
 
-    error = fimo_array_list_push(&node_stack, sizeof(FimoU64), &start_node);
+    error = fimo_array_list_push(&node_stack, sizeof(FimoU64),
+        alignof(FimoU64), &start_node, NULL);
     if (FIMO_IS_ERROR(error)) {
         goto error_node_stack_init;
     }
@@ -1777,7 +1785,7 @@ FimoError fimo_graph_clone_reachable_subgraph(const FimoGraph* graph,
     };
     while (!fimo_array_list_is_empty(&node_stack)) {
         FimoU64 node;
-        error = fimo_array_list_pop_back(&node_stack, sizeof(FimoU64), &node);
+        error = fimo_array_list_pop_back(&node_stack, sizeof(FimoU64), &node, NULL);
         if (FIMO_IS_ERROR(error)) {
             goto error_construct_sub_graph;
         }
@@ -1795,7 +1803,7 @@ FimoError fimo_graph_clone_reachable_subgraph(const FimoGraph* graph,
     *sub_graph = g;
 
     btree_free(node_map);
-    fimo_array_list_free(&node_stack, sizeof(FimoU64));
+    fimo_array_list_free(&node_stack, sizeof(FimoU64), alignof(FimoU64), NULL);
 
     return FIMO_EOK;
 
@@ -1805,7 +1813,7 @@ error_sub_graph_alloc:
     btree_free(node_map);
 error_node_map_alloc:;
 error_node_stack_init:
-    fimo_array_list_free(&node_stack, sizeof(FimoU64));
+    fimo_array_list_free(&node_stack, sizeof(FimoU64), alignof(FimoU64), NULL);
 error_node_stack_alloc:;
 error_start_node_not_found:
     return error;
