@@ -4,6 +4,8 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <fimo_std/impl/macros/has_builtin.h>
+#include <fimo_std/impl/macros/inline.h>
 
 // Include the sal header on windows.
 #ifdef _MSC_VER
@@ -47,17 +49,6 @@
 #define FIMO_MUST_USE _Check_return_
 #else
 #define FIMO_MUST_USE
-#endif
-
-/**
- * Checks whether the compiler defines a builtin.
- *
- * @param x builtin
- */
-#if defined(__has_builtin)
-#define FIMO_HAS_BUILTIN(x) __has_builtin(x)
-#else
-#define FIMO_HAS_BUILTIN(x) FALSE
 #endif
 
 /**

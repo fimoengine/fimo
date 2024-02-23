@@ -28,15 +28,21 @@ set(FIMO_STD_PUBLIC_HEADERS
     include/fimo_std/version.h
 )
 
+set(FIMO_STD_IMPL_HEADERS
+    # Public implementation headers
+    include/fimo_std/impl/macros/has_builtin.h
+    include/fimo_std/impl/macros/inline.h
+    include/fimo_std/internal/unicode.h
+)
+
 set(FIMO_STD_PRIVATE_HEADERS
     # Internal headers
     include/fimo_std/internal/context.h
     include/fimo_std/internal/module.h
     include/fimo_std/internal/tracing.h
-    include/fimo_std/internal/unicode.h
 )
 
-list(APPEND FIMO_STD_HEADERS ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_PRIVATE_HEADERS})
+list(APPEND FIMO_STD_HEADERS ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS} ${FIMO_STD_PRIVATE_HEADERS})
 
 set(FIMO_STD_SRC
     # Internal header implementations
@@ -61,9 +67,20 @@ set(FIMO_STD_SRC
 
 option(FIMO_MACRO_HELPER_FUNCTIONS "Enable helper functions from macros" OFF)
 
-add_library(fimo_std STATIC ${FIMO_STD_HEADERS} ${FIMO_STD_SRC})
+# add_library(fimo_std STATIC ${FIMO_STD_HEADERS} ${FIMO_STD_SRC})
+add_library(fimo_std STATIC)
+target_sources(fimo_std PUBLIC 
+    FILE_SET fimo_std_public_headers 
+    TYPE HEADERS
+    FILES ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS}
+)
+target_sources(fimo_std PRIVATE 
+    FILE_SET fimo_std_private_headers 
+    TYPE HEADERS
+    FILES ${FIMO_STD_PRIVATE_HEADERS}
+)
+target_sources(fimo_std PRIVATE ${FIMO_STD_SRC})
 target_link_libraries(fimo_std PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
-set_property(TARGET fimo_std PROPERTY PUBLIC_HEADER ${FIMO_STD_PUBLIC_HEADERS})
 set_property(TARGET fimo_std PROPERTY LINKER_LANGUAGE C)
 set_property(TARGET fimo_std PROPERTY C_STANDARD 17)
 set_property(TARGET fimo_std PROPERTY C_STANDARD_REQUIRED ON)
@@ -101,5 +118,6 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS fimo_std
     ARCHIVE
-    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo_std
+    FILE_SET fimo_std_public_headers
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo_std
 )
