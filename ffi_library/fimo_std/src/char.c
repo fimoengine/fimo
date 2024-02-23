@@ -63,7 +63,7 @@ FimoError fimo_char_to_digit(FimoChar ch, FimoU32 radix, FimoU32* digit)
         }
 
         d = ((FimoU32)ch | (FimoU32)0x20) - (FimoU32)'a';
-        d = fimo_saturating_add_u32(d, 10);
+        d = fimo_u32_saturating_add(d, 10);
     }
 
     if (d < radix) {

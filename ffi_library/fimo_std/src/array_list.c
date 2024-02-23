@@ -7,26 +7,6 @@
 
 #include <fimo_std/memory.h>
 
-#if defined(_WIN32) || defined(WIN32)
-#include <intrin.h>
-#endif
-
-#if FIMO_HAS_BUILTIN(__builtin_add_overflow)
-#define FIMO_ADD_OVERFLOW_(lhs, rhs, out) __builtin_add_overflow(lhs, rhs, out)
-#elif defined(_WIN32) || defined(WIN32)
-#define FIMO_ADD_OVERFLOW_(lhs, rhs, out) _addcarry_u64(0, lhs, rhs, out)
-#else
-#error "Unsupported compiler"
-#endif
-
-#if FIMO_HAS_BUILTIN(__builtin_mul_overflow)
-#define FIMO_MUL_OVERFLOW_(lhs, rhs, out) __builtin_mul_overflow(lhs, rhs, out)
-#elif defined(_WIN32) || defined(WIN32)
-#define FIMO_MUL_OVERFLOW_(lhs, rhs, out) (_umul128(lhs, rhs, out), *out != 0)
-#else
-#error "Unsupported compiler"
-#endif
-
 #define MAX_BUFFER_SIZE_ SIZE_MAX >> 1
 
 FIMO_MUST_USE
@@ -43,7 +23,7 @@ FIMO_MUST_USE
 FimoError fimo_array_list_with_capacity(size_t capacity, size_t elem_size,
     FimoArrayList* array)
 {
-    capacity = fimo_next_power_of_two_u64(capacity);
+    capacity = fimo_usize_next_power_of_two(capacity);
     return fimo_array_list_with_capacity_exact(capacity, elem_size, array);
 }
 
@@ -51,14 +31,15 @@ FIMO_MUST_USE
 FimoError fimo_array_list_with_capacity_exact(size_t capacity, size_t elem_size,
     FimoArrayList* array)
 {
-    size_t buffer_size;
-    if (FIMO_MUL_OVERFLOW_(capacity, elem_size, &buffer_size)) {
-        return FIMO_ERANGE;
     }
 
     if (!array || buffer_size > MAX_BUFFER_SIZE_) {
         return FIMO_EINVAL;
+    FimoIntOverflowCheckUSize tmp = fimo_usize_overflowing_mul(capacity, elem_size);
+    if (tmp.overflow) {
+        return FIMO_ERANGE;
     }
+    size_t buffer_size = tmp.value;
 
     FimoError error = FIMO_EOK;
     array->elements = fimo_malloc(buffer_size, &error);
@@ -90,10 +71,11 @@ FimoError fimo_array_list_reserve(FimoArrayList* array, size_t elem_size,
         return FIMO_EINVAL;
     }
 
-    size_t new_size;
-    if (FIMO_ADD_OVERFLOW_(additional, array->size, &new_size)) {
+    FimoIntOverflowCheckUSize tmp = fimo_usize_overflowing_add(additional, array->size);
+    if (tmp.overflow) {
         return FIMO_ERANGE;
     }
+    size_t new_size = tmp.value;
 
     if (new_size <= array->capacity) {
         return FIMO_EOK;
@@ -109,10 +91,11 @@ FimoError fimo_array_list_reserve_exact(FimoArrayList* array, size_t elem_size,
         return FIMO_EINVAL;
     }
 
-    size_t new_size;
-    if (FIMO_ADD_OVERFLOW_(additional, array->size, &new_size)) {
+    FimoIntOverflowCheckUSize tmp = fimo_usize_overflowing_add(additional, array->size);
+    if (tmp.overflow) {
         return FIMO_ERANGE;
     }
+    size_t new_size = tmp.value;
 
     if (new_size <= array->capacity) {
         return FIMO_EOK;
@@ -124,7 +107,7 @@ FIMO_MUST_USE
 FimoError fimo_array_list_resize(FimoArrayList* array, size_t elem_size,
     size_t capacity)
 {
-    capacity = fimo_next_power_of_two_u64(capacity);
+    capacity = fimo_usize_next_power_of_two(capacity);
     return fimo_array_list_resize_exact(array, elem_size, capacity);
 }
 
@@ -132,14 +115,15 @@ FIMO_MUST_USE
 FimoError fimo_array_list_resize_exact(FimoArrayList* array, size_t elem_size,
     size_t capacity)
 {
-    size_t buffer_size;
-    if (FIMO_MUL_OVERFLOW_(capacity, elem_size, &buffer_size)) {
-        return FIMO_ERANGE;
     }
 
     if (!array || buffer_size > MAX_BUFFER_SIZE_) {
         return FIMO_EINVAL;
+    FimoIntOverflowCheckUSize tmp = fimo_usize_overflowing_mul(capacity, elem_size);
+    if (tmp.overflow) {
+        return FIMO_ERANGE;
     }
+    size_t buffer_size = tmp.value;
 
     FimoError error = FIMO_EOK;
     void* elements = fimo_malloc(buffer_size, &error);

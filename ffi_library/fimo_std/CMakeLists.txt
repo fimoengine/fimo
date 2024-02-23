@@ -19,6 +19,7 @@ set(FIMO_STD_PUBLIC_HEADERS
     include/fimo_std/context.h
     include/fimo_std/error.h
     include/fimo_std/graph.h
+    include/fimo_std/integers.h
     include/fimo_std/memory.h
     include/fimo_std/module.h
     include/fimo_std/refcount.h
@@ -30,6 +31,14 @@ set(FIMO_STD_PUBLIC_HEADERS
 
 set(FIMO_STD_IMPL_HEADERS
     # Public implementation headers
+    include/fimo_std/impl/integers/add_overflow.h
+    include/fimo_std/impl/integers/count_ones.h
+    include/fimo_std/impl/integers/integers_base.h
+    include/fimo_std/impl/integers/mul_overflow.h
+    include/fimo_std/impl/integers/next_power_of_two.h
+    include/fimo_std/impl/integers/saturating_add.h
+    include/fimo_std/impl/integers/saturating_sub.h
+    include/fimo_std/impl/integers/sub_overflow.h
     include/fimo_std/impl/macros/has_builtin.h
     include/fimo_std/impl/macros/inline.h
     include/fimo_std/internal/unicode.h
