@@ -48,8 +48,7 @@ typedef struct FimoGraphNeighborsEdges FimoGraphNeighborsEdges;
  * Constructs a new graph.
  *
  * The caller can use `0` as the size of the node/edge, in that case they must
- * pass `NULL` as the cleanup function. If the size is greater than `0`, this
- * function requires that a cleanup function be defined.
+ * pass `NULL` as the cleanup function.
  *
  * @param node_size size of a node element
  * @param edge_size size of an edge element

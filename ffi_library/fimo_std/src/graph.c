@@ -5,6 +5,7 @@
 
 #include <btree/btree.h>
 #include <limits.h>
+#include <stdalign.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,13 +135,19 @@ static bool node_free_(const void* item, void* data)
 {
     FimoGraph* graph = data;
     struct FimoGraphNode_* node = (void*)item;
-    if (graph->node_free) {
-        graph->node_free(node->data);
+    if (node->data) {
+        if (graph->node_free) {
+            graph->node_free(node->data);
+        }
         fimo_free_sized(node->data, graph->node_size);
         node->data = NULL;
     }
-    btree_free(node->adjacency);
-    btree_free(node->inv_adjacency);
+    if (node->adjacency) {
+        btree_free(node->adjacency);
+    }
+    if (node->inv_adjacency) {
+        btree_free(node->inv_adjacency);
+    }
     return true;
 }
 
@@ -148,8 +155,10 @@ static bool edge_free_(const void* item, void* data)
 {
     FimoGraph* graph = data;
     struct FimoGraphEdge_* edge = (void*)item;
-    if (graph->edge_free) {
-        graph->edge_free(edge->data);
+    if (edge->data) {
+        if (graph->edge_free) {
+            graph->edge_free(edge->data);
+        }
         fimo_free_sized(edge->data, graph->edge_size);
         edge->data = NULL;
     }
@@ -216,10 +225,10 @@ FimoError fimo_graph_new(size_t node_size, size_t edge_size,
     if (!graph) {
         return FIMO_EINVAL;
     }
-    if ((node_size > 0 && !node_free) || (node_size == 0 && node_free)) {
+    if (node_size == 0 && node_free) {
         return FIMO_EINVAL;
     }
-    if ((edge_size > 0 && !edge_free) || (edge_size == 0 && edge_free)) {
+    if (edge_size == 0 && edge_free) {
         return FIMO_EINVAL;
     }
 
@@ -356,6 +365,8 @@ FimoError fimo_graph_add_node(FimoGraph* graph, const void* node_data,
         error = FIMO_ENOMEM;
         goto error_node_alloc;
     }
+
+    *node = node_idx;
 
     return FIMO_EOK;
 
@@ -524,13 +535,13 @@ FimoError fimo_graph_add_edge(FimoGraph* graph, FimoU64 src_node,
     return FIMO_EOK;
 
 error_edges_set:
-    fimo_free((void*)btree_delete(inv_adjacency, &(struct FimoGraphNodeAdj_) {
-                                                     .key = src_node,
-                                                 }));
+    btree_delete(inv_adjacency, &(struct FimoGraphNodeAdj_) {
+                                    .key = src_node,
+                                });
 error_inv_adjacency_set:
-    fimo_free((void*)btree_delete(adjacency, &(struct FimoGraphNodeAdj_) {
-                                                 .key = dst_node,
-                                             }));
+    btree_delete(adjacency, &(struct FimoGraphNodeAdj_) {
+                                .key = dst_node,
+                            });
 error_adjacency_set:
     if (edge_idx_from_free_list) {
         FIMO_IGNORE(fimo_array_list_push(&graph->edge_free_list, sizeof(FimoU64),
@@ -711,13 +722,17 @@ FimoError fimo_graph_remove_node(FimoGraph* graph, FimoU64 node,
             .edges = &edge_buffer,
             .error = FIMO_EOK,
         };
-        btree_ascend(n->adjacency, NULL, collect_edges_, &data);
-        if (FIMO_IS_ERROR(data.error)) {
-            goto error_collect_edges;
+        if (n->adjacency) {
+            btree_ascend(n->adjacency, NULL, collect_edges_, &data);
+            if (FIMO_IS_ERROR(data.error)) {
+                goto error_collect_edges;
+            }
         }
-        btree_ascend(n->inv_adjacency, NULL, collect_edges_, &data);
-        if (FIMO_IS_ERROR(data.error)) {
-            goto error_collect_edges;
+        if (n->inv_adjacency) {
+            btree_ascend(n->inv_adjacency, NULL, collect_edges_, &data);
+            if (FIMO_IS_ERROR(data.error)) {
+                goto error_collect_edges;
+            }
         }
 
         while (!fimo_array_list_is_empty(&edge_buffer)) {
@@ -793,21 +808,20 @@ FimoError fimo_graph_remove_edge(FimoGraph* graph, FimoU64 edge,
     struct FimoGraphNode_* src_node = (void*)btree_get(graph->nodes, &(struct FimoGraphNode_) {
                                                                          .key = src,
                                                                      });
-    struct FimoGraphNode_* dst_node = (void*)btree_get(graph->nodes, &(struct FimoGraphNode_) {
-                                                                         .key = dst,
-                                                                     });
-
-    fimo_free((void*)btree_delete(src_node->adjacency, &(struct FimoGraphNodeAdj_) {
-                                                           .key = dst,
-                                                       }));
+    btree_delete(src_node->adjacency, &(struct FimoGraphNodeAdj_) {
+                                          .key = dst,
+                                      });
     if (btree_count(src_node->adjacency) == 0) {
         btree_free(src_node->adjacency);
         src_node->adjacency = NULL;
     }
 
-    fimo_free((void*)btree_delete(dst_node->inv_adjacency, &(struct FimoGraphNodeAdj_) {
-                                                               .key = src,
-                                                           }));
+    struct FimoGraphNode_* dst_node = (void*)btree_get(graph->nodes, &(struct FimoGraphNode_) {
+                                                                         .key = dst,
+                                                                     });
+    btree_delete(dst_node->inv_adjacency, &(struct FimoGraphNodeAdj_) {
+                                              .key = src,
+                                          });
     if (btree_count(dst_node->inv_adjacency) == 0) {
         btree_free(dst_node->inv_adjacency);
         dst_node->inv_adjacency = NULL;
@@ -886,6 +900,8 @@ FimoError fimo_graph_nodes_new(const FimoGraph* graph,
     if (btree_count(graph->nodes) == 0) {
         tmp_iter->iter = NULL;
         tmp_iter->has_value = false;
+        *iter = tmp_iter;
+        *has_value = tmp_iter->has_value;
         return FIMO_EOK;
     }
 
@@ -921,6 +937,7 @@ FimoError fimo_graph_nodes_next(FimoGraphNodes* iter,
         btree_iter_free(iter->iter);
         iter->iter = NULL;
     }
+    *has_value = iter->has_value;
 
     return FIMO_EOK;
 }
@@ -976,6 +993,8 @@ FimoError fimo_graph_edges_new(const FimoGraph* graph,
     if (btree_count(graph->edges) == 0) {
         tmp_iter->iter = NULL;
         tmp_iter->has_value = false;
+        *iter = tmp_iter;
+        *has_value = false;
         return FIMO_EOK;
     }
 
@@ -1011,6 +1030,7 @@ FimoError fimo_graph_edges_next(FimoGraphEdges* iter,
         btree_iter_free(iter->iter);
         iter->iter = NULL;
     }
+    *has_value = iter->has_value;
 
     return FIMO_EOK;
 }
@@ -1067,6 +1087,8 @@ FimoError fimo_graph_externals_new(const FimoGraph* graph, bool sink,
     if (btree_count(graph->nodes) == 0) {
         tmp_iter->iter = NULL;
         tmp_iter->has_value = false;
+        *iter = tmp_iter;
+        *has_value = false;
         return FIMO_EOK;
     }
 
@@ -1079,8 +1101,8 @@ FimoError fimo_graph_externals_new(const FimoGraph* graph, bool sink,
     tmp_iter->has_value = btree_iter_first(tmp_iter->iter);
     while (tmp_iter->has_value) {
         const struct FimoGraphNode_* n = btree_iter_item(tmp_iter->iter);
-        if ((sink && btree_count(n->adjacency) == 0)
-            || (!sink && btree_count(n->inv_adjacency) == 0)) {
+        if ((sink && (!n->adjacency || btree_count(n->adjacency) == 0))
+            || (!sink && (!n->inv_adjacency || btree_count(n->inv_adjacency) == 0))) {
             break;
         }
         tmp_iter->has_value = btree_iter_next(tmp_iter->iter);
@@ -1111,10 +1133,11 @@ FimoError fimo_graph_externals_next(FimoGraphExternals* iter,
         return FIMO_EINVAL;
     }
 
+    iter->has_value = btree_iter_next(iter->iter);
     while (iter->has_value) {
         const struct FimoGraphNode_* n = btree_iter_item(iter->iter);
-        if ((iter->sink && btree_count(n->adjacency) == 0)
-            || (!iter->sink && btree_count(n->inv_adjacency) == 0)) {
+        if ((iter->sink && (!n->adjacency || btree_count(n->adjacency) == 0))
+            || (!iter->sink && (!n->inv_adjacency || btree_count(n->inv_adjacency) == 0))) {
             break;
         }
         iter->has_value = btree_iter_next(iter->iter);
@@ -1195,6 +1218,7 @@ FimoError fimo_graph_neighbors_new(const FimoGraph* graph, FimoU64 node,
         tmp_iter->has_value = false;
         tmp_iter->iter = NULL;
         *iter = tmp_iter;
+        *has_value = false;
         return FIMO_EOK;
     }
 
@@ -1205,6 +1229,7 @@ FimoError fimo_graph_neighbors_new(const FimoGraph* graph, FimoU64 node,
     }
     tmp_iter->has_value = btree_iter_first(tmp_iter->iter);
     *iter = tmp_iter;
+    *has_value = tmp_iter->has_value;
 
     return FIMO_EOK;
 
@@ -1296,6 +1321,7 @@ FimoError fimo_graph_neighbors_edges_new(const FimoGraph* graph, FimoU64 node,
         tmp_iter->has_value = false;
         tmp_iter->iter = NULL;
         *iter = tmp_iter;
+        *has_value = false;
         return FIMO_EOK;
     }
 
@@ -1306,6 +1332,7 @@ FimoError fimo_graph_neighbors_edges_new(const FimoGraph* graph, FimoU64 node,
     }
     tmp_iter->has_value = btree_iter_first(tmp_iter->iter);
     *iter = tmp_iter;
+    *has_value = tmp_iter->has_value;
 
     return FIMO_EOK;
 
@@ -1794,9 +1821,11 @@ FimoError fimo_graph_clone_reachable_subgraph(const FimoGraph* graph,
         const struct FimoGraphNode_* n = btree_get(graph->nodes, &(struct FimoGraphNode_) {
                                                                      .key = node,
                                                                  });
-        btree_ascend(n->adjacency, NULL, clone_adjacency_, &reachable_data);
-        if (FIMO_IS_ERROR(reachable_data.error)) {
-            goto error_construct_sub_graph;
+        if (n->adjacency) {
+            btree_ascend(n->adjacency, NULL, clone_adjacency_, &reachable_data);
+            if (FIMO_IS_ERROR(reachable_data.error)) {
+                goto error_construct_sub_graph;
+            }
         }
     }
 
