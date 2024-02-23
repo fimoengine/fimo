@@ -98,8 +98,6 @@ unsafe impl Allocator for FimoAllocator {
 mod tests {
     use core::hint::black_box;
 
-    use alloc::{boxed::Box, vec::Vec};
-
     use crate::allocator::FimoAllocator;
 
     #[test]
