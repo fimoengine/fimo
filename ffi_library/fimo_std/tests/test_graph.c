@@ -8,6 +8,11 @@
 #include <fimo_std/graph.h>
 #include <fimo_std/memory.h>
 
+static void dummy_cleanup_(void* data)
+{
+    (void)data;
+}
+
 static void graph_init_test(void** state)
 {
     (void)state;

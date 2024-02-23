@@ -13,5 +13,6 @@ pub mod bindings;
 pub mod context;
 pub mod error;
 pub mod ffi;
+pub mod graph;
 pub mod refcount;
 pub mod version;
