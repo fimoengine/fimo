@@ -297,44 +297,92 @@ typedef uintptr_t FimoUIntPtr;
 // Private Utility Macros
 ///////////////////////////////////////////////////////////////////////////////
 
-#if FIMO_ISIZE_WIDTH == 16
-#define FIMO_ISIZE_SWITCH_(NAME, ...) NAME##_i16(__VA_ARGS__)
-#elif FIMO_ISIZE_WIDTH == 32
-#define FIMO_ISIZE_SWITCH_(NAME, ...) NAME##_i32(__VA_ARGS__)
-#elif FIMO_ISIZE_WIDTH == 64
-#define FIMO_ISIZE_SWITCH_(NAME, ...) NAME##_i64(__VA_ARGS__)
-#else
-#error "Unknown FimoISize width"
-#endif
+#ifdef __cplusplus
+#include <type_traits>
 
-#if FIMO_INTPTR_WIDTH == 16
-#define FIMO_INTPTR_SWITCH_(NAME, ...) NAME##_i16(__VA_ARGS__)
-#elif FIMO_INTPTR_WIDTH == 32
-#define FIMO_INTPTR_SWITCH_(NAME, ...) NAME##_i32(__VA_ARGS__)
-#elif FIMO_INTPTR_WIDTH == 64
-#define FIMO_INTPTR_SWITCH_(NAME, ...) NAME##_i64(__VA_ARGS__)
-#else
-#error "Unknown FimoIntPtr width"
-#endif
+#define FIMO_ISIZE_SWITCH_(NAME)                                          \
+    [](auto x) {                                                          \
+        if constexpr (std::is_same<decltype(x), FimoI8>::value) {         \
+            return [](auto... args) { return NAME##_i8(args...); };       \
+        } else if constexpr (std::is_same<decltype(x), FimoI16>::value) { \
+            return [](auto... args) { return NAME##_i16(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoI32>::value) { \
+            return [](auto... args) { return NAME##_i32(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoI64>::value) { \
+            return [](auto... args) { return NAME##_i64(args...); };      \
+        } else {                                                          \
+            static_assert(false, "Invalid FimoISize type");               \
+        }                                                                 \
+    }((FimoISize)0)
 
-#if FIMO_USIZE_WIDTH == 16
-#define FIMO_USIZE_SWITCH_(NAME, ...) NAME##_u16(__VA_ARGS__)
-#elif FIMO_USIZE_WIDTH == 32
-#define FIMO_USIZE_SWITCH_(NAME, ...) NAME##_u32(__VA_ARGS__)
-#elif FIMO_USIZE_WIDTH == 64
-#define FIMO_USIZE_SWITCH_(NAME, ...) NAME##_u64(__VA_ARGS__)
-#else
-#error "Unknown FimoUSize width"
-#endif
+#define FIMO_INTPTR_SWITCH_(NAME)                                         \
+    [](auto x) {                                                          \
+        if constexpr (std::is_same<decltype(x), FimoI8>::value) {         \
+            return [](auto... args) { return NAME##_i8(args...); };       \
+        } else if constexpr (std::is_same<decltype(x), FimoI16>::value) { \
+            return [](auto... args) { return NAME##_i16(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoI32>::value) { \
+            return [](auto... args) { return NAME##_i32(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoI64>::value) { \
+            return [](auto... args) { return NAME##_i64(args...); };      \
+        } else {                                                          \
+            static_assert(false, "Invalid FimoIntPtr type");              \
+        }                                                                 \
+    }((FimoIntPtr)0)
 
-#if FIMO_UINTPTR_WIDTH == 16
-#define FIMO_UINTPTR_SWITCH_(NAME, ...) NAME##_u16(__VA_ARGS__)
-#elif FIMO_UINTPTR_WIDTH == 32
-#define FIMO_UINTPTR_SWITCH_(NAME, ...) NAME##_u32(__VA_ARGS__)
-#elif FIMO_UINTPTR_WIDTH == 64
-#define FIMO_UINTPTR_SWITCH_(NAME, ...) NAME##_u64(__VA_ARGS__)
+#define FIMO_USIZE_SWITCH_(NAME)                                          \
+    [](auto x) {                                                          \
+        if constexpr (std::is_same<decltype(x), FimoU8>::value) {         \
+            return [](auto... args) { return NAME##_u8(args...); };       \
+        } else if constexpr (std::is_same<decltype(x), FimoU16>::value) { \
+            return [](auto... args) { return NAME##_u16(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoU32>::value) { \
+            return [](auto... args) { return NAME##_u32(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoU64>::value) { \
+            return [](auto... args) { return NAME##_u64(args...); };      \
+        } else {                                                          \
+            static_assert(false, "Invalid FimoUSize type");               \
+        }                                                                 \
+    }((FimoUSize)0)
+
+#define FIMO_INTPTR_SWITCH_(NAME)                                         \
+    [](auto x) {                                                          \
+        if constexpr (std::is_same<decltype(x), FimoU8>::value) {         \
+            return [](auto... args) { return NAME##_u8(args...); };       \
+        } else if constexpr (std::is_same<decltype(x), FimoU16>::value) { \
+            return [](auto... args) { return NAME##_u16(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoU32>::value) { \
+            return [](auto... args) { return NAME##_u32(args...); };      \
+        } else if constexpr (std::is_same<decltype(x), FimoU64>::value) { \
+            return [](auto... args) { return NAME##_u64(args...); };      \
+        } else {                                                          \
+            static_assert(false, "Invalid FimoUIntPtr type");             \
+        }                                                                 \
+    }((FimoUIntPtr)0)
 #else
-#error "Unknown FimoUSize width"
-#endif
+#define FIMO_ISIZE_SWITCH_(NAME) _Generic((FimoISize)0, \
+    FimoI8: NAME##_i8,                                  \
+    FimoI16: NAME##_i16,                                \
+    FimoI32: NAME##_i32,                                \
+    FimoI64: NAME##_i64)
+
+#define FIMO_INTPTR_SWITCH_(NAME) _Generic((FimoIntPtr)0, \
+    FimoI8: NAME##_i8,                                    \
+    FimoI16: NAME##_i16,                                  \
+    FimoI32: NAME##_i32,                                  \
+    FimoI64: NAME##_i64)
+
+#define FIMO_USIZE_SWITCH_(NAME) _Generic((FimoUSize)0, \
+    FimoU8: NAME##_u8,                                  \
+    FimoU16: NAME##_u16,                                \
+    FimoU32: NAME##_u32,                                \
+    FimoU64: NAME##_u64)
+
+#define FIMO_UINTPTR_SWITCH_(NAME) _Generic((FimoUIntPtr)0, \
+    FimoU8: NAME##_u8,                                      \
+    FimoU16: NAME##_u16,                                    \
+    FimoU32: NAME##_u32,                                    \
+    FimoU64: NAME##_u64)
+#endif // __cplusplus
 
 #endif // !FIMO_IMPL_INTEGERS_INTEGERS_BASE_H
