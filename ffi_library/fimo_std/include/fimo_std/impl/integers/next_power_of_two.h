@@ -107,7 +107,7 @@ static FIMO_INLINE_ALWAYS FimoU64 fimo_impl_next_power_of_two_u64(FimoU64 v)
  */
 static FIMO_INLINE_ALWAYS FimoUSize fimo_impl_next_power_of_two_usize(FimoUSize v)
 {
-    return FIMO_USIZE_SWITCH_(fimo_impl_next_power_of_two, v);
+    return FIMO_USIZE_SWITCH_(fimo_impl_next_power_of_two)(v);
 }
 
 /**
@@ -121,7 +121,7 @@ static FIMO_INLINE_ALWAYS FimoUSize fimo_impl_next_power_of_two_usize(FimoUSize 
  */
 static FIMO_INLINE_ALWAYS FimoUIntPtr fimo_impl_next_power_of_two_uintptr(FimoUIntPtr v)
 {
-    return FIMO_UINTPTR_SWITCH_(fimo_impl_next_power_of_two, v);
+    return FIMO_UINTPTR_SWITCH_(fimo_impl_next_power_of_two)(v);
 }
 
 #ifdef __cplusplus

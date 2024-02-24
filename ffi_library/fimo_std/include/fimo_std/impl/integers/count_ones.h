@@ -101,7 +101,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u64(FimoU64 v)
  */
 static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_usize(FimoUSize v)
 {
-    return FIMO_USIZE_SWITCH_(fimo_impl_count_ones, v);
+    return FIMO_USIZE_SWITCH_(fimo_impl_count_ones)(v);
 }
 
 /**
@@ -112,7 +112,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_usize(FimoUSize v)
  */
 static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_uintptr(FimoUIntPtr v)
 {
-    return FIMO_UINTPTR_SWITCH_(fimo_impl_count_ones, v);
+    return FIMO_UINTPTR_SWITCH_(fimo_impl_count_ones)(v);
 }
 
 #ifdef __cplusplus

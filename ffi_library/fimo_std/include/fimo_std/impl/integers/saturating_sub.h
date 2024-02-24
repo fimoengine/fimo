@@ -100,7 +100,7 @@ static FIMO_INLINE_ALWAYS FimoI64 fimo_impl_saturating_sub_i64(FimoI64 a, FimoI6
  */
 static FIMO_INLINE_ALWAYS FimoISize fimo_impl_saturating_sub_isize(FimoISize a, FimoISize b)
 {
-    return FIMO_ISIZE_SWITCH_(fimo_impl_saturating_sub, a, b);
+    return FIMO_ISIZE_SWITCH_(fimo_impl_saturating_sub)(a, b);
 }
 
 /**
@@ -113,7 +113,7 @@ static FIMO_INLINE_ALWAYS FimoISize fimo_impl_saturating_sub_isize(FimoISize a, 
  */
 static FIMO_INLINE_ALWAYS FimoIntPtr fimo_impl_saturating_sub_intptr(FimoIntPtr a, FimoIntPtr b)
 {
-    return FIMO_INTPTR_SWITCH_(fimo_impl_saturating_sub, a, b);
+    return FIMO_INTPTR_SWITCH_(fimo_impl_saturating_sub)(a, b);
 }
 
 /**
@@ -178,12 +178,12 @@ static FIMO_INLINE_ALWAYS FimoU64 fimo_impl_saturating_sub_u64(FimoU64 a, FimoU6
  */
 static FIMO_INLINE_ALWAYS FimoUSize fimo_impl_saturating_sub_usize(FimoUSize a, FimoUSize b)
 {
-    return FIMO_USIZE_SWITCH_(fimo_impl_saturating_sub, a, b);
+    return FIMO_USIZE_SWITCH_(fimo_impl_saturating_sub)(a, b);
 }
 
 static FIMO_INLINE_ALWAYS FimoUIntPtr fimo_impl_saturating_sub_uintptr(FimoUIntPtr a, FimoUIntPtr b)
 {
-    return FIMO_UINTPTR_SWITCH_(fimo_impl_saturating_sub, a, b);
+    return FIMO_UINTPTR_SWITCH_(fimo_impl_saturating_sub)(a, b);
 }
 
 #ifdef __cplusplus
