@@ -415,26 +415,50 @@ struct FimoUnderlying_<FimoU64> {
         }                                                                 \
     }()
 #else
-#define FIMO_ISIZE_UNDERLYING_ _Generic((FimoISize)0, \
-    FimoI8: FimoI8,                                   \
-    FimoI16: FimoI16,                                 \
-    FimoI32: FimoI32,                                 \
-    FimoI64: FimoI64)
-#define FIMO_INTPTR_UNDERLYING_ _Generic((FimoIntPtr)0, \
-    FimoI8: FimoI8,                                     \
-    FimoI16: FimoI16,                                   \
-    FimoI32: FimoI32,                                   \
-    FimoI64: FimoI64)
-#define FIMO_USIZE_UNDERLYING_ _Generic((FimoUSize)0, \
-    FimoI8: FimoU8,                                   \
-    FimoI16: FimoU16,                                 \
-    FimoI32: FimoU32,                                 \
-    FimoI64: FimoU64)
-#define FIMO_UINTPTR_UNDERLYING_ _Generic((FimoUIntPtr)0, \
-    FimoI8: FimoU8,                                       \
-    FimoI16: FimoU16,                                     \
-    FimoI32: FimoU32,                                     \
-    FimoI64: FimoU64)
+#if FIMO_ISIZE_WIDTH == 8
+#define FIMO_ISIZE_UNDERLYING_ FimoI8
+#elif FIMO_ISIZE_WIDTH == 16
+#define FIMO_ISIZE_UNDERLYING_ FimoI16
+#elif FIMO_ISIZE_WIDTH == 32
+#define FIMO_ISIZE_UNDERLYING_ FimoI32
+#elif FIMO_ISIZE_WIDTH == 64
+#define FIMO_ISIZE_UNDERLYING_ FimoI64
+#else
+#error "Unknown type"
+#endif
+#if FIMO_INTPTR_WIDTH == 8
+#define FIMO_INTPTR_UNDERLYING_ FimoI8
+#elif FIMO_INTPTR_WIDTH == 16
+#define FIMO_INTPTR_UNDERLYING_ FimoI16
+#elif FIMO_INTPTR_WIDTH == 32
+#define FIMO_INTPTR_UNDERLYING_ FimoI32
+#elif FIMO_INTPTR_WIDTH == 64
+#define FIMO_INTPTR_UNDERLYING_ FimoI64
+#else
+#error "Unknown type"
+#endif
+#if FIMO_USIZE_WIDTH == 8
+#define FIMO_USIZE_UNDERLYING_ FimoU8
+#elif FIMO_USIZE_WIDTH == 16
+#define FIMO_USIZE_UNDERLYING_ FimoU16
+#elif FIMO_USIZE_WIDTH == 32
+#define FIMO_USIZE_UNDERLYING_ FimoU32
+#elif FIMO_USIZE_WIDTH == 64
+#define FIMO_USIZE_UNDERLYING_ FimoU64
+#else
+#error "Unknown type"
+#endif
+#if FIMO_UINTPTR_WIDTH == 8
+#define FIMO_UINTPTR_UNDERLYING_ FimoU8
+#elif FIMO_UINTPTR_WIDTH == 16
+#define FIMO_UINTPTR_UNDERLYING_ FimoU16
+#elif FIMO_UINTPTR_WIDTH == 32
+#define FIMO_UINTPTR_UNDERLYING_ FimoU32
+#elif FIMO_UINTPTR_WIDTH == 64
+#define FIMO_UINTPTR_UNDERLYING_ FimoU64
+#else
+#error "Unknown type"
+#endif
 
 #define FIMO_ISIZE_SWITCH_(NAME) _Generic((FimoISize)0, \
     FimoI8: NAME##_i8,                                  \
