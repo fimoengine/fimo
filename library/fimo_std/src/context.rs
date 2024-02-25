@@ -125,6 +125,8 @@ impl crate::ffi::FFITransferable<bindings::FimoContext> for Context {
 pub(crate) mod private {
     use super::Context;
 
+    // todo: Remove when used.
+    #[allow(unused)]
     pub trait SealedContext {}
     impl SealedContext for Context {}
 }
