@@ -83,7 +83,7 @@ static void add_nodes_empty_test(void** state)
     assert_true(fimo_graph_node_count(graph) == 1);
 
     const int* node_a_data = NULL;
-    error = fimo_graph_node_data(graph, node_a, &node_a_data);
+    error = fimo_graph_node_data(graph, node_a, (const void**)&node_a_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_null(node_a_data);
 
@@ -94,7 +94,7 @@ static void add_nodes_empty_test(void** state)
     assert_false(node_a == node_b);
 
     const int* node_b_data = NULL;
-    error = fimo_graph_node_data(graph, node_b, &node_b_data);
+    error = fimo_graph_node_data(graph, node_b, (const void**)&node_b_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_null(node_b_data);
 
@@ -121,7 +121,7 @@ static void add_nodes_test(void** state)
     assert_true(fimo_graph_node_count(graph) == 1);
 
     const int* node_a_data = NULL;
-    error = fimo_graph_node_data(graph, node_a, &node_a_data);
+    error = fimo_graph_node_data(graph, node_a, (const void**)&node_a_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_non_null(node_a_data);
     assert_true(*node_a_data == 5);
@@ -134,7 +134,7 @@ static void add_nodes_test(void** state)
     assert_false(node_a == node_b);
 
     const int* node_b_data = NULL;
-    error = fimo_graph_node_data(graph, node_b, &node_b_data);
+    error = fimo_graph_node_data(graph, node_b, (const void**)&node_b_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_non_null(node_b_data);
     assert_true(*node_b_data == 10);
@@ -176,7 +176,7 @@ static void add_edges_empty_test(void** state)
     assert_true(fimo_graph_edge_count(graph) == 1);
 
     int* edge_ab_data = NULL;
-    error = fimo_graph_edge_data(graph, edge_ab, &edge_ab_data);
+    error = fimo_graph_edge_data(graph, edge_ab, (const void**)&edge_ab_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_null(edge_ab_data);
 
@@ -187,7 +187,7 @@ static void add_edges_empty_test(void** state)
     assert_true(fimo_graph_edge_count(graph) == 1);
     assert_true(edge_ab == edge_ab_new);
 
-    error = fimo_graph_edge_data(graph, edge_ab, &edge_ab_data);
+    error = fimo_graph_edge_data(graph, edge_ab, (const void**)&edge_ab_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_null(edge_ab_data);
 
@@ -199,7 +199,7 @@ static void add_edges_empty_test(void** state)
     assert_false(edge_ab == edge_bc);
 
     int* edge_bc_data = NULL;
-    error = fimo_graph_edge_data(graph, edge_bc, &edge_bc_data);
+    error = fimo_graph_edge_data(graph, edge_bc, (const void**)&edge_bc_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_null(edge_bc_data);
 
@@ -240,7 +240,7 @@ static void add_edges_test(void** state)
     assert_true(fimo_graph_edge_count(graph) == 1);
 
     int* edge_ab_data = NULL;
-    error = fimo_graph_edge_data(graph, edge_ab, &edge_ab_data);
+    error = fimo_graph_edge_data(graph, edge_ab, (const void**)&edge_ab_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_non_null(edge_ab_data);
     assert_true(*edge_ab_data == 0);
@@ -255,7 +255,7 @@ static void add_edges_test(void** state)
     assert_true(*(int*)old_data == 0);
     fimo_free_sized(old_data, sizeof(int));
 
-    error = fimo_graph_edge_data(graph, edge_ab, &edge_ab_data);
+    error = fimo_graph_edge_data(graph, edge_ab, (const void**)&edge_ab_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_non_null(edge_ab_data);
     assert_true(*edge_ab_data == 1);
@@ -269,7 +269,7 @@ static void add_edges_test(void** state)
     assert_false(edge_ab == edge_bc);
 
     int* edge_bc_data = NULL;
-    error = fimo_graph_edge_data(graph, edge_bc, &edge_bc_data);
+    error = fimo_graph_edge_data(graph, edge_bc, (const void**)&edge_bc_data);
     assert_false(FIMO_IS_ERROR(error));
     assert_non_null(edge_bc_data);
     assert_true(*edge_bc_data == 2);
