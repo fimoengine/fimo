@@ -145,41 +145,38 @@ FimoError fimo_array_list_set_capacity_exact(FimoArrayList* array, size_t elem_s
     }
 
     if (array->capacity == 0) {
-        array->size = array->size <= capacity ? array->size : capacity;
+        array->size = 0;
         array->capacity = capacity;
         array->elements = elements;
 
         return FIMO_EOK;
     }
 
-    size_t old_buffer_size = array->capacity * elem_size;
-    size_t min_buffer_size = (buffer_size <= old_buffer_size)
-        ? buffer_size
-        : old_buffer_size;
+    size_t elements_to_move = (array->size < capacity) ? array->size : capacity;
 
     // Move over the elements `[0, capacity)`.
     if (move_func) {
         void* curr_src_ptr = array->elements;
         void* curr_dst_ptr = elements;
-        for (FimoISize i = 0; i < (FimoISize)capacity; i++) {
+        for (FimoISize i = 0; i < (FimoISize)elements_to_move; i++) {
             move_func(curr_src_ptr, curr_dst_ptr);
             curr_src_ptr = ((char*)curr_src_ptr) + elem_size;
             curr_dst_ptr = ((char*)curr_dst_ptr) + elem_size;
         }
     } else if (elements) {
         // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
-        memcpy(elements, array->elements, min_buffer_size);
+        memcpy(elements, array->elements, elements_to_move * elem_size);
     }
 
     // Drop the elements `[capacity, len)`.
     if (drop_func) {
-        void* curr_ptr = ((char*)array->elements) + min_buffer_size;
+        void* curr_ptr = ((char*)array->elements) + (elements_to_move * elem_size);
         for (FimoISize i = (FimoISize)capacity; i < (FimoISize)array->size; i++) {
             drop_func(curr_ptr);
             curr_ptr = ((char*)curr_ptr) + elem_size;
         }
     }
-    fimo_free_aligned_sized(array->elements, elem_align, old_buffer_size);
+    fimo_free_aligned_sized(array->elements, elem_align, array->capacity * elem_size);
 
     array->size = array->size <= capacity ? array->size : capacity;
     array->capacity = capacity;

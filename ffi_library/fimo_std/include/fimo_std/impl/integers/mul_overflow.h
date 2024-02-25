@@ -107,7 +107,7 @@ static FIMO_INLINE_ALWAYS bool fimo_impl_mul_overflow_i64(FimoI64 a, FimoI64 b, 
 static FIMO_INLINE_ALWAYS bool fimo_impl_mul_overflow_isize(FimoISize a, FimoISize b, FimoISize* c)
 {
     FIMO_ISIZE_UNDERLYING_ c_;
-    bool tmp = FIMO_ISIZE_SWITCH_(fimo_impl_add_overflow)(a, b, &c_);
+    bool tmp = FIMO_ISIZE_SWITCH_(fimo_impl_mul_overflow)(a, b, &c_);
     *c = c_;
     return tmp;
 }
@@ -123,7 +123,7 @@ static FIMO_INLINE_ALWAYS bool fimo_impl_mul_overflow_isize(FimoISize a, FimoISi
 static FIMO_INLINE_ALWAYS bool fimo_impl_mul_overflow_intptr(FimoIntPtr a, FimoIntPtr b, FimoIntPtr* c)
 {
     FIMO_INTPTR_UNDERLYING_ c_;
-    bool tmp = FIMO_INTPTR_SWITCH_(fimo_impl_add_overflow)(a, b, &c_);
+    bool tmp = FIMO_INTPTR_SWITCH_(fimo_impl_mul_overflow)(a, b, &c_);
     *c = c_;
     return tmp;
 }
@@ -221,7 +221,7 @@ static FIMO_INLINE_ALWAYS bool fimo_impl_mul_overflow_u64(FimoU64 a, FimoU64 b, 
 static FIMO_INLINE_ALWAYS bool fimo_impl_mul_overflow_usize(FimoUSize a, FimoUSize b, FimoUSize* c)
 {
     FIMO_USIZE_UNDERLYING_ c_;
-    bool tmp = FIMO_USIZE_SWITCH_(fimo_impl_add_overflow)(a, b, &c_);
+    bool tmp = FIMO_USIZE_SWITCH_(fimo_impl_mul_overflow)(a, b, &c_);
     *c = c_;
     return tmp;
 }

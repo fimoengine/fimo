@@ -1720,19 +1720,33 @@ impl<T> From<ArrayList<T>> for Box<[T], FimoAllocator> {
 impl<T> From<alloc::vec::Vec<T, FimoAllocator>> for ArrayList<T> {
     fn from(value: alloc::vec::Vec<T, FimoAllocator>) -> Self {
         let (ptr, len, cap) = value.into_raw_parts();
-        let ptr = if Self::T_SIZE == 0 {
-            core::ptr::null_mut()
+        if Self::T_SIZE == 0 {
+            Self {
+                inner: bindings::FimoArrayList {
+                    elements: core::ptr::null_mut(),
+                    size: len,
+                    capacity: len,
+                },
+                _phantom: PhantomData,
+            }
+        } else if cap == 0 {
+            Self {
+                inner: bindings::FimoArrayList {
+                    elements: core::ptr::null_mut(),
+                    size: 0,
+                    capacity: 0,
+                },
+                _phantom: PhantomData,
+            }
         } else {
-            ptr
-        };
-
-        Self {
-            inner: bindings::FimoArrayList {
-                elements: ptr.cast(),
-                size: len,
-                capacity: cap,
-            },
-            _phantom: PhantomData,
+            Self {
+                inner: bindings::FimoArrayList {
+                    elements: ptr.cast(),
+                    size: len,
+                    capacity: cap,
+                },
+                _phantom: PhantomData,
+            }
         }
     }
 }
@@ -1740,16 +1754,21 @@ impl<T> From<alloc::vec::Vec<T, FimoAllocator>> for ArrayList<T> {
 impl<T> From<ArrayList<T>> for alloc::vec::Vec<T, FimoAllocator> {
     fn from(value: ArrayList<T>) -> Self {
         let mut value = ManuallyDrop::new(value);
-        let ptr = value.as_mut_ptr();
-        let len = value.len();
-        let cap = if ArrayList::<T>::T_SIZE == 0 {
-            value.capacity()
+        if ArrayList::<T>::T_SIZE == 0 {
+            let mut v = alloc::vec::Vec::new_in(FimoAllocator);
+            // Safety: `T` is a ZST.
+            unsafe { v.set_len(value.len()) };
+            v
+        } else if value.capacity() == 0 {
+            alloc::vec::Vec::new_in(FimoAllocator)
         } else {
-            usize::MAX
-        };
+            let ptr = value.as_mut_ptr();
+            let len = value.len();
+            let cap = value.capacity();
 
-        // Safety: Is sound, as we transfer the ownership of the entire buffer.
-        unsafe { alloc::vec::Vec::from_raw_parts_in(ptr, len, cap, FimoAllocator) }
+            // Safety: Is sound, as we transfer the ownership of the entire buffer.
+            unsafe { alloc::vec::Vec::from_raw_parts_in(ptr, len, cap, FimoAllocator) }
+        }
     }
 }
 
