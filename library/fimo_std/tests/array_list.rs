@@ -114,8 +114,8 @@ fn test_push() {
 
 #[test]
 fn test_extend() {
-    let mut v = ArrayList::new();
-    let mut w = ArrayList::new();
+    let mut v = ArrayList::<i32>::new();
+    let mut w = ArrayList::<i32>::new();
 
     v.extend(w.clone());
     assert_eq!(v, &[]);
