@@ -115,8 +115,8 @@ struct FimoUnicodeCharTriple {
     FimoChar ch[3];
 };
 
-struct FimoUnicodeCharTriple fimo_internal_unicode_to_lower(FimoChar ch);
-struct FimoUnicodeCharTriple fimo_internal_unicode_to_upper(FimoChar ch);
+struct FimoUnicodeCharTriple fimo_impl_unicode_to_lower(FimoChar ch);
+struct FimoUnicodeCharTriple fimo_impl_unicode_to_upper(FimoChar ch);
 ";
 
 static SRC_HEADER: &str = r"
@@ -153,7 +153,7 @@ static inline bool binary_search_conversion_table_(FimoChar el,
     return false;
 }
 
-struct FimoUnicodeCharTriple fimo_internal_unicode_to_lower(FimoChar ch)
+struct FimoUnicodeCharTriple fimo_impl_unicode_to_lower(FimoChar ch)
 {
     if (fimo_char_is_ascii(ch)) {
         return (struct FimoUnicodeCharTriple) {
@@ -190,7 +190,7 @@ struct FimoUnicodeCharTriple fimo_internal_unicode_to_lower(FimoChar ch)
     }
 }
 
-struct FimoUnicodeCharTriple fimo_internal_unicode_to_upper(FimoChar ch)
+struct FimoUnicodeCharTriple fimo_impl_unicode_to_upper(FimoChar ch)
 {
     if (fimo_char_is_ascii(ch)) {
         return (struct FimoUnicodeCharTriple) {

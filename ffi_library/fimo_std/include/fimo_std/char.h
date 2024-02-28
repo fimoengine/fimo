@@ -2,7 +2,7 @@
 #define FIMO_CHAR_H
 
 #include <fimo_std/error.h>
-#include <fimo_std/internal/unicode.h>
+#include <fimo_std/impl/unicode.h>
 #include <fimo_std/utils.h>
 
 #ifdef __cplusplus
@@ -28,17 +28,17 @@ extern "C" {
 /**
  * Major version of the implemented Unicode Standard.
  */
-#define FIMO_CHAR_UNICODE_VERSION_MAJOR FIMO_INTERNAL_UNICODE_VERSION_MAJOR
+#define FIMO_CHAR_UNICODE_VERSION_MAJOR FIMO_IMPL_UNICODE_VERSION_MAJOR
 
 /**
  * Minor version of the implemented Unicode Standard.
  */
-#define FIMO_CHAR_UNICODE_VERSION_MINOR FIMO_INTERNAL_UNICODE_VERSION_MINOR
+#define FIMO_CHAR_UNICODE_VERSION_MINOR FIMO_IMPL_UNICODE_VERSION_MINOR
 
 /**
  * Update version of the implemented Unicode Standard.
  */
-#define FIMO_CHAR_UNICODE_VERSION_UPDATE FIMO_INTERNAL_UNICODE_VERSION_UPDATE
+#define FIMO_CHAR_UNICODE_VERSION_UPDATE FIMO_IMPL_UNICODE_VERSION_UPDATE
 
 /**
  * A Unicode character.

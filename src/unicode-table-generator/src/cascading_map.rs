@@ -67,11 +67,11 @@ impl RawEmitter {
         self.bytes_used += 256;
 
         #[rustfmt::skip]
-        writeln!(&mut self.header_file, "bool fimo_internal_unicode_whitespace_lookup(FimoChar ch);").unwrap();
+        writeln!(&mut self.header_file, "bool fimo_impl_unicode_whitespace_lookup(FimoChar ch);").unwrap();
 
         #[rustfmt::skip]
         let x = || {
-            writeln!(&mut self.src_file, "bool fimo_internal_unicode_whitespace_lookup(FimoChar ch) {{").unwrap();
+            writeln!(&mut self.src_file, "bool fimo_impl_unicode_whitespace_lookup(FimoChar ch) {{").unwrap();
             writeln!(&mut self.src_file, "    switch (((FimoU32)ch) >> 8) {{").unwrap();
             for arm in arms {
                 writeln!(&mut self.src_file, "    {}", arm).unwrap();

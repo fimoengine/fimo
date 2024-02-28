@@ -92,11 +92,11 @@ impl RawEmitter {
         self.bytes_used += coded_offsets.len();
 
         #[rustfmt::skip]
-        writeln!(&mut self.header_file, "bool fimo_internal_unicode_{}_lookup(FimoChar ch);", property_lower).unwrap();
+        writeln!(&mut self.header_file, "bool fimo_impl_unicode_{}_lookup(FimoChar ch);", property_lower).unwrap();
 
         #[rustfmt::skip]
         let mut x = || {
-            writeln!(&mut self.src_file, "bool fimo_internal_unicode_{}_lookup(FimoChar ch)", property_lower).unwrap();
+            writeln!(&mut self.src_file, "bool fimo_impl_unicode_{}_lookup(FimoChar ch)", property_lower).unwrap();
             writeln!(&mut self.src_file, "{{").unwrap();
             writeln!(&mut self.src_file, "    return skip_search_(",).unwrap();
             writeln!(&mut self.src_file, "        (FimoU32)ch,").unwrap();

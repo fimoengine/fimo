@@ -133,7 +133,7 @@ impl RawEmitter {
 
         writeln!(
             &mut self.header_file,
-            "bool fimo_internal_unicode_{}_lookup(FimoChar ch);",
+            "bool fimo_impl_unicode_{}_lookup(FimoChar ch);",
             property.to_lowercase()
         )
         .unwrap();
@@ -145,7 +145,7 @@ impl RawEmitter {
 
             writeln!(
                 &mut self.src_file,
-                "bool fimo_internal_unicode_{}_lookup(FimoChar ch) {{", lowercase
+                "bool fimo_impl_unicode_{}_lookup(FimoChar ch) {{", lowercase
             )
             .unwrap();
             writeln!(&mut self.src_file, "    return bitset_search_(",).unwrap();
@@ -308,6 +308,7 @@ impl Canonicalized {
                     }
                 }
 
+                #[allow(clippy::nonminimal_bool)]
                 if (!a) == b {
                     mappings.entry(b).or_default().push((a, Mapping::Invert));
                     // We're not interested in further mappings between a and b
@@ -316,6 +317,7 @@ impl Canonicalized {
 
                 // All possible distinct rotations, inverted
                 for rotation in 1..64 {
+                    #[allow(clippy::nonminimal_bool)]
                     if (!a.rotate_right(rotation)) == b {
                         mappings
                             .entry(b)
