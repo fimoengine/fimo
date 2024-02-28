@@ -11,10 +11,10 @@ use crate::{
 /// Constructs a new [`Version`].
 #[macro_export]
 macro_rules! version {
-    ($major:literal, $minor:literal, $patch:literal) => {{
+    ($major:literal, $minor:literal, $patch:literal $(,)?) => {{
         $crate::version::Version::new($major, $minor, $patch)
     }};
-    ($major:literal, $minor:literal, $patch:literal, $build:literal) => {{
+    ($major:literal, $minor:literal, $patch:literal, $build:literal$(,)?) => {{
         $crate::version::Version::new_long($major, $minor, $patch, $build)
     }};
     ($version:literal) => {{
