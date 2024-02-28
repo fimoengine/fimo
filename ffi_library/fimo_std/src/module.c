@@ -32,21 +32,21 @@ FIMO_MUST_USE FimoError fimo_module_pseudo_module_destroy(const FimoModule* modu
 }
 
 FIMO_MUST_USE FimoError fimo_module_set_new(FimoContext context,
-    FimoModuleLoadingSet* module_set)
+    FimoModuleLoadingSet** module_set)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
     return vtable->module_set_new(context.data, module_set);
 }
 
 FIMO_MUST_USE FimoError fimo_module_set_has_module(FimoContext context,
-    FimoModuleLoadingSet module_set, const char* name, bool* has_module)
+    FimoModuleLoadingSet* module_set, const char* name, bool* has_module)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
     return vtable->module_set_has_module(context.data, module_set, name, has_module);
 }
 
 FIMO_MUST_USE FimoError fimo_module_set_has_symbol(FimoContext context,
-    FimoModuleLoadingSet module_set, const char* name, const char* ns,
+    FimoModuleLoadingSet* module_set, const char* name, const char* ns,
     FimoVersion version, bool* has_symbol)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
@@ -54,7 +54,7 @@ FIMO_MUST_USE FimoError fimo_module_set_has_symbol(FimoContext context,
 }
 
 FIMO_MUST_USE FimoError fimo_module_set_append(FimoContext context,
-    FimoModuleLoadingSet module_set, const char* module_path,
+    FimoModuleLoadingSet* module_set, const char* module_path,
     FimoModuleLoadingFilter filter, void* filter_data,
     FimoModuleLoadingSuccessCallback on_success,
     FimoModuleLoadingErrorCallback on_error,
@@ -66,14 +66,14 @@ FIMO_MUST_USE FimoError fimo_module_set_append(FimoContext context,
 }
 
 FIMO_MUST_USE FimoError fimo_module_set_dismiss(FimoContext context,
-    FimoModuleLoadingSet module_set)
+    FimoModuleLoadingSet* module_set)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
     return vtable->module_set_dismiss(context.data, module_set);
 }
 
 FIMO_MUST_USE FimoError fimo_module_set_finish(FimoContext context,
-    FimoModuleLoadingSet module_set)
+    FimoModuleLoadingSet* module_set)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
     return vtable->module_set_finish(context.data, module_set);
@@ -185,55 +185,75 @@ FIMO_MUST_USE FimoError fimo_module_param_query(FimoContext context, const char*
 }
 
 FIMO_MUST_USE FimoError fimo_module_param_set_public(FimoContext context, const void* value,
-    const char* module_name, const char* param)
+    FimoModuleParamType type, const char* module_name, const char* param)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
-    return vtable->module_param_set_public(context.data, value, module_name, param);
+    return vtable->module_param_set_public(context.data, value, type, module_name, param);
 }
 
 FIMO_MUST_USE FimoError fimo_module_param_get_public(FimoContext context, void* value,
-    const char* module_name, const char* param)
+    FimoModuleParamType* type, const char* module_name, const char* param)
 {
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)context.vtable;
-    return vtable->module_param_get_public(context.data, value, module_name, param);
+    return vtable->module_param_get_public(context.data, value, type, module_name, param);
 }
 
 FIMO_MUST_USE FimoError fimo_module_param_set_dependency(const FimoModule* module, const void* value,
-    const char* module_name, const char* param)
+    FimoModuleParamType type, const char* module_name, const char* param)
 {
     if (!module) {
         return FIMO_EINVAL;
     }
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)module->context.vtable;
-    return vtable->module_param_set_dependency(module->context.data, module, value, module_name, param);
+    return vtable->module_param_set_dependency(module->context.data, module, value, type, module_name, param);
 }
 
 FIMO_MUST_USE FimoError fimo_module_param_get_dependency(const FimoModule* module, void* value,
-    const char* module_name, const char* param)
+    FimoModuleParamType* type, const char* module_name, const char* param)
 {
     if (!module) {
         return FIMO_EINVAL;
     }
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)module->context.vtable;
-    return vtable->module_param_get_dependency(module->context.data, module, value, module_name, param);
+    return vtable->module_param_get_dependency(module->context.data, module, value, type, module_name, param);
 }
 
 FIMO_MUST_USE FimoError fimo_module_param_set_private(const FimoModule* module, const void* value,
-    FimoModuleParam* param)
+    FimoModuleParamType type, FimoModuleParam* param)
 {
     if (!module) {
         return FIMO_EINVAL;
     }
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)module->context.vtable;
-    return vtable->module_param_set_private(module->context.data, module, value, param);
+    return vtable->module_param_set_private(module->context.data, module, value, type, param);
 }
 
 FIMO_MUST_USE FimoError fimo_module_param_get_private(const FimoModule* module, void* value,
-    const FimoModuleParam* param)
+    FimoModuleParamType* type, const FimoModuleParam* param)
 {
     if (!module) {
         return FIMO_EINVAL;
     }
     const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)module->context.vtable;
-    return vtable->module_param_get_private(module->context.data, module, value, param);
+    return vtable->module_param_get_private(module->context.data, module, value, type, param);
+}
+
+FIMO_MUST_USE FimoError fimo_module_param_set_inner(const FimoModule* module, const void* value,
+    FimoModuleParamType type, FimoModuleParamData* param)
+{
+    if (!module) {
+        return FIMO_EINVAL;
+    }
+    const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)module->context.vtable;
+    return vtable->module_param_set_inner(module->context.data, module, value, type, param);
+}
+
+FIMO_MUST_USE FimoError fimo_module_param_get_inner(const FimoModule* module, void* value,
+    FimoModuleParamType* type, const FimoModuleParamData* param)
+{
+    if (!module) {
+        return FIMO_EINVAL;
+    }
+    const FimoInternalContextVTable* vtable = (const FimoInternalContextVTable*)module->context.vtable;
+    return vtable->module_param_get_inner(module->context.data, module, value, type, param);
 }
