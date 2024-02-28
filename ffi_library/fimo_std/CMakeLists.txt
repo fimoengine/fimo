@@ -41,7 +41,7 @@ set(FIMO_STD_IMPL_HEADERS
     include/fimo_std/impl/integers/sub_overflow.h
     include/fimo_std/impl/macros/has_builtin.h
     include/fimo_std/impl/macros/inline.h
-    include/fimo_std/internal/unicode.h
+    include/fimo_std/impl/unicode.h
 )
 
 set(FIMO_STD_PRIVATE_HEADERS
@@ -58,7 +58,9 @@ set(FIMO_STD_SRC
     src/internal/context.c
     src/internal/module.c
     src/internal/tracing.c
-    src/internal/unicode.c
+
+    # Public implementation header implementations
+    src/impl/unicode.c
 
     # Public header implementations
     src/array_list.c

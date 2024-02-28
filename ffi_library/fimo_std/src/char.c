@@ -1,6 +1,6 @@
 // This implementation is adapted from the rust standard library,
 // licensed under the MIT and Apache dual license.
-#define FIMO_INTERNAL_EXPOSE_UNICODE
+#define FIMO_IMPL_EXPOSE_UNICODE
 #include <fimo_std/char.h>
 
 #include <string.h>
@@ -194,21 +194,21 @@ bool fimo_char_is_alphabetic(FimoChar ch)
 {
     return ('a' <= ch && ch <= 'z')
         || ('A' <= ch && ch <= 'Z')
-        || (ch > '\x7F' && fimo_internal_unicode_alphabetic_lookup(ch));
+        || (ch > '\x7F' && fimo_impl_unicode_alphabetic_lookup(ch));
 }
 
 FIMO_MUST_USE
 bool fimo_char_is_lowercase(FimoChar ch)
 {
     return ('a' <= ch && ch <= 'z')
-        || (ch > '\x7F' && fimo_internal_unicode_lowercase_lookup(ch));
+        || (ch > '\x7F' && fimo_impl_unicode_lowercase_lookup(ch));
 }
 
 FIMO_MUST_USE
 bool fimo_char_is_uppercase(FimoChar ch)
 {
     return ('A' <= ch && ch <= 'Z')
-        || (ch > '\x7F' && fimo_internal_unicode_uppercase_lookup(ch));
+        || (ch > '\x7F' && fimo_impl_unicode_uppercase_lookup(ch));
 }
 
 FIMO_MUST_USE
@@ -216,7 +216,7 @@ bool fimo_char_is_whitespace(FimoChar ch)
 {
     return (ch == ' ')
         || ('\x09' <= ch && ch <= '\x0D')
-        || (ch > '\x7F' && fimo_internal_unicode_whitespace_lookup(ch));
+        || (ch > '\x7F' && fimo_impl_unicode_whitespace_lookup(ch));
 }
 
 FIMO_MUST_USE
@@ -228,20 +228,20 @@ bool fimo_char_is_alphanumeric(FimoChar ch)
 FIMO_MUST_USE
 bool fimo_char_is_control(FimoChar ch)
 {
-    return fimo_internal_unicode_cc_lookup(ch);
+    return fimo_impl_unicode_cc_lookup(ch);
 }
 
 FIMO_MUST_USE
 bool fimo_char_is_numeric(FimoChar ch)
 {
     return ('0' <= ch && ch <= '9')
-        || (ch > '\x7F' && fimo_internal_unicode_n_lookup(ch));
+        || (ch > '\x7F' && fimo_impl_unicode_n_lookup(ch));
 }
 
 FIMO_MUST_USE
 FimoCharCaseMapper fimo_char_to_lowercase(FimoChar ch)
 {
-    struct FimoUnicodeCharTriple x = fimo_internal_unicode_to_lower(ch);
+    struct FimoUnicodeCharTriple x = fimo_impl_unicode_to_lower(ch);
     if (x.ch[2] == '\0') {
         if (x.ch[1] == '\0') {
             return (FimoCharCaseMapper) {
@@ -280,7 +280,7 @@ FimoCharCaseMapper fimo_char_to_lowercase(FimoChar ch)
 FIMO_MUST_USE
 FimoCharCaseMapper fimo_char_to_uppercase(FimoChar ch)
 {
-    struct FimoUnicodeCharTriple x = fimo_internal_unicode_to_upper(ch);
+    struct FimoUnicodeCharTriple x = fimo_impl_unicode_to_upper(ch);
     if (x.ch[2] == '\0') {
         if (x.ch[1] == '\0') {
             return (FimoCharCaseMapper) {
