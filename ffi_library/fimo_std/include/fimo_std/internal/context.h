@@ -62,18 +62,18 @@ typedef struct FimoInternalContextVTable {
     FimoError (*module_unlock)(void*);
     FimoError (*module_pseudo_module_new)(void*, const FimoModule**);
     FimoError (*module_pseudo_module_destroy)(void*, const FimoModule*);
-    FimoError (*module_set_new)(void*, FimoModuleLoadingSet*);
-    FimoError (*module_set_has_module)(void*, FimoModuleLoadingSet,
+    FimoError (*module_set_new)(void*, FimoModuleLoadingSet**);
+    FimoError (*module_set_has_module)(void*, FimoModuleLoadingSet*,
         const char*, bool*);
-    FimoError (*module_set_has_symbol)(void*, FimoModuleLoadingSet,
+    FimoError (*module_set_has_symbol)(void*, FimoModuleLoadingSet*,
         const char*, const char*, FimoVersion, bool*);
-    FimoError (*module_set_append)(void*, FimoModuleLoadingSet,
+    FimoError (*module_set_append)(void*, FimoModuleLoadingSet*,
         const char*, FimoModuleLoadingFilter, void*,
         FimoModuleLoadingSuccessCallback, FimoModuleLoadingErrorCallback,
         FimoModuleLoadingCleanupCallback, void*,
         void (*)(bool (*)(const FimoModuleExport*, void*), void*));
-    FimoError (*module_set_dismiss)(void*, FimoModuleLoadingSet);
-    FimoError (*module_set_finish)(void*, FimoModuleLoadingSet);
+    FimoError (*module_set_dismiss)(void*, FimoModuleLoadingSet*);
+    FimoError (*module_set_finish)(void*, FimoModuleLoadingSet*);
     FimoError (*module_find_by_name)(void*, const char*,
         const FimoModuleInfo**);
     FimoError (*module_find_by_symbol)(void*, const char*, const char*,
@@ -96,18 +96,22 @@ typedef struct FimoInternalContextVTable {
     FimoError (*module_unload)(void*, const FimoModuleInfo*);
     FimoError (*module_param_query)(void*, const char*, const char*,
         FimoModuleParamType*, FimoModuleParamAccess*, FimoModuleParamAccess*);
-    FimoError (*module_param_set_public)(void*, const void*, const char*,
-        const char*);
-    FimoError (*module_param_get_public)(void*, void*, const char*,
-        const char*);
+    FimoError (*module_param_set_public)(void*, const void*, FimoModuleParamType,
+        const char*, const char*);
+    FimoError (*module_param_get_public)(void*, void*, FimoModuleParamType*,
+        const char*, const char*);
     FimoError (*module_param_set_dependency)(void*, const FimoModule*,
-        const void*, const char*, const char*);
+        const void*, FimoModuleParamType, const char*, const char*);
     FimoError (*module_param_get_dependency)(void*, const FimoModule*,
-        void*, const char*, const char*);
+        void*, FimoModuleParamType*, const char*, const char*);
     FimoError (*module_param_set_private)(void*, const FimoModule*,
-        const void*, FimoModuleParam*);
+        const void*, FimoModuleParamType, FimoModuleParam*);
     FimoError (*module_param_get_private)(void*, const FimoModule*,
-        void*, const FimoModuleParam*);
+        void*, FimoModuleParamType*, const FimoModuleParam*);
+    FimoError (*module_param_set_inner)(void*, const FimoModule*,
+        const void*, FimoModuleParamType, FimoModuleParamData*);
+    FimoError (*module_param_get_inner)(void*, const FimoModule*,
+        void*, FimoModuleParamType*, const FimoModuleParamData*);
 } FimoInternalContextVTable;
 
 /**
