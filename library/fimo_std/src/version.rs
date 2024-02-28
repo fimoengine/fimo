@@ -8,6 +8,21 @@ use crate::{
     ffi::FFITransferable,
 };
 
+/// Constructs a new [`Version`].
+#[macro_export]
+macro_rules! version {
+    ($major:literal, $minor:literal, $patch:literal) => {{
+        $crate::version::Version::new($major, $minor, $patch)
+    }};
+    ($major:literal, $minor:literal, $patch:literal, $build:literal) => {{
+        $crate::version::Version::new_long($major, $minor, $patch, $build)
+    }};
+    ($version:literal) => {{
+        $crate::version::Version::try_from($version)
+    }};
+}
+
+/// A version specifier.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct Version(bindings::FimoVersion);
