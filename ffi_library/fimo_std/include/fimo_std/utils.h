@@ -7,6 +7,7 @@
 #include <fimo_std/impl/macros/has_builtin.h>
 #include <fimo_std/impl/macros/inline.h>
 #include <fimo_std/impl/macros/must_use.h>
+#include <fimo_std/impl/macros/pragma.h>
 #include <fimo_std/impl/macros/print_format.h>
 #include <fimo_std/impl/macros/stringify.h>
 #include <fimo_std/impl/macros/var.h>
