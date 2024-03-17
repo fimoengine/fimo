@@ -40,8 +40,8 @@ typedef struct FimoInternalContext {
  */
 typedef struct FimoInternalContextVTable {
     FimoError (*check_version)(void*, const FimoVersion*);
-    FimoError (*destroy)(void*);
-    FimoError (*dealloc)(void*);
+    void (*acquire)(void*);
+    void (*release)(void*);
     FimoError (*tracing_call_stack_create)(void*, FimoTracingCallStack*);
     FimoError (*tracing_call_stack_destroy)(void*, FimoTracingCallStack);
     FimoError (*tracing_call_stack_switch)(void*, FimoTracingCallStack,
@@ -140,14 +140,18 @@ FIMO_MUST_USE
 FimoError fimo_internal_context_destroy(void* ptr);
 
 /**
- * Deallocates the context.
+ * Acquires a reference to the context by increasing the reference count.
  *
- * @param ptr pointer to the context
- *
- * @return Status code.
+ * @param ptr pointer to the context.
  */
-FIMO_MUST_USE
-FimoError fimo_internal_context_dealloc(void* ptr);
+void fimo_internal_context_acquire(void* ptr);
+
+/**
+ * Releases a reference to the context by decreasing the reference count.
+ *
+ * @param ptr pointer to the context.
+ */
+void fimo_internal_context_release(void* ptr);
 
 /**
  * Checks that the implemented context version is compatible with `version`.

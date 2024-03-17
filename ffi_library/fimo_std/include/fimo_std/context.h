@@ -2,7 +2,6 @@
 #define FIMO_CONTEXT_H
 
 #include <fimo_std/error.h>
-#include <fimo_std/refcount.h>
 #include <fimo_std/utils.h>
 
 #ifdef __cplusplus
@@ -13,18 +12,12 @@ extern "C" {
  * Context of the fimo std.
  *
  * The context is an opaque object that can only be accessed through
- * the provided vtable, which is also opaque. The data pointer can be
- * cast to a pointer to an `FimoAtomicRefCount`.
+ * the provided vtable, which is also opaque.
  */
 typedef struct FimoContext {
     void* data;
     const void* vtable;
 } FimoContext;
-
-/**
- * Returns a pointer to the atomic reference counter from a context.
- */
-#define FIMO_CONTEXT_REF_COUNT(context) (FimoAtomicRefCount*)((context).data)
 
 /**
  * Fimo std structure types.
@@ -73,34 +66,6 @@ FimoError fimo_context_init(const FimoBaseStructIn* options,
     FimoContext* context);
 
 /**
- * Destroys the context.
- *
- * This function destroys the `FimoContext`, without deallocating it.
- * This function must be called when the strong reference count of the
- * `FimoContext` instance reaches `0`.
- *
- * @param context the context
- *
- * @return Status code.
- */
-FIMO_MUST_USE
-FimoError fimo_context_destroy_strong(FimoContext context);
-
-/**
- * Deallocates a context.
- *
- * This function deallocates the `FimoContext`, without destroying it.
- * This function must be called when the weak reference count of the
- * `FimoContext` instance reaches `0`.
- *
- * @param context the context
- *
- * @return Status code.
- */
-FIMO_MUST_USE
-FimoError fimo_context_destroy_weak(FimoContext context);
-
-/**
  * Checks the compatibility of the context version.
  *
  * This function must be called upon the acquisition of a context, that
@@ -114,6 +79,28 @@ FimoError fimo_context_destroy_weak(FimoContext context);
  */
 FIMO_MUST_USE
 FimoError fimo_context_check_version(FimoContext context);
+
+/**
+ * Acquires a reference to the context.
+ *
+ * Increases the reference count of the context. May abort the program,
+ * if doing so is not possible. May only be called with a valid reference
+ * to the context.
+ *
+ * @param context the context
+ */
+void fimo_context_acquire(FimoContext context);
+
+/**
+ * Releases a reference to the context.
+ *
+ * Decrements the reference count of the context. When the reference count
+ * reaches zero, this function also destroys the reference. May only be
+ * called with a valid reference to the context.
+ *
+ * @param context the context
+ */
+void fimo_context_release(FimoContext context);
 
 #ifdef __cplusplus
 }

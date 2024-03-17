@@ -21,22 +21,20 @@ FimoError fimo_context_init(const FimoBaseStructIn* options,
 }
 
 FIMO_MUST_USE
-FimoError fimo_context_destroy_strong(FimoContext context)
-{
-    const FimoInternalContextVTable* vtable = context.vtable;
-    return vtable->destroy(context.data);
-}
-
-FIMO_MUST_USE
-FimoError fimo_context_destroy_weak(FimoContext context)
-{
-    const FimoInternalContextVTable* vtable = context.vtable;
-    return vtable->dealloc(context.data);
-}
-
-FIMO_MUST_USE
 FimoError fimo_context_check_version(FimoContext context)
 {
     const struct FimoInternalContextMinCompatVTable* vtable = context.vtable;
     return vtable->check_version(context.data, &FIMO_REQUIRED_VERSION);
+}
+
+void fimo_context_acquire(FimoContext context)
+{
+    const struct FimoInternalContextVTable* vtable = context.vtable;
+    vtable->acquire(context.data);
+}
+
+void fimo_context_release(FimoContext context)
+{
+    const struct FimoInternalContextVTable* vtable = context.vtable;
+    vtable->release(context.data);
 }

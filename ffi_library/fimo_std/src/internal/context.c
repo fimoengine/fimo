@@ -6,8 +6,8 @@
 
 static const FimoInternalContextVTable FIMO_INTERNAL_CONTEXT_VTABLE = {
     .check_version = fimo_internal_context_check_version,
-    .destroy = fimo_internal_context_destroy,
-    .dealloc = fimo_internal_context_dealloc,
+    .acquire = fimo_internal_context_acquire,
+    .release = fimo_internal_context_release,
     .tracing_call_stack_create = fimo_internal_tracing_call_stack_create,
     .tracing_call_stack_destroy = fimo_internal_tracing_call_stack_destroy,
     .tracing_call_stack_switch = fimo_internal_tracing_call_stack_switch,
@@ -76,40 +76,35 @@ cleanup:
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_context_destroy(void* ptr)
 {
-    FimoInternalContext* context = (FimoInternalContext*)ptr;
-    if (!context || fimo_strong_count_atomic(&context->ref_count) != 0) {
         return FIMO_EINVAL;
     }
-
-    // Check the different submodules, if we are allowed to destroy
-    // the context.
-    FimoError error = FIMO_EOK;
-    error = fimo_internal_tracing_check_destroy(context);
-    if (FIMO_IS_ERROR(error)) {
-        return error;
-    }
-
-    // With permission from all submodules we destroy the context.
-    fimo_internal_tracing_destroy(context);
 
     return FIMO_EOK;
 }
 
-FIMO_MUST_USE
-FimoError fimo_internal_context_dealloc(void* ptr)
+void fimo_internal_context_acquire(void* ptr)
 {
+    FIMO_ASSERT(ptr)
     FimoInternalContext* context = (FimoInternalContext*)ptr;
-    if (!context
-        || fimo_strong_count_atomic(&context->ref_count) != 0
-        || fimo_weak_count_atomic_unguarded(&context->ref_count) != 0) {
-        return FIMO_EINVAL;
+    fimo_increase_strong_count_atomic(&context->ref_count);
+}
+
+void fimo_internal_context_release(void* ptr)
+{
+    FIMO_ASSERT(ptr)
+    FimoInternalContext* context = (FimoInternalContext*)ptr;
+    bool can_destroy = fimo_decrease_strong_count_atomic(&context->ref_count);
+    if (!can_destroy) {
+        return;
     }
 
+    // Destroy all submodules.
+    fimo_internal_tracing_destroy(context);
+
+    // Finally deallocate the context.
     fimo_free_aligned_sized(context, _Alignof(FimoInternalContext),
         sizeof(FimoInternalContext));
-    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
