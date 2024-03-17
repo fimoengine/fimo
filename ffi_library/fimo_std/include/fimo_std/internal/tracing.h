@@ -71,7 +71,10 @@ extern "C" {
  * @param FMT printf format string
  */
 #define FIMO_INTERNAL_TRACING_EMIT_ERROR_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_INTERNAL_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, 0)
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")       \
+    FIMO_INTERNAL_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, 0)         \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
  * Emits a warning event using the default formatter.
@@ -94,7 +97,10 @@ extern "C" {
  * @param FMT printf format string
  */
 #define FIMO_INTERNAL_TRACING_EMIT_WARN_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_INTERNAL_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, 0)
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")      \
+    FIMO_INTERNAL_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, 0)         \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
  * Emits an info event using the default formatter.
@@ -117,7 +123,10 @@ extern "C" {
  * @param FMT printf format string
  */
 #define FIMO_INTERNAL_TRACING_EMIT_INFO_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_INTERNAL_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, 0)
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")      \
+    FIMO_INTERNAL_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, 0)         \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
  * Emits a debug event using the default formatter.
@@ -140,7 +149,10 @@ extern "C" {
  * @param FMT printf format string
  */
 #define FIMO_INTERNAL_TRACING_EMIT_DEBUG_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_INTERNAL_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, 0)
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")       \
+    FIMO_INTERNAL_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, 0)         \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
  * Emits a trace event using the default formatter.
@@ -163,7 +175,10 @@ extern "C" {
  * @param FMT printf format string
  */
 #define FIMO_INTERNAL_TRACING_EMIT_TRACE_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")       \
+    FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)         \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 typedef struct FimoInternalContext FimoInternalContext;
 
