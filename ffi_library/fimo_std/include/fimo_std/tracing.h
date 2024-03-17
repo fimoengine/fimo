@@ -12,107 +12,155 @@
 extern "C" {
 #endif // __cplusplus
 
-#define FIMO_TRACING_EMIT_(_context, _name, _target, _level,     \
-    _format, _metadata_var, _event_var, _error_var, ...)         \
-    static const FimoTracingMetadata _metadata_var = {           \
-        .type = FIMO_STRUCT_TYPE_TRACING_METADATA,               \
-        .next = NULL,                                            \
-        .name = (_name),                                         \
-        .target = (_target),                                     \
-        .level = (_level),                                       \
-        .file_name = __FILE__,                                   \
-        .line_number = __LINE__,                                 \
-    };                                                           \
-    static const FimoTracingEvent _event_var = {                 \
-        .type = FIMO_STRUCT_TYPE_TRACING_EVENT,                  \
-        .next = NULL,                                            \
-        .metadata = &_metadata_var,                              \
-    };                                                           \
-    FimoError _error_var = fimo_tracing_event_emit_fmt(_context, \
-        &_event_var, _format, __VA_ARGS__);                      \
-    if (FIMO_IS_ERROR(_error_var)) {                             \
-        return _error_var;                                       \
-    }
+#define FIMO_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT,    \
+    META_VAR, EVENT_VAR, ERROR_VAR, ...)                   \
+    static const FimoTracingMetadata _metadata_var = {     \
+        .type = FIMO_STRUCT_TYPE_TRACING_METADATA,         \
+        .next = NULL,                                      \
+        .name = (NAME),                                    \
+        .target = (TARGET),                                \
+        .level = (LVL),                                    \
+        .file_name = __FILE__,                             \
+        .line_number = __LINE__,                           \
+    };                                                     \
+    static const FimoTracingEvent EVENT_VAR = {            \
+        .type = FIMO_STRUCT_TYPE_TRACING_EVENT,            \
+        .next = NULL,                                      \
+        .metadata = &META_VAR,                             \
+    };                                                     \
+    FimoError ERROR_VAR = fimo_tracing_event_emit_fmt(CTX, \
+        &EVENT_VAR, FMT, __VA_ARGS__);                     \
+    FIMO_ASSERT_FALSE(FIMO_IS_ERROR(ERROR_VAR))
 
 /**
  * Emits a new event using the default formatter.
  *
- * @param _context the context
- * @param _name event name
- * @param _target event target
- * @param _level event level
- * @param _format printf format string
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param LVL event level
+ * @param FMT printf format string
  * @param args printf format args
  */
-#define FIMO_TRACING_EMIT(_context, _name, _target, _level, _format, ...)  \
-    FIMO_TRACING_EMIT_(_context, _name, _target, _level, _format,          \
+#define FIMO_TRACING_EMIT(CTX, NAME, TARGET, LVL, FMT, ...)                \
+    FIMO_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT,                        \
         FIMO_VAR(_fimo_private_metadata_), FIMO_VAR(_fimo_private_event_), \
         FIMO_VAR(_fimo_private_error_), __VA_ARGS__)
 
 /**
  * Emits an error event using the default formatter.
  *
- * @param _context the context
- * @param _name event name
- * @param _target event target
- * @param _format printf format string
- * @param args printf format args
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ * @param ARGS printf format args
  */
-#define FIMO_TRACING_EMIT_ERROR(_context, _name, _target, _format, ...)   \
-    FIMO_TRACING_EMIT(_context, _name, _target, FIMO_TRACING_LEVEL_ERROR, \
-        _format, __VA_ARGS__)
+#define FIMO_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, ...) \
+    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_ERROR, FMT, __VA_ARGS__)
+
+/**
+ * Emits an error event using the default formatter.
+ *
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ */
+#define FIMO_TRACING_EMIT_ERROR_SIMPLE(CTX, NAME, TARGET, FMT) \
+    FIMO_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, 0)
 
 /**
  * Emits a warning event using the default formatter.
  *
- * @param _context the context
- * @param _name event name
- * @param _target event target
- * @param _format printf format string
- * @param args printf format args
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ * @param ARGS printf format args
  */
-#define FIMO_TRACING_EMIT_WARN(_context, _name, _target, _format, ...)   \
-    FIMO_TRACING_EMIT(_context, _name, _target, FIMO_TRACING_LEVEL_WARN, \
-        _format, __VA_ARGS__)
+#define FIMO_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, ...) \
+    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_WARN, FMT, __VA_ARGS__)
+
+/**
+ * Emits a warning event using the default formatter.
+ *
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ */
+#define FIMO_TRACING_EMIT_WARN_SIMPLE(CTX, NAME, TARGET, FMT) \
+    FIMO_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, 0)
 
 /**
  * Emits an info event using the default formatter.
  *
- * @param _context the context
- * @param _name event name
- * @param _target event target
- * @param _format printf format string
- * @param args printf format args
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ * @param ARGS printf format args
  */
-#define FIMO_TRACING_EMIT_INFO(_context, _name, _target, _format, ...)   \
-    FIMO_TRACING_EMIT(_context, _name, _target, FIMO_TRACING_LEVEL_INFO, \
-        _format, __VA_ARGS__)
+#define FIMO_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, ...) \
+    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_INFO, FMT, __VA_ARGS__)
+
+/**
+ * Emits an info event using the default formatter.
+ *
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ */
+#define FIMO_TRACING_EMIT_INFO_SIMPLE(CTX, NAME, TARGET, FMT) \
+    FIMO_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, 0)
 
 /**
  * Emits a debug event using the default formatter.
  *
- * @param _context the context
- * @param _name event name
- * @param _target event target
- * @param _format printf format string
- * @param args printf format args
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ * @param ARGS printf format args
  */
-#define FIMO_TRACING_EMIT_DEBUG(_context, _name, _target, _format, ...)   \
-    FIMO_TRACING_EMIT(_context, _name, _target, FIMO_TRACING_LEVEL_DEBUG, \
-        _format, __VA_ARGS__)
+#define FIMO_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, ...) \
+    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_DEBUG, FMT, __VA_ARGS__)
+
+/**
+ * Emits a debug event using the default formatter.
+ *
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ */
+#define FIMO_TRACING_EMIT_DEBUG_SIMPLE(CTX, NAME, TARGET, FMT) \
+    FIMO_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, 0)
 
 /**
  * Emits a trace event using the default formatter.
  *
- * @param _context the context
- * @param _name event name
- * @param _target event target
- * @param _format printf format string
- * @param args printf format args
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ * @param ARGS printf format args
  */
-#define FIMO_TRACING_EMIT_TRACE(_context, _name, _target, _format, ...)   \
-    FIMO_TRACING_EMIT(_context, _name, _target, FIMO_TRACING_LEVEL_TRACE, \
-        _format, __VA_ARGS__)
+#define FIMO_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, ...) \
+    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_TRACE, FMT, __VA_ARGS__)
+
+/**
+ * Emits a trace event using the default formatter.
+ *
+ * @param CTX the context
+ * @param NAME event name
+ * @param TARGET event target
+ * @param FMT printf format string
+ */
+#define FIMO_TRACING_EMIT_TRACE_SIMPLE(CTX, NAME, TARGET, FMT) \
+    FIMO_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)
 
 /**
  * A call stack.
