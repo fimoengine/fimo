@@ -39,8 +39,16 @@ set(FIMO_STD_IMPL_HEADERS
     include/fimo_std/impl/integers/saturating_add.h
     include/fimo_std/impl/integers/saturating_sub.h
     include/fimo_std/impl/integers/sub_overflow.h
+    include/fimo_std/impl/macros/assert.h
+    include/fimo_std/impl/macros/concat.h
+    include/fimo_std/impl/macros/container_of.h
     include/fimo_std/impl/macros/has_builtin.h
     include/fimo_std/impl/macros/inline.h
+    include/fimo_std/impl/macros/msvc_sal.h
+    include/fimo_std/impl/macros/must_use.h
+    include/fimo_std/impl/macros/print_format.h
+    include/fimo_std/impl/macros/stringify.h
+    include/fimo_std/impl/macros/var.h
     include/fimo_std/impl/unicode.h
 )
 
@@ -110,6 +118,7 @@ endif()
 if (MSVC)
     if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
         target_compile_options(fimo_std PUBLIC /std:c17)
+        target_compile_options(fimo_std PUBLIC /Zc:preprocessor)
         target_compile_options(fimo_std PUBLIC /experimental:c11atomics)
     endif()
 
