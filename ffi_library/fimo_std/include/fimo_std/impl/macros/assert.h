@@ -12,10 +12,10 @@
  * If the assertion is not true, the assert prints some info
  * to `stderr` and exits the program.
  */
-#define FIMO_ASSERT(CONDITION)                                                                               \
-    if (!(CONDITION)) {                                                                                      \
-        perror("assertion error in " __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_ASSERT(" #CONDITION ")"); \
-        exit(EXIT_FAILURE);                                                                                  \
+#define FIMO_ASSERT(CONDITION)                                                                                         \
+    if (!(CONDITION)) {                                                                                                \
+        perror("assertion error in " __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_ASSERT(" #CONDITION ")");           \
+        exit(EXIT_FAILURE);                                                                                            \
     }
 
 /**
@@ -24,10 +24,10 @@
  * If the assertion is not true, the assert prints some info
  * to `stderr` and exits the program.
  */
-#define FIMO_ASSERT_FALSE(CONDITION)                                                                           \
-    if ((CONDITION)) {                                                                                         \
-        perror("assertion error" __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_ASSERT_FALSE(" #CONDITION ")"); \
-        exit(EXIT_FAILURE);                                                                                    \
+#define FIMO_ASSERT_FALSE(CONDITION)                                                                                   \
+    if ((CONDITION)) {                                                                                                 \
+        perror("assertion error" __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_ASSERT_FALSE(" #CONDITION ")");         \
+        exit(EXIT_FAILURE);                                                                                            \
     }
 
 /**
@@ -42,10 +42,10 @@
 #ifdef NDEBUG
 #define FIMO_DEBUG_ASSERT(CONDITION) ((void)0)
 #else
-#define FIMO_DEBUG_ASSERT(CONDITION)                                                                               \
-    if (!(CONDITION)) {                                                                                            \
-        perror("assertion error in " __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_DEBUG_ASSERT(" #CONDITION ")"); \
-        exit(EXIT_FAILURE);                                                                                        \
+#define FIMO_DEBUG_ASSERT(CONDITION)                                                                                   \
+    if (!(CONDITION)) {                                                                                                \
+        perror("assertion error in " __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_DEBUG_ASSERT(" #CONDITION ")");     \
+        exit(EXIT_FAILURE);                                                                                            \
     }
 #endif
 
@@ -61,10 +61,10 @@
 #ifdef NDEBUG
 #define FIMO_DEBUG_ASSERT_FALSE(CONDITION) ((void)0)
 #else
-#define FIMO_DEBUG_ASSERT_FALSE(CONDITION)                                                                           \
-    if ((CONDITION)) {                                                                                               \
-        perror("assertion error" __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_DEBUG_ASSERT_FALSE(" #CONDITION ")"); \
-        exit(EXIT_FAILURE);                                                                                          \
+#define FIMO_DEBUG_ASSERT_FALSE(CONDITION)                                                                             \
+    if ((CONDITION)) {                                                                                                 \
+        perror("assertion error" __FILE__ ":" FIMO_STRINGIFY(__LINE__) ": FIMO_DEBUG_ASSERT_FALSE(" #CONDITION ")");   \
+        exit(EXIT_FAILURE);                                                                                            \
     }
 #endif
 

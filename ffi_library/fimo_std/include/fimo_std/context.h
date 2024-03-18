@@ -6,7 +6,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif // __cplusplus
+#endif
 
 /**
  * Context of the fimo std.
@@ -15,8 +15,8 @@ extern "C" {
  * the provided vtable, which is also opaque.
  */
 typedef struct FimoContext {
-    void* data;
-    const void* vtable;
+    void *data;
+    const void *vtable;
 } FimoContext;
 
 /**
@@ -39,7 +39,7 @@ typedef enum FimoStructType {
  */
 typedef struct FimoBaseStructIn {
     FimoStructType type;
-    const struct FimoBaseStructIn* next;
+    const struct FimoBaseStructIn *next;
 } FimoBaseStructIn;
 
 /**
@@ -47,7 +47,7 @@ typedef struct FimoBaseStructIn {
  */
 typedef struct FimoBaseStructOut {
     FimoStructType type;
-    struct FimoBaseStructOut* next;
+    struct FimoBaseStructOut *next;
 } FimoBaseStructOut;
 
 /**
@@ -62,8 +62,7 @@ typedef struct FimoBaseStructOut {
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_context_init(const FimoBaseStructIn* options,
-    FimoContext* context);
+FimoError fimo_context_init(const FimoBaseStructIn *options, FimoContext *context);
 
 /**
  * Checks the compatibility of the context version.
@@ -104,6 +103,6 @@ void fimo_context_release(FimoContext context);
 
 #ifdef __cplusplus
 }
-#endif // __cplusplus
+#endif
 
 #endif // FIMO_CONTEXT_H

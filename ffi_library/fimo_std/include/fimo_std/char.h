@@ -99,7 +99,7 @@ typedef struct FimoCharCaseMapper {
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_char_from_u32(FimoU32 i, FimoChar* ch);
+FimoError fimo_char_from_u32(FimoU32 i, FimoChar *ch);
 
 /**
  * Converts a digit in the given radix to a character.
@@ -116,7 +116,7 @@ FimoError fimo_char_from_u32(FimoU32 i, FimoChar* ch);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_char_from_digit(FimoU32 num, FimoU32 radix, FimoChar* ch);
+FimoError fimo_char_from_digit(FimoU32 num, FimoU32 radix, FimoChar *ch);
 
 /**
  * Checks if a character is a digit in the given radix.
@@ -149,7 +149,7 @@ bool fimo_char_is_digit(FimoChar ch, FimoU32 radix);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_char_to_digit(FimoChar ch, FimoU32 radix, FimoU32* digit);
+FimoError fimo_char_to_digit(FimoChar ch, FimoU32 radix, FimoU32 *digit);
 
 /**
  * Returns the number of bytes that would be required to encode
@@ -160,7 +160,7 @@ FimoError fimo_char_to_digit(FimoChar ch, FimoU32 radix, FimoU32* digit);
  * @return Number of bytes.
  */
 FIMO_MUST_USE
-size_t fimo_char_len_utf8(FimoChar ch);
+FimoUSize fimo_char_len_utf8(FimoChar ch);
 
 /**
  * Returns the number of bytes that would be required to encode
@@ -171,7 +171,7 @@ size_t fimo_char_len_utf8(FimoChar ch);
  * @return Number of bytes.
  */
 FIMO_MUST_USE
-size_t fimo_char_len_utf16(FimoChar ch);
+FimoUSize fimo_char_len_utf16(FimoChar ch);
 
 /**
  * Encodes the character as UTF-8 into the provided byte buffer.
@@ -187,8 +187,7 @@ size_t fimo_char_len_utf16(FimoChar ch);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_char_encode_utf8(FimoChar ch, char* buff, size_t buff_len,
-    size_t* utf8_len);
+FimoError fimo_char_encode_utf8(FimoChar ch, char *buff, FimoUSize buff_len, FimoUSize *utf8_len);
 
 /**
  * Encodes the character as UTF-16 into the provided buffer.
@@ -199,13 +198,12 @@ FimoError fimo_char_encode_utf8(FimoChar ch, char* buff, size_t buff_len,
  * @param ch character
  * @param buff buffer to encode the character into
  * @param buff_len length of the buffer
- * @param utf8_len resulting length of the UTF-16 character
+ * @param utf16_len resulting length of the UTF-16 character
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_char_encode_utf16(FimoChar ch, FimoU16* buff, size_t buff_len,
-    size_t* utf16_len);
+FimoError fimo_char_encode_utf16(FimoChar ch, FimoU16 *buff, FimoUSize buff_len, FimoUSize *utf16_len);
 
 /**
  * Returns whether the character has the `Alphabetic` property.
@@ -485,7 +483,7 @@ bool fimo_char_is_ascii_control(FimoChar ch);
  * @return Iterator length.
  */
 FIMO_MUST_USE
-size_t fimo_char_case_mapper_len(const FimoCharCaseMapper* mapper);
+FimoUSize fimo_char_case_mapper_len(const FimoCharCaseMapper *mapper);
 
 /**
  * Returns the next character in the iterator.
@@ -496,7 +494,7 @@ size_t fimo_char_case_mapper_len(const FimoCharCaseMapper* mapper);
  * @return `true` if the iterator contained a character
  */
 FIMO_MUST_USE
-bool fimo_char_case_mapper_next(FimoCharCaseMapper* mapper, FimoChar* ch);
+bool fimo_char_case_mapper_next(FimoCharCaseMapper *mapper, FimoChar *ch);
 
 /**
  * Returns the next character in the iterator from the end.
@@ -507,7 +505,7 @@ bool fimo_char_case_mapper_next(FimoCharCaseMapper* mapper, FimoChar* ch);
  * @return `true` if the iterator contained a character
  */
 FIMO_MUST_USE
-bool fimo_char_case_mapper_next_back(FimoCharCaseMapper* mapper, FimoChar* ch);
+bool fimo_char_case_mapper_next_back(FimoCharCaseMapper *mapper, FimoChar *ch);
 
 #ifdef __cplusplus
 }

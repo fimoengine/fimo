@@ -23,8 +23,7 @@ extern "C" {
  * @param v value
  * @return Ones count.
  */
-static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u8(FimoU8 v)
-{
+static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u8(const FimoU8 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcount)
     _Static_assert(sizeof(FimoU8) <= sizeof(unsigned int), "Size mismatch");
     return __builtin_popcount(v);
@@ -43,8 +42,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u8(FimoU8 v)
  * @param v value
  * @return Ones count.
  */
-static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u16(FimoU16 v)
-{
+static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u16(const FimoU16 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcount)
     _Static_assert(sizeof(FimoU16) <= sizeof(unsigned int), "Size mismatch");
     return __builtin_popcount(v);
@@ -63,8 +61,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u16(FimoU16 v)
  * @param v value
  * @return Ones count.
  */
-static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u32(FimoU32 v)
-{
+static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u32(const FimoU32 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcount)
     _Static_assert(sizeof(FimoU32) <= sizeof(unsigned int), "Size mismatch");
     return __builtin_popcount(v);
@@ -83,8 +80,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u32(FimoU32 v)
  * @param v value
  * @return Ones count.
  */
-static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u64(FimoU64 v)
-{
+static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u64(const FimoU64 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcountll)
     _Static_assert(sizeof(FimoU64) <= sizeof(unsigned long long), "Size mismatch");
     return __builtin_popcountll(v);
@@ -103,8 +99,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u64(FimoU64 v)
  * @param v value
  * @return Ones count.
  */
-static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_usize(FimoUSize v)
-{
+static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_usize(const FimoUSize v) {
     return FIMO_USIZE_SWITCH_(fimo_impl_count_ones)(v);
 }
 
@@ -114,8 +109,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_usize(FimoUSize v)
  * @param v value
  * @return Ones count.
  */
-static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_uintptr(FimoUIntPtr v)
-{
+static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_uintptr(const FimoUIntPtr v) {
     return FIMO_UINTPTR_SWITCH_(fimo_impl_count_ones)(v);
 }
 

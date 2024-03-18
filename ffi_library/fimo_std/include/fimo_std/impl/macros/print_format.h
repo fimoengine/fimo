@@ -21,7 +21,7 @@
  * @param dots_param index of the arguments parameter
  */
 #if defined(__GNUC__)
-#define FIMO_PRINT_F_FORMAT_ATTR(format_param, dots_param) \
+#define FIMO_PRINT_F_FORMAT_ATTR(format_param, dots_param)                                                             \
     __attribute__((__format__(__printf__, format_param, dots_param)))
 #elif defined(_MSC_VER)
 #define FIMO_PRINT_F_FORMAT_ATTR(format_param, dots_param) /**/
