@@ -3,24 +3,23 @@
 
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <stdint.h>
 
 #include <fimo_std/error.h>
 #include <fimo_std/utils.h>
 
 #ifdef __cplusplus
 extern "C" {
-#endif // __cplusplus
+#endif
 
 /**
  * A strong and weak counter pair for reference counts.
  *
  * The counter aborts the program, if either the strong or the weak count
- * reaches INTPTR_MAX, to safeguard against overflow.
+ * reaches `FIMO_ISIZE_MAX`, to safeguard against overflow.
  */
 typedef struct FimoRefCount {
-    uintptr_t strong_refs;
-    uintptr_t weak_refs;
+    FimoUSize strong_refs;
+    FimoUSize weak_refs;
 } FimoRefCount;
 
 /**
@@ -28,33 +27,15 @@ typedef struct FimoRefCount {
  * reference counts.
  *
  * The counter aborts the program, if either the strong or the weak count
- * reaches INTPTR_MAX, to safeguard against overflow.
+ * reaches `FIMO_ISIZE_MAX`, to safeguard against overflow.
  */
 typedef struct FimoAtomicRefCount {
-    _Atomic(uintptr_t) strong_refs;
-    _Atomic(uintptr_t) weak_refs;
+    _Atomic(FimoUSize) strong_refs;
+    _Atomic(FimoUSize) weak_refs;
 } FimoAtomicRefCount;
 
-#define FIMO_REFCOUNT_INIT                \
-    {                                     \
-        .strong_refs = 1, .weak_refs = 1, \
-    }
-
-#ifdef FIMO_MACRO_HELPER_FUNCTIONS
-/**
- * Initializes a new refcount.
- *
- * @return The refcount
- */
-FimoRefCount fimo_refcount_init(void);
-
-/**
- * Initializes a new atomic refcount.
- *
- * @return The refcount.
- */
-FimoAtomicRefCount fimo_refcount_atomic_init(void);
-#endif // FIMO_MACRO_HELPER_FUNCTIONS
+#define FIMO_REFCOUNT_INIT                                                                                             \
+    { .strong_refs = 1, .weak_refs = 1, }
 
 /**
  * Get the refcount's strong value.
@@ -64,7 +45,7 @@ FimoAtomicRefCount fimo_refcount_atomic_init(void);
  * @return The refcount's strong value.
  */
 FIMO_MUST_USE
-uintptr_t fimo_strong_count(const FimoRefCount* count);
+FimoUSize fimo_strong_count(const FimoRefCount *count);
 
 /**
  * Get the atomic refcount's strong value.
@@ -74,7 +55,7 @@ uintptr_t fimo_strong_count(const FimoRefCount* count);
  * @return The refcount's strong value.
  */
 FIMO_MUST_USE
-uintptr_t fimo_strong_count_atomic(const FimoAtomicRefCount* count);
+FimoUSize fimo_strong_count_atomic(const FimoAtomicRefCount *count);
 
 /**
  * Get the refcount's weak value.
@@ -84,7 +65,7 @@ uintptr_t fimo_strong_count_atomic(const FimoAtomicRefCount* count);
  * @return The refcount's weak value.
  */
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_unguarded(const FimoRefCount* count);
+FimoUSize fimo_weak_count_unguarded(const FimoRefCount *count);
 
 /**
  * Get the refcount's weak value.
@@ -97,7 +78,7 @@ uintptr_t fimo_weak_count_unguarded(const FimoRefCount* count);
  * @return The refcount's weak value.
  */
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_guarded(const FimoRefCount* count);
+FimoUSize fimo_weak_count_guarded(const FimoRefCount *count);
 
 /**
  * Get the atomic refcount's weak value.
@@ -110,7 +91,7 @@ uintptr_t fimo_weak_count_guarded(const FimoRefCount* count);
  * @return The refcount's weak value.
  */
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount* count);
+FimoUSize fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount *count);
 
 /**
  * Get the atomic refcount's weak value.
@@ -124,7 +105,7 @@ uintptr_t fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount* count);
  * @return The refcount's weak value.
  */
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_atomic_guarded(const FimoAtomicRefCount* count);
+FimoUSize fimo_weak_count_atomic_guarded(const FimoAtomicRefCount *count);
 
 /**
  * Increase the refcount's strong value.
@@ -133,7 +114,7 @@ uintptr_t fimo_weak_count_atomic_guarded(const FimoAtomicRefCount* count);
  *
  * This function may abort the program, if the strong value is saturated.
  */
-void fimo_increase_strong_count(FimoRefCount* count);
+void fimo_increase_strong_count(FimoRefCount *count);
 
 /**
  * Increase the atomic refcount's strong value.
@@ -142,7 +123,7 @@ void fimo_increase_strong_count(FimoRefCount* count);
  *
  * This function may abort the program, if the strong value is saturated.
  */
-void fimo_increase_strong_count_atomic(FimoAtomicRefCount* count);
+void fimo_increase_strong_count_atomic(FimoAtomicRefCount *count);
 
 /**
  * Decreases the refcount's strong value.
@@ -152,7 +133,7 @@ void fimo_increase_strong_count_atomic(FimoAtomicRefCount* count);
  * @return Whether the data guarded by the refcount can be destroyed.
  */
 FIMO_MUST_USE
-bool fimo_decrease_strong_count(FimoRefCount* count);
+bool fimo_decrease_strong_count(FimoRefCount *count);
 
 /**
  * Decreases the atomic refcount's strong value.
@@ -162,7 +143,7 @@ bool fimo_decrease_strong_count(FimoRefCount* count);
  * @return Whether the data guarded by the refcount can be destroyed.
  */
 FIMO_MUST_USE
-bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount* count);
+bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount *count);
 
 /**
  * Decreases the refcount's weak value.
@@ -172,7 +153,7 @@ bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount* count);
  * @return Whether the refcount can be destroyed.
  */
 FIMO_MUST_USE
-bool fimo_decrease_weak_count(FimoRefCount* count);
+bool fimo_decrease_weak_count(FimoRefCount *count);
 
 /**
  * Decreases the atomic refcount's weak value.
@@ -182,7 +163,7 @@ bool fimo_decrease_weak_count(FimoRefCount* count);
  * @return Whether the refcount can be destroyed.
  */
 FIMO_MUST_USE
-bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount* count);
+bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount *count);
 
 /**
  * Upgrades a weak reference to a strong reference.
@@ -196,7 +177,7 @@ bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount* count);
  * @error `FIMO_EOVERFLOW`: Strong count saturated.
  */
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount(FimoRefCount* count);
+FimoError fimo_upgrade_refcount(FimoRefCount *count);
 
 /**
  * Upgrades a weak reference to a strong reference.
@@ -210,7 +191,7 @@ FimoError fimo_upgrade_refcount(FimoRefCount* count);
  * @error `FIMO_EOVERFLOW`: Strong count saturated.
  */
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount* count);
+FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count);
 
 /**
  * Downgrades a strong reference to a weak reference.
@@ -226,7 +207,7 @@ FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount* count);
  * @error `FIMO_EOVERFLOW`: Weak count saturated.
  */
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount(FimoRefCount* count);
+FimoError fimo_downgrade_refcount(FimoRefCount *count);
 
 /**
  * Downgrades a strong reference to a weak reference.
@@ -242,7 +223,7 @@ FimoError fimo_downgrade_refcount(FimoRefCount* count);
  * @error `FIMO_EOVERFLOW`: Weak count saturated.
  */
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount* count);
+FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count);
 
 /**
  * Checks whether there is only one reference.
@@ -252,7 +233,7 @@ FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount* count);
  * @return Whether the reference is unique.
  */
 FIMO_MUST_USE
-bool fimo_refcount_is_unique(FimoRefCount* count);
+bool fimo_refcount_is_unique(FimoRefCount *count);
 
 /**
  * Checks whether there is only one reference.
@@ -262,10 +243,10 @@ bool fimo_refcount_is_unique(FimoRefCount* count);
  * Whether the reference is unique.
  */
 FIMO_MUST_USE
-bool fimo_refcount_atomic_is_unique(FimoAtomicRefCount* count);
+bool fimo_refcount_atomic_is_unique(FimoAtomicRefCount *count);
 
 #ifdef __cplusplus
 }
-#endif // __cplusplus
+#endif
 
 #endif // FIMO_STD_REFCOUNT_H

@@ -14,7 +14,7 @@
  *
  * @param X arguments to pass to the macro
  */
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #define FIMO_PRAGMA_GCC(X) FIMO_PRAGMA(X)
 #else
 #define FIMO_PRAGMA_GCC(X)

@@ -3,12 +3,8 @@
 
 #include <fimo_std/refcount.h>
 
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#define MAX_REFCOUNT INTPTR_MAX
-#define LOCKED_SENTINEL UINTPTR_MAX
+#define MAX_REFCOUNT (FimoUSize) FIMO_ISIZE_MAX
+#define LOCKED_SENTINEL FIMO_USIZE_MAX
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(i386) || defined(__i386__) || defined(__i386) || defined(_M_IX86)
 #include <immintrin.h>
@@ -17,97 +13,76 @@
 #define PAUSE
 #endif
 
-#ifdef FIMO_MACRO_HELPER_FUNCTIONS
-FimoRefCount fimo_refcount_init(void)
-{
-    return (FimoRefCount)FIMO_REFCOUNT_INIT;
-}
-
-FimoAtomicRefCount fimo_refcount_atomic_init(void)
-{
-    return (FimoAtomicRefCount)FIMO_REFCOUNT_INIT;
-}
-#endif // FIMO_MACRO_HELPER_FUNCTIONS
-
 FIMO_MUST_USE
-uintptr_t fimo_strong_count(const FimoRefCount* count)
-{
+FimoUSize fimo_strong_count(const FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     return count->strong_refs;
 }
 
 FIMO_MUST_USE
-uintptr_t fimo_strong_count_atomic(const FimoAtomicRefCount* count)
-{
+FimoUSize fimo_strong_count_atomic(const FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     return atomic_load_explicit(&count->strong_refs, memory_order_acquire);
 }
 
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_guarded(const FimoRefCount* count)
-{
+FimoUSize fimo_weak_count_guarded(const FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     if (count->strong_refs == 0) {
         return 0;
-    } else {
-        return count->weak_refs - 1;
     }
-}
-
-FIMO_MUST_USE
-uintptr_t fimo_weak_count_unguarded(const FimoRefCount* count)
-{
     return count->weak_refs - 1;
 }
 
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount* count)
-{
-    uintptr_t weak_refs = atomic_load_explicit(&count->weak_refs, memory_order_acquire);
+FimoUSize fimo_weak_count_unguarded(const FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    return count->weak_refs - 1;
+}
+
+FIMO_MUST_USE
+FimoUSize fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize weak_refs = atomic_load_explicit(&count->weak_refs, memory_order_acquire);
     if (weak_refs == LOCKED_SENTINEL) {
         return 0;
-    } else {
-        return weak_refs - 1;
     }
+    return weak_refs - 1;
 }
 
 FIMO_MUST_USE
-uintptr_t fimo_weak_count_atomic_guarded(const FimoAtomicRefCount* count)
-{
-    uintptr_t weak_refs = atomic_load_explicit(&count->weak_refs, memory_order_acquire);
-    uintptr_t strong_refs = atomic_load_explicit(&count->strong_refs, memory_order_acquire);
+FimoUSize fimo_weak_count_atomic_guarded(const FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize weak_refs = atomic_load_explicit(&count->weak_refs, memory_order_acquire);
+    FimoUSize strong_refs = atomic_load_explicit(&count->strong_refs, memory_order_acquire);
     if (strong_refs == 0 || weak_refs == LOCKED_SENTINEL) {
         return 0;
-    } else {
-        return weak_refs - 1;
     }
+    return weak_refs - 1;
 }
 
-void fimo_increase_strong_count(FimoRefCount* count)
-{
-    uintptr_t old_count = count->strong_refs++;
-    if (old_count > MAX_REFCOUNT) {
-        fprintf(stderr, "FimoRefCount strong count saturated\n");
-        abort();
-    }
+void fimo_increase_strong_count(FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize old_count = count->strong_refs++;
+    FIMO_ASSERT(old_count <= MAX_REFCOUNT)
 }
 
-void fimo_increase_strong_count_atomic(FimoAtomicRefCount* count)
-{
-    uintptr_t old_count = atomic_fetch_add_explicit(&count->strong_refs, 1, memory_order_relaxed);
-    if (old_count > MAX_REFCOUNT) {
-        fprintf(stderr, "FimoRefCount strong count saturated\n");
-        abort();
-    }
+void fimo_increase_strong_count_atomic(FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize old_count = atomic_fetch_add_explicit(&count->strong_refs, 1, memory_order_relaxed);
+    FIMO_ASSERT(old_count <= MAX_REFCOUNT)
 }
 
 FIMO_MUST_USE
-bool fimo_decrease_strong_count(FimoRefCount* count)
-{
-    uintptr_t old_count = count->strong_refs--;
+bool fimo_decrease_strong_count(FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize old_count = count->strong_refs--;
     return old_count == 1;
 }
 
 FIMO_MUST_USE
-bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount* count)
-{
+bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     // If there are more than one strong references, we can take the fast
     // path and return false.
     if (atomic_fetch_sub_explicit(&count->strong_refs, 1, memory_order_release) != 1) {
@@ -134,15 +109,15 @@ bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount* count)
 }
 
 FIMO_MUST_USE
-bool fimo_decrease_weak_count(FimoRefCount* count)
-{
-    uintptr_t old_count = count->weak_refs--;
+bool fimo_decrease_weak_count(FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize old_count = count->weak_refs--;
     return old_count == 1;
 }
 
 FIMO_MUST_USE
-bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount* count)
-{
+bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     // The same logic as for the strong count in fimo_decrease_strong_count_atomic
     // applies.
     if (atomic_fetch_sub_explicit(&count->weak_refs, 1, memory_order_release) != 1) {
@@ -153,8 +128,8 @@ bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount* count)
 }
 
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount(FimoRefCount* count)
-{
+FimoError fimo_upgrade_refcount(FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     if (count->strong_refs == 0) {
         return FIMO_EINVAL;
     }
@@ -166,10 +141,10 @@ FimoError fimo_upgrade_refcount(FimoRefCount* count)
 }
 
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount* count)
-{
+FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     // CAS loop
-    uintptr_t expected_count = atomic_load_explicit(&count->strong_refs, memory_order_relaxed);
+    FimoUSize expected_count = atomic_load_explicit(&count->strong_refs, memory_order_relaxed);
     for (;;) {
         if (expected_count == 0) {
             return FIMO_EINVAL;
@@ -177,20 +152,16 @@ FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount* count)
         if (expected_count > MAX_REFCOUNT) {
             return FIMO_EOVERFLOW;
         }
-        if (atomic_compare_exchange_weak_explicit(
-                &count->strong_refs,
-                &expected_count,
-                expected_count + 1,
-                memory_order_acquire,
-                memory_order_relaxed)) {
+        if (atomic_compare_exchange_weak_explicit(&count->strong_refs, &expected_count, expected_count + 1,
+                                                  memory_order_acquire, memory_order_relaxed)) {
             return FIMO_EOK;
         }
     }
 }
 
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount(FimoRefCount* count)
-{
+FimoError fimo_downgrade_refcount(FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     if (count->weak_refs > MAX_REFCOUNT) {
         return FIMO_EOVERFLOW;
     }
@@ -199,9 +170,9 @@ FimoError fimo_downgrade_refcount(FimoRefCount* count)
 }
 
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount* count)
-{
-    uintptr_t current = atomic_load_explicit(&count->weak_refs, memory_order_relaxed);
+FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
+    FimoUSize current = atomic_load_explicit(&count->weak_refs, memory_order_relaxed);
     for (;;) {
         // spin while the weak counter is locked.
         if (current == LOCKED_SENTINEL) {
@@ -212,39 +183,31 @@ FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount* count)
         if (current > MAX_REFCOUNT) {
             return FIMO_EOVERFLOW;
         }
-        if (atomic_compare_exchange_weak_explicit(
-                &count->weak_refs,
-                &current,
-                current + 1,
-                memory_order_acquire,
-                memory_order_relaxed)) {
+        if (atomic_compare_exchange_weak_explicit(&count->weak_refs, &current, current + 1, memory_order_acquire,
+                                                  memory_order_relaxed)) {
             return FIMO_EOK;
         }
     }
 }
 
 FIMO_MUST_USE
-bool fimo_refcount_is_unique(FimoRefCount* count)
-{
+bool fimo_refcount_is_unique(FimoRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     return count->strong_refs == 1;
 }
 
 FIMO_MUST_USE
-bool fimo_refcount_atomic_is_unique(FimoAtomicRefCount* count)
-{
+bool fimo_refcount_atomic_is_unique(FimoAtomicRefCount *count) {
+    FIMO_DEBUG_ASSERT(count)
     // To check whether our atomic refcount is unique, i.e. both the strong
     // and weak counts are 1, we must resort to locking the weak count.
     // We use LOCKED_SENTINEL as a sentinel for the locked state. The
     // acquire memory order ensures a happens-before relationship, for all
     // writes to the strong count (fimo_upgrade_refcount_atomic) followed
     // by decrements of the weak count (fimo_decrease_weak_count_atomic).
-    uintptr_t expected = 1;
-    if (atomic_compare_exchange_strong_explicit(
-            &count->weak_refs,
-            &expected,
-            LOCKED_SENTINEL,
-            memory_order_acquire,
-            memory_order_relaxed)) {
+    FimoUSize expected = 1;
+    if (atomic_compare_exchange_strong_explicit(&count->weak_refs, &expected, LOCKED_SENTINEL, memory_order_acquire,
+                                                memory_order_relaxed)) {
         // Use the acquire memory order to synchronize with a call to
         // fimo_decrease_strong_count_atomic.
         bool is_unique = atomic_load_explicit(&count->strong_refs, memory_order_acquire) == 1;
@@ -253,7 +216,8 @@ bool fimo_refcount_atomic_is_unique(FimoAtomicRefCount* count)
         // release memory order.
         atomic_store_explicit(&count->weak_refs, 1, memory_order_release);
         return is_unique;
-    } else {
+    }
+    else {
         return false;
     }
 }

@@ -7,13 +7,14 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif // __cplusplus
+#endif
 
-#define FIMO_IGNORE_(expr, var) \
-    do {                        \
-        FimoError var = (expr); \
-        (void)var;              \
-    } while (0)
+#define FIMO_IGNORE_(expr, var)                                                                                        \
+    do {                                                                                                               \
+        FimoError var = (expr);                                                                                        \
+        (void)var;                                                                                                     \
+    }                                                                                                                  \
+    while (0)
 
 /**
  * Ignores a `FimoError` result.
@@ -24,9 +25,9 @@ extern "C" {
  * suppressing the warning by using `(void)expr`, but
  * this does not work in GCC.
  *
- * @param expr expression to ignore
+ * @param EXPR expression to ignore
  */
-#define FIMO_IGNORE(expr) FIMO_IGNORE_(expr, FIMO_VAR(_fimo_ignored))
+#define FIMO_IGNORE(EXPR) FIMO_IGNORE_(EXPR, FIMO_VAR(_fimo_ignored))
 
 /**
  * Posix error codes.
@@ -186,26 +187,6 @@ typedef enum FimoError {
  */
 #define FIMO_IS_ERROR(errnum) (((errnum) > FIMO_EOK) && FIMO_IS_VALID_ERROR(errnum))
 
-#ifdef FIMO_MACRO_HELPER_FUNCTIONS
-/**
- * Checks if an error number is valid.
- *
- * @param errnum error number
- *
- * @return Error number is valid.
- */
-FIMO_MUST_USE bool fimo_is_valid_error(FimoError errnum);
-
-/**
- * Checks if an error number represents an error.
- *
- * @param errnum error number
- *
- * @return Error number is an error
- */
-FIMO_MUST_USE bool fimo_is_error(FimoError errnum);
-#endif // FIMO_MACRO_HELPER_FUNCTIONS
-
 /**
  * Get the name of the error.
  *
@@ -220,7 +201,8 @@ FIMO_MUST_USE bool fimo_is_error(FimoError errnum);
  * @error `FIMO_EOK`: Operation was successful.
  * @error `FIMO_EINVAL`: The value of `errnum` is not a valid error number.
  */
-FIMO_MUST_USE const char* fimo_strerrorname(FimoError errnum, FimoError* err);
+FIMO_MUST_USE
+const char *fimo_strerrorname(FimoError errnum, FimoError *err);
 
 /**
  * Get the description of the error.
@@ -236,7 +218,8 @@ FIMO_MUST_USE const char* fimo_strerrorname(FimoError errnum, FimoError* err);
  * @error `FIMO_EOK`: Operation was successful.
  * @error `FIMO_EINVAL`: The value of `errnum` is not a valid error number.
  */
-FIMO_MUST_USE const char* fimo_strerrordesc(FimoError errnum, FimoError* err);
+FIMO_MUST_USE
+const char *fimo_strerrordesc(FimoError errnum, FimoError *err);
 
 /**
  * Constructs an error code from an errno error code.
@@ -247,10 +230,11 @@ FIMO_MUST_USE const char* fimo_strerrordesc(FimoError errnum, FimoError* err);
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_error_from_errno(int errnum);
+FIMO_MUST_USE
+FimoError fimo_error_from_errno(int errnum);
 
 #ifdef __cplusplus
 }
-#endif // __cplusplus
+#endif
 
 #endif // FIMO_ERROR_H

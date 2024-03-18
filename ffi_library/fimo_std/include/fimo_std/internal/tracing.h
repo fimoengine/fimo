@@ -4,7 +4,6 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stddef.h>
-#include <stdint.h>
 
 #include <fimo_std/error.h>
 #include <fimo_std/tracing.h>
@@ -13,26 +12,24 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif // __cplusplus
+#endif
 
-#define FIMO_INTERNAL_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT,    \
-    META_VAR, EVENT_VAR, ERROR_VAR, ...)                            \
-    static const FimoTracingMetadata META_VAR = {                   \
-        .type = FIMO_STRUCT_TYPE_TRACING_METADATA,                  \
-        .next = NULL,                                               \
-        .name = (NAME),                                             \
-        .target = (TARGET),                                         \
-        .level = (LVL),                                             \
-        .file_name = __FILE__,                                      \
-        .line_number = __LINE__,                                    \
-    };                                                              \
-    static const FimoTracingEvent EVENT_VAR = {                     \
-        .type = FIMO_STRUCT_TYPE_TRACING_EVENT,                     \
-        .next = NULL,                                               \
-        .metadata = &META_VAR,                                      \
-    };                                                              \
-    FimoError ERROR_VAR = fimo_internal_tracing_event_emit_fmt(CTX, \
-        &EVENT_VAR, FMT, __VA_ARGS__);                              \
+#define FIMO_INTERNAL_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT, META_VAR, EVENT_VAR, ERROR_VAR, ...)                  \
+    static const FimoTracingMetadata META_VAR = {                                                                      \
+            .type = FIMO_STRUCT_TYPE_TRACING_METADATA,                                                                 \
+            .next = NULL,                                                                                              \
+            .name = (NAME),                                                                                            \
+            .target = (TARGET),                                                                                        \
+            .level = (LVL),                                                                                            \
+            .file_name = __FILE__,                                                                                     \
+            .line_number = __LINE__,                                                                                   \
+    };                                                                                                                 \
+    static const FimoTracingEvent EVENT_VAR = {                                                                        \
+            .type = FIMO_STRUCT_TYPE_TRACING_EVENT,                                                                    \
+            .next = NULL,                                                                                              \
+            .metadata = &META_VAR,                                                                                     \
+    };                                                                                                                 \
+    FimoError ERROR_VAR = fimo_internal_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                     \
     FIMO_ASSERT_FALSE(FIMO_IS_ERROR(ERROR_VAR))
 
 /**
@@ -45,10 +42,9 @@ extern "C" {
  * @param FMT printf format string
  * @param args printf format args
  */
-#define FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, LVL, FMT, ...)       \
-    FIMO_INTERNAL_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT,               \
-        FIMO_VAR(_fimo_private_metadata_), FIMO_VAR(_fimo_private_event_), \
-        FIMO_VAR(_fimo_private_error_), __VA_ARGS__)
+#define FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, LVL, FMT, ...)                                                   \
+    FIMO_INTERNAL_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT, FIMO_VAR(_fimo_private_metadata_),                        \
+                                FIMO_VAR(_fimo_private_event_), FIMO_VAR(_fimo_private_error_), __VA_ARGS__)
 
 /**
  * Emits an error event using the default formatter.
@@ -59,7 +55,7 @@ extern "C" {
  * @param FMT printf format string
  * @param ARGS printf format args
  */
-#define FIMO_INTERNAL_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, ...) \
+#define FIMO_INTERNAL_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, ...)                                                  \
     FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_ERROR, FMT, __VA_ARGS__)
 
 /**
@@ -70,10 +66,10 @@ extern "C" {
  * @param TARGET event target
  * @param FMT printf format string
  */
-#define FIMO_INTERNAL_TRACING_EMIT_ERROR_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")       \
-    FIMO_INTERNAL_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, 0)         \
+#define FIMO_INTERNAL_TRACING_EMIT_ERROR_SIMPLE(CTX, NAME, TARGET, FMT)                                                \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
+    FIMO_INTERNAL_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, 0)                                                        \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
@@ -85,7 +81,7 @@ extern "C" {
  * @param FMT printf format string
  * @param ARGS printf format args
  */
-#define FIMO_INTERNAL_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, ...) \
+#define FIMO_INTERNAL_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, ...)                                                   \
     FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_WARN, FMT, __VA_ARGS__)
 
 /**
@@ -96,10 +92,10 @@ extern "C" {
  * @param TARGET event target
  * @param FMT printf format string
  */
-#define FIMO_INTERNAL_TRACING_EMIT_WARN_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")      \
-    FIMO_INTERNAL_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, 0)         \
+#define FIMO_INTERNAL_TRACING_EMIT_WARN_SIMPLE(CTX, NAME, TARGET, FMT)                                                 \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
+    FIMO_INTERNAL_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, 0)                                                         \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
@@ -111,7 +107,7 @@ extern "C" {
  * @param FMT printf format string
  * @param ARGS printf format args
  */
-#define FIMO_INTERNAL_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, ...) \
+#define FIMO_INTERNAL_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, ...)                                                   \
     FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_INFO, FMT, __VA_ARGS__)
 
 /**
@@ -122,10 +118,10 @@ extern "C" {
  * @param TARGET event target
  * @param FMT printf format string
  */
-#define FIMO_INTERNAL_TRACING_EMIT_INFO_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")      \
-    FIMO_INTERNAL_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, 0)         \
+#define FIMO_INTERNAL_TRACING_EMIT_INFO_SIMPLE(CTX, NAME, TARGET, FMT)                                                 \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
+    FIMO_INTERNAL_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, 0)                                                         \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
@@ -137,7 +133,7 @@ extern "C" {
  * @param FMT printf format string
  * @param ARGS printf format args
  */
-#define FIMO_INTERNAL_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, ...) \
+#define FIMO_INTERNAL_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, ...)                                                  \
     FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_DEBUG, FMT, __VA_ARGS__)
 
 /**
@@ -148,10 +144,10 @@ extern "C" {
  * @param TARGET event target
  * @param FMT printf format string
  */
-#define FIMO_INTERNAL_TRACING_EMIT_DEBUG_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")       \
-    FIMO_INTERNAL_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, 0)         \
+#define FIMO_INTERNAL_TRACING_EMIT_DEBUG_SIMPLE(CTX, NAME, TARGET, FMT)                                                \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
+    FIMO_INTERNAL_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, 0)                                                        \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
@@ -163,7 +159,7 @@ extern "C" {
  * @param FMT printf format string
  * @param ARGS printf format args
  */
-#define FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, ...) \
+#define FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, ...)                                                  \
     FIMO_INTERNAL_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_TRACE, FMT, __VA_ARGS__)
 
 /**
@@ -174,10 +170,10 @@ extern "C" {
  * @param TARGET event target
  * @param FMT printf format string
  */
-#define FIMO_INTERNAL_TRACING_EMIT_TRACE_SIMPLE(CTX, NAME, TARGET, FMT) \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")       \
-    FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)         \
+#define FIMO_INTERNAL_TRACING_EMIT_TRACE_SIMPLE(CTX, NAME, TARGET, FMT)                                                \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
+    FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)                                                        \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 typedef struct FimoInternalContext FimoInternalContext;
@@ -186,9 +182,9 @@ typedef struct FimoInternalContext FimoInternalContext;
  * Tracing backend state.
  */
 typedef struct FimoInternalContextTracing {
-    FimoTracingSubscriber* subscribers;
-    size_t subscriber_count;
-    size_t format_buffer_size;
+    FimoTracingSubscriber *subscribers;
+    FimoUSize subscriber_count;
+    FimoUSize format_buffer_size;
     FimoTracingLevel maximum_level;
     tss_t thread_local_data;
     atomic_size_t thread_count;
@@ -199,9 +195,9 @@ typedef struct FimoInternalContextTracing {
  */
 typedef struct FimoInternalTracingFmtArgs {
     /// `vprintf` format string.
-    const char* format;
+    const char *format;
     /// `vprintf` argument list.
-    va_list* vlist;
+    va_list *vlist;
 } FimoInternalTracingFmtArgs;
 
 /**
@@ -216,8 +212,7 @@ typedef struct FimoInternalTracingFmtArgs {
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_init(FimoInternalContext* context,
-    const FimoTracingCreationConfig* options);
+FimoError fimo_internal_tracing_init(FimoInternalContext *context, const FimoTracingCreationConfig *options);
 
 /**
  * Checks whether the backend can be destroyed.
@@ -230,7 +225,7 @@ FimoError fimo_internal_tracing_init(FimoInternalContext* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_check_destroy(FimoInternalContext* context);
+FimoError fimo_internal_tracing_check_destroy(FimoInternalContext *context);
 
 /**
  * Destroys the backend.
@@ -240,7 +235,7 @@ FimoError fimo_internal_tracing_check_destroy(FimoInternalContext* context);
  *
  * @param context the context.
  */
-void fimo_internal_tracing_destroy(FimoInternalContext* context);
+void fimo_internal_tracing_destroy(FimoInternalContext *context);
 
 /**
  * Creates a new empty call stack.
@@ -255,8 +250,7 @@ void fimo_internal_tracing_destroy(FimoInternalContext* context);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_create(void* context,
-    FimoTracingCallStack* call_stack);
+FimoError fimo_internal_tracing_call_stack_create(void *context, FimoTracingCallStack *call_stack);
 
 /**
  * Destroys an empty call stack.
@@ -274,8 +268,7 @@ FimoError fimo_internal_tracing_call_stack_create(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_destroy(void* context,
-    FimoTracingCallStack call_stack);
+FimoError fimo_internal_tracing_call_stack_destroy(void *context, FimoTracingCallStack call_stack);
 
 /**
  * Switches the call stack of the current thread.
@@ -294,8 +287,8 @@ FimoError fimo_internal_tracing_call_stack_destroy(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_switch(void* context,
-    FimoTracingCallStack call_stack, FimoTracingCallStack* old_call_stack);
+FimoError fimo_internal_tracing_call_stack_switch(void *context, FimoTracingCallStack call_stack,
+                                                  FimoTracingCallStack *old_call_stack);
 
 /**
  * Unblocks a blocked call stack.
@@ -309,8 +302,7 @@ FimoError fimo_internal_tracing_call_stack_switch(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_unblock(void* context,
-    FimoTracingCallStack call_stack);
+FimoError fimo_internal_tracing_call_stack_unblock(void *context, FimoTracingCallStack call_stack);
 
 /**
  * Marks the current call stack as being suspended.
@@ -326,8 +318,7 @@ FimoError fimo_internal_tracing_call_stack_unblock(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_suspend_current(void* context,
-    bool block);
+FimoError fimo_internal_tracing_call_stack_suspend_current(void *context, bool block);
 
 /**
  * Marks the current call stack as being resumed.
@@ -340,7 +331,7 @@ FimoError fimo_internal_tracing_call_stack_suspend_current(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_resume_current(void* context);
+FimoError fimo_internal_tracing_call_stack_resume_current(void *context);
 
 /**
  * Creates a new span with the standard formatter and enters it.
@@ -359,9 +350,9 @@ FimoError fimo_internal_tracing_call_stack_resume_current(void* context);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_fmt(void* context,
-    const FimoTracingSpanDesc* span_desc, FimoTracingSpan* span,
-    FIMO_PRINT_F_FORMAT const char* format, ...) FIMO_PRINT_F_FORMAT_ATTR(4, 5);
+FimoError fimo_internal_tracing_span_create_fmt(void *context, const FimoTracingSpanDesc *span_desc,
+                                                FimoTracingSpan *span, FIMO_PRINT_F_FORMAT const char *format, ...)
+        FIMO_PRINT_F_FORMAT_ATTR(4, 5);
 
 /**
  * Creates a new span with a custom formatter and enters it.
@@ -381,9 +372,8 @@ FimoError fimo_internal_tracing_span_create_fmt(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_custom(void* context,
-    const FimoTracingSpanDesc* span_desc, FimoTracingSpan* span,
-    FimoTracingFormat format, const void* data);
+FimoError fimo_internal_tracing_span_create_custom(void *context, const FimoTracingSpanDesc *span_desc,
+                                                   FimoTracingSpan *span, FimoTracingFormat format, const void *data);
 
 /**
  * Exits and destroys a span.
@@ -399,8 +389,7 @@ FimoError fimo_internal_tracing_span_create_custom(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_destroy(void* context,
-    FimoTracingSpan* span);
+FimoError fimo_internal_tracing_span_destroy(void *context, FimoTracingSpan *span);
 
 /**
  * Emits a new event with the standard formatter.
@@ -416,9 +405,9 @@ FimoError fimo_internal_tracing_span_destroy(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_fmt(void* context,
-    const FimoTracingEvent* event, FIMO_PRINT_F_FORMAT const char* format,
-    ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4);
+FimoError fimo_internal_tracing_event_emit_fmt(void *context, const FimoTracingEvent *event,
+                                               FIMO_PRINT_F_FORMAT const char *format, ...)
+        FIMO_PRINT_F_FORMAT_ATTR(3, 4);
 
 /**
  * Emits a new event with a custom formatter.
@@ -434,8 +423,8 @@ FimoError fimo_internal_tracing_event_emit_fmt(void* context,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_custom(void* context,
-    const FimoTracingEvent* event, FimoTracingFormat format, const void* data);
+FimoError fimo_internal_tracing_event_emit_custom(void *context, const FimoTracingEvent *event,
+                                                  FimoTracingFormat format, const void *data);
 
 /**
  * Checks whether the tracing backend is enabled.
@@ -450,7 +439,7 @@ FimoError fimo_internal_tracing_event_emit_custom(void* context,
  * @return `true` if the backend is enabled.
  */
 FIMO_MUST_USE
-bool fimo_internal_tracing_is_enabled(void* context);
+bool fimo_internal_tracing_is_enabled(void *context);
 
 /**
  * Registers the calling thread with the tracing backend.
@@ -468,7 +457,7 @@ bool fimo_internal_tracing_is_enabled(void* context);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_register_thread(void* context);
+FimoError fimo_internal_tracing_register_thread(void *context);
 
 /**
  * Unregisters the calling thread from the tracing backend.
@@ -482,7 +471,7 @@ FimoError fimo_internal_tracing_register_thread(void* context);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_unregister_thread(void* context);
+FimoError fimo_internal_tracing_unregister_thread(void *context);
 
 /**
  * Flushes the streams used for tracing.
@@ -494,7 +483,7 @@ FimoError fimo_internal_tracing_unregister_thread(void* context);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_flush(void* context);
+FimoError fimo_internal_tracing_flush(void *context);
 
 /**
  * Standard formatter.
@@ -511,12 +500,10 @@ FimoError fimo_internal_tracing_flush(void* context);
  *
  * @return Status code.
  */
-FimoError
-fimo_internal_tracing_fmt(char* buffer, size_t buffer_size, const void* args,
-    size_t* written_size);
+FimoError fimo_internal_tracing_fmt(char *buffer, FimoUSize buffer_size, const void *args, FimoUSize *written_size);
 
 #ifdef __cplusplus
 }
-#endif // __cplusplus
+#endif
 
 #endif // FIMO_INTERNAL_TRACING_H
