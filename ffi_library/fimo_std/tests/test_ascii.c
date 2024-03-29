@@ -214,7 +214,7 @@ static void ascii_whitespace(void** state)
     }
 }
 
-static void ascii_control(void** state)
+static void load_modules(void** state)
 {
     (void)state;
     const char positives[] = ""
@@ -249,7 +249,7 @@ int main(void)
         cmocka_unit_test(ascii_punctuation),
         cmocka_unit_test(ascii_graphic),
         cmocka_unit_test(ascii_whitespace),
-        cmocka_unit_test(ascii_control),
+        cmocka_unit_test(load_modules),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
