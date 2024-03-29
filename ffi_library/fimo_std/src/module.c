@@ -1,8 +1,6 @@
 #include <fimo_std/module.h>
 #include <fimo_std/vtable.h>
 
-#include <fimo_std/internal/module.h>
-
 FIMO_MUST_USE
 FimoError fimo_module_lock(const FimoContext context) {
     const FimoContextVTable *vtable = context.vtable;
@@ -65,7 +63,7 @@ FimoError fimo_module_set_append_modules(const FimoContext context, FimoModuleLo
                                          void *filter_data) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_append_modules(context.data, module_set, module_path, filter, filter_data,
-                                                fimo_internal_module_export_iterator);
+                                                fimo_impl_module_export_iterator);
 }
 
 FIMO_MUST_USE

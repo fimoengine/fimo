@@ -12,12 +12,6 @@
 extern "C" {
 #endif
 
-#ifdef _WIN32
-#define FIMO_INTERNAL_EXPORT __declspec(dllexport)
-#else
-#define FIMO_INTERNAL_EXPORT __attribute__((visibility("default")))
-#endif
-
 typedef struct FimoInternalModuleContext {
     mtx_t mutex;
     struct hashmap *symbols;
@@ -26,25 +20,6 @@ typedef struct FimoInternalModuleContext {
     FimoGraph *dependency_graph;
     bool is_loading;
 } FimoInternalModuleContext;
-
-/**
- * Inspector function for the internal iterator of exported modules.
- *
- * @param arg0 export declaration
- * @param arg1 user defined data
- *
- * @return `true`, if the iteration should continue.
- */
-typedef bool (*FimoInternalModuleInspector)(const FimoModuleExport *arg0, void *arg1);
-
-/**
- * Iterates over the modules exported by the current binary.
- *
- * @param inspector inspection function.
- * @param data user defined data to pass to the inspector.
- */
-FIMO_INTERNAL_EXPORT
-void fimo_internal_module_export_iterator(FimoInternalModuleInspector inspector, void *data);
 
 ///////////////////////////////////////////////////////////////////////
 //// Trampoline functions
