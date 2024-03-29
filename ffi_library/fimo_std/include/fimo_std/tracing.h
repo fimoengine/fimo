@@ -13,6 +13,8 @@ extern "C" {
 #endif // __cplusplus
 
 #define FIMO_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT, META_VAR, EVENT_VAR, ERROR_VAR, ...)                           \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-zero-length")                                                     \
     static const FimoTracingMetadata _metadata_var = {                                                                 \
             .type = FIMO_STRUCT_TYPE_TRACING_METADATA,                                                                 \
             .next = NULL,                                                                                              \
@@ -28,7 +30,8 @@ extern "C" {
             .metadata = &META_VAR,                                                                                     \
     };                                                                                                                 \
     FimoError ERROR_VAR = fimo_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                              \
-    FIMO_ASSERT_FALSE(FIMO_IS_ERROR(ERROR_VAR))
+    FIMO_ASSERT_FALSE(FIMO_IS_ERROR(ERROR_VAR))                                                                        \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
  * Emits a new event using the default formatter.
