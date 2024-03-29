@@ -53,6 +53,7 @@ set(FIMO_STD_IMPL_HEADERS
         include/fimo_std/impl/macros/type_eq.h
         include/fimo_std/impl/macros/var.h
         include/fimo_std/impl/module.h
+        include/fimo_std/impl/tracing.h
         include/fimo_std/impl/unicode.h
 )
 
@@ -73,6 +74,7 @@ set(FIMO_STD_SRC
 
         # Public implementation header implementations
         src/impl/module.c
+        src/impl/tracing.c
         src/impl/unicode.c
 
         # Public header implementations

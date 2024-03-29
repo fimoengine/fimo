@@ -3,8 +3,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include <fimo_std/internal/tracing.h>
-
 #include <fimo_std/vtable.h>
 
 FIMO_MUST_USE
@@ -50,8 +48,8 @@ FimoError fimo_tracing_span_create_fmt(const FimoContext context, const FimoTrac
                                        FimoTracingSpan *span, FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
-    FimoInternalTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    FimoError result = fimo_tracing_span_create_custom(context, span_desc, span, fimo_internal_tracing_fmt, &args);
+    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
+    FimoError result = fimo_tracing_span_create_custom(context, span_desc, span, fimo_impl_tracing_fmt, &args);
     va_end(vlist);
     return result;
 }
@@ -75,8 +73,8 @@ FimoError fimo_tracing_event_emit_fmt(const FimoContext context, const FimoTraci
                                       FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
-    FimoInternalTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    FimoError result = fimo_tracing_event_emit_custom(context, event, fimo_internal_tracing_fmt, &args);
+    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
+    FimoError result = fimo_tracing_event_emit_custom(context, event, fimo_impl_tracing_fmt, &args);
     va_end(vlist);
     return result;
 }

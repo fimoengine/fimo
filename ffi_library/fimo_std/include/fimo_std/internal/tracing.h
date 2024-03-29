@@ -194,16 +194,6 @@ typedef struct FimoInternalContextTracing {
 } FimoInternalContextTracing;
 
 /**
- * Argument type for the standard formatter.
- */
-typedef struct FimoInternalTracingFmtArgs {
-    /// `vprintf` format string.
-    const char *format;
-    /// `vprintf` argument list.
-    va_list *vlist;
-} FimoInternalTracingFmtArgs;
-
-/**
  * Initializes the tracing backend.
  *
  * If `options` is `NULL`, the backend is initialized with the default options,
@@ -487,23 +477,6 @@ FimoError fimo_internal_tracing_unregister_thread(void *context);
  */
 FIMO_MUST_USE
 FimoError fimo_internal_tracing_flush(void *context);
-
-/**
- * Standard formatter.
- *
- * This functions acts like a call to `vsnprintf`, where the format string
- * and arguments are stored in `args`. The number of written bytes is
- * written into `written_bytes`. `args` must point to an instance of a
- * `FimoInternalTracingFmtArgs`.
- *
- * @param buffer destination buffer
- * @param buffer_size size of the buffer
- * @param args formatting args
- * @param written_size pointer to the count of written bytes
- *
- * @return Status code.
- */
-FimoError fimo_internal_tracing_fmt(char *buffer, FimoUSize buffer_size, const void *args, FimoUSize *written_size);
 
 #ifdef __cplusplus
 }
