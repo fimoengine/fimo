@@ -3,6 +3,7 @@
 
 #include <fimo_std/error.h>
 #include <fimo_std/utils.h>
+#include <fimo_std/version.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,6 +50,27 @@ typedef struct FimoBaseStructOut {
     FimoStructType type;
     struct FimoBaseStructOut *next;
 } FimoBaseStructOut;
+
+/**
+ * Header of all VTables of a `FimoContext`, for all future versions.
+ *
+ * May never be changed, since we rely on it to determine whether a
+ * given `FimoContext` instance is compatible with the definitions
+ * available to us.
+ */
+typedef struct FimoContextVTableHeader {
+    FimoError (*check_version)(void *, const FimoVersion *);
+} FimoContextVTableHeader;
+
+/**
+ * Core VTable of a `FimoContext`.
+ *
+ * Changing the VTable is a breaking change.
+ */
+typedef struct FimoContextVTableV0 {
+    void (*acquire)(void *);
+    void (*release)(void *);
+} FimoContextCoreVTableV0;
 
 /**
  * Initializes a new context.

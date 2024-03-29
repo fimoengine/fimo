@@ -27,6 +27,7 @@ set(FIMO_STD_PUBLIC_HEADERS
         include/fimo_std/tracing.h
         include/fimo_std/utils.h
         include/fimo_std/version.h
+        include/fimo_std/vtable.h
 )
 
 set(FIMO_STD_IMPL_HEADERS
@@ -109,6 +110,10 @@ target_include_directories(fimo_std PUBLIC
 )
 set_property(TARGET fimo_std PROPERTY
         MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
+
+if (WIN32)
+    target_link_libraries(fimo_std PRIVATE Pathcch)
+endif ()
 
 if (MSVC)
     if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")

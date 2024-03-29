@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdalign.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 
 #include <fimo_std/context.h>
@@ -43,333 +44,307 @@ extern "C" {
 /**
  * Constructs a new `FimoU8` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_U8_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                \
-        .type = FIMO_MODULE_PARAM_TYPE_U8,                                           \
-        .read_access = (pread),                                                      \
-        .write_access = (pwrite),                                                    \
-        .setter = (psetter),                                                         \
-        .getter = (pgetter),                                                         \
-        .name = (pname),                                                             \
-        .default_value = { .u8 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_U8_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                         \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U8, .read_access = READ, .write_access = WRITE, .setter = SETTER,               \
+        .getter = GETTER, .name = NAME, .default_value = {.u8 = VALUE},                                                \
     }
 
 /**
  * Constructs a new `FimoU16` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_U16_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                 \
-        .type = FIMO_MODULE_PARAM_TYPE_U16,                                           \
-        .read_access = (pread),                                                       \
-        .write_access = (pwrite),                                                     \
-        .setter = (psetter),                                                          \
-        .getter = (pgetter),                                                          \
-        .name = (pname),                                                              \
-        .default_value = { .u16 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_U16_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                        \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U16, .read_access = READ, .write_access = WRITE, .setter = SETTER,              \
+        .getter = GETTER, .name = NAME, .default_value = {.u16 = VALUE},                                               \
     }
 
 /**
  * Constructs a new `FimoU32` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_U32_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                 \
-        .type = FIMO_MODULE_PARAM_TYPE_U32,                                           \
-        .read_access = (pread),                                                       \
-        .write_access = (pwrite),                                                     \
-        .setter = (psetter),                                                          \
-        .getter = (pgetter),                                                          \
-        .name = (pname),                                                              \
-        .default_value = { .u32 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_U32_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                        \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U32, .read_access = READ, .write_access = WRITE, .setter = SETTER,              \
+        .getter = GETTER, .name = NAME, .default_value = {.u32 = VALUE},                                               \
     }
 
 /**
  * Constructs a new `FimoU64` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_U64_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                 \
-        .type = FIMO_MODULE_PARAM_TYPE_U64,                                           \
-        .read_access = (pread),                                                       \
-        .write_access = (pwrite),                                                     \
-        .setter = (psetter),                                                          \
-        .getter = (pgetter),                                                          \
-        .name = (pname),                                                              \
-        .default_value = { .u64 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_U64_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                        \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U64, .read_access = READ, .write_access = WRITE, .setter = SETTER,              \
+        .getter = GETTER, .name = NAME, .default_value = {.u64 = VALUE},                                               \
     }
 
 /**
  * Constructs a new `FimoI8` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_I8_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                \
-        .type = FIMO_MODULE_PARAM_TYPE_I8,                                           \
-        .read_access = (pread),                                                      \
-        .write_access = (pwrite),                                                    \
-        .setter = (psetter),                                                         \
-        .getter = (pgetter),                                                         \
-        .name = (pname),                                                             \
-        .default_value = { .i8 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_I8_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                         \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_I8, .read_access = READ, .write_access = WRITE, .setter = SETTER,               \
+        .getter = GETTER, .name = NAME, .default_value = {.i8 = VALUE},                                                \
     }
 
 /**
  * Constructs a new `FimoI16` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_I16_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                 \
-        .type = FIMO_MODULE_PARAM_TYPE_U16,                                           \
-        .read_access = (pread),                                                       \
-        .write_access = (pwrite),                                                     \
-        .setter = (psetter),                                                          \
-        .getter = (pgetter),                                                          \
-        .name = (pname),                                                              \
-        .default_value = { .i16 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_I16_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                        \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U16, .read_access = READ, .write_access = WRITE, .setter = SETTER,              \
+        .getter = GETTER, .name = NAME, .default_value = {.i16 = VALUE},                                               \
     }
 
 /**
  * Constructs a new `FimoI32` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_I32_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                 \
-        .type = FIMO_MODULE_PARAM_TYPE_U32,                                           \
-        .read_access = (pread),                                                       \
-        .write_access = (pwrite),                                                     \
-        .setter = (psetter),                                                          \
-        .getter = (pgetter),                                                          \
-        .name = (pname),                                                              \
-        .default_value = { .i32 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_I32_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                        \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U32, .read_access = READ, .write_access = WRITE, .setter = SETTER,              \
+        .getter = GETTER, .name = NAME, .default_value = {.i32 = VALUE},                                               \
     }
 
 /**
  * Constructs a new `FimoI64` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
- * @param psetter parameter setter
- * @param pgetter parameter getter
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
+ * @param SETTER parameter setter
+ * @param GETTER parameter getter
  */
-#define FIMO_MODULE_PARAM_I64_COMPLEX(pname, pvalue, pread, pwrite, psetter, pgetter) \
-    {                                                                                 \
-        .type = FIMO_MODULE_PARAM_TYPE_U64,                                           \
-        .read_access = (pread),                                                       \
-        .write_access = (pwrite),                                                     \
-        .setter = (psetter),                                                          \
-        .getter = (pgetter),                                                          \
-        .name = (pname),                                                              \
-        .default_value = { .i64 = (pvalue) },                                         \
+#define FIMO_MODULE_PARAM_I64_COMPLEX(NAME, VALUE, READ, WRITE, SETTER, GETTER)                                        \
+    {                                                                                                                  \
+        .type = FIMO_MODULE_PARAM_TYPE_U64, .read_access = READ, .write_access = WRITE, .setter = SETTER,              \
+        .getter = GETTER, .name = NAME, .default_value = {.i64 = VALUE},                                               \
     }
 
 /**
  * Constructs a new `FimoU8` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_U8(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_U8_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_U8(NAME, VALUE, READ, WRITE)                                                                 \
+    FIMO_MODULE_PARAM_U8_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoU16` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_U16(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_U16_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_U16(NAME, VALUE, READ, WRITE)                                                                \
+    FIMO_MODULE_PARAM_U16_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoU32` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_U32(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_U32_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_U32(NAME, VALUE, READ, WRITE)                                                                \
+    FIMO_MODULE_PARAM_U32_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoU64` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_U64(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_U64_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_U64(NAME, VALUE, READ, WRITE)                                                                \
+    FIMO_MODULE_PARAM_U64_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoI8` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_I8(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_I8_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_I8(NAME, VALUE, READ, WRITE)                                                                 \
+    FIMO_MODULE_PARAM_I8_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoI16` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_I16(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_I16_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_I16(NAME, VALUE, READ, WRITE)                                                                \
+    FIMO_MODULE_PARAM_I16_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoI32` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_I32(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_I32_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_I32(NAME, VALUE, READ, WRITE)                                                                \
+    FIMO_MODULE_PARAM_I32_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
 
 /**
  * Constructs a new `FimoI64` parameter declaration.
  *
- * @param pname parameter name
- * @param pvalue default value
- * @param pread read access group
- * @param pwrite write access group
+ * @param NAME parameter name
+ * @param VALUE default value
+ * @param READ read access group
+ * @param WRITE write access group
  */
-#define FIMO_MODULE_PARAM_I64(pname, pvalue, pread, pwrite) \
-    FIMO_MODULE_PARAM_I64_COMPLEX(pname, pvalue, pread, pwrite, fimo_module_param_set_inner, fimo_module_param_get_inner)
+#define FIMO_MODULE_PARAM_I64(NAME, VALUE, READ, WRITE)                                                                \
+    FIMO_MODULE_PARAM_I64_COMPLEX(NAME, VALUE, READ, WRITE, fimo_module_param_set_inner, fimo_module_param_get_inner)
+
+/**
+ * Constructs a new resource declaration.
+ *
+ * @param PATH path to the resource relative to the module directory
+ */
+#define FIMO_MODULE_RESOURCE(PATH)                                                                                     \
+    { .path = PATH }
 
 /**
  * Constructs a new namespace import declaration.
+ *
+ * @param NS namespace name
  */
-#define FIMO_MODULE_IMPORT_NAMESPACE(ns) \
-    {                                    \
-        .name = (ns)                     \
-    }
+#define FIMO_MODULE_IMPORT_NAMESPACE(NS)                                                                               \
+    { .name = NS }
 
 /**
  * Constructs a new symbol import declaration.
  *
- * @param sname symbol name
- * @param sns symbol namespace
- * @param sversion symbol version
+ * @param NAME symbol name
+ * @param NS symbol namespace
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
  */
-#define FIMO_MODULE_IMPORT_SYMBOL_NS(sname, sns, sversion)  \
-    {                                                       \
-        .version = (sversion), .name = (sname), .ns = (sns) \
-    }
+#define FIMO_MODULE_IMPORT_SYMBOL_NS(NAME, NS, V_MAJOR, V_MINOR, V_PATCH)                                              \
+    { .version = FIMO_VERSION(V_MAJOR, V_MINOR, V_PATCH), .name = NAME, .ns = NS }
 
 /**
  * Constructs a new symbol import declaration.
  *
- * @param sname symbol name
- * @param sversion symbol version
+ * @param NAME symbol name
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
  */
-#define FIMO_MODULE_IMPORT_SYMBOL(sname, sversion) \
-    FIMO_MODULE_IMPORT_SYMBOL_NS(sname, "", sversion)
+#define FIMO_MODULE_IMPORT_SYMBOL(NAME, V_MAJOR, V_MINOR, V_PATCH)                                                     \
+    FIMO_MODULE_IMPORT_SYMBOL_NS(NAME, "", V_MAJOR, V_MINOR, V_PATCH)
 
 /**
  * Constructs a new symbol export declaration for a variable.
  *
- * @param sname symbol name
- * @param sns symbol namespace
- * @param svar variable to export
- * @param sversion symbol version
+ * @param NAME symbol name
+ * @param NS symbol namespace
+ * @param VAR variable to export
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
  */
-#define FIMO_MODULE_EXPORT_SYMBOL_VAR_NS(sname, sns, svar, sversion)                 \
-    {                                                                                \
-        .symbol = (void*)&(svar), .version = (version), .name = (sname), .ns = (sns) \
-    }
+#define FIMO_MODULE_EXPORT_SYMBOL_VAR_NS(NAME, NS, VAR, V_MAJOR, V_MINOR, V_PATCH)                                     \
+    { .symbol = (void *)&VAR, .version = FIMO_VERSION(V_MAJOR, V_MINOR, V_PATCH), .name = NAME, .ns = NS }
 
 /**
  * Constructs a new symbol export declaration for a function.
  *
- * @param sname symbol name
- * @param sns symbol namespace
- * @param sfunc function to export
- * @param sversion symbol version
+ * @param NAME symbol name
+ * @param NS symbol namespace
+ * @param FUNC function to export
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
  */
-#define FIMO_MODULE_EXPORT_SYMBOL_FUNC_NS(sname, sns, sfunc, sversion)               \
-    {                                                                                \
-        .symbol = (void*)(sfunc), .version = (version), .name = (sname), .ns = (sns) \
-    }
+#define FIMO_MODULE_EXPORT_SYMBOL_FUNC_NS(NAME, NS, FUNC, V_MAJOR, V_MINOR, V_PATCH)                                   \
+    { .symbol = *(void **)&FUNC, .version = FIMO_VERSION(V_MAJOR, V_MINOR, V_PATCH), .name = NAME, .ns = NS }
 
 /**
  * Constructs a new symbol export declaration for a variable.
  *
- * @param svar variable to export
- * @param sversion symbol version
- * @param sname symbol name
+ * @param NAME symbol name
+ * @param VAR variable to export
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
  */
-#define FIMO_MODULE_EXPORT_SYMBOL_VAR(sname, svar, sversion) \
-    FIMO_MODULE_EXPORT_SYMBOL_VAR_NS(sname, "", svar, sversion)
+#define FIMO_MODULE_EXPORT_SYMBOL_VAR(NAME, VAR, V_MAJOR, V_MINOR, V_PATCH)                                            \
+    FIMO_MODULE_EXPORT_SYMBOL_VAR_NS(NAME, "", VAR, V_MAJOR, V_MINOR, V_PATCH)
 
 /**
  * Constructs a new symbol export declaration for a function.
  *
- * @param sname symbol name
- * @param sfunc function to export
- * @param sversion symbol version
+ * @param NAME symbol name
+ * @param FUNC function to export
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
  */
-#define FIMO_MODULE_EXPORT_SYMBOL_FUNC(sname, sfunc, sversion) \
-    FIMO_MODULE_EXPORT_SYMBOL_FUNC_NS(sname, "", sfunc, sversion)
+#define FIMO_MODULE_EXPORT_SYMBOL_FUNC(NAME, FUNC, V_MAJOR, V_MINOR, V_PATCH)                                          \
+    FIMO_MODULE_EXPORT_SYMBOL_FUNC_NS(NAME, "", FUNC, V_MAJOR, V_MINOR, V_PATCH)
 
 /**
  * Constructs a new dynamic symbol export declaration.
@@ -380,10 +355,8 @@ extern "C" {
  * @param sconstr constructor
  * @param sdestr destructor
  */
-#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(sname, sns, sversion, sconstr, sdestr)                           \
-    {                                                                                                         \
-        .constructor = (sconstr), .destructor = (sdestr), .version = (sversion), .name = (sname), .ns = (sns) \
-    }
+#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(sname, sns, sversion, sconstr, sdestr)                                    \
+    { .constructor = (sconstr), .destructor = (sdestr), .version = (sversion), .name = (sname), .ns = (sns) }
 
 /**
  * Constructs a new dynamic symbol export declaration.
@@ -393,7 +366,7 @@ extern "C" {
  * @param sconstr constructor
  * @param sdestr destructor
  */
-#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL(sname, sversion, sconstr, sdestr) \
+#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL(sname, sversion, sconstr, sdestr)                                            \
     FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(sname, "", sversion, sconstr, sdestr)
 
 /**
@@ -402,36 +375,33 @@ extern "C" {
 #define FIMO_MODULE_EXPORT_ABI 0
 
 #ifdef _WIN32
-#define FIMO_MODULE_EXPORT_MODULE__(VAR)      \
-    __declspec(allocate(FIMO_MODULE_SECTION)) \
-        const FimoModuleExport* FIMO_VAR(VAR) \
-        = &VAR;
+#define FIMO_MODULE_EXPORT_MODULE__(VAR)                                                                               \
+    __declspec(allocate(FIMO_MODULE_SECTION)) const FimoModuleExport *FIMO_VAR(VAR) = &VAR;
 #else
-#define FIMO_MODULE_EXPORT_MODULE__(VAR)                    \
-    const FimoModuleExport* FIMO_VAR(VAR)                   \
-        __attribute__((used, section(FIMO_MODULE_SECTION))) \
-        = &VAR;
+#define FIMO_MODULE_EXPORT_MODULE__(VAR)                                                                               \
+    const FimoModuleExport *FIMO_VAR(VAR) __attribute__((used, section(FIMO_MODULE_SECTION))) = &VAR;
 #endif
 
-#define FIMO_MODULE_EXPORT_MODULE_(VAR, NAME, DESC, AUTHOR, LICENSE, ...) \
-    FimoModuleExport VAR = {                                              \
-        .type = FIMO_STRUCT_TYPE_MODULE_EXPORT,                           \
-        .next = NULL,                                                     \
-        .export_abi = FIMO_MODULE_EXPORT_ABI,                             \
-        .name = NAME,                                                     \
-        .description = DESC,                                              \
-        .author = AUTHOR,                                                 \
-        .license = LICENSE,                                               \
-        __VA_ARGS__                                                       \
-    };                                                                    \
+#define FIMO_MODULE_EXPORT_MODULE_(VAR, NAME, DESC, AUTHOR, LICENSE, ...)                                              \
+    FimoModuleExport VAR = {.type = FIMO_STRUCT_TYPE_MODULE_EXPORT,                                                    \
+                            .next = NULL,                                                                              \
+                            .export_abi = FIMO_MODULE_EXPORT_ABI,                                                      \
+                            .name = NAME,                                                                              \
+                            .description = DESC,                                                                       \
+                            .author = AUTHOR,                                                                          \
+                            .license = LICENSE,                                                                        \
+                            __VA_ARGS__};                                                                              \
     FIMO_MODULE_EXPORT_MODULE__(VAR)
 
 /**
  * Exports a new module.
  *
- * @param export_info module export info
+ * @param NAME module name (not NULL)
+ * @param DESC module description
+ * @param AUTHOR module author
+ * @param LICENSE module license
  */
-#define FIMO_MODULE_EXPORT_MODULE(NAME, DESC, AUTHOR, LICENSE, ...) \
+#define FIMO_MODULE_EXPORT_MODULE(NAME, DESC, AUTHOR, LICENSE, ...)                                                    \
     FIMO_MODULE_EXPORT_MODULE_(FIMO_VAR(fimo_module_export_private), NAME, DESC, AUTHOR, LICENSE, __VA_ARGS__)
 
 /**
@@ -439,67 +409,72 @@ extern "C" {
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
  *
- * @param _param_list array of `FimoModuleParamDecl`
+ * @param PARAM_LIST array of `FimoModuleParamDecl`
  */
-#define FIMO_MODULE_EXPORT_MODULE_PARAMS(_param_list) \
-    .parameters = _param_list,                        \
-    .parameters_count = (FimoU32)(sizeof(_param_list) / sizeof(FimoModuleParamDecl))
+#define FIMO_MODULE_EXPORT_MODULE_PARAMS(PARAM_LIST)                                                                   \
+    .parameters = PARAM_LIST, .parameters_count = (FimoU32)(sizeof(PARAM_LIST) / sizeof(FimoModuleParamDecl))
+
+/**
+ * Specifies the module resources.
+ *
+ * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
+ *
+ * @param RESOURCE_LIST array of `FimoModuleResourceDecl`
+ */
+#define FIMO_MODULE_EXPORT_MODULE_RESOURCES(RESOURCE_LIST)                                                             \
+    .resources = RESOURCE_LIST, .resources_count = (FimoU32)(sizeof(RESOURCE_LIST) / sizeof(FimoModuleResourceDecl))
 
 /**
  * Specifies the module namespace imports.
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
  *
- * @param _ns_list array of `FimoModuleNamespaceImport`
+ * @param NS_LIST array of `FimoModuleNamespaceImport`
  */
-#define FIMO_MODULE_EXPORT_MODULE_NAMESPACES(_ns_list) \
-    .namespace_imports = _ns_list,                     \
-    .namespace_imports_count = (FimoU32)(sizeof(_ns_list) / sizeof(FimoModuleNamespaceImport))
+#define FIMO_MODULE_EXPORT_MODULE_NAMESPACES(NS_LIST)                                                                  \
+    .namespace_imports = NS_LIST,                                                                                      \
+    .namespace_imports_count = (FimoU32)(sizeof(NS_LIST) / sizeof(FimoModuleNamespaceImport))
 
 /**
  * Specifies the module symbol imports.
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
  *
- * @param _symbol_list array of `FimoModuleSymbolImport`
+ * @param SYM_LIST array of `FimoModuleSymbolImport`
  */
-#define FIMO_MODULE_EXPORT_MODULE_SYMBOL_IMPORTS(_symbol_list) \
-    .symbol_imports = _symbol_list,                            \
-    .symbol_imports_count = (FimoU32)(sizeof(_symbol_list) / sizeof(FimoModuleSymbolImport))
+#define FIMO_MODULE_EXPORT_MODULE_SYMBOL_IMPORTS(SYM_LIST)                                                             \
+    .symbol_imports = SYM_LIST, .symbol_imports_count = (FimoU32)(sizeof(SYM_LIST) / sizeof(FimoModuleSymbolImport))
 
 /**
  * Specifies the static module symbol exports.
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
  *
- * @param _symbol_list array of `FimoModuleSymbolExport`
+ * @param SYM_LIST array of `FimoModuleSymbolExport`
  */
-#define FIMO_MODULE_EXPORT_MODULE_SYMBOL_EXPORTS(_symbol_list) \
-    .symbol_exports = _symbol_list,                            \
-    .symbol_exports_count = (FimoU32)(sizeof(_symbol_list) / sizeof(FimoModuleSymbolExport))
+#define FIMO_MODULE_EXPORT_MODULE_SYMBOL_EXPORTS(SYM_LIST)                                                             \
+    .symbol_exports = SYM_LIST, .symbol_exports_count = (FimoU32)(sizeof(SYM_LIST) / sizeof(FimoModuleSymbolExport))
 
 /**
  * Specifies the dynamic module symbol exports.
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
  *
- * @param _symbol_list array of `FimoModuleDynamicSymbolExport`
+ * @param SYM_LIST array of `FimoModuleDynamicSymbolExport`
  */
-#define FIMO_MODULE_EXPORT_MODULE_DYNAMIC_SYMBOL_EXPORTS(_symbol_list) \
-    .dynamic_symbol_exports = _symbol_list,                            \
-    .dynamic_symbol_exports_count = (FimoU32)(sizeof(_symbol_list) / sizeof(FimoModuleDynamicSymbolExport))
+#define FIMO_MODULE_EXPORT_MODULE_DYNAMIC_SYMBOL_EXPORTS(SYM_LIST)                                                     \
+    .dynamic_symbol_exports = SYM_LIST,                                                                                \
+    .dynamic_symbol_exports_count = (FimoU32)(sizeof(SYM_LIST) / sizeof(FimoModuleDynamicSymbolExport))
 
 /**
  * Specifies the constructor and destructor of a module.
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
  *
- * @param _constructor constructor function
- * @param _destructor destructor function
+ * @param CONSTR constructor function
+ * @param DESTR destructor function
  */
-#define FIMO_MODULE_EXPORT_MODULE_CONSTRUCTOR(_constructor, _destructor) \
-    .module_constructor = _constructor,                                  \
-    .module_destructor = _destructor,
+#define FIMO_MODULE_EXPORT_MODULE_CONSTRUCTOR(CONSTR, DESTR) .module_constructor = CONSTR, .module_destructor = DESTR,
 
 /**
  * Declares a new parameter table.
@@ -510,29 +485,59 @@ extern "C" {
  * `FIMO_MODULE_PARAM_TABLE_PARAM`. The params must be declared in the
  * same order as they are specified in the module.
  *
- * @param name parameter table name
- * @param param_count number of parameters in the table
- * @param declaration table struct declaration
+ * @param NAME parameter table name
+ * @param PARAM_COUNT number of parameters in the table
+ * @param DECL table struct declaration
  */
-#define FIMO_MODULE_PARAM_TABLE(name, param_count, declaration)                                            \
-    declaration;                                                                                           \
-    static_assert(alignof(name) == alignof(FimoModuleParam*), "Unexpected padding in module param table"); \
-    static_assert(sizeof(name) > 0, "Unexpected size of module param table");                              \
-    static_assert(sizeof(name) == param_count * sizeof(FimoModuleParam*), "Unexpected size of module param table");
+#define FIMO_MODULE_PARAM_TABLE(NAME, PARAM_COUNT, DECL)                                                               \
+    DECL;                                                                                                              \
+    static_assert(alignof(NAME) == alignof(FimoModuleParam *), "Unexpected padding in module param table");            \
+    static_assert(sizeof(NAME) > 0, "Unexpected size of module param table");                                          \
+    static_assert(sizeof(NAME) == PARAM_COUNT * sizeof(FimoModuleParam *), "Unexpected size of module param table");
 
 /**
  * Declares a placeholder param.
  */
-#define FIMO_MODULE_PARAM_TABLE_EMPTY \
-    FimoModuleParam* empty__;
+#define FIMO_MODULE_PARAM_TABLE_EMPTY FimoModuleParam *empty__
 
 /**
  * Declares a new parameter for the param table.
  *
- * @param name name of the parameter
+ * @param NAME name of the parameter
  */
-#define FIMO_MODULE_PARAM_TABLE_PARAM(name) \
-    FimoModuleParam* name;
+#define FIMO_MODULE_PARAM_TABLE_PARAM(NAME) FimoModuleParam *NAME
+
+/**
+ * Declares a new resource table.
+ *
+ * For compatibility with C++, the table must contain at least one
+ * element. Use `FIMO_MODULE_RESOURCE_TABLE_EMPTY` in that case. Otherwise,
+ * the members of the struct must be declared with calls to
+ * `FIMO_MODULE_RESOURCE_TABLE_PARAM`. The resources must be declared
+ * in the same order as they are specified in the module.
+ *
+ * @param NAME symbol table name
+ * @param SYM_COUNT number of symbols in the table
+ * @param DECL table struct declaration
+ */
+#define FIMO_MODULE_RESOURCE_TABLE(NAME, RES_COUNT, DECL)                                                              \
+    DECL;                                                                                                              \
+    static_assert(alignof(NAME) == alignof(const char *), "Unexpected padding in module resource table");              \
+    static_assert(sizeof(NAME) > 0, "Unexpected size of module resource table");                                       \
+    static_assert(sizeof(NAME) == RES_COUNT * sizeof(const char *), "Unexpected size of module resource table");
+
+/**
+ * Declares a placeholder param.
+ */
+#define FIMO_MODULE_RESOURCE_TABLE_EMPTY const char *empty__
+
+
+/**
+ * Declares a new resource for the resource table.
+ *
+ * @param NAME name of the resource
+ */
+#define FIMO_MODULE_RESOURCE_TABLE_PARAM(NAME) const char *NAME
 
 /**
  * Declares a new symbol table.
@@ -544,44 +549,61 @@ extern "C" {
  * The symbols must be declared in the same order as they are specified
  * in the module.
  *
- * @param name symbol table name
- * @param symbol_count number of symbols in the table
- * @param declaration table struct declaration
+ * @param NAME symbol table name
+ * @param SYM_COUNT number of symbols in the table
+ * @param DECL table struct declaration
  */
-#define FIMO_MODULE_SYMBOL_TABLE(name, symbol_count, declaration)                                      \
-    declaration;                                                                                       \
-    static_assert(alignof(name) == alignof(const void*), "Unexpected padding in module symbol table"); \
-    static_assert(sizeof(name) > 0, "Unexpected size of module symbol table");                         \
-    static_assert(sizeof(name) == symbol_count * sizeof(const void*), "Unexpected size of module symbol table");
+#define FIMO_MODULE_SYMBOL_TABLE(NAME, SYM_COUNT, DECL)                                                                \
+    DECL;                                                                                                              \
+    static_assert(alignof(NAME) == alignof(const FimoModuleRawSymbol *), "Unexpected padding in module symbol table"); \
+    static_assert(sizeof(NAME) > 0, "Unexpected size of module symbol table");                                         \
+    static_assert(sizeof(NAME) == SYM_COUNT * sizeof(const FimoModuleRawSymbol *), "Unexpected size of module symbol " \
+                                                                                   "table");
 
 /**
  * Declares a placeholder symbol.
  */
-#define FIMO_MODULE_SYMBOL_TABLE_EMPTY \
-    const void* empty__;
+#define FIMO_MODULE_SYMBOL_TABLE_EMPTY FimoModuleRawSymbol empty__;
 
 /**
  * Declares a new variable symbol for the symbol table.
  *
- * @param name name of the symbol in the symbol table
- * @param type type of the symbol
+ * @param NAME name of the symbol in the symbol table
+ * @param TYPE type of the symbol
  */
-#define FIMO_MODULE_SYMBOL_TABLE_VAR(name, type)                                         \
-    const type* name;                                                                    \
-    static_assert(sizeof(const type*) == sizeof(const void*), "Unexpected symbol size"); \
-    static_assert(alignof(const type*) == alignof(const void*), "Unexpected symbol alignment");
+#define FIMO_MODULE_SYMBOL_TABLE_VAR(NAME, TYPE)                                                                       \
+    const struct {                                                                                                     \
+        const TYPE *data;                                                                                              \
+        _Atomic(FimoUSize) lock;                                                                                       \
+    } *NAME;                                                                                                           \
+    static_assert(sizeof(const TYPE *) == sizeof(const void *), "Unexpected symbol size");                             \
+    static_assert(alignof(const TYPE *) == alignof(const void *), "Unexpected symbol alignment")
 
 /**
  * Declares a new function symbol for the symbol table.
  *
- * @param name name of the symbol in the symbol table
- * @param ret function return type
- * @param args function parameter list
+ * @param NAME name of the symbol in the symbol table
+ * @param RET function return type
+ * @param ARGS function parameter list
  */
-#define FIMO_MODULE_SYMBOL_TABLE_FUNC(name, ret, ...)                                                 \
-    ret (*const name)(__VA_ARGS__);                                                                   \
-    static_assert(sizeof(ret(*const)(__VA_ARGS__)) == sizeof(const void*), "Unexpected symbol size"); \
-    static_assert(alignof(ret(*const)(__VA_ARGS__)) == alignof(const void*), "Unexpected symbol alignment");
+#define FIMO_MODULE_SYMBOL_TABLE_FUNC(NAME, RET, ...)                                                                  \
+    const struct {                                                                                                     \
+        const RET (*data)(__VA_ARGS__);                                                                                \
+        _Atomic(FimoUSize) lock;                                                                                       \
+    } *NAME;                                                                                                           \
+    static_assert(sizeof(RET(*const)(__VA_ARGS__)) == sizeof(const void *), "Unexpected symbol size");                 \
+    static_assert(alignof(RET(*const)(__VA_ARGS__)) == alignof(const void *), "Unexpected symbol alignment")
+
+/**
+ * Locks a symbol and returns it.
+ */
+#define FIMO_MODULE_SYMBOL_LOCK(SYMBOL)                                                                                \
+    (fimo_impl_module_symbol_acquire((_Atomic(FimoUSize) *)&SYMBOL->lock), SYMBOL->data)
+
+/**
+ * Unlocks a symbol.
+ */
+#define FIMO_MODULE_SYMBOL_RELEASE(SYMBOL) fimo_impl_module_symbol_release((_Atomic(FimoUSize) *)&SYMBOL->lock)
 
 typedef struct FimoModule FimoModule;
 
@@ -593,12 +615,11 @@ typedef struct FimoModule FimoModule;
  * module. The resulting symbol is written into the last argument.
  *
  * @param arg0 pointer to the module
- * @param arg1 reserved for future use
- * @param arg2 pointer to the resulting symbol
+ * @param arg1 pointer to the resulting symbol
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleDynamicSymbolConstructor)(const FimoModule*, void*, void**);
+typedef FimoError (*FimoModuleDynamicSymbolConstructor)(const FimoModule *arg0, void **arg1);
 
 /**
  * Destructor function for a dynamic symbol.
@@ -608,9 +629,8 @@ typedef FimoError (*FimoModuleDynamicSymbolConstructor)(const FimoModule*, void*
  * not allowed to access the module backend.
  *
  * @param arg0 symbol to destroy
- * @param arg1 reserved for future use
  */
-typedef void (*FimoModuleDynamicSymbolDestructor)(void*, void*);
+typedef void (*FimoModuleDynamicSymbolDestructor)(void *arg0);
 
 /**
  * Type-erased set of modules to load by the backend.
@@ -634,8 +654,7 @@ typedef struct FimoModuleLoadingSet FimoModuleLoadingSet;
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleConstructor)(const FimoModule*, FimoModuleLoadingSet*,
-    void*, void**);
+typedef FimoError (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLoadingSet *arg1, void *arg2, void **arg3);
 
 /**
  * Destructor function for a module.
@@ -647,7 +666,7 @@ typedef FimoError (*FimoModuleConstructor)(const FimoModule*, FimoModuleLoadingS
  * @param arg1 reserved for future use
  * @param arg2 module data to destroy
  */
-typedef void (*FimoModuleDestructor)(const FimoModule*, void*, void*);
+typedef void (*FimoModuleDestructor)(const FimoModule *arg0, void *arg1, void *arg2);
 
 /**
  * Data type of a module parameter.
@@ -667,9 +686,9 @@ typedef enum FimoModuleParamType {
  * Access group for a module parameter.
  */
 typedef enum FimoModuleParamAccess {
-    FIMO_MODULE_CONFIG_ACCESS_PUBLIC,
-    FIMO_MODULE_CONFIG_ACCESS_DEPENDENCY,
-    FIMO_MODULE_CONFIG_ACCESS_PRIVATE,
+    FIMO_MODULE_PARAM_ACCESS_PUBLIC,
+    FIMO_MODULE_PARAM_ACCESS_DEPENDENCY,
+    FIMO_MODULE_PARAM_ACCESS_PRIVATE,
 } FimoModuleParamAccess;
 
 /**
@@ -695,8 +714,8 @@ typedef struct FimoModuleParamData FimoModuleParamData;
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleParamSet)(const FimoModule*, const void*, FimoModuleParamType,
-    FimoModuleParamData*);
+typedef FimoError (*FimoModuleParamSet)(const FimoModule *arg0, const void *arg1, FimoModuleParamType arg2,
+                                        FimoModuleParamData *arg3);
 
 /**
  * Getter for a module parameter.
@@ -708,8 +727,8 @@ typedef FimoError (*FimoModuleParamSet)(const FimoModule*, const void*, FimoModu
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleParamGet)(const FimoModule*, void*, FimoModuleParamType*,
-    const FimoModuleParamData*);
+typedef FimoError (*FimoModuleParamGet)(const FimoModule *arg0, void *arg1, FimoModuleParamType *arg2,
+                                        const FimoModuleParamData *arg3);
 
 /**
  * Declaration of a module parameter.
@@ -737,8 +756,10 @@ typedef struct FimoModuleParamDecl {
     FimoModuleParamGet getter;
     /**
      * Name of the parameter.
+     *
+     * Must not be `NULL`.
      */
-    const char* name;
+    const char *name;
     /**
      * Default value of the parameter.
      */
@@ -755,10 +776,27 @@ typedef struct FimoModuleParamDecl {
 } FimoModuleParamDecl;
 
 /**
+ * Declaration of a module resource.
+ */
+typedef struct FimoModuleResourceDecl {
+    /**
+     * Resource path relative to the module directory.
+     *
+     * Must not be `NULL` or begin with a slash.
+     */
+    const char *path;
+} FimoModuleResourceDecl;
+
+/**
  * Declaration of a module namespace import.
  */
 typedef struct FimoModuleNamespaceImport {
-    const char* name;
+    /**
+     * Imported namespace.
+     *
+     * Must not be `NULL`.
+     */
+    const char *name;
 } FimoModuleNamespaceImport;
 
 /**
@@ -771,12 +809,16 @@ typedef struct FimoModuleSymbolImport {
     FimoVersion version;
     /**
      * Symbol name.
+     *
+     * Must not be `NULL`.
      */
-    const char* name;
+    const char *name;
     /**
      * Symbol namespace.
+     *
+     * Must not be `NULL`.
      */
-    const char* ns;
+    const char *ns;
 } FimoModuleSymbolImport;
 
 /**
@@ -786,19 +828,23 @@ typedef struct FimoModuleSymbolExport {
     /**
      * Pointer to the symbol.
      */
-    const void* symbol;
+    const void *symbol;
     /**
      * Symbol version.
      */
     FimoVersion version;
     /**
      * Symbol name.
+     *
+     * Must not be `NULL`.
      */
-    const char* name;
+    const char *name;
     /**
      * Symbol namespace.
+     *
+     * Must not be `NULL`.
      */
-    const char* ns;
+    const char *ns;
 } FimoModuleSymbolExport;
 
 /**
@@ -807,10 +853,14 @@ typedef struct FimoModuleSymbolExport {
 typedef struct FimoModuleDynamicSymbolExport {
     /**
      * Symbol constructor.
+     *
+     * Must not be `NULL`.
      */
     FimoModuleDynamicSymbolConstructor constructor;
     /**
      * Symbol destructor.
+     *
+     * Must not be `NULL`.
      */
     FimoModuleDynamicSymbolDestructor destructor;
     /**
@@ -819,12 +869,16 @@ typedef struct FimoModuleDynamicSymbolExport {
     FimoVersion version;
     /**
      * Symbol name.
+     *
+     * Must not be `NULL`.
      */
-    const char* name;
+    const char *name;
     /**
      * Symbol namespace.
+     *
+     * Must not be `NULL`.
      */
-    const char* ns;
+    const char *ns;
 } FimoModuleDynamicSymbolExport;
 
 /**
@@ -842,7 +896,7 @@ typedef struct FimoModuleExport {
      *
      * Reserved for future use. Must be `NULL`.
      */
-    const struct FimoBaseStructIn* next;
+    const FimoBaseStructIn *next;
     /**
      * ABI version of the module export.
      *
@@ -855,35 +909,37 @@ typedef struct FimoModuleExport {
      * The module name must be unique to the module.
      * Must not be `NULL`.
      */
-    const char* name;
+    const char *name;
     /**
      * Module description.
-     *
-     * Must not be `NULL`.
      */
-    const char* description;
+    const char *description;
     /**
      * Module author.
-     *
-     * Must not be `NULL`.
      */
-    const char* author;
+    const char *author;
     /**
      * Module license.
-     *
-     * Must not be `NULL`.
      */
-    const char* license;
+    const char *license;
     /**
      * List of parameters exposed by the module.
      *
      * A module is not allowed to expose duplicate parameters.
      */
-    const FimoModuleParamDecl* parameters;
+    const FimoModuleParamDecl *parameters;
     /**
      * Number of parameters exposed by the module.
      */
     FimoU32 parameters_count;
+    /**
+     * List of resources declared by the module.
+     */
+    const FimoModuleResourceDecl *resources;
+    /**
+     * Number of resources declared by the module.
+     */
+    FimoU32 resources_count;
     /**
      * List of namespaces to import by the module.
      *
@@ -892,7 +948,7 @@ typedef struct FimoModuleExport {
      * a namespace, that does not exist, without exporting to
      * that namespace.
      */
-    const FimoModuleNamespaceImport* namespace_imports;
+    const FimoModuleNamespaceImport *namespace_imports;
     /**
      * Number of namespaces to import by the module.
      */
@@ -903,7 +959,7 @@ typedef struct FimoModuleExport {
      * Upon loading, the module is provided the listed symbols.
      * If some symbols are not available, the loading fails.
      */
-    const FimoModuleSymbolImport* symbol_imports;
+    const FimoModuleSymbolImport *symbol_imports;
     /**
      * Number of symbols to import by the module.
      */
@@ -915,7 +971,7 @@ typedef struct FimoModuleExport {
      * modules. Trying to export a duplicate symbol will
      * result in an error upon loading of the module.
      */
-    const FimoModuleSymbolExport* symbol_exports;
+    const FimoModuleSymbolExport *symbol_exports;
     /**
      * Number of static symbols exported by the module.
      */
@@ -927,7 +983,7 @@ typedef struct FimoModuleExport {
      * until loading of the module. This is useful, in case
      * the symbol depends on the module imports.
      */
-    const FimoModuleDynamicSymbolExport* dynamic_symbol_exports;
+    const FimoModuleDynamicSymbolExport *dynamic_symbol_exports;
     /**
      * Number of dynamic symbols exported by the module.
      */
@@ -947,6 +1003,34 @@ typedef struct FimoModuleExport {
      */
     FimoModuleDestructor module_destructor;
 } FimoModuleExport;
+
+/**
+ * Type-erased symbol definition.
+ */
+typedef struct FimoModuleRawSymbol {
+    /**
+     * Pointer to the symbol.
+     */
+    const void *data;
+    /**
+     * Lock count of the symbol.
+     */
+    _Atomic(FimoUSize) lock;
+} FimoModuleRawSymbol;
+
+static FIMO_INLINE_ALWAYS bool fimo_impl_module_symbol_is_used(_Atomic(FimoUSize) *lock) {
+    return atomic_load_explicit(lock, memory_order_acquire) != 0;
+}
+
+static FIMO_INLINE_ALWAYS void fimo_impl_module_symbol_acquire(_Atomic(FimoUSize) *lock) {
+    FimoUSize count = atomic_fetch_add_explicit(lock, 1, memory_order_acquire);
+    FIMO_ASSERT(count < (FimoUSize)FIMO_ISIZE_MAX)
+}
+
+static FIMO_INLINE_ALWAYS void fimo_impl_module_symbol_release(_Atomic(FimoUSize) *lock) {
+    FimoUSize count = atomic_fetch_sub_explicit(lock, 1, memory_order_release);
+    FIMO_ASSERT(count != 0)
+}
 
 /**
  * Opaque type for a parameter table of a module.
@@ -969,7 +1053,7 @@ typedef void FimoModuleResourceTable;
 /**
  * Opaque type for a symbol import table of a module.
  *
- * The import table is equivalent to an array of `const void*`,
+ * The import table is equivalent to an array of `const FimoModuleRawSymbol*`,
  * where each entry represents one symbol of the module symbol
  * import list. The symbols are ordered in declaration order.
  */
@@ -978,7 +1062,7 @@ typedef void FimoModuleSymbolImportTable;
 /**
  * Opaque type for a symbol export table of a module.
  *
- * The export table is equivalent to an array of `const void*`,
+ * The export table is equivalent to an array of `const FimoModuleRawSymbol*`,
  * where each entry represents one symbol of the module symbol
  * export list, followed by the entries of the dynamic symbol
  * export list.
@@ -1000,41 +1084,29 @@ typedef struct FimoModuleInfo {
      *
      * Reserved for future use. Must be `NULL`.
      */
-    const struct FimoBaseStructIn* next;
+    const FimoBaseStructIn *next;
     /**
      * Module name.
      *
      * Must not be `NULL`.
      */
-    const char* name;
+    const char *name;
     /**
      * Module description.
-     *
-     * Must not be `NULL`.
      */
-    const char* description;
+    const char *description;
     /**
      * Module author.
-     *
-     * Must not be `NULL`.
      */
-    const char* author;
+    const char *author;
     /**
      * Module license.
-     *
-     * Must not be `NULL`.
      */
-    const char* license;
+    const char *license;
     /**
-     * Path to the module binary.
-     *
-     * Must not be `NULL`.
+     * Path to the module directory.
      */
-    const char* module_path;
-    /**
-     * Opaque data of the module.
-     */
-    void* internal_data;
+    const char *module_path;
 } FimoModuleInfo;
 
 /**
@@ -1049,23 +1121,23 @@ typedef struct FimoModule {
     /**
      * Module parameter table.
      */
-    const FimoModuleParamTable* parameters;
+    const FimoModuleParamTable *parameters;
     /**
      * Module resource table.
      */
-    const FimoModuleResourceTable* resources;
+    const FimoModuleResourceTable *resources;
     /**
      * Module symbol import table.
      */
-    const FimoModuleSymbolImportTable* imports;
+    const FimoModuleSymbolImportTable *imports;
     /**
      * Module symbol export table.
      */
-    const FimoModuleSymbolExportTable* exports;
+    const FimoModuleSymbolExportTable *exports;
     /**
      * Module info.
      */
-    const FimoModuleInfo* module_info;
+    const FimoModuleInfo *module_info;
     /**
      * Context that loaded the module.
      */
@@ -1073,7 +1145,7 @@ typedef struct FimoModule {
     /**
      * Private data of the module.
      */
-    void* module_data;
+    void *module_data;
 } FimoModule;
 
 /**
@@ -1088,7 +1160,7 @@ typedef struct FimoModule {
  *
  * @return `true`, if the module should be loaded.
  */
-typedef bool (*FimoModuleLoadingFilter)(const FimoModuleExport*, void*);
+typedef bool (*FimoModuleLoadingFilter)(const FimoModuleExport *arg0, void *arg1);
 
 /**
  * A callback for successfully loading a module.
@@ -1100,34 +1172,64 @@ typedef bool (*FimoModuleLoadingFilter)(const FimoModuleExport*, void*);
  * @param arg0 loaded module
  * @param arg1 callback data
  */
-typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo*, void*);
+typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo *arg0, void *arg1);
 
 /**
  * A callback for a module loading error.
  *
  * The callback function is called when the backend was not
- * successful in loading the requested module. The provider
- * of the function is then able to indicate to the backend,
- * whether or not to rollback the loading of the module set.
+ * successful in loading the requested module.
  *
  * @param arg0 module that caused the error
  * @param arg1 callback data
- *
- * @return `true`, if the loading should be reverted
  */
-typedef bool (*FimoModuleLoadingErrorCallback)(const FimoModuleExport*, void*);
+typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, void *arg1);
 
 /**
- * Cleanup function for the callback data.
+ * VTable of the module subsystem.
  *
- * Cleanup function for the user data passed to the
- * `FimoModuleLoadingSuccessCallback` and
- * `FimoModuleLoadingErrorCallback` callback functions.
- * Is called after the loading/rollback has been completed.
- *
- * @param arg0 user data to clean up
+ * Changing the VTable is a breaking change.
  */
-typedef void (*FimoModuleLoadingCleanupCallback)(void*);
+typedef struct FimoModuleVTableV0 {
+    FimoError (*lock)(void *);
+    FimoError (*unlock)(void *);
+    FimoError (*pseudo_module_new)(void *, const FimoModule **);
+    FimoError (*pseudo_module_destroy)(void *, const FimoModule *, FimoContext *);
+    FimoError (*set_new)(void *, FimoModuleLoadingSet **);
+    FimoError (*set_has_module)(void *, FimoModuleLoadingSet *, const char *, bool *);
+    FimoError (*set_has_symbol)(void *, FimoModuleLoadingSet *, const char *, const char *, FimoVersion, bool *);
+    FimoError (*set_append_callback)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingSuccessCallback,
+                                     FimoModuleLoadingErrorCallback, void *);
+    FimoError (*set_append_modules)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingFilter, void *,
+                                    void (*)(bool (*)(const FimoModuleExport *, void *), void *));
+    FimoError (*set_dismiss)(void *, FimoModuleLoadingSet *);
+    FimoError (*set_finish)(void *, FimoModuleLoadingSet *);
+    FimoError (*find_by_name)(void *, const char *, const FimoModuleInfo **);
+    FimoError (*find_by_symbol)(void *, const char *, const char *, FimoVersion, const FimoModuleInfo **);
+    FimoError (*namespace_exists)(void *, const char *, bool *);
+    FimoError (*namespace_include)(void *, const FimoModule *, const char *);
+    FimoError (*namespace_exclude)(void *, const FimoModule *, const char *);
+    FimoError (*namespace_included)(void *, const FimoModule *, const char *, bool *, bool *);
+    FimoError (*acquire_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
+    FimoError (*relinquish_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
+    FimoError (*has_dependency)(void *, const FimoModule *, const FimoModuleInfo *, bool *, bool *);
+    FimoError (*load_symbol)(void *, const FimoModule *, const char *, const char *, FimoVersion,
+                             const FimoModuleRawSymbol **);
+    FimoError (*unload)(void *, const FimoModuleInfo *);
+    FimoError (*param_query)(void *, const char *, const char *, FimoModuleParamType *, FimoModuleParamAccess *,
+                             FimoModuleParamAccess *);
+    FimoError (*param_set_public)(void *, const void *, FimoModuleParamType, const char *, const char *);
+    FimoError (*param_get_public)(void *, void *, FimoModuleParamType *, const char *, const char *);
+    FimoError (*param_set_dependency)(void *, const FimoModule *, const void *, FimoModuleParamType, const char *,
+                                      const char *);
+    FimoError (*param_get_dependency)(void *, const FimoModule *, void *, FimoModuleParamType *, const char *,
+                                      const char *);
+    FimoError (*param_set_private)(void *, const FimoModule *, const void *, FimoModuleParamType, FimoModuleParam *);
+    FimoError (*param_get_private)(void *, const FimoModule *, void *, FimoModuleParamType *, const FimoModuleParam *);
+    FimoError (*param_set_inner)(void *, const FimoModule *, const void *, FimoModuleParamType, FimoModuleParamData *);
+    FimoError (*param_get_inner)(void *, const FimoModule *, void *, FimoModuleParamType *,
+                                 const FimoModuleParamData *);
+} FimoModuleVTableV0;
 
 /**
  * Locks the module backend.
@@ -1140,7 +1242,8 @@ typedef void (*FimoModuleLoadingCleanupCallback)(void*);
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_lock(FimoContext context);
+FIMO_MUST_USE
+FimoError fimo_module_lock(FimoContext context);
 
 /**
  * Unlocks the module backend.
@@ -1154,7 +1257,8 @@ FIMO_MUST_USE FimoError fimo_module_lock(FimoContext context);
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_unlock(FimoContext context);
+FIMO_MUST_USE
+FimoError fimo_module_unlock(FimoContext context);
 
 /**
  * Constructs a new pseudo module.
@@ -1170,8 +1274,8 @@ FIMO_MUST_USE FimoError fimo_module_unlock(FimoContext context);
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_pseudo_module_new(FimoContext context,
-    const FimoModule** module);
+FIMO_MUST_USE
+FimoError fimo_module_pseudo_module_new(FimoContext context, const FimoModule **module);
 
 /**
  * Destroys an existing pseudo module.
@@ -1180,10 +1284,12 @@ FIMO_MUST_USE FimoError fimo_module_pseudo_module_new(FimoContext context,
  * relinquished all access to handles derived by the module backend.
  *
  * @param module pseudo module to destroy
+ * @param module_context extracted context from the module
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_pseudo_module_destroy(const FimoModule* module);
+FIMO_MUST_USE
+FimoError fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContext *module_context);
 
 /**
  * Constructs a new empty module set.
@@ -1199,8 +1305,8 @@ FIMO_MUST_USE FimoError fimo_module_pseudo_module_destroy(const FimoModule* modu
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_set_new(FimoContext context,
-    FimoModuleLoadingSet** module_set);
+FIMO_MUST_USE
+FimoError fimo_module_set_new(FimoContext context, FimoModuleLoadingSet **module_set);
 
 /**
  * Checks whether a module set contains a module.
@@ -1212,8 +1318,9 @@ FIMO_MUST_USE FimoError fimo_module_set_new(FimoContext context,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_set_has_module(FimoContext context,
-    FimoModuleLoadingSet* module_set, const char* name, bool* has_module);
+FIMO_MUST_USE
+FimoError fimo_module_set_has_module(FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
+                                     bool *has_module);
 
 /**
  * Checks whether a module set contains a symbol.
@@ -1227,50 +1334,67 @@ FIMO_MUST_USE FimoError fimo_module_set_has_module(FimoContext context,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_set_has_symbol(FimoContext context,
-    FimoModuleLoadingSet* module_set, const char* name, const char* ns,
-    FimoVersion version, bool* has_symbol);
+FIMO_MUST_USE
+FimoError fimo_module_set_has_symbol(FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
+                                     const char *ns, FimoVersion version, bool *has_symbol);
+
+/**
+ * Adds a status callback to the module set.
+ *
+ * Adds a set of callbacks to report a successful or failed loading of
+ * a module. The `on_success` callback wil be called if the set has
+ * was able to load all requested modules, whereas the `on_error` callback
+ * will be called immediately after the failed loading of the module. Since
+ * the module set can be in a partially loaded state at the time of calling
+ * this function, the `on_errro` callback may be invoked immediately. The
+ * callbacks will be provided with a user-specified data pointer, which they
+ * are in charge of cleaning up. If the requested module `module_name` does
+ * not exist, this function will return an error.
+ *
+ * @param context the context
+ * @param module_set set of modules
+ * @param module_name module to query
+ * @param on_success success callback
+ * @param on_error error callback
+ * @param user_data callback user data
+ *
+ * @return Status code.
+ */
+FIMO_MUST_USE
+FimoError fimo_module_set_append_callback(FimoContext context, FimoModuleLoadingSet *module_set,
+                                          const char *module_name, FimoModuleLoadingSuccessCallback on_success,
+                                          FimoModuleLoadingErrorCallback on_error, void *user_data);
 
 /**
  * Adds modules to the module set.
  *
  * Opens up a module binary to select which modules to load.
  * The binary path `module_path` must be encoded as `UTF-8`,
- * and point to the binary that contains the modules. The
- * binary path does not require to contain the file extension.
- * If the path is `Null`, it iterates over the exported modules
- * of the current binary. Each exported module is then passed to
- * the `filter`, along with the provided `filter_data`, which can
+ * and point to the binary that contains the modules.  If the
+ * path is `NULL`, it iterates over the exported modules of the
+ * current binary. Each exported module is then passed to the
+ * `filter`, along with the provided `filter_data`, which can
  * then filter which modules to load. This function may skip
  * invalid module exports. Trying to include a module with duplicate
- * exports will result in an error. This function signals an error,
- * if the binary does not contain the symbols necessary to query
- * the exported modules, but does not result in an error, if it
- * does not export any modules. The necessary symbols are setup
- * automatically, if the binary was linked with the fimo library.
- *
- * In addition, the caller can include status reporting callbacks
- * to the module set, that are called after the loading/dismissal
- * of the set.
+ * exports or duplicate name will result in an error. This function
+ * signals an error, if the binary does not contain the symbols
+ * necessary to query the exported modules, but does not return
+ * in an error, if it does not export any modules. The necessary
+ * symbols are setup automatically, if the binary was linked with
+ * the fimo library. In case of an error, no modules are appended
+ * to the set.
  *
  * @param context the context
- * @param module_set set of modules to append to
+ * @param module_set set of modules
  * @param module_path path to the binary to inspect
  * @param filter filter function
  * @param filter_data custom data to pass to the filter function
- * @param on_success success callback
- * @param on_error error callback
- * @param on_cleanup cleanup callback
- * @param user_data callback user data
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_set_append(FimoContext context,
-    FimoModuleLoadingSet* module_set, const char* module_path,
-    FimoModuleLoadingFilter filter, void* filter_data,
-    FimoModuleLoadingSuccessCallback on_success,
-    FimoModuleLoadingErrorCallback on_error,
-    FimoModuleLoadingCleanupCallback on_cleanup, void* user_data);
+FIMO_MUST_USE
+FimoError fimo_module_set_append_modules(FimoContext context, FimoModuleLoadingSet *module_set, const char *module_path,
+                                         FimoModuleLoadingFilter filter, void *filter_data);
 
 /**
  * Destroys the module set without loading any modules.
@@ -1283,8 +1407,8 @@ FIMO_MUST_USE FimoError fimo_module_set_append(FimoContext context,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_set_dismiss(FimoContext context,
-    FimoModuleLoadingSet* module_set);
+FIMO_MUST_USE
+FimoError fimo_module_set_dismiss(FimoContext context, FimoModuleLoadingSet *module_set);
 
 /**
  * Destroys the module set and loads the modules contained in it.
@@ -1302,8 +1426,8 @@ FIMO_MUST_USE FimoError fimo_module_set_dismiss(FimoContext context,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_set_finish(FimoContext context,
-    FimoModuleLoadingSet* module_set);
+FIMO_MUST_USE
+FimoError fimo_module_set_finish(FimoContext context, FimoModuleLoadingSet *module_set);
 
 /**
  * Searches for a module by it's name.
@@ -1316,8 +1440,8 @@ FIMO_MUST_USE FimoError fimo_module_set_finish(FimoContext context,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_find_by_name(FimoContext context, const char* name,
-    const FimoModuleInfo** module);
+FIMO_MUST_USE
+FimoError fimo_module_find_by_name(FimoContext context, const char *name, const FimoModuleInfo **module);
 
 /**
  * Searches for a module by a symbol it exports.
@@ -1332,8 +1456,9 @@ FIMO_MUST_USE FimoError fimo_module_find_by_name(FimoContext context, const char
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_find_by_symbol(FimoContext context, const char* name,
-    const char* ns, FimoVersion version, const FimoModuleInfo** module);
+FIMO_MUST_USE
+FimoError fimo_module_find_by_symbol(FimoContext context, const char *name, const char *ns, FimoVersion version,
+                                     const FimoModuleInfo **module);
 
 /**
  * Checks for the presence of a namespace in the module backend.
@@ -1347,8 +1472,8 @@ FIMO_MUST_USE FimoError fimo_module_find_by_symbol(FimoContext context, const ch
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_namespace_exists(FimoContext context, const char* ns,
-    bool* exists);
+FIMO_MUST_USE
+FimoError fimo_module_namespace_exists(FimoContext context, const char *ns, bool *exists);
 
 /**
  * Includes a namespace by the module.
@@ -1362,8 +1487,8 @@ FIMO_MUST_USE FimoError fimo_module_namespace_exists(FimoContext context, const 
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_namespace_include(const FimoModule* module,
-    const char* ns);
+FIMO_MUST_USE
+FimoError fimo_module_namespace_include(const FimoModule *module, const char *ns);
 
 /**
  * Removes a namespace include from the module.
@@ -1379,8 +1504,8 @@ FIMO_MUST_USE FimoError fimo_module_namespace_include(const FimoModule* module,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_namespace_exclude(const FimoModule* module,
-    const char* ns);
+FIMO_MUST_USE
+FimoError fimo_module_namespace_exclude(const FimoModule *module, const char *ns);
 
 /**
  * Checks if a module includes a namespace.
@@ -1400,8 +1525,8 @@ FIMO_MUST_USE FimoError fimo_module_namespace_exclude(const FimoModule* module,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_namespace_included(const FimoModule* module,
-    const char* ns, bool* is_included, bool* is_static);
+FIMO_MUST_USE
+FimoError fimo_module_namespace_included(const FimoModule *module, const char *ns, bool *is_included, bool *is_static);
 
 /**
  * Acquires another module as a dependency.
@@ -1418,8 +1543,8 @@ FIMO_MUST_USE FimoError fimo_module_namespace_included(const FimoModule* module,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_acquire_dependency(const FimoModule* module,
-    const FimoModuleInfo* dependency);
+FIMO_MUST_USE
+FimoError fimo_module_acquire_dependency(const FimoModule *module, const FimoModuleInfo *dependency);
 
 /**
  * Removes a module as a dependency.
@@ -1437,8 +1562,8 @@ FIMO_MUST_USE FimoError fimo_module_acquire_dependency(const FimoModule* module,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_relinquish_dependency(const FimoModule* module,
-    const FimoModuleInfo* dependency);
+FIMO_MUST_USE
+FimoError fimo_module_relinquish_dependency(const FimoModule *module, const FimoModuleInfo *dependency);
 
 /**
  * Checks if a module depends on another module.
@@ -1458,8 +1583,9 @@ FIMO_MUST_USE FimoError fimo_module_relinquish_dependency(const FimoModule* modu
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_has_dependency(const FimoModule* module,
-    const FimoModuleInfo* other, bool* has_dependency, bool* is_static);
+FIMO_MUST_USE
+FimoError fimo_module_has_dependency(const FimoModule *module, const FimoModuleInfo *other, bool *has_dependency,
+                                     bool *is_static);
 
 /**
  * Loads a symbol from the module backend.
@@ -1481,22 +1607,27 @@ FIMO_MUST_USE FimoError fimo_module_has_dependency(const FimoModule* module,
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_load_symbol(const FimoModule* module, const char* name,
-    const char* ns, FimoVersion version, const void** symbol);
+FIMO_MUST_USE
+FimoError fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns, FimoVersion version,
+                                  const FimoModuleRawSymbol **symbol);
 
 /**
  * Unloads a module.
  *
- * If successful, this function unloads the module `module` and all
- * modules that have it as a dependency. To succeed, the module
- * must have no dependencies left.
+ * If successful, this function unloads the module `module`.
+ * To succeed, the module no other module may depend on the module.
+ * This function automatically unloads cleans up unreferenced modules,
+ * except if they are a pseudo module.
+ *
+ * Setting `module` to `NULL` only runs the cleanup of all loose modules.
  *
  * @param context the context
  * @param module module to unload
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_unload(FimoContext context, const FimoModuleInfo* module);
+FIMO_MUST_USE
+FimoError fimo_module_unload(FimoContext context, const FimoModuleInfo *module);
 
 /**
  * Queries the info of a module parameter.
@@ -1514,9 +1645,9 @@ FIMO_MUST_USE FimoError fimo_module_unload(FimoContext context, const FimoModule
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_query(FimoContext context, const char* module_name,
-    const char* param, FimoModuleParamType* type, FimoModuleParamAccess* read,
-    FimoModuleParamAccess* write);
+FIMO_MUST_USE
+FimoError fimo_module_param_query(FimoContext context, const char *module_name, const char *param,
+                                  FimoModuleParamType *type, FimoModuleParamAccess *read, FimoModuleParamAccess *write);
 
 /**
  * Sets a module parameter with public write access.
@@ -1535,8 +1666,9 @@ FIMO_MUST_USE FimoError fimo_module_param_query(FimoContext context, const char*
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_set_public(FimoContext context, const void* value,
-    FimoModuleParamType type, const char* module_name, const char* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_set_public(FimoContext context, const void *value, FimoModuleParamType type,
+                                       const char *module_name, const char *param);
 
 /**
  * Reads a module parameter with public read access.
@@ -1555,8 +1687,9 @@ FIMO_MUST_USE FimoError fimo_module_param_set_public(FimoContext context, const 
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_get_public(FimoContext context, void* value,
-    FimoModuleParamType* type, const char* module_name, const char* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_get_public(FimoContext context, void *value, FimoModuleParamType *type,
+                                       const char *module_name, const char *param);
 
 /**
  * Sets a module parameter with dependency write access.
@@ -1575,8 +1708,9 @@ FIMO_MUST_USE FimoError fimo_module_param_get_public(FimoContext context, void* 
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_set_dependency(const FimoModule* module, const void* value,
-    FimoModuleParamType type, const char* module_name, const char* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_set_dependency(const FimoModule *module, const void *value, FimoModuleParamType type,
+                                           const char *module_name, const char *param);
 
 /**
  * Reads a module parameter with dependency read access.
@@ -1595,8 +1729,9 @@ FIMO_MUST_USE FimoError fimo_module_param_set_dependency(const FimoModule* modul
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_get_dependency(const FimoModule* module, void* value,
-    FimoModuleParamType* type, const char* module_name, const char* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_get_dependency(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                           const char *module_name, const char *param);
 
 /**
  * Setter for a module parameter.
@@ -1610,8 +1745,9 @@ FIMO_MUST_USE FimoError fimo_module_param_get_dependency(const FimoModule* modul
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_set_private(const FimoModule* module, const void* value,
-    FimoModuleParamType type, FimoModuleParam* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_set_private(const FimoModule *module, const void *value, FimoModuleParamType type,
+                                        FimoModuleParam *param);
 
 /**
  * Getter for a module parameter.
@@ -1623,8 +1759,9 @@ FIMO_MUST_USE FimoError fimo_module_param_set_private(const FimoModule* module, 
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_get_private(const FimoModule* module, void* value,
-    FimoModuleParamType* type, const FimoModuleParam* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_get_private(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                        const FimoModuleParam *param);
 
 /**
  * Internal setter for a module parameter.
@@ -1638,8 +1775,9 @@ FIMO_MUST_USE FimoError fimo_module_param_get_private(const FimoModule* module, 
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_set_inner(const FimoModule* module, const void* value,
-    FimoModuleParamType type, FimoModuleParamData* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_set_inner(const FimoModule *module, const void *value, FimoModuleParamType type,
+                                      FimoModuleParamData *param);
 
 /**
  * Internal getter for a module parameter.
@@ -1651,8 +1789,9 @@ FIMO_MUST_USE FimoError fimo_module_param_set_inner(const FimoModule* module, co
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_module_param_get_inner(const FimoModule* module, void* value,
-    FimoModuleParamType* type, const FimoModuleParamData* param);
+FIMO_MUST_USE
+FimoError fimo_module_param_get_inner(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                      const FimoModuleParamData *param);
 
 #ifdef __cplusplus
 }
