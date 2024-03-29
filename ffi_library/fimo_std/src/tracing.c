@@ -3,43 +3,44 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include <fimo_std/internal/context.h>
 #include <fimo_std/internal/tracing.h>
+
+#include <fimo_std/vtable.h>
 
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_create(const FimoContext context, FimoTracingCallStack *call_stack) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_call_stack_create(context.data, call_stack);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_destroy(const FimoContext context, const FimoTracingCallStack call_stack) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_call_stack_destroy(context.data, call_stack);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_switch(const FimoContext context, const FimoTracingCallStack new_call_stack,
                                          FimoTracingCallStack *old_call_stack) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_call_stack_switch(context.data, new_call_stack, old_call_stack);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_unblock(const FimoContext context, const FimoTracingCallStack call_stack) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_call_stack_unblock(context.data, call_stack);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_suspend_current(const FimoContext context, const bool block) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_call_stack_suspend_current(context.data, block);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_resume_current(const FimoContext context) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_call_stack_resume_current(context.data);
 }
 
@@ -58,13 +59,13 @@ FimoError fimo_tracing_span_create_fmt(const FimoContext context, const FimoTrac
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_custom(const FimoContext context, const FimoTracingSpanDesc *span_desc,
                                           FimoTracingSpan *span, const FimoTracingFormat format, const void *data) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_span_create(context.data, span_desc, span, format, data);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_span_destroy(const FimoContext context, FimoTracingSpan *span) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_span_destroy(context.data, span);
 }
 
@@ -83,18 +84,18 @@ FimoError fimo_tracing_event_emit_fmt(const FimoContext context, const FimoTraci
 FIMO_MUST_USE
 FimoError fimo_tracing_event_emit_custom(const FimoContext context, const FimoTracingEvent *event,
                                          const FimoTracingFormat format, const void *data) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_event_emit(context.data, event, format, data);
 }
 
 FIMO_MUST_USE
 bool fimo_tracing_is_enabled(const FimoContext context) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_is_enabled(context.data);
 }
 
 FIMO_MUST_USE
 FimoError fimo_tracing_flush(const FimoContext context) {
-    const FimoInternalContextVTable *vtable = context.vtable;
+    const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_flush(context.data);
 }
