@@ -503,6 +503,27 @@ typedef struct FimoTracingCreationConfig {
 } FimoTracingCreationConfig;
 
 /**
+ * VTable of the tracing subsystem.
+ *
+ * Changing the VTable is a breaking change.
+ */
+typedef struct FimoTracingVTableV0 {
+    FimoError (*call_stack_create)(void *, FimoTracingCallStack *);
+    FimoError (*call_stack_destroy)(void *, FimoTracingCallStack);
+    FimoError (*call_stack_switch)(void *, FimoTracingCallStack, FimoTracingCallStack *);
+    FimoError (*call_stack_unblock)(void *, FimoTracingCallStack);
+    FimoError (*call_stack_suspend_current)(void *, bool);
+    FimoError (*call_stack_resume_current)(void *);
+    FimoError (*span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan *, FimoTracingFormat, const void *);
+    FimoError (*span_destroy)(void *, FimoTracingSpan *);
+    FimoError (*event_emit)(void *, const FimoTracingEvent *, FimoTracingFormat, const void *);
+    bool (*is_enabled)(void *);
+    FimoError (*register_thread)(void *);
+    FimoError (*unregister_thread)(void *);
+    FimoError (*flush)(void *);
+} FimoTracingVTableV0;
+
+/**
  * Creates a new empty call stack.
  *
  * If successful, the new call stack is marked as suspended, and written
