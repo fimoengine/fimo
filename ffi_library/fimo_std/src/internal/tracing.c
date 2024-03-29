@@ -556,9 +556,9 @@ FimoError fimo_internal_tracing_span_create_fmt(void *context, const FimoTracing
                                                 FimoTracingSpan *span, FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
-    FimoInternalTracingFmtArgs args = {.format = format, .vlist = &vlist};
+    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
     const FimoError result =
-            fimo_internal_tracing_span_create_custom(context, span_desc, span, fimo_internal_tracing_fmt, &args);
+            fimo_internal_tracing_span_create_custom(context, span_desc, span, fimo_impl_tracing_fmt, &args);
     va_end(vlist);
     return result;
 }
@@ -717,8 +717,8 @@ FimoError fimo_internal_tracing_event_emit_fmt(void *context, const FimoTracingE
                                                FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
-    FimoInternalTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    const FimoError result = fimo_internal_tracing_event_emit_custom(context, event, fimo_internal_tracing_fmt, &args);
+    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
+    const FimoError result = fimo_internal_tracing_event_emit_custom(context, event, fimo_impl_tracing_fmt, &args);
     va_end(vlist);
     return result;
 }
@@ -856,18 +856,5 @@ FimoError fimo_internal_tracing_flush(void *context) {
         tracing->subscribers[i].vtable->flush(tracing->subscribers[i].ptr);
     }
 
-    return FIMO_EOK;
-}
-
-FimoError fimo_internal_tracing_fmt(char *buffer, FimoUSize buffer_size, const void *args, FimoUSize *written_size) {
-    if (buffer == NULL || args == NULL || written_size == NULL) {
-        return FIMO_EINVAL;
-    }
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4996))
-    FimoInternalTracingFmtArgs *tracing_args = (FimoInternalTracingFmtArgs *)args;
-    int written = vsnprintf(buffer, buffer_size, tracing_args->format, *tracing_args->vlist);
-    *written_size = (FimoUSize)written;
-    FIMO_PRAGMA_MSVC(warning(pop))
     return FIMO_EOK;
 }

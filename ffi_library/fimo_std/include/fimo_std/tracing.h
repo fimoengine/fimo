@@ -8,6 +8,8 @@
 #include <fimo_std/time.h>
 #include <fimo_std/utils.h>
 
+#include <fimo_std/impl/tracing.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
