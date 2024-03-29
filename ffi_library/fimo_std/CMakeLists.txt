@@ -49,6 +49,7 @@ set(FIMO_STD_IMPL_HEADERS
         include/fimo_std/impl/macros/pragma.h
         include/fimo_std/impl/macros/print_format.h
         include/fimo_std/impl/macros/stringify.h
+        include/fimo_std/impl/macros/type_eq.h
         include/fimo_std/impl/macros/var.h
         include/fimo_std/impl/unicode.h
 )
@@ -85,7 +86,6 @@ set(FIMO_STD_SRC
         src/version.c
 )
 
-# add_library(fimo_std STATIC ${FIMO_STD_HEADERS} ${FIMO_STD_SRC})
 add_library(fimo_std STATIC)
 target_sources(fimo_std PUBLIC
         FILE_SET fimo_std_public_headers
