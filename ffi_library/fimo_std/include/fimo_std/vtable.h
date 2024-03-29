@@ -20,20 +20,7 @@
 typedef struct FimoContextVTable {
     FimoContextVTableHeader header;
     FimoContextCoreVTableV0 core;
-    FimoError (*tracing_call_stack_create)(void *, FimoTracingCallStack *);
-    FimoError (*tracing_call_stack_destroy)(void *, FimoTracingCallStack);
-    FimoError (*tracing_call_stack_switch)(void *, FimoTracingCallStack, FimoTracingCallStack *);
-    FimoError (*tracing_call_stack_unblock)(void *, FimoTracingCallStack);
-    FimoError (*tracing_call_stack_suspend_current)(void *, bool);
-    FimoError (*tracing_call_stack_resume_current)(void *);
-    FimoError (*tracing_span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan *, FimoTracingFormat,
-                                     const void *);
-    FimoError (*tracing_span_destroy)(void *, FimoTracingSpan *);
-    FimoError (*tracing_event_emit)(void *, const FimoTracingEvent *, FimoTracingFormat, const void *);
-    bool (*tracing_is_enabled)(void *);
-    FimoError (*tracing_register_thread)(void *);
-    FimoError (*tracing_unregister_thread)(void *);
-    FimoError (*tracing_flush)(void *);
+    FimoTracingVTableV0 tracing_v0;
     FimoModuleVTableV0 module_v0;
 } FimoContextVTable;
 
