@@ -29,7 +29,11 @@
 #define MODULE_HANDLE_ HMODULE
 #define FIMO_MALLOC_ALIGNMENT 16
 #else
+#if __APPLE__
+#define _DARWIN_C_SOURCE
+#else
 #define _GNU_SOURCE
+#endif
 #include <dlfcn.h>
 
 #define MODULE_HANDLE_ void *
