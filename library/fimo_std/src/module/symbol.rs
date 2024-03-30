@@ -18,7 +18,7 @@ impl<'a, T> Symbol<'a, T> {
             unreachable!()
         }
 
-        SymbolGuard { 0: self }
+        SymbolGuard(self)
     }
 
     fn unlock(&self) {
@@ -56,7 +56,7 @@ impl<T> Deref for SymbolGuard<'_, '_, T> {
 
     fn deref(&self) -> &Self::Target {
         // Safety: We hold a reference to a `T`.
-        unsafe { &*(*self.0 .0).data.cast::<T>() }
+        unsafe { &*(*self.0 .0).data.get().cast::<T>() }
     }
 }
 
@@ -68,7 +68,7 @@ impl<T> Clone for SymbolGuard<'_, '_, T> {
 
 impl<T> Drop for SymbolGuard<'_, '_, T> {
     fn drop(&mut self) {
-        self.0.unlock()
+        self.0.unlock();
     }
 }
 

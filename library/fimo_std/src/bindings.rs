@@ -2,6 +2,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![allow(clippy::type_complexity)]
 #![allow(clippy::undocumented_unsafe_blocks)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -11,7 +12,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 #[derive(Debug)]
 pub struct FimoModuleRawSymbol {
     /// Pointer to the symbol.
-    pub data: *const core::ffi::c_void,
+    pub data: core::cell::Cell<*const core::ffi::c_void>,
     /// Lock count of the symbol.
     pub lock: core::sync::atomic::AtomicUsize,
 }
