@@ -236,7 +236,7 @@ fn is_error(errnum: bindings::FimoError) -> bool {
 }
 
 fn is_valid_error(errnum: bindings::FimoError) -> bool {
-    errnum.0 >= bindings::FimoError::FIMO_EOK.0 && errnum.0 <= bindings::FimoError::FIMO_EUNKNOWN.0
+    (bindings::FimoError::FIMO_EOK.0..=bindings::FimoError::FIMO_EUNKNOWN.0).contains(&errnum.0)
 }
 
 impl fmt::Debug for Error {
