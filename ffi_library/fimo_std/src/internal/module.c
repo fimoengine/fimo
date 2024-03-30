@@ -6,11 +6,20 @@
 #include <fimo_std/memory.h>
 
 #include <inttypes.h>
-#include <malloc.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32) || defined(WIN32)
+#include <malloc.h>
+#elif __APPLE__
+#include <malloc/malloc.h>
+#elif __ANDROID__
+#include <malloc.h>
+#elif __linux__
+#include <malloc.h>
+#endif // defined(_WIN32) || defined(WIN32)
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
