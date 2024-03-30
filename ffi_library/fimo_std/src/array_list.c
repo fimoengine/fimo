@@ -278,7 +278,7 @@ FimoError fimo_array_list_try_insert(FimoArrayList *array, const FimoUSize index
     if (array->size < index || array->capacity == array->size) {
         return FIMO_EINVAL;
     }
-    FIMO_DEBUG_ASSERT(array->elements != NULL)
+    FIMO_DEBUG_ASSERT(elem_size == 0 || array->elements != NULL)
 
     const FimoUSize elements_to_shift = array->size - index;
     array->size++;

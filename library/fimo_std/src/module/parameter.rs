@@ -102,13 +102,13 @@ impl TryFrom<bindings::FimoModuleParamAccess> for ParameterAccess {
 
     fn try_from(value: bindings::FimoModuleParamAccess) -> Result<Self, Self::Error> {
         match value {
-            bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_PUBLIC => {
+            bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PUBLIC => {
                 Ok(ParameterAccess::Public)
             }
-            bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_DEPENDENCY => {
+            bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_DEPENDENCY => {
                 Ok(ParameterAccess::Dependency)
             }
-            bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_PRIVATE => {
+            bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE => {
                 Ok(ParameterAccess::Private)
             }
             _ => Err(Error::EINVAL),
@@ -120,13 +120,13 @@ impl From<ParameterAccess> for bindings::FimoModuleParamAccess {
     fn from(value: ParameterAccess) -> Self {
         match value {
             ParameterAccess::Public => {
-                bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_PUBLIC
+                bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PUBLIC
             }
             ParameterAccess::Dependency => {
-                bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_DEPENDENCY
+                bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_DEPENDENCY
             }
             ParameterAccess::Private => {
-                bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_PRIVATE
+                bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE
             }
         }
     }
@@ -471,8 +471,8 @@ impl ParameterInfo {
         parameter: &CStr,
     ) -> Result<Self, Error> {
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
-        let mut read = bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_PRIVATE;
-        let mut write = bindings::FimoModuleParamAccess::FIMO_MODULE_CONFIG_ACCESS_PRIVATE;
+        let mut read = bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE;
+        let mut write = bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE;
 
         // Safety: The ffi call is safe.
         to_result_indirect(|error| unsafe {
@@ -586,6 +586,7 @@ pub trait ParameterCast: Sized {
     fn to_parameter_value(self) -> ParameterValue;
     fn from_parameter_value(value: ParameterValue) -> Result<Self, Error>;
 }
+
 impl ParameterCast for u8 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::U8(self)
@@ -598,6 +599,7 @@ impl ParameterCast for u8 {
         }
     }
 }
+
 impl ParameterCast for u16 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::U16(self)
@@ -610,6 +612,7 @@ impl ParameterCast for u16 {
         }
     }
 }
+
 impl ParameterCast for u32 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::U32(self)
@@ -622,6 +625,7 @@ impl ParameterCast for u32 {
         }
     }
 }
+
 impl ParameterCast for u64 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::U64(self)
@@ -634,6 +638,7 @@ impl ParameterCast for u64 {
         }
     }
 }
+
 impl ParameterCast for i8 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::I8(self)
@@ -646,6 +651,7 @@ impl ParameterCast for i8 {
         }
     }
 }
+
 impl ParameterCast for i16 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::I16(self)
@@ -658,6 +664,7 @@ impl ParameterCast for i16 {
         }
     }
 }
+
 impl ParameterCast for i32 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::I32(self)
@@ -670,6 +677,7 @@ impl ParameterCast for i32 {
         }
     }
 }
+
 impl ParameterCast for i64 {
     fn to_parameter_value(self) -> ParameterValue {
         ParameterValue::I64(self)

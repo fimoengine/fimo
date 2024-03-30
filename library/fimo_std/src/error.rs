@@ -167,8 +167,7 @@ impl Error {
     ///
     /// In case of an invalid error code, this returns `EINVAL`.
     pub fn from_error(error: bindings::FimoError) -> Self {
-        // Safety: The function is safe to be called.
-        if unsafe { !bindings::fimo_is_valid_error(error) } {
+        if is_valid_error(error) {
             Self(bindings::FimoError::FIMO_EINVAL)
         } else {
             Self(error)
@@ -202,8 +201,7 @@ impl Error {
         // Safety: The error pointer is valid.
         let ptr = unsafe { bindings::fimo_strerrorname(self.0, &mut error) };
 
-        // Safety: The function is safe.
-        if unsafe { bindings::fimo_is_error(error) } {
+        if is_error(error) {
             None
         } else {
             // Safety: The string returned by `fimo_strerrorname` is static and `NULL`-terminated.
@@ -221,8 +219,7 @@ impl Error {
         // Safety: The error pointer is valid.
         let ptr = unsafe { bindings::fimo_strerrordesc(self.0, &mut error) };
 
-        // Safety: The function is safe.
-        if unsafe { bindings::fimo_is_error(error) } {
+        if is_error(error) {
             None
         } else {
             // Safety: The string returned by `fimo_strerrordesc` is static and `NULL`-terminated.
@@ -232,6 +229,14 @@ impl Error {
             unsafe { Some(core::str::from_utf8_unchecked(desc.to_bytes())) }
         }
     }
+}
+
+fn is_error(errnum: bindings::FimoError) -> bool {
+    errnum.0 > bindings::FimoError::FIMO_EOK.0 && is_valid_error(errnum)
+}
+
+fn is_valid_error(errnum: bindings::FimoError) -> bool {
+    errnum.0 >= bindings::FimoError::FIMO_EOK.0 && errnum.0 <= bindings::FimoError::FIMO_EUNKNOWN.0
 }
 
 impl fmt::Debug for Error {

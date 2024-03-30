@@ -2,7 +2,7 @@ use core::{ffi::CStr, mem::ManuallyDrop, ops::Deref};
 
 use crate::{
     bindings,
-    context::ContextView,
+    context::{Context, ContextView},
     error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
     version::Version,
@@ -556,22 +556,30 @@ impl<'ctx> PseudoModule<'ctx> {
         unsafe { Ok(PseudoModule::from_ffi(module)) }
     }
 
-    unsafe fn destroy_by_ref(&mut self, _guard: &mut ModuleBackendGuard<'_>) -> error::Result {
+    unsafe fn destroy_by_ref(
+        &mut self,
+        _guard: &mut ModuleBackendGuard<'_>,
+    ) -> Result<Context, Error> {
         let module = self.share_to_ffi();
 
         // Safety: The ffi call is safe.
-        let error = unsafe { bindings::fimo_module_pseudo_module_destroy(module) };
-        to_result(error)
+        let context = unsafe {
+            to_result_indirect_in_place(|error, context| {
+                *error = bindings::fimo_module_pseudo_module_destroy(module, context.as_mut_ptr())
+            })
+        }?;
+
+        unsafe { Ok(Context::from_ffi(context)) }
     }
 
     /// Destroys the `PseudoModule`.
     ///
     /// Unlike [`PseudoModule::drop`] this method can be called while the module
     /// backend is still locked.
-    pub fn destroy(self, guard: &mut ModuleBackendGuard<'_>) -> error::Result {
+    pub fn destroy(self, guard: &mut ModuleBackendGuard<'_>) -> Result<Context, Error> {
         let mut this = ManuallyDrop::new(self);
 
-        // Safety: The module is not used afterwards.
+        // Safety: The module is not used afterward.
         unsafe { this.destroy_by_ref(guard) }
     }
 }
@@ -617,7 +625,7 @@ impl Drop for PseudoModule<'_> {
             .lock_module_backend()
             .expect("the context should be valid");
 
-        // Safety: The module is not used afterwards.
+        // Safety: The module is not used afterward.
         unsafe {
             self.destroy_by_ref(&mut guard)
                 .expect("no module should depend on the pseudo module");

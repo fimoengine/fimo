@@ -1,19 +1,34 @@
-use core::{ffi::CStr, marker::PhantomData, ops::Deref};
+use core::{ffi::CStr, marker::PhantomData, ops::Deref, sync::atomic};
 
-use crate::{error::Error, version::Version};
+use crate::{bindings, error::Error, version::Version};
 
 use super::OpaqueModule;
 
 /// A symbol of a module.
 #[derive(Clone, Copy)]
-pub struct Symbol<'a, T>(*const core::ffi::c_void, PhantomData<&'a T>);
+pub struct Symbol<'a, T>(*const bindings::FimoModuleRawSymbol, PhantomData<&'a T>);
 
-impl<T> Deref for Symbol<'_, T> {
-    type Target = T;
+impl<'a, T> Symbol<'a, T> {
+    pub fn lock(&self) -> SymbolGuard<'_, 'a, T> {
+        // Safety: it is sound.
+        let count = unsafe { &(*self.0).lock };
 
-    fn deref(&self) -> &Self::Target {
-        // Safety: Is safe by contract.
-        unsafe { &*self.0.cast::<T>() }
+        let old_count = count.fetch_add(1, atomic::Ordering::Acquire);
+        if old_count >= (isize::MAX as usize) {
+            unreachable!()
+        }
+
+        SymbolGuard { 0: self }
+    }
+
+    fn unlock(&self) {
+        // Safety: it is sound.
+        let count = unsafe { &(*self.0).lock };
+
+        let old_count = count.fetch_sub(1, atomic::Ordering::Release);
+        if old_count == 0 {
+            unreachable!()
+        }
     }
 }
 
@@ -23,13 +38,37 @@ unsafe impl<T> Send for Symbol<'_, T> where T: Send {}
 // Safety: Symbol is essentially a `&'a T`.
 unsafe impl<T> Sync for Symbol<'_, T> where T: Sync {}
 
-impl<T> crate::ffi::FFITransferable<*const core::ffi::c_void> for Symbol<'_, T> {
-    fn into_ffi(self) -> *const core::ffi::c_void {
+impl<T> crate::ffi::FFITransferable<*const bindings::FimoModuleRawSymbol> for Symbol<'_, T> {
+    fn into_ffi(self) -> *const bindings::FimoModuleRawSymbol {
         self.0
     }
 
-    unsafe fn from_ffi(ffi: *const core::ffi::c_void) -> Self {
+    unsafe fn from_ffi(ffi: *const bindings::FimoModuleRawSymbol) -> Self {
         Self(ffi, PhantomData)
+    }
+}
+
+/// A reference to a locked symbol.
+pub struct SymbolGuard<'sym, 'a, T>(&'sym Symbol<'a, T>);
+
+impl<T> Deref for SymbolGuard<'_, '_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // Safety: We hold a reference to a `T`.
+        unsafe { &*(*self.0 .0).data.cast::<T>() }
+    }
+}
+
+impl<T> Clone for SymbolGuard<'_, '_, T> {
+    fn clone(&self) -> Self {
+        self.0.lock()
+    }
+}
+
+impl<T> Drop for SymbolGuard<'_, '_, T> {
+    fn drop(&mut self) {
+        self.0.unlock()
     }
 }
 

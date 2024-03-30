@@ -4,9 +4,8 @@ use core::{marker::PhantomData, mem::ManuallyDrop, ops::Deref};
 
 use crate::{
     bindings,
-    error::{to_result, to_result_indirect},
-    ffi::FFITransferable,
-    refcount::ARefCount,
+    error::to_result,
+    ffi::{FFISharable, FFITransferable},
     version::Version,
 };
 
@@ -37,10 +36,8 @@ impl ContextView<'_> {
 
     /// Promotes the context view to a context, by increasing the reference count.
     pub fn to_context(&self) -> Context {
-        let rc = self.as_ref();
-
-        // Safety: We own a strong reference to the context.
-        unsafe { rc.increase_strong_count() };
+        // Safety: We own a valid reference to the context.
+        unsafe { bindings::fimo_context_acquire(self.into_ffi()) }
         Context(ContextView(self.0, PhantomData))
     }
 }
@@ -58,15 +55,6 @@ impl PartialEq for ContextView<'_> {
 }
 
 impl Eq for ContextView<'_> {}
-
-impl AsRef<ARefCount> for ContextView<'_> {
-    fn as_ref(&self) -> &ARefCount {
-        let rc = self.0.data.cast::<ARefCount>();
-        // Safety: The soundness is guaranteed by the documentation
-        // of the context type.
-        unsafe { &*rc }
-    }
-}
 
 impl crate::ffi::FFISharable<bindings::FimoContext> for ContextView<'_> {
     type BorrowedView<'a> = ContextView<'a>;
@@ -130,32 +118,8 @@ impl Deref for Context {
 
 impl Drop for Context {
     fn drop(&mut self) {
-        let rc = self.as_ref();
-
-        // Safety: We own a strong reference to the context.
-        let no_strong_refs = unsafe { rc.decrease_strong_count() };
-        if !no_strong_refs {
-            return;
-        }
-
-        // Safety: The strong count has reached `0`.
-        to_result_indirect(|err| unsafe {
-            *err = bindings::fimo_context_destroy_strong(self.0 .0);
-        })
-        .expect("the strong reference count reached 0");
-
-        // Safety: The last strong reference implicitly owns a weak
-        // reference.
-        let no_weak_refs = unsafe { rc.decrease_weak_count() };
-        if !no_weak_refs {
-            return;
-        }
-
-        // Safety: The weak count has reached `0`.
-        to_result_indirect(|err| unsafe {
-            *err = bindings::fimo_context_destroy_weak(self.0 .0);
-        })
-        .expect("the weak reference count reached 0");
+        // Safety: We own the reference to the context.
+        unsafe { bindings::fimo_context_release(self.share_to_ffi()) }
     }
 }
 
