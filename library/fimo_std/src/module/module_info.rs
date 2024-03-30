@@ -565,10 +565,11 @@ impl<'ctx> PseudoModule<'ctx> {
         // Safety: The ffi call is safe.
         let context = unsafe {
             to_result_indirect_in_place(|error, context| {
-                *error = bindings::fimo_module_pseudo_module_destroy(module, context.as_mut_ptr())
+                *error = bindings::fimo_module_pseudo_module_destroy(module, context.as_mut_ptr());
             })
         }?;
 
+        // Safety: The context returned by destroying the pseudo module is valid.
         unsafe { Ok(Context::from_ffi(context)) }
     }
 
