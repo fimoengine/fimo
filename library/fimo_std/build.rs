@@ -16,7 +16,7 @@ fn main() {
         .header("wrapper.h")
         .clang_arg("-Iffi/include")
         .clang_arg("-std=c17")
-        .clang_arg("-DFIMO_MACRO_HELPER_FUNCTIONS=TRUE")
+        .clang_arg("-DFIMO_STD_BINDGEN")
         .use_core()
         .newtype_enum("Fimo.*")
         .generate_cstr(true)

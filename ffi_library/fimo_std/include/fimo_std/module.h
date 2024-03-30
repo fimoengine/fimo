@@ -993,6 +993,9 @@ typedef struct FimoModuleRawSymbol {
     _Atomic(FimoUSize) lock;
 } FimoModuleRawSymbol;
 
+// The use of atomics trips up our generation of rust bindings,
+// so we disable them.
+#ifndef FIMO_STD_BINDGEN
 static FIMO_INLINE_ALWAYS bool fimo_impl_module_symbol_is_used(_Atomic(FimoUSize) *lock) {
     return atomic_load_explicit(lock, memory_order_acquire) != 0;
 }
@@ -1006,6 +1009,7 @@ static FIMO_INLINE_ALWAYS void fimo_impl_module_symbol_release(_Atomic(FimoUSize
     FimoUSize count = atomic_fetch_sub_explicit(lock, 1, memory_order_release);
     FIMO_ASSERT(count != 0)
 }
+#endif
 
 /**
  * Opaque type for a parameter table of a module.
