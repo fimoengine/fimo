@@ -11,8 +11,10 @@ pub struct RefCount(UnsafeCell<bindings::FimoRefCount>);
 impl RefCount {
     /// Constructs a new `RefCount` with one strong reference.
     pub fn new() -> Self {
-        // Safety: Function call is safe.
-        unsafe { Self(UnsafeCell::new(bindings::fimo_refcount_init())) }
+        Self(UnsafeCell::new(bindings::FimoRefCount {
+            strong_refs: 1,
+            weak_refs: 1,
+        }))
     }
 
     /// Returns the number of strong references for this instance.
@@ -134,8 +136,10 @@ pub struct ARefCount(UnsafeCell<bindings::FimoAtomicRefCount>);
 impl ARefCount {
     /// Constructs a new `RefCount` with one strong reference.
     pub fn new() -> Self {
-        // Safety: Function call is safe.
-        unsafe { Self(UnsafeCell::new(bindings::fimo_refcount_atomic_init())) }
+        Self(UnsafeCell::new(bindings::FimoAtomicRefCount {
+            strong_refs: 1,
+            weak_refs: 1,
+        }))
     }
 
     /// Returns the number of strong references for this instance.

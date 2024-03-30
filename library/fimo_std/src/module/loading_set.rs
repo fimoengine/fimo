@@ -2,7 +2,7 @@ use core::{ffi::CStr, marker::PhantomData};
 
 use crate::{
     bindings,
-    error::{self, to_result, to_result_indirect_in_place, Error},
+    error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
     version::Version,
 };
@@ -18,14 +18,9 @@ pub enum LoadingFilterRequest {
 
 /// Status of a module loading operation.
 #[derive(Debug)]
-pub enum LoadingStatus<'ctx, 'a> {
-    Success {
-        info: ModuleInfo<'ctx>,
-    },
-    Error {
-        export: ModuleExport<'ctx>,
-        should_rollback: &'a mut bool,
-    },
+pub enum LoadingStatus<'ctx> {
+    Success { info: ModuleInfo<'ctx> },
+    Error { export: ModuleExport<'ctx> },
 }
 
 /// Request of a [`LoadingSet`].
@@ -115,114 +110,34 @@ impl<'a> LoadingSet<'a> {
         }
     }
 
-    /// Adds a module to the module set.
+    /// Adds a status callback to the module set.
     ///
-    /// Opens up a module binary to select which modules to load. The binary path `module_path` must
-    /// be encoded as `UTF-8`, and point to the binary that contains the modules. The binary
-    /// path does not require to contain the file extension. If the path is [`None`], it
-    /// iterates over the exported modules of the current binary. Each exported module is then
-    /// passed to the `filter`, which can then filter which modules to load.
-    ///
-    /// This function may skip invalid module exports. Trying to include a module with duplicate
-    /// exports will result in an error. This function signals an error, if the binary does not
-    /// contain the symbols necessary to query the exported modules, but does not result in an
-    /// error, if it does not export any modules. The necessary symbols are setup automatically,
-    /// if the binary was linked with the fimo library.
-    pub fn append<F>(
+    /// Adds a set of callbacks to report a successful or failed loading of a module. If the set is
+    /// able to load all modules contained in the set, the callback will be invoked with the
+    /// [`LoadingStatus::Success`] variant, while the error path will invoke the callback with the
+    /// [`LoadingStatus::Error`] value immediately after the module fails to load. Since the
+    /// `LoadingSet` can be in a partially loaded state, the error path may be invoked immediately,
+    /// if it tried to load the module already. If the requested module `module` is not contained
+    /// in the `LoadingSet`, this method will return an error.
+    pub fn append_callback<T>(
         &mut self,
         guard: &ModuleBackendGuard<'_>,
-        module_path: Option<&CStr>,
-        mut filter: F,
+        module: &CStr,
+        callback: T,
     ) -> error::Result
     where
-        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+        T: FnOnce(LoadingStatus<'_>),
     {
-        unsafe extern "C" fn filter_func<T>(
-            export: *const bindings::FimoModuleExport,
-            data: *mut core::ffi::c_void,
-        ) -> bool
-        where
-            T: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
-        {
-            // Safety: `data` is a mutable reference to `T`.
-            let func = unsafe { &mut *data.cast::<T>() };
-
-            // Safety: Is safe.
-            let export = unsafe { ModuleExport::borrow_from_ffi(export) };
-            let request = func(export);
-            matches!(request, LoadingFilterRequest::Load)
-        }
-
-        let filter_data = core::ptr::from_mut(&mut filter).cast::<core::ffi::c_void>();
-        let filter = Some(filter_func::<F> as _);
-
-        // Safety: The ffi call is safe.
-        let error = unsafe {
-            bindings::fimo_module_set_append(
-                guard.share_to_ffi(),
-                self.share_to_ffi(),
-                module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
-                filter,
-                filter_data,
-                None,
-                None,
-                None,
-                core::ptr::null_mut(),
-            )
-        };
-        to_result(error)
-    }
-
-    /// Adds a module to the module set.
-    ///
-    /// Opens up a module binary to select which modules to load. The binary path `module_path` must
-    /// be encoded as `UTF-8`, and point to the binary that contains the modules. The binary
-    /// path does not require to contain the file extension. If the path is [`None`], it
-    /// iterates over the exported modules of the current binary. Each exported module is then
-    /// passed to the `filter`, which can then filter which modules to load.
-    ///
-    /// This function may skip invalid module exports. Trying to include a module with duplicate
-    /// exports will result in an error. This function signals an error, if the binary does not
-    /// contain the symbols necessary to query the exported modules, but does not result in an
-    /// error, if it does not export any modules. The necessary symbols are setup automatically,
-    /// if the binary was linked with the fimo library.
-    ///
-    /// Unlike [`LoadingSet::append`], this method requires a status reporting callback, which
-    /// is called after the loading/dismissal of the set.
-    pub fn append_with_callback<F, L>(
-        &mut self,
-        guard: &ModuleBackendGuard<'_>,
-        module_path: Option<&CStr>,
-        filter: F,
-        after_load: L,
-    ) -> error::Result
-    where
-        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
-        L: FnOnce(LoadingStatus<'_, '_>),
-    {
-        unsafe extern "C" fn filter_func<T>(
-            export: *const bindings::FimoModuleExport,
-            data: *mut core::ffi::c_void,
-        ) -> bool
-        where
-            T: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
-        {
-            // Safety: `data` is a mutable reference to `T`.
-            let func = unsafe { &mut *data.cast::<T>() };
-
-            // Safety: Is safe.
-            let export = unsafe { ModuleExport::borrow_from_ffi(export) };
-            let request = func(export);
-            matches!(request, LoadingFilterRequest::Load)
-        }
         unsafe extern "C" fn success_callback<T>(
             module: *const bindings::FimoModuleInfo,
             data: *mut core::ffi::c_void,
         ) where
-            T: FnMut(LoadingStatus<'_, '_>),
+            T: FnOnce(LoadingStatus<'_>),
         {
-            // Safety: `data` is a mutable reference to `T`.
-            let func = unsafe { &mut *data.cast::<T>() };
+            // Safety: `data` is a `Box<T>`.
+            let func = unsafe {
+                alloc::boxed::Box::from_raw_in(data.cast::<T>(), crate::allocator::FimoAllocator)
+            };
 
             // Safety: Is safe.
             let module = unsafe { ModuleInfo::borrow_from_ffi(module) };
@@ -232,78 +147,90 @@ impl<'a> LoadingSet<'a> {
         unsafe extern "C" fn error_callback<T>(
             export: *const bindings::FimoModuleExport,
             data: *mut core::ffi::c_void,
+        ) where
+            T: FnOnce(LoadingStatus<'_>),
+        {
+            // Safety: `data` is a `Box<T>`.
+            let func = unsafe {
+                alloc::boxed::Box::from_raw_in(data.cast::<T>(), crate::allocator::FimoAllocator)
+            };
+
+            // Safety: Is safe.
+            let export = unsafe { ModuleExport::borrow_from_ffi(export) };
+            let status = LoadingStatus::Error { export };
+            func(status);
+        }
+
+        let on_success = Some(success_callback::<T> as _);
+        let on_error = Some(error_callback::<T> as _);
+        let callback = alloc::boxed::Box::try_new_in(callback, crate::allocator::FimoAllocator)
+            .map_err(|_err| Error::ENOMEM)?;
+        let callback = alloc::boxed::Box::into_raw(callback);
+
+        // Safety: FFI call is safe.
+        to_result_indirect(|error| unsafe {
+            *error = bindings::fimo_module_set_append_callback(
+                guard.share_to_ffi(),
+                self.share_to_ffi(),
+                module.as_ptr(),
+                on_success,
+                on_error,
+                callback.cast(),
+            );
+        })
+    }
+
+    /// Adds modules to the module set.
+    ///
+    /// Opens up a module binary to select which modules to load. The binary path `module_path` must
+    /// be encoded as `UTF-8`, and point to the binary that contains the modules. The binary path
+    /// does not require to contain the file extension. If the path is `Null`, it iterates over the
+    /// exported modules of the current binary. Each exported module is then passed to the `filter`,
+    /// along with the provided `filter_data`, which can then filter which modules to load. This
+    /// function may skip invalid module exports. Trying to include a module with duplicate exports
+    /// or duplicate name will result in an error. This function signals an error, if the binary
+    /// does not contain the symbols necessary to query the exported modules, but does not return in
+    /// an error, if it does not export any modules. The necessary symbols are setup automatically,
+    /// if the binary was linked with the fimo library. In case of an error, no modules are appended
+    /// to the set.
+    pub fn append_modules<T>(
+        &mut self,
+        guard: &ModuleBackendGuard<'_>,
+        module_path: Option<&CStr>,
+        mut filter: T,
+    ) -> error::Result
+    where
+        T: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+    {
+        unsafe extern "C" fn filter_func<T>(
+            export: *const bindings::FimoModuleExport,
+            data: *mut core::ffi::c_void,
         ) -> bool
         where
-            T: FnMut(LoadingStatus<'_, '_>),
+            T: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
         {
             // Safety: `data` is a mutable reference to `T`.
             let func = unsafe { &mut *data.cast::<T>() };
 
             // Safety: Is safe.
             let export = unsafe { ModuleExport::borrow_from_ffi(export) };
-            let mut should_rollback = true;
-            let status = LoadingStatus::Error {
-                export,
-                should_rollback: &mut should_rollback,
-            };
-            func(status);
-            should_rollback
-        }
-        unsafe extern "C" fn cleanup_callback<T>(data: *mut core::ffi::c_void)
-        where
-            T: FnMut(LoadingStatus<'_, '_>),
-        {
-            let _ =
-                // Safety: Is safe.
-                unsafe { alloc::boxed::Box::from_raw_in(data.cast::<T>(), crate::allocator::FimoAllocator) };
+            let request = (func)(export);
+            matches!(request, LoadingFilterRequest::Load)
         }
 
-        fn append_internal<F, L>(
-            this: &mut LoadingSet<'_>,
-            guard: &ModuleBackendGuard<'_>,
-            module_path: Option<&CStr>,
-            mut filter: F,
-            after_load: L,
-        ) -> error::Result
-        where
-            F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
-            L: FnMut(LoadingStatus<'_, '_>),
-        {
-            let filter_data = core::ptr::from_mut(&mut filter).cast::<core::ffi::c_void>();
-            let after_load =
-                alloc::boxed::Box::try_new_in(after_load, crate::allocator::FimoAllocator)
-                    .map_err(|_err| Error::ENOMEM)?;
-            let user_data = alloc::boxed::Box::into_raw(after_load).cast::<core::ffi::c_void>();
+        let filter_data = core::ptr::from_mut(&mut filter).cast::<core::ffi::c_void>();
+        let filter = Some(filter_func::<T> as _);
 
-            let filter = Some(filter_func::<F> as _);
-            let on_success = Some(success_callback::<L> as _);
-            let on_error = Some(error_callback::<L> as _);
-            let on_cleanup = Some(cleanup_callback::<L> as _);
-
-            // Safety: The ffi call is safe.
-            let error = unsafe {
-                bindings::fimo_module_set_append(
-                    guard.share_to_ffi(),
-                    this.share_to_ffi(),
-                    module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
-                    filter,
-                    filter_data,
-                    on_success,
-                    on_error,
-                    on_cleanup,
-                    user_data,
-                )
-            };
-            to_result(error)
-        }
-
-        let mut after_load = Some(after_load);
-        let after_load = move |status: LoadingStatus<'_, '_>| {
-            let after_load = after_load.take().unwrap();
-            after_load(status);
-        };
-
-        append_internal(self, guard, module_path, filter, after_load)
+        // Safety: FFI call is safe.
+        to_result_indirect(|error| unsafe {
+            *error = bindings::fimo_module_set_append_modules(
+                guard.share_to_ffi(),
+                self.share_to_ffi(),
+                module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
+                filter,
+                filter_data,
+            );
+        })
     }
 }
 

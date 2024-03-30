@@ -9,6 +9,9 @@ fn main() {
     println!("cargo:rustc-link-lib=static=fimo_std");
     println!("cargo:rerun-if-changed=wrapper.h");
 
+    #[cfg(windows)]
+    println!("cargo:rustc-link-lib=dylib=Pathcch");
+
     let bindings = bindgen::builder()
         .header("wrapper.h")
         .clang_arg("-Iffi/include")
@@ -21,6 +24,7 @@ fn main() {
         .allowlist_item("fimo_.*")
         .allowlist_item("FIMO_.*")
         .allowlist_item("Fimo.*")
+        .blocklist_type("FimoModuleRawSymbol")
         .wrap_unsafe_ops(true)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .parse_callbacks(Box::new(DoxygenCallback))

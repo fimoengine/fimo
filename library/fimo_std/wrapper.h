@@ -11,3 +11,4 @@
 #include <fimo_std/tracing.h>
 #include <fimo_std/utils.h>
 #include <fimo_std/version.h>
+#include <fimo_std/vtable.h>
