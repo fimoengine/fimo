@@ -25,8 +25,6 @@ typedef struct FimoInternalModuleContext {
 //// Trampoline functions
 ///////////////////////////////////////////////////////////////////////
 
-FimoError fimo_internal_trampoline_module_lock(void *ctx);
-FimoError fimo_internal_trampoline_module_unlock(void *ctx);
 FimoError fimo_internal_trampoline_module_pseudo_module_new(void *ctx, const FimoModule **module);
 FimoError fimo_internal_trampoline_module_pseudo_module_destroy(void *ctx, const FimoModule *module,
                                                                 FimoContext *module_context);
@@ -105,34 +103,6 @@ FimoError fimo_internal_module_init(FimoInternalModuleContext *ctx);
  * @param ctx the context.
  */
 void fimo_internal_module_destroy(FimoInternalModuleContext *ctx);
-
-/**
- * Locks the module backend.
- *
- * The module backend is synchronized with a mutex. While the backend
- * is locked, the owner of the lock is allowed to have references to
- * modules it does not own.
- *
- * @param ctx the context.
- *
- * @return Status code.
- */
-FIMO_MUST_USE FimoError fimo_internal_module_lock(FimoInternalModuleContext *ctx);
-
-/**
- * Unlocks the module backend.
- *
- * The caller must ensure that they own a lock to the backend, and
- * that they don't have any references to symbols/modules that are
- * registered as dependencies of the module of the caller, as they
- * may be invalidated immediately after the unlock of the backend.
- *
- * @param ctx the context.
- *
- * @return Status code.
- */
-FIMO_MUST_USE
-FimoError fimo_internal_module_unlock(FimoInternalModuleContext *ctx);
 
 /**
  * Constructs a new pseudo module.

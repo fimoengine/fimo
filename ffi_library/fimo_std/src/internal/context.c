@@ -33,8 +33,6 @@ static const FimoContextVTable FIMO_INTERNAL_CONTEXT_VTABLE = {
                 },
         .module_v0 =
                 {
-                        .lock = fimo_internal_trampoline_module_lock,
-                        .unlock = fimo_internal_trampoline_module_unlock,
                         .pseudo_module_new = fimo_internal_trampoline_module_pseudo_module_new,
                         .pseudo_module_destroy = fimo_internal_trampoline_module_pseudo_module_destroy,
                         .set_new = fimo_internal_trampoline_module_set_new,

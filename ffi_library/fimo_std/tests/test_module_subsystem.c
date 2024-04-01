@@ -72,10 +72,9 @@ FIMO_MODULE_SYMBOL_TABLE(
             FIMO_MODULE_SYMBOL_TABLE_VAR(b_0, int);
             FIMO_MODULE_SYMBOL_TABLE_VAR(b_1, int);
         })
-static FimoError c_constructor(const FimoModule *module, FimoModuleLoadingSet *set, void *reserved, void **data) {
+static FimoError c_constructor(const FimoModule *module, FimoModuleLoadingSet *set, void **data) {
     assert_true(module != NULL);
     assert_true(set != NULL);
-    assert_true(reserved == NULL);
     assert_true(data != NULL);
 
     assert_true(module->parameters != NULL);
@@ -162,9 +161,8 @@ static FimoError c_constructor(const FimoModule *module, FimoModuleLoadingSet *s
     *data = NULL;
     return FIMO_EOK;
 }
-static void c_destructor(const FimoModule *module, void *reserved, void *data) {
+static void c_destructor(const FimoModule *module, void *data) {
     (void)module;
-    (void)reserved;
     (void)data;
 }
 FIMO_MODULE_EXPORT_MODULE("c", NULL, NULL, NULL, FIMO_MODULE_EXPORT_MODULE_PARAMS(c_params),
@@ -182,9 +180,6 @@ static void load_modules(void **state) {
     (void)state; /* unused */
     FimoContext context;
     FimoError error = fimo_context_init(NULL, &context);
-    assert_false(FIMO_IS_ERROR(error));
-
-    error = fimo_module_lock(context);
     assert_false(FIMO_IS_ERROR(error));
 
     FimoModuleLoadingSet *set;
@@ -247,8 +242,8 @@ static void load_modules(void **state) {
     error = fimo_module_pseudo_module_destroy(pseudo_module, &context);
     assert_false(FIMO_IS_ERROR(error));
 
-    error = fimo_module_unlock(context);
-    assert_false(FIMO_IS_ERROR(error));
+    FIMO_MODULE_INFO_RELEASE(a_info);
+    FIMO_MODULE_INFO_RELEASE(c_info);
 
     fimo_context_release(context);
 }
