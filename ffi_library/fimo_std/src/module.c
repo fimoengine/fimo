@@ -2,18 +2,6 @@
 #include <fimo_std/vtable.h>
 
 FIMO_MUST_USE
-FimoError fimo_module_lock(const FimoContext context) {
-    const FimoContextVTable *vtable = context.vtable;
-    return vtable->module_v0.lock(context.data);
-}
-
-FIMO_MUST_USE
-FimoError fimo_module_unlock(const FimoContext context) {
-    const FimoContextVTable *vtable = context.vtable;
-    return vtable->module_v0.unlock(context.data);
-}
-
-FIMO_MUST_USE
 FimoError fimo_module_pseudo_module_new(const FimoContext context, const FimoModule **module) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.pseudo_module_new(context.data, module);

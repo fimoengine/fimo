@@ -580,6 +580,20 @@ extern "C" {
  */
 #define FIMO_MODULE_SYMBOL_RELEASE(SYMBOL) fimo_impl_module_symbol_release((_Atomic(FimoUSize) *)&SYMBOL->lock)
 
+/**
+ * Acquires a reference to a `FimoModuleInfo`.
+ *
+ * @param INFO pointer to a `FimoModuleInfo`
+ */
+#define FIMO_MODULE_INFO_ACQUIRE(INFO) (fimo_impl_module_info_acquire(INFO), INFO)
+
+/**
+ * Releases a reference to a `FimoModuleInfo`.
+ *
+ * @param INFO pointer to a `FimoModuleInfo`
+ */
+#define FIMO_MODULE_INFO_RELEASE(INFO) fimo_impl_module_info_release(INFO)
+
 typedef struct FimoModule FimoModule;
 
 /**
@@ -624,12 +638,11 @@ typedef struct FimoModuleLoadingSet FimoModuleLoadingSet;
  *
  * @param arg0 pointer to the partially initialized module
  * @param arg1 module set that contained the module
- * @param arg2 reserved for future use
- * @param arg3 pointer to the resulting module data
+ * @param arg2 pointer to the resulting module data
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLoadingSet *arg1, void *arg2, void **arg3);
+typedef FimoError (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLoadingSet *arg1, void **arg2);
 
 /**
  * Destructor function for a module.
@@ -638,10 +651,9 @@ typedef FimoError (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLoa
  * module backend.
  *
  * @param arg0 pointer to the module
- * @param arg1 reserved for future use
- * @param arg2 module data to destroy
+ * @param arg1 module data to destroy
  */
-typedef void (*FimoModuleDestructor)(const FimoModule *arg0, void *arg1, void *arg2);
+typedef void (*FimoModuleDestructor)(const FimoModule *arg0, void *arg1);
 
 /**
  * Data type of a module parameter.
@@ -1086,7 +1098,31 @@ typedef struct FimoModuleInfo {
      * Path to the module directory.
      */
     const char *module_path;
+    /**
+     * Increases the reference count of the instance.
+     *
+     * Not `NULL`.
+     */
+    void (*acquire)(const struct FimoModuleInfo *);
+    /**
+     * Decreases the reference count of the instance.
+     *
+     * Not `NULL`.
+     */
+    void (*release)(const struct FimoModuleInfo *);
 } FimoModuleInfo;
+
+#ifndef FIMO_STD_BINDGEN
+static FIMO_INLINE_ALWAYS void fimo_impl_module_info_acquire(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    info->acquire(info);
+}
+
+static FIMO_INLINE_ALWAYS void fimo_impl_module_info_release(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    info->release(info);
+}
+#endif
 
 /**
  * State of a loaded module.
@@ -1170,8 +1206,6 @@ typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, voi
  * Changing the VTable is a breaking change.
  */
 typedef struct FimoModuleVTableV0 {
-    FimoError (*lock)(void *);
-    FimoError (*unlock)(void *);
     FimoError (*pseudo_module_new)(void *, const FimoModule **);
     FimoError (*pseudo_module_destroy)(void *, const FimoModule *, FimoContext *);
     FimoError (*set_new)(void *, FimoModuleLoadingSet **);
@@ -1209,35 +1243,6 @@ typedef struct FimoModuleVTableV0 {
     FimoError (*param_get_inner)(void *, const FimoModule *, void *, FimoModuleParamType *,
                                  const FimoModuleParamData *);
 } FimoModuleVTableV0;
-
-/**
- * Locks the module backend.
- *
- * The module backend is synchronized with a mutex. While the backend
- * is locked, the owner of the lock is allowed to have references to
- * modules it does not own.
- *
- * @param context the context.
- *
- * @return Status code.
- */
-FIMO_MUST_USE
-FimoError fimo_module_lock(FimoContext context);
-
-/**
- * Unlocks the module backend.
- *
- * The caller must ensure that they own a lock to the backend, and
- * that they don't have any references to symbols/modules that are
- * registered as dependencies of the module of the caller, as they
- * may be invalidated immediately after the unlock of the backend.
- *
- * @param context the context.
- *
- * @return Status code.
- */
-FIMO_MUST_USE
-FimoError fimo_module_unlock(FimoContext context);
 
 /**
  * Constructs a new pseudo module.
@@ -1411,7 +1416,8 @@ FimoError fimo_module_set_finish(FimoContext context, FimoModuleLoadingSet *modu
 /**
  * Searches for a module by it's name.
  *
- * Queries a module by its unique name.
+ * Queries a module by its unique name. The returned `FimoModuleInfo`
+ * will have its reference count increased.
  *
  * @param context context
  * @param name module name
@@ -1425,7 +1431,8 @@ FimoError fimo_module_find_by_name(FimoContext context, const char *name, const 
 /**
  * Searches for a module by a symbol it exports.
  *
- * Queries the module that exported the specified symbol.
+ * Queries the module that exported the specified symbol. The returned
+ * `FimoModuleInfo` will have its reference count increased.
  *
  * @param context context
  * @param name symbol name

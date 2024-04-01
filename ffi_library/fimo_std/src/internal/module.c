@@ -1,9 +1,9 @@
-// ReSharper disable CppDeclaratorNeverUsed
 #include <fimo_std/internal/module.h>
 
 #include <fimo_std/internal/context.h>
 #include <fimo_std/internal/tracing.h>
 #include <fimo_std/memory.h>
+#include <fimo_std/refcount.h>
 
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -330,32 +330,42 @@ typedef int (*CmpFn_)(const void *, const void *, void *);
 typedef void (*FreeFn_)(void *);
 
 struct ModuleInfo_;
+struct ModuleInfoInner_;
 struct ModuleInfoSymbol_;
 struct ModuleInfoParam_;
 struct ModuleInfoNamespace_;
 struct ModuleInfoDependency_;
 
-static const struct ModuleInfo_ *module_info_from_module(const FimoModule *module);
-static const struct ModuleInfo_ *module_info_from_module_info(const FimoModuleInfo *module_info);
-static FimoError module_info_set_symbol_(struct ModuleInfo_ *element, const char *name, const char *ns,
+static const struct ModuleInfo_ *module_info_from_module_(const FimoModule *module);
+static const struct ModuleInfo_ *module_info_from_module_info_(const FimoModuleInfo *module_info);
+static const struct ModuleInfo_ *module_info_from_inner_(struct ModuleInfoInner_ *inner);
+static void module_info_acquire_(const struct ModuleInfo_ *info);
+static void module_info_release_(const struct ModuleInfo_ *info);
+
+static struct ModuleInfoInner_ *module_info_lock_(const struct ModuleInfo_ *inner);
+static void module_info_unlock_(struct ModuleInfoInner_ *inner);
+static bool module_info_is_detached_(struct ModuleInfoInner_ *inner);
+static void module_info_detach_(struct ModuleInfoInner_ *inner);
+static FimoError module_info_set_symbol_(struct ModuleInfoInner_ *inner, const char *name, const char *ns,
                                          FimoVersion version, FimoModuleDynamicSymbolDestructor destructor,
                                          const void *symbol, const struct ModuleInfoSymbol_ **symbol_element);
-static const struct ModuleInfoSymbol_ *module_info_get_symbol_(const struct ModuleInfo_ *element, const char *name,
+static const struct ModuleInfoSymbol_ *module_info_get_symbol_(struct ModuleInfoInner_ *inner, const char *name,
                                                                const char *ns, FimoVersion version);
-static FimoError module_info_set_param_(struct ModuleInfo_ *element, const char *name, const FimoModuleParam *param);
-static const struct ModuleInfoParam_ *module_info_get_param_(const struct ModuleInfo_ *element, const char *name);
-static FimoError module_info_set_ns_(struct ModuleInfo_ *element, const char *name, bool is_static);
-static const struct ModuleInfoNamespace_ *module_info_get_ns_(const struct ModuleInfo_ *element, const char *name);
-static void module_info_delete_ns_(struct ModuleInfo_ *element, const char *name);
-static FimoError module_info_set_dependency_(struct ModuleInfo_ *element, const FimoModuleInfo *info, bool is_static);
-static const struct ModuleInfoDependency_ *module_info_get_dependency_(const struct ModuleInfo_ *element,
+static FimoError module_info_set_param_(struct ModuleInfoInner_ *inner, const char *name, const FimoModuleParam *param);
+static const struct ModuleInfoParam_ *module_info_get_param_(struct ModuleInfoInner_ *inner, const char *name);
+static FimoError module_info_set_ns_(struct ModuleInfoInner_ *inner, const char *name, bool is_static);
+static const struct ModuleInfoNamespace_ *module_info_get_ns_(struct ModuleInfoInner_ *inner, const char *name);
+static void module_info_delete_ns_(struct ModuleInfoInner_ *inner, const char *name);
+static FimoError module_info_set_dependency_(struct ModuleInfoInner_ *inner, const FimoModuleInfo *info,
+                                             bool is_static);
+static const struct ModuleInfoDependency_ *module_info_get_dependency_(struct ModuleInfoInner_ *inner,
                                                                        const char *name);
-static void module_info_delete_dependency_(struct ModuleInfo_ *element, const char *name);
-static bool module_info_next_symbol_(const struct ModuleInfo_ *element, FimoUSize *it,
+static void module_info_delete_dependency_(struct ModuleInfoInner_ *inner, const char *name);
+static bool module_info_next_symbol_(struct ModuleInfoInner_ *inner, FimoUSize *it,
                                      const struct ModuleInfoSymbol_ **item);
-static bool module_info_next_ns_(const struct ModuleInfo_ *element, FimoUSize *it,
+static bool module_info_next_ns_(struct ModuleInfoInner_ *inner, FimoUSize *it,
                                  const struct ModuleInfoNamespace_ **item);
-static bool module_info_next_dependency_(const struct ModuleInfo_ *element, FimoUSize *it,
+static bool module_info_next_dependency_(struct ModuleInfoInner_ *inner, FimoUSize *it,
                                          const struct ModuleInfoDependency_ **item);
 
 struct ModuleHandle_;
@@ -369,8 +379,10 @@ static void module_handle_release_(struct ModuleHandle_ *element);
 struct LoadingSetModule_;
 struct LoadingSetSymbol_;
 
-static FimoError loading_set_new_(FimoModuleLoadingSet **element);
-static void loading_set_free_(FimoModuleLoadingSet *element);
+static FimoError loading_set_new_(FimoModuleLoadingSet **set);
+static void loading_set_free_(FimoModuleLoadingSet *set);
+static void loading_set_lock_(FimoModuleLoadingSet *set);
+static void loading_set_unlock_(FimoModuleLoadingSet *set);
 static const struct LoadingSetModule_ *loading_set_get_module_(FimoModuleLoadingSet *set, const char *name);
 static const struct LoadingSetSymbol_ *loading_set_get_symbol_(FimoModuleLoadingSet *set, const char *name,
                                                                const char *ns, FimoVersion version);
@@ -383,13 +395,13 @@ static FimoError ctx_init_(FimoInternalModuleContext *ctx);
 static void ctx_deinit_(FimoInternalModuleContext *ctx);
 static FimoError ctx_lock_(FimoInternalModuleContext *ctx);
 static FimoError ctx_unlock_(FimoInternalModuleContext *ctx);
-static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModule *module);
-static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, const FimoModule *module);
-static FimoError ctx_link_module_(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                  const FimoModuleInfo *other);
-static FimoError ctx_unlink_module_(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                    const FimoModuleInfo *other);
-static bool ctx_can_remove_module_(FimoInternalModuleContext *ctx, const FimoModule *module);
+static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner);
+static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner);
+static FimoError ctx_link_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner,
+                                  struct ModuleInfoInner_ *other_inner);
+static FimoError ctx_unlink_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner,
+                                    struct ModuleInfoInner_ *other_inner);
+static bool ctx_can_remove_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner);
 static FimoError ctx_cleanup_loose_modules(FimoInternalModuleContext *ctx);
 static const struct Module_ *ctx_get_module_(FimoInternalModuleContext *ctx, const char *name);
 static const struct Symbol_ *ctx_get_symbol_(FimoInternalModuleContext *ctx, const char *name, const char *ns);
@@ -408,7 +420,10 @@ static FimoError fi_module_new_pseudo_(FimoInternalModuleContext *ctx, const cha
 static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
                                            const FimoModuleExport *export, struct ModuleHandle_ *handle,
                                            FimoModule **element);
-static void fi_module_free_(FimoModule *element, FimoContext *context);
+static void fi_module_free_(struct ModuleInfoInner_ *info_inner, FimoContext *context);
+
+static void fi_module_info_acquire_(const FimoModuleInfo *info);
+static void fi_module_info_release_(const FimoModuleInfo *info);
 
 static bool fi_module_export_is_valid_(const FimoModuleExport *export, FimoInternalModuleContext *ctx);
 
@@ -542,11 +557,10 @@ static bool param_can_read_public(const FimoModuleParam *param) {
     return param->read == FIMO_MODULE_PARAM_ACCESS_PUBLIC;
 }
 
-static bool param_can_read_dependency(const FimoModuleParam *param, const FimoModule *caller) {
+static bool param_can_read_dependency(const FimoModuleParam *param, struct ModuleInfoInner_ *caller) {
     FIMO_DEBUG_ASSERT(param && caller)
-    const struct ModuleInfo_ *caller_info = module_info_from_module(caller);
     const char *param_owner = param->data.owner->module_info->name;
-    if (module_info_get_dependency_(caller_info, param_owner) == NULL) {
+    if (module_info_get_dependency_(caller, param_owner) == NULL) {
         return false;
     }
 
@@ -563,11 +577,10 @@ static bool param_can_write_public(const FimoModuleParam *param) {
     return param->write == FIMO_MODULE_PARAM_ACCESS_PUBLIC;
 }
 
-static bool param_can_write_dependency(const FimoModuleParam *param, const FimoModule *caller) {
+static bool param_can_write_dependency(const FimoModuleParam *param, struct ModuleInfoInner_ *caller) {
     FIMO_DEBUG_ASSERT(param && caller)
-    const struct ModuleInfo_ *caller_info = module_info_from_module(caller);
     const char *param_owner = param->data.owner->module_info->name;
-    if (module_info_get_dependency_(caller_info, param_owner) == NULL) {
+    if (module_info_get_dependency_(caller, param_owner) == NULL) {
         return false;
     }
 
@@ -825,10 +838,7 @@ enum ModuleType_ {
     MODULE_TYPE_PSEUDO_,
 };
 
-// Heap only.
-struct ModuleInfo_ {
-    FimoModuleInfo info;
-    enum ModuleType_ type;
+struct ModuleInfoInner_ {
     struct hashmap *symbols;
     struct hashmap *parameters;
     struct hashmap *namespaces;
@@ -836,6 +846,15 @@ struct ModuleInfo_ {
     struct ModuleHandle_ *handle;
     const FimoModule *module;
     const FimoModuleExport *export;
+    mtx_t mutex;
+};
+
+// Heap only.
+struct ModuleInfo_ {
+    FimoModuleInfo info;
+    enum ModuleType_ type;
+    struct ModuleInfoInner_ inner;
+    FimoAtomicRefCount ref_count;
 };
 
 static FimoError module_info_new_(const char *name, const char *description, const char *author, const char *license,
@@ -922,19 +941,32 @@ static FimoError module_info_new_(const char *name, const char *description, con
                             .author = author_,
                             .license = license_,
                             .module_path = module_path_,
+                            .acquire = fi_module_info_acquire_,
+                            .release = fi_module_info_release_,
                     },
             .type = type,
-            .symbols = symbols,
-            .parameters = parameters,
-            .namespaces = namespaces,
-            .dependencies = dependencies,
-            .handle = handle,
-            .module = NULL,
-            .export = export,
+            .inner =
+                    {
+                            .symbols = symbols,
+                            .parameters = parameters,
+                            .namespaces = namespaces,
+                            .dependencies = dependencies,
+                            .handle = handle,
+                            .module = NULL,
+                            .export = export,
+                    },
+            .ref_count = FIMO_REFCOUNT_INIT,
     };
+
+    if (mtx_init(&(*info)->inner.mutex, mtx_plain) != thrd_success) {
+        error = FIMO_EUNKNOWN;
+        goto mutex_init;
+    }
 
     return FIMO_EOK;
 
+mutex_init:
+    fimo_free(*info);
 info_alloc:
     hashmap_free(dependencies);
 alloc_dependencies:
@@ -957,88 +989,135 @@ name_alloc:
     return error;
 }
 
-static void module_info_free_(struct ModuleInfo_ *info) {
-    FIMO_DEBUG_ASSERT(info)
-    hashmap_free(info->dependencies);
-    hashmap_free(info->parameters);
-    hashmap_free(info->namespaces);
-    hashmap_free(info->symbols);
+static const struct ModuleInfo_ *module_info_from_module_(const FimoModule *module) {
+    FIMO_DEBUG_ASSERT(module)
+    return module_info_from_module_info_(module->module_info);
+}
 
-    if (info->module && info->module->module_data) {
-        info->export->module_destructor(info->module, NULL, info->module->module_data);
+static const struct ModuleInfo_ *module_info_from_module_info_(const FimoModuleInfo *module_info) {
+    FIMO_DEBUG_ASSERT(module_info)
+    return FIMO_CONTAINER_OF_CONST(module_info, struct ModuleInfo_, info);
+}
+
+static const struct ModuleInfo_ *module_info_from_inner_(struct ModuleInfoInner_ *inner) {
+    FIMO_DEBUG_ASSERT(inner)
+    return FIMO_CONTAINER_OF_CONST(inner, struct ModuleInfo_, inner);
+}
+
+static void module_info_acquire_(const struct ModuleInfo_ *info) {
+    FIMO_DEBUG_ASSERT(info)
+    fimo_increase_strong_count_atomic((FimoAtomicRefCount *)&info->ref_count);
+}
+
+static void module_info_release_(const struct ModuleInfo_ *info) {
+    FIMO_DEBUG_ASSERT(info)
+    const bool can_destroy = fimo_decrease_strong_count_atomic((FimoAtomicRefCount *)&info->ref_count);
+    if (!can_destroy) {
+        return;
     }
-    module_handle_release_(info->handle);
+
+    struct ModuleInfoInner_ *inner = module_info_lock_(info);
+    FIMO_ASSERT(module_info_is_detached_(inner))
+    module_info_unlock_(inner);
 
     fimo_free((char *)info->info.module_path);
     fimo_free((char *)info->info.license);
     fimo_free((char *)info->info.author);
     fimo_free((char *)info->info.description);
     fimo_free((char *)info->info.name);
-    fimo_free(info);
+    mtx_destroy((mtx_t *)&info->inner.mutex);
+    fimo_free((struct ModuleInfo_ *)info);
 }
 
-static const struct ModuleInfo_ *module_info_from_module(const FimoModule *module) {
-    FIMO_DEBUG_ASSERT(module)
-    return module_info_from_module_info(module->module_info);
+static struct ModuleInfoInner_ *module_info_lock_(const struct ModuleInfo_ *inner) {
+    FIMO_DEBUG_ASSERT(inner)
+    const int result = mtx_lock((mtx_t *)&inner->inner.mutex);
+    FIMO_ASSERT(result == thrd_success)
+    return (struct ModuleInfoInner_ *)&inner->inner;
 }
 
-static const struct ModuleInfo_ *module_info_from_module_info(const FimoModuleInfo *module_info) {
-    FIMO_DEBUG_ASSERT(module_info)
-    return FIMO_CONTAINER_OF_CONST(module_info, struct ModuleInfo_, info);
+static void module_info_unlock_(struct ModuleInfoInner_ *inner) {
+    FIMO_DEBUG_ASSERT(inner)
+    const int result = mtx_unlock(&inner->mutex);
+    FIMO_DEBUG_ASSERT(result == thrd_success);
 }
 
-static FimoError module_info_set_symbol_(struct ModuleInfo_ *element, const char *name, const char *ns,
+static bool module_info_is_detached_(struct ModuleInfoInner_ *inner) {
+    FIMO_DEBUG_ASSERT(inner)
+    return inner->handle == NULL;
+}
+
+static void module_info_detach_(struct ModuleInfoInner_ *inner) {
+    FIMO_DEBUG_ASSERT(inner && !module_info_is_detached_(inner))
+    hashmap_free(inner->dependencies);
+    hashmap_free(inner->parameters);
+    hashmap_free(inner->namespaces);
+    hashmap_free(inner->symbols);
+    if (inner->export && inner->export->module_destructor) {
+        inner->export->module_destructor(inner->module, inner->module->module_data);
+    }
+    module_handle_release_(inner->handle);
+    inner->handle = NULL;
+    inner->module = NULL;
+    inner->export = NULL;
+}
+
+static FimoError module_info_set_symbol_(struct ModuleInfoInner_ *inner, const char *name, const char *ns,
                                          const FimoVersion version, FimoModuleDynamicSymbolDestructor destructor,
                                          const void *symbol, const struct ModuleInfoSymbol_ **symbol_element) {
-    FIMO_DEBUG_ASSERT(element && name && ns && symbol_element)
+    FIMO_DEBUG_ASSERT(inner && name && ns && symbol_element && !module_info_is_detached_(inner))
     struct ModuleInfoSymbol_ sym;
     const FimoError error = module_info_symbol_new_(name, ns, version, destructor, symbol, &sym);
     if (FIMO_IS_ERROR(error)) {
         return error;
     }
 
-    const void *old = hashmap_set(element->symbols, &sym);
+    const void *old = hashmap_set(inner->symbols, &sym);
     if (old) {
         module_info_symbol_free_(&sym);
         return FIMO_EEXIST;
     }
-    if (hashmap_oom(element->symbols)) {
+    if (hashmap_oom(inner->symbols)) {
         module_info_symbol_free_(&sym);
         return FIMO_ENOMEM;
     }
-    *symbol_element = hashmap_get(element->symbols, &sym);
+    *symbol_element = hashmap_get(inner->symbols, &sym);
 
     return FIMO_EOK;
 }
 
-static const struct ModuleInfoSymbol_ *module_info_get_symbol_(const struct ModuleInfo_ *element, const char *name,
+static const struct ModuleInfoSymbol_ *module_info_get_symbol_(struct ModuleInfoInner_ *inner, const char *name,
                                                                const char *ns, const FimoVersion version) {
-    FIMO_DEBUG_ASSERT(element && name && ns)
-    const struct ModuleInfoSymbol_ *x = hashmap_get(element->symbols, &(struct ModuleInfoSymbol_){
-                                                                              .name = name,
-                                                                              .ns = ns,
-                                                                      });
+    FIMO_DEBUG_ASSERT(inner && name && ns)
+    if (module_info_is_detached_(inner)) {
+        return NULL;
+    }
+    const struct ModuleInfoSymbol_ *x = hashmap_get(inner->symbols, &(struct ModuleInfoSymbol_){
+                                                                            .name = name,
+                                                                            .ns = ns,
+                                                                    });
     if (x == NULL || !fimo_version_compatible(&x->version, &version)) {
         return NULL;
     }
     return x;
 }
 
-static FimoError module_info_set_param_(struct ModuleInfo_ *element, const char *name, const FimoModuleParam *param) {
-    FIMO_DEBUG_ASSERT(element && name && param)
+static FimoError module_info_set_param_(struct ModuleInfoInner_ *inner, const char *name,
+                                        const FimoModuleParam *param) {
+    FIMO_DEBUG_ASSERT(inner && name && param && !module_info_is_detached_(inner))
     struct ModuleInfoParam_ p;
     const FimoError error = module_info_param_new_(name, param, &p);
     if (FIMO_IS_ERROR(error)) {
         return error;
     }
 
-    const void *old = hashmap_set(element->parameters, &p);
+    const void *old = hashmap_set(inner->parameters, &p);
     if (old) {
         module_info_param_free_(&p);
         return FIMO_EEXIST;
     }
 
-    if (hashmap_oom(element->parameters)) {
+    if (hashmap_oom(inner->parameters)) {
         module_info_param_free_(&p);
         return FIMO_ENOMEM;
     }
@@ -1046,29 +1125,32 @@ static FimoError module_info_set_param_(struct ModuleInfo_ *element, const char 
     return FIMO_EOK;
 }
 
-static const struct ModuleInfoParam_ *module_info_get_param_(const struct ModuleInfo_ *element, const char *name) {
-    FIMO_DEBUG_ASSERT(element && name)
-    const struct ModuleInfoParam_ *x = hashmap_get(element->parameters, &(struct ModuleInfoParam_){
-                                                                                .name = name,
-                                                                        });
+static const struct ModuleInfoParam_ *module_info_get_param_(struct ModuleInfoInner_ *inner, const char *name) {
+    FIMO_DEBUG_ASSERT(inner && name)
+    if (module_info_is_detached_(inner)) {
+        return NULL;
+    }
+    const struct ModuleInfoParam_ *x = hashmap_get(inner->parameters, &(struct ModuleInfoParam_){
+                                                                              .name = name,
+                                                                      });
     return x;
 }
 
-static FimoError module_info_set_ns_(struct ModuleInfo_ *element, const char *name, const bool is_static) {
-    FIMO_DEBUG_ASSERT(element && name)
+static FimoError module_info_set_ns_(struct ModuleInfoInner_ *inner, const char *name, const bool is_static) {
+    FIMO_DEBUG_ASSERT(inner && name && !module_info_is_detached_(inner))
     struct ModuleInfoNamespace_ ns;
     const FimoError error = module_info_namespace_new_(name, is_static, &ns);
     if (FIMO_IS_ERROR(error)) {
         return error;
     }
 
-    const void *old = hashmap_set(element->namespaces, &ns);
+    const void *old = hashmap_set(inner->namespaces, &ns);
     if (old) {
         module_info_namespace_free_(&ns);
         return FIMO_EEXIST;
     }
 
-    if (hashmap_oom(element->namespaces)) {
+    if (hashmap_oom(inner->namespaces)) {
         module_info_namespace_free_(&ns);
         return FIMO_ENOMEM;
     }
@@ -1076,38 +1158,41 @@ static FimoError module_info_set_ns_(struct ModuleInfo_ *element, const char *na
     return FIMO_EOK;
 }
 
-static const struct ModuleInfoNamespace_ *module_info_get_ns_(const struct ModuleInfo_ *element, const char *name) {
-    FIMO_DEBUG_ASSERT(element && name)
-    const struct ModuleInfoNamespace_ *x = hashmap_get(element->namespaces, &(struct ModuleInfoNamespace_){
-                                                                                    .name = name,
-                                                                            });
+static const struct ModuleInfoNamespace_ *module_info_get_ns_(struct ModuleInfoInner_ *inner, const char *name) {
+    FIMO_DEBUG_ASSERT(inner && name)
+    if (module_info_is_detached_(inner)) {
+        return NULL;
+    }
+    const struct ModuleInfoNamespace_ *x = hashmap_get(inner->namespaces, &(struct ModuleInfoNamespace_){
+                                                                                  .name = name,
+                                                                          });
     return x;
 }
 
-static void module_info_delete_ns_(struct ModuleInfo_ *element, const char *name) {
-    FIMO_DEBUG_ASSERT(element && name)
-    struct ModuleInfoNamespace_ *x = (void *)hashmap_delete(element->namespaces, &(struct ModuleInfoNamespace_){
-                                                                                         .name = name,
-                                                                                 });
+static void module_info_delete_ns_(struct ModuleInfoInner_ *inner, const char *name) {
+    FIMO_DEBUG_ASSERT(inner && name && !module_info_is_detached_(inner))
+    struct ModuleInfoNamespace_ *x = (void *)hashmap_delete(inner->namespaces, &(struct ModuleInfoNamespace_){
+                                                                                       .name = name,
+                                                                               });
     module_info_namespace_free_(x);
 }
 
-static FimoError module_info_set_dependency_(struct ModuleInfo_ *element, const FimoModuleInfo *info,
+static FimoError module_info_set_dependency_(struct ModuleInfoInner_ *inner, const FimoModuleInfo *info,
                                              const bool is_static) {
-    FIMO_DEBUG_ASSERT(element && info)
+    FIMO_DEBUG_ASSERT(inner && info && !module_info_is_detached_(inner))
     struct ModuleInfoDependency_ dep;
     const FimoError error = module_info_dependency_new_(info, is_static, &dep);
     if (FIMO_IS_ERROR(error)) {
         return error;
     }
 
-    const void *old = hashmap_set(element->dependencies, &dep);
+    const void *old = hashmap_set(inner->dependencies, &dep);
     if (old) {
         module_info_dependency_free_(&dep);
         return FIMO_EEXIST;
     }
 
-    if (hashmap_oom(element->dependencies)) {
+    if (hashmap_oom(inner->dependencies)) {
         module_info_dependency_free_(&dep);
         return FIMO_ENOMEM;
     }
@@ -1115,39 +1200,51 @@ static FimoError module_info_set_dependency_(struct ModuleInfo_ *element, const 
     return FIMO_EOK;
 }
 
-static const struct ModuleInfoDependency_ *module_info_get_dependency_(const struct ModuleInfo_ *element,
+static const struct ModuleInfoDependency_ *module_info_get_dependency_(struct ModuleInfoInner_ *inner,
                                                                        const char *name) {
-    FIMO_DEBUG_ASSERT(element && name)
-    const struct ModuleInfoDependency_ *x = hashmap_get(element->dependencies, &(struct ModuleInfoDependency_){
-                                                                                       .name = name,
-                                                                               });
+    FIMO_DEBUG_ASSERT(inner && name)
+    if (module_info_is_detached_(inner)) {
+        return NULL;
+    }
+    const struct ModuleInfoDependency_ *x = hashmap_get(inner->dependencies, &(struct ModuleInfoDependency_){
+                                                                                     .name = name,
+                                                                             });
     return x;
 }
 
-static void module_info_delete_dependency_(struct ModuleInfo_ *element, const char *name) {
-    FIMO_DEBUG_ASSERT(element && name)
-    struct ModuleInfoDependency_ *x = (void *)hashmap_delete(element->dependencies, &(struct ModuleInfoDependency_){
-                                                                                            .name = name,
-                                                                                    });
+static void module_info_delete_dependency_(struct ModuleInfoInner_ *inner, const char *name) {
+    FIMO_DEBUG_ASSERT(inner && name && !module_info_is_detached_(inner))
+    struct ModuleInfoDependency_ *x = (void *)hashmap_delete(inner->dependencies, &(struct ModuleInfoDependency_){
+                                                                                          .name = name,
+                                                                                  });
     module_info_dependency_free_(x);
 }
 
-static bool module_info_next_symbol_(const struct ModuleInfo_ *element, FimoUSize *it,
+static bool module_info_next_symbol_(struct ModuleInfoInner_ *inner, FimoUSize *it,
                                      const struct ModuleInfoSymbol_ **item) {
-    FIMO_DEBUG_ASSERT(element && it && item)
-    return hashmap_iter(element->symbols, it, (void **)item);
+    FIMO_DEBUG_ASSERT(inner && it && item)
+    if (module_info_is_detached_(inner)) {
+        return false;
+    }
+    return hashmap_iter(inner->symbols, it, (void **)item);
 }
 
-static bool module_info_next_ns_(const struct ModuleInfo_ *element, FimoUSize *it,
+static bool module_info_next_ns_(struct ModuleInfoInner_ *inner, FimoUSize *it,
                                  const struct ModuleInfoNamespace_ **item) {
-    FIMO_DEBUG_ASSERT(element && it && item)
-    return hashmap_iter(element->namespaces, it, (void **)item);
+    FIMO_DEBUG_ASSERT(inner && it && item)
+    if (module_info_is_detached_(inner)) {
+        return false;
+    }
+    return hashmap_iter(inner->namespaces, it, (void **)item);
 }
 
-static bool module_info_next_dependency_(const struct ModuleInfo_ *element, FimoUSize *it,
+static bool module_info_next_dependency_(struct ModuleInfoInner_ *inner, FimoUSize *it,
                                          const struct ModuleInfoDependency_ **item) {
-    FIMO_DEBUG_ASSERT(element && it && item)
-    return hashmap_iter(element->dependencies, it, (void **)item);
+    FIMO_DEBUG_ASSERT(inner && it && item)
+    if (module_info_is_detached_(inner)) {
+        return false;
+    }
+    return hashmap_iter(inner->dependencies, it, (void **)item);
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -1156,7 +1253,7 @@ static bool module_info_next_dependency_(const struct ModuleInfo_ *element, Fimo
 
 // Heap only.
 struct ModuleHandle_ {
-    FimoUSize references;
+    FimoAtomicRefCount ref_count;
     MODULE_HANDLE_ handle;
     const char *module_path;
     void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *);
@@ -1241,7 +1338,7 @@ static FimoError module_handle_new_local_(void (*export_iterator)(bool (*)(const
 #endif
 
     **element = (struct ModuleHandle_){
-            .references = 1,
+            .ref_count = FIMO_REFCOUNT_INIT,
             .handle = handle,
             .module_path = module_path,
             .export_iterator = export_iterator,
@@ -1322,7 +1419,7 @@ static FimoError module_handle_new_plugin_(const char *path, struct ModuleHandle
 #endif
 
     **element = (struct ModuleHandle_){
-            .references = 1,
+            .ref_count = FIMO_REFCOUNT_INIT,
             .handle = handle,
             .module_path = module_path,
             .export_iterator = export_iterator,
@@ -1351,18 +1448,13 @@ get_path_parent:
 
 static void module_handle_acquire_(struct ModuleHandle_ *element) {
     FIMO_DEBUG_ASSERT(element)
-    FimoIntOptionUSize result = fimo_usize_checked_add(element->references, 1);
-    FIMO_ASSERT(result.has_value)
-    element->references = result.data.value;
+    fimo_increase_strong_count_atomic(&element->ref_count);
 }
 
 static void module_handle_release_(struct ModuleHandle_ *element) {
     FIMO_DEBUG_ASSERT(element)
-    FimoIntOptionUSize sub_result = fimo_usize_checked_sub(element->references, 1);
-    FIMO_ASSERT(sub_result.has_value)
-    element->references = sub_result.data.value;
-
-    if (element->references != 0) {
+    bool can_destroy = fimo_decrease_strong_count_atomic(&element->ref_count);
+    if (!can_destroy) {
         return;
     }
 
@@ -1672,15 +1764,17 @@ static int loading_set_loading_info_entry_cmp_(const struct LoadingSetLoadingInf
 //// Loading Set
 ///////////////////////////////////////////////////////////////////////
 
+// Heap only.
 struct FimoModuleLoadingSet {
     bool is_loading;
     bool should_recreate_map;
     struct hashmap *modules;
     struct hashmap *symbols;
+    mtx_t mutex;
 };
 
-static FimoError loading_set_new_(FimoModuleLoadingSet **element) {
-    FIMO_DEBUG_ASSERT(element)
+static FimoError loading_set_new_(FimoModuleLoadingSet **set) {
+    FIMO_DEBUG_ASSERT(set)
     struct hashmap *modules = hashmap_new_with_allocator(
             malloc_, realloc_, free_, sizeof(struct LoadingSetModule_), 0, 0, 0, (HashFn_)loading_set_module_hash_,
             (CmpFn_)loading_set_module_cmp_, (FreeFn_)loading_set_module_free_, NULL);
@@ -1697,29 +1791,49 @@ static FimoError loading_set_new_(FimoModuleLoadingSet **element) {
     }
 
     FimoError error;
-    *element = fimo_malloc(sizeof(**element), &error);
+    *set = fimo_malloc(sizeof(**set), &error);
     if (FIMO_IS_ERROR(error)) {
         hashmap_free(symbols);
         hashmap_free(modules);
         return error;
     }
 
-    **element = (FimoModuleLoadingSet){
+    **set = (FimoModuleLoadingSet){
             .is_loading = false,
             .should_recreate_map = false,
             .modules = modules,
             .symbols = symbols,
     };
 
+    if (mtx_init(&(*set)->mutex, mtx_plain) != thrd_success) {
+        fimo_free(*set);
+        hashmap_free(symbols);
+        hashmap_free(modules);
+        return FIMO_EUNKNOWN;
+    }
+
     return FIMO_EOK;
 }
 
-static void loading_set_free_(FimoModuleLoadingSet *element) {
-    FIMO_DEBUG_ASSERT(element)
-    FIMO_DEBUG_ASSERT(!element->is_loading)
-    hashmap_free(element->symbols);
-    hashmap_free(element->modules);
-    fimo_free(element);
+static void loading_set_free_(FimoModuleLoadingSet *set) {
+    FIMO_DEBUG_ASSERT(set)
+    FIMO_DEBUG_ASSERT(!set->is_loading)
+    hashmap_free(set->symbols);
+    hashmap_free(set->modules);
+    mtx_destroy(&set->mutex);
+    fimo_free(set);
+}
+
+static void loading_set_lock_(FimoModuleLoadingSet *set) {
+    FIMO_DEBUG_ASSERT(set)
+    const int result = mtx_lock(&set->mutex);
+    FIMO_ASSERT(result == thrd_success)
+}
+
+static void loading_set_unlock_(FimoModuleLoadingSet *set) {
+    FIMO_DEBUG_ASSERT(set)
+    const int result = mtx_unlock(&set->mutex);
+    FIMO_ASSERT(result == thrd_success)
 }
 
 static const struct LoadingSetModule_ *loading_set_get_module_(FimoModuleLoadingSet *set, const char *name) {
@@ -2216,32 +2330,33 @@ static FimoError ctx_unlock_(FimoInternalModuleContext *ctx) {
     return FIMO_EOK;
 }
 
-static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModule *module) {
-    FIMO_DEBUG_ASSERT(ctx && module)
-    TRACE_(ctx, "module='%s'", module->module_info->name)
-    if (hashmap_get(ctx->modules, &(struct Module_){.name = module->module_info->name}) != NULL) {
-        ERROR_(ctx, FIMO_EINVAL, "module already exists, module='%s'", module->module_info->name)
+static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner) {
+    FIMO_DEBUG_ASSERT(ctx && info_inner && !module_info_is_detached_(info_inner))
+    const struct ModuleInfo_ *info = module_info_from_inner_(info_inner);
+
+    TRACE_(ctx, "module='%s'", info->info.name)
+    if (hashmap_get(ctx->modules, &(struct Module_){.name = info->info.name}) != NULL) {
+        ERROR_(ctx, FIMO_EINVAL, "module already exists, module='%s'", info->info.name)
         return FIMO_EINVAL;
     }
 
     FimoU64 node;
-    FimoError error = fimo_graph_add_node(ctx->dependency_graph, &module, &node);
+    FimoError error = fimo_graph_add_node(ctx->dependency_graph, &info_inner->module, &node);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not add the module to the dependency graph")
         return error;
     }
 
-    const struct ModuleInfo_ *info = module_info_from_module(module);
     // Check for no duplicate symbols.
     {
         FimoUSize it = 0;
         const struct ModuleInfoSymbol_ *symbol = NULL;
-        while (module_info_next_symbol_(info, &it, &symbol)) {
+        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
             const struct Symbol_ *s = ctx_get_symbol_(ctx, symbol->name, symbol->ns);
             if (s) {
                 error = FIMO_EINVAL;
-                ERROR_(ctx, error, "symbol already exists, module='%s', symbol='%s', ns='%s'",
-                       module->module_info->name, symbol->name, symbol->ns)
+                ERROR_(ctx, error, "symbol already exists, module='%s', symbol='%s', ns='%s'", info->info.name,
+                       symbol->name, symbol->ns)
                 goto remove_node;
             }
         }
@@ -2250,12 +2365,11 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
     {
         FimoUSize it = 0;
         const struct ModuleInfoNamespace_ *ns = NULL;
-        while (module_info_next_ns_(info, &it, &ns)) {
+        while (module_info_next_ns_(info_inner, &it, &ns)) {
             const struct Namespace_ *n = ctx_get_ns_(ctx, ns->name);
             if (n == NULL) {
                 error = FIMO_EINVAL;
-                ERROR_(ctx, error, "namespace does not exist, module='%s', ns='%s'", module->module_info->name,
-                       ns->name)
+                ERROR_(ctx, error, "namespace does not exist, module='%s', ns='%s'", info->info.name, ns->name)
                 goto remove_node;
             }
         }
@@ -2264,11 +2378,11 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
     {
         FimoUSize it = 0;
         const struct ModuleInfoDependency_ *dependency = NULL;
-        while (module_info_next_dependency_(info, &it, &dependency)) {
+        while (module_info_next_dependency_(info_inner, &it, &dependency)) {
             const struct Module_ *dep_mod = ctx_get_module_(ctx, dependency->name);
             if (dep_mod == NULL) {
                 error = FIMO_EINVAL;
-                ERROR_(ctx, error, "dependency not found, module='%s', dependency='%s'", module->module_info->name,
+                ERROR_(ctx, error, "dependency not found, module='%s', dependency='%s'", info->info.name,
                        dependency->name)
                 goto remove_node;
             }
@@ -2299,10 +2413,10 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
     {
         FimoUSize it = 0;
         const struct ModuleInfoSymbol_ *symbol = NULL;
-        while (module_info_next_symbol_(info, &it, &symbol)) {
+        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
             error = ctx_ns_allocate_if_not_found_(ctx, symbol->ns);
             if (FIMO_IS_ERROR(error)) {
-                ERROR_(ctx, error, "failed to allocate ns, module='%s', ns='%s'", module->module_info->name, symbol->ns)
+                ERROR_(ctx, error, "failed to allocate ns, module='%s', ns='%s'", info->info.name, symbol->ns)
                 goto remove_allocated_ns;
             }
         }
@@ -2311,11 +2425,11 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
     {
         FimoUSize it = 0;
         const struct ModuleInfoSymbol_ *symbol = NULL;
-        while (module_info_next_symbol_(info, &it, &symbol)) {
-            error = ctx_insert_symbol_(ctx, symbol->name, symbol->ns, symbol->version, module->module_info->name);
+        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
+            error = ctx_insert_symbol_(ctx, symbol->name, symbol->ns, symbol->version, info->info.name);
             if (FIMO_IS_ERROR(error)) {
                 ERROR_(ctx, error, "failed to allocate export symbol, module='%s', symbol='%s', ns='%s'",
-                       module->module_info->name, symbol->name, symbol->ns)
+                       info->info.name, symbol->name, symbol->ns)
                 goto remove_symbol_export;
             }
         }
@@ -2323,9 +2437,9 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
     // Insert the module.
     {
         struct Module_ module_;
-        error = module_new_(module, node, &module_);
+        error = module_new_(info_inner->module, node, &module_);
         if (FIMO_IS_ERROR(error)) {
-            ERROR_(ctx, error, "failed to allocate module, module='%s'", module->module_info->name)
+            ERROR_(ctx, error, "failed to allocate module, module='%s'", info->info.name)
             goto remove_symbol_export;
         }
 
@@ -2333,7 +2447,7 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
         if (hashmap_oom(ctx->modules)) {
             module_free_(&module_);
             error = FIMO_ENOMEM;
-            ERROR_(ctx, error, "failed to insert module, module='%s'", module->module_info->name)
+            ERROR_(ctx, error, "failed to insert module, module='%s'", info->info.name)
             goto remove_symbol_export;
         }
     }
@@ -2343,7 +2457,7 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, const FimoModul
 remove_symbol_export: {
     FimoUSize it = 0;
     const struct ModuleInfoSymbol_ *symbol = NULL;
-    while (module_info_next_symbol_(info, &it, &symbol)) {
+    while (module_info_next_symbol_(info_inner, &it, &symbol)) {
         if (ctx_get_symbol_(ctx, symbol->name, symbol->ns)) {
             ctx_remove_symbol_(ctx, symbol->name, symbol->ns);
         }
@@ -2352,7 +2466,7 @@ remove_symbol_export: {
 remove_allocated_ns: {
     FimoUSize it = 0;
     const struct ModuleInfoSymbol_ *symbol = NULL;
-    while (module_info_next_symbol_(info, &it, &symbol)) {
+    while (module_info_next_symbol_(info_inner, &it, &symbol)) {
         ctx_ns_free_if_empty_(ctx, symbol->name);
     }
 }
@@ -2366,14 +2480,16 @@ remove_node: {
     return error;
 }
 
-static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, const FimoModule *module) {
-    FIMO_DEBUG_ASSERT(ctx && module)
-    TRACE_(ctx, "module='%s'", module->module_info->name)
+static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner) {
+    FIMO_DEBUG_ASSERT(ctx && info_inner && !module_info_is_detached_(info_inner))
+    const struct ModuleInfo_ *info = module_info_from_inner_(info_inner);
+
+    TRACE_(ctx, "module='%s'", info->info.name)
     const struct Module_ *module_ = hashmap_get(ctx->modules, &(struct Module_){
-                                                                      .name = module->module_info->name,
+                                                                      .name = info->info.name,
                                                               });
-    if (module_ == NULL || module_->module != module) {
-        ERROR_(ctx, FIMO_EINVAL, "module is not registered with the backend, module='%s'", module->module_info->name)
+    if (module_ == NULL || module_->module != info_inner->module) {
+        ERROR_(ctx, FIMO_EINVAL, "module is not registered with the backend, module='%s'", info->info.name)
         return FIMO_EINVAL;
     }
 
@@ -2382,16 +2498,15 @@ static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, const FimoMo
     FimoError error = fimo_graph_neighbors_count(ctx->dependency_graph, node, true, &count);
     FIMO_ASSERT_FALSE(FIMO_IS_ERROR(error))
     if (count != 0) {
-        ERROR_(ctx, FIMO_EPERM, "module is still in use, module='%s'", module->module_info->name)
+        ERROR_(ctx, FIMO_EPERM, "module is still in use, module='%s'", info->info.name)
         return FIMO_EPERM;
     }
 
-    const struct ModuleInfo_ *info = module_info_from_module(module);
     // Remove all symbols.
     {
         FimoUSize it = 0;
         const struct ModuleInfoSymbol_ *symbol = NULL;
-        while (module_info_next_symbol_(info, &it, &symbol)) {
+        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
             ctx_remove_symbol_(ctx, symbol->name, symbol->ns);
         }
     }
@@ -2399,7 +2514,7 @@ static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, const FimoMo
     {
         FimoUSize it = 0;
         const struct ModuleInfoNamespace_ *ns = NULL;
-        while (module_info_next_ns_(info, &it, &ns)) {
+        while (module_info_next_ns_(info_inner, &it, &ns)) {
             ctx_ns_release_(ctx, ns->name);
         }
     }
@@ -2407,22 +2522,21 @@ static FimoError ctx_remove_module_(FimoInternalModuleContext *ctx, const FimoMo
     {
         FimoUSize it = 0;
         const struct ModuleInfoSymbol_ *symbol = NULL;
-        while (module_info_next_symbol_(info, &it, &symbol)) {
+        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
             if (strcmp(GLOBAL_NS, symbol->ns) == 0) {
                 continue;
             }
             const struct Namespace_ *ns = ctx_get_ns_(ctx, symbol->ns);
             if (ns && ns->reference_count != 0 && ns->symbol_count == 0) {
                 error = FIMO_EPERM;
-                ERROR_(ctx, error, "namespace is still in use, module='%s', ns='%s'", module->module_info->name,
-                       ns->name)
+                ERROR_(ctx, error, "namespace is still in use, module='%s', ns='%s'", info->info.name, ns->name)
                 goto rollback_ns;
             }
         }
     }
 
     module_ = hashmap_delete(ctx->modules, &(struct Module_){
-                                                   .name = module->module_info->name,
+                                                   .name = info->info.name,
                                            });
     FIMO_ASSERT(module_)
     module_free_((struct Module_ *)module_);
@@ -2438,7 +2552,7 @@ rollback_ns:;
     {
         FimoUSize it = 0;
         const struct ModuleInfoNamespace_ *ns = NULL;
-        while (module_info_next_ns_(info, &it, &ns)) {
+        while (module_info_next_ns_(info_inner, &it, &ns)) {
             const FimoError error_ = ctx_ns_acquire_(ctx, ns->name);
             FIMO_ASSERT_FALSE(FIMO_IS_ERROR(error_))
         }
@@ -2446,9 +2560,9 @@ rollback_ns:;
     {
         FimoUSize it = 0;
         const struct ModuleInfoSymbol_ *symbol = NULL;
-        while (module_info_next_symbol_(info, &it, &symbol)) {
+        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
             const FimoError error_ =
-                    ctx_insert_symbol_(ctx, symbol->name, symbol->ns, symbol->version, module->module_info->name);
+                    ctx_insert_symbol_(ctx, symbol->name, symbol->ns, symbol->version, info->info.name);
             FIMO_ASSERT_FALSE(FIMO_IS_ERROR(error_))
         }
     }
@@ -2456,34 +2570,33 @@ rollback_ns:;
     return error;
 }
 
-static FimoError ctx_link_module_(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                  const FimoModuleInfo *other) {
-    FIMO_DEBUG_ASSERT(ctx && module && other)
-    TRACE_(ctx, "module='%s', other='%s'", module->module_info->name, other->name)
-    const struct ModuleInfo_ *info = module_info_from_module(module);
-    if (&info->info == other) {
-        ERROR_(ctx, FIMO_EINVAL, "can not link module to itself, module='%s'", module->module_info->name)
+static FimoError ctx_link_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner,
+                                  struct ModuleInfoInner_ *other_inner) {
+    FIMO_DEBUG_ASSERT(ctx && info_inner && other_inner && !module_info_is_detached_(info_inner))
+    const struct ModuleInfo_ *info = module_info_from_inner_(info_inner);
+    const struct ModuleInfo_ *other_info = module_info_from_inner_(other_inner);
+
+    TRACE_(ctx, "module='%s', other='%s'", info->info.name, other_info->info.name)
+    if (module_info_is_detached_(other_inner)) {
+        ERROR_(ctx, FIMO_EINVAL, "module is not registered with the module subsystem, module='%s'",
+               other_info->info.name)
         return FIMO_EINVAL;
     }
-
-    if (module_info_get_dependency_(info, other->name) != NULL) {
-        ERROR_(ctx, FIMO_EINVAL, "modules are already linked, module='%s', other='%s'", module->module_info->name,
-               other->name)
+    if (module_info_get_dependency_(info_inner, other_info->info.name) != NULL) {
+        ERROR_(ctx, FIMO_EINVAL, "modules are already linked, module='%s', other='%s'", info->info.name,
+               other_info->info.name)
         return FIMO_EEXIST;
     }
-
-    const struct Module_ *inner_module = ctx_get_module_(ctx, module->module_info->name);
-    FIMO_DEBUG_ASSERT(inner_module)
-    const struct Module_ *other_module = ctx_get_module_(ctx, other->name);
-    if (other_module == NULL) {
-        ERROR_(ctx, FIMO_EINVAL, "module does not exist, module='%s'", other->name)
-        return FIMO_EINVAL;
-    }
-    const struct ModuleInfo_ *other_info = module_info_from_module_info(other);
     if (other_info->type == MODULE_TYPE_PSEUDO_) {
-        ERROR_(ctx, FIMO_EPERM, "can not link to a pseudo module, module='%s', other='%s'", other->name, other->name)
+        ERROR_(ctx, FIMO_EPERM, "can not link to a pseudo module, module='%s', other='%s'", info->info.name,
+               other_info->info.name)
         return FIMO_EPERM;
     }
+
+    const struct Module_ *inner_module = ctx_get_module_(ctx, info->info.name);
+    const struct Module_ *other_module = ctx_get_module_(ctx, other_info->info.name);
+    FIMO_DEBUG_ASSERT(inner_module)
+    FIMO_DEBUG_ASSERT(other_module)
 
     bool would_introduce_cycle;
     FimoError error = fimo_graph_path_exists(ctx->dependency_graph, other_module->node, inner_module->node,
@@ -2500,47 +2613,49 @@ static FimoError ctx_link_module_(FimoInternalModuleContext *ctx, const FimoModu
         return error;
     }
 
-    error = module_info_set_dependency_((struct ModuleInfo_ *)info, other, false);
+    error = module_info_set_dependency_(info_inner, &other_info->info, false);
     if (FIMO_IS_ERROR(error)) {
         void *edge_data;
         const FimoError error_ = fimo_graph_remove_edge(ctx->dependency_graph, edge, &edge_data);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
         FIMO_DEBUG_ASSERT(edge_data == NULL)
         ERROR_(ctx, error, "could not insert other into the module info dependency map, module='%s', dependency='%s'",
-               module->module_info->name, other->name)
+               info->info.name, other_info->info.name)
         return error;
     }
 
     return FIMO_EOK;
 }
 
-static FimoError ctx_unlink_module_(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                    const FimoModuleInfo *other) {
-    FIMO_DEBUG_ASSERT(ctx && module && other)
-    TRACE_(ctx, "module='%s', other='%s'", module->module_info->name, other->name)
-    const struct ModuleInfo_ *info = module_info_from_module(module);
+static FimoError ctx_unlink_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner,
+                                    struct ModuleInfoInner_ *other_inner) {
+    FIMO_DEBUG_ASSERT(ctx && info_inner && other_inner && !module_info_is_detached_(info_inner) &&
+                      !module_info_is_detached_(other_inner))
+    const struct ModuleInfo_ *info = module_info_from_inner_(info_inner);
+    const struct ModuleInfo_ *other_info = module_info_from_inner_(other_inner);
 
-    const struct ModuleInfoDependency_ *dependency = module_info_get_dependency_(info, other->name);
+    TRACE_(ctx, "module='%s', other='%s'", info->info.name, other_info->info.name)
+    const struct ModuleInfoDependency_ *dependency = module_info_get_dependency_(info_inner, other_info->info.name);
     if (dependency == NULL) {
-        ERROR_(ctx, FIMO_EINVAL, "modules are not linked, module='%s', other='%s'", module->module_info->name,
-               other->name)
+        ERROR_(ctx, FIMO_EINVAL, "modules are not linked, module='%s', other='%s'", info->info.name,
+               other_info->info.name)
         return FIMO_EEXIST;
     }
     if (dependency->is_static) {
-        ERROR_(ctx, FIMO_EPERM, "can not unlink static module links, module='%s', other='%s'",
-               module->module_info->name, other->name)
+        ERROR_(ctx, FIMO_EPERM, "can not unlink static module links, module='%s', other='%s'", info->info.name,
+               other_info->info.name)
         return FIMO_EPERM;
     }
 
-    const struct Module_ *inner_module = ctx_get_module_(ctx, module->module_info->name);
-    const struct Module_ *other_module = ctx_get_module_(ctx, other->name);
-    FIMO_DEBUG_ASSERT(inner_module)
-    FIMO_DEBUG_ASSERT(other_module)
+    const struct Module_ *ctx_module = ctx_get_module_(ctx, info->info.name);
+    const struct Module_ *other_ctx_module = ctx_get_module_(ctx, other_info->info.name);
+    FIMO_DEBUG_ASSERT(ctx_module)
+    FIMO_DEBUG_ASSERT(other_ctx_module)
 
     FimoU64 edge;
     bool contained;
     FimoError error =
-            fimo_graph_find_edge(ctx->dependency_graph, inner_module->node, other_module->node, &edge, &contained);
+            fimo_graph_find_edge(ctx->dependency_graph, ctx_module->node, other_ctx_module->node, &edge, &contained);
     FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
     FIMO_DEBUG_ASSERT(contained)
 
@@ -2549,16 +2664,17 @@ static FimoError ctx_unlink_module_(FimoInternalModuleContext *ctx, const FimoMo
     FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
     FIMO_DEBUG_ASSERT(edge_data == NULL)
 
-    module_info_delete_dependency_((struct ModuleInfo_ *)info, other->name);
+    module_info_delete_dependency_(info_inner, other_info->info.name);
 
     return FIMO_EOK;
 }
 
-static bool ctx_can_remove_module_(FimoInternalModuleContext *ctx, const FimoModule *module) {
-    FIMO_DEBUG_ASSERT(ctx && module);
-    TRACE_(ctx, "module='%s'", module->module_info->name)
+static bool ctx_can_remove_module_(FimoInternalModuleContext *ctx, struct ModuleInfoInner_ *info_inner) {
+    FIMO_DEBUG_ASSERT(ctx && info_inner && !module_info_is_detached_(info_inner));
+    const struct ModuleInfo_ *info = module_info_from_inner_(info_inner);
+    TRACE_(ctx, "module='%s'", info->info.name)
 
-    const struct Module_ *module_ = ctx_get_module_(ctx, module->module_info->name);
+    const struct Module_ *module_ = ctx_get_module_(ctx, info->info.name);
     FIMO_DEBUG_ASSERT(module_)
     FimoUSize neighbors;
     FimoError error = fimo_graph_neighbors_count(ctx->dependency_graph, module_->node, true, &neighbors);
@@ -2586,21 +2702,23 @@ static FimoError ctx_cleanup_loose_modules(FimoInternalModuleContext *ctx) {
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
         FIMO_DEBUG_ASSERT(module_ptr)
         const FimoModule *module = *module_ptr;
-        const struct ModuleInfo_ *info = module_info_from_module(module);
+        const struct ModuleInfo_ *info = module_info_from_module_(module);
         if (info->type != MODULE_TYPE_REGULAR_) {
             error = fimo_graph_externals_next(iter, &has_next);
             FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
             continue;
         }
+        struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
 
-        FIMO_DEBUG_ASSERT(ctx_can_remove_module_(ctx, module))
-        error = ctx_remove_module_(ctx, module);
+        FIMO_DEBUG_ASSERT(ctx_can_remove_module_(ctx, info_inner))
+        error = ctx_remove_module_(ctx, info_inner);
         if (FIMO_IS_ERROR(error)) {
+            module_info_unlock_(info_inner);
             ERROR_(ctx, error, "could not remove module, module='%s'", module->module_info->name)
             fimo_graph_externals_free(iter);
             return error;
         }
-        fi_module_free_((FimoModule *)module, NULL);
+        fi_module_free_(info_inner, NULL);
 
         // Rebuild the iterator since we modified the dependency graph
         fimo_graph_externals_free(iter);
@@ -2853,12 +2971,15 @@ static FimoError ctx_load_set(FimoInternalModuleContext *ctx, FimoModuleLoadingS
         }
 
         // Register it with the backend.
-        error = ctx_add_module_(ctx, constructed);
+        const struct ModuleInfo_ *constructed_info = module_info_from_module_(constructed);
+        struct ModuleInfoInner_ *constructed_info_inner = module_info_lock_(constructed_info);
+        error = ctx_add_module_(ctx, constructed_info_inner);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not register module with the backend")
-            fi_module_free_(constructed, NULL);
+            fi_module_free_(constructed_info_inner, NULL);
             goto free_loding_info;
         }
+        module_info_unlock_(constructed_info_inner);
 
         // Signal loading success.
         loading_set_module_signal_success(module, constructed->module_info);
@@ -2912,7 +3033,7 @@ static FimoError fi_module_new_pseudo_(FimoInternalModuleContext *ctx, const cha
         ERROR_SIMPLE_(ctx, error, "could not allocate module")
         goto release_ctx;
     }
-    info->module = *element;
+    info->inner.module = *element;
 
     **element = (FimoModule){
             .parameters = NULL,
@@ -2928,7 +3049,7 @@ static FimoError fi_module_new_pseudo_(FimoInternalModuleContext *ctx, const cha
 
 release_ctx:
     fimo_internal_context_release(TO_CTX_(ctx));
-    module_info_free_(info);
+    module_info_release_(info);
 
     return error;
 }
@@ -2948,6 +3069,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
         module_handle_release_(handle);
         return error;
     }
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
 
     fimo_internal_context_acquire(TO_CTX_(ctx));
     FimoContext ctx_;
@@ -2959,7 +3081,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
         ERROR_SIMPLE_(ctx, error, "could not allocate module")
         goto release_ctx;
     }
-    info->module = *element;
+    info->inner.module = *element;
 
     **element = (FimoModule){
             .parameters = NULL,
@@ -3016,7 +3138,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
             ERROR_SIMPLE_(ctx, error, "could not insert parameter into the parameter table")
             goto release_parameters;
         }
-        error = module_info_set_param_(info, decl->name, param);
+        error = module_info_set_param_(info_inner, decl->name, param);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert parameter into the module info")
             goto release_parameters;
@@ -3050,7 +3172,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
             ERROR_(ctx, error, "could not find namespace, ns='%s'", import->name)
             goto release_namespaces;
         }
-        error = module_info_set_ns_(info, import->name, true);
+        error = module_info_set_ns_(info_inner, import->name, true);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert namespace into the module info")
             goto release_namespaces;
@@ -3068,30 +3190,42 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
         }
         const struct Module_ *module = ctx_get_module_(ctx, symbol->module);
         FIMO_DEBUG_ASSERT(module);
-        const struct ModuleInfo_ *module_info = module_info_from_module(module->module);
+        const struct ModuleInfo_ *module_info = module_info_from_module_(module->module);
+        struct ModuleInfoInner_ *module_info_inner = module_info_lock_(module_info);
         const struct ModuleInfoSymbol_ *module_info_symbol =
-                module_info_get_symbol_(module_info, symbol->name, symbol->ns, symbol->version);
+                module_info_get_symbol_(module_info_inner, symbol->name, symbol->ns, symbol->version);
         FIMO_DEBUG_ASSERT(module_info_symbol);
         const FimoModuleRawSymbol *raw_symbol = &module_info_symbol->symbol;
         error = fimo_array_list_push(&imports, sizeof(FimoModuleRawSymbol *), _Alignof(FimoModuleRawSymbol *),
                                      &raw_symbol, NULL);
         if (FIMO_IS_ERROR(error)) {
+            module_info_unlock_(module_info_inner);
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the import table")
             goto release_imports;
         }
-        if (module_info_get_dependency_(info, symbol->module) == NULL) {
-            error = module_info_set_dependency_(info, module->module->module_info, true);
+        if (module_info_get_dependency_(info_inner, symbol->module) == NULL) {
+            error = module_info_set_dependency_(info_inner, module->module->module_info, true);
             if (FIMO_IS_ERROR(error)) {
+                module_info_unlock_(module_info_inner);
                 ERROR_SIMPLE_(ctx, error, "could not insert dependency into the module info")
                 goto release_imports;
             }
         }
+        module_info_unlock_(module_info_inner);
     }
     (*element)->imports = imports.elements;
 
     // Init the module.
     if (export->module_constructor) {
-        error = export->module_constructor(*element, set, NULL, &(*element)->module_data);
+        void *module_data = NULL;
+        module_info_unlock_(info_inner);
+        loading_set_unlock_(set);
+        ctx_unlock_(ctx);
+        error = export->module_constructor(*element, set, &module_data);
+        ctx_lock_(ctx);
+        loading_set_lock_(set);
+        module_info_unlock_(info_inner);
+        (*element)->module_data = module_data;
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not construct the module data")
             goto release_imports;
@@ -3103,7 +3237,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
     for (FimoISize i = 0; i < export->symbol_exports_count; i++) {
         const FimoModuleSymbolExport *symbol = &export->symbol_exports[i];
         const struct ModuleInfoSymbol_ *info_symbol;
-        error = module_info_set_symbol_(info, symbol->name, symbol->ns, symbol->version, NULL, symbol->symbol,
+        error = module_info_set_symbol_(info_inner, symbol->name, symbol->ns, symbol->version, NULL, symbol->symbol,
                                         &info_symbol);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the module info")
@@ -3128,7 +3262,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
             goto release_exports;
         }
         const struct ModuleInfoSymbol_ *info_symbol;
-        error = module_info_set_symbol_(info, symbol->name, symbol->ns, symbol->version, symbol->destructor, sym,
+        error = module_info_set_symbol_(info_inner, symbol->name, symbol->ns, symbol->version, symbol->destructor, sym,
                                         &info_symbol);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the module info")
@@ -3144,6 +3278,8 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
         }
     }
     (*element)->exports = exports.elements;
+
+    module_info_unlock_(info_inner);
 
     return FIMO_EOK;
 
@@ -3167,7 +3303,8 @@ release_parameters:
     }
 release_ctx:
     fimo_internal_context_release(TO_CTX_(ctx));
-    module_info_free_(info);
+    module_info_unlock_(info_inner);
+    module_info_release_(info);
 
     if (*element != NULL) {
         fimo_free(*element);
@@ -3176,30 +3313,49 @@ release_ctx:
     return error;
 }
 
-static void fi_module_free_(FimoModule *element, FimoContext *context) {
-    FIMO_DEBUG_ASSERT(element)
-    if (element->parameters) {
-        fimo_free((void *)element->parameters);
-        element->parameters = NULL;
-    }
-    if (element->resources) {
-        fimo_free((void *)element->resources);
-        element->resources = NULL;
-    }
-    if (element->imports) {
-        fimo_free((void *)element->imports);
-        element->imports = NULL;
-    }
+static void fi_module_free_(struct ModuleInfoInner_ *info_inner, FimoContext *context) {
+    FIMO_DEBUG_ASSERT(info_inner && !module_info_is_detached_(info_inner))
+    FimoModule *module = (FimoModule *)info_inner->module;
+    const struct ModuleInfo_ *info = module_info_from_inner_(info_inner);
+    module_info_detach_(info_inner);
+    module_info_unlock_(info_inner);
+    module_info_release_(info);
 
-    struct ModuleInfo_ *info = (struct ModuleInfo_ *)module_info_from_module(element);
-    module_info_free_(info);
+    if (module->parameters) {
+        fimo_free((void *)module->parameters);
+        module->parameters = NULL;
+    }
+    if (module->resources) {
+        fimo_free((void *)module->resources);
+        module->resources = module;
+    }
+    if (module->imports) {
+        fimo_free((void *)module->imports);
+        module->imports = NULL;
+    }
 
     if (context) {
-        *context = element->context;
+        *context = module->context;
     }
     else {
-        fimo_internal_context_release(element->context.data);
+        fimo_internal_context_release(module->context.data);
     }
+}
+
+///////////////////////////////////////////////////////////////////////
+//// Fimo Module Info
+///////////////////////////////////////////////////////////////////////
+
+static void fi_module_info_acquire_(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    const struct ModuleInfo_ *module_info = module_info_from_module_info_(info);
+    module_info_acquire_(module_info);
+}
+
+static void fi_module_info_release_(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    const struct ModuleInfo_ *module_info = module_info_from_module_info_(info);
+    module_info_release_(module_info);
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -3468,16 +3624,6 @@ static bool fi_module_export_is_valid_(const FimoModuleExport *export, FimoInter
 //// Trampoline functions
 ///////////////////////////////////////////////////////////////////////
 
-FimoError fimo_internal_trampoline_module_lock(void *ctx) {
-    FIMO_DEBUG_ASSERT(ctx)
-    return fimo_internal_module_lock(TO_MODULE_CTX_(ctx));
-}
-
-FimoError fimo_internal_trampoline_module_unlock(void *ctx) {
-    FIMO_DEBUG_ASSERT(ctx)
-    return fimo_internal_module_unlock(TO_MODULE_CTX_(ctx));
-}
-
 FimoError fimo_internal_trampoline_module_pseudo_module_new(void *ctx, const FimoModule **module) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_module_pseudo_module_new(TO_MODULE_CTX_(ctx), module);
@@ -3679,20 +3825,6 @@ void fimo_internal_module_destroy(FimoInternalModuleContext *ctx) {
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_module_lock(FimoInternalModuleContext *ctx) {
-    FIMO_DEBUG_ASSERT(ctx)
-    TRACE_SIMPLE_(ctx, "locking the module subsystem")
-    return ctx_lock_(ctx);
-}
-
-FIMO_MUST_USE
-FimoError fimo_internal_module_unlock(FimoInternalModuleContext *ctx) {
-    FIMO_DEBUG_ASSERT(ctx)
-    TRACE_SIMPLE_(ctx, "unlocking the module subsystem")
-    return ctx_unlock_(ctx);
-}
-
-FIMO_MUST_USE
 FimoError fimo_internal_module_pseudo_module_new(FimoInternalModuleContext *ctx, const FimoModule **module) {
     FIMO_DEBUG_ASSERT(ctx)
     if (module == NULL) {
@@ -3701,6 +3833,7 @@ FimoError fimo_internal_module_pseudo_module_new(FimoInternalModuleContext *ctx,
     }
 
     TRACE_SIMPLE_(ctx, "new pseudo module")
+    ctx_lock_(ctx);
     char name_buffer[32];
     const FimoU64 num_modules = (FimoU64)hashmap_count(ctx->modules);
 
@@ -3717,12 +3850,16 @@ FimoError fimo_internal_module_pseudo_module_new(FimoInternalModuleContext *ctx,
         return error;
     }
 
-    error = ctx_add_module_(ctx, module_);
+    const struct ModuleInfo_ *info = module_info_from_module_(module_);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    error = ctx_add_module_(ctx, info_inner);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not add module to context")
-        fi_module_free_(module_, NULL);
+        fi_module_free_(info_inner, NULL);
         return error;
     }
+    module_info_unlock_(info_inner);
+    ctx_unlock_(ctx);
 
     *module = module_;
     return FIMO_EOK;
@@ -3739,20 +3876,25 @@ FimoError fimo_internal_module_pseudo_module_destroy(FimoInternalModuleContext *
     }
 
     TRACE_SIMPLE_(ctx, "destroying pseudo module")
-    if (module_info_from_module(module)->type != MODULE_TYPE_PSEUDO_) {
+    ctx_lock_(ctx);
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    if (module_info_from_module_(module)->type != MODULE_TYPE_PSEUDO_) {
         ERROR_SIMPLE_(ctx, FIMO_EINVAL, "module is not a pseudo module")
         return FIMO_EINVAL;
     }
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
 
-    FimoError error = ctx_remove_module_(ctx, module);
+    FimoError error = ctx_remove_module_(ctx, info_inner);
     if (FIMO_IS_ERROR(error)) {
+        module_info_unlock_(info_inner);
         ERROR_SIMPLE_(ctx, error, "could not remove module from context")
         return error;
     }
 
-    fi_module_free_((FimoModule *)module, module_context);
+    fi_module_free_(info_inner, module_context);
 
     error = ctx_cleanup_loose_modules(ctx);
+    ctx_unlock_(ctx);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not cleanup loose modules")
         return error;
@@ -3790,8 +3932,10 @@ FimoError fimo_internal_module_set_has_module(FimoInternalModuleContext *ctx, Fi
     }
 
     TRACE_(ctx, "name='%s'", name)
+    loading_set_lock_(set);
     const struct LoadingSetModule_ *module = loading_set_get_module_(set, name);
     *has_module = module != NULL;
+    loading_set_unlock_(set);
 
     return FIMO_EOK;
 }
@@ -3808,8 +3952,10 @@ FimoError fimo_internal_module_set_has_symbol(FimoInternalModuleContext *ctx, Fi
     }
 
     TRACE_(ctx, "name='%s', ns='%s'", name, ns)
+    loading_set_lock_(set);
     const struct LoadingSetSymbol_ *sym = loading_set_get_symbol_(set, name, ns, version);
     *has_symbol = sym != NULL;
+    loading_set_unlock_(set);
 
     return FIMO_EOK;
 }
@@ -3832,13 +3978,16 @@ FimoError fimo_internal_module_set_append_callback(FimoInternalModuleContext *ct
             .success = on_success,
     };
 
+    loading_set_lock_(set);
     struct LoadingSetModule_ *module = (void *)loading_set_get_module_(set, module_name);
     if (module == NULL) {
+        loading_set_unlock_(set);
         ERROR_(ctx, FIMO_EINVAL, "module does not exist, module='%s'", module_name)
         return FIMO_EINVAL;
     }
 
     const FimoError error = loading_set_module_append_callback_(module, callback);
+    loading_set_unlock_(set);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not append callback")
         return error;
@@ -4083,11 +4232,13 @@ FimoError fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx
         goto iterate_exports;
     }
 
+    loading_set_lock_(set);
     error = extract_exports_(ctx, set, handle, data.exports);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not extract the module exports")
         goto extract_exports;
     }
+    loading_set_unlock_(set);
 
     fimo_array_list_free(&data.exports, sizeof(const FimoModuleExport *), _Alignof(const FimoModuleExport *), NULL);
     module_handle_release_(handle);
@@ -4111,11 +4262,12 @@ FimoError fimo_internal_module_set_dismiss(FimoInternalModuleContext *ctx, FimoM
     }
 
     TRACE_SIMPLE_(ctx, "dismissing set")
+    loading_set_lock_(set);
     if (set->is_loading) {
         ERROR_SIMPLE_(ctx, FIMO_EPERM, "set is being loaded")
         return FIMO_EPERM;
     }
-
+    loading_set_unlock_(set);
     loading_set_free_(set);
 
     return FIMO_EOK;
@@ -4130,7 +4282,11 @@ FimoError fimo_internal_module_set_finish(FimoInternalModuleContext *ctx, FimoMo
     }
 
     TRACE_SIMPLE_(ctx, "loading module set")
+    ctx_lock_(ctx);
+    loading_set_lock_(set);
     const FimoError error = ctx_load_set(ctx, set);
+    loading_set_unlock_(set);
+    ctx_unlock_(ctx);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not load set")
         loading_set_free_(set);
@@ -4151,12 +4307,14 @@ FimoError fimo_internal_module_find_by_name(FimoInternalModuleContext *ctx, cons
     }
 
     TRACE_(ctx, "name='%s'", name)
+    ctx_lock_(ctx);
     const struct Module_ *mod = ctx_get_module_(ctx, name);
     if (mod == NULL) {
         ERROR_(ctx, FIMO_EINVAL, "no module by the given name exists, module='%s'", name)
         return FIMO_EINVAL;
     }
-    *module = mod->module->module_info;
+    *module = FIMO_MODULE_INFO_ACQUIRE(mod->module->module_info);
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4173,6 +4331,7 @@ FimoError fimo_internal_module_find_by_symbol(FimoInternalModuleContext *ctx, co
 
     TRACE_(ctx, "name='%s', ns='%s', version='%" PRIu32 ".%" PRIu32 ".%" PRIu32 "+%" PRIu64 "'", name, ns,
            version.major, version.minor, version.patch, version.build)
+    ctx_lock_(ctx);
     const struct Symbol_ *symbol = ctx_get_symbol_compatible_(ctx, name, ns, version);
     if (symbol == NULL) {
         ERROR_(ctx, FIMO_EINVAL,
@@ -4184,7 +4343,8 @@ FimoError fimo_internal_module_find_by_symbol(FimoInternalModuleContext *ctx, co
 
     const struct Module_ *mod = ctx_get_module_(ctx, symbol->module);
     FIMO_DEBUG_ASSERT(mod)
-    *module = mod->module->module_info;
+    *module = FIMO_MODULE_INFO_ACQUIRE(mod->module->module_info);
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4198,8 +4358,10 @@ FimoError fimo_internal_module_namespace_exists(FimoInternalModuleContext *ctx, 
     }
 
     TRACE_(ctx, "ns='%s'", ns)
+    ctx_lock_(ctx);
     const struct Namespace_ *namespace = ctx_get_ns_(ctx, ns);
     *exists = namespace != NULL;
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4214,9 +4376,13 @@ FimoError fimo_internal_module_namespace_include(FimoInternalModuleContext *ctx,
     }
 
     TRACE_(ctx, "ns='%s', module='%s'", ns, module->module_info->name)
-    struct ModuleInfo_ *info = (void *)module_info_from_module(module);
-    const struct ModuleInfoNamespace_ *info_namespace = module_info_get_ns_(info, ns);
+    ctx_lock_(ctx);
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    const struct ModuleInfoNamespace_ *info_namespace = module_info_get_ns_(info_inner, ns);
     if (info_namespace != NULL) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EEXIST, "namespace was already included by the module, ns='%s', module='%s'", ns,
                info->info.name)
         return FIMO_EEXIST;
@@ -4224,22 +4390,30 @@ FimoError fimo_internal_module_namespace_include(FimoInternalModuleContext *ctx,
 
     const struct Namespace_ *namespace = ctx_get_ns_(ctx, ns);
     if (namespace == NULL) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "namespace does not exist, ns='%s', module='%s'", ns, info->info.name)
         return FIMO_EINVAL;
     }
 
     FimoError error = ctx_ns_acquire_(ctx, ns);
     if (FIMO_IS_ERROR(error)) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, error, "could not acquire namespace, ns='%s', module='%s'", ns, info->info.name)
         return error;
     }
 
-    error = module_info_set_ns_(info, ns, false);
+    error = module_info_set_ns_(info_inner, ns, false);
     if (FIMO_IS_ERROR(error)) {
         ctx_ns_release_(ctx, ns);
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, error, "could not insert namespace into the module info, ns='%s', module='%s'", ns, info->info.name)
         return error;
     }
+    module_info_unlock_(info_inner);
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4254,19 +4428,27 @@ FimoError fimo_internal_module_namespace_exclude(FimoInternalModuleContext *ctx,
     }
 
     TRACE_(ctx, "ns='%s', module='%s'", ns, module->module_info->name)
-    struct ModuleInfo_ *info = (void *)module_info_from_module(module);
-    const struct ModuleInfoNamespace_ *info_namespace = module_info_get_ns_(info, ns);
+    ctx_lock_(ctx);
+    struct ModuleInfo_ *info = (void *)module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    const struct ModuleInfoNamespace_ *info_namespace = module_info_get_ns_(info_inner, ns);
     if (info_namespace == NULL) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EEXIST, "namespace was not included by the module, ns='%s', module='%s'", ns, info->info.name)
         return FIMO_EEXIST;
     }
     if (info_namespace->is_static) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EPERM, "can not exclude static namespace, ns='%s', module='%s'", ns, info->info.name)
         return FIMO_EPERM;
     }
 
-    module_info_delete_ns_(info, ns);
+    module_info_delete_ns_(info_inner, ns);
     ctx_ns_release_(ctx, ns);
+    module_info_unlock_(info_inner);
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4282,8 +4464,9 @@ FimoError fimo_internal_module_namespace_included(FimoInternalModuleContext *ctx
     }
 
     TRACE_(ctx, "ns='%s', module='%s'", ns, module->module_info->name)
-    const struct ModuleInfo_ *info = module_info_from_module(module);
-    const struct ModuleInfoNamespace_ *info_namespace = module_info_get_ns_(info, ns);
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    const struct ModuleInfoNamespace_ *info_namespace = module_info_get_ns_(info_inner, ns);
     if (info_namespace != NULL) {
         *is_included = true;
         *is_static = info_namespace->is_static;
@@ -4292,6 +4475,7 @@ FimoError fimo_internal_module_namespace_included(FimoInternalModuleContext *ctx
         *is_included = false;
         *is_static = false;
     }
+    module_info_unlock_(info_inner);
 
     return FIMO_EOK;
 }
@@ -4306,8 +4490,21 @@ FimoError fimo_internal_module_acquire_dependency(FimoInternalModuleContext *ctx
         return FIMO_EINVAL;
     }
 
-    TRACE_(ctx, "module='%s', dependency='%s'", module->module_info->name, dependency->name)
-    const FimoError error = ctx_link_module_(ctx, module, dependency);
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    const struct ModuleInfo_ *dependency_info = module_info_from_module_info_(dependency);
+    TRACE_(ctx, "module='%s', dependency='%s'", info->info.name, dependency_info->info.name)
+    if (info == dependency_info) {
+        ERROR_(ctx, FIMO_EINVAL, "can not link module to itself, module='%s'", info->info.name)
+        return FIMO_EINVAL;
+    }
+
+    ctx_lock_(ctx);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    struct ModuleInfoInner_ *dependency_info_inner = module_info_lock_(dependency_info);
+    const FimoError error = ctx_link_module_(ctx, info_inner, dependency_info_inner);
+    module_info_unlock_(dependency_info_inner);
+    module_info_unlock_(info_inner);
+    ctx_unlock_(ctx);
     if (FIMO_IS_ERROR(error)) {
         ERROR_(ctx, error, "could not acquire dependency, module='%s', dependency='%s'", module->module_info->name,
                dependency->name)
@@ -4327,8 +4524,21 @@ FimoError fimo_internal_module_relinquish_dependency(FimoInternalModuleContext *
         return FIMO_EINVAL;
     }
 
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    const struct ModuleInfo_ *dependency_info = module_info_from_module_info_(dependency);
     TRACE_(ctx, "module='%s', dependency='%s'", module->module_info->name, dependency->name)
-    const FimoError error = ctx_unlink_module_(ctx, module, dependency);
+    if (info == dependency_info) {
+        ERROR_(ctx, FIMO_EINVAL, "module can not relinquish itself, module='%s'", info->info.name)
+        return FIMO_EINVAL;
+    }
+
+    ctx_lock_(ctx);
+    struct ModuleInfoInner_ *inner = module_info_lock_(info);
+    struct ModuleInfoInner_ *dependency_info_inner = module_info_lock_(dependency_info);
+    const FimoError error = ctx_unlink_module_(ctx, inner, dependency_info_inner);
+    module_info_unlock_(dependency_info_inner);
+    module_info_unlock_(inner);
+    ctx_unlock_(ctx);
     if (FIMO_IS_ERROR(error)) {
         ERROR_(ctx, error, "could not relinquish dependency, module='%s', dependency='%s'", module->module_info->name,
                dependency->name)
@@ -4349,8 +4559,9 @@ FimoError fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, co
     }
 
     TRACE_(ctx, "module='%s', other='%s'", module->module_info->name, other->name)
-    const struct ModuleInfo_ *info = module_info_from_module(module);
-    const struct ModuleInfoDependency_ *dependency = module_info_get_dependency_(info, other->name);
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    const struct ModuleInfoDependency_ *dependency = module_info_get_dependency_(info_inner, other->name);
     if (dependency == NULL) {
         *has_dependency = false;
         *is_static = false;
@@ -4359,6 +4570,7 @@ FimoError fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, co
         *has_dependency = true;
         *is_static = dependency->is_static;
     }
+    module_info_unlock_(info_inner);
 
     return FIMO_EOK;
 }
@@ -4375,8 +4587,10 @@ FimoError fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const
 
     TRACE_(ctx, "module='%s', name='%s', ns='%s', version='%" PRIu32 ".%" PRIu32 ".%" PRIu32 "+%" PRIu64 "'",
            module->module_info->name, name, ns, version.major, version.minor, version.patch, version.build)
+    ctx_lock_(ctx);
     const struct Symbol_ *sym = ctx_get_symbol_compatible_(ctx, name, ns, version);
     if (sym == NULL) {
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL,
                "could not find a compatible symbol, module='%s', name='%s', ns='%s', version='%" PRIu32 ".%" PRIu32
                ".%" PRIu32 "+%" PRIu64 "'",
@@ -4384,9 +4598,12 @@ FimoError fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const
         return FIMO_EINVAL;
     }
 
-    const struct ModuleInfo_ *info = module_info_from_module(module);
-    const struct ModuleInfoDependency_ *dependency = module_info_get_dependency_(info, sym->module);
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
+    const struct ModuleInfoDependency_ *dependency = module_info_get_dependency_(info_inner, sym->module);
     if (dependency == NULL) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EPERM,
                "module exposing the symbol is not a dependency, exposed_by='%s', module='%s', name='%s', ns='%s', "
                "version='%" PRIu32 ".%" PRIu32 ".%" PRIu32 "+%" PRIu64 "'",
@@ -4394,13 +4611,27 @@ FimoError fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const
                version.build)
         return FIMO_EPERM;
     }
+    if (module_info_get_ns_(info_inner, ns) == NULL && strcmp(ns, GLOBAL_NS) != 0) {
+        module_info_unlock_(info_inner);
+        ctx_unlock_(ctx);
+        ERROR_(ctx, FIMO_EPERM,
+               "module does not include the namespace it tried to load a symbol from, module='%s', name='%s', ns='%s', "
+               "version='%" PRIu32 ".%" PRIu32 ".%" PRIu32 "+%" PRIu64 "'",
+               module->module_info->name, name, ns, version.major, version.minor, version.patch, version.build)
+        return FIMO_EPERM;
+    }
 
     const struct Module_ *symbol_owner = ctx_get_module_(ctx, sym->module);
     FIMO_DEBUG_ASSERT(symbol_owner)
-    const struct ModuleInfo_ *symbol_owner_info = module_info_from_module(symbol_owner->module);
-    const struct ModuleInfoSymbol_ *info_symbol = module_info_get_symbol_(symbol_owner_info, name, ns, version);
+    const struct ModuleInfo_ *symbol_owner_info = module_info_from_module_(symbol_owner->module);
+    struct ModuleInfoInner_ *symbol_owner_info_inner = module_info_lock_(symbol_owner_info);
+    const struct ModuleInfoSymbol_ *info_symbol = module_info_get_symbol_(symbol_owner_info_inner, name, ns, version);
     FIMO_DEBUG_ASSERT(info_symbol);
     *symbol = &info_symbol->symbol;
+
+    module_info_unlock_(symbol_owner_info_inner);
+    module_info_unlock_(info_inner);
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4409,30 +4640,37 @@ FIMO_MUST_USE
 FimoError fimo_internal_module_unload(FimoInternalModuleContext *ctx, const FimoModuleInfo *module) {
     FIMO_DEBUG_ASSERT(ctx)
 
+    ctx_lock_(ctx);
     if (module != NULL) {
         TRACE_(ctx, "unloading module, module='%s'", module->name)
-        const struct ModuleInfo_ *info = module_info_from_module_info(module);
+        const struct ModuleInfo_ *info = module_info_from_module_info_(module);
         if (info->type != MODULE_TYPE_REGULAR_) {
+            ctx_unlock_(ctx);
             ERROR_SIMPLE_(ctx, FIMO_EPERM, "can only unload regular modules")
             return FIMO_EPERM;
         }
-        const FimoModule *module_ = info->module;
+        struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
 
-        if (!ctx_can_remove_module_(ctx, module_)) {
+        if (!ctx_can_remove_module_(ctx, info_inner)) {
+            module_info_unlock_(info_inner);
+            ctx_unlock_(ctx);
             ERROR_SIMPLE_(ctx, FIMO_EPERM, "the module can not be removed")
             return FIMO_EPERM;
         }
 
-        const FimoError error = ctx_remove_module_(ctx, module_);
+        const FimoError error = ctx_remove_module_(ctx, info_inner);
         if (FIMO_IS_ERROR(error)) {
+            module_info_unlock_(info_inner);
+            ctx_unlock_(ctx);
             ERROR_SIMPLE_(ctx, error, "could not remove module from context")
             return error;
         }
 
-        fi_module_free_((FimoModule *)module_, NULL);
+        fi_module_free_(info_inner, NULL);
     }
 
     const FimoError error = ctx_cleanup_loose_modules(ctx);
+    ctx_unlock_(ctx);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not cleanup loose modules")
         return error;
@@ -4454,15 +4692,20 @@ FimoError fimo_internal_module_param_query(FimoInternalModuleContext *ctx, const
     }
 
     TRACE_(ctx, "module_name='%s', param='%s'", module_name, param)
+    ctx_lock_(ctx);
     const struct Module_ *module = ctx_get_module_(ctx, module_name);
     if (module == NULL) {
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "module does not exist, module='%s'", module_name)
         return FIMO_EINVAL;
     }
 
-    const struct ModuleInfo_ *module_info = module_info_from_module(module->module);
-    const struct ModuleInfoParam_ *module_param = module_info_get_param_(module_info, param);
+    const struct ModuleInfo_ *module_info = module_info_from_module_(module->module);
+    struct ModuleInfoInner_ *module_info_inner = module_info_lock_(module_info);
+    const struct ModuleInfoParam_ *module_param = module_info_get_param_(module_info_inner, param);
     if (module_param == NULL) {
+        module_info_unlock_(module_info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "parameter not found, module='%s', param='%s'", module_name, param)
         return FIMO_EINVAL;
     }
@@ -4470,6 +4713,9 @@ FimoError fimo_internal_module_param_query(FimoInternalModuleContext *ctx, const
     *type = module_param->param->data.type;
     *read = module_param->param->read;
     *write = module_param->param->write;
+
+    module_info_unlock_(module_info_inner);
+    ctx_unlock_(ctx);
 
     return FIMO_EOK;
 }
@@ -4486,25 +4732,40 @@ FimoError fimo_internal_module_param_set_public(FimoInternalModuleContext *ctx, 
     }
 
     TRACE_(ctx, "module_name='%s', param='%s'", module_name, param)
+    ctx_lock_(ctx);
     const struct Module_ *module = ctx_get_module_(ctx, module_name);
     if (module == NULL) {
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "module does not exist, module='%s'", module_name)
         return FIMO_EINVAL;
     }
 
-    const struct ModuleInfo_ *module_info = module_info_from_module(module->module);
-    const struct ModuleInfoParam_ *module_param = module_info_get_param_(module_info, param);
+    const struct ModuleInfo_ *module_info = module_info_from_module_(module->module);
+    struct ModuleInfoInner_ *module_info_inner = module_info_lock_(module_info);
+    const struct ModuleInfoParam_ *module_param = module_info_get_param_(module_info_inner, param);
     if (module_param == NULL) {
+        module_info_unlock_(module_info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "parameter not found, module='%s', param='%s'", module_name, param)
         return FIMO_EINVAL;
     }
 
     if (!param_can_write_public(module_param->param)) {
+        module_info_unlock_(module_info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EPERM, "write not permitted, module='%s', param='%s'", module_name, param)
         return FIMO_EPERM;
     }
 
-    return param_write_((FimoModuleParam *)module_param->param, module->module, value, type);
+    const FimoError error = param_write_((FimoModuleParam *)module_param->param, module->module, value, type);
+    module_info_unlock_(module_info_inner);
+    ctx_unlock_(ctx);
+    if (FIMO_IS_ERROR(error)) {
+        ERROR_(ctx, error, "could not write to param, module='%s', param='%s'", module_name, param)
+        return error;
+    }
+
+    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
@@ -4518,25 +4779,40 @@ FimoError fimo_internal_module_param_get_public(FimoInternalModuleContext *ctx, 
     }
 
     TRACE_(ctx, "module_name='%s', param='%s'", module_name, param)
+    ctx_lock_(ctx);
     const struct Module_ *module = ctx_get_module_(ctx, module_name);
     if (module == NULL) {
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "module does not exist, module='%s'", module_name)
         return FIMO_EINVAL;
     }
 
-    const struct ModuleInfo_ *module_info = module_info_from_module(module->module);
-    const struct ModuleInfoParam_ *module_param = module_info_get_param_(module_info, param);
+    const struct ModuleInfo_ *module_info = module_info_from_module_(module->module);
+    struct ModuleInfoInner_ *module_info_inner = module_info_lock_(module_info);
+    const struct ModuleInfoParam_ *module_param = module_info_get_param_(module_info_inner, param);
     if (module_param == NULL) {
+        module_info_unlock_(module_info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "parameter not found, module='%s', param='%s'", module_name, param)
         return FIMO_EINVAL;
     }
 
     if (!param_can_read_public(module_param->param)) {
+        module_info_unlock_(module_info_inner);
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EPERM, "read not permitted, module='%s', param='%s'", module_name, param)
         return FIMO_EPERM;
     }
 
-    return param_read_(module_param->param, module->module, value, type);
+    const FimoError error = param_read_(module_param->param, module->module, value, type);
+    module_info_unlock_(module_info_inner);
+    ctx_unlock_(ctx);
+    if (FIMO_IS_ERROR(error)) {
+        ERROR_(ctx, error, "could not read from param, module='%s', param='%s'", module_name, param)
+        return error;
+    }
+
+    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
@@ -4551,31 +4827,44 @@ FimoError fimo_internal_module_param_set_dependency(FimoInternalModuleContext *c
     }
 
     TRACE_(ctx, "module='%p', module_name='%s', param='%s'", (void *)module, module_name, param)
-    const struct ModuleInfo_ *caller_info = module_info_from_module(module);
-    const struct ModuleInfoDependency_ *dep = module_info_get_dependency_(caller_info, module_name);
+    const struct ModuleInfo_ *caller_info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *caller_info_inner = module_info_lock_(caller_info);
+    const struct ModuleInfoDependency_ *dep = module_info_get_dependency_(caller_info_inner, module_name);
     if (dep == NULL) {
+        module_info_unlock_(caller_info_inner);
         ERROR_(ctx, FIMO_EINVAL, "module is not a dependency, module='%s', caller='%s'", module_name,
                module->module_info->name)
         return FIMO_EINVAL;
     }
 
-    const struct ModuleInfo_ *dep_info = module_info_from_module_info(dep->info);
-    const struct ModuleInfoParam_ *dep_param = module_info_get_param_(dep_info, param);
+    const struct ModuleInfo_ *dep_info = module_info_from_module_info_(dep->info);
+    struct ModuleInfoInner_ *dep_info_inner = module_info_lock_(dep_info);
+    const struct ModuleInfoParam_ *dep_param = module_info_get_param_(dep_info_inner, param);
     if (dep_param == NULL) {
+        module_info_unlock_(dep_info_inner);
+        module_info_unlock_(caller_info_inner);
         ERROR_(ctx, FIMO_EINVAL, "parameter not found, module='%s', parameter='%s'", module_name, param)
         return FIMO_EINVAL;
     }
 
-    if (!param_can_write_dependency(dep_param->param, module)) {
+    if (!param_can_write_dependency(dep_param->param, caller_info_inner)) {
+        module_info_unlock_(dep_info_inner);
+        module_info_unlock_(caller_info_inner);
         ERROR_(ctx, FIMO_EPERM, "write not permitted, caller='%s', module='%s', parameter='%s'",
                module->module_info->name, module_name, param)
         return FIMO_EPERM;
     }
 
-    const struct Module_ *dep_module = ctx_get_module_(ctx, module_name);
-    FIMO_ASSERT(dep_module)
+    FIMO_ASSERT(!module_info_is_detached_(dep_info_inner) && dep_info_inner->module)
+    const FimoError error = param_write_((FimoModuleParam *)dep_param->param, dep_info_inner->module, value, type);
+    module_info_unlock_(dep_info_inner);
+    module_info_unlock_(caller_info_inner);
+    if (FIMO_IS_ERROR(error)) {
+        ERROR_(ctx, error, "could not write to param, module='%s', param='%s'", module_name, param)
+        return error;
+    }
 
-    return param_write_((FimoModuleParam *)dep_param->param, dep_module->module, value, type);
+    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
@@ -4591,31 +4880,45 @@ FimoError fimo_internal_module_param_get_dependency(FimoInternalModuleContext *c
     }
 
     TRACE_(ctx, "module='%p', module_name='%s', param='%s'", (void *)module, module_name, param)
-    const struct ModuleInfo_ *caller_info = module_info_from_module(module);
-    const struct ModuleInfoDependency_ *dep = module_info_get_dependency_(caller_info, module_name);
+    const struct ModuleInfo_ *caller_info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *caller_info_inner = module_info_lock_(caller_info);
+    const struct ModuleInfoDependency_ *dep = module_info_get_dependency_(caller_info_inner, module_name);
     if (dep == NULL) {
+        module_info_unlock_(caller_info_inner);
         ERROR_(ctx, FIMO_EINVAL, "module is not a dependency, module='%s', caller='%s'", module_name,
                module->module_info->name)
         return FIMO_EINVAL;
     }
 
-    const struct ModuleInfo_ *dep_info = module_info_from_module_info(dep->info);
-    const struct ModuleInfoParam_ *dep_param = module_info_get_param_(dep_info, param);
+    const struct ModuleInfo_ *dep_info = module_info_from_module_info_(dep->info);
+    struct ModuleInfoInner_ *dep_info_inner = module_info_lock_(dep_info);
+    const struct ModuleInfoParam_ *dep_param = module_info_get_param_(dep_info_inner, param);
     if (dep_param == NULL) {
+        module_info_unlock_(dep_info_inner);
+        module_info_unlock_(caller_info_inner);
         ERROR_(ctx, FIMO_EINVAL, "parameter not found, module='%s', parameter='%s'", module_name, param)
         return FIMO_EINVAL;
     }
 
-    if (!param_can_read_dependency(dep_param->param, module)) {
+    if (!param_can_read_dependency(dep_param->param, caller_info_inner)) {
+        module_info_unlock_(dep_info_inner);
+        module_info_unlock_(caller_info_inner);
         ERROR_(ctx, FIMO_EPERM, "read not permitted, caller='%s', module='%s', parameter='%s'",
                module->module_info->name, module_name, param)
         return FIMO_EPERM;
     }
 
-    const struct Module_ *dep_module = ctx_get_module_(ctx, module_name);
-    FIMO_ASSERT(dep_module)
+    FIMO_ASSERT(!module_info_is_detached_(dep_info_inner) && dep_info_inner->module)
+    const FimoError error = param_read_(dep_param->param, dep_info_inner->module, value, type);
 
-    return param_read_(dep_param->param, dep_module->module, value, type);
+    module_info_unlock_(dep_info_inner);
+    module_info_unlock_(caller_info_inner);
+    if (FIMO_IS_ERROR(error)) {
+        ERROR_(ctx, error, "could not read from param, module='%s', param='%s'", module_name, param)
+        return error;
+    }
+
+    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
@@ -4629,6 +4932,8 @@ FimoError fimo_internal_module_param_set_private(FimoInternalModuleContext *ctx,
         return FIMO_EINVAL;
     }
 
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
     TRACE_(ctx, "module='%p', param='%p', owner='%p', read='%d', write='%d', type='%d'", (void *)module, (void *)param,
            (void *)param->data.owner, param->read, param->write, param->data.type)
     if (!param_can_write_private(param, module)) {
@@ -4637,7 +4942,14 @@ FimoError fimo_internal_module_param_set_private(FimoInternalModuleContext *ctx,
         return FIMO_EPERM;
     }
 
-    return param_write_(param, module, value, type);
+    const FimoError error = param_write_(param, module, value, type);
+    module_info_unlock_(info_inner);
+    if (FIMO_IS_ERROR(error)) {
+        ERROR_(ctx, error, "could not write to param, module='%s'", module->module_info->name)
+        return error;
+    }
+
+    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
@@ -4650,6 +4962,8 @@ FimoError fimo_internal_module_param_get_private(FimoInternalModuleContext *ctx,
         return FIMO_EINVAL;
     }
 
+    const struct ModuleInfo_ *info = module_info_from_module_(module);
+    struct ModuleInfoInner_ *info_inner = module_info_lock_(info);
     TRACE_(ctx, "module='%p', param='%p', owner='%p', read='%d', write='%d', type='%d'", (void *)module, (void *)param,
            (void *)param->data.owner, param->read, param->write, param->data.type)
     if (!param_can_read_private(param, module)) {
@@ -4658,7 +4972,14 @@ FimoError fimo_internal_module_param_get_private(FimoInternalModuleContext *ctx,
         return FIMO_EPERM;
     }
 
-    return param_read_(param, module, value, type);
+    const FimoError error = param_read_(param, module, value, type);
+    module_info_unlock_(info_inner);
+    if (FIMO_IS_ERROR(error)) {
+        ERROR_(ctx, error, "could not read from param, module='%s'", module->module_info->name)
+        return error;
+    }
+
+    return FIMO_EOK;
 }
 
 FIMO_MUST_USE
