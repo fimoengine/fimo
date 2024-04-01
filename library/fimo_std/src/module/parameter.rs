@@ -1,4 +1,4 @@
-use core::{ffi::CStr, marker::PhantomData, ops::Deref};
+use core::{cell::UnsafeCell, ffi::CStr, marker::PhantomData, ops::Deref};
 
 use crate::{
     bindings,
@@ -6,9 +6,9 @@ use crate::{
     ffi::{FFISharable, FFITransferable},
 };
 
-use super::{Module, ModuleBackendGuard};
+use super::{Module, ModuleSubsystem};
 
-/// Type of a module parameter.
+/// Type of module parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParameterType {
     U8,
@@ -69,7 +69,7 @@ impl From<ParameterType> for bindings::FimoModuleParamType {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleParamType> for ParameterType {
+impl FFITransferable<bindings::FimoModuleParamType> for ParameterType {
     fn into_ffi(self) -> bindings::FimoModuleParamType {
         self.into()
     }
@@ -132,7 +132,7 @@ impl From<ParameterAccess> for bindings::FimoModuleParamAccess {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleParamAccess> for ParameterAccess {
+impl FFITransferable<bindings::FimoModuleParamAccess> for ParameterAccess {
     fn into_ffi(self) -> bindings::FimoModuleParamAccess {
         self.into()
     }
@@ -173,7 +173,7 @@ impl ParameterValue {
     /// the parameter does not exist, or if the parameter does not allow reading with a public
     /// access.
     pub fn read_public(
-        guard: &ModuleBackendGuard<'_>,
+        ctx: &impl ModuleSubsystem,
         module: &CStr,
         parameter: &CStr,
     ) -> Result<Self, Error> {
@@ -183,7 +183,7 @@ impl ParameterValue {
         // Safety: The ffi call is safe.
         to_result_indirect(|error| unsafe {
             *error = bindings::fimo_module_param_get_public(
-                guard.share_to_ffi(),
+                ctx.share_to_ffi(),
                 core::ptr::from_mut(&mut value).cast(),
                 &mut type_,
                 module.as_ptr(),
@@ -284,7 +284,7 @@ impl ParameterValue {
     /// Reads a module parameter.
     pub fn read_inner(
         caller: &impl Module,
-        parameter: &bindings::FimoModuleParamData,
+        parameter: &UnsafeCell<bindings::FimoModuleParamData>,
     ) -> Result<Self, Error> {
         let mut value = ValueTypes { u8_: 0 };
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
@@ -295,7 +295,7 @@ impl ParameterValue {
                 caller.share_to_ffi(),
                 core::ptr::from_mut(&mut value).cast(),
                 &mut type_,
-                parameter,
+                parameter.get(),
             );
         })?;
         let type_ = ParameterType::try_from(type_)?;
@@ -322,7 +322,7 @@ impl ParameterValue {
     /// access.
     pub fn write_public(
         self,
-        guard: &ModuleBackendGuard<'_>,
+        ctx: &impl ModuleSubsystem,
         module: &CStr,
         parameter: &CStr,
     ) -> error::Result {
@@ -340,7 +340,7 @@ impl ParameterValue {
         // Safety: The ffi call is safe.
         to_result_indirect(|error| unsafe {
             *error = bindings::fimo_module_param_set_public(
-                guard.share_to_ffi(),
+                ctx.share_to_ffi(),
                 core::ptr::from_ref(&value).cast(),
                 type_.into_ffi(),
                 module.as_ptr(),
@@ -415,7 +415,7 @@ impl ParameterValue {
     pub fn write_inner(
         self,
         caller: &impl Module,
-        parameter: &mut bindings::FimoModuleParamData,
+        parameter: &UnsafeCell<bindings::FimoModuleParamData>,
     ) -> error::Result {
         let (value, type_) = match self {
             ParameterValue::U8(x) => (ValueTypes { u8_: x }, ParameterType::U8),
@@ -434,7 +434,7 @@ impl ParameterValue {
                 caller.share_to_ffi(),
                 core::ptr::from_ref(&value).cast(),
                 type_.into_ffi(),
-                parameter,
+                parameter.get(),
             );
         })
     }
@@ -466,7 +466,7 @@ pub struct ParameterInfo {
 impl ParameterInfo {
     /// Queries the info of a module parameter.
     pub fn query(
-        guard: &ModuleBackendGuard<'_>,
+        ctx: &impl ModuleSubsystem,
         module: &CStr,
         parameter: &CStr,
     ) -> Result<Self, Error> {
@@ -477,7 +477,7 @@ impl ParameterInfo {
         // Safety: The ffi call is safe.
         to_result_indirect(|error| unsafe {
             *error = bindings::fimo_module_param_query(
-                guard.share_to_ffi(),
+                ctx.share_to_ffi(),
                 module.as_ptr(),
                 parameter.as_ptr(),
                 &mut type_,
@@ -518,7 +518,7 @@ unsafe impl Send for OpaqueParameter<'_> {}
 /// Safety: A parameter is a reference to an atomic integer.
 unsafe impl Sync for OpaqueParameter<'_> {}
 
-impl crate::ffi::FFISharable<*mut bindings::FimoModuleParam> for OpaqueParameter<'_> {
+impl FFISharable<*mut bindings::FimoModuleParam> for OpaqueParameter<'_> {
     type BorrowedView<'a> = OpaqueParameter<'a>;
 
     fn share_to_ffi(&self) -> *mut bindings::FimoModuleParam {
@@ -530,7 +530,7 @@ impl crate::ffi::FFISharable<*mut bindings::FimoModuleParam> for OpaqueParameter
     }
 }
 
-impl crate::ffi::FFITransferable<*mut bindings::FimoModuleParam> for OpaqueParameter<'_> {
+impl FFITransferable<*mut bindings::FimoModuleParam> for OpaqueParameter<'_> {
     fn into_ffi(self) -> *mut bindings::FimoModuleParam {
         self.0
     }
@@ -568,9 +568,7 @@ impl<'a, T: ParameterCast> Deref for Parameter<'a, T> {
     }
 }
 
-impl<T: ParameterCast> crate::ffi::FFITransferable<*mut bindings::FimoModuleParam>
-    for Parameter<'_, T>
-{
+impl<T: ParameterCast> FFITransferable<*mut bindings::FimoModuleParam> for Parameter<'_, T> {
     fn into_ffi(self) -> *mut bindings::FimoModuleParam {
         self.0.into_ffi()
     }

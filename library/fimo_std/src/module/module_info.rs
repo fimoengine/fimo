@@ -8,23 +8,52 @@ use crate::{
     version::Version,
 };
 
-use super::{ModuleBackend, ModuleBackendGuard, Symbol};
+use super::{ModuleSubsystem, Symbol};
 
-/// Info of a loaded module.
-#[repr(transparent)]
-pub struct ModuleInfo<'a>(&'a bindings::FimoModuleInfo);
+/// View of a `ModuleInfo`.
+#[derive(Copy, Clone)]
+pub struct ModuleInfoView<'a>(&'a bindings::FimoModuleInfo);
 
-impl ModuleInfo<'_> {
-    /// Searches for a module by it's name.
-    pub fn find_by_name<'a>(
-        guard: &'a ModuleBackendGuard<'_>,
-        name: &CStr,
-    ) -> Result<ModuleInfo<'a>, Error> {
+impl ModuleInfoView<'_> {
+    /// Unique module name.
+    pub fn name(&self) -> &CStr {
+        // Safety: The name is a valid string.
+        unsafe { CStr::from_ptr(self.0.name) }
+    }
+
+    /// Module description.
+    pub fn description(&self) -> Option<&CStr> {
+        // Safety: The string is valid or null.
+        unsafe { self.0.description.as_ref().map(|x| CStr::from_ptr(x)) }
+    }
+
+    /// Module author.
+    pub fn author(&self) -> Option<&CStr> {
+        // Safety: The string is valid or null.
+        unsafe { self.0.author.as_ref().map(|x| CStr::from_ptr(x)) }
+    }
+
+    /// Module license.
+    pub fn license(&self) -> Option<&CStr> {
+        // Safety: The string is valid or null.
+        unsafe { self.0.license.as_ref().map(|x| CStr::from_ptr(x)) }
+    }
+
+    /// Path to the module directory.
+    pub fn module_path(&self) -> &CStr {
+        // Safety: The module path is a valid string.
+        unsafe { CStr::from_ptr(self.0.module_path) }
+    }
+}
+
+impl ModuleInfoView<'_> {
+    /// Searches for a module by its name.
+    pub fn find_by_name<'a>(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<ModuleInfo, Error> {
         // Safety: Either we get an error, or we initialize the module.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
                 *error = bindings::fimo_module_find_by_name(
-                    guard.share_to_ffi(),
+                    ctx.share_to_ffi(),
                     name.as_ptr(),
                     module.as_mut_ptr(),
                 );
@@ -32,21 +61,22 @@ impl ModuleInfo<'_> {
         }?;
 
         // Safety: We own the module info.
-        unsafe { Ok(ModuleInfo::from_ffi(module)) }
+        let view = unsafe { ModuleInfoView::from_ffi(module) };
+        Ok(ModuleInfo(view))
     }
 
     /// Searches for a module by a symbol it exports.
-    pub fn find_by_symbol<'a>(
-        guard: &'a ModuleBackendGuard<'_>,
+    pub fn find_by_symbol(
+        ctx: &impl ModuleSubsystem,
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<ModuleInfo<'a>, Error> {
+    ) -> Result<ModuleInfo, Error> {
         // Safety: Either we get an error, or we initialize the module.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
                 *error = bindings::fimo_module_find_by_symbol(
-                    guard.share_to_ffi(),
+                    ctx.share_to_ffi(),
                     name.as_ptr(),
                     namespace.as_ptr(),
                     version.into_ffi(),
@@ -56,68 +86,47 @@ impl ModuleInfo<'_> {
         }?;
 
         // Safety: We own the module info.
-        unsafe { Ok(ModuleInfo::from_ffi(module)) }
+        let view = unsafe { ModuleInfoView::from_ffi(module) };
+        Ok(ModuleInfo(view))
     }
 
     /// Unloads the module.
     ///
-    /// If successful, this function unloads the module and all modules that have it as a
-    /// dependency. To succeed, the module must have no dependencies left.
-    pub fn unload(self, guard: &mut ModuleBackendGuard<'_>) -> error::Result {
+    /// If successful, this function unloads the module. To succeed, the module no other module may
+    /// depend on the module. This function automatically unloads cleans up unreferenced modules,
+    /// except if they are a pseudo module.
+    pub fn unload(&self, ctx: &impl ModuleSubsystem) -> error::Result {
         // Safety: The ffi call is safe.
         to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_unload(guard.share_to_ffi(), self.into_ffi());
+            *error = bindings::fimo_module_unload(ctx.share_to_ffi(), self.share_to_ffi());
         })
     }
-}
 
-impl ModuleInfo<'_> {
-    /// Unique module name.
-    pub fn name(&self) -> &CStr {
-        // Safety: The name is a valid string.
-        unsafe { CStr::from_ptr(self.0.name) }
-    }
-
-    /// Module description.
-    pub fn description(&self) -> &CStr {
-        // Safety: The description is a valid string.
-        unsafe { CStr::from_ptr(self.0.description) }
-    }
-
-    /// Module author.
-    pub fn author(&self) -> &CStr {
-        // Safety: The author is a valid string.
-        unsafe { CStr::from_ptr(self.0.author) }
-    }
-
-    /// Module license.
-    pub fn license(&self) -> &CStr {
-        // Safety: The author is a valid string.
-        unsafe { CStr::from_ptr(self.0.license) }
-    }
-
-    /// Module description.
-    pub fn module_path(&self) -> &CStr {
-        // Safety: The module path is a valid string.
-        unsafe { CStr::from_ptr(self.0.module_path) }
+    /// Acquires the module info by increasing the reference count.
+    pub fn to_owned(&self) -> ModuleInfo {
+        let acquire = self.0.acquire.unwrap();
+        unsafe {
+            (acquire)(self.share_to_ffi());
+            ModuleInfo::from_ffi(self.0)
+        }
     }
 }
 
 // Safety: `FimoModuleInfo` must be `Send + Sync`.
-unsafe impl Send for ModuleInfo<'_> {}
+unsafe impl Send for ModuleInfoView<'_> {}
 
 // Safety: `FimoModuleInfo` must be `Send + Sync`.
-unsafe impl Sync for ModuleInfo<'_> {}
+unsafe impl Sync for ModuleInfoView<'_> {}
 
-impl PartialEq for ModuleInfo<'_> {
+impl PartialEq for ModuleInfoView<'_> {
     fn eq(&self, other: &Self) -> bool {
         core::ptr::eq(self.0, other.0)
     }
 }
 
-impl Eq for ModuleInfo<'_> {}
+impl Eq for ModuleInfoView<'_> {}
 
-impl core::fmt::Debug for ModuleInfo<'_> {
+impl core::fmt::Debug for ModuleInfoView<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ModuleInfo")
             .field("name", &self.name())
@@ -129,19 +138,19 @@ impl core::fmt::Debug for ModuleInfo<'_> {
     }
 }
 
-impl core::fmt::Display for ModuleInfo<'_> {
+impl core::fmt::Display for ModuleInfoView<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{} ({})",
             self.name().to_string_lossy(),
-            self.author().to_string_lossy()
+            self.author().map_or("".into(), |x| x.to_string_lossy())
         )
     }
 }
 
-impl crate::ffi::FFISharable<*const bindings::FimoModuleInfo> for ModuleInfo<'_> {
-    type BorrowedView<'a> = ModuleInfo<'a>;
+impl FFISharable<*const bindings::FimoModuleInfo> for ModuleInfoView<'_> {
+    type BorrowedView<'a> = ModuleInfoView<'a>;
 
     fn share_to_ffi(&self) -> *const bindings::FimoModuleInfo {
         self.0
@@ -154,12 +163,12 @@ impl crate::ffi::FFISharable<*const bindings::FimoModuleInfo> for ModuleInfo<'_>
                 (*ffi).type_,
                 bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_INFO
             );
-            ModuleInfo(&*ffi)
+            ModuleInfoView(&*ffi)
         }
     }
 }
 
-impl crate::ffi::FFITransferable<*const bindings::FimoModuleInfo> for ModuleInfo<'_> {
+impl FFITransferable<*const bindings::FimoModuleInfo> for ModuleInfoView<'_> {
     fn into_ffi(self) -> *const bindings::FimoModuleInfo {
         self.0
     }
@@ -176,20 +185,77 @@ impl crate::ffi::FFITransferable<*const bindings::FimoModuleInfo> for ModuleInfo
     }
 }
 
-impl<'a> From<&'a bindings::FimoModuleInfo> for ModuleInfo<'a> {
-    fn from(value: &'a bindings::FimoModuleInfo) -> Self {
-        debug_assert_eq!(
-            value.type_,
-            bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_INFO
-        );
+/// Info of a loaded module.
+#[repr(transparent)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ModuleInfo(ModuleInfoView<'static>);
 
-        Self(value)
+impl ModuleInfo {
+    /// Searches for a module by its name.
+    pub fn find_by_name<'a>(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<Self, Error> {
+        ModuleInfoView::find_by_name(ctx, name)
+    }
+
+    /// Searches for a module by a symbol it exports.
+    pub fn find_by_symbol(
+        ctx: &impl ModuleSubsystem,
+        name: &CStr,
+        namespace: &CStr,
+        version: Version,
+    ) -> Result<Self, Error> {
+        ModuleInfoView::find_by_symbol(ctx, name, namespace, version)
     }
 }
 
-impl<'a> From<ModuleInfo<'a>> for &'a bindings::FimoModuleInfo {
-    fn from(value: ModuleInfo<'a>) -> Self {
-        value.0
+impl core::fmt::Display for ModuleInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&**self, f)
+    }
+}
+
+impl Deref for ModuleInfo {
+    type Target = ModuleInfoView<'static>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Clone for ModuleInfo {
+    fn clone(&self) -> Self {
+        self.to_owned()
+    }
+}
+
+impl Drop for ModuleInfo {
+    fn drop(&mut self) {
+        let release = self.0 .0.acquire.unwrap();
+        // Safety: The ffi call is safe.
+        unsafe { (release)(self.share_to_ffi()) }
+    }
+}
+
+impl FFISharable<*const bindings::FimoModuleInfo> for ModuleInfo {
+    type BorrowedView<'a> = ModuleInfoView<'a>;
+
+    fn share_to_ffi(&self) -> *const bindings::FimoModuleInfo {
+        self.0.share_to_ffi()
+    }
+
+    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModuleInfo) -> Self::BorrowedView<'a> {
+        // Safety: See above.
+        unsafe { ModuleInfoView::borrow_from_ffi(ffi) }
+    }
+}
+
+impl FFITransferable<*const bindings::FimoModuleInfo> for ModuleInfo {
+    fn into_ffi(self) -> *const bindings::FimoModuleInfo {
+        self.0.into_ffi()
+    }
+
+    unsafe fn from_ffi(ffi: *const bindings::FimoModuleInfo) -> Self {
+        // Safety: The contract of this method allows us to assume ownership.
+        unsafe { Self(ModuleInfoView::from_ffi(ffi)) }
     }
 }
 
@@ -205,7 +271,7 @@ pub enum DependencyType {
 ///
 /// A module is self-contained, and may not be passed to other modules.
 /// An instance of [`Module`] is valid for as long as the owning module
-/// remains loaded. Modules mut not leak any resources outside it's own
+/// remains loaded. Modules mut not leak any resources outside its own
 /// module, ensuring that they are destroyed upon module unloading.
 ///
 /// # Safety
@@ -213,12 +279,7 @@ pub enum DependencyType {
 /// The implementor must ensure that the associated table types are compatible
 /// with the ones the module expects.
 pub unsafe trait Module:
-    Send
-    + Sync
-    + for<'a> crate::ffi::FFISharable<
-        *const bindings::FimoModule,
-        BorrowedView<'a> = OpaqueModule<'a>,
-    >
+    Send + Sync + for<'a> FFISharable<*const bindings::FimoModule, BorrowedView<'a> = OpaqueModule<'a>>
 {
     /// Type of the parameter table.
     type Parameters: Send + Sync;
@@ -248,7 +309,7 @@ pub unsafe trait Module:
     fn exports(&self) -> &Self::Exports;
 
     /// Fetches the module info.
-    fn module_info(&self) -> ModuleInfo<'_>;
+    fn module_info(&self) -> ModuleInfoView<'_>;
 
     /// Fetches the context of the module.
     fn context(&self) -> ContextView<'_>;
@@ -266,29 +327,25 @@ pub unsafe trait Module:
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are exposed
     /// in said namespace. A namespace can not be included multiple times.
-    fn include_namespace(
-        &mut self,
-        guard: &mut ModuleBackendGuard<'_>,
-        namespace: &CStr,
-    ) -> error::Result;
+    fn include_namespace(&self, namespace: &CStr) -> error::Result;
 
     /// Removes a namespace from the module.
     ///
     /// Once excluded, the caller guarantees to relinquish access to the symbols contained in said
     /// namespace. It is only possible to exclude namespaces that were manually added, whereas
-    /// static namespace includes remain valid until the module is unloaded. Trying to exclude a
-    /// namespace that is currently in use by the module will result in an error.
-    fn exclude_namespace(
-        &mut self,
-        guard: &mut ModuleBackendGuard<'_>,
-        namespace: &CStr,
-    ) -> error::Result;
+    /// static namespace includes remain valid until the module is unloaded.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that they don't utilize and symbol from the namespace that will be
+    /// excluded.
+    unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result;
 
     /// Checks if a module depends on another module.
     ///
     /// Checks if `module` is a dependency of the current instance. In that case the instance is
     /// allowed to access the symbols exported by `module`.
-    fn has_dependency(&self, module: &ModuleInfo<'_>) -> Result<DependencyType, Error>;
+    fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error>;
 
     /// Acquires another module as a dependency.
     ///
@@ -296,11 +353,7 @@ pub unsafe trait Module:
     /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
     /// already a dependency, or to a module that would result in a circular dependency will result
     /// in an error.
-    fn acquire_dependency<'ctx>(
-        &mut self,
-        guard: &mut ModuleBackendGuard<'ctx>,
-        dependency: &ModuleInfo<'_>,
-    ) -> Result<ModuleInfo<'ctx>, Error>;
+    fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result;
 
     /// Removes a module as a dependency.
     ///
@@ -308,11 +361,11 @@ pub unsafe trait Module:
     /// to resources originating from the former dependency, and allows for the unloading of the
     /// module. A module can only relinquish dependencies to modules that were acquired dynamically,
     /// as static dependencies remain valid until the module is unloaded.
-    fn remove_dependency(
-        &mut self,
-        guard: &mut ModuleBackendGuard<'_>,
-        dependency: ModuleInfo<'_>,
-    ) -> error::Result;
+    ///
+    /// # Safety
+    ///
+    /// Calling this method invalidates all loaded symbols from the dependency.
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result;
 
     /// Loads a symbol from the module backend.
     ///
@@ -372,9 +425,9 @@ unsafe impl Module for OpaqueModule<'_> {
         unsafe { self.0.exports.cast::<()>().as_ref().unwrap_or(&()) }
     }
 
-    fn module_info(&self) -> ModuleInfo<'_> {
+    fn module_info(&self) -> ModuleInfoView<'_> {
         // Safety: `ModuleInfo` is only a wrapper over a `FimoModuleInfo`.
-        unsafe { ModuleInfo::borrow_from_ffi(self.0.module_info) }
+        unsafe { ModuleInfoView::borrow_from_ffi(self.0.module_info) }
     }
 
     fn context(&self) -> ContextView<'_> {
@@ -409,11 +462,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn include_namespace(
-        &mut self,
-        _guard: &mut ModuleBackendGuard<'_>,
-        namespace: &CStr,
-    ) -> error::Result {
+    fn include_namespace(&self, namespace: &CStr) -> error::Result {
         // Safety: FFI call is safe.
         let error = unsafe {
             bindings::fimo_module_namespace_include(self.share_to_ffi(), namespace.as_ptr())
@@ -421,11 +470,7 @@ unsafe impl Module for OpaqueModule<'_> {
         to_result(error)
     }
 
-    fn exclude_namespace(
-        &mut self,
-        _guard: &mut ModuleBackendGuard<'_>,
-        namespace: &CStr,
-    ) -> error::Result {
+    unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result {
         // Safety: FFI call is safe.
         let error = unsafe {
             bindings::fimo_module_namespace_exclude(self.share_to_ffi(), namespace.as_ptr())
@@ -433,7 +478,7 @@ unsafe impl Module for OpaqueModule<'_> {
         to_result(error)
     }
 
-    fn has_dependency(&self, module: &ModuleInfo<'_>) -> Result<DependencyType, Error> {
+    fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
         let mut has_dependency = false;
         let mut is_static = false;
 
@@ -455,26 +500,15 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn acquire_dependency<'ctx>(
-        &mut self,
-        _guard: &mut ModuleBackendGuard<'ctx>,
-        dependency: &ModuleInfo<'_>,
-    ) -> Result<ModuleInfo<'ctx>, Error> {
+    fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result {
         // Safety: FFI call is safe.
         let error = unsafe {
             bindings::fimo_module_acquire_dependency(self.share_to_ffi(), dependency.share_to_ffi())
         };
-        to_result(error)?;
-
-        // Safety: Now that we acquired the dependency we can extend our reference to the module.
-        unsafe { Ok(ModuleInfo::from_ffi(dependency.share_to_ffi())) }
+        to_result(error)
     }
 
-    fn remove_dependency(
-        &mut self,
-        _guard: &mut ModuleBackendGuard<'_>,
-        dependency: ModuleInfo<'_>,
-    ) -> error::Result {
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result {
         // Safety: FFI call is safe.
         let error = unsafe {
             bindings::fimo_module_relinquish_dependency(self.share_to_ffi(), dependency.into_ffi())
@@ -506,7 +540,7 @@ unsafe impl Module for OpaqueModule<'_> {
     }
 }
 
-impl crate::ffi::FFISharable<*const bindings::FimoModule> for OpaqueModule<'_> {
+impl FFISharable<*const bindings::FimoModule> for OpaqueModule<'_> {
     type BorrowedView<'a> = OpaqueModule<'a>;
 
     fn share_to_ffi(&self) -> *const bindings::FimoModule {
@@ -519,7 +553,7 @@ impl crate::ffi::FFISharable<*const bindings::FimoModule> for OpaqueModule<'_> {
     }
 }
 
-impl crate::ffi::FFITransferable<*const bindings::FimoModule> for OpaqueModule<'_> {
+impl FFITransferable<*const bindings::FimoModule> for OpaqueModule<'_> {
     fn into_ffi(self) -> *const bindings::FimoModule {
         self.0
     }
@@ -539,16 +573,18 @@ impl crate::ffi::FFITransferable<*const bindings::FimoModule> for OpaqueModule<'
 /// module handles without an associated module.
 #[repr(transparent)]
 #[derive(Debug)]
-pub struct PseudoModule<'a>(OpaqueModule<'a>);
+pub struct PseudoModule(OpaqueModule<'static>);
 
-impl<'ctx> PseudoModule<'ctx> {
+impl PseudoModule {
     /// Constructs a new `PseudoModule`.
-    pub fn new(guard: &mut ModuleBackendGuard<'ctx>) -> Result<Self, Error> {
+    pub fn new(ctx: &impl ModuleSubsystem) -> Result<Self, Error> {
         // Safety: We either initialize `module` or write an error.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
-                *error =
-                    bindings::fimo_module_pseudo_module_new(guard.into_ffi(), module.as_mut_ptr());
+                *error = bindings::fimo_module_pseudo_module_new(
+                    ctx.share_to_ffi(),
+                    module.as_mut_ptr(),
+                );
             })
         }?;
 
@@ -556,10 +592,7 @@ impl<'ctx> PseudoModule<'ctx> {
         unsafe { Ok(PseudoModule::from_ffi(module)) }
     }
 
-    unsafe fn destroy_by_ref(
-        &mut self,
-        _guard: &mut ModuleBackendGuard<'_>,
-    ) -> Result<Context, Error> {
+    unsafe fn destroy_by_ref(&mut self) -> Result<Context, Error> {
         let module = self.share_to_ffi();
 
         // Safety: The ffi call is safe.
@@ -577,23 +610,23 @@ impl<'ctx> PseudoModule<'ctx> {
     ///
     /// Unlike [`PseudoModule::drop`] this method can be called while the module
     /// backend is still locked.
-    pub fn destroy(self, guard: &mut ModuleBackendGuard<'_>) -> Result<Context, Error> {
+    pub fn destroy(self) -> Result<Context, Error> {
         let mut this = ManuallyDrop::new(self);
 
         // Safety: The module is not used afterward.
-        unsafe { this.destroy_by_ref(guard) }
+        unsafe { this.destroy_by_ref() }
     }
 }
 
-impl<'a> Deref for PseudoModule<'a> {
-    type Target = OpaqueModule<'a>;
+impl Deref for PseudoModule {
+    type Target = OpaqueModule<'static>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl crate::ffi::FFISharable<*const bindings::FimoModule> for PseudoModule<'_> {
+impl FFISharable<*const bindings::FimoModule> for PseudoModule {
     type BorrowedView<'a> = OpaqueModule<'a>;
 
     fn share_to_ffi(&self) -> *const bindings::FimoModule {
@@ -606,7 +639,7 @@ impl crate::ffi::FFISharable<*const bindings::FimoModule> for PseudoModule<'_> {
     }
 }
 
-impl crate::ffi::FFITransferable<*const bindings::FimoModule> for PseudoModule<'_> {
+impl FFITransferable<*const bindings::FimoModule> for PseudoModule {
     fn into_ffi(self) -> *const bindings::FimoModule {
         let this = ManuallyDrop::new(self);
         this.0.into_ffi()
@@ -618,17 +651,11 @@ impl crate::ffi::FFITransferable<*const bindings::FimoModule> for PseudoModule<'
     }
 }
 
-impl Drop for PseudoModule<'_> {
+impl Drop for PseudoModule {
     fn drop(&mut self) {
-        let mut guard = self
-            .context()
-            .to_context()
-            .lock_module_backend()
-            .expect("the context should be valid");
-
         // Safety: The module is not used afterward.
         unsafe {
-            self.destroy_by_ref(&mut guard)
+            self.destroy_by_ref()
                 .expect("no module should depend on the pseudo module");
         }
     }
