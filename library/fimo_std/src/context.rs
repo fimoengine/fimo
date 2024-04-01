@@ -56,7 +56,7 @@ impl PartialEq for ContextView<'_> {
 
 impl Eq for ContextView<'_> {}
 
-impl crate::ffi::FFISharable<bindings::FimoContext> for ContextView<'_> {
+impl FFISharable<bindings::FimoContext> for ContextView<'_> {
     type BorrowedView<'a> = ContextView<'a>;
 
     fn share_to_ffi(&self) -> bindings::FimoContext {
@@ -69,7 +69,7 @@ impl crate::ffi::FFISharable<bindings::FimoContext> for ContextView<'_> {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoContext> for ContextView<'_> {
+impl FFITransferable<bindings::FimoContext> for ContextView<'_> {
     fn into_ffi(self) -> bindings::FimoContext {
         self.0
     }
@@ -123,7 +123,7 @@ impl Drop for Context {
     }
 }
 
-impl crate::ffi::FFISharable<bindings::FimoContext> for Context {
+impl FFISharable<bindings::FimoContext> for Context {
     type BorrowedView<'a> = ContextView<'a>;
 
     fn share_to_ffi(&self) -> bindings::FimoContext {
@@ -136,7 +136,7 @@ impl crate::ffi::FFISharable<bindings::FimoContext> for Context {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoContext> for Context {
+impl FFITransferable<bindings::FimoContext> for Context {
     fn into_ffi(self) -> bindings::FimoContext {
         let this = ManuallyDrop::new(self);
         this.0 .0
@@ -149,7 +149,14 @@ impl crate::ffi::FFITransferable<bindings::FimoContext> for Context {
 
 pub(crate) mod private {
     use super::ContextView;
+    use crate::{
+        bindings,
+        ffi::{FFISharable, FFITransferable},
+    };
 
-    pub trait SealedContext<'ctx> {}
-    impl<'ctx> SealedContext<'ctx> for ContextView<'ctx> {}
+    pub trait SealedContext:
+        FFISharable<bindings::FimoContext> + FFITransferable<bindings::FimoContext>
+    {
+    }
+    impl SealedContext for ContextView<'_> {}
 }

@@ -1,8 +1,6 @@
 use core::{ffi::CStr, marker::PhantomData, ops::Deref, sync::atomic};
 
-use crate::{bindings, error::Error, version::Version};
-
-use super::OpaqueModule;
+use crate::{bindings, version::Version};
 
 /// A symbol of a module.
 #[derive(Clone, Copy)]
@@ -73,7 +71,7 @@ impl<T> Drop for SymbolGuard<'_, '_, T> {
 }
 
 /// Information of a symbol namespace.
-pub trait NamespaceInfo {
+pub trait NamespaceItem {
     /// Name of the namespace.
     const NAME: &'static CStr;
 }
@@ -81,98 +79,50 @@ pub trait NamespaceInfo {
 /// Global namespace for symbols.
 pub struct GlobalNs;
 
-impl NamespaceInfo for GlobalNs {
+impl NamespaceItem for GlobalNs {
     const NAME: &'static CStr = c"";
 }
 
-/// Common information of an exported item.
-pub trait SymbolInfo {
+/// Common information of an exported symbol item.
+pub trait SymbolItem {
+    /// Type of the symbol.
+    type Type;
+
     /// Name of the export.
     const NAME: &'static CStr;
 
     /// Namespace of the export.
-    type Namespace: NamespaceInfo;
+    type Namespace: NamespaceItem;
 
     /// Version of the export.
     const VERSION: Version;
 }
 
-/// Information of a statically exported item.
-pub trait StaticSymbolInfo: SymbolInfo {
-    /// Type of the exported item.
-    type Type: 'static + Sync;
-
-    /// Symbol to export.
-    const SYMBOL: &'static Self::Type;
-}
-
-/// Information of a dynamically exported item.
-pub trait DynamicSymbolInfo: SymbolInfo {
-    /// Type of the exported item.
-    type Type: Sync;
-
-    /// Constructor for the item.
-    const NEW: fn(OpaqueModule<'static>, *const ()) -> Result<Self::Type, Error>;
-
-    /// Drop function for the item.
-    const DROP: fn(Self::Type, *const ());
-}
-
-/// Specialization of [`Drop`] for symbols.
-pub trait SymbolDrop: Sized {
-    /// Drops the symbol.
-    fn drop_symbol(self);
-}
-
-impl<T> SymbolDrop for T {
-    default fn drop_symbol(self) {
-        core::mem::drop(self);
-    }
-}
-
-#[doc(hidden)]
-pub fn drop_symbol_private(symbol: impl SymbolDrop) {
-    symbol.drop_symbol();
-}
-
-/// Creates items describing the exported symbols and namespaces.
+/// Creates symbol and namespace items that can later be used for import and export.
 ///
 /// # Examples
 ///
-/// ## Static symbol
+/// ## Global symbol
 ///
 /// ```
-/// use fimo_std::declare_exports;
+/// use fimo_std::declare_items;
 ///
-/// declare_exports! {
-///     // Creates the item `SymbolExport` with the version "1.2.3".
-///     static symbol @ (1, 2, 3): usize = 5;
-/// }
-/// ```
-///
-/// ## Dynamic symbol
-///
-/// ```
-/// use fimo_std::declare_exports;
-///
-/// declare_exports! {
-///     // Creates the item `DynamicSymbolExport` with the version "1.2.3+4".
-///     dyn dynamic_symbol @ (1, 2, 3, 4): Box<usize> = |module| Ok(Box::new(5));
+/// declare_items! {
+///     // Creates the item `Symbol` with the version "1.2.3".
+///     extern symbol @ (1, 2, 3): usize;
 /// }
 /// ```
 ///
 /// ## New namespaces
 ///
 /// ```
-/// use fimo_std::declare_exports;
+/// use fimo_std::declare_items;
 ///
-/// declare_exports! {
-///     // Creates the namespace item `MyNsNs`.
+/// declare_items! {
+///     // Creates the namespace item `my_ns::NamespaceItem`.
 ///     mod my_ns {
-///         // Creates the symbol `MyNs_ASymExport`.
-///         static a_sym @ (1, 2, 3): usize = 5;
-///         // Creates the symbol `MyNs_BSymExport`.
-///         dyn b_sym @ (1, 2, 3, 4): Box<usize> = |module| Ok(Box::new(5));
+///         // Creates the symbol `my_ns::ASym`.
+///         extern a_sym @ (1, 2, 3): usize;
 ///     }
 /// }
 /// ```
@@ -180,79 +130,70 @@ pub fn drop_symbol_private(symbol: impl SymbolDrop) {
 /// ## Existing namespaces
 ///
 /// ```
-/// use fimo_std::declare_exports;
+/// use fimo_std::declare_items;
 /// use fimo_std::module::GlobalNs;
 ///
-/// declare_exports! {
+/// declare_items! {
 ///     // Creates the new items in the `GlobalNs` namespace.
-///     mod global: GlobalNs {
-///         // Creates the symbol `MyNs_ASymExport`.
-///         static a_sym @ (1, 2, 3): usize = 5;
-///         // Creates the symbol `MyNs_BSymExport`.
-///         dyn b_sym @ (1, 2, 3, 4): Box<usize> = |module| Ok(Box::new(5));
+///     // Also creates the namespace item type alias `global::NamespaceItem`.
+///     mod global = GlobalNs {
+///         // Creates the symbol `global::ASym`.
+///         extern a_sym @ (1, 2, 3): usize;
 ///     }
 /// }
 /// ```
 #[macro_export]
-macro_rules! declare_exports {
+macro_rules! declare_items {
     () => {};
-    (static $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)? $(,)?): $type:ty = $expr:expr; $($tt:tt)*) => {
-        $crate::declare_exports_private!(item static : $crate::module::GlobalNs; $name @ ($major, $minor, $patch $(, $build)?): $type = $expr;);
-        $crate::declare_exports!($($tt)*);
+    (extern $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)? $(,)?): $type:ty; $($tt:tt)*) => {
+        $crate::declare_items_private!(item $crate::module::GlobalNs; $name @ ($major, $minor, $patch $(, $build)?): $type;);
+        $crate::declare_items!($($tt)*);
     };
-    (dyn $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)? $(,)?): $type:ty = $expr:expr; $($tt:tt)*) => {
-        $crate::declare_exports_private!(item dyn : $crate::module::GlobalNs; $name @ ($major, $minor, $patch $(, $build)?): $type = $expr;);
-        $crate::declare_exports!($($tt)*);
-    };
-    (mod $ns:ident: $ns_type:ty { $($block:tt)* } $($tt:tt)*) => {
-        $crate::declare_exports_private!(namespace $ns: $ns_type; $($block)*);
-        $crate::declare_exports!($($tt)*);
+    (mod $ns:ident = $ns_type:ty { $($block:tt)* } $($tt:tt)*) => {
+        $crate::paste::paste! {
+            #[doc = "Namespace `" $ns "`"]
+            pub mod $ns {
+                #[allow(unused_imports)]
+                use super::*;
+                pub type NamespaceItem = $ns_type;
+                $crate::declare_items_private!(namespace NamespaceItem $($block)*);
+            }
+        }
+        $crate::declare_items!($($tt)*);
     };
     (mod $ns:ident { $($block:tt)* } $($tt:tt)*) => {
         $crate::paste::paste! {
             #[doc = "Namespace `" $ns "`"]
-            pub struct [<$ns:camel Ns>];
-            impl $crate::module::NamespaceInfo for [<$ns:camel Ns>] {
-                const NAME: &'static core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(
-                    core::concat!(core::stringify!($ns), '\0').as_bytes()
-                ) {
-                    Ok(x) => x,
-                    Err(_) => unreachable!()
-                };
+            pub mod $ns {
+                #[allow(unused_imports)]
+                use super::*;
+                #[doc = "Namespace `" $ns "` item"]
+                pub struct NamespaceItem;
+                impl $crate::module::NamespaceItem for NamespaceItem {
+                    const NAME: &'static core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(
+                        core::concat!(core::stringify!($ns), '\0').as_bytes()
+                    ) {
+                        Ok(x) => x,
+                        Err(_) => unreachable!()
+                    };
+                }
+                $crate::declare_items_private!(namespace NamespaceItem $($block)*);
             }
-
-            $crate::declare_exports_private!(namespace $ns: [<$ns:camel Ns>]; $($block)*);
         }
-
-        $crate::declare_exports!($($tt)*);
+        $crate::declare_items!($($tt)*);
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! declare_exports_private {
-    () => {};
-    (namespace $($ns:ident)?: $ns_type:ty;) => {};
-    (namespace $($ns:ident)?: $ns_type:ty; { $($tt:tt)* }) => {
-        $crate::declare_exports_private!(namespace $($ns)?: $ns_type; $($tt)*)
-    };
-    (namespace $($ns:ident)?: $ns_type:ty; static $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)? $(,)?): $type:ty = $expr:expr; $($tt:tt)*) => {
-        $crate::declare_exports_private!(item static $($ns)?: $ns_type; $name @ ($major, $minor, $patch $(, $build)?): $type = $expr;);
-        $crate::declare_exports_private!(namespace $($ns)?: $ns_type; $($tt)*);
-    };
-    (namespace $($ns:ident)?: $ns_type:ty; dyn $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)? $(,)?): $type:ty = $expr:expr; $($tt:tt)*) => {
-        $crate::declare_exports_private!(item dyn $($ns)?: $ns_type; $name @ ($major, $minor, $patch $(, $build)?) : $type = $expr;);
-        $crate::declare_exports_private!(namespace $($ns)?: $ns_type; $($tt)*);
-    };
-    (item static $($ns:ident)?: $ns_type:ty; $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)?) : $type:ty = $expr:expr;) => {
+macro_rules! declare_items_private {
+    (item $ns_type:ty; $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)?) : $type:ty;) => {
         $crate::paste::paste! {
             #[allow(non_camel_case_types)]
-            #[doc = "Export `" $name "`" $(" in the namespace `" $ns "`")? "."]
-            pub struct [<$($ns:camel _)? $name:camel Export>];
-            impl [<$($ns:camel _)? $name:camel Export>] {
-                const SYMBOL_VALUE: $type = { $expr };
-            }
-            impl $crate::module::SymbolInfo for [<$($ns:camel _)? $name:camel Export>] {
+            #[doc = "Symbol `" $name "`."]
+            pub struct [<$name:camel>];
+            impl $crate::module::SymbolItem for [<$name:camel>] {
+                type Type = $type;
                 const NAME: &'static core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(
                     core::concat!(core::stringify!($name), '\0').as_bytes()
                 ) {
@@ -262,49 +203,11 @@ macro_rules! declare_exports_private {
                 type Namespace = $ns_type;
                 const VERSION: $crate::version::Version = $crate::version!($major, $minor, $patch, $($build)?);
             }
-            impl $crate::module::StaticSymbolInfo for [<$($ns:camel _)? $name:camel Export>]
-            {
-                type Type = $type;
-                const SYMBOL: &'static Self::Type = &[<$($ns:camel _)? $name:camel Export>]::SYMBOL_VALUE;
-            }
         }
     };
-    (item dyn $($ns:ident)?: $ns_type:ty; $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)?) : $type:ty = $expr:expr;) => {
-        $crate::paste::paste! {
-            #[allow(non_camel_case_types)]
-            #[doc = "Export `" $name "`" $(" in the namespace `" $ns "`")? "."]
-            pub struct [<$($ns:camel _)? $name:camel Export>];
-            impl [<$($ns:camel _)? $name:camel Export>] {
-                fn construct(
-                    module: $crate::module::OpaqueModule<'static>,
-                    _reserved: *const ()
-                ) -> Result<$type, $crate::error::Error> {
-                    ($expr)(module)
-                }
-
-                fn drop(symbol: $type, _: *const ()) {
-                    $crate::module::drop_symbol_private(symbol);
-                }
-            }
-            impl $crate::module::SymbolInfo for [<$($ns:camel _)? $name:camel Export>] {
-                const NAME: &'static core::ffi::CStr = match core::ffi::CStr::from_bytes_with_nul(
-                    core::concat!(core::stringify!($name), '\0').as_bytes()
-                ) {
-                    Ok(x) => x,
-                    Err(_) => unreachable!()
-                };
-                type Namespace = $ns_type;
-                const VERSION: $crate::version::Version = $crate::version!($major, $minor, $patch, $($build)?);
-            }
-            impl $crate::module::DynamicSymbolInfo for [<$($ns:camel _)? $name:camel Export>]
-            {
-                type Type = $type;
-                const NEW: fn(
-                    $crate::module::OpaqueModule<'static>,
-                    *const ()
-                ) -> Result<Self::Type, $crate::error::Error> = [<$($ns:camel _)? $name:camel Export>]::construct;
-                const DROP: fn(Self::Type, *const ()) = [<$($ns:camel _)? $name:camel Export>]::drop;
-            }
-        }
+    (namespace $ns_type:ident) => {};
+    (namespace $ns_type:ident extern $name:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)? $(,)?): $type:ty; $($tt:tt)*) => {
+        $crate::declare_items_private!(item $ns_type; $name @ ($major, $minor, $patch $(, $build)?): $type;);
+        $crate::declare_items_private!(namespace $ns_type $($tt)*);
     };
 }

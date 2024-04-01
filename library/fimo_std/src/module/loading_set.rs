@@ -7,7 +7,7 @@ use crate::{
     version::Version,
 };
 
-use super::{ModuleBackendGuard, ModuleExport, ModuleInfo};
+use super::{ModuleExport, ModuleInfo, ModuleInfoView, ModuleSubsystem};
 
 /// Result of the filter operation of a [`LoadingSet`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -18,9 +18,9 @@ pub enum LoadingFilterRequest {
 
 /// Status of a module loading operation.
 #[derive(Debug)]
-pub enum LoadingStatus<'ctx> {
-    Success { info: ModuleInfo<'ctx> },
-    Error { export: ModuleExport<'ctx> },
+pub enum LoadingStatus<'a> {
+    Success { info: ModuleInfoView<'a> },
+    Error { export: ModuleExport<'a> },
 }
 
 /// Request of a [`LoadingSet`].
@@ -41,24 +41,25 @@ impl<'a> LoadingSet<'a> {
     /// If the closure `f` return [`LoadingSetRequest::Load`] then the module backend will start
     /// loading the modules contained in the set. The loading of the set can be dismissed by
     /// returning [`LoadingSetRequest::Dismiss`] or an error from the closure.
-    pub fn with_loading_set(
-        guard: &mut ModuleBackendGuard<'a>,
-        f: impl FnOnce(&mut Self, &mut ModuleBackendGuard<'a>) -> Result<LoadingSetRequest, Error>,
+    pub fn with_loading_set<T: ModuleSubsystem>(
+        ctx: &T,
+        f: impl FnOnce(&mut Self, &T) -> Result<LoadingSetRequest, Error>,
     ) -> error::Result {
         // Safety: The ffi call is safe, as we own all pointers.
         let mut loading_set = unsafe {
             let x = to_result_indirect_in_place(|error, loading_set| {
-                *error = bindings::fimo_module_set_new(guard.into_ffi(), loading_set.as_mut_ptr());
+                *error =
+                    bindings::fimo_module_set_new(ctx.share_to_ffi(), loading_set.as_mut_ptr());
             })?;
 
             LoadingSet::from_ffi(x)
         };
 
-        let request = f(&mut loading_set, guard);
+        let request = f(&mut loading_set, ctx);
         if matches!(request, Ok(LoadingSetRequest::Dismiss) | Err(_)) {
             // Safety: The ffi call is safe.
             let error = unsafe {
-                bindings::fimo_module_set_dismiss(guard.share_to_ffi(), loading_set.into_ffi())
+                bindings::fimo_module_set_dismiss(ctx.share_to_ffi(), loading_set.into_ffi())
             };
             to_result(error)?;
             request?;
@@ -66,19 +67,19 @@ impl<'a> LoadingSet<'a> {
         } else {
             // Safety: The ffi call is safe.
             let error = unsafe {
-                bindings::fimo_module_set_finish(guard.share_to_ffi(), loading_set.into_ffi())
+                bindings::fimo_module_set_finish(ctx.share_to_ffi(), loading_set.into_ffi())
             };
             to_result(error)
         }
     }
 
     /// Checks if the `LoadingSet` contains the module.
-    pub fn has_module(&self, guard: &ModuleBackendGuard<'_>, name: &CStr) -> Result<bool, Error> {
+    pub fn has_module(&self, ctx: &impl ModuleSubsystem, name: &CStr) -> Result<bool, Error> {
         // Safety: The ffi call is safe, as we own all pointers.
         unsafe {
             to_result_indirect_in_place(|error, has_module| {
                 *error = bindings::fimo_module_set_has_module(
-                    guard.into_ffi(),
+                    ctx.share_to_ffi(),
                     self.share_to_ffi(),
                     name.as_ptr(),
                     has_module.as_mut_ptr(),
@@ -90,7 +91,7 @@ impl<'a> LoadingSet<'a> {
     /// Checks whether the `LoadingSet` set contains a symbol.
     pub fn has_symbol(
         &self,
-        guard: &ModuleBackendGuard<'_>,
+        ctx: &impl ModuleSubsystem,
         name: &CStr,
         ns: &CStr,
         version: Version,
@@ -99,7 +100,7 @@ impl<'a> LoadingSet<'a> {
         unsafe {
             to_result_indirect_in_place(|error, has_module| {
                 *error = bindings::fimo_module_set_has_symbol(
-                    guard.into_ffi(),
+                    ctx.share_to_ffi(),
                     self.share_to_ffi(),
                     name.as_ptr(),
                     ns.as_ptr(),
@@ -121,7 +122,7 @@ impl<'a> LoadingSet<'a> {
     /// in the `LoadingSet`, this method will return an error.
     pub fn append_callback<T>(
         &mut self,
-        guard: &ModuleBackendGuard<'_>,
+        ctx: &impl ModuleSubsystem,
         module: &CStr,
         callback: T,
     ) -> error::Result
@@ -170,7 +171,7 @@ impl<'a> LoadingSet<'a> {
         // Safety: FFI call is safe.
         to_result_indirect(|error| unsafe {
             *error = bindings::fimo_module_set_append_callback(
-                guard.share_to_ffi(),
+                ctx.share_to_ffi(),
                 self.share_to_ffi(),
                 module.as_ptr(),
                 on_success,
@@ -195,7 +196,7 @@ impl<'a> LoadingSet<'a> {
     /// to the set.
     pub fn append_modules<T>(
         &mut self,
-        guard: &ModuleBackendGuard<'_>,
+        ctx: &impl ModuleSubsystem,
         module_path: Option<&CStr>,
         mut filter: T,
     ) -> error::Result
@@ -224,7 +225,7 @@ impl<'a> LoadingSet<'a> {
         // Safety: FFI call is safe.
         to_result_indirect(|error| unsafe {
             *error = bindings::fimo_module_set_append_modules(
-                guard.share_to_ffi(),
+                ctx.share_to_ffi(),
                 self.share_to_ffi(),
                 module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
                 filter,
@@ -240,7 +241,7 @@ unsafe impl Send for LoadingSet<'_> {}
 // Safety: `FimoModuleLoadingSet` is always `Send + Sync`.
 unsafe impl Sync for LoadingSet<'_> {}
 
-impl crate::ffi::FFISharable<*mut bindings::FimoModuleLoadingSet> for LoadingSet<'_> {
+impl FFISharable<*mut bindings::FimoModuleLoadingSet> for LoadingSet<'_> {
     type BorrowedView<'a> = LoadingSet<'a>;
 
     fn share_to_ffi(&self) -> *mut bindings::FimoModuleLoadingSet {
@@ -254,7 +255,7 @@ impl crate::ffi::FFISharable<*mut bindings::FimoModuleLoadingSet> for LoadingSet
     }
 }
 
-impl crate::ffi::FFITransferable<*mut bindings::FimoModuleLoadingSet> for LoadingSet<'_> {
+impl FFITransferable<*mut bindings::FimoModuleLoadingSet> for LoadingSet<'_> {
     fn into_ffi(self) -> *mut bindings::FimoModuleLoadingSet {
         self.0
     }

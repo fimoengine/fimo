@@ -1,6 +1,10 @@
 use core::ffi::CStr;
 
-use crate::{bindings, ffi::FFITransferable, version::Version};
+use crate::{
+    bindings,
+    ffi::{FFISharable, FFITransferable},
+    version::Version,
+};
 
 use super::{ParameterAccess, ParameterType, ParameterValue};
 
@@ -84,12 +88,54 @@ impl core::fmt::Display for ParameterDeclaration {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleParamDecl> for ParameterDeclaration {
+impl FFITransferable<bindings::FimoModuleParamDecl> for ParameterDeclaration {
     fn into_ffi(self) -> bindings::FimoModuleParamDecl {
         self.0
     }
 
     unsafe fn from_ffi(ffi: bindings::FimoModuleParamDecl) -> Self {
+        Self(ffi)
+    }
+}
+
+/// Declaration of a module resource.
+#[repr(transparent)]
+pub struct ResourceDecl(bindings::FimoModuleResourceDecl);
+
+impl ResourceDecl {
+    /// Fetches the path of the resource.
+    pub fn path(&self) -> &CStr {
+        // Safety: The value is always a valid string.
+        unsafe { CStr::from_ptr(self.0.path) }
+    }
+}
+
+// Safety: `FimoModuleResourceDecl` is always `Send + Sync`.
+unsafe impl Send for ResourceDecl {}
+
+// Safety: `FimoModuleResourceDecl` is always `Send + Sync`.
+unsafe impl Sync for ResourceDecl {}
+
+impl core::fmt::Debug for ResourceDecl {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ResourceDecl")
+            .field("path", &self.path())
+            .finish()
+    }
+}
+
+impl core::fmt::Display for ResourceDecl {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.path().to_string_lossy(),)
+    }
+}
+
+impl FFITransferable<bindings::FimoModuleResourceDecl> for ResourceDecl {
+    fn into_ffi(self) -> bindings::FimoModuleResourceDecl {
+        self.0
+    }
+
+    unsafe fn from_ffi(ffi: bindings::FimoModuleResourceDecl) -> Self {
         Self(ffi)
     }
 }
@@ -126,7 +172,7 @@ impl core::fmt::Display for NamespaceImport {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleNamespaceImport> for NamespaceImport {
+impl FFITransferable<bindings::FimoModuleNamespaceImport> for NamespaceImport {
     fn into_ffi(self) -> bindings::FimoModuleNamespaceImport {
         self.0
     }
@@ -188,7 +234,7 @@ impl core::fmt::Display for SymbolImport {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleSymbolImport> for SymbolImport {
+impl FFITransferable<bindings::FimoModuleSymbolImport> for SymbolImport {
     fn into_ffi(self) -> bindings::FimoModuleSymbolImport {
         self.0
     }
@@ -256,7 +302,7 @@ impl core::fmt::Display for SymbolExport {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleSymbolExport> for SymbolExport {
+impl FFITransferable<bindings::FimoModuleSymbolExport> for SymbolExport {
     fn into_ffi(self) -> bindings::FimoModuleSymbolExport {
         self.0
     }
@@ -330,7 +376,7 @@ impl core::fmt::Display for DynamicSymbolExport {
     }
 }
 
-impl crate::ffi::FFITransferable<bindings::FimoModuleDynamicSymbolExport> for DynamicSymbolExport {
+impl FFITransferable<bindings::FimoModuleDynamicSymbolExport> for DynamicSymbolExport {
     fn into_ffi(self) -> bindings::FimoModuleDynamicSymbolExport {
         self.0
     }
@@ -356,21 +402,21 @@ impl ModuleExport<'_> {
     }
 
     /// Fetches the description of the module declaration.
-    pub fn description(&self) -> &CStr {
-        // Safety: The value is always a valid string.
-        unsafe { CStr::from_ptr(self.0.description) }
+    pub fn description(&self) -> Option<&CStr> {
+        // Safety: The string is valid or null.
+        unsafe { self.0.description.as_ref().map(|x| CStr::from_ptr(x)) }
     }
 
     /// Fetches the author of the module declaration.
-    pub fn author(&self) -> &CStr {
-        // Safety: The value is always a valid string.
-        unsafe { CStr::from_ptr(self.0.author) }
+    pub fn author(&self) -> Option<&CStr> {
+        // Safety: The string is valid or null.
+        unsafe { self.0.author.as_ref().map(|x| CStr::from_ptr(x)) }
     }
 
     /// Fetches the license of the module declaration.
-    pub fn license(&self) -> &CStr {
-        // Safety: The value is always a valid string.
-        unsafe { CStr::from_ptr(self.0.license) }
+    pub fn license(&self) -> Option<&CStr> {
+        // Safety: The string is valid or null.
+        unsafe { self.0.description.as_ref().map(|x| CStr::from_ptr(x)) }
     }
 
     /// Fetches the list of parameters exposed by the module.
@@ -382,6 +428,19 @@ impl ModuleExport<'_> {
                 &[]
             } else {
                 core::slice::from_raw_parts(parameters, self.0.parameters_count as usize)
+            }
+        }
+    }
+
+    /// Fetches the list of resources declared in the module.
+    pub fn resources(&self) -> &[ResourceDecl] {
+        // Safety: The layout is compatible.
+        unsafe {
+            let resources = self.0.resources.cast::<ResourceDecl>();
+            if resources.is_null() {
+                &[]
+            } else {
+                core::slice::from_raw_parts(resources, self.0.resources_count as usize)
             }
         }
     }
@@ -464,6 +523,7 @@ impl core::fmt::Debug for ModuleExport<'_> {
             .field("author", &self.author())
             .field("license", &self.license())
             .field("parameters", &self.parameters())
+            .field("resources", &self.resources())
             .field("imported_namespaces", &self.imported_namespaces())
             .field("imported_symbols", &self.imported_symbols())
             .field("exported_symbols", &self.exported_symbols())
@@ -480,14 +540,14 @@ impl core::fmt::Display for ModuleExport<'_> {
             f,
             "{} ({}/{}): {}",
             self.name().to_string_lossy(),
-            self.author().to_string_lossy(),
-            self.license().to_string_lossy(),
-            self.description().to_string_lossy()
+            self.author().unwrap_or(c"").to_string_lossy(),
+            self.license().unwrap_or(c"").to_string_lossy(),
+            self.description().unwrap_or(c"").to_string_lossy()
         )
     }
 }
 
-impl crate::ffi::FFISharable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
+impl FFISharable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
     type BorrowedView<'a> = ModuleExport<'a>;
 
     fn share_to_ffi(&self) -> *const bindings::FimoModuleExport {
@@ -509,7 +569,7 @@ impl crate::ffi::FFISharable<*const bindings::FimoModuleExport> for ModuleExport
     }
 }
 
-impl crate::ffi::FFITransferable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
+impl FFITransferable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
     fn into_ffi(self) -> *const bindings::FimoModuleExport {
         self.0
     }
