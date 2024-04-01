@@ -136,7 +136,7 @@ pub trait SymbolItem {
 /// declare_items! {
 ///     // Creates the new items in the `GlobalNs` namespace.
 ///     // Also creates the namespace item type alias `global::NamespaceItem`.
-///     mod global = GlobalNs {
+///     mod global = fimo_std::module::GlobalNs {
 ///         // Creates the symbol `global::ASym`.
 ///         extern a_sym @ (1, 2, 3): usize;
 ///     }
@@ -149,7 +149,7 @@ macro_rules! declare_items {
         $crate::declare_items_private!(item $crate::module::GlobalNs; $name @ ($major, $minor, $patch $(, $build)?): $type;);
         $crate::declare_items!($($tt)*);
     };
-    (mod $ns:ident = $ns_type:ty { $($block:tt)* } $($tt:tt)*) => {
+    (mod $ns:ident = $ns_type:path { $($block:tt)* } $($tt:tt)*) => {
         $crate::paste::paste! {
             #[doc = "Namespace `" $ns "`"]
             pub mod $ns {
