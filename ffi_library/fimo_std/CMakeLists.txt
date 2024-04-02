@@ -15,7 +15,6 @@ add_subdirectory(third_party)
 set(FIMO_STD_PUBLIC_HEADERS
         # Public headers
         include/fimo_std/array_list.h
-        include/fimo_std/char.h
         include/fimo_std/context.h
         include/fimo_std/error.h
         include/fimo_std/graph.h
@@ -54,7 +53,6 @@ set(FIMO_STD_IMPL_HEADERS
         include/fimo_std/impl/macros/var.h
         include/fimo_std/impl/module.h
         include/fimo_std/impl/tracing.h
-        include/fimo_std/impl/unicode.h
 )
 
 set(FIMO_STD_PRIVATE_HEADERS
@@ -75,11 +73,9 @@ set(FIMO_STD_SRC
         # Public implementation header implementations
         src/impl/module.c
         src/impl/tracing.c
-        src/impl/unicode.c
 
         # Public header implementations
         src/array_list.c
-        src/char.c
         src/context.c
         src/error.c
         src/graph.c
