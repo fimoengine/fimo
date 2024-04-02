@@ -91,7 +91,7 @@ FimoError fimo_module_namespace_include(const FimoModule *module, const char *ns
         return FIMO_EINVAL;
     }
     const FimoContextVTable *vtable = module->context.vtable;
-    return vtable->module_v0.namespace_exclude(module->context.data, module, ns);
+    return vtable->module_v0.namespace_include(module->context.data, module, ns);
 }
 
 FIMO_MUST_USE

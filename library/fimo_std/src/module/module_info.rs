@@ -1,4 +1,4 @@
-use core::{ffi::CStr, mem::ManuallyDrop, ops::Deref};
+use core::{ffi::CStr, marker::PhantomData, mem::ManuallyDrop, ops::Deref};
 
 use crate::{
     bindings,
@@ -8,7 +8,7 @@ use crate::{
     version::Version,
 };
 
-use super::{ModuleSubsystem, Symbol};
+use super::{ModuleSubsystem, NamespaceItem, NoState, Symbol, SymbolItem};
 
 /// View of a `ModuleInfo`.
 #[derive(Copy, Clone)]
@@ -48,7 +48,7 @@ impl ModuleInfoView<'_> {
 
 impl ModuleInfoView<'_> {
     /// Searches for a module by its name.
-    pub fn find_by_name<'a>(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<ModuleInfo, Error> {
+    pub fn find_by_name(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<ModuleInfo, Error> {
         // Safety: Either we get an error, or we initialize the module.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
@@ -105,6 +105,7 @@ impl ModuleInfoView<'_> {
     /// Acquires the module info by increasing the reference count.
     pub fn to_owned(&self) -> ModuleInfo {
         let acquire = self.0.acquire.unwrap();
+        // Safety: Is sound, as we acquired a strong reference.
         unsafe {
             (acquire)(self.share_to_ffi());
             ModuleInfo::from_ffi(self.0)
@@ -192,7 +193,7 @@ pub struct ModuleInfo(ModuleInfoView<'static>);
 
 impl ModuleInfo {
     /// Searches for a module by its name.
-    pub fn find_by_name<'a>(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<Self, Error> {
+    pub fn find_by_name(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<Self, Error> {
         ModuleInfoView::find_by_name(ctx, name)
     }
 
@@ -367,18 +368,30 @@ pub unsafe trait Module:
     /// Calling this method invalidates all loaded symbols from the dependency.
     unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result;
 
-    /// Loads a symbol from the module backend.
+    /// Loads a symbol from the module subsystem.
     ///
     /// The caller can query the backend for a symbol of a loaded module. This is useful for loading
     /// optional symbols, or for loading symbols after the creation of a module. The symbol, if it
     /// exists, is returned, and can be used until the module relinquishes the dependency to the
     /// module that exported the symbol. This function fails, if the module containing the symbol is
-    /// not a dependency of the module.
+    /// not a dependency of the module, or if the module has not included the required namespace.
+    fn load_symbol<T: SymbolItem>(&self) -> Result<Symbol<'_, T::Type>, Error> {
+        // Safety: We know the type of the symbol from the item.
+        unsafe { self.load_symbol_unchecked(T::NAME, T::Namespace::NAME, T::VERSION) }
+    }
+
+    /// Loads a symbol from the module subsystem.
+    ///
+    /// The caller can query the backend for a symbol of a loaded module. This is useful for loading
+    /// optional symbols, or for loading symbols after the creation of a module. The symbol, if it
+    /// exists, is returned, and can be used until the module relinquishes the dependency to the
+    /// module that exported the symbol. This function fails, if the module containing the symbol is
+    /// not a dependency of the module, or if the module has not included the required namespace.
     ///
     /// # Safety
     ///
     /// Users of this API must specify the correct type of the symbol.
-    unsafe fn load_symbol<T>(
+    unsafe fn load_symbol_unchecked<T>(
         &self,
         name: &CStr,
         namespace: &CStr,
@@ -403,7 +416,7 @@ unsafe impl Module for OpaqueModule<'_> {
     type Resources = ();
     type Imports = ();
     type Exports = ();
-    type Data = ();
+    type Data = NoState;
 
     fn parameters(&self) -> &() {
         // Safety: Is safe due to `()` being a ZST.
@@ -437,7 +450,13 @@ unsafe impl Module for OpaqueModule<'_> {
 
     fn data(&self) -> &Self::Data {
         // Safety: Is safe due to `()` being a ZST.
-        unsafe { self.0.module_data.cast::<()>().as_ref().unwrap_or(&()) }
+        unsafe {
+            self.0
+                .module_data
+                .cast::<NoState>()
+                .as_ref()
+                .unwrap_or(&NoState)
+        }
     }
 
     fn has_namespace_dependency(&self, namespace: &CStr) -> Result<DependencyType, Error> {
@@ -516,7 +535,7 @@ unsafe impl Module for OpaqueModule<'_> {
         to_result(error)
     }
 
-    unsafe fn load_symbol<T>(
+    unsafe fn load_symbol_unchecked<T>(
         &self,
         name: &CStr,
         namespace: &CStr,
@@ -561,6 +580,179 @@ impl FFITransferable<*const bindings::FimoModule> for OpaqueModule<'_> {
     unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
         // Safety: The value must be valid.
         unsafe { Self(&*ffi) }
+    }
+}
+
+/// A strong reference to a module.
+///
+/// An instance of this type may not be shared or transferred to other modules.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct GenericModule<'a, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync,
+    Res: Send + Sync,
+    Imp: Send + Sync,
+    Exp: Send + Sync,
+    Data: Send + Sync,
+{
+    module: OpaqueModule<'a>,
+    _parameters: PhantomData<&'a Par>,
+    _resources: PhantomData<&'a Res>,
+    _imports: PhantomData<&'a Imp>,
+    _exports: PhantomData<&'a Exp>,
+    _data: PhantomData<&'a Data>,
+}
+
+// Safety:
+unsafe impl<Par, Res, Imp, Exp, Data> Module for GenericModule<'_, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync,
+    Res: Send + Sync,
+    Imp: Send + Sync,
+    Exp: Send + Sync,
+    Data: Send + Sync,
+{
+    type Parameters = Par;
+    type Resources = Res;
+    type Imports = Imp;
+    type Exports = Exp;
+    type Data = Data;
+
+    fn parameters(&self) -> &Self::Parameters {
+        // Safety: The only way to construct a `GenericModule`
+        // is through unsafe functions, where the users have to
+        // ensure that the signatures matches the types contained
+        // in the module.
+        unsafe { &*core::ptr::from_ref(self.module.parameters()).cast() }
+    }
+
+    fn resources(&self) -> &Self::Resources {
+        // Safety: The only way to construct a `GenericModule`
+        // is through unsafe functions, where the users have to
+        // ensure that the signatures matches the types contained
+        // in the module.
+        unsafe { &*core::ptr::from_ref(self.module.resources()).cast() }
+    }
+
+    fn imports(&self) -> &Self::Imports {
+        // Safety: The only way to construct a `GenericModule`
+        // is through unsafe functions, where the users have to
+        // ensure that the signatures matches the types contained
+        // in the module.
+        unsafe { &*core::ptr::from_ref(self.module.imports()).cast() }
+    }
+
+    fn exports(&self) -> &Self::Exports {
+        // Safety: The only way to construct a `GenericModule`
+        // is through unsafe functions, where the users have to
+        // ensure that the signatures matches the types contained
+        // in the module.
+        unsafe { &*core::ptr::from_ref(self.module.exports()).cast() }
+    }
+
+    fn module_info(&self) -> ModuleInfoView<'_> {
+        self.module.module_info()
+    }
+
+    fn context(&self) -> ContextView<'_> {
+        self.module.context()
+    }
+
+    fn data(&self) -> &Self::Data {
+        // Safety: The only way to construct a `GenericModule`
+        // is through unsafe functions, where the users have to
+        // ensure that the signatures matches the types contained
+        // in the module.
+        unsafe { &*core::ptr::from_ref(self.module.data()).cast() }
+    }
+
+    fn has_namespace_dependency(&self, namespace: &CStr) -> Result<DependencyType, Error> {
+        self.module.has_namespace_dependency(namespace)
+    }
+
+    fn include_namespace(&self, namespace: &CStr) -> error::Result {
+        self.module.include_namespace(namespace)
+    }
+
+    unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result {
+        // Safety: The caller ensures that the contract is valid.
+        unsafe { self.module.exclude_namespace(namespace) }
+    }
+
+    fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
+        self.module.has_dependency(module)
+    }
+
+    fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result {
+        self.module.acquire_dependency(dependency)
+    }
+
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result {
+        // Safety: The caller ensures that the contract is valid.
+        unsafe { self.module.remove_dependency(dependency) }
+    }
+
+    unsafe fn load_symbol_unchecked<T>(
+        &self,
+        name: &CStr,
+        namespace: &CStr,
+        version: Version,
+    ) -> Result<Symbol<'_, T>, Error> {
+        // Safety: The caller ensures that the contract is valid.
+        unsafe {
+            self.module
+                .load_symbol_unchecked::<T>(name, namespace, version)
+        }
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModule>
+    for GenericModule<'_, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync,
+    Res: Send + Sync,
+    Imp: Send + Sync,
+    Exp: Send + Sync,
+    Data: Send + Sync,
+{
+    type BorrowedView<'a> = OpaqueModule<'a>;
+
+    fn share_to_ffi(&self) -> *const bindings::FimoModule {
+        self.module.into_ffi()
+    }
+
+    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModule) -> Self::BorrowedView<'a> {
+        // Safety: `GenericModule` is a wrapper over a `FimoModule`.
+        unsafe { OpaqueModule::from_ffi(ffi) }
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModule>
+    for GenericModule<'_, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync,
+    Res: Send + Sync,
+    Imp: Send + Sync,
+    Exp: Send + Sync,
+    Data: Send + Sync,
+{
+    fn into_ffi(self) -> *const bindings::FimoModule {
+        self.module.into_ffi()
+    }
+
+    unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
+        // Safety: The value must be valid.
+        unsafe {
+            Self {
+                module: OpaqueModule::from_ffi(ffi),
+                _parameters: PhantomData,
+                _resources: PhantomData,
+                _imports: PhantomData,
+                _exports: PhantomData,
+                _data: PhantomData,
+            }
+        }
     }
 }
 

@@ -25,7 +25,7 @@ macro_rules! version {
 /// A version specifier.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
-pub struct Version(bindings::FimoVersion);
+pub struct Version(pub(crate) bindings::FimoVersion);
 
 impl Version {
     /// Maximum length of a formatted `Version` string.
