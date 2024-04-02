@@ -510,6 +510,7 @@ impl ParameterInfo {
 
 /// A module parameter.
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct OpaqueParameter<'a>(*mut bindings::FimoModuleParam, PhantomData<&'a mut ()>);
 
 /// Safety: A parameter is a reference to an atomic integer.
@@ -541,6 +542,7 @@ impl FFITransferable<*mut bindings::FimoModuleParam> for OpaqueParameter<'_> {
 }
 
 /// A typed parameter.
+#[repr(transparent)]
 pub struct Parameter<'a, T: ParameterCast>(
     OpaqueParameter<'a>,
     PhantomData<&'a core::cell::Cell<T>>,
@@ -559,6 +561,13 @@ impl<T: ParameterCast> Parameter<'_, T> {
         value.write_private(caller, self)
     }
 }
+
+// Safety: The parameter does not contain a `T`, as it
+// constructed/destructed on read/write.
+unsafe impl<T: ParameterCast> Send for Parameter<'_, T> {}
+
+// Safety: See above.
+unsafe impl<T: ParameterCast> Sync for Parameter<'_, T> {}
 
 impl<'a, T: ParameterCast> Deref for Parameter<'a, T> {
     type Target = OpaqueParameter<'a>;

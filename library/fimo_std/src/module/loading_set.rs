@@ -43,10 +43,10 @@ impl<'a> LoadingSet<'a> {
     /// returning [`LoadingSetRequest::Dismiss`] or an error from the closure.
     pub fn with_loading_set<T: ModuleSubsystem>(
         ctx: &T,
-        f: impl FnOnce(&mut Self, &T) -> Result<LoadingSetRequest, Error>,
+        f: impl FnOnce(&T, &Self) -> Result<LoadingSetRequest, Error>,
     ) -> error::Result {
         // Safety: The ffi call is safe, as we own all pointers.
-        let mut loading_set = unsafe {
+        let loading_set = unsafe {
             let x = to_result_indirect_in_place(|error, loading_set| {
                 *error =
                     bindings::fimo_module_set_new(ctx.share_to_ffi(), loading_set.as_mut_ptr());
@@ -55,7 +55,7 @@ impl<'a> LoadingSet<'a> {
             LoadingSet::from_ffi(x)
         };
 
-        let request = f(&mut loading_set, ctx);
+        let request = f(ctx, &loading_set);
         if matches!(request, Ok(LoadingSetRequest::Dismiss) | Err(_)) {
             // Safety: The ffi call is safe.
             let error = unsafe {
@@ -121,7 +121,7 @@ impl<'a> LoadingSet<'a> {
     /// if it tried to load the module already. If the requested module `module` is not contained
     /// in the `LoadingSet`, this method will return an error.
     pub fn append_callback<T>(
-        &mut self,
+        &self,
         ctx: &impl ModuleSubsystem,
         module: &CStr,
         callback: T,
@@ -195,7 +195,7 @@ impl<'a> LoadingSet<'a> {
     /// if the binary was linked with the fimo library. In case of an error, no modules are appended
     /// to the set.
     pub fn append_modules<T>(
-        &mut self,
+        &self,
         ctx: &impl ModuleSubsystem,
         module_path: Option<&CStr>,
         mut filter: T,

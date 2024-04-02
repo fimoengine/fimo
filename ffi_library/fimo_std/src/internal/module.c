@@ -2374,6 +2374,15 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, struct ModuleIn
             }
         }
     }
+    // Acquire all imported namespaces.
+    {
+        FimoUSize it = 0;
+        const struct ModuleInfoNamespace_ *ns = NULL;
+        while (module_info_next_ns_(info_inner, &it, &ns)) {
+            error = ctx_ns_acquire_(ctx, ns->name);
+            FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        }
+    }
     // Check that all dependencies are met and correct.
     {
         FimoUSize it = 0;
@@ -2384,14 +2393,14 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, struct ModuleIn
                 error = FIMO_EINVAL;
                 ERROR_(ctx, error, "dependency not found, module='%s', dependency='%s'", info->info.name,
                        dependency->name)
-                goto remove_node;
+                goto release_namespaces;
             }
             FIMO_ASSERT(dependency->info == dep_mod->module->module_info)
             FimoU64 edge;
             error = fimo_graph_add_edge(ctx->dependency_graph, node, dep_mod->node, NULL, NULL, &edge);
             if (FIMO_IS_ERROR(error)) {
                 ERROR_SIMPLE_(ctx, error, "could not add edge to the dependency graph")
-                goto remove_node;
+                goto release_namespaces;
             }
         }
     }
@@ -2401,12 +2410,12 @@ static FimoError ctx_add_module_(FimoInternalModuleContext *ctx, struct ModuleIn
     error = fimo_graph_is_cyclic(ctx->dependency_graph, &is_cyclic);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not determine if the dependency graph is cycle free")
-        goto remove_node;
+        goto release_namespaces;
     }
     if (is_cyclic) {
         error = FIMO_EINVAL;
         ERROR_SIMPLE_(ctx, error, "adding the module would introduce a cyclic depdendency")
-        goto remove_node;
+        goto release_namespaces;
     }
 
     // Allocate all exported namespaces.
@@ -2468,6 +2477,13 @@ remove_allocated_ns: {
     const struct ModuleInfoSymbol_ *symbol = NULL;
     while (module_info_next_symbol_(info_inner, &it, &symbol)) {
         ctx_ns_free_if_empty_(ctx, symbol->name);
+    }
+}
+release_namespaces: {
+    FimoUSize it = 0;
+    const struct ModuleInfoNamespace_ *ns = NULL;
+    while (module_info_next_ns_(info_inner, &it, &ns)) {
+        ctx_ns_release_(ctx, ns->name);
     }
 }
 remove_node: {

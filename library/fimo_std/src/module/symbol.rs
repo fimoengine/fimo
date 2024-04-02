@@ -1,12 +1,22 @@
 use core::{ffi::CStr, marker::PhantomData, ops::Deref, sync::atomic};
 
-use crate::{bindings, version::Version};
+use crate::{
+    bindings,
+    error::Error,
+    module::{GenericModule, Module},
+    version::Version,
+};
 
 /// A symbol of a module.
+#[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct Symbol<'a, T>(*const bindings::FimoModuleRawSymbol, PhantomData<&'a T>);
 
 impl<'a, T> Symbol<'a, T> {
+    /// Locks the symbol for use.
+    ///
+    /// The same symbol may be locked multiple times, without
+    /// introducing any deadlock.
     pub fn lock(&self) -> SymbolGuard<'_, 'a, T> {
         // Safety: it is sound.
         let count = unsafe { &(*self.0).lock };
@@ -47,6 +57,7 @@ impl<T> crate::ffi::FFITransferable<*const bindings::FimoModuleRawSymbol> for Sy
 }
 
 /// A reference to a locked symbol.
+#[repr(transparent)]
 pub struct SymbolGuard<'sym, 'a, T>(&'sym Symbol<'a, T>);
 
 impl<T> Deref for SymbolGuard<'_, '_, T> {
@@ -96,6 +107,33 @@ pub trait SymbolItem {
 
     /// Version of the export.
     const VERSION: Version;
+}
+
+/// A partially constructed module.
+pub type PartialModule<'a, T> = GenericModule<
+    'a,
+    <T as Module>::Parameters,
+    <T as Module>::Resources,
+    <T as Module>::Imports,
+    core::mem::MaybeUninit<<T as Module>::Exports>,
+    <T as Module>::Data,
+>;
+
+/// Helper trait for constructing and destroying dynamic symbols.
+pub trait DynamicExport<T>
+where
+    T: Module,
+{
+    /// [`SymbolItem`] describing the symbol.
+    type Item: SymbolItem;
+
+    /// Constructs a new instance of the symbol.
+    fn construct(
+        module: PartialModule<'_, T>,
+    ) -> Result<&mut <Self::Item as SymbolItem>::Type, Error>;
+
+    /// Destroys the symbol.
+    fn destroy(symbol: &mut <Self::Item as SymbolItem>::Type);
 }
 
 /// Creates symbol and namespace items that can later be used for import and export.
