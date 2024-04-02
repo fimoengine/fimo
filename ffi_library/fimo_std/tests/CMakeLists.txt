@@ -1,4 +1,3 @@
-list(APPEND TEST_TARGETS test_ascii)
 list(APPEND TEST_TARGETS test_context)
 list(APPEND TEST_TARGETS test_graph)
 list(APPEND TEST_TARGETS test_memory)
