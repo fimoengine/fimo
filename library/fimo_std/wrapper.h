@@ -1,5 +1,4 @@
 #include <fimo_std/array_list.h>
-#include <fimo_std/char.h>
 #include <fimo_std/context.h>
 #include <fimo_std/error.h>
 #include <fimo_std/graph.h>
