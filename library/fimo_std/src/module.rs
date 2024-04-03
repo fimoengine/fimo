@@ -1,4 +1,4 @@
-//! Module backend.
+//! Module subsystem.
 
 use alloc::boxed::Box;
 use core::{ffi::CStr, mem::MaybeUninit};
