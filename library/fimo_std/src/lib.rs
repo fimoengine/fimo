@@ -21,4 +21,5 @@ pub mod graph;
 pub mod module;
 pub mod refcount;
 pub mod time;
+pub mod tracing;
 pub mod version;
