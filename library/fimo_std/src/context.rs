@@ -4,6 +4,7 @@ use alloc::boxed::Box;
 use core::{marker::PhantomData, mem::ManuallyDrop, ops::Deref, pin::Pin};
 
 use crate::{
+    allocator::FimoAllocator,
     bindings,
     error::to_result,
     ffi::{FFISharable, FFITransferable},
@@ -151,19 +152,19 @@ impl FFITransferable<bindings::FimoContext> for Context {
 /// A builder for a [`Context`].
 #[derive(Debug, Default)]
 pub struct ContextBuilder<const N: usize = 0> {
-    tracing: Option<Pin<Box<crate::tracing::Config<N>>>>,
+    tracing: Option<Pin<Box<crate::tracing::Config<N>, FimoAllocator>>>,
 }
 
 impl<const N: usize> ContextBuilder<N> {
     /// Constructs a new builder.
-    pub fn new() -> Self {
-        Self { tracing: None }
+    pub fn new() -> ContextBuilder<0> {
+        ContextBuilder { tracing: None }
     }
 
     /// Adds a config for the tracing subsystem.
     pub fn with_tracing_config<const M: usize>(
         self,
-        config: Pin<Box<crate::tracing::Config<M>>>,
+        config: Pin<Box<crate::tracing::Config<M>, FimoAllocator>>,
     ) -> ContextBuilder<M> {
         ContextBuilder {
             tracing: Some(config),

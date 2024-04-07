@@ -1,4 +1,11 @@
-use fimo_std::{context::Context, declare_items, error::Error, export_module, module::*};
+use fimo_std::{
+    context::ContextBuilder,
+    declare_items, emit_info,
+    error::Error,
+    export_module,
+    module::*,
+    tracing::{default_subscriber, Config, Level, ThreadAccess},
+};
 
 declare_items! {
     extern a_export_0 @ (0, 1, 0): i32;
@@ -132,10 +139,18 @@ impl<'m> ModuleConstructor<C<'m>> for CConstructor {
         parameters.pri_pri.write(&module, 8)?;
 
         let resources = module.resources();
-        println!("empty: {}", resources.empty().to_string_lossy());
-        println!("a: {}", resources.a().to_string_lossy());
-        println!("b: {}", resources.b().to_string_lossy());
-        println!("img: {}", resources.img().to_string_lossy());
+        emit_info!(
+            &module.context(),
+            "empty: {}",
+            resources.empty().to_string_lossy()
+        );
+        emit_info!(&module.context(), "a: {}", resources.a().to_string_lossy());
+        emit_info!(&module.context(), "b: {}", resources.b().to_string_lossy());
+        emit_info!(
+            &module.context(),
+            "img: {}",
+            resources.img().to_string_lossy()
+        );
 
         let imports = module.imports();
         assert_eq!(*imports.a_0(), 5);
@@ -144,23 +159,32 @@ impl<'m> ModuleConstructor<C<'m>> for CConstructor {
         assert_eq!(*imports.b_1(), 77);
 
         let info = module.module_info();
-        println!("{info}");
+        emit_info!(&module.context(), "{info}");
 
         <DefaultConstructor as ModuleConstructor<C<'m>>>::construct(module, set)
     }
 
     fn destroy(module: ConstructorModule<'_, C<'m>>, data: &mut <C<'m> as Module>::Data) {
-        println!("dropping module: {data:?}");
+        emit_info!(&module.context(), "dropping module: {data:?}");
         <DefaultConstructor as ModuleConstructor<C<'m>>>::destroy(module, data);
     }
 }
 
 #[test]
 fn load_modules() -> Result<(), Error> {
-    let context = Context::new()?;
+    let context = <ContextBuilder>::new()
+        .with_tracing_config(Config::new(
+            None,
+            Some(Level::Trace),
+            [default_subscriber()],
+        ))
+        .build()?;
+
+    let _access = ThreadAccess::new(&context)?;
+
     LoadingSet::with_loading_set(&*context, |ctx, set| {
         set.append_modules(ctx, None, |export| {
-            println!("{export}");
+            emit_info!(ctx, "{export}");
             LoadingFilterRequest::Load
         })?;
         Ok(LoadingSetRequest::Load)
