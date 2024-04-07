@@ -184,8 +184,6 @@ extern "C" {
  * Tracing backend state.
  */
 typedef struct FimoInternalTracingContext {
-    FimoTracingSubscriber *subscribers__;
-    FimoUSize subscriber_count;
     FimoArrayList subscribers;
     FimoUSize buff_size;
     FimoTracingLevel max_level;

@@ -404,11 +404,9 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg3 formatted span message
      * @param arg4 length of the span message
      * @param arg5 the call stack
-     * @param arg6 pointer to the new span
      * @return Status code.
      */
-    FimoError (*span_create)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *,
-                             void **);
+    FimoError (*span_push)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *);
     /**
      * Drops a newly created span.
      *
@@ -416,18 +414,16 @@ typedef struct FimoTracingSubscriberVTable {
      *
      * @param arg0 pointer to the subscriber
      * @param arg1 the call stack
-     * @param arg2 the span
      */
-    void (*span_drop)(void *, void *, void *);
+    void (*span_drop)(void *, void *);
     /**
      * Exits and destroys a span.
      *
      * @param arg0 pointer to the subscriber
      * @param arg1 time of the event
      * @param arg2 the call stack
-     * @param arg3 the span
      */
-    void (*span_destroy)(void *, const FimoTime *, void *, void *);
+    void (*span_pop)(void *, const FimoTime *, void *);
     /**
      * Emits an event.
      *
@@ -477,6 +473,11 @@ typedef struct FimoTracingSubscriber {
      */
     const FimoTracingSubscriberVTable *vtable;
 } FimoTracingSubscriber;
+
+/**
+ * Default subscriber.
+ */
+extern const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER;
 
 /**
  * Configuration for the tracing backend.
