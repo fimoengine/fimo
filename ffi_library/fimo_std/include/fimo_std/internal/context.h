@@ -22,15 +22,17 @@ extern "C" {
  */
 typedef struct FimoInternalContext {
     FimoAtomicRefCount ref_count;
-    FimoInternalContextTracing tracing;
+    FimoInternalTracingContext tracing;
     FimoInternalModuleContext module;
 } FimoInternalContext;
 
 /**
- * Initializes a new context.
+ * Initializes a new context with the given options.
  *
- * If `options` is `NULL`, the context is initialized with the default options.
- * A pointer to the initialized context is written to `context`.
+ * If `options` is `NULL`, the context is initialized with the default options,
+ * otherwise `options` must be an array terminated with a `NULL` element. The
+ * initialized context is written to `context`. In case of an error, this function
+ * cleans up the configuration options.
  *
  * @param options init options
  * @param context pointer to the context (not `NULL`)
@@ -38,7 +40,7 @@ typedef struct FimoInternalContext {
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_context_init(const FimoBaseStructIn *options, FimoContext *context);
+FimoError fimo_internal_context_init(const FimoBaseStructIn **options, FimoContext *context);
 
 /**
  * Returns the public context for the internal context.

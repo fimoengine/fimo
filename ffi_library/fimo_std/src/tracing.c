@@ -1,31 +1,30 @@
 #include <fimo_std/tracing.h>
 
-#include <stdarg.h>
 #include <stdio.h>
 
 #include <fimo_std/vtable.h>
 
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_create(const FimoContext context, FimoTracingCallStack *call_stack) {
+FimoError fimo_tracing_call_stack_create(const FimoContext context, FimoTracingCallStack **call_stack) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_create(context.data, call_stack);
 }
 
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_destroy(const FimoContext context, const FimoTracingCallStack call_stack) {
+FimoError fimo_tracing_call_stack_destroy(const FimoContext context, FimoTracingCallStack *call_stack) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_destroy(context.data, call_stack);
 }
 
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_switch(const FimoContext context, const FimoTracingCallStack new_call_stack,
-                                         FimoTracingCallStack *old_call_stack) {
+FimoError fimo_tracing_call_stack_switch(const FimoContext context, FimoTracingCallStack *call_stack,
+                                         FimoTracingCallStack **old) {
     const FimoContextVTable *vtable = context.vtable;
-    return vtable->tracing_v0.call_stack_switch(context.data, new_call_stack, old_call_stack);
+    return vtable->tracing_v0.call_stack_switch(context.data, call_stack, old);
 }
 
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_unblock(const FimoContext context, const FimoTracingCallStack call_stack) {
+FimoError fimo_tracing_call_stack_unblock(const FimoContext context, FimoTracingCallStack *call_stack) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_unblock(context.data, call_stack);
 }
@@ -45,7 +44,7 @@ FimoError fimo_tracing_call_stack_resume_current(const FimoContext context) {
 FIMO_PRINT_F_FORMAT_ATTR(4, 5)
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_fmt(const FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                       FimoTracingSpan *span, FIMO_PRINT_F_FORMAT const char *format, ...) {
+                                       FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
     FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
@@ -56,7 +55,7 @@ FimoError fimo_tracing_span_create_fmt(const FimoContext context, const FimoTrac
 
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_custom(const FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                          FimoTracingSpan *span, const FimoTracingFormat format, const void *data) {
+                                          FimoTracingSpan **span, const FimoTracingFormat format, const void *data) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.span_create(context.data, span_desc, span, format, data);
 }

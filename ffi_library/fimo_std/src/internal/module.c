@@ -291,35 +291,37 @@ static FimoError path_join(const char *path1, const char *path2, char **joined) 
 
 #define TO_CTX_(CTX) FIMO_CONTAINER_OF(CTX, FimoInternalContext, module)
 
+#define TO_TRACING_CTX_(CTX) &(TO_CTX_(CTX))->tracing
+
 #define TO_MODULE_CTX_(CTX) &((FimoInternalContext *)CTX)->module
 
 #define ERROR_(CTX, ERROR, FMT, ...)                                                                                   \
     FIMO_ASSERT_TYPE_EQ(CTX, FimoInternalModuleContext *)                                                              \
-    FIMO_INTERNAL_TRACING_EMIT_ERROR(TO_CTX_(ctx), __func__, "module", FMT, __VA_ARGS__)                               \
-    FIMO_INTERNAL_TRACING_EMIT_ERROR(TO_CTX_(ctx), __func__, "module", "error='%s: %s'",                               \
+    FIMO_INTERNAL_TRACING_EMIT_ERROR(TO_TRACING_CTX_(ctx), __func__, "module", FMT, __VA_ARGS__)                       \
+    FIMO_INTERNAL_TRACING_EMIT_ERROR(TO_TRACING_CTX_(ctx), __func__, "module", "error='%s: %s'",                       \
                                      fimo_strerrorname(ERROR, NULL), fimo_strerrordesc(ERROR, NULL))
 
 #define ERROR_SIMPLE_(CTX, ERROR, MSG)                                                                                 \
     FIMO_ASSERT_TYPE_EQ(CTX, FimoInternalModuleContext *)                                                              \
-    FIMO_INTERNAL_TRACING_EMIT_ERROR_SIMPLE(TO_CTX_(ctx), __func__, "module", MSG)                                     \
-    FIMO_INTERNAL_TRACING_EMIT_ERROR(TO_CTX_(ctx), __func__, "module", "error='%s: %s'",                               \
+    FIMO_INTERNAL_TRACING_EMIT_ERROR_SIMPLE(TO_TRACING_CTX_(ctx), __func__, "module", MSG)                             \
+    FIMO_INTERNAL_TRACING_EMIT_ERROR(TO_TRACING_CTX_(ctx), __func__, "module", "error='%s: %s'",                       \
                                      fimo_strerrorname(ERROR, NULL), fimo_strerrordesc(ERROR, NULL))
 
 #define WARN_(CTX, FMT, ...)                                                                                           \
     FIMO_ASSERT_TYPE_EQ(CTX, FimoInternalModuleContext *)                                                              \
-    FIMO_INTERNAL_TRACING_EMIT_WARN(TO_CTX_(ctx), __func__, "module", FMT, __VA_ARGS__)
+    FIMO_INTERNAL_TRACING_EMIT_WARN(TO_TRACING_CTX_(ctx), __func__, "module", FMT, __VA_ARGS__)
 
 #define WARN_SIMPLE_(CTX, MSG)                                                                                         \
     FIMO_ASSERT_TYPE_EQ(CTX, FimoInternalModuleContext *)                                                              \
-    FIMO_INTERNAL_TRACING_EMIT_WARN_SIMPLE(TO_CTX_(ctx), __func__, "module", MSG)
+    FIMO_INTERNAL_TRACING_EMIT_WARN_SIMPLE(TO_TRACING_CTX_(ctx), __func__, "module", MSG)
 
 #define TRACE_(CTX, FMT, ...)                                                                                          \
     FIMO_ASSERT_TYPE_EQ(CTX, FimoInternalModuleContext *)                                                              \
-    FIMO_INTERNAL_TRACING_EMIT_TRACE(TO_CTX_(ctx), __func__, "module", FMT, __VA_ARGS__)
+    FIMO_INTERNAL_TRACING_EMIT_TRACE(TO_TRACING_CTX_(ctx), __func__, "module", FMT, __VA_ARGS__)
 
 #define TRACE_SIMPLE_(CTX, MSG)                                                                                        \
     FIMO_ASSERT_TYPE_EQ(CTX, FimoInternalModuleContext *)                                                              \
-    FIMO_INTERNAL_TRACING_EMIT_TRACE_SIMPLE(TO_CTX_(ctx), __func__, "module", MSG)
+    FIMO_INTERNAL_TRACING_EMIT_TRACE_SIMPLE(TO_TRACING_CTX_(ctx), __func__, "module", MSG)
 
 ///////////////////////////////////////////////////////////////////////
 //// Forward declarations

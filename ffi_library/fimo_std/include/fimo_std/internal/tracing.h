@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stddef.h>
 
+#include <fimo_std/array_list.h>
 #include <fimo_std/error.h>
 #include <fimo_std/tracing.h>
 
@@ -179,19 +180,44 @@ extern "C" {
     FIMO_INTERNAL_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)                                                        \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
-typedef struct FimoInternalContext FimoInternalContext;
-
 /**
  * Tracing backend state.
  */
-typedef struct FimoInternalContextTracing {
-    FimoTracingSubscriber *subscribers;
+typedef struct FimoInternalTracingContext {
+    FimoTracingSubscriber *subscribers__;
     FimoUSize subscriber_count;
-    FimoUSize format_buffer_size;
-    FimoTracingLevel maximum_level;
-    tss_t thread_local_data;
+    FimoArrayList subscribers;
+    FimoUSize buff_size;
+    FimoTracingLevel max_level;
+    tss_t tss_data;
     atomic_size_t thread_count;
-} FimoInternalContextTracing;
+} FimoInternalTracingContext;
+
+///////////////////////////////////////////////////////////////////////
+//// Trampoline functions
+///////////////////////////////////////////////////////////////////////
+
+FimoError fimo_internal_trampoline_tracing_call_stack_create(void *ctx, FimoTracingCallStack **call_stack);
+FimoError fimo_internal_trampoline_tracing_call_stack_destroy(void *ctx, FimoTracingCallStack *call_stack);
+FimoError fimo_internal_trampoline_tracing_call_stack_switch(void *ctx, FimoTracingCallStack *call_stack,
+                                                             FimoTracingCallStack **old);
+FimoError fimo_internal_trampoline_tracing_call_stack_unblock(void *ctx, FimoTracingCallStack *call_stack);
+FimoError fimo_internal_trampoline_tracing_call_stack_suspend_current(void *ctx, bool block);
+FimoError fimo_internal_trampoline_tracing_call_stack_resume_current(void *ctx);
+FimoError fimo_internal_trampoline_tracing_span_create(void *ctx, const FimoTracingSpanDesc *span_desc,
+                                                       FimoTracingSpan **span, FimoTracingFormat format,
+                                                       const void *data);
+FimoError fimo_internal_trampoline_tracing_span_destroy(void *ctx, FimoTracingSpan *span);
+FimoError fimo_internal_trampoline_tracing_event_emit(void *ctx, const FimoTracingEvent *event,
+                                                      FimoTracingFormat format, const void *data);
+bool fimo_internal_trampoline_tracing_is_enabled(void *ctx);
+FimoError fimo_internal_trampoline_tracing_register_thread(void *ctx);
+FimoError fimo_internal_trampoline_tracing_unregister_thread(void *ctx);
+FimoError fimo_internal_trampoline_tracing_flush(void *ctx);
+
+///////////////////////////////////////////////////////////////////////
+//// Tracing Subsystem API
+///////////////////////////////////////////////////////////////////////
 
 /**
  * Initializes the tracing backend.
@@ -199,26 +225,13 @@ typedef struct FimoInternalContextTracing {
  * If `options` is `NULL`, the backend is initialized with the default options,
  * i.e., it is disabled.
  *
- * @param context partially initialized context
+ * @param ctx partially initialized context
  * @param options init options
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_init(FimoInternalContext *context, const FimoTracingCreationConfig *options);
-
-/**
- * Checks whether the backend can be destroyed.
- *
- * The backend can be destroyed, if this functions returns without producing an
- * error.
- *
- * @param context the context.
- *
- * @return Status code.
- */
-FIMO_MUST_USE
-FimoError fimo_internal_tracing_check_destroy(FimoInternalContext *context);
+FimoError fimo_internal_tracing_init(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options);
 
 /**
  * Destroys the backend.
@@ -226,9 +239,16 @@ FimoError fimo_internal_tracing_check_destroy(FimoInternalContext *context);
  * Calls exit if the backend can not be destroyed. The caller must ensure that they
  * are responsible for destroying the context.
  *
- * @param context the context.
+ * @param ctx the context.
  */
-void fimo_internal_tracing_destroy(FimoInternalContext *context);
+void fimo_internal_tracing_destroy(FimoInternalTracingContext *ctx);
+
+/**
+ * Cleans up the resources specified in the options.
+ *
+ * @param options init options
+ */
+void fimo_internal_tracing_cleanup_options(const FimoTracingCreationConfig *options);
 
 /**
  * Creates a new empty call stack.
@@ -237,13 +257,13 @@ void fimo_internal_tracing_destroy(FimoInternalContext *context);
  * into `call_stack`. The new call stack is not set to be the active call
  * stack.
  *
- * @param context the context
+ * @param ctx the context
  * @param call_stack pointer to the resulting call stack
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_create(void *context, FimoTracingCallStack *call_stack);
+FimoError fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack);
 
 /**
  * Destroys an empty call stack.
@@ -255,13 +275,13 @@ FimoError fimo_internal_tracing_call_stack_create(void *context, FimoTracingCall
  * is destroyed automatically, on thread exit or during destruction
  * of `context`. The caller must own the call stack uniquely.
  *
- * @param context the context
+ * @param ctx the context
  * @param call_stack the call stack to destroy
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_destroy(void *context, FimoTracingCallStack call_stack);
+FimoError fimo_internal_tracing_call_stack_destroy(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
 
 /**
  * Switches the call stack of the current thread.
@@ -273,15 +293,18 @@ FimoError fimo_internal_tracing_call_stack_destroy(void *context, FimoTracingCal
  * active. The active call stack must also be in a suspended state, but may
  * also be blocked.
  *
- * @param context the context
- * @param new_call_stack new call stack
- * @param old_call_stack location to store the old call stack into
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param ctx the context
+ * @param call_stack new call stack
+ * @param old location to store the old call stack into
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_switch(void *context, FimoTracingCallStack call_stack,
-                                                  FimoTracingCallStack *old_call_stack);
+FimoError fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
+                                                  FimoTracingCallStack **old);
 
 /**
  * Unblocks a blocked call stack.
@@ -289,13 +312,13 @@ FimoError fimo_internal_tracing_call_stack_switch(void *context, FimoTracingCall
  * Once unblocked, the call stack may be resumed. The call stack
  * may not be active and must be marked as blocked.
  *
- * @param context the context
+ * @param ctx the context
  * @param call_stack the call stack to unblock
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_unblock(void *context, FimoTracingCallStack call_stack);
+FimoError fimo_internal_tracing_call_stack_unblock(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
 
 /**
  * Marks the current call stack as being suspended.
@@ -305,13 +328,16 @@ FimoError fimo_internal_tracing_call_stack_unblock(void *context, FimoTracingCal
  * blocked. In that case, the call stack must be unblocked prior
  * to resumption.
  *
- * @param context the context
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param ctx the context
  * @param block whether to mark the call stack as blocked
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_suspend_current(void *context, bool block);
+FimoError fimo_internal_tracing_call_stack_suspend_current(FimoInternalTracingContext *ctx, bool block);
 
 /**
  * Marks the current call stack as being resumed.
@@ -319,12 +345,15 @@ FimoError fimo_internal_tracing_call_stack_suspend_current(void *context, bool b
  * Once resumed, the context can be used to trace messages. To be
  * successful, the current call stack must be suspended and unblocked.
  *
- * @param context the context.
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param ctx the context.
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_resume_current(void *context);
+FimoError fimo_internal_tracing_call_stack_resume_current(FimoInternalTracingContext *ctx);
 
 /**
  * Creates a new span with the standard formatter and enters it.
@@ -335,16 +364,20 @@ FimoError fimo_internal_tracing_call_stack_resume_current(void *context);
  * if the length exceeds the internal formatting buffer size.  The
  * contents of `span_desc` must remain valid until the span is destroyed.
  *
- * @param context the context
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param ctx the context
  * @param span_desc descriptor of the new span
  * @param span pointer to the resulting span
  * @param format formatting string
+ * @param ... format arguments
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_fmt(void *context, const FimoTracingSpanDesc *span_desc,
-                                                FimoTracingSpan *span, FIMO_PRINT_F_FORMAT const char *format, ...)
+FimoError fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
+                                                FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
         FIMO_PRINT_F_FORMAT_ATTR(4, 5);
 
 /**
@@ -356,7 +389,10 @@ FimoError fimo_internal_tracing_span_create_fmt(void *context, const FimoTracing
  * reaching that specified size. The contents of `span_desc` must
  * remain valid until the span is destroyed.
  *
- * @param context the context
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param ctx the context
  * @param span_desc descriptor of the new span
  * @param span pointer to the resulting span
  * @param format custom formatting function
@@ -365,8 +401,9 @@ FimoError fimo_internal_tracing_span_create_fmt(void *context, const FimoTracing
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_custom(void *context, const FimoTracingSpanDesc *span_desc,
-                                                   FimoTracingSpan *span, FimoTracingFormat format, const void *data);
+FimoError fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *ctx,
+                                                   const FimoTracingSpanDesc *span_desc, FimoTracingSpan **span,
+                                                   FimoTracingFormat format, const void *data);
 
 /**
  * Exits and destroys a span.
@@ -376,13 +413,16 @@ FimoError fimo_internal_tracing_span_create_custom(void *context, const FimoTrac
  * call stack. The span may not be in use prior to a call to this function,
  * and may not be used afterwards.
  *
- * @param context the context
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param ctx the context
  * @param span the span to destroy
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_destroy(void *context, FimoTracingSpan *span);
+FimoError fimo_internal_tracing_span_destroy(FimoInternalTracingContext *ctx, FimoTracingSpan *span);
 
 /**
  * Emits a new event with the standard formatter.
@@ -391,14 +431,15 @@ FimoError fimo_internal_tracing_span_destroy(void *context, FimoTracingSpan *spa
  * The message may be cut of, if the length exceeds the internal formatting
  * buffer size.
  *
- * @param context the context
+ * @param ctx the context
  * @param event the event to emit
  * @param format formatting string
+ * @param ... format arguments
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_fmt(void *context, const FimoTracingEvent *event,
+FimoError fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
                                                FIMO_PRINT_F_FORMAT const char *format, ...)
         FIMO_PRINT_F_FORMAT_ATTR(3, 4);
 
@@ -408,7 +449,7 @@ FimoError fimo_internal_tracing_event_emit_fmt(void *context, const FimoTracingE
  * The backend may use a formatting buffer of a fixed size. The formatter is
  * expected to cut-of the message after reaching that specified size.
  *
- * @param context the context
+ * @param ctx the context
  * @param event the event to emit
  * @param format custom formatting function
  * @param data custom data to format
@@ -416,7 +457,7 @@ FimoError fimo_internal_tracing_event_emit_fmt(void *context, const FimoTracingE
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_custom(void *context, const FimoTracingEvent *event,
+FimoError fimo_internal_tracing_event_emit_custom(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
                                                   FimoTracingFormat format, const void *data);
 
 /**
@@ -427,12 +468,12 @@ FimoError fimo_internal_tracing_event_emit_custom(void *context, const FimoTraci
  * backend are guaranteed to return default values, in case the backend is
  * disabled.
  *
- * @param context the context.
+ * @param ctx the context.
  *
  * @return `true` if the backend is enabled.
  */
 FIMO_MUST_USE
-bool fimo_internal_tracing_is_enabled(void *context);
+bool fimo_internal_tracing_is_enabled(FimoInternalTracingContext *ctx);
 
 /**
  * Registers the calling thread with the tracing backend.
@@ -445,12 +486,12 @@ bool fimo_internal_tracing_is_enabled(void *context);
  * context is destroyed, by terminating the tread, or by manually
  * calling `fimo_internal_tracing_unregister_thread()`.
  *
- * @param context the context
+ * @param ctx the context
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_register_thread(void *context);
+FimoError fimo_internal_tracing_register_thread(FimoInternalTracingContext *ctx);
 
 /**
  * Unregisters the calling thread from the tracing backend.
@@ -459,24 +500,24 @@ FimoError fimo_internal_tracing_register_thread(void *context);
  * backend until it is registered again. The thread can not be unregistered
  * until the call stack is empty.
  *
- * @param context the context.
+ * @param ctx the context.
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_unregister_thread(void *context);
+FimoError fimo_internal_tracing_unregister_thread(FimoInternalTracingContext *ctx);
 
 /**
  * Flushes the streams used for tracing.
  *
  * If successful, any unwritten data is written out by the individual subscribers.
  *
- * @param context the context
+ * @param ctx the context
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_flush(void *context);
+FimoError fimo_internal_tracing_flush(FimoInternalTracingContext *ctx);
 
 #ifdef __cplusplus
 }

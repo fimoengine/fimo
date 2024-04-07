@@ -8,7 +8,7 @@ static const FimoVersion FIMO_REQUIRED_VERSION =
         FIMO_VERSION_LONG(FIMO_VERSION_MAJOR, FIMO_VERSION_MINOR, FIMO_VERSION_PATCH, FIMO_VERSION_BUILD_NUMBER);
 
 FIMO_MUST_USE
-FimoError fimo_context_init(const FimoBaseStructIn *options, FimoContext *context) {
+FimoError fimo_context_init(const FimoBaseStructIn **options, FimoContext *context) {
     return fimo_internal_context_init(options, context);
 }
 
