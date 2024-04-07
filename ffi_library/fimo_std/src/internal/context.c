@@ -17,19 +17,19 @@ static const FimoContextVTable FIMO_INTERNAL_CONTEXT_VTABLE = {
                 },
         .tracing_v0 =
                 {
-                        .call_stack_create = fimo_internal_tracing_call_stack_create,
-                        .call_stack_destroy = fimo_internal_tracing_call_stack_destroy,
-                        .call_stack_switch = fimo_internal_tracing_call_stack_switch,
-                        .call_stack_unblock = fimo_internal_tracing_call_stack_unblock,
-                        .call_stack_suspend_current = fimo_internal_tracing_call_stack_suspend_current,
-                        .call_stack_resume_current = fimo_internal_tracing_call_stack_resume_current,
-                        .span_create = fimo_internal_tracing_span_create_custom,
-                        .span_destroy = fimo_internal_tracing_span_destroy,
-                        .event_emit = fimo_internal_tracing_event_emit_custom,
-                        .is_enabled = fimo_internal_tracing_is_enabled,
-                        .register_thread = fimo_internal_tracing_register_thread,
-                        .unregister_thread = fimo_internal_tracing_unregister_thread,
-                        .flush = fimo_internal_tracing_flush,
+                        .call_stack_create = fimo_internal_trampoline_tracing_call_stack_create,
+                        .call_stack_destroy = fimo_internal_trampoline_tracing_call_stack_destroy,
+                        .call_stack_switch = fimo_internal_trampoline_tracing_call_stack_switch,
+                        .call_stack_unblock = fimo_internal_trampoline_tracing_call_stack_unblock,
+                        .call_stack_suspend_current = fimo_internal_trampoline_tracing_call_stack_suspend_current,
+                        .call_stack_resume_current = fimo_internal_trampoline_tracing_call_stack_resume_current,
+                        .span_create = fimo_internal_trampoline_tracing_span_create,
+                        .span_destroy = fimo_internal_trampoline_tracing_span_destroy,
+                        .event_emit = fimo_internal_trampoline_tracing_event_emit,
+                        .is_enabled = fimo_internal_trampoline_tracing_is_enabled,
+                        .register_thread = fimo_internal_trampoline_tracing_register_thread,
+                        .unregister_thread = fimo_internal_trampoline_tracing_unregister_thread,
+                        .flush = fimo_internal_trampoline_tracing_flush,
                 },
         .module_v0 =
                 {
@@ -69,27 +69,34 @@ static FimoVersion FIMO_IMPLEMENTED_VERSION =
         FIMO_VERSION_LONG(FIMO_VERSION_MAJOR, FIMO_VERSION_MINOR, FIMO_VERSION_PATCH, FIMO_VERSION_BUILD_NUMBER);
 
 FIMO_MUST_USE
-FimoError fimo_internal_context_init(const FimoBaseStructIn *options, FimoContext *context) {
+FimoError fimo_internal_context_init(const FimoBaseStructIn **options, FimoContext *context) {
     if (context == NULL) {
         return FIMO_EINVAL;
     }
 
     // Parse the options. Each option type may occur at most once.
+    FimoError error;
     const FimoTracingCreationConfig *tracing_config = NULL;
-    for (const FimoBaseStructIn *opt = options; opt != NULL; opt = opt->next) {
-        switch (opt->type) {
-            case FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG:
-                if (tracing_config) {
-                    return FIMO_EINVAL;
-                }
-                tracing_config = (const FimoTracingCreationConfig *)opt;
-                break;
-            default:
-                return FIMO_EINVAL;
+    if (options != NULL) {
+        for (const FimoBaseStructIn **cursor = options; *cursor != NULL; cursor++) {
+            const FimoBaseStructIn *option = *cursor;
+            switch (option->type) {
+                case FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG:
+                    if (tracing_config) {
+                        error = FIMO_EINVAL;
+                        tracing_config = NULL;
+                        goto cleanup_options;
+                    }
+                    tracing_config = (const FimoTracingCreationConfig *)option;
+                    break;
+                default:
+                    error = FIMO_EINVAL;
+                    goto cleanup_options;
+            }
         }
     }
+    options = NULL;
 
-    FimoError error = FIMO_EOK;
     FimoInternalContext *ctx = fimo_aligned_alloc(_Alignof(FimoInternalContext), sizeof(FimoInternalContext), &error);
     if (FIMO_IS_ERROR(error)) {
         return error;
@@ -97,10 +104,11 @@ FimoError fimo_internal_context_init(const FimoBaseStructIn *options, FimoContex
 
     ctx->ref_count = (FimoAtomicRefCount)FIMO_REFCOUNT_INIT;
 
-    error = fimo_internal_tracing_init(ctx, tracing_config);
+    error = fimo_internal_tracing_init(&ctx->tracing, tracing_config);
     if (FIMO_IS_ERROR(error)) {
         goto cleanup;
     }
+    tracing_config = NULL;
 
     error = fimo_internal_module_init(&ctx->module);
     if (FIMO_IS_ERROR(error)) {
@@ -111,9 +119,27 @@ FimoError fimo_internal_context_init(const FimoBaseStructIn *options, FimoContex
     return FIMO_EOK;
 
 deinit_tracing:
-    fimo_internal_tracing_destroy(ctx);
+    fimo_internal_tracing_destroy(&ctx->tracing);
 cleanup:
     fimo_free_aligned_sized(ctx, _Alignof(FimoInternalContext), sizeof(FimoInternalContext));
+cleanup_options:
+    if (tracing_config != NULL) {
+        fimo_internal_tracing_cleanup_options(tracing_config);
+    }
+
+    if (options != NULL) {
+        for (const FimoBaseStructIn **cursor = options; *cursor != NULL; cursor++) {
+            const FimoBaseStructIn *option = *cursor;
+            switch (option->type) {
+                case FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG:
+                    fimo_internal_tracing_cleanup_options((const FimoTracingCreationConfig *)option);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
     return error;
 }
 
@@ -143,7 +169,7 @@ void fimo_internal_context_release(void *ptr) {
 
     // Destroy all submodules.
     fimo_internal_module_destroy(&context->module);
-    fimo_internal_tracing_destroy(context);
+    fimo_internal_tracing_destroy(&context->tracing);
 
     // Finally deallocate the context.
     fimo_free_aligned_sized(context, _Alignof(FimoInternalContext), sizeof(FimoInternalContext));

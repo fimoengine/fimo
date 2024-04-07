@@ -189,7 +189,7 @@ extern "C" {
  * one would create one stack for each task, and activate it when
  * the task is resumed.
  */
-typedef void *FimoTracingCallStack;
+typedef struct FimoTracingCallStack FimoTracingCallStack;
 
 /**
  * Possible tracing levels.
@@ -292,10 +292,6 @@ typedef struct FimoTracingSpan {
      * Reserved for future use.
      */
     FimoBaseStructOut *next;
-    /**
-     * Id assigned to the span.
-     */
-    void *span_id;
 } FimoTracingSpan;
 
 /**
@@ -333,7 +329,7 @@ typedef struct FimoTracingEvent {
  * @param arg3 number of written bytes of the formatter
  * @return Status code.
  */
-typedef FimoError (*FimoTracingFormat)(char *, size_t, const void *, size_t *);
+typedef FimoError (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
 
 /**
  * VTable of a tracing subscriber.
@@ -358,6 +354,15 @@ typedef struct FimoTracingSubscriberVTable {
      * @return Status code.
      */
     FimoError (*call_stack_create)(void *, const FimoTime *, void **);
+    /**
+     * Drops an empty call stack.
+     *
+     * Calling this function reverts the creation of the call stack.
+     *
+     * @param arg0 pointer to the subscriber
+     * @param arg1 the stack
+     */
+    void (*call_stack_drop)(void *, void *);
     /**
      * Destroys a stack.
      *
@@ -402,8 +407,18 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg6 pointer to the new span
      * @return Status code.
      */
-    FimoError (*span_create)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, size_t, void *,
+    FimoError (*span_create)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *,
                              void **);
+    /**
+     * Drops a newly created span.
+     *
+     * Calling this function reverts the creation of the span.
+     *
+     * @param arg0 pointer to the subscriber
+     * @param arg1 the call stack
+     * @param arg2 the span
+     */
+    void (*span_drop)(void *, void *, void *);
     /**
      * Exits and destroys a span.
      *
@@ -423,7 +438,7 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg4 formatted message of the event
      * @param arg5 length of the event message
      */
-    void (*event_emit)(void *, const FimoTime *, void *, const FimoTracingEvent *, const char *, size_t);
+    void (*event_emit)(void *, const FimoTime *, void *, const FimoTracingEvent *, const char *, FimoUSize);
     /**
      * Flushes the messages of the subscriber.
      *
@@ -482,9 +497,9 @@ typedef struct FimoTracingCreationConfig {
      */
     const struct FimoBaseStructIn *next;
     /**
-     * Size of the per-thread buffer used for formatting messages.
+     * Size of the per-call-stack buffer used for formatting messages.
      */
-    size_t format_buffer_size;
+    FimoUSize format_buffer_size;
     /**
      * Maximum level for which to consume tracing events.
      */
@@ -501,7 +516,7 @@ typedef struct FimoTracingCreationConfig {
      *
      * Must match the number of subscribers present in `subscribers`.
      */
-    size_t subscriber_count;
+    FimoUSize subscriber_count;
 } FimoTracingCreationConfig;
 
 /**
@@ -510,13 +525,13 @@ typedef struct FimoTracingCreationConfig {
  * Changing the VTable is a breaking change.
  */
 typedef struct FimoTracingVTableV0 {
-    FimoError (*call_stack_create)(void *, FimoTracingCallStack *);
-    FimoError (*call_stack_destroy)(void *, FimoTracingCallStack);
-    FimoError (*call_stack_switch)(void *, FimoTracingCallStack, FimoTracingCallStack *);
-    FimoError (*call_stack_unblock)(void *, FimoTracingCallStack);
+    FimoError (*call_stack_create)(void *, FimoTracingCallStack **);
+    FimoError (*call_stack_destroy)(void *, FimoTracingCallStack *);
+    FimoError (*call_stack_switch)(void *, FimoTracingCallStack *, FimoTracingCallStack **);
+    FimoError (*call_stack_unblock)(void *, FimoTracingCallStack *);
     FimoError (*call_stack_suspend_current)(void *, bool);
     FimoError (*call_stack_resume_current)(void *);
-    FimoError (*span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan *, FimoTracingFormat, const void *);
+    FimoError (*span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan **, FimoTracingFormat, const void *);
     FimoError (*span_destroy)(void *, FimoTracingSpan *);
     FimoError (*event_emit)(void *, const FimoTracingEvent *, FimoTracingFormat, const void *);
     bool (*is_enabled)(void *);
@@ -538,7 +553,7 @@ typedef struct FimoTracingVTableV0 {
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallStack *call_stack);
+FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallStack **call_stack);
 
 /**
  * Destroys an empty call stack.
@@ -556,7 +571,7 @@ FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallSta
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallStack call_stack);
+FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallStack *call_stack);
 
 /**
  * Switches the call stack of the current thread.
@@ -568,15 +583,18 @@ FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallSt
  * active. The active call stack must also be in a suspended state, but may
  * also be blocked.
  *
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
  * @param context the context
- * @param new_call_stack new call stack
- * @param old_call_stack location to store the old call stack into
+ * @param call_stack new call stack
+ * @param old location to store the old call stack into
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallStack new_call_stack,
-                                         FimoTracingCallStack *old_call_stack);
+FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallStack *call_stack,
+                                         FimoTracingCallStack **old);
 
 /**
  * Unblocks a blocked call stack.
@@ -590,7 +608,7 @@ FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallSta
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallStack call_stack);
+FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallStack *call_stack);
 
 /**
  * Marks the current call stack as being suspended.
@@ -599,6 +617,9 @@ FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallSt
  * messages. The call stack optionally also be marked as being
  * blocked. In that case, the call stack must be unblocked prior
  * to resumption.
+ *
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
  *
  * @param context the context
  * @param block whether to mark the call stack as blocked
@@ -613,6 +634,9 @@ FimoError fimo_tracing_call_stack_suspend_current(FimoContext context, bool bloc
  *
  * Once resumed, the context can be used to trace messages. To be
  * successful, the current call stack must be suspended and unblocked.
+ *
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
  *
  * @param context the context.
  *
@@ -630,16 +654,21 @@ FimoError fimo_tracing_call_stack_resume_current(FimoContext context);
  * if the length exceeds the internal formatting buffer size.  The
  * contents of `span_desc` must remain valid until the span is destroyed.
  *
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
+ *
  * @param context the context
  * @param span_desc descriptor of the new span
  * @param span pointer to the resulting span
  * @param format formatting string
+ * @param ... format args
  *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc, FimoTracingSpan *span,
-                                       FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(4, 5);
+FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
+                                       FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
+        FIMO_PRINT_F_FORMAT_ATTR(4, 5);
 
 /**
  * Creates a new span with a custom formatter and enters it.
@@ -649,6 +678,9 @@ FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpa
  * fixed size. The formatter is expected to cut-of the message after
  * reaching that specified size. The contents of `span_desc` must
  * remain valid until the span is destroyed.
+ *
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
  *
  * @param context the context
  * @param span_desc descriptor of the new span
@@ -660,7 +692,7 @@ FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpa
  */
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_custom(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                          FimoTracingSpan *span, FimoTracingFormat format, const void *data);
+                                          FimoTracingSpan **span, FimoTracingFormat format, const void *data);
 
 /**
  * Exits and destroys a span.
@@ -669,6 +701,9 @@ FimoError fimo_tracing_span_create_custom(FimoContext context, const FimoTracing
  * exited span anymore. `span` must be the span at the top of the current
  * call stack. The span may not be in use prior to a call to this function,
  * and may not be used afterwards.
+ *
+ * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * registered with the subsystem.
  *
  * @param context the context
  * @param span the span to destroy
@@ -688,6 +723,7 @@ FimoError fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
  * @param context the context
  * @param event the event to emit
  * @param format formatting string
+ * @param ... format args
  *
  * @return Status code.
  */
