@@ -71,7 +71,7 @@ where
 #[macro_export]
 macro_rules! tracing_span {
     ($ctx:expr, name: $name:literal, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
-        let _ = {
+        {
             const METADATA: &'static $crate::tracing::Metadata = $crate::tracing_metadata!(
                 name: $name,
                 target: $target,
@@ -81,10 +81,10 @@ macro_rules! tracing_span {
                 &$crate::tracing::SpanDescriptor::new(METADATA);
             $crate::tracing::Span::new($ctx, DESCRIPTOR, core::format_args!($($arg)+))
                 .expect("could not create span")
-        };
+        }
     };
     ($ctx:expr, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
-        let _ = {
+        {
             const METADATA: &'static $crate::tracing::Metadata = $crate::tracing_metadata!(
                 target: $target,
                 lvl: $lvl
@@ -717,9 +717,6 @@ pub trait Subscriber: Send + Sync {
     /// Type of the internal call stack.
     type CallStack;
 
-    /// Type of the internal span.
-    type Span;
-
     /// Creates a new call stack.
     fn create_call_stack(&self, time: Time) -> Result<Box<Self::CallStack>, Error>;
 
@@ -745,13 +742,13 @@ pub trait Subscriber: Send + Sync {
         span_descriptor: &SpanDescriptor,
         message: &[u8],
         call_stack: &mut Self::CallStack,
-    ) -> Result<Box<Self::Span>, Error>;
+    ) -> error::Result;
 
     /// Drops the span without tracing anything.
-    fn drop_span(&self, call_stack: &mut Self::CallStack, span: Box<Self::Span>);
+    fn drop_span(&self, call_stack: &mut Self::CallStack);
 
     /// Exits and destroys a span.
-    fn destroy_span(&self, time: Time, call_stack: &mut Self::CallStack, span: Box<Self::Span>);
+    fn destroy_span(&self, time: Time, call_stack: &mut Self::CallStack);
 
     /// Emits an event.
     fn emit_event(
@@ -899,14 +896,13 @@ impl OpaqueSubscriber {
                 subscriber.resume_call_stack(time, stack);
             }
         }
-        unsafe extern "C" fn span_create<T: Subscriber>(
+        unsafe extern "C" fn span_push<T: Subscriber>(
             subscriber: *mut core::ffi::c_void,
             time: *const bindings::FimoTime,
             span_descriptor: *const bindings::FimoTracingSpanDesc,
             message: *const core::ffi::c_char,
             message_length: usize,
             stack: *mut core::ffi::c_void,
-            span: *mut *mut core::ffi::c_void,
         ) -> bindings::FimoError {
             // Safety:
             unsafe {
@@ -916,10 +912,7 @@ impl OpaqueSubscriber {
                 let message = core::slice::from_raw_parts(message.cast(), message_length);
                 let stack = &mut *stack.cast();
                 match subscriber.create_span(time, span_descriptor, message, stack) {
-                    Ok(x) => {
-                        core::ptr::write(span, Box::into_raw(x).cast());
-                        Error::EOK.into_error()
-                    }
+                    Ok(_) => Error::EOK.into_error(),
                     Err(e) => e.into_error(),
                 }
             }
@@ -927,29 +920,25 @@ impl OpaqueSubscriber {
         unsafe extern "C" fn span_drop<T: Subscriber>(
             subscriber: *mut core::ffi::c_void,
             stack: *mut core::ffi::c_void,
-            span: *mut core::ffi::c_void,
         ) {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
                 let stack = &mut *stack.cast();
-                let span = Box::from_raw(span.cast());
-                subscriber.drop_span(stack, span);
+                subscriber.drop_span(stack);
             }
         }
-        unsafe extern "C" fn span_destroy<T: Subscriber>(
+        unsafe extern "C" fn span_pop<T: Subscriber>(
             subscriber: *mut core::ffi::c_void,
             time: *const bindings::FimoTime,
             stack: *mut core::ffi::c_void,
-            span: *mut core::ffi::c_void,
         ) {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
                 let time = Time::from_ffi(*time);
                 let stack = &mut *stack.cast();
-                let span = Box::from_raw(span.cast());
-                subscriber.destroy_span(time, stack, span);
+                subscriber.destroy_span(time, stack);
             }
         }
         unsafe extern "C" fn event_emit<T: Subscriber>(
@@ -986,9 +975,9 @@ impl OpaqueSubscriber {
             call_stack_unblock: Some(call_stack_unblock::<T>),
             call_stack_suspend: Some(call_stack_suspend::<T>),
             call_stack_resume: Some(call_stack_resume::<T>),
-            span_create: Some(span_create::<T>),
+            span_push: Some(span_push::<T>),
             span_drop: Some(span_drop::<T>),
-            span_destroy: Some(span_destroy::<T>),
+            span_pop: Some(span_pop::<T>),
             event_emit: Some(event_emit::<T>),
             flush: Some(flush::<T>),
         }
@@ -1011,6 +1000,12 @@ impl Drop for OpaqueSubscriber {
             }
         }
     }
+}
+
+/// Returns the default subscriber.
+pub fn default_subscriber() -> OpaqueSubscriber {
+    // Safety: Is safe, as it is write only.
+    unsafe { OpaqueSubscriber(bindings::FIMO_TRACING_DEFAULT_SUBSCRIBER) }
 }
 
 /// Configuration of the tracing subsystem.
