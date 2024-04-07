@@ -6,6 +6,7 @@
 #include <cmocka.h>
 
 #include <fimo_std/module.h>
+#include <fimo_std/tracing.h>
 
 static const int a_export_0 = 5;
 static const int a_export_1 = 10;
@@ -178,8 +179,20 @@ static bool modules_filter(const FimoModuleExport *arg0, void *arg1) {
 
 static void load_modules(void **state) {
     (void)state; /* unused */
+    FimoTracingCreationConfig config = {
+            .type = FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG,
+            .next = NULL,
+            .maximum_level = FIMO_TRACING_LEVEL_TRACE,
+            .subscribers = (FimoTracingSubscriber *)&FIMO_TRACING_DEFAULT_SUBSCRIBER,
+            .subscriber_count = 1,
+    };
+    const FimoBaseStructIn *options[] = {(FimoBaseStructIn *)&config, NULL};
+
     FimoContext context;
-    FimoError error = fimo_context_init(NULL, &context);
+    FimoError error = fimo_context_init(options, &context);
+    assert_false(FIMO_IS_ERROR(error));
+
+    error = fimo_tracing_register_thread(context);
     assert_false(FIMO_IS_ERROR(error));
 
     FimoModuleLoadingSet *set;
