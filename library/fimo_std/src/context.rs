@@ -1,6 +1,7 @@
 //! Fimo context.
 
-use core::{marker::PhantomData, mem::ManuallyDrop, ops::Deref};
+use alloc::boxed::Box;
+use core::{marker::PhantomData, mem::ManuallyDrop, ops::Deref, pin::Pin};
 
 use crate::{
     bindings,
@@ -45,7 +46,7 @@ impl ContextView<'_> {
 // Safety: A `FimoContext` can be sent to other threads
 unsafe impl Send for ContextView<'_> {}
 
-// Safety: A `FimoContext` is basically an Arc so it is sync.
+// Safety: A `FimoContext` is basically an Arc, so it is sync.
 unsafe impl Sync for ContextView<'_> {}
 
 impl PartialEq for ContextView<'_> {
@@ -95,7 +96,7 @@ impl Context {
         // Safety: The context is either initialized, or the function returns an error.
         let ctx = unsafe {
             crate::error::to_result_indirect_in_place(|err, ctx| {
-                *err = bindings::fimo_context_init(core::ptr::null(), ctx.as_mut_ptr());
+                *err = bindings::fimo_context_init(core::ptr::null_mut(), ctx.as_mut_ptr());
             })?
         };
         Ok(Self(ContextView(ctx, PhantomData)))
@@ -144,6 +145,53 @@ impl FFITransferable<bindings::FimoContext> for Context {
 
     unsafe fn from_ffi(ffi: bindings::FimoContext) -> Self {
         Self(ContextView(ffi, PhantomData))
+    }
+}
+
+/// A builder for a [`Context`].
+#[derive(Debug, Default)]
+pub struct ContextBuilder<const N: usize = 0> {
+    tracing: Option<Pin<Box<crate::tracing::Config<N>>>>,
+}
+
+impl<const N: usize> ContextBuilder<N> {
+    /// Constructs a new builder.
+    pub fn new() -> Self {
+        Self { tracing: None }
+    }
+
+    /// Adds a config for the tracing subsystem.
+    pub fn with_tracing_config<const M: usize>(
+        self,
+        config: Pin<Box<crate::tracing::Config<M>>>,
+    ) -> ContextBuilder<M> {
+        ContextBuilder {
+            tracing: Some(config),
+        }
+    }
+
+    /// Builds the context.
+    pub fn build(self) -> Result<Context, crate::error::Error> {
+        let tracing = ManuallyDrop::new(self.tracing);
+
+        let mut counter = 0;
+        let mut options: [*const bindings::FimoBaseStructIn; 2] = [core::ptr::null(); 2];
+        if let Some(tracing) = &*tracing {
+            options[counter] = tracing.as_ffi_option_ptr();
+            counter += 1;
+        }
+
+        if counter == 0 {
+            Context::new()
+        } else {
+            // Safety: The context is either initialized, or the function returns an error.
+            let ctx = unsafe {
+                crate::error::to_result_indirect_in_place(|err, ctx| {
+                    *err = bindings::fimo_context_init(options.as_mut_ptr(), ctx.as_mut_ptr());
+                })?
+            };
+            Ok(Context(ContextView(ctx, PhantomData)))
+        }
     }
 }
 

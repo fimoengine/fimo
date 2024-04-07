@@ -1,5 +1,6 @@
 //! Tracing subsystem.
 use crate::{
+    allocator::FimoAllocator,
     bindings,
     context::{private::SealedContext, Context, ContextView},
     error,
@@ -12,6 +13,8 @@ use core::{
     ffi::CStr,
     fmt::{Arguments, Write},
     mem::ManuallyDrop,
+    num::NonZeroUsize,
+    pin::Pin,
 };
 
 /// Definition of the tracing subsystem.
@@ -519,7 +522,7 @@ impl FFISharable<*const bindings::FimoTracingSpanDesc> for SpanDescriptor {
 
 /// A tracing span.
 #[derive(Debug)]
-pub struct Span(Context, bindings::FimoTracingSpan);
+pub struct Span(Context, *mut bindings::FimoTracingSpan);
 
 impl Span {
     /// Creates a new span and enters it.
@@ -558,14 +561,14 @@ impl Drop for Span {
     fn drop(&mut self) {
         // Safety: FFI call is safe.
         to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_span_destroy(self.0.share_to_ffi(), &mut self.1);
+            *error = bindings::fimo_tracing_span_destroy(self.0.share_to_ffi(), self.1);
         })
         .expect("the span should be destroyable");
     }
 }
 
 /// A call stack.
-pub struct CallStack(Context, bindings::FimoTracingCallStack);
+pub struct CallStack(Context, *mut bindings::FimoTracingCallStack);
 
 impl CallStack {
     /// Creates a new empty call stack.
@@ -720,6 +723,9 @@ pub trait Subscriber: Send + Sync {
     /// Creates a new call stack.
     fn create_call_stack(&self, time: Time) -> Result<Box<Self::CallStack>, Error>;
 
+    /// Drops the call stack without tracing anything.
+    fn drop_call_stack(&self, call_stack: Box<Self::CallStack>);
+
     /// Destroys the call stack.
     fn destroy_call_stack(&self, time: Time, call_stack: Box<Self::CallStack>);
 
@@ -740,6 +746,9 @@ pub trait Subscriber: Send + Sync {
         message: &[u8],
         call_stack: &mut Self::CallStack,
     ) -> Result<Box<Self::Span>, Error>;
+
+    /// Drops the span without tracing anything.
+    fn drop_span(&self, call_stack: &mut Self::CallStack, span: Box<Self::Span>);
 
     /// Exits and destroys a span.
     fn destroy_span(&self, time: Time, call_stack: &mut Self::CallStack, span: Box<Self::Span>);
@@ -826,6 +835,17 @@ impl OpaqueSubscriber {
                 }
             }
         }
+        unsafe extern "C" fn call_stack_drop<T: Subscriber>(
+            subscriber: *mut core::ffi::c_void,
+            stack: *mut core::ffi::c_void,
+        ) {
+            // Safety:
+            unsafe {
+                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
+                let stack = Box::from_raw(stack.cast());
+                subscriber.drop_call_stack(stack);
+            }
+        }
         unsafe extern "C" fn call_stack_destroy<T: Subscriber>(
             subscriber: *mut core::ffi::c_void,
             time: *const bindings::FimoTime,
@@ -904,6 +924,19 @@ impl OpaqueSubscriber {
                 }
             }
         }
+        unsafe extern "C" fn span_drop<T: Subscriber>(
+            subscriber: *mut core::ffi::c_void,
+            stack: *mut core::ffi::c_void,
+            span: *mut core::ffi::c_void,
+        ) {
+            // Safety:
+            unsafe {
+                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
+                let stack = &mut *stack.cast();
+                let span = Box::from_raw(span.cast());
+                subscriber.drop_span(stack, span);
+            }
+        }
         unsafe extern "C" fn span_destroy<T: Subscriber>(
             subscriber: *mut core::ffi::c_void,
             time: *const bindings::FimoTime,
@@ -948,11 +981,13 @@ impl OpaqueSubscriber {
         bindings::FimoTracingSubscriberVTable {
             destroy: drop_fn,
             call_stack_create: Some(call_stack_create::<T>),
+            call_stack_drop: Some(call_stack_drop::<T>),
             call_stack_destroy: Some(call_stack_destroy::<T>),
             call_stack_unblock: Some(call_stack_unblock::<T>),
             call_stack_suspend: Some(call_stack_suspend::<T>),
             call_stack_resume: Some(call_stack_resume::<T>),
             span_create: Some(span_create::<T>),
+            span_drop: Some(span_drop::<T>),
             span_destroy: Some(span_destroy::<T>),
             event_emit: Some(event_emit::<T>),
             flush: Some(flush::<T>),
@@ -975,6 +1010,52 @@ impl Drop for OpaqueSubscriber {
                 destroy(self.0.ptr);
             }
         }
+    }
+}
+
+/// Configuration of the tracing subsystem.
+#[derive(Debug)]
+pub struct Config<const N: usize> {
+    config: bindings::FimoTracingCreationConfig,
+    subscribers: [OpaqueSubscriber; N],
+    _pinned: core::marker::PhantomPinned,
+}
+
+impl<const N: usize> Config<N> {
+    /// Constructs a new config.
+    pub fn new(
+        format_buffer_len: Option<NonZeroUsize>,
+        max_level: Option<Level>,
+        subscribers: [OpaqueSubscriber; N],
+    ) -> Pin<Box<Self, FimoAllocator>> {
+        let mut this = Box::pin_in(
+            Self {
+                config: bindings::FimoTracingCreationConfig {
+                    type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG,
+                    next: core::ptr::null(),
+                    format_buffer_size: format_buffer_len.map_or(0, |x| x.get()),
+                    maximum_level: max_level.unwrap_or(Level::Off).to_ffi(),
+                    subscribers: core::ptr::null_mut(),
+                    subscriber_count: 0,
+                },
+                subscribers,
+                _pinned: core::marker::PhantomPinned,
+            },
+            FimoAllocator,
+        );
+
+        if N > 0 {
+            // Safety: We don't move the value.
+            let pin = unsafe { this.as_mut().get_unchecked_mut() };
+            pin.config.subscriber_count = N;
+            pin.config.subscribers = pin.subscribers.as_mut_ptr().cast();
+        }
+
+        this
+    }
+
+    pub(crate) fn as_ffi_option_ptr(&self) -> *const bindings::FimoBaseStructIn {
+        core::ptr::from_ref(&self.config).cast()
     }
 }
 
