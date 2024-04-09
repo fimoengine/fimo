@@ -131,13 +131,15 @@ else ()
     target_compile_options(fimo_std PUBLIC -finput-charset=UTF-8)
 endif ()
 
-if (ENABLE_TESTS)
+if (TEST_BINDINGS)
     add_subdirectory(tests)
 endif ()
 
-include(GNUInstallDirs)
-install(TARGETS fimo_std
-        ARCHIVE
-        FILE_SET fimo_std_public_headers
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo_std
-)
+if (INSTALL_BINDINGS)
+    include(GNUInstallDirs)
+    install(TARGETS fimo_std
+            ARCHIVE
+            FILE_SET fimo_std_public_headers
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo_std
+    )
+endif ()
