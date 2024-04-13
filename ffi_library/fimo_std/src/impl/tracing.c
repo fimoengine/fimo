@@ -97,6 +97,7 @@ void fimo_impl_tracing_default_subscriber_call_stack_destroy(void *subscriber, c
 void fimo_impl_tracing_default_subscriber_call_stack_unblock(void *subscriber, const FimoTime *time, void *stack) {
     (void)subscriber;
     (void)time;
+    (void)stack;
     FIMO_DEBUG_ASSERT(stack);
 }
 
@@ -104,6 +105,7 @@ void fimo_impl_tracing_default_subscriber_call_stack_suspend(void *subscriber, c
                                                              bool block) {
     (void)subscriber;
     (void)time;
+    (void)stack;
     (void)block;
     FIMO_DEBUG_ASSERT(stack);
 }
@@ -111,6 +113,7 @@ void fimo_impl_tracing_default_subscriber_call_stack_suspend(void *subscriber, c
 void fimo_impl_tracing_default_subscriber_call_stack_resume(void *subscriber, const FimoTime *time, void *stack) {
     (void)subscriber;
     (void)time;
+    (void)stack;
     FIMO_DEBUG_ASSERT(stack);
 }
 

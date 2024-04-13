@@ -1,3 +1,0 @@
-[submodule "modules/python_module_loader/third_party/cpython"]
-	path = modules/python_module_loader/third_party/cpython
-	url = https://github.com/python/cpython.git

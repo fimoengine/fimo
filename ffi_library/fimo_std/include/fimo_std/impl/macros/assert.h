@@ -40,7 +40,7 @@
  * `NDEBUG` is defined.
  */
 #ifdef NDEBUG
-#define FIMO_DEBUG_ASSERT(CONDITION) ((void)0)
+#define FIMO_DEBUG_ASSERT(CONDITION) ((void)0);
 #else
 #define FIMO_DEBUG_ASSERT(CONDITION)                                                                                   \
     if (!(CONDITION)) {                                                                                                \
@@ -59,7 +59,7 @@
  * only checked, if `NDEBUG` is defined.
  */
 #ifdef NDEBUG
-#define FIMO_DEBUG_ASSERT_FALSE(CONDITION) ((void)0)
+#define FIMO_DEBUG_ASSERT_FALSE(CONDITION) ((void)0);
 #else
 #define FIMO_DEBUG_ASSERT_FALSE(CONDITION)                                                                             \
     if ((CONDITION)) {                                                                                                 \
