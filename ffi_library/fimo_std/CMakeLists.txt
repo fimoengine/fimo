@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 cmake_policy(SET CMP0141 NEW)
 project(
         fimo_std

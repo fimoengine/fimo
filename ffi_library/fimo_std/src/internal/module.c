@@ -1042,6 +1042,7 @@ static void module_info_unlock_(struct ModuleInfoInner_ *inner) {
     FIMO_DEBUG_ASSERT(inner)
     const int result = mtx_unlock(&inner->mutex);
     FIMO_DEBUG_ASSERT(result == thrd_success);
+    (void)result;
 }
 
 static bool module_info_is_detached_(struct ModuleInfoInner_ *inner) {
@@ -1557,7 +1558,7 @@ static FimoError loading_set_module_append_callback_(struct LoadingSetModule_ *e
         }
     }
 
-    FIMO_DEBUG_ASSERT(false)
+    FIMO_ASSERT(false)
 }
 
 static void loading_set_module_signal_error_(struct LoadingSetModule_ *element) {
@@ -1711,6 +1712,7 @@ static struct LoadingSetModule_ *loading_set_loading_info_pop_(struct LoadingSet
     struct LoadingSetModule_ *module;
     const FimoError error = fimo_array_list_pop_back(&element->load_list, sizeof(module), &module, NULL);
     FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+    (void)error;
     return module;
 }
 
@@ -2636,6 +2638,7 @@ static FimoError ctx_link_module_(FimoInternalModuleContext *ctx, struct ModuleI
         void *edge_data;
         const FimoError error_ = fimo_graph_remove_edge(ctx->dependency_graph, edge, &edge_data);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
+        (void)error_;
         FIMO_DEBUG_ASSERT(edge_data == NULL)
         ERROR_(ctx, error, "could not insert other into the module info dependency map, module='%s', dependency='%s'",
                info->info.name, other_info->info.name)
@@ -2697,6 +2700,7 @@ static bool ctx_can_remove_module_(FimoInternalModuleContext *ctx, struct Module
     FimoUSize neighbors;
     FimoError error = fimo_graph_neighbors_count(ctx->dependency_graph, module_->node, true, &neighbors);
     FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+    (void)error;
 
     return neighbors == 0;
 }

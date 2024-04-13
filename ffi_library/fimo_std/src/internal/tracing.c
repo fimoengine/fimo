@@ -652,8 +652,10 @@ static FimoError ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCre
 
 static void ctx_deinit_(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
+#ifndef NDEBUG
     FimoUSize remaining_threads = atomic_load_explicit(&ctx->thread_count, memory_order_acquire);
     FIMO_DEBUG_ASSERT_FALSE(remaining_threads > 1);
+#endif
 
     // There are three possibilities:
     // 1. All threads are cleaned up.
@@ -843,6 +845,7 @@ static FimoError ctx_register_thread_(FimoInternalTracingContext *ctx) {
     }
     const int result = tss_set(ctx->tss_data, local_data);
     FIMO_DEBUG_ASSERT(result == thrd_success);
+    (void)result;
 
     return FIMO_EOK;
 }
@@ -861,6 +864,7 @@ static FimoError ctx_unregister_thread_(FimoInternalTracingContext *ctx) {
     tss_data_free_(local_data);
     const int result = tss_set(ctx->tss_data, NULL);
     FIMO_DEBUG_ASSERT(result == thrd_success);
+    (void)result;
 
     return FIMO_EOK;
 }
@@ -876,6 +880,7 @@ static void ctx_flush_(FimoInternalTracingContext *ctx) {
         const FimoError error =
                 fimo_array_list_get(&ctx->subscribers, i, sizeof(FimoTracingSubscriber), (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
         subscriber->vtable->flush(subscriber->ptr);
     }
 }
