@@ -27,7 +27,6 @@
 #include <pathcch.h>
 
 #define MODULE_HANDLE_ HMODULE
-#define FIMO_MALLOC_ALIGNMENT 16
 #else
 #if __APPLE__
 #define _DARWIN_C_SOURCE
@@ -37,7 +36,6 @@
 #include <dlfcn.h>
 
 #define MODULE_HANDLE_ void *
-#define FIMO_MALLOC_ALIGNMENT _Alignof(max_align_t)
 #endif
 
 static void *malloc_(size_t size) { return fimo_malloc(size, NULL); }

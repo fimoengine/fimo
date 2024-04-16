@@ -20,12 +20,6 @@
 #include <malloc.h>
 #endif
 
-#if defined(_WIN32) || defined(WIN32)
-#define FIMO_MALLOC_ALIGNMENT 16
-#else
-#define FIMO_MALLOC_ALIGNMENT _Alignof(max_align_t)
-#endif
-
 #define MAX_GRAPH_IDX_ UINT64_MAX
 
 struct FimoGraph {

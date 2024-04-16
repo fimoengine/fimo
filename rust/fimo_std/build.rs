@@ -2,8 +2,8 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let library = cmake::Config::new("ffi")
-        .configure_arg("-DTEST_BINDINGS:BOOL=OFF")
-        .configure_arg("-DINSTALL_BINDINGS:BOOL=ON")
+        .configure_arg("-DFIMO_TEST_BINDINGS:BOOL=OFF")
+        .configure_arg("-DFIMO_INSTALL_BINDINGS:BOOL=ON")
         .build();
     println!("cargo:rustc-link-search=native={}/lib", library.display());
     println!("cargo:rustc-link-lib=static=fimo_std");

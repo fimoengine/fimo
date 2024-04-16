@@ -1,3 +1,2 @@
 message(STATUS "Building C bindings")
-
-add_subdirectory(fimo_std)
+fimo_include_enabled_bindings()

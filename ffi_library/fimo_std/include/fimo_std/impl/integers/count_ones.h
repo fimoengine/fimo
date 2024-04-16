@@ -1,6 +1,8 @@
 #ifndef FIMO_IMPL_INTEGERS_COUNT_ONES_H
 #define FIMO_IMPL_INTEGERS_COUNT_ONES_H
 
+#include <assert.h>
+
 #include <fimo_std/impl/integers/integers_base.h>
 #include <fimo_std/impl/macros/has_builtin.h>
 #include <fimo_std/impl/macros/inline.h>
@@ -25,7 +27,7 @@ extern "C" {
  */
 static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u8(const FimoU8 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcount)
-    _Static_assert(sizeof(FimoU8) <= sizeof(unsigned int), "Size mismatch");
+    static_assert(sizeof(FimoU8) <= sizeof(unsigned int), "Size mismatch");
     return __builtin_popcount(v);
 #elif defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
     return __popcnt16(v);
@@ -44,7 +46,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u8(const FimoU8 v) {
  */
 static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u16(const FimoU16 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcount)
-    _Static_assert(sizeof(FimoU16) <= sizeof(unsigned int), "Size mismatch");
+    static_assert(sizeof(FimoU16) <= sizeof(unsigned int), "Size mismatch");
     return __builtin_popcount(v);
 #elif defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
     return __popcnt16(v);
@@ -63,7 +65,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u16(const FimoU16 v) {
  */
 static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u32(const FimoU32 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcount)
-    _Static_assert(sizeof(FimoU32) <= sizeof(unsigned int), "Size mismatch");
+    static_assert(sizeof(FimoU32) <= sizeof(unsigned int), "Size mismatch");
     return __builtin_popcount(v);
 #elif defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
     return __popcnt(v);
@@ -82,7 +84,7 @@ static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u32(const FimoU32 v) {
  */
 static FIMO_INLINE_ALWAYS FimoU32 fimo_impl_count_ones_u64(const FimoU64 v) {
 #if FIMO_HAS_BUILTIN(__builtin_popcountll)
-    _Static_assert(sizeof(FimoU64) <= sizeof(unsigned long long), "Size mismatch");
+    static_assert(sizeof(FimoU64) <= sizeof(unsigned long long), "Size mismatch");
     return __builtin_popcountll(v);
 #elif defined(_MSC_VER) && defined(_M_X64)
     return (FimoU32)__popcnt64(v);

@@ -15,12 +15,6 @@
 #include <malloc.h>
 #endif // defined(_WIN32) || defined(WIN32)
 
-#if defined(_WIN32) || defined(WIN32)
-#define FIMO_MALLOC_ALIGNMENT 16
-#else
-#define FIMO_MALLOC_ALIGNMENT _Alignof(max_align_t)
-#endif // defined(_WIN32) || defined(WIN32)
-
 FIMO_MUST_USE
 void *fimo_malloc(const size_t size, FimoError *error) { return fimo_malloc_sized(size, error).ptr; }
 
