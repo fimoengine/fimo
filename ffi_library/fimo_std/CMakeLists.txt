@@ -100,9 +100,8 @@ target_sources(fimo_std PRIVATE
 )
 target_sources(fimo_std PRIVATE ${FIMO_STD_SRC})
 target_link_libraries(fimo_std PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
-set_property(TARGET fimo_std PROPERTY LINKER_LANGUAGE C)
-set_property(TARGET fimo_std PROPERTY C_STANDARD 17)
-set_property(TARGET fimo_std PROPERTY C_STANDARD_REQUIRED ON)
+target_compile_features(fimo_std PRIVATE c_std_17)
+set_property(TARGET fimo_std PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET fimo_std PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 target_include_directories(fimo_std PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -117,8 +116,6 @@ endif ()
 
 if (MSVC)
     if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
-        target_compile_options(fimo_std PUBLIC /std:c17)
-        target_compile_options(fimo_std PUBLIC /Zc:preprocessor)
         target_compile_options(fimo_std PUBLIC /experimental:c11atomics)
     endif ()
 
@@ -131,11 +128,11 @@ else ()
     target_compile_options(fimo_std PUBLIC -finput-charset=UTF-8)
 endif ()
 
-if (TEST_BINDINGS)
+if (FIMO_TEST_BINDINGS)
     add_subdirectory(tests)
 endif ()
 
-if (INSTALL_BINDINGS)
+if (FIMO_INSTALL_BINDINGS)
     include(GNUInstallDirs)
     install(TARGETS fimo_std
             ARCHIVE

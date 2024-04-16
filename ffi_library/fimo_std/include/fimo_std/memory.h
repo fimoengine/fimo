@@ -1,6 +1,7 @@
 #ifndef FIMO_MEMORY_H
 #define FIMO_MEMORY_H
 
+#include <stdalign.h>
 #include <stddef.h>
 
 #include <fimo_std/error.h>
@@ -9,6 +10,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * Minimum alignment of the default allocator.
+ */
+#if defined(_WIN32) || defined(WIN32)
+#define FIMO_MALLOC_ALIGNMENT 16
+#else
+#define FIMO_MALLOC_ALIGNMENT alignof(max_align_t)
+#endif // defined(_WIN32) || defined(WIN32)
 
 /**
  * An allocated buffer.

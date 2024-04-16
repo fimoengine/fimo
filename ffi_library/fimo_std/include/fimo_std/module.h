@@ -324,25 +324,32 @@ extern "C" {
 /**
  * Constructs a new dynamic symbol export declaration.
  *
- * @param sname symbol name
- * @param sns symbol namespace
- * @param sversion symbol version
- * @param sconstr constructor
- * @param sdestr destructor
+ * @param NAME symbol name
+ * @param NS symbol namespace
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
+ * @param CONSTR constructor
+ * @param DESTR destructor
  */
-#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(sname, sns, sversion, sconstr, sdestr)                                    \
-    { .constructor = (sconstr), .destructor = (sdestr), .version = (sversion), .name = (sname), .ns = (sns) }
+#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(NAME, NS, V_MAJOR, V_MINOR, V_PATCH, CONSTR, DESTR)                       \
+    {                                                                                                                  \
+        .constructor = CONSTR, .destructor = DESTR, .version = FIMO_VERSION(V_MAJOR, V_MINOR, V_PATCH), .name = NAME,  \
+        .ns = NS                                                                                                       \
+    }
 
 /**
  * Constructs a new dynamic symbol export declaration.
  *
- * @param sname symbol name
- * @param sversion symbol version
- * @param sconstr constructor
- * @param sdestr destructor
+ * @param NAME symbol name
+ * @param V_MAJOR major version of the symbol
+ * @param V_MINOR minor version of the symbol
+ * @param V_PATCH patch version of the symbol
+ * @param CONSTR constructor
+ * @param DESTR destructor
  */
-#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL(sname, sversion, sconstr, sdestr)                                            \
-    FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(sname, "", sversion, sconstr, sdestr)
+#define FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL(NAME, V_MAJOR, V_MINOR, V_PATCH, CONSTR, DESTR)                              \
+    FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(NAME, "", V_MAJOR, V_MINOR, V_PATCH, CONSTR, DESTR)
 
 /**
  * ABI version of the current module export.
@@ -358,6 +365,8 @@ extern "C" {
 #endif
 
 #define FIMO_MODULE_EXPORT_MODULE_(VAR, NAME, DESC, AUTHOR, LICENSE, ...)                                              \
+    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
+    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wmissing-field-initializers")                                             \
     FimoModuleExport VAR = {.type = FIMO_STRUCT_TYPE_MODULE_EXPORT,                                                    \
                             .next = NULL,                                                                              \
                             .export_abi = FIMO_MODULE_EXPORT_ABI,                                                      \
@@ -366,6 +375,7 @@ extern "C" {
                             .author = AUTHOR,                                                                          \
                             .license = LICENSE,                                                                        \
                             __VA_ARGS__};                                                                              \
+    FIMO_PRAGMA_GCC(GCC diagnostic pop)                                                                                \
     FIMO_MODULE_EXPORT_MODULE__(VAR)
 
 /**

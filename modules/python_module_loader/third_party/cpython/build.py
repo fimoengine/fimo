@@ -66,14 +66,8 @@ for old in os.listdir(build_dir):
 
 print("\tStarting build.")
 if os.name == 'nt':
-    build_commands = [os.path.join(source_dir, 'PCbuild/build.bat'), '-e']
-    if build_release:
-        build_commands.append('-c')
-        build_commands.append('Release')
-    else:
-        build_commands.append('-c')
-        build_commands.append('Debug')
-
+    # Unconditionally build the release package since we link our module with the release runtime.
+    build_commands = [os.path.join(source_dir, 'PCbuild/build.bat'), '-e', '-c', 'Release']
     machine = platform.machine().lower()
     if machine == 'x86_64' or machine == 'amd64':
         build_commands.append('-p')

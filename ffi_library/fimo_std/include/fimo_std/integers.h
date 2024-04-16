@@ -41,59 +41,72 @@ extern "C" {
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_add(T a, T b) {                  \
         T value;                                                                                                       \
         bool overflow = fimo_impl_add_overflow_##AFFIX(a, b, &value);                                                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = value, .overflow = overflow};                                   \
+        FimoIntOverflowCheck##SUFFIX result = {.value = value, .overflow = overflow};                                  \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_sub(T a, T b) {                  \
         T value;                                                                                                       \
         bool overflow = fimo_impl_sub_overflow_##AFFIX(a, b, &value);                                                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = value, .overflow = overflow};                                   \
+        FimoIntOverflowCheck##SUFFIX result = {.value = value, .overflow = overflow};                                  \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_mul(T a, T b) {                  \
         T value;                                                                                                       \
         bool overflow = fimo_impl_mul_overflow_##AFFIX(a, b, &value);                                                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = value, .overflow = overflow};                                   \
+        FimoIntOverflowCheck##SUFFIX result = {.value = value, .overflow = overflow};                                  \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_div(T a, T b) {                  \
         if ((a == MIN) && (b == -1)) {                                                                                 \
-            return (FimoIntOverflowCheck##SUFFIX){.value = a, .overflow = true};                                       \
+            FimoIntOverflowCheck##SUFFIX result = {.value = a, .overflow = true};                                      \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOverflowCheck##SUFFIX){.value = a / b, .overflow = false};                                  \
+            FimoIntOverflowCheck##SUFFIX result = {.value = (T)(a / b), .overflow = false};                            \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_add(T a, T b) {                             \
         FimoIntOverflowCheck##SUFFIX tmp = fimo_##AFFIX##_overflowing_add(a, b);                                       \
         if (tmp.overflow) {                                                                                            \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = tmp.value}};                           \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = tmp.value}};                          \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_sub(T a, T b) {                             \
         FimoIntOverflowCheck##SUFFIX tmp = fimo_##AFFIX##_overflowing_sub(a, b);                                       \
         if (tmp.overflow) {                                                                                            \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = tmp.value}};                           \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = tmp.value}};                          \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_mul(T a, T b) {                             \
         FimoIntOverflowCheck##SUFFIX tmp = fimo_##AFFIX##_overflowing_mul(a, b);                                       \
         if (tmp.overflow) {                                                                                            \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = tmp.value}};                           \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = tmp.value}};                          \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_div(T a, T b) {                             \
         if ((b == 0) || ((a == MIN) && (b == -1))) {                                                                   \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = a / b}};                               \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = (T)(a / b)}};                         \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS T fimo_##AFFIX##_saturating_add(T a, T b) {                                              \
@@ -137,54 +150,66 @@ extern "C" {
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_add(T a, T b) {                  \
         T value;                                                                                                       \
         bool overflow = fimo_impl_add_overflow_##AFFIX(a, b, &value);                                                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = value, .overflow = overflow};                                   \
+        FimoIntOverflowCheck##SUFFIX result = {.value = value, .overflow = overflow};                                  \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_sub(T a, T b) {                  \
         T value;                                                                                                       \
         bool overflow = fimo_impl_sub_overflow_##AFFIX(a, b, &value);                                                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = value, .overflow = overflow};                                   \
+        FimoIntOverflowCheck##SUFFIX result = {.value = value, .overflow = overflow};                                  \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_mul(T a, T b) {                  \
         T value;                                                                                                       \
         bool overflow = fimo_impl_mul_overflow_##AFFIX(a, b, &value);                                                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = value, .overflow = overflow};                                   \
+        FimoIntOverflowCheck##SUFFIX result = {.value = value, .overflow = overflow};                                  \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOverflowCheck##SUFFIX fimo_##AFFIX##_overflowing_div(T a, T b) {                  \
-        return (FimoIntOverflowCheck##SUFFIX){.value = a / b, .overflow = false};                                      \
+        FimoIntOverflowCheck##SUFFIX result = {.value = (T)(a / b), .overflow = false};                                \
+        return result;                                                                                                 \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_add(T a, T b) {                             \
         FimoIntOverflowCheck##SUFFIX tmp = fimo_##AFFIX##_overflowing_add(a, b);                                       \
         if (tmp.overflow) {                                                                                            \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = tmp.value}};                           \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = tmp.value}};                          \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_sub(T a, T b) {                             \
         FimoIntOverflowCheck##SUFFIX tmp = fimo_##AFFIX##_overflowing_sub(a, b);                                       \
         if (tmp.overflow) {                                                                                            \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = tmp.value}};                           \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = tmp.value}};                          \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_mul(T a, T b) {                             \
         FimoIntOverflowCheck##SUFFIX tmp = fimo_##AFFIX##_overflowing_mul(a, b);                                       \
         if (tmp.overflow) {                                                                                            \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = tmp.value}};                           \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = tmp.value}};                          \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS FimoIntOption##SUFFIX fimo_##AFFIX##_checked_div(T a, T b) {                             \
         if (b == 0) {                                                                                                  \
-            return (FimoIntOption##SUFFIX){.has_value = false, .data = {.empty_ = 0}};                                 \
+            FimoIntOption##SUFFIX result = {.has_value = false, .data = {.empty_ = 0}};                                \
+            return result;                                                                                             \
         }                                                                                                              \
         else {                                                                                                         \
-            return (FimoIntOption##SUFFIX){.has_value = true, .data = {.value = a / b}};                               \
+            FimoIntOption##SUFFIX result = {.has_value = true, .data = {.value = (T)(a / b)}};                         \
+            return result;                                                                                             \
         }                                                                                                              \
     }                                                                                                                  \
     static FIMO_INLINE_ALWAYS T fimo_##AFFIX##_saturating_add(T a, T b) {                                              \

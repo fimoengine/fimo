@@ -17,7 +17,7 @@ extern "C" {
 #define FIMO_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT, META_VAR, EVENT_VAR, ERROR_VAR, ...)                           \
     FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
     FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-zero-length")                                                     \
-    static const FimoTracingMetadata _metadata_var = {                                                                 \
+    static const FimoTracingMetadata META_VAR = {                                                                      \
             .type = FIMO_STRUCT_TYPE_TRACING_METADATA,                                                                 \
             .next = NULL,                                                                                              \
             .name = (NAME),                                                                                            \

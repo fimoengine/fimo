@@ -1,20 +1,23 @@
-list(APPEND TEST_TARGETS test_context)
-list(APPEND TEST_TARGETS test_graph)
-list(APPEND TEST_TARGETS test_memory)
+fimo_add_bindings_test(
+        NAME std_context
+        SOURCES context.cpp
+        LINK_LIBRARIES fimo_std
+)
 
-list(APPEND TEST_TARGETS test_module_subsystem)
+fimo_add_bindings_test(
+        NAME std_graph
+        SOURCES graph.cpp
+        LINK_LIBRARIES fimo_std
+)
 
-list(APPEND TEST_LIBS "${CMOCKA_LIBRARIES}")
-list(APPEND TEST_LIBS fimo_std)
+fimo_add_bindings_test(
+        NAME std_memory
+        SOURCES memory.cpp
+        LINK_LIBRARIES fimo_std
+)
 
-list(APPEND TEST_DIRS "${CMOCKA_INCLUDE_DIRS}")
-
-foreach (TEST_TARGET IN LISTS TEST_TARGETS)
-    add_cmocka_test(
-            ${TEST_TARGET}
-            SOURCES "${TEST_TARGET}.c"
-            COMPILE_OPTIONS ${DEFAULT_C_COMPILE_FLAGS}
-            LINK_LIBRARIES "${TEST_LIBS}")
-    add_cmocka_test_environment(${TEST_TARGET})
-    target_include_directories(${TEST_TARGET} PUBLIC "${TEST_DIRS}")
-endforeach ()
+fimo_add_bindings_test(
+        NAME std_module_subsystem
+        SOURCES module_subsystem.cpp
+        LINK_LIBRARIES fimo_std
+)

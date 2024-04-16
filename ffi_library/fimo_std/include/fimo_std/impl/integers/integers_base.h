@@ -358,8 +358,13 @@ struct FimoUnderlying_<FimoU64> {
 #define FIMO_USIZE_UNDERLYING_ FimoUnderlying_<FimoUSize>::T
 #define FIMO_UINTPTR_UNDERLYING_ FimoUnderlying_<FimoUIntPtr>::T
 
+template<typename>
+constexpr void fimo_impl_integers_assert_false() {
+    static_assert(false, "Unknown integer type");
+}
+
 #define FIMO_ISIZE_SWITCH_(NAME)                                                                                       \
-    [](auto x) {                                                                                                       \
+    []() {                                                                                                             \
         if constexpr (std::is_same<FimoISize, FimoI8>::value) {                                                        \
             return [](auto... args) { return NAME##_i8(args...); };                                                    \
         }                                                                                                              \
@@ -373,7 +378,7 @@ struct FimoUnderlying_<FimoU64> {
             return [](auto... args) { return NAME##_i64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            static_assert(false, "Invalid FimoISize type");                                                            \
+            fimo_impl_integers_assert_false<void>();                                                                   \
         }                                                                                                              \
     }()
 #define FIMO_INTPTR_SWITCH_(NAME)                                                                                      \
@@ -391,7 +396,7 @@ struct FimoUnderlying_<FimoU64> {
             return [](auto... args) { return NAME##_i64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            static_assert(false, "Invalid FimoIntPtr type");                                                           \
+            fimo_impl_integers_assert_false<void>();                                                                   \
         }                                                                                                              \
     }()
 #define FIMO_USIZE_SWITCH_(NAME)                                                                                       \
@@ -409,10 +414,10 @@ struct FimoUnderlying_<FimoU64> {
             return [](auto... args) { return NAME##_u64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            static_assert(false, "Invalid FimoUSize type");                                                            \
+            fimo_impl_integers_assert_false<void>();                                                                   \
         }                                                                                                              \
     }()
-#define FIMO_INTPTR_SWITCH_(NAME)                                                                                      \
+#define FIMO_UINTPTR_SWITCH_(NAME)                                                                                     \
     []() {                                                                                                             \
         if constexpr (std::is_same<FimoUIntPtr, FimoU8>::value) {                                                      \
             return [](auto... args) { return NAME##_u8(args...); };                                                    \
@@ -427,7 +432,7 @@ struct FimoUnderlying_<FimoU64> {
             return [](auto... args) { return NAME##_u64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            static_assert(false, "Invalid FimoUIntPtr type");                                                          \
+            fimo_impl_integers_assert_false<void>();                                                                   \
         }                                                                                                              \
     }()
 #else
