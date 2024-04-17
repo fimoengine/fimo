@@ -17,6 +17,7 @@ jobs:
           - nightly
     steps:
       - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
@@ -30,7 +31,10 @@ jobs:
         run: brew install ninja
       - name: Install (Windows)
         if: runner.os == 'Windows'
-        run: choco install ninja
+        run: |
+          choco install ninja
+          echo "CC=cl" >> $GITHUB_ENV
+          echo "CXX=cl" >> $GITHUB_ENV
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -40,10 +44,12 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Configure project
+        run: cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+        shell: bash
+
       - name: Build project
-        run: |
-          cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          cmake --build build
+        run: cmake --build build
         shell: bash
 
       - name: Test project
