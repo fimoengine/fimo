@@ -12,57 +12,38 @@ jobs:
     strategy:
       matrix:
         os: [ macos-latest, windows-latest, ubuntu-latest ]
+        build-type: [ Debug, Release ]
         rust:
           - nightly
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone cmocka repository
-        if: runner.os == 'Windows'
-        run: git clone https://git.cryptomilk.org/projects/cmocka.git cmocka
-
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install libcmocka-dev ninja-build
+          sudo apt-get install ninja-build
       - name: Install (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmocka ninja
-      - name: Install (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install ninja
-          mkdir external_bins
-          cd cmocka
-          cmake -S . -B build -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/external_bins/cmocka
-          cmake --build build --config Release
-          cmake --install build
-          echo "${{ github.workspace }}\external_bins\cmocka\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          cd ${{ github.workspace }}
+        run: brew install ninja
 
-      - name: Run FFI tests
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            cmake -S ffi_library -B build -DCMOCKA_PATH='${{ github.workspace }}/external_bins/cmocka'
-          else
-            cmake -S ffi_library -B build
-          fi
-          cmake --build build
-          ctest --test-dir build
-        shell: bash
-
-      - uses: actions-rs/toolchain@v1
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt, clippy
 
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - name: Build project
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          cmake --build build
+        shell: bash
+
+      - name: Test project
+        run: ctest --test-dir build
+        shell: bash
   
   lints:
     name: Lints
@@ -76,7 +57,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install toolchain
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
@@ -94,4 +75,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --workspace --exclude unicode-bdd -- -D warnings
+          args: --workspace -- -D warnings
