@@ -11,6 +11,7 @@ FetchContent_Declare(
         cpython
         GIT_REPOSITORY "https://github.com/python/cpython.git"
         GIT_TAG "main"
+        GIT_SHALLOW TRUE
 )
 FetchContent_GetProperties(cpython)
 if (NOT cpython_POPULATED)
