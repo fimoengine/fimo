@@ -12,24 +12,6 @@ macro(fimo_declare_bindings NAME ENABLE)
     cmake_dependent_option(FIMO_ENABLE_BINDINGS_${NAME} "Enables the ${NAME} bindings" ${ENABLE} "NOT FIMO_DISABLE_BINDINGS" OFF)
 endmacro()
 
-macro(fimo_declare_rust_bindings)
-    cmake_parse_arguments(
-            ARGS
-            ""
-            "NAME ENABLED"
-            ""
-            ${ARGN}
-    )
-
-    if (NOT DEFINED FIMO_RUST_BINDINGS)
-        set(FIMO_RUST_BINDINGS "")
-    endif ()
-    if (${ARGS_NAME} IN_LIST FIMO_RUST_BINDINGS)
-        message(FATAL_ERROR "Rust bindings ${NAME} were already declared")
-    endif ()
-    cmake_dependent_option(FIMO_RUST_ENABLE_BINDINGS_${NAME} "Enables the ${NAME} bindings" ${ENABLE} "NOT FIMO_DISABLE_BINDINGS" OFF)
-endmacro()
-
 macro(fimo_declare_module NAME ENABLE)
     if (NOT DEFINED FIMO_MODULES)
         set(FIMO_MODULES "")
@@ -135,6 +117,7 @@ function(fimo_add_bindings_test)
     add_dependencies(fimo_bindings_test_${ARGS_NAME} fimo_all)
     target_link_libraries(fimo_bindings_test_${ARGS_NAME} PRIVATE Catch2::Catch2WithMain)
     target_compile_features(fimo_bindings_test_${ARGS_NAME} PRIVATE cxx_std_23)
+    target_compile_definitions(fimo_bindings_test_${ARGS_NAME} PRIVATE FIMO_MODULES_DIR="${CMAKE_BINARY_DIR}/_modules")
 
     if (DEFINED ARGS_COMPILE_OPTIONS)
         target_compile_definitions(
@@ -198,6 +181,7 @@ function(fimo_add_module_test)
     add_dependencies(fimo_module_test_${ARGS_NAME} fimo_all)
     target_link_libraries(fimo_module_test_${ARGS_NAME} PRIVATE Catch2::Catch2WithMain)
     target_compile_features(fimo_module_test_${ARGS_NAME} PRIVATE cxx_std_23)
+    target_compile_definitions(fimo_module_test_${ARGS_NAME} PRIVATE FIMO_MODULES_DIR="${CMAKE_BINARY_DIR}/_modules")
 
     if (DEFINED ARGS_COMPILE_OPTIONS)
         target_compile_definitions(
@@ -226,7 +210,7 @@ endfunction()
 
 function(fimo_include_enabled_bindings)
     foreach (NAME IN LISTS FIMO_BINDINGS)
-        if (FIMO_ENABLE_ALL_MODULES OR FIMO_ENABLE_MODULE_${NAME})
+        if (FIMO_ENABLE_ALL_BINDINGS OR FIMO_ENABLE_BINDINGS_${NAME})
             message(STATUS "Building bindings: ${NAME}")
             add_subdirectory(${NAME})
         endif ()
