@@ -1,8 +1,8 @@
 import os
+import sys
 import shutil
 import argparse
 import platform
-import sysconfig
 import subprocess
 
 
@@ -121,7 +121,10 @@ else:
 
     lib_dir = os.path.join(build_dir, 'Lib')
     so_dir = os.path.join(lib_dir, 'lib-dynload')
-    so_suffix = sysconfig.get_config_var('SHLIB_SUFFIX')
+    if sys.platform.startswith('darwin'):
+        so_suffix = '.dylib'
+    else:
+        so_suffix = '.so'
 
     shutil.copytree(
         os.path.join(source_dir, 'Lib'),

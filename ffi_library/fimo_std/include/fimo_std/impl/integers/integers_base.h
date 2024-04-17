@@ -298,10 +298,11 @@ typedef uintptr_t FimoUIntPtr;
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef __APPLE__
-_Static_assert(sizeof(FimoISize) == 8, "Invalid FimoISize size");
-_Static_assert(sizeof(FimoIntPtr) == 8, "Invalid FimoIntPtr size");
-_Static_assert(sizeof(FimoUSize) == 8, "Invalid FimoUSize size");
-_Static_assert(sizeof(FimoUIntPtr) == 8, "Invalid FimoUIntPtr size");
+#include <assert.h>
+static_assert(sizeof(FimoISize) == 8, "Invalid FimoISize size");
+static_assert(sizeof(FimoIntPtr) == 8, "Invalid FimoIntPtr size");
+static_assert(sizeof(FimoUSize) == 8, "Invalid FimoUSize size");
+static_assert(sizeof(FimoUIntPtr) == 8, "Invalid FimoUIntPtr size");
 
 #define FIMO_ISIZE_UNDERLYING_ FimoI64
 #define FIMO_INTPTR_UNDERLYING_ FimoI64
