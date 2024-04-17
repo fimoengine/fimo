@@ -2677,11 +2677,13 @@ static FimoError ctx_unlink_module_(FimoInternalModuleContext *ctx, struct Modul
             fimo_graph_find_edge(ctx->dependency_graph, ctx_module->node, other_ctx_module->node, &edge, &contained);
     FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
     FIMO_DEBUG_ASSERT(contained)
+    (void)error;
 
     void *edge_data;
     error = fimo_graph_remove_edge(ctx->dependency_graph, edge, &edge_data);
     FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
     FIMO_DEBUG_ASSERT(edge_data == NULL)
+    (void)error;
 
     module_info_delete_dependency_(info_inner, other_info->info.name);
 
