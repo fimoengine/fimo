@@ -318,7 +318,7 @@ _Static_assert(sizeof(FimoUIntPtr) == 8, "Invalid FimoUIntPtr size");
 template<typename I>
 struct FimoUnderlying_ {
     using T = I;
-    static_assert(false, "Unknown type");
+    static_assert(!sizeof(I *), "Unknown type");
 };
 template<>
 struct FimoUnderlying_<FimoI8> {
@@ -358,13 +358,9 @@ struct FimoUnderlying_<FimoU64> {
 #define FIMO_USIZE_UNDERLYING_ FimoUnderlying_<FimoUSize>::T
 #define FIMO_UINTPTR_UNDERLYING_ FimoUnderlying_<FimoUIntPtr>::T
 
-template<typename>
-constexpr void fimo_impl_integers_assert_false() {
-    static_assert(false, "Unknown integer type");
-}
-
 #define FIMO_ISIZE_SWITCH_(NAME)                                                                                       \
-    []() {                                                                                                             \
+    [](auto x) {                                                                                                       \
+        using T = decltype(x);                                                                                         \
         if constexpr (std::is_same<FimoISize, FimoI8>::value) {                                                        \
             return [](auto... args) { return NAME##_i8(args...); };                                                    \
         }                                                                                                              \
@@ -378,11 +374,12 @@ constexpr void fimo_impl_integers_assert_false() {
             return [](auto... args) { return NAME##_i64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            fimo_impl_integers_assert_false<void>();                                                                   \
+            static_assert(!sizeof(T *), "Unknown FimoISize type");                                                     \
         }                                                                                                              \
-    }()
+    }(0)
 #define FIMO_INTPTR_SWITCH_(NAME)                                                                                      \
-    []() {                                                                                                             \
+    [](auto x) {                                                                                                       \
+        using T = decltype(x);                                                                                         \
         if constexpr (std::is_same<FimoIntPtr, FimoI8>::value) {                                                       \
             return [](auto... args) { return NAME##_i8(args...); };                                                    \
         }                                                                                                              \
@@ -396,11 +393,12 @@ constexpr void fimo_impl_integers_assert_false() {
             return [](auto... args) { return NAME##_i64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            fimo_impl_integers_assert_false<void>();                                                                   \
+            static_assert(!sizeof(T *), "Unknown FimoIntPtr type");                                                    \
         }                                                                                                              \
-    }()
+    }(0)
 #define FIMO_USIZE_SWITCH_(NAME)                                                                                       \
-    []() {                                                                                                             \
+    [](auto x) {                                                                                                       \
+        using T = decltype(x);                                                                                         \
         if constexpr (std::is_same<FimoUSize, FimoU8>::value) {                                                        \
             return [](auto... args) { return NAME##_u8(args...); };                                                    \
         }                                                                                                              \
@@ -414,11 +412,12 @@ constexpr void fimo_impl_integers_assert_false() {
             return [](auto... args) { return NAME##_u64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            fimo_impl_integers_assert_false<void>();                                                                   \
+            static_assert(!sizeof(T *), "Unknown FimoUSize type");                                                     \
         }                                                                                                              \
-    }()
+    }(0)
 #define FIMO_UINTPTR_SWITCH_(NAME)                                                                                     \
-    []() {                                                                                                             \
+    [](auto x) {                                                                                                       \
+        using T = decltype(x);                                                                                         \
         if constexpr (std::is_same<FimoUIntPtr, FimoU8>::value) {                                                      \
             return [](auto... args) { return NAME##_u8(args...); };                                                    \
         }                                                                                                              \
@@ -432,9 +431,9 @@ constexpr void fimo_impl_integers_assert_false() {
             return [](auto... args) { return NAME##_u64(args...); };                                                   \
         }                                                                                                              \
         else {                                                                                                         \
-            fimo_impl_integers_assert_false<void>();                                                                   \
+            static_assert(!sizeof(T *), "Unknown FimoUIntPtr type");                                                   \
         }                                                                                                              \
-    }()
+    }(0)
 #else
 #if FIMO_ISIZE_WIDTH == 8
 #define FIMO_ISIZE_UNDERLYING_ FimoI8
