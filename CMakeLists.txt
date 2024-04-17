@@ -10,12 +10,19 @@ enable_language(CXX)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fimo)
 include(FimoUtils)
+include(FimoRust)
 include(CMakeDependentOption)
 
 option(FIMO_DISABLE_BINDINGS "Don't build bindings" OFF)
 cmake_dependent_option(
         FIMO_ENABLE_ALL_BINDINGS "Build all included bindings" ON
         "NOT FIMO_DISABLE_BINDINGS" OFF
+)
+
+option(FIMO_RUST_DISABLE_BINDINGS "Don't build Rust bindings" OFF)
+cmake_dependent_option(
+        FIMO_RUST_ENABLE_ALL_BINDINGS "Build all Rust bindings" ON
+        "NOT FIMO_RUST_DISABLE_BINDINGS" OFF
 )
 
 option(FIMO_DISABLE_MODULES "Don't build modules" OFF)
@@ -33,6 +40,9 @@ option(FIMO_INSTALL_BINDINGS "Install the c bindings for the modules" ON)
 # Bindings
 fimo_declare_bindings(fimo_std ON)
 fimo_declare_bindings(python_module_loader ON)
+
+# Rust Bindings
+fimo_declare_rust_bindings(NAME fimo_std ENABLED ON)
 
 # Modules
 fimo_declare_module(python_module_loader ON)
@@ -52,4 +62,5 @@ if (FIMO_TEST_MODULES OR FIMO_TEST_BINDINGS)
 endif ()
 
 add_subdirectory(ffi_library)
+add_subdirectory(rust)
 add_subdirectory(modules)
