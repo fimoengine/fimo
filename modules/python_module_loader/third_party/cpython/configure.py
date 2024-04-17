@@ -42,10 +42,16 @@ parser.add_argument('--release',
                     const=True,
                     default=False,
                     help='make a release configuration')
+parser.add_argument('--universal',
+                    action='store_const',
+                    const=True,
+                    default=False,
+                    help='make a configuration for a universal binary')
 args = parser.parse_args()
 source_dir = os.getcwd()
 binary_dir = args.binary_dir
 build_release = args.release
+build_universal = args.universal
 
 print('Configuring CPython.')
 print(f'\tMode: {"Release" if build_release else "Debug"}')
@@ -84,7 +90,7 @@ else:
         configure_args.append('--with-lto')
     else:
         configure_args.append('--with-pydebug')
-    if sys.platform.startswith('darwin'):
+    if build_universal and sys.platform.startswith('darwin'):
         configure_args.append('--enable-universalsdk')
         configure_args.append('--with-universal-archs=universal2')
     print(f'\t\tRunning: {" ".join(configure_args)}')
