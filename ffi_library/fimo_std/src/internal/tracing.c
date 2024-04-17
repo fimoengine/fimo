@@ -189,11 +189,13 @@ cleanup:
         void **stack_;
         FimoError error_ = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
+        (void)error_;
 
         const FimoTracingSubscriber *subscriber;
         error_ = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                      (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
+        (void)error_;
 
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
         subscriber->vtable->span_drop(subscriber->ptr, *stack_);
@@ -210,11 +212,13 @@ static void stack_frame_free_(struct StackFrame_ *frame) {
         FimoError error =
                 fimo_array_list_get(&frame->call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&frame->call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
         subscriber->vtable->span_pop(subscriber->ptr, &current_time, *stack_);
     }
 
@@ -293,10 +297,12 @@ cleanup_call_stacks:
         void *stack_;
         FimoError error_ = fimo_array_list_pop_front(&call_stacks, sizeof(void *), &stack_, NULL);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
+        (void)error_;
 
         const FimoTracingSubscriber *subscriber;
         error_ = fimo_array_list_get(&ctx->subscribers, i, sizeof(FimoTracingSubscriber), (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
+        (void)error_;
         subscriber->vtable->call_stack_drop(subscriber->ptr, &stack_);
     }
 
@@ -315,11 +321,13 @@ static void call_stack_free_(FimoTracingCallStack *call_stack, bool allow_bound)
         void *stack_;
         FimoError error = fimo_array_list_pop_front(&call_stack->call_stacks, sizeof(void *), &stack_, NULL);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
         subscriber->vtable->call_stack_destroy(subscriber->ptr, &current_time, stack_);
     }
     fimo_array_list_free(&call_stack->call_stacks, sizeof(void *), alignof(void *), NULL);
@@ -337,7 +345,11 @@ static bool call_stack_can_destroy_(FimoTracingCallStack *call_stack, bool allow
     return (state & (unsigned int)(BOUND_BIT_ | BLOCKED_BIT_)) == 0 && call_stack->end_frame == NULL;
 }
 
-static bool call_stack_is_bound_(FimoTracingCallStack *call_stack) {
+#ifdef __GNUC__
+__attribute__((unused))
+#endif
+static bool
+call_stack_is_bound_(FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(call_stack)
     unsigned int state = atomic_load_explicit(&call_stack->state, memory_order_relaxed);
     return (state & (unsigned int)BOUND_BIT_) != 0;
@@ -417,11 +429,13 @@ static FimoError call_stack_unblock_(FimoTracingCallStack *call_stack) {
         void **stack_;
         FimoError error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
         subscriber->vtable->call_stack_unblock(subscriber->ptr, &current_time, *stack_);
     }
 
@@ -447,11 +461,13 @@ static FimoError call_stack_suspend_(FimoTracingCallStack *call_stack, bool bloc
         void **stack_;
         FimoError error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
         subscriber->vtable->call_stack_suspend(subscriber->ptr, &current_time, *stack_, block);
     }
 
@@ -473,11 +489,13 @@ static FimoError call_stack_resume_(FimoTracingCallStack *call_stack) {
         void **stack_;
         FimoError error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
         FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        (void)error;
         subscriber->vtable->call_stack_resume(subscriber->ptr, &current_time, *stack_);
     }
 
