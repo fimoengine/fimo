@@ -136,7 +136,7 @@ cleanup_config:
 }
 
 static void destroy_module_(const FimoModule *module, void *data) {
-    FIMO_DEBUG_ASSERT_FALSE(data)
+    FIMO_DEBUG_ASSERT(data)
     FIMO_TRACING_EMIT_TRACE_SIMPLE(module->context, __func__, FIMO_CURRENT_MODULE_NAME, "destroying module")
     (void)module;
 
@@ -153,7 +153,7 @@ static void destroy_module_(const FimoModule *module, void *data) {
 }
 
 static FimoError run_string_(void *data, const char *code, const char *home) {
-    FIMO_DEBUG_ASSERT_FALSE(data)
+    FIMO_DEBUG_ASSERT(data)
     const FimoModule *module = data;
     if (code == NULL) {
         FIMO_TRACING_EMIT_ERROR_SIMPLE(module->context, __func__, FIMO_CURRENT_MODULE_NAME, "no code provided")
