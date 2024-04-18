@@ -1388,13 +1388,13 @@ static FimoError module_handle_new_plugin_(const char *path, struct ModuleHandle
         goto get_wide_path;
     }
 
-    handle = LoadLibraryExW(wide_path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+    handle = LoadLibraryExW(wide_path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (handle == NULL) {
         error = FIMO_EUNKNOWN;
         goto load_library;
     }
 
-    FARPROC symbol = GetProcAddress(handle, "fimo_internal_module_export_iterator");
+    FARPROC symbol = GetProcAddress(handle, "fimo_impl_module_export_iterator");
     if (symbol == NULL) {
         error = FIMO_EINVAL;
         goto load_symbol;
@@ -1410,7 +1410,7 @@ static FimoError module_handle_new_plugin_(const char *path, struct ModuleHandle
     }
 
     dlerror();
-    void *symbol = dlsym(handle, "fimo_internal_module_export_iterator");
+    void *symbol = dlsym(handle, "fimo_impl_module_export_iterator");
     if (dlerror()) {
         error = FIMO_EUNKNOWN;
         goto load_symbol;

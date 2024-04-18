@@ -43,6 +43,19 @@ function(fimo_add_module)
             FIMO_CURRENT_MODULE_NAME="${FIMO_CURRENT_MODULE}"
     )
 
+    if (WIN32)
+        target_link_options(
+                ${FIMO_CURRENT_MODULE_TARGET} PRIVATE
+                "/INCLUDE:fimo_impl_module_export_iterator"
+        )
+    else ()
+        target_link_options(
+                ${FIMO_CURRENT_MODULE_TARGET} PRIVATE
+                "LINKER:--undefined=fimo_impl_module_export_iterator"
+        )
+    endif ()
+
+
     # On Windows we embed the debug information and utilize the shared runtime library.
     set_property(TARGET ${FIMO_CURRENT_MODULE_TARGET} PROPERTY
             MSVC_RUNTIME_LIBRARY "MultiThreadedDLL"
