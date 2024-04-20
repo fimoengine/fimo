@@ -48,10 +48,16 @@ function(fimo_add_module)
                 ${FIMO_CURRENT_MODULE_TARGET} PRIVATE
                 "/INCLUDE:fimo_impl_module_export_iterator"
         )
-    else ()
+    elseif (UNIX AND NOT APPLE)
         target_link_options(
                 ${FIMO_CURRENT_MODULE_TARGET} PRIVATE
                 "LINKER:--undefined=fimo_impl_module_export_iterator"
+        )
+    elseif (APPLE)
+        target_link_options(
+                ${FIMO_CURRENT_MODULE_TARGET} PRIVATE
+                "LINKER:-u"
+                "LINKER:_fimo_impl_module_export_iterator"
         )
     endif ()
 
@@ -63,6 +69,11 @@ function(fimo_add_module)
     set_property(TARGET ${FIMO_CURRENT_MODULE_TARGET} PROPERTY
             MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
     )
+
+    # Use the .dylib extension on macOS
+    if (APPLE)
+        set_property(TARGET ${FIMO_CURRENT_MODULE_TARGET} PROPERTY SUFFIX ".dylib")
+    endif()
 
     # On the other Unixes we set the rpath to point to the module root.
     if (UNIX AND NOT APPLE)
