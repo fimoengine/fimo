@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+cmake_policy(SET CMP0042 NEW)
+cmake_policy(SET CMP0068 NEW)
 cmake_policy(SET CMP0087 NEW)
 cmake_policy(SET CMP0141 NEW)
 project(

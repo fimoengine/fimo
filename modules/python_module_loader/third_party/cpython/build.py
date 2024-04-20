@@ -15,6 +15,7 @@ def dir_path(string):
 
 def execute(cmd):
     cmd = ' '.join(cmd)
+    yield cmd
     popen = subprocess.Popen(cmd,
                              shell=True,
                              stdout=subprocess.PIPE,
@@ -67,7 +68,8 @@ for old in os.listdir(build_dir):
 print("\tStarting build.")
 if os.name == 'nt':
     # Unconditionally build the release package since we link our module with the release runtime.
-    build_commands = [os.path.join(source_dir, 'PCbuild/build.bat'), '-e', '-c', 'Release']
+    build_commands = [os.path.join(
+        source_dir, 'PCbuild/build.bat'), '-e', '-c', 'Release']
     machine = platform.machine().lower()
     if machine == 'x86_64' or machine == 'amd64':
         build_commands.append('-p')
@@ -86,6 +88,15 @@ else:
     for line in execute(['make', '-j', str(os.cpu_count())]):
         print(f'\t\t{line}', end='')
 print()
+
+if sys.platform.startswith('darwin'):
+    print('\tSetting binary soname')
+    for file in os.listdir(source_dir):
+        source = os.path.join(source_dir, file)
+        if 'libpython' in file:
+            for line in execute(['install_name_tool', '-id', f"@rpath/{file}", source]):
+                print(f'\t\t{line}', end='')
+    print()
 
 print('\tCopying files.')
 if os.name == 'nt':
@@ -147,4 +158,5 @@ else:
             if not os.path.isfile(source):
                 continue
             print(f'\t\tCopying file: {source}')
-            shutil.copy(source, os.path.join(so_dir, file), follow_symlinks=True)
+            shutil.copy(source, os.path.join(
+                so_dir, file), follow_symlinks=True)

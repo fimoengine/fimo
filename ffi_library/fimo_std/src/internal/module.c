@@ -188,15 +188,15 @@ static FimoError path_get_parent_(const char *path, char **parent) {
     LocalFree(canonical_path);
     return error;
 #else
-    char *realpath_ = realpath(path, NULL);
-    if (realpath_ == NULL) {
-        return FIMO_ENOMEM;
-    }
-
-    FimoError error = clone_string_(realpath_, parent);
-    free(realpath_);
+    FimoError error;
+    *parent = fimo_malloc(PATH_MAX, &error);
     if (FIMO_IS_ERROR(error)) {
         return error;
+    }
+
+    if (realpath(path, *parent) == NULL) {
+        fimo_free(*parent);
+        return FIMO_EUNKNOWN;
     }
 
     FimoUSize path_len = strlen(*parent);
