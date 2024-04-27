@@ -1,5 +1,4 @@
-use core::ffi::CStr;
-use core::marker::PhantomData;
+use core::{ffi::CStr, marker::PhantomData};
 
 use crate::{
     bindings,
@@ -127,7 +126,7 @@ impl core::fmt::Debug for ResourceDecl {
 
 impl core::fmt::Display for ResourceDecl {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.path().to_string_lossy(), )
+        write!(f, "{}", self.path().to_string_lossy(),)
     }
 }
 
@@ -169,7 +168,7 @@ impl core::fmt::Debug for NamespaceImport {
 
 impl core::fmt::Display for NamespaceImport {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.name().to_string_lossy(), )
+        write!(f, "{}", self.name().to_string_lossy(),)
     }
 }
 
@@ -397,7 +396,7 @@ impl Modifier {
     pub fn value(&self) -> ModifierValue<'_> {
         #[allow(clippy::match_single_binding)]
         match self.0.key {
-            _ => ModifierValue::Unknown(PhantomData)
+            _ => ModifierValue::Unknown(PhantomData),
         }
     }
 }
@@ -410,9 +409,7 @@ unsafe impl Sync for Modifier {}
 
 impl core::fmt::Debug for Modifier {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Modifier")
-            .field(&self.value())
-            .finish()
+        f.debug_tuple("Modifier").field(&self.value()).finish()
     }
 }
 
@@ -436,7 +433,7 @@ impl FFITransferable<bindings::FimoModuleExportModifier> for Modifier {
 #[non_exhaustive]
 #[derive(Debug, Copy, Clone)]
 pub enum ModifierValue<'a> {
-    Unknown(PhantomData<&'a ()>)
+    Unknown(PhantomData<&'a ()>),
 }
 
 impl core::fmt::Display for ModifierValue<'_> {

@@ -30,8 +30,8 @@ pub trait ModuleSubsystem: SealedContext {
 }
 
 impl<T> ModuleSubsystem for T
-    where
-        T: SealedContext,
+where
+    T: SealedContext,
 {
     fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error> {
         // Safety: Either we get an error, or we initialize the module.
@@ -48,7 +48,42 @@ impl<T> ModuleSubsystem for T
 }
 
 /// A handle to a module that is being constructed.
-pub type ConstructorModule<'a, T> = GenericModule<
+pub struct ConstructorModule<'a, T: Module>(PreModule<'a, T>);
+
+impl<'a, T> ConstructorModule<'a, T>
+where
+    T: Module,
+{
+    /// Unwraps the handle, checking that the version of the context that loaded the module is
+    /// compatible with the required version.
+    pub fn unwrap(self) -> Result<PreModule<'a, T>, Error> {
+        self.0.context().check_version()?;
+        Ok(self.0)
+    }
+
+    /// Unwraps the handle without checking that the version of the context that loaded the module
+    /// is compatible.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure to only use some functionality of the context, if it is supported by
+    /// the received version.
+    pub unsafe fn unwrap_unchecked(self) -> PreModule<'a, T> {
+        self.0
+    }
+}
+
+impl<'a, T> From<PreModule<'a, T>> for ConstructorModule<'a, T>
+where
+    T: Module,
+{
+    fn from(value: PreModule<'a, T>) -> Self {
+        Self(value)
+    }
+}
+
+/// A handle to a module that has not been initialized.
+pub type PreModule<'a, T> = GenericModule<
     'a,
     <T as Module>::Parameters,
     <T as Module>::Resources,
@@ -71,7 +106,7 @@ pub trait ModuleConstructor<T: Module> {
     /// Destroys the module data.
     ///
     /// This function is not allowed to call into the [`ModuleSubsystem`].
-    fn destroy(module: ConstructorModule<'_, T>, data: &mut <T as Module>::Data);
+    fn destroy(module: PreModule<'_, T>, data: &mut <T as Module>::Data);
 }
 
 /// A marker type indicating no state for a module.
@@ -84,18 +119,20 @@ pub struct NoState;
 pub struct DefaultConstructor;
 
 impl<T> ModuleConstructor<T> for DefaultConstructor
-    where
-        T: Module<Data: Default>,
+where
+    T: Module<Data: Default>,
 {
     fn construct<'a>(
-        _module: ConstructorModule<'a, T>,
+        module: ConstructorModule<'a, T>,
         _set: LoadingSet<'_>,
     ) -> Result<&'a mut T::Data, Error> {
+        // Check that the version is compatible.
+        let _ = module.unwrap()?;
         // Safety: The pointer is valid.
         unsafe { Ok(&mut *Box::into_raw(Box::default())) }
     }
 
-    fn destroy(_module: ConstructorModule<'_, T>, data: &mut T::Data) {
+    fn destroy(_module: PreModule<'_, T>, data: &mut T::Data) {
         // Safety: We were returned the ownership.
         unsafe { drop(Box::from_raw(data)) }
     }
@@ -722,8 +759,8 @@ pub mod c_ffi {
         error::Error,
         ffi::FFITransferable,
         module::{
-            ConstructorModule, DynamicExport, LoadingSet, Module, ModuleConstructor, ParameterType,
-            ParameterValue, PartialModule,
+            DynamicExport, LoadingSet, Module, ModuleConstructor, ParameterType, ParameterValue,
+            PartialModule, PreModule,
         },
         version::Version,
     };
@@ -740,9 +777,9 @@ pub mod c_ffi {
         data: *mut bindings::FimoModuleParamData,
         f: F,
     ) -> bindings::FimoError
-        where
-            T: Module,
-            F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
+    where
+        T: Module,
+        F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
     {
         // Safety:
         unsafe {
@@ -817,9 +854,9 @@ pub mod c_ffi {
         data: *mut bindings::FimoModuleParamData,
         f: F,
     ) -> bindings::FimoError
-        where
-            T: Module,
-            F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
+    where
+        T: Module,
+        F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
     {
         // Safety:
         unsafe {
@@ -850,9 +887,9 @@ pub mod c_ffi {
         module: *const bindings::FimoModule,
         symbol: *mut *mut core::ffi::c_void,
     ) -> bindings::FimoError
-        where
-            T: Module,
-            S: DynamicExport<T>,
+    where
+        T: Module,
+        S: DynamicExport<T>,
     {
         // Safety: The function is only called internally,
         // where we know the type of the module.
@@ -870,9 +907,9 @@ pub mod c_ffi {
     }
 
     pub unsafe extern "C" fn destroy_dynamic_symbol<T, S>(symbol: *mut core::ffi::c_void)
-        where
-            T: Module,
-            S: DynamicExport<T>,
+    where
+        T: Module,
+        S: DynamicExport<T>,
     {
         // Safety: The function is only called internally,
         // where we know the type of the symbol.
@@ -886,15 +923,15 @@ pub mod c_ffi {
         set: *mut bindings::FimoModuleLoadingSet,
         data: *mut *mut core::ffi::c_void,
     ) -> bindings::FimoError
-        where
-            T: Module,
-            C: ModuleConstructor<T>,
+    where
+        T: Module,
+        C: ModuleConstructor<T>,
     {
         // Safety: See above.
         unsafe {
-            let module = ConstructorModule::<T>::from_ffi(module);
+            let module = PreModule::<T>::from_ffi(module);
             let set = LoadingSet::from_ffi(set);
-            match C::construct(module, set) {
+            match C::construct(module.into(), set) {
                 Ok(v) => {
                     core::ptr::write(data, core::ptr::from_mut(v).cast());
                     Error::EOK.into_error()
@@ -913,7 +950,7 @@ pub mod c_ffi {
     {
         // Safety: See above
         unsafe {
-            let module = ConstructorModule::<T>::from_ffi(module);
+            let module = PreModule::<T>::from_ffi(module);
             let data = &mut *data.cast();
             C::destroy(module, data);
         }
