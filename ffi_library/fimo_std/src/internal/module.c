@@ -3608,6 +3608,25 @@ static bool fi_module_export_dynamic_exports_are_valid_(const FimoModuleExport *
     return true;
 }
 
+static bool fi_module_export_modifiers_are_valid_(const FimoModuleExport *export, FimoInternalModuleContext *ctx) {
+    FIMO_DEBUG_ASSERT(export && ctx)
+    if ((export->modifiers == NULL && export->modifiers_count != 0) ||
+        (export->modifiers != NULL && export->modifiers_count == 0)) {
+        WARN_(ctx, "invalid modifiers count, module='%s', modifiers='%p', modifiers_count='%u'", export->name,
+              (void *)export->modifiers, export->modifiers_count)
+        return false;
+    }
+    for (FimoISize i = 0; i < (FimoISize) export->modifiers_count; i++) {
+        const FimoModuleExportModifier *modifier = &export->modifiers[i];
+        if (modifier->key < 0 || modifier->key > FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST) {
+            WARN_(ctx, "unrecognized modifier key, module='%s', modifier='%d'", export->name, modifier->key)
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static bool fi_module_export_is_valid_(const FimoModuleExport *export, FimoInternalModuleContext *ctx) {
     FIMO_DEBUG_ASSERT(export && ctx)
     _Static_assert(FIMO_MODULE_EXPORT_ABI == 0, "Unknown module abi version");
@@ -3635,7 +3654,8 @@ static bool fi_module_export_is_valid_(const FimoModuleExport *export, FimoInter
     if (!fi_module_export_parameters_are_valid_(export, ctx) || !fi_module_export_resources_are_valid_(export, ctx) ||
         !fi_module_export_namespaces_are_valid_(export, ctx) || !fi_module_export_imports_are_valid_(export, ctx) ||
         !fi_module_export_imports_are_valid_(export, ctx) || !fi_module_export_static_exports_are_valid_(export, ctx) ||
-        !fi_module_export_dynamic_exports_are_valid_(export, ctx)) {
+        !fi_module_export_dynamic_exports_are_valid_(export, ctx) ||
+        !fi_module_export_modifiers_are_valid_(export, ctx)) {
         return false;
     }
 

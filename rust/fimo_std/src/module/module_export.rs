@@ -1,4 +1,5 @@
 use core::ffi::CStr;
+use core::marker::PhantomData;
 
 use crate::{
     bindings,
@@ -126,7 +127,7 @@ impl core::fmt::Debug for ResourceDecl {
 
 impl core::fmt::Display for ResourceDecl {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.path().to_string_lossy(),)
+        write!(f, "{}", self.path().to_string_lossy(), )
     }
 }
 
@@ -168,7 +169,7 @@ impl core::fmt::Debug for NamespaceImport {
 
 impl core::fmt::Display for NamespaceImport {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.name().to_string_lossy(),)
+        write!(f, "{}", self.name().to_string_lossy(), )
     }
 }
 
@@ -386,6 +387,68 @@ impl FFITransferable<bindings::FimoModuleDynamicSymbolExport> for DynamicSymbolE
     }
 }
 
+/// Declaration of a module modifier.
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct Modifier(bindings::FimoModuleExportModifier);
+
+impl Modifier {
+    /// Fetches the value of the modifier.
+    pub fn value(&self) -> ModifierValue<'_> {
+        #[allow(clippy::match_single_binding)]
+        match self.0.key {
+            _ => ModifierValue::Unknown(PhantomData)
+        }
+    }
+}
+
+// Safety: `FimoModuleExportModifier` is always `Send + Sync`.
+unsafe impl Send for Modifier {}
+
+// Safety: `FimoModuleExportModifier` is always `Send + Sync`.
+unsafe impl Sync for Modifier {}
+
+impl core::fmt::Debug for Modifier {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("Modifier")
+            .field(&self.value())
+            .finish()
+    }
+}
+
+impl core::fmt::Display for Modifier {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.value())
+    }
+}
+
+impl FFITransferable<bindings::FimoModuleExportModifier> for Modifier {
+    fn into_ffi(self) -> bindings::FimoModuleExportModifier {
+        self.0
+    }
+
+    unsafe fn from_ffi(ffi: bindings::FimoModuleExportModifier) -> Self {
+        Self(ffi)
+    }
+}
+
+/// A value of a [`Modifier`].
+#[non_exhaustive]
+#[derive(Debug, Copy, Clone)]
+pub enum ModifierValue<'a> {
+    Unknown(PhantomData<&'a ()>)
+}
+
+impl core::fmt::Display for ModifierValue<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ModifierValue::Unknown(_) => {
+                write!(f, "Unknown modifier")
+            }
+        }
+    }
+}
+
 /// Declaration of an exported module.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -493,6 +556,19 @@ impl ModuleExport<'_> {
                 &[]
             } else {
                 core::slice::from_raw_parts(symbols, self.0.dynamic_symbol_exports_count as usize)
+            }
+        }
+    }
+
+    /// Fetches the list of modifiers for the module.
+    pub fn modifiers(&self) -> &[Modifier] {
+        // Safety: The layout is compatible.
+        unsafe {
+            let modifiers = self.0.modifiers.cast::<Modifier>();
+            if modifiers.is_null() {
+                &[]
+            } else {
+                core::slice::from_raw_parts(modifiers, self.0.modifiers_count as usize)
             }
         }
     }
