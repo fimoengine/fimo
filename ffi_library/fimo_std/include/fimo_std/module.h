@@ -452,6 +452,16 @@ extern "C" {
     .dynamic_symbol_exports_count = (FimoU32)(sizeof(SYM_LIST) / sizeof(FimoModuleDynamicSymbolExport))
 
 /**
+ * Specifies the modifiers of the module export.
+ *
+ * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
+ *
+ * @param MOD_LIST array of `FimoModuleExportModifier`
+ */
+#define FIMO_MODULE_EXPORT_MODULE_MODIFIERS(MOD_LIST)                                                                  \
+    .modifiers = MOD_LIST, .modifiers_count = (FimoU32)(sizeof(MOD_LIST) / sizeof(FimoModuleExportModifier))
+
+/**
  * Specifies the constructor and destructor of a module.
  *
  * Must be called as a parameter of `FIMO_MODULE_EXPORT_MODULE`.
@@ -879,6 +889,22 @@ typedef struct FimoModuleDynamicSymbolExport {
 } FimoModuleDynamicSymbolExport;
 
 /**
+ * Valid keys of `FimoModuleExportModifier`.
+ */
+typedef enum FimoModuleExportModifierKey {
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST = 0,
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_FORCE32 = 0x7FFFFFFF
+} FimoModuleExportModifierKey;
+
+/**
+ * A modifier declaration for a module export.
+ */
+typedef struct FimoModuleExportModifier {
+    FimoModuleExportModifierKey key;
+    const void *value;
+} FimoModuleExportModifier;
+
+/**
  * Declaration of a module export.
  */
 typedef struct FimoModuleExport {
@@ -985,6 +1011,14 @@ typedef struct FimoModuleExport {
      * Number of dynamic symbols exported by the module.
      */
     FimoU32 dynamic_symbol_exports_count;
+    /**
+     * List of modifier key-value pairs for the exported module.
+     */
+    const FimoModuleExportModifier *modifiers;
+    /**
+     * Number of modifiers for the module.
+     */
+    FimoU32 modifiers_count;
     /**
      * Optional constructor for the module.
      *

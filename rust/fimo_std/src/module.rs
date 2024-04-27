@@ -30,8 +30,8 @@ pub trait ModuleSubsystem: SealedContext {
 }
 
 impl<T> ModuleSubsystem for T
-where
-    T: SealedContext,
+    where
+        T: SealedContext,
 {
     fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error> {
         // Safety: Either we get an error, or we initialize the module.
@@ -84,8 +84,8 @@ pub struct NoState;
 pub struct DefaultConstructor;
 
 impl<T> ModuleConstructor<T> for DefaultConstructor
-where
-    T: Module<Data: Default>,
+    where
+        T: Module<Data: Default>,
 {
     fn construct<'a>(
         _module: ConstructorModule<'a, T>,
@@ -192,6 +192,8 @@ macro_rules! export_module {
                     symbol_exports_count,
                     dynamic_symbol_exports,
                     dynamic_symbol_exports_count,
+                    modifiers: core::ptr::null(),
+                    modifiers_count: 0,
                     module_constructor,
                     module_destructor,
                 }
@@ -738,9 +740,9 @@ pub mod c_ffi {
         data: *mut bindings::FimoModuleParamData,
         f: F,
     ) -> bindings::FimoError
-    where
-        T: Module,
-        F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
+        where
+            T: Module,
+            F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
     {
         // Safety:
         unsafe {
@@ -815,9 +817,9 @@ pub mod c_ffi {
         data: *mut bindings::FimoModuleParamData,
         f: F,
     ) -> bindings::FimoError
-    where
-        T: Module,
-        F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
+        where
+            T: Module,
+            F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
     {
         // Safety:
         unsafe {
@@ -848,9 +850,9 @@ pub mod c_ffi {
         module: *const bindings::FimoModule,
         symbol: *mut *mut core::ffi::c_void,
     ) -> bindings::FimoError
-    where
-        T: Module,
-        S: DynamicExport<T>,
+        where
+            T: Module,
+            S: DynamicExport<T>,
     {
         // Safety: The function is only called internally,
         // where we know the type of the module.
@@ -868,9 +870,9 @@ pub mod c_ffi {
     }
 
     pub unsafe extern "C" fn destroy_dynamic_symbol<T, S>(symbol: *mut core::ffi::c_void)
-    where
-        T: Module,
-        S: DynamicExport<T>,
+        where
+            T: Module,
+            S: DynamicExport<T>,
     {
         // Safety: The function is only called internally,
         // where we know the type of the symbol.
@@ -884,9 +886,9 @@ pub mod c_ffi {
         set: *mut bindings::FimoModuleLoadingSet,
         data: *mut *mut core::ffi::c_void,
     ) -> bindings::FimoError
-    where
-        T: Module,
-        C: ModuleConstructor<T>,
+        where
+            T: Module,
+            C: ModuleConstructor<T>,
     {
         // Safety: See above.
         unsafe {
