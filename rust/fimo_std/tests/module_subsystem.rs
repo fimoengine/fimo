@@ -113,11 +113,14 @@ export_module! {
 }
 
 struct CConstructor;
+
 impl<'m> ModuleConstructor<C<'m>> for CConstructor {
     fn construct<'a>(
         module: ConstructorModule<'a, C<'m>>,
         set: LoadingSet<'_>,
     ) -> Result<&'a mut <C<'m> as Module>::Data, Error> {
+        let module = module.unwrap()?;
+
         let parameters = module.parameters();
         assert_eq!(parameters.pub_pub.read(&module)?, 0u32);
         assert_eq!(parameters.pub_dep.read(&module)?, 1u32);
@@ -161,10 +164,10 @@ impl<'m> ModuleConstructor<C<'m>> for CConstructor {
         let info = module.module_info();
         emit_info!(&module.context(), "{info}");
 
-        <DefaultConstructor as ModuleConstructor<C<'m>>>::construct(module, set)
+        <DefaultConstructor as ModuleConstructor<C<'m>>>::construct(module.into(), set)
     }
 
-    fn destroy(module: ConstructorModule<'_, C<'m>>, data: &mut <C<'m> as Module>::Data) {
+    fn destroy(module: PreModule<'_, C<'m>>, data: &mut <C<'m> as Module>::Data) {
         emit_info!(&module.context(), "dropping module: {data:?}");
         <DefaultConstructor as ModuleConstructor<C<'m>>>::destroy(module, data);
     }
