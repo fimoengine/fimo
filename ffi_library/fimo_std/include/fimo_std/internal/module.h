@@ -37,6 +37,9 @@ FimoError fimo_internal_trampoline_module_set_append_callback(void *ctx, FimoMod
                                                               const char *module_name,
                                                               FimoModuleLoadingSuccessCallback on_success,
                                                               FimoModuleLoadingErrorCallback on_error, void *user_data);
+FimoError fimo_internal_trampoline_module_set_append_freestanding_module(void *ctx, const FimoModule *module,
+                                                                         FimoModuleLoadingSet *set,
+                                                                         const FimoModuleExport *export);
 FimoError fimo_internal_trampoline_module_set_append_modules(
         void *ctx, FimoModuleLoadingSet *set, const char *module_path, FimoModuleLoadingFilter filter,
         void *filter_data, void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *));
@@ -209,6 +212,35 @@ FIMO_MUST_USE
 FimoError fimo_internal_module_set_append_callback(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
                                                    const char *module_name, FimoModuleLoadingSuccessCallback on_success,
                                                    FimoModuleLoadingErrorCallback on_error, void *user_data);
+
+/**
+ * Adds a freestanding module to the module set.
+ *
+ * Adds a freestanding module to the set, so that it may be loaded
+ * by a future call to `fimo_module_set_finish`. Trying to include
+ * an invalid module, a module with duplicate exports or duplicate
+ * name will result in an error. Unlike `fimo_module_set_append_modules`,
+ * this function allows for the loading of dynamic modules, i.e.
+ * modules that are created at runtime, like non-native modules,
+ * which may require a runtime to be executed in. To ensure that
+ * the binary of the module calling this function is not unloaded
+ * while the new module is instantiated, the new module inherits
+ * a strong reference to the same binary as the callers module.
+ * Note that the new module is not setup to automatically depend
+ * on `module`, but may prevent it from being unloaded while
+ * the set exists.
+ *
+ * @param module the ctx
+ * @param module owner of the export
+ * @param set set of modules
+ * @param export module to append to the set
+ *
+ * @return Status code.
+ */
+FIMO_MUST_USE
+FimoError fimo_internal_module_set_append_freestanding_module(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                              FimoModuleLoadingSet *set,
+                                                              const FimoModuleExport *export);
 
 /**
  * Adds modules to the module set.

@@ -7,7 +7,7 @@ use crate::{
     version::Version,
 };
 
-use super::{ModuleExport, ModuleInfo, ModuleInfoView, ModuleSubsystem};
+use super::{Module, ModuleExport, ModuleInfo, ModuleInfoView, ModuleSubsystem};
 
 /// Result of the filter operation of a [`LoadingSet`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -177,6 +177,36 @@ impl<'a> LoadingSet<'a> {
                 on_success,
                 on_error,
                 callback.cast(),
+            );
+        })
+    }
+
+    /// Adds a freestanding module to the module set.
+    ///
+    /// Adds a freestanding module to the set, so that it may be loaded. Trying to include an
+    /// invalid module, a module with duplicate exports or duplicate name will result in an
+    /// error. Unlike [`append_modules`](Self::append_modules), this function allows for the loading
+    /// of dynamic modules, i.e. modules that are created at runtime, like non-native modules,
+    /// which may require a runtime to be executed in. To ensure that the binary of the module
+    /// calling this function is not unloaded while the new module is instantiated, the new
+    /// module inherits a strong reference to the same binary as the caller's module. Note that
+    /// the new module is not setup to automatically depend on `module`, but may prevent it from
+    /// being unloaded while the set exists.
+    ///
+    /// # Safety
+    ///
+    /// `export` must remain valid until the module is unloaded and the set is dropped.
+    pub unsafe fn append_freestanding_module(
+        &self,
+        module: &impl Module,
+        export: impl FFITransferable<*const bindings::FimoModuleExport>,
+    ) -> error::Result {
+        // Safety: FFI call is safe.
+        to_result_indirect(|error| unsafe {
+            *error = bindings::fimo_module_set_append_freestanding_module(
+                module.share_to_ffi(),
+                self.share_to_ffi(),
+                export.into_ffi(),
             );
         })
     }
