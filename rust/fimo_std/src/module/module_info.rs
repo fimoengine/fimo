@@ -102,6 +102,36 @@ impl ModuleInfoView<'_> {
         })
     }
 
+    /// Checks whether the underlying module is still loaded.
+    pub fn is_loaded(&self) -> bool {
+        let is_loaded = self.0.is_loaded.unwrap();
+        // Safety: The ffi call is safe.
+        unsafe { (is_loaded)(self.share_to_ffi()) }
+    }
+
+    /// Locks the underlying module from being unloaded.
+    ///
+    /// The module may be locked multiple times.
+    pub fn lock_unload(&self) -> Result<ModuleInfoGuard<'_>, Error> {
+        let lock_unload = self.0.lock_unload.unwrap();
+        // Safety: The ffi call is safe.
+        to_result_indirect(|error| unsafe {
+            *error = lock_unload(self.share_to_ffi());
+        })?;
+        Ok(ModuleInfoGuard(*self))
+    }
+
+    /// Unlocks the underlying module, allowing it to be unloaded again.
+    ///
+    /// # Safety
+    ///
+    /// The module must have been locked.
+    pub unsafe fn unlock_unload(&self) {
+        let unlock_unload = self.0.unlock_unload.unwrap();
+        // Safety: The ffi call is safe.
+        unsafe { (unlock_unload)(self.share_to_ffi()) }
+    }
+
     /// Acquires the module info by increasing the reference count.
     pub fn to_owned(&self) -> ModuleInfo {
         let acquire = self.0.acquire.unwrap();
@@ -183,6 +213,26 @@ impl FFITransferable<*const bindings::FimoModuleInfo> for ModuleInfoView<'_> {
             );
             Self(&*ffi)
         }
+    }
+}
+
+/// A guard of a locked module.
+#[repr(transparent)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ModuleInfoGuard<'a>(ModuleInfoView<'a>);
+
+impl<'a> Deref for ModuleInfoGuard<'a> {
+    type Target = ModuleInfoView<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for ModuleInfoGuard<'_> {
+    fn drop(&mut self) {
+        // Safety: We own the lock.
+        unsafe { self.0.unlock_unload() }
     }
 }
 

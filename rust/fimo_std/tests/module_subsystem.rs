@@ -197,6 +197,10 @@ fn load_modules() -> Result<(), Error> {
     let a = ModuleInfo::find_by_name(&*context, c"a")?;
     let b = ModuleInfo::find_by_name(&*context, c"b")?;
     let c = ModuleInfo::find_by_name(&*context, c"c")?;
+    assert!(module.module_info().is_loaded());
+    assert!(a.is_loaded());
+    assert!(b.is_loaded());
+    assert!(c.is_loaded());
 
     module.acquire_dependency(&a)?;
     module.acquire_dependency(&b)?;
@@ -208,6 +212,11 @@ fn load_modules() -> Result<(), Error> {
     assert!(module.load_symbol::<b::BExport0>().is_err());
     module.include_namespace(b::NamespaceItem::NAME)?;
     assert!(module.load_symbol::<b::BExport0>().is_ok());
+
+    drop(module);
+    assert!(!a.is_loaded());
+    assert!(!b.is_loaded());
+    assert!(!c.is_loaded());
 
     Ok(())
 }

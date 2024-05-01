@@ -591,14 +591,25 @@ extern "C" {
 
 /**
  * Locks a symbol and returns it.
+ *
+ * @param SYMBOL a symbol
  */
 #define FIMO_MODULE_SYMBOL_LOCK(SYMBOL)                                                                                \
-    (fimo_impl_module_symbol_acquire((_Atomic(FimoUSize) *)&SYMBOL->lock), SYMBOL->data)
+    (fimo_impl_module_symbol_acquire((_Atomic(FimoUSize) *)&(SYMBOL)->lock), (SYMBOL)->data)
 
 /**
  * Unlocks a symbol.
+ *
+ * @param SYMBOL a symbol
  */
-#define FIMO_MODULE_SYMBOL_RELEASE(SYMBOL) fimo_impl_module_symbol_release((_Atomic(FimoUSize) *)&SYMBOL->lock)
+#define FIMO_MODULE_SYMBOL_RELEASE(SYMBOL) fimo_impl_module_symbol_release((_Atomic(FimoUSize) *)&(SYMBOL)->lock)
+
+/**
+ * Checks whether the symbol is locked.
+ *
+ * @param SYMBOL a symbol
+ */
+#define FIMO_MODULE_SYMBOL_IS_LOCKED(SYMBOL) fimo_impl_module_symbol_is_used((_Atomic(FimoUSize) *)&(SYMBOL)->lock)
 
 /**
  * Acquires a reference to a `FimoModuleInfo`.
@@ -613,6 +624,30 @@ extern "C" {
  * @param INFO pointer to a `FimoModuleInfo`
  */
 #define FIMO_MODULE_INFO_RELEASE(INFO) fimo_impl_module_info_release(INFO)
+
+/**
+ * Checks whether a module is loaded.
+ *
+ * @param INFO pointer to a `FimoModuleInfo`
+ */
+#define FIMO_MODULE_INFO_IS_LOADED(INFO) fimo_impl_module_info_is_loaded(INFO)
+
+/**
+ * Locks the module from being unloaded.
+ *
+ * A module may be locked recursively. Each call to lock must be paired with
+ * a call to unlock.
+ *
+ * @param INFO pointer to a `FimoModuleInfo`
+ */
+#define FIMO_MODULE_INFO_LOCK_UNLOAD(INFO) fimo_impl_module_info_lock_unload(INFO)
+
+/**
+ * Unlocks a module, allowing it to be unloaded.
+ *
+ * @param INFO pointer to a `FimoModuleInfo`
+ */
+#define FIMO_MODULE_INFO_UNLOCK_UNLOAD(INFO) fimo_impl_module_info_unlock_unload(INFO)
 
 typedef struct FimoModule FimoModule;
 
@@ -892,7 +927,19 @@ typedef struct FimoModuleDynamicSymbolExport {
  * Valid keys of `FimoModuleExportModifier`.
  */
 typedef enum FimoModuleExportModifierKey {
-    FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST = 0,
+    /**
+     * Specifies that the module export has a destructor function
+     * that must be called. The value must be a pointer to a
+     * `FimoModuleExportModifierDestructor`.
+     */
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR,
+    /**
+     * Specifies that the module should acquire a static dependency
+     * to another module. The value must be a strong reference to
+     * a `FimoModuleInfo`.
+     */
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY,
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST,
     FIMO_MODULE_EXPORT_MODIFIER_KEY_FORCE32 = 0x7FFFFFFF
 } FimoModuleExportModifierKey;
 
@@ -903,6 +950,20 @@ typedef struct FimoModuleExportModifier {
     FimoModuleExportModifierKey key;
     const void *value;
 } FimoModuleExportModifier;
+
+/**
+ * Value for the `FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR` modifier key.
+ */
+typedef struct FimoModuleExportModifierDestructor {
+    /**
+     * Type-erased data to pass to the destructor.
+     */
+    void *data;
+    /**
+     * Destructor function.
+     */
+    void (*destructor)(void *);
+} FimoModuleExportModifierDestructor;
 
 /**
  * Declaration of a module export.
@@ -1154,6 +1215,24 @@ typedef struct FimoModuleInfo {
      * Not `NULL`.
      */
     void (*release)(const struct FimoModuleInfo *);
+    /**
+     * Returns whether the owning module is still loaded.
+     *
+     * Not `NULL`.
+     */
+    bool (*is_loaded)(const struct FimoModuleInfo *);
+    /**
+     * Prevents the module from being unloaded.
+     *
+     * Not `NULL`.
+     */
+    FimoError (*lock_unload)(const struct FimoModuleInfo *);
+    /**
+     * Unlocks a previously locked module, allowing it to be unloaded.
+     *
+     * Not `NULL`.
+     */
+    void (*unlock_unload)(const struct FimoModuleInfo *);
 } FimoModuleInfo;
 
 #ifndef FIMO_STD_BINDGEN
@@ -1165,6 +1244,21 @@ static FIMO_INLINE_ALWAYS void fimo_impl_module_info_acquire(const FimoModuleInf
 static FIMO_INLINE_ALWAYS void fimo_impl_module_info_release(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     info->release(info);
+}
+
+static FIMO_INLINE_ALWAYS bool fimo_impl_module_info_is_loaded(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    return info->is_loaded(info);
+}
+
+static FIMO_INLINE_ALWAYS FimoError fimo_impl_module_info_lock_unload(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    return info->lock_unload(info);
+}
+
+static FIMO_INLINE_ALWAYS void fimo_impl_module_info_unlock_unload(const FimoModuleInfo *info) {
+    FIMO_DEBUG_ASSERT(info)
+    info->unlock_unload(info);
 }
 #endif
 
@@ -1257,6 +1351,8 @@ typedef struct FimoModuleVTableV0 {
     FimoError (*set_has_symbol)(void *, FimoModuleLoadingSet *, const char *, const char *, FimoVersion, bool *);
     FimoError (*set_append_callback)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingSuccessCallback,
                                      FimoModuleLoadingErrorCallback, void *);
+    FimoError (*set_append_freestanding_module)(void *, const FimoModule *, FimoModuleLoadingSet *,
+                                                const FimoModuleExport *);
     FimoError (*set_append_modules)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingFilter, void *,
                                     void (*)(bool (*)(const FimoModuleExport *, void *), void *));
     FimoError (*set_dismiss)(void *, FimoModuleLoadingSet *);
@@ -1392,6 +1488,33 @@ FIMO_MUST_USE
 FimoError fimo_module_set_append_callback(FimoContext context, FimoModuleLoadingSet *module_set,
                                           const char *module_name, FimoModuleLoadingSuccessCallback on_success,
                                           FimoModuleLoadingErrorCallback on_error, void *user_data);
+
+/**
+ * Adds a freestanding module to the module set.
+ *
+ * Adds a freestanding module to the set, so that it may be loaded
+ * by a future call to `fimo_module_set_finish`. Trying to include
+ * an invalid module, a module with duplicate exports or duplicate
+ * name will result in an error. Unlike `fimo_module_set_append_modules`,
+ * this function allows for the loading of dynamic modules, i.e.
+ * modules that are created at runtime, like non-native modules,
+ * which may require a runtime to be executed in. To ensure that
+ * the binary of the module calling this function is not unloaded
+ * while the new module is instantiated, the new module inherits
+ * a strong reference to the same binary as the caller's module.
+ * Note that the new module is not setup to automatically depend
+ * on `module`, but may prevent it from being unloaded while
+ * the set exists.
+ *
+ * @param module owner of the export
+ * @param module_set set of modules
+ * @param module_export module to append to the set
+ *
+ * @return Status code.
+ */
+FIMO_MUST_USE
+FimoError fimo_module_set_append_freestanding_module(const FimoModule *module, FimoModuleLoadingSet *module_set,
+                                                     const FimoModuleExport *module_export);
 
 /**
  * Adds modules to the module set.

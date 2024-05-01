@@ -39,6 +39,8 @@ static const FimoContextVTable FIMO_INTERNAL_CONTEXT_VTABLE = {
                         .set_has_module = fimo_internal_trampoline_module_set_has_module,
                         .set_has_symbol = fimo_internal_trampoline_module_set_has_symbol,
                         .set_append_callback = fimo_internal_trampoline_module_set_append_callback,
+                        .set_append_freestanding_module =
+                                fimo_internal_trampoline_module_set_append_freestanding_module,
                         .set_append_modules = fimo_internal_trampoline_module_set_append_modules,
                         .set_dismiss = fimo_internal_trampoline_module_set_dismiss,
                         .set_finish = fimo_internal_trampoline_module_set_finish,

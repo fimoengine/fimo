@@ -46,6 +46,16 @@ FimoError fimo_module_set_append_callback(const FimoContext context, FimoModuleL
 }
 
 FIMO_MUST_USE
+FimoError fimo_module_set_append_freestanding_module(const FimoModule *module, FimoModuleLoadingSet *module_set,
+                                                     const FimoModuleExport *module_export) {
+    if (module == NULL) {
+        return FIMO_EINVAL;
+    }
+    const FimoContextVTable *vtable = module->context.vtable;
+    return vtable->module_v0.set_append_freestanding_module(module->context.data, module, module_set, module_export);
+}
+
+FIMO_MUST_USE
 FimoError fimo_module_set_append_modules(const FimoContext context, FimoModuleLoadingSet *module_set,
                                          const char *module_path, const FimoModuleLoadingFilter filter,
                                          void *filter_data) {
