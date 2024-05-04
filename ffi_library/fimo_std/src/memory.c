@@ -15,22 +15,27 @@
 #include <malloc.h>
 #endif // defined(_WIN32) || defined(WIN32)
 
+FIMO_EXPORT
 FIMO_MUST_USE
 void *fimo_malloc(const size_t size, FimoError *error) { return fimo_malloc_sized(size, error).ptr; }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 void *fimo_calloc(const size_t size, FimoError *error) { return fimo_calloc_sized(size, error).ptr; }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 void *fimo_aligned_alloc(const size_t alignment, const size_t size, FimoError *error) {
     return fimo_aligned_alloc_sized(alignment, size, error).ptr;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoMallocBuffer fimo_malloc_sized(const size_t size, FimoError *error) {
     return fimo_aligned_alloc_sized(FIMO_MALLOC_ALIGNMENT, size, error);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoMallocBuffer fimo_calloc_sized(const size_t size, FimoError *error) {
     const FimoMallocBuffer buffer = fimo_malloc_sized(size, error);
@@ -43,6 +48,7 @@ FimoMallocBuffer fimo_calloc_sized(const size_t size, FimoError *error) {
     return buffer;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoError *error) {
     if (size == 0 || alignment == 0 || ((alignment & (alignment - 1)) != 0)) {
@@ -101,6 +107,7 @@ FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoErr
     return (FimoMallocBuffer){.ptr = ptr, .buff_size = buff_size};
 }
 
+FIMO_EXPORT
 void fimo_free(void *ptr) {
 #if defined(_WIN32) || defined(WIN32)
     _aligned_free(ptr);
@@ -109,11 +116,13 @@ void fimo_free(void *ptr) {
 #endif
 }
 
+FIMO_EXPORT
 void fimo_free_sized(void *ptr, const size_t size) {
     (void)size;
     fimo_free(ptr);
 }
 
+FIMO_EXPORT
 void fimo_free_aligned_sized(void *ptr, const size_t alignment, const size_t size) {
     (void)alignment;
     (void)size;

@@ -201,6 +201,7 @@ typedef enum FimoError {
  * @error `FIMO_EOK`: Operation was successful.
  * @error `FIMO_EINVAL`: The value of `errnum` is not a valid error number.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 const char *fimo_strerrorname(FimoError errnum, FimoError *err);
 
@@ -218,6 +219,7 @@ const char *fimo_strerrorname(FimoError errnum, FimoError *err);
  * @error `FIMO_EOK`: Operation was successful.
  * @error `FIMO_EINVAL`: The value of `errnum` is not a valid error number.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 const char *fimo_strerrordesc(FimoError errnum, FimoError *err);
 
@@ -230,6 +232,7 @@ const char *fimo_strerrordesc(FimoError errnum, FimoError *err);
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_error_from_errno(int errnum);
 

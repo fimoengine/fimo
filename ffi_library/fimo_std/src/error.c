@@ -3,7 +3,9 @@
 #include <errno.h>
 #include <stddef.h>
 
-FIMO_MUST_USE const char *fimo_strerrorname(const FimoError errnum, FimoError *err) {
+FIMO_EXPORT
+FIMO_MUST_USE
+const char *fimo_strerrorname(const FimoError errnum, FimoError *err) {
     if (err) {
         *err = FIMO_EOK;
     }
@@ -275,7 +277,9 @@ FIMO_MUST_USE const char *fimo_strerrorname(const FimoError errnum, FimoError *e
     return "Unknown error number";
 }
 
-FIMO_MUST_USE const char *fimo_strerrordesc(const FimoError errnum, FimoError *err) {
+FIMO_EXPORT
+FIMO_MUST_USE
+const char *fimo_strerrordesc(const FimoError errnum, FimoError *err) {
     if (err) {
         *err = FIMO_EOK;
     }
@@ -553,7 +557,9 @@ FIMO_MUST_USE const char *fimo_strerrordesc(const FimoError errnum, FimoError *e
     return "Unknown error number";
 }
 
-FIMO_MUST_USE FimoError fimo_error_from_errno(const int errnum) {
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoError fimo_error_from_errno(const int errnum) {
     switch (errnum) {
         case 0:
             return FIMO_EOK;

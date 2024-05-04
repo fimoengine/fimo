@@ -7,51 +7,62 @@
 #include <time.h>
 #endif
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_zero(void) { return FIMO_DURATION_ZERO; }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_max(void) { return FIMO_DURATION_MAX; }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_from_seconds(const FimoU64 seconds) { return FIMO_SECONDS(seconds); }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_from_millis(const FimoU64 milliseconds) { return FIMO_MILLIS(milliseconds); }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_from_nanos(const FimoU64 nanoseconds) { return FIMO_NANOS(nanoseconds); }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_duration_is_zero(const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(duration)
     return duration->secs == 0 && duration->nanos == 0;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_secs(const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(duration)
     return duration->secs;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU32 fimo_duration_subsec_millis(const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(duration)
     return duration->nanos / FIMO_NANOS_PER_MILLIS;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU32 fimo_duration_subsec_micros(const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(duration)
     return duration->nanos / FIMO_NANOS_PER_MICROS;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU32 fimo_duration_subsec_nanos(const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(duration)
     return duration->nanos;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_millis(const FimoDuration *duration, FimoU32 *high) {
     FIMO_DEBUG_ASSERT(duration)
@@ -78,6 +89,7 @@ FimoU64 fimo_duration_as_millis(const FimoDuration *duration, FimoU32 *high) {
 #endif
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_micros(const FimoDuration *duration, FimoU32 *high) {
     FIMO_DEBUG_ASSERT(duration)
@@ -104,6 +116,7 @@ FimoU64 fimo_duration_as_micros(const FimoDuration *duration, FimoU32 *high) {
 #endif
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_nanos(const FimoDuration *duration, FimoU32 *high) {
     FIMO_DEBUG_ASSERT(duration)
@@ -129,6 +142,7 @@ FimoU64 fimo_duration_as_nanos(const FimoDuration *duration, FimoU32 *high) {
 #endif
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_duration_add(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out) {
     FIMO_DEBUG_ASSERT(lhs && rhs && out)
@@ -153,6 +167,7 @@ FimoError fimo_duration_add(const FimoDuration *lhs, const FimoDuration *rhs, Fi
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_saturating_add(const FimoDuration *lhs, const FimoDuration *rhs) {
     FIMO_DEBUG_ASSERT(lhs && rhs)
@@ -164,6 +179,7 @@ FimoDuration fimo_duration_saturating_add(const FimoDuration *lhs, const FimoDur
     return result;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_duration_sub(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out) {
     FIMO_DEBUG_ASSERT(lhs && rhs && out)
@@ -190,6 +206,7 @@ FimoError fimo_duration_sub(const FimoDuration *lhs, const FimoDuration *rhs, Fi
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_saturating_sub(const FimoDuration *lhs, const FimoDuration *rhs) {
     FIMO_DEBUG_ASSERT(lhs && rhs)
@@ -201,6 +218,7 @@ FimoDuration fimo_duration_saturating_sub(const FimoDuration *lhs, const FimoDur
     return result;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_now(void) {
 #if defined(_WIN32) || defined(WIN32)
@@ -221,6 +239,7 @@ FimoTime fimo_time_now(void) {
 #endif
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed) {
     FIMO_DEBUG_ASSERT(time_point && elapsed)
@@ -228,6 +247,7 @@ FimoError fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed) {
     return fimo_time_duration_since(&now, time_point, elapsed);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_duration_since(const FimoTime *time_point, const FimoTime *earlier_time_point,
                                    FimoDuration *duration) {
@@ -255,6 +275,7 @@ FimoError fimo_time_duration_since(const FimoTime *time_point, const FimoTime *e
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_add(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out) {
     FIMO_DEBUG_ASSERT(time_point && duration && out)
@@ -279,6 +300,7 @@ FimoError fimo_time_add(const FimoTime *time_point, const FimoDuration *duration
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_saturating_add(const FimoTime *time_point, const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(time_point && duration)
@@ -290,6 +312,7 @@ FimoTime fimo_time_saturating_add(const FimoTime *time_point, const FimoDuration
     return result;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_sub(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out) {
     FIMO_DEBUG_ASSERT(time_point && duration && out)
@@ -316,6 +339,7 @@ FimoError fimo_time_sub(const FimoTime *time_point, const FimoDuration *duration
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_saturating_sub(const FimoTime *time_point, const FimoDuration *duration) {
     FIMO_DEBUG_ASSERT(time_point && duration)

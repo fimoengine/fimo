@@ -72,6 +72,7 @@ static FimoError parse_str_u64(const char **str, const size_t str_len, FimoU64 *
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_version_parse_str(const char *str, const size_t str_len, FimoVersion *version) {
     if (str == NULL || str_len == 0 || isspace(*str) || version == NULL) {
@@ -116,6 +117,7 @@ FimoError fimo_version_parse_str(const char *str, const size_t str_len, FimoVers
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 size_t fimo_version_str_len(const FimoVersion *version) {
     if (version == NULL) {
@@ -129,6 +131,7 @@ size_t fimo_version_str_len(const FimoVersion *version) {
     FIMO_PRAGMA_MSVC(warning(pop))
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 size_t fimo_version_str_len_full(const FimoVersion *version) {
     if (version == NULL) {
@@ -143,6 +146,7 @@ size_t fimo_version_str_len_full(const FimoVersion *version) {
     FIMO_PRAGMA_MSVC(warning(pop))
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_version_write_str(const FimoVersion *version, char *str, const size_t str_len, size_t *written) {
     if (version == NULL || str == NULL || str_len == 0) {
@@ -176,6 +180,7 @@ FimoError fimo_version_write_str(const FimoVersion *version, char *str, const si
     FIMO_PRAGMA_MSVC(warning(pop))
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_version_write_str_long(const FimoVersion *version, char *str, const size_t str_len, size_t *written) {
     if (version == NULL || str == NULL || str_len == 0) {
@@ -209,6 +214,7 @@ FimoError fimo_version_write_str_long(const FimoVersion *version, char *str, con
     FIMO_PRAGMA_MSVC(warning(pop))
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 int fimo_version_cmp(const FimoVersion *lhs, const FimoVersion *rhs) {
     if (lhs->major < rhs->major) {
@@ -235,6 +241,7 @@ int fimo_version_cmp(const FimoVersion *lhs, const FimoVersion *rhs) {
     return 0;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 int fimo_version_cmp_long(const FimoVersion *lhs, const FimoVersion *rhs) {
     const int res = fimo_version_cmp(lhs, rhs);
@@ -252,6 +259,7 @@ int fimo_version_cmp_long(const FimoVersion *lhs, const FimoVersion *rhs) {
     return 0;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_version_compatible(const FimoVersion *got, const FimoVersion *required) {
     if (required->major != got->major || (required->major == 0 && required->minor != got->minor)) {

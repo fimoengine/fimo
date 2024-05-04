@@ -13,18 +13,21 @@
 #define PAUSE
 #endif
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoUSize fimo_strong_count(const FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     return count->strong_refs;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoUSize fimo_strong_count_atomic(const FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     return atomic_load_explicit(&count->strong_refs, memory_order_acquire);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoUSize fimo_weak_count_guarded(const FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -34,12 +37,14 @@ FimoUSize fimo_weak_count_guarded(const FimoRefCount *count) {
     return count->weak_refs - 1;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoUSize fimo_weak_count_unguarded(const FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     return count->weak_refs - 1;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoUSize fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -50,6 +55,7 @@ FimoUSize fimo_weak_count_atomic_unguarded(const FimoAtomicRefCount *count) {
     return weak_refs - 1;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoUSize fimo_weak_count_atomic_guarded(const FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -61,18 +67,21 @@ FimoUSize fimo_weak_count_atomic_guarded(const FimoAtomicRefCount *count) {
     return weak_refs - 1;
 }
 
+FIMO_EXPORT
 void fimo_increase_strong_count(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     FimoUSize old_count = count->strong_refs++;
     FIMO_ASSERT(old_count <= MAX_REFCOUNT)
 }
 
+FIMO_EXPORT
 void fimo_increase_strong_count_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     FimoUSize old_count = atomic_fetch_add_explicit(&count->strong_refs, 1, memory_order_relaxed);
     FIMO_ASSERT(old_count <= MAX_REFCOUNT)
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_decrease_strong_count(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -80,6 +89,7 @@ bool fimo_decrease_strong_count(FimoRefCount *count) {
     return old_count == 1;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -108,6 +118,7 @@ bool fimo_decrease_strong_count_atomic(FimoAtomicRefCount *count) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_decrease_weak_count(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -115,6 +126,7 @@ bool fimo_decrease_weak_count(FimoRefCount *count) {
     return old_count == 1;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -127,6 +139,7 @@ bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount *count) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_upgrade_refcount(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -140,6 +153,7 @@ FimoError fimo_upgrade_refcount(FimoRefCount *count) {
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -159,6 +173,7 @@ FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count) {
     }
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_downgrade_refcount(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -169,6 +184,7 @@ FimoError fimo_downgrade_refcount(FimoRefCount *count) {
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
@@ -190,12 +206,14 @@ FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count) {
     }
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_refcount_is_unique(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     return count->strong_refs == 1;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_refcount_atomic_is_unique(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)

@@ -19,6 +19,7 @@ static const FimoTracingSubscriberVTable FIMO_IMPL_TRACING_DEFAULT_SUBSCRIBER_VT
         .flush = fimo_impl_tracing_default_subscriber_flush,
 };
 
+FIMO_EXPORT
 const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER = {
         .type = FIMO_STRUCT_TYPE_TRACING_SUBSCRIBER,
         .next = NULL,
@@ -26,18 +27,21 @@ const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER = {
         .vtable = &FIMO_IMPL_TRACING_DEFAULT_SUBSCRIBER_VTABLE,
 };
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_create(const FimoContext context, FimoTracingCallStack **call_stack) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_create(context.data, call_stack);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_destroy(const FimoContext context, FimoTracingCallStack *call_stack) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_destroy(context.data, call_stack);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_switch(const FimoContext context, FimoTracingCallStack *call_stack,
                                          FimoTracingCallStack **old) {
@@ -45,24 +49,28 @@ FimoError fimo_tracing_call_stack_switch(const FimoContext context, FimoTracingC
     return vtable->tracing_v0.call_stack_switch(context.data, call_stack, old);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_unblock(const FimoContext context, FimoTracingCallStack *call_stack) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_unblock(context.data, call_stack);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_suspend_current(const FimoContext context, const bool block) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_suspend_current(context.data, block);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_resume_current(const FimoContext context) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.call_stack_resume_current(context.data);
 }
 
+FIMO_EXPORT
 FIMO_PRINT_F_FORMAT_ATTR(4, 5)
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_fmt(const FimoContext context, const FimoTracingSpanDesc *span_desc,
@@ -75,6 +83,7 @@ FimoError fimo_tracing_span_create_fmt(const FimoContext context, const FimoTrac
     return result;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_custom(const FimoContext context, const FimoTracingSpanDesc *span_desc,
                                           FimoTracingSpan **span, const FimoTracingFormat format, const void *data) {
@@ -82,12 +91,14 @@ FimoError fimo_tracing_span_create_custom(const FimoContext context, const FimoT
     return vtable->tracing_v0.span_create(context.data, span_desc, span, format, data);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_span_destroy(const FimoContext context, FimoTracingSpan *span) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.span_destroy(context.data, span);
 }
 
+FIMO_EXPORT
 FIMO_PRINT_F_FORMAT_ATTR(3, 4)
 FIMO_MUST_USE
 FimoError fimo_tracing_event_emit_fmt(const FimoContext context, const FimoTracingEvent *event,
@@ -100,6 +111,7 @@ FimoError fimo_tracing_event_emit_fmt(const FimoContext context, const FimoTraci
     return result;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_event_emit_custom(const FimoContext context, const FimoTracingEvent *event,
                                          const FimoTracingFormat format, const void *data) {
@@ -107,24 +119,28 @@ FimoError fimo_tracing_event_emit_custom(const FimoContext context, const FimoTr
     return vtable->tracing_v0.event_emit(context.data, event, format, data);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_tracing_is_enabled(const FimoContext context) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.is_enabled(context.data);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_register_thread(const FimoContext context) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.register_thread(context.data);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_unregister_thread(const FimoContext context) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->tracing_v0.unregister_thread(context.data);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_flush(const FimoContext context) {
     const FimoContextVTable *vtable = context.vtable;
