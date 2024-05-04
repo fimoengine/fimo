@@ -137,6 +137,7 @@ typedef struct FimoTimeMonotonic {
  *
  * @return Zero duration.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_zero(void);
 
@@ -145,6 +146,7 @@ FimoDuration fimo_duration_zero(void);
  *
  * @return Max duration.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_max(void);
 
@@ -153,6 +155,7 @@ FimoDuration fimo_duration_max(void);
  *
  * @return Duration.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_from_seconds(FimoU64 seconds);
 
@@ -161,6 +164,7 @@ FimoDuration fimo_duration_from_seconds(FimoU64 seconds);
  *
  * @return Duration.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_from_millis(FimoU64 milliseconds);
 
@@ -169,6 +173,7 @@ FimoDuration fimo_duration_from_millis(FimoU64 milliseconds);
  *
  * @return Duration.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_from_nanos(FimoU64 nanoseconds);
 
@@ -179,6 +184,7 @@ FimoDuration fimo_duration_from_nanos(FimoU64 nanoseconds);
  *
  * @return `true` if the duration is zero.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_duration_is_zero(const FimoDuration *duration);
 
@@ -189,6 +195,7 @@ bool fimo_duration_is_zero(const FimoDuration *duration);
  *
  * @return Whole seconds.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_secs(const FimoDuration *duration);
 
@@ -199,6 +206,7 @@ FimoU64 fimo_duration_as_secs(const FimoDuration *duration);
  *
  * @return Fractional part in whole milliseconds
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU32 fimo_duration_subsec_millis(const FimoDuration *duration);
 
@@ -209,6 +217,7 @@ FimoU32 fimo_duration_subsec_millis(const FimoDuration *duration);
  *
  * @return Fractional part in whole microseconds.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU32 fimo_duration_subsec_micros(const FimoDuration *duration);
 
@@ -219,6 +228,7 @@ FimoU32 fimo_duration_subsec_micros(const FimoDuration *duration);
  *
  * @return Fractional part in whole nanoseconds.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU32 fimo_duration_subsec_nanos(const FimoDuration *duration);
 
@@ -232,6 +242,7 @@ FimoU32 fimo_duration_subsec_nanos(const FimoDuration *duration);
  *
  * @return Low part of the milliseconds.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_millis(const FimoDuration *duration, FimoU32 *high);
 
@@ -245,6 +256,7 @@ FimoU64 fimo_duration_as_millis(const FimoDuration *duration, FimoU32 *high);
  *
  * @return Low part of the microseconds.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_micros(const FimoDuration *duration, FimoU32 *high);
 
@@ -258,6 +270,7 @@ FimoU64 fimo_duration_as_micros(const FimoDuration *duration, FimoU32 *high);
  *
  * @return Low part of the nanoseconds.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_nanos(const FimoDuration *duration, FimoU32 *high);
 
@@ -273,6 +286,7 @@ FimoU64 fimo_duration_as_nanos(const FimoDuration *duration, FimoU32 *high);
  * @error `FIMO_EOK`: The addition was successful.
  * @error `FIMO_ERANGE`: Addition would result in an overflow.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_duration_add(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out);
 
@@ -286,6 +300,7 @@ FimoError fimo_duration_add(const FimoDuration *lhs, const FimoDuration *rhs, Fi
  *
  * @return Added durations.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_saturating_add(const FimoDuration *lhs, const FimoDuration *rhs);
 
@@ -301,6 +316,7 @@ FimoDuration fimo_duration_saturating_add(const FimoDuration *lhs, const FimoDur
  * @error `FIMO_EOK`: The subtraction was successful.
  * @error `FIMO_ERANGE`: The subtraction would result in an overflow or a negative duration.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_duration_sub(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out);
 
@@ -314,6 +330,7 @@ FimoError fimo_duration_sub(const FimoDuration *lhs, const FimoDuration *rhs, Fi
  *
  * @return Subtracted durations.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoDuration fimo_duration_saturating_sub(const FimoDuration *lhs, const FimoDuration *rhs);
 
@@ -322,6 +339,7 @@ FimoDuration fimo_duration_saturating_sub(const FimoDuration *lhs, const FimoDur
  *
  * @return Current time.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_now(void);
 
@@ -336,6 +354,7 @@ FimoTime fimo_time_now(void);
  * @error `FIMO_EOK`: The operation was successful.
  * @error `FIMO_ERANGE`: A time shift caused @time_point to be in the future.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed);
 
@@ -351,6 +370,7 @@ FimoError fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed);
  * @error `FIMO_EOK`: The operation was successful.
  * @error `FIMO_ERANGE`: The time point @time_point is after @earlier_time_point.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_duration_since(const FimoTime *time_point, const FimoTime *earlier_time_point,
                                    FimoDuration *duration);
@@ -367,6 +387,7 @@ FimoError fimo_time_duration_since(const FimoTime *time_point, const FimoTime *e
  * @error `FIMO_EOK`: The addition was successful.
  * @error `FIMO_ERANGE`: The addition would result in an overflow.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_add(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out);
 
@@ -380,6 +401,7 @@ FimoError fimo_time_add(const FimoTime *time_point, const FimoDuration *duration
  *
  * @return Shifted time point.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_saturating_add(const FimoTime *time_point, const FimoDuration *duration);
 
@@ -395,6 +417,7 @@ FimoTime fimo_time_saturating_add(const FimoTime *time_point, const FimoDuration
  * @error `FIMO_EOK`: The subtraction was successful.
  * @error `FIMO_ERANGE`: The subtraction would result in an overflow.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_time_sub(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out);
 
@@ -408,6 +431,7 @@ FimoError fimo_time_sub(const FimoTime *time_point, const FimoDuration *duration
  *
  * @return Shifted time point.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_saturating_sub(const FimoTime *time_point, const FimoDuration *duration);
 

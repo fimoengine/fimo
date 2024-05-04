@@ -477,6 +477,7 @@ typedef struct FimoTracingSubscriber {
 /**
  * Default subscriber.
  */
+FIMO_EXPORT
 extern const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER;
 
 /**
@@ -553,6 +554,7 @@ typedef struct FimoTracingVTableV0 {
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallStack **call_stack);
 
@@ -571,6 +573,7 @@ FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallSta
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallStack *call_stack);
 
@@ -593,6 +596,7 @@ FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallSt
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallStack *call_stack,
                                          FimoTracingCallStack **old);
@@ -608,6 +612,7 @@ FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallSta
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallStack *call_stack);
 
@@ -627,6 +632,7 @@ FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallSt
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_suspend_current(FimoContext context, bool block);
 
@@ -643,6 +649,7 @@ FimoError fimo_tracing_call_stack_suspend_current(FimoContext context, bool bloc
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_call_stack_resume_current(FimoContext context);
 
@@ -666,6 +673,7 @@ FimoError fimo_tracing_call_stack_resume_current(FimoContext context);
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
@@ -691,6 +699,7 @@ FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpa
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_span_create_custom(FimoContext context, const FimoTracingSpanDesc *span_desc,
                                           FimoTracingSpan **span, FimoTracingFormat format, const void *data);
@@ -711,6 +720,7 @@ FimoError fimo_tracing_span_create_custom(FimoContext context, const FimoTracing
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
 
@@ -728,6 +738,7 @@ FimoError fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
                                       FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4);
@@ -745,6 +756,7 @@ FimoError fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEven
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_event_emit_custom(FimoContext context, const FimoTracingEvent *event, FimoTracingFormat format,
                                          const void *data);
@@ -761,6 +773,7 @@ FimoError fimo_tracing_event_emit_custom(FimoContext context, const FimoTracingE
  *
  * @return `true` if the backend is enabled.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_tracing_is_enabled(FimoContext context);
 
@@ -779,6 +792,7 @@ bool fimo_tracing_is_enabled(FimoContext context);
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_register_thread(FimoContext context);
 
@@ -793,6 +807,7 @@ FimoError fimo_tracing_register_thread(FimoContext context);
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_unregister_thread(FimoContext context);
 
@@ -805,6 +820,7 @@ FimoError fimo_tracing_unregister_thread(FimoContext context);
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_tracing_flush(FimoContext context);
 

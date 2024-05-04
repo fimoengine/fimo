@@ -85,6 +85,7 @@ typedef struct FimoContextVTableV0 {
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_context_init(const FimoBaseStructIn **options, FimoContext *context);
 
@@ -100,6 +101,7 @@ FimoError fimo_context_init(const FimoBaseStructIn **options, FimoContext *conte
  *
  * @return Status code.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_context_check_version(FimoContext context);
 
@@ -112,6 +114,7 @@ FimoError fimo_context_check_version(FimoContext context);
  *
  * @param context the context
  */
+FIMO_EXPORT
 void fimo_context_acquire(FimoContext context);
 
 /**
@@ -123,6 +126,7 @@ void fimo_context_acquire(FimoContext context);
  *
  * @param context the context
  */
+FIMO_EXPORT
 void fimo_context_release(FimoContext context);
 
 #ifdef __cplusplus

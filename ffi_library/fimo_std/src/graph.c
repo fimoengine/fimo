@@ -202,6 +202,7 @@ static void *realloc_(void *ptr, size_t size) {
 
 static void free_(void *ptr) { fimo_free(ptr); }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_new(size_t node_size, size_t edge_size, void (*node_free)(void *), void (*edge_free)(void *),
                          FimoGraph **graph) {
@@ -257,6 +258,7 @@ error_graph:
     return error;
 }
 
+FIMO_EXPORT
 void fimo_graph_free(FimoGraph *graph) {
     if (graph == NULL) {
         perror("graph is null");
@@ -275,6 +277,7 @@ void fimo_graph_free(FimoGraph *graph) {
     fimo_free_aligned_sized(graph, _Alignof(FimoGraph), sizeof(FimoGraph));
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 size_t fimo_graph_node_count(const FimoGraph *graph) {
     if (graph == NULL) {
@@ -285,6 +288,7 @@ size_t fimo_graph_node_count(const FimoGraph *graph) {
     return btree_count(graph->nodes);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 size_t fimo_graph_edge_count(const FimoGraph *graph) {
     if (graph == NULL) {
@@ -295,6 +299,7 @@ size_t fimo_graph_edge_count(const FimoGraph *graph) {
     return btree_count(graph->edges);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_count(const FimoGraph *graph, FimoU64 node, bool inward, size_t *count) {
     if (graph == NULL || count == NULL) {
@@ -319,6 +324,7 @@ FimoError fimo_graph_neighbors_count(const FimoGraph *graph, FimoU64 node, bool 
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_add_node(FimoGraph *graph, const void *node_data, FimoU64 *node) {
     if (graph == NULL || node == NULL) {
@@ -385,6 +391,7 @@ error_data_alloc:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_node_data(const FimoGraph *graph, FimoU64 node, const void **node_data) {
     if (graph == NULL || node_data == NULL) {
@@ -402,6 +409,7 @@ FimoError fimo_graph_node_data(const FimoGraph *graph, FimoU64 node, const void 
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_add_edge(FimoGraph *graph, FimoU64 src_node, FimoU64 dst_node, const void *edge_data,
                               void **old_edge_data, FimoU64 *edge) {
@@ -562,6 +570,7 @@ error_adjacency:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_update_edge(FimoGraph *graph, FimoU64 src_node, FimoU64 dst_node, const void *edge_data,
                                  void **old_edge_data, FimoU64 *edge) {
@@ -612,6 +621,7 @@ FimoError fimo_graph_update_edge(FimoGraph *graph, FimoU64 src_node, FimoU64 dst
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_edge_data(const FimoGraph *graph, FimoU64 edge, const void **edge_data) {
     if (graph == NULL || edge_data == NULL) {
@@ -629,6 +639,7 @@ FimoError fimo_graph_edge_data(const FimoGraph *graph, FimoU64 edge, const void 
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_edge_endpoints(const FimoGraph *graph, FimoU64 edge, FimoU64 *start_node, FimoU64 *end_node) {
     if (graph == NULL || start_node == NULL || end_node == NULL) {
@@ -662,6 +673,7 @@ static bool collect_edges_(const void *item, void *data) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_remove_node(FimoGraph *graph, FimoU64 node, void **node_data) {
     if (graph == NULL || node_data == NULL) {
@@ -758,6 +770,7 @@ error_node_not_found:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_remove_edge(FimoGraph *graph, FimoU64 edge, void **edge_data) {
     if (graph == NULL || edge_data == NULL) {
@@ -812,12 +825,14 @@ error_free_list_resize:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_contains_edge(const FimoGraph *graph, FimoU64 src_node, FimoU64 dst_node, bool *contained) {
     FimoU64 edge;
     return fimo_graph_find_edge(graph, src_node, dst_node, &edge, contained);
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_find_edge(const FimoGraph *graph, FimoU64 src_node, FimoU64 dst_node, FimoU64 *edge,
                                bool *contained) {
@@ -858,6 +873,7 @@ FimoError fimo_graph_find_edge(const FimoGraph *graph, FimoU64 src_node, FimoU64
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_nodes_new(const FimoGraph *graph, FimoGraphNodes **iter, bool *has_value) {
     if (graph == NULL || iter == NULL || has_value == NULL) {
@@ -896,6 +912,7 @@ error_iter_alloc:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_nodes_next(FimoGraphNodes *iter, bool *has_value) {
     if (iter == NULL || has_value == NULL || !iter->has_value) {
@@ -912,6 +929,7 @@ FimoError fimo_graph_nodes_next(FimoGraphNodes *iter, bool *has_value) {
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_nodes_item(const FimoGraphNodes *iter, FimoU64 *node, const void **node_data) {
     if (iter == NULL || !iter->has_value) {
@@ -929,6 +947,7 @@ FimoError fimo_graph_nodes_item(const FimoGraphNodes *iter, FimoU64 *node, const
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 void fimo_graph_nodes_free(FimoGraphNodes *iter) {
     if (iter == NULL) {
         perror("invalid nodes iter");
@@ -941,6 +960,7 @@ void fimo_graph_nodes_free(FimoGraphNodes *iter) {
     fimo_free_aligned_sized(iter, _Alignof(FimoGraphNodes), sizeof(FimoGraphNodes));
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_edges_new(const FimoGraph *graph, FimoGraphEdges **iter, bool *has_value) {
     if (graph == NULL || iter == NULL || has_value == NULL) {
@@ -979,6 +999,7 @@ error_iter_alloc:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_edges_next(FimoGraphEdges *iter, bool *has_value) {
     if (iter == NULL || has_value == NULL || !iter->has_value) {
@@ -995,6 +1016,7 @@ FimoError fimo_graph_edges_next(FimoGraphEdges *iter, bool *has_value) {
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_edges_item(const FimoGraphEdges *iter, FimoU64 *edge, const void **edge_data) {
     if (iter == NULL || !iter->has_value) {
@@ -1012,6 +1034,7 @@ FimoError fimo_graph_edges_item(const FimoGraphEdges *iter, FimoU64 *edge, const
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 void fimo_graph_edges_free(FimoGraphEdges *iter) {
     if (iter == NULL) {
         perror("invalid edges iter");
@@ -1024,6 +1047,7 @@ void fimo_graph_edges_free(FimoGraphEdges *iter) {
     fimo_free_aligned_sized(iter, _Alignof(FimoGraphEdges), sizeof(FimoGraphEdges));
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_externals_new(const FimoGraph *graph, bool sink, FimoGraphExternals **iter, bool *has_value) {
     if (graph == NULL || iter == NULL || has_value == NULL) {
@@ -1077,6 +1101,7 @@ error_iter_alloc:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_externals_next(FimoGraphExternals *iter, bool *has_value) {
     if (iter == NULL || has_value == NULL || !iter->has_value) {
@@ -1103,6 +1128,7 @@ FimoError fimo_graph_externals_next(FimoGraphExternals *iter, bool *has_value) {
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_externals_item(const FimoGraphExternals *iter, FimoU64 *node, const void **node_data) {
     if (iter == NULL || !iter->has_value) {
@@ -1120,6 +1146,7 @@ FimoError fimo_graph_externals_item(const FimoGraphExternals *iter, FimoU64 *nod
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 void fimo_graph_externals_free(FimoGraphExternals *iter) {
     if (iter == NULL) {
         perror("invalid neighbors iterator");
@@ -1132,6 +1159,7 @@ void fimo_graph_externals_free(FimoGraphExternals *iter) {
     fimo_free_aligned_sized(iter, _Alignof(FimoGraphExternals), sizeof(FimoGraphExternals));
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_new(const FimoGraph *graph, FimoU64 node, bool inward, FimoGraphNeighbors **iter,
                                    bool *has_value) {
@@ -1184,6 +1212,7 @@ error_node_not_found:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_next(FimoGraphNeighbors *iter, bool *has_value) {
     if (iter == NULL || has_value == NULL || !iter->has_value) {
@@ -1202,6 +1231,7 @@ FimoError fimo_graph_neighbors_next(FimoGraphNeighbors *iter, bool *has_value) {
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_item(const FimoGraphNeighbors *iter, FimoU64 *node) {
     if (iter == NULL || !iter->has_value || node == NULL) {
@@ -1214,6 +1244,7 @@ FimoError fimo_graph_neighbors_item(const FimoGraphNeighbors *iter, FimoU64 *nod
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 void fimo_graph_neighbors_free(FimoGraphNeighbors *iter) {
     if (iter == NULL) {
         perror("invalid neighbors iterator");
@@ -1226,6 +1257,7 @@ void fimo_graph_neighbors_free(FimoGraphNeighbors *iter) {
     fimo_free_aligned_sized(iter, _Alignof(FimoGraphNeighbors), sizeof(FimoGraphNeighbors));
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_edges_new(const FimoGraph *graph, FimoU64 node, bool inward,
                                          FimoGraphNeighborsEdges **iter, bool *has_value) {
@@ -1279,6 +1311,7 @@ error_node_not_found:
     return error;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_edges_next(FimoGraphNeighborsEdges *iter, bool *has_value) {
     if (iter == NULL || has_value == NULL || !iter->has_value) {
@@ -1297,6 +1330,7 @@ FimoError fimo_graph_neighbors_edges_next(FimoGraphNeighborsEdges *iter, bool *h
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_neighbors_edges_item(const FimoGraphNeighborsEdges *iter, FimoU64 *edge) {
     if (iter == NULL || !iter->has_value || edge == NULL) {
@@ -1309,6 +1343,7 @@ FimoError fimo_graph_neighbors_edges_item(const FimoGraphNeighborsEdges *iter, F
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 void fimo_graph_neighbors_edges_free(FimoGraphNeighborsEdges *iter) {
     if (iter == NULL) {
         perror("invalid neighbors iterator");
@@ -1321,6 +1356,7 @@ void fimo_graph_neighbors_edges_free(FimoGraphNeighborsEdges *iter) {
     fimo_free_aligned_sized(iter, _Alignof(FimoGraphNeighborsEdges), sizeof(FimoGraphNeighborsEdges));
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_clear(FimoGraph *graph) {
     if (graph == NULL) {
@@ -1360,6 +1396,7 @@ static bool node_clear_edges_(const void *item, void *data) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_clear_edges(FimoGraph *graph) {
     if (graph == NULL) {
@@ -1399,6 +1436,7 @@ static bool invert_edge_(const void *item, void *data) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_reverse(FimoGraph *graph) {
     if (graph == NULL) {
@@ -1499,6 +1537,7 @@ static bool edge_clone_(const void *item, void *data) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_clone(const FimoGraph *graph, FimoGraph **new_graph,
                            FimoError (*node_mapper)(FimoU64, FimoU64, void *),
@@ -1644,6 +1683,7 @@ static bool clone_adjacency_(const void *item, void *data) {
     return true;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_clone_reachable_subgraph(const FimoGraph *graph, FimoGraph **sub_graph, FimoU64 start_node,
                                               FimoError (*node_mapper)(FimoU64, FimoU64, void *),
@@ -1774,6 +1814,7 @@ static FimoError path_exists_node_mapper_(FimoU64 old, FimoU64 new, void *data) 
     return FIMO_EOK;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_path_exists(const FimoGraph *graph, FimoU64 start_node, FimoU64 end_node, bool *path_exists) {
     if (graph == NULL || path_exists == NULL) {
@@ -1887,6 +1928,7 @@ static int is_cyclic_compare_(const void *a, const void *b, void *data) {
     return 0;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_is_cyclic(const FimoGraph *graph, bool *is_cyclic) {
     if (graph == NULL || is_cyclic == NULL) {
@@ -2021,6 +2063,7 @@ static int topological_sort_compare_(const void *a, const void *b, void *data) {
     return 0;
 }
 
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_graph_topological_sort(const FimoGraph *graph, const bool inward, FimoArrayList *nodes) {
     if (graph == NULL || nodes == NULL) {

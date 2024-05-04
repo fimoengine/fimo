@@ -44,6 +44,7 @@ typedef struct FimoMallocBuffer {
  * @error `FIMO_EOK`: The allocation was successful.
  * @error `FIMO_ENOMEM`: Out of memory.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 void *fimo_malloc(size_t size, FimoError *error);
 
@@ -63,6 +64,7 @@ void *fimo_malloc(size_t size, FimoError *error);
  * @error `FIMO_EOK`: The allocation was successful.
  * @error `FIMO_ENOMEM`: Out of memory.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 void *fimo_calloc(size_t size, FimoError *error);
 
@@ -85,6 +87,7 @@ void *fimo_calloc(size_t size, FimoError *error);
  * @error `FIMO_EINVAL`: Invalid alignment received.
  * @error `FIMO_ENOMEM`: Out of memory.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 void *fimo_aligned_alloc(size_t alignment, size_t size, FimoError *error);
 
@@ -104,6 +107,7 @@ void *fimo_aligned_alloc(size_t alignment, size_t size, FimoError *error);
  * @error `FIMO_EOK`: The allocation was successful.
  * @error `FIMO_ENOMEM`: Out of memory.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoMallocBuffer fimo_malloc_sized(size_t size, FimoError *error);
 
@@ -123,6 +127,7 @@ FimoMallocBuffer fimo_malloc_sized(size_t size, FimoError *error);
  * @error `FIMO_EOK`: The allocation was successful.
  * @error `FIMO_ENOMEM`: Out of memory.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoMallocBuffer fimo_calloc_sized(size_t size, FimoError *error);
 
@@ -147,6 +152,7 @@ FimoMallocBuffer fimo_calloc_sized(size_t size, FimoError *error);
  * @error `FIMO_EINVAL`: Invalid alignment received.
  * @error `FIMO_ENOMEM`: Out of memory.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoError *error);
 
@@ -160,6 +166,7 @@ FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoErr
  *
  * @param ptr: pointer to the memory
  */
+FIMO_EXPORT
 void fimo_free(void *ptr);
 
 /**
@@ -174,6 +181,7 @@ void fimo_free(void *ptr);
  * @param ptr: pointer to the memory
  * @param size: size of the allocation
  */
+FIMO_EXPORT
 void fimo_free_sized(void *ptr, size_t size);
 
 /**
@@ -189,6 +197,7 @@ void fimo_free_sized(void *ptr, size_t size);
  * @param alignment: alignment of the allocation
  * @param size: size of the allocation
  */
+FIMO_EXPORT
 void fimo_free_aligned_sized(void *ptr, size_t alignment, size_t size);
 
 #ifdef __cplusplus

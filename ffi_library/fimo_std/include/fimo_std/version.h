@@ -74,6 +74,7 @@ typedef struct FimoVersion {
  *
  * @return Status code
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_version_parse_str(const char *str, size_t str_len, FimoVersion *version);
 
@@ -88,6 +89,7 @@ FimoError fimo_version_parse_str(const char *str, size_t str_len, FimoVersion *v
  *
  * @return Required string length
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 size_t fimo_version_str_len(const FimoVersion *version);
 
@@ -102,6 +104,7 @@ size_t fimo_version_str_len(const FimoVersion *version);
  *
  * @return Required string length
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 size_t fimo_version_str_len_full(const FimoVersion *version);
 
@@ -120,6 +123,7 @@ size_t fimo_version_str_len_full(const FimoVersion *version);
  *
  * @return Status code
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_version_write_str(const FimoVersion *version, char *str, size_t str_len, size_t *written);
 
@@ -138,6 +142,7 @@ FimoError fimo_version_write_str(const FimoVersion *version, char *str, size_t s
  *
  * @return Status code
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 FimoError fimo_version_write_str_long(const FimoVersion *version, char *str, size_t str_len, size_t *written);
 
@@ -153,6 +158,7 @@ FimoError fimo_version_write_str_long(const FimoVersion *version, char *str, siz
  *
  * @return Version ordering
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 int fimo_version_cmp(const FimoVersion *lhs, const FimoVersion *rhs);
 
@@ -167,6 +173,7 @@ int fimo_version_cmp(const FimoVersion *lhs, const FimoVersion *rhs);
  *
  * @return Version ordering
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 int fimo_version_cmp_long(const FimoVersion *lhs, const FimoVersion *rhs);
 
@@ -189,6 +196,7 @@ int fimo_version_cmp_long(const FimoVersion *lhs, const FimoVersion *rhs);
  *
  * @return `true` if is compatible, `false` otherwise.
  */
+FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_version_compatible(const FimoVersion *got, const FimoVersion *required);
 

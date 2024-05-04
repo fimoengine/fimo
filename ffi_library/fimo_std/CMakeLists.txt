@@ -42,6 +42,7 @@ set(FIMO_STD_IMPL_HEADERS
         include/fimo_std/impl/macros/assert.h
         include/fimo_std/impl/macros/concat.h
         include/fimo_std/impl/macros/container_of.h
+        include/fimo_std/impl/macros/export.h
         include/fimo_std/impl/macros/has_builtin.h
         include/fimo_std/impl/macros/inline.h
         include/fimo_std/impl/macros/msvc_sal.h
@@ -87,46 +88,65 @@ set(FIMO_STD_SRC
         src/version.c
 )
 
+# Add interface target for PUBLIC configs
+add_library(fimo_std__public_config INTERFACE)
+target_include_directories(fimo_std__public_config INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>  # <prefix>/include
+)
+
+if (MSVC)
+    if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(fimo_std__public_config INTERFACE /experimental:c11atomics)
+    endif ()
+
+    target_compile_options(fimo_std__public_config INTERFACE /W4 /WX /utf-8 /Brepro)
+else ()
+    target_compile_options(fimo_std__public_config INTERFACE -Wno-documentation-unknown-command)
+    target_compile_options(fimo_std__public_config INTERFACE -Wno-declaration-after-statement)
+    target_compile_options(fimo_std__public_config INTERFACE -Wall -Wextra -pedantic -Werror)
+    target_compile_options(fimo_std__public_config INTERFACE -fexec-charset=UTF-8)
+    target_compile_options(fimo_std__public_config INTERFACE -finput-charset=UTF-8)
+endif ()
+
+# Add interface target for PRIVATE configs
+add_library(fimo_std__private_config INTERFACE)
+target_sources(fimo_std__private_config INTERFACE
+        FILE_SET fimo_std_private_headers
+        TYPE HEADERS
+        FILES ${FIMO_STD_PRIVATE_HEADERS}
+)
+target_sources(fimo_std__private_config INTERFACE ${FIMO_STD_SRC})
+target_compile_features(fimo_std__private_config INTERFACE c_std_17)
+if (WIN32)
+    target_link_libraries(fimo_std__private_config INTERFACE Pathcch)
+endif ()
+
 add_library(fimo_std STATIC)
+target_link_libraries(fimo_std PUBLIC fimo_std__public_config)
+target_link_libraries(fimo_std PRIVATE fimo_std__private_config)
 target_sources(fimo_std PUBLIC
         FILE_SET fimo_std_public_headers
         TYPE HEADERS
         FILES ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS}
 )
-target_sources(fimo_std PRIVATE
-        FILE_SET fimo_std_private_headers
-        TYPE HEADERS
-        FILES ${FIMO_STD_PRIVATE_HEADERS}
-)
-target_sources(fimo_std PRIVATE ${FIMO_STD_SRC})
 target_link_libraries(fimo_std PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
-target_compile_features(fimo_std PRIVATE c_std_17)
 set_property(TARGET fimo_std PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET fimo_std PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
-target_include_directories(fimo_std PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>  # <prefix>/include
-)
 set_property(TARGET fimo_std PROPERTY
         MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 
-if (WIN32)
-    target_link_libraries(fimo_std PRIVATE Pathcch)
-endif ()
-
-if (MSVC)
-    if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
-        target_compile_options(fimo_std PUBLIC /experimental:c11atomics)
-    endif ()
-
-    target_compile_options(fimo_std PUBLIC /W4 /WX /utf-8 /Brepro)
-else ()
-    target_compile_options(fimo_std PUBLIC -Wno-documentation-unknown-command)
-    target_compile_options(fimo_std PUBLIC -Wno-declaration-after-statement)
-    target_compile_options(fimo_std PUBLIC -Wall -Wextra -pedantic -Werror)
-    target_compile_options(fimo_std PUBLIC -fexec-charset=UTF-8)
-    target_compile_options(fimo_std PUBLIC -finput-charset=UTF-8)
-endif ()
+add_library(fimo_std_shared SHARED)
+target_link_libraries(fimo_std_shared PUBLIC fimo_std__public_config)
+target_link_libraries(fimo_std_shared PRIVATE fimo_std__private_config)
+target_compile_definitions(fimo_std_shared PUBLIC FIMO_STD_BUILD_SHARED)
+target_compile_definitions(fimo_std_shared PRIVATE FIMO_STD_EXPORT_SYMBOLS)
+target_sources(fimo_std_shared PUBLIC ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS})
+target_link_libraries(fimo_std_shared PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
+set_property(TARGET fimo_std_shared PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_property(TARGET fimo_std_shared PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+set_property(TARGET fimo_std_shared PROPERTY
+        MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
 
 if (FIMO_TEST_BINDINGS)
     add_subdirectory(tests)
@@ -138,5 +158,9 @@ if (FIMO_INSTALL_BINDINGS)
             ARCHIVE
             FILE_SET fimo_std_public_headers
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/fimo_std
+    )
+    install(TARGETS fimo_std_shared
+            ARCHIVE
+            RUNTIME
     )
 endif ()
