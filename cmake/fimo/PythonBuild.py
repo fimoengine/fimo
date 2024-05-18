@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import venv
+import os
 
 
 class EnvBuilder(venv.EnvBuilder):
@@ -19,7 +20,8 @@ class EnvBuilder(venv.EnvBuilder):
 
 
 def execute_subprocess(args) -> None:
-    with subprocess.Popen(args, stdout=subprocess.PIPE, text=True) as p:
+    with subprocess.Popen(args, stdout=subprocess.PIPE, text=True,
+                          env=dict(os.environ, MACOSX_DEPLOYMENT_TARGET='10.15')) as p:
         for line in p.stdout:
             print(f'\t{line}', end='')
 
