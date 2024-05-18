@@ -43,8 +43,14 @@ class build(_build):
         # temporary CMake files including "CMakeCache.txt" in top level dir.
         os.chdir(str(cwd))
 
-        fimo_std_build_dir = pathlib.Path(output_dir).joinpath('bin')
-        fimo_std_install_dir = pathlib.Path(self.build_lib).joinpath('fimo_std/ffi')
+        if platform.system() == 'Windows':
+            fimo_lib_dir = 'bin'
+        else:
+            fimo_lib_dir = 'lib'
+
+        fimo_std_build_dir = pathlib.Path(output_dir).joinpath(fimo_lib_dir)
+        fimo_std_install_dir = pathlib.Path(
+            self.build_lib).joinpath('fimo_std/ffi')
 
         if platform.system() == "Linux":
             fimo_lib_name = "libfimo_std_shared.so"
@@ -57,7 +63,8 @@ class build(_build):
 
         fimo_std_build_file = fimo_std_build_dir.joinpath(fimo_lib_name)
         fimo_std_install_file = fimo_std_install_dir.joinpath(fimo_lib_name)
-        self.copy_file(fimo_std_build_file.__str__(), fimo_std_install_file.__str__())
+        self.copy_file(fimo_std_build_file.__str__(),
+                       fimo_std_install_file.__str__())
 
 
 setup(
