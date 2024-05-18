@@ -15,7 +15,7 @@ impl FimoAllocator {
     pub(crate) const DEFAULT_ALIGNMENT: usize = 16;
 
     /// Default alignment of the allocator, when no value is specified.
-    #[cfg(any(unix, wasm))]
+    #[cfg(any(unix, target_family = "wasm"))]
     #[allow(unused)]
     pub(crate) const DEFAULT_ALIGNMENT: usize = core::mem::align_of::<libc::max_align_t>();
 }
