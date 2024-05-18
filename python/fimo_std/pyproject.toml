@@ -1,0 +1,12 @@
+[build-system]
+requires = ['setuptools']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'fimo_std'
+dynamic = ['version', 'description', 'license']
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
