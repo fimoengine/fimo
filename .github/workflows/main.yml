@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-14, windows-latest, ubuntu-latest ]
+        os: [ macos-14, windows-latest, ubuntu-24.04 ]
         build-type: [ Debug, Release ]
         rust:
           - nightly
@@ -24,8 +24,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install ninja-build
-          echo "CC=gcc-13" >> $GITHUB_ENV
-          echo "CXX=g++-13" >> $GITHUB_ENV
       - name: Install (macOS)
         if: runner.os == 'macOS'
         run: brew install ninja
