@@ -10,7 +10,7 @@ include(FetchContent)
 FetchContent_Declare(
         cpython
         GIT_REPOSITORY "https://github.com/python/cpython.git"
-        GIT_TAG "main"
+        GIT_TAG "3.13"
         GIT_SHALLOW TRUE
 )
 FetchContent_GetProperties(cpython)
@@ -67,8 +67,8 @@ set_target_properties(
 if (WIN32)
     set_target_properties(cpython PROPERTIES IMPORTED_IMPLIB ${cpython_IMP_LIBRARY_PATH})
 elseif (APPLE)
-    set_target_properties(cpython PROPERTIES 
-        IMPORTED_SONAME "@rpath/${cpython_LIBRARY_NAME}"
+    set_target_properties(cpython PROPERTIES
+            IMPORTED_SONAME "@rpath/${cpython_LIBRARY_NAME}"
     )
 endif ()
 
