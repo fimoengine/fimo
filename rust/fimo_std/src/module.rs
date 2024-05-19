@@ -253,6 +253,18 @@ macro_rules! export_module {
             #[cfg_attr(all(unix, not(target_vendor = "apple")), link_section = "fimo_module")]
             static EXPORT: Wrapper = Wrapper(&build_export());
         };
+
+        // For ELF targets the linker garbage collection tends to
+        // remove our custom section. On the C/C++ side, we can
+        // use the `retain` attribute to force the linker to keep
+        // the section. As a workaround, we can keep the section
+        // alive by adding a relocation.
+        #[cfg(all(unix, not(target_vendor = "apple")))]
+        core::arch::global_asm!(
+            ".pushsection .init_array,\"aw\",%init_array",
+            ".reloc ., BFD_RELOC_NONE, fimo_module",
+            ".popsection"
+        );
     };
 }
 
