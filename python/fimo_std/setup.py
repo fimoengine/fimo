@@ -74,5 +74,6 @@ setup(
     license='MIT OR Apache-2.0',
     where=['src'],
     install_requires=[],
-    cmdclass={'build': build}
+    cmdclass={'build': build},
+    include_package_data=True,
 )
