@@ -4622,6 +4622,7 @@ FimoError fimo_internal_module_find_by_name(FimoInternalModuleContext *ctx, cons
     ctx_lock_(ctx);
     const struct Module_ *mod = ctx_get_module_(ctx, name);
     if (mod == NULL) {
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL, "no module by the given name exists, module='%s'", name)
         return FIMO_EINVAL;
     }
@@ -4646,6 +4647,7 @@ FimoError fimo_internal_module_find_by_symbol(FimoInternalModuleContext *ctx, co
     ctx_lock_(ctx);
     const struct Symbol_ *symbol = ctx_get_symbol_compatible_(ctx, name, ns, version);
     if (symbol == NULL) {
+        ctx_unlock_(ctx);
         ERROR_(ctx, FIMO_EINVAL,
                "no compatible symbol was found, name='%s', ns='%s', version='%" PRIu32 ".%" PRIu32 ".%" PRIu32
                "+%" PRIu64 "'",
