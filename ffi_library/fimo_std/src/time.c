@@ -79,7 +79,7 @@ FimoU64 fimo_duration_as_millis(const FimoDuration *duration, FimoU32 *high) {
     }
     return low;
 #else
-    __extension__ unsigned __int128 nanos = ((unsigned __int128)duration->secs * FIMO_MILLIS_PER_SEC) + duration->nanos;
+    __extension__ unsigned __int128 nanos = ((unsigned __int128)duration->secs * FIMO_NANOS_PER_SEC) + duration->nanos;
     __extension__ unsigned __int128 millis = nanos / FIMO_NANOS_PER_MILLIS;
 
     if (high) {
@@ -106,7 +106,7 @@ FimoU64 fimo_duration_as_micros(const FimoDuration *duration, FimoU32 *high) {
     }
     return low;
 #else
-    __extension__ unsigned __int128 nanos = ((unsigned __int128)duration->secs * FIMO_MILLIS_PER_SEC) + duration->nanos;
+    __extension__ unsigned __int128 nanos = ((unsigned __int128)duration->secs * FIMO_NANOS_PER_SEC) + duration->nanos;
     __extension__ unsigned __int128 micros = nanos / FIMO_NANOS_PER_MICROS;
 
     if (high) {
