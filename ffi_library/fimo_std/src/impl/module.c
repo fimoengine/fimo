@@ -10,7 +10,8 @@ __declspec(allocate("fi_mod$z")) const FimoModuleExport *fimo_impl_modules_secti
 #define FIMO_IMPL_MODULES_SECTION_END fimo_impl_modules_section_end
 #elif __APPLE__
 // Allocate a dummy module to force the creation of the section symbols.
-const FimoModuleExport *fimo_impl_modules_dummy_module __attribute__((section(FIMO_IMPL_MODULE_SECTION))) = NULL;
+const FimoModuleExport *fimo_impl_modules_dummy_module
+        __attribute__((retain, used, section(FIMO_IMPL_MODULE_SECTION))) = NULL;
 
 extern const FimoModuleExport *fimo_impl_modules_section_start __asm("section$start$__DATA$__fimo_module");
 extern const FimoModuleExport *fimo_impl_modules_section_end __asm("section$end$__DATA$__fimo_module");
@@ -19,7 +20,8 @@ extern const FimoModuleExport *fimo_impl_modules_section_end __asm("section$end$
 #define FIMO_IMPL_MODULES_SECTION_END fimo_impl_modules_section_end
 #else
 // Allocate a dummy module to force the creation of the section symbols.
-const FimoModuleExport *fimo_impl_modules_dummy_module __attribute__((section(FIMO_IMPL_MODULE_SECTION))) = NULL;
+const FimoModuleExport *fimo_impl_modules_dummy_module
+        __attribute__((retain, used, section(FIMO_IMPL_MODULE_SECTION))) = NULL;
 
 extern const FimoModuleExport *__start_fimo_module;
 extern const FimoModuleExport *__stop_fimo_module;

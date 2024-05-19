@@ -361,7 +361,7 @@ extern "C" {
     __declspec(allocate(FIMO_IMPL_MODULE_SECTION)) const FimoModuleExport *FIMO_VAR(VAR) = &VAR;
 #else
 #define FIMO_MODULE_EXPORT_MODULE__(VAR)                                                                               \
-    const FimoModuleExport *FIMO_VAR(VAR) __attribute__((used, section(FIMO_IMPL_MODULE_SECTION))) = &VAR;
+    const FimoModuleExport *FIMO_VAR(VAR) __attribute__((retain, used, section(FIMO_IMPL_MODULE_SECTION))) = &VAR;
 #endif
 
 #define FIMO_MODULE_EXPORT_MODULE_(VAR, NAME, DESC, AUTHOR, LICENSE, ...)                                              \
