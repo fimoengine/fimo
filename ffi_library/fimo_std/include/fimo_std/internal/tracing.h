@@ -9,7 +9,11 @@
 #include <fimo_std/error.h>
 #include <fimo_std/tracing.h>
 
+#if __APPLE__
 #include <tinycthread/tinycthread.h>
+#else
+#include <threads.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -187,7 +191,11 @@ typedef struct FimoInternalTracingContext {
     FimoArrayList subscribers;
     FimoUSize buff_size;
     FimoTracingLevel max_level;
+#if _WIN32
     tss_t tss_data;
+#else
+    pthread_key_t tss_data;
+#endif
     atomic_size_t thread_count;
 } FimoInternalTracingContext;
 

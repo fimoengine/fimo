@@ -1,3 +1,20 @@
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <pathcch.h>
+
+#define MODULE_HANDLE_ HMODULE
+#else
+#if __APPLE__
+#define _DARWIN_C_SOURCE
+#else
+#define _GNU_SOURCE
+#endif
+#include <dlfcn.h>
+
+#define MODULE_HANDLE_ void *
+#endif
+
 #include <fimo_std/internal/module.h>
 
 #include <fimo_std/internal/context.h>
@@ -20,23 +37,6 @@
 #elif __linux__
 #include <malloc.h>
 #endif // defined(_WIN32) || defined(WIN32)
-
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#include <pathcch.h>
-
-#define MODULE_HANDLE_ HMODULE
-#else
-#if __APPLE__
-#define _DARWIN_C_SOURCE
-#else
-#define _GNU_SOURCE
-#endif
-#include <dlfcn.h>
-
-#define MODULE_HANDLE_ void *
-#endif
 
 static void *malloc_(size_t size) { return fimo_malloc(size, NULL); }
 
@@ -2313,7 +2313,7 @@ static FimoError ctx_init_(FimoInternalModuleContext *ctx) {
                                               (HashFn_)symbol_hash_, (CmpFn_)symbol_cmp_, (FreeFn_)symbol_free_, NULL);
     if (ctx->symbols == NULL) {
         error = FIMO_ENOMEM;
-        ERROR_SIMPLE_(ctx, FIMO_EUNKNOWN, "could not initialize symbols map")
+        ERROR_SIMPLE_(ctx, error, "could not initialize symbols map")
         goto deinit_mtx;
     }
 
@@ -2321,7 +2321,7 @@ static FimoError ctx_init_(FimoInternalModuleContext *ctx) {
                                               (HashFn_)module_hash_, (CmpFn_)module_cmp_, (FreeFn_)module_free_, NULL);
     if (ctx->modules == NULL) {
         error = FIMO_ENOMEM;
-        ERROR_SIMPLE_(ctx, FIMO_EUNKNOWN, "could not initialize modules map")
+        ERROR_SIMPLE_(ctx, error, "could not initialize modules map")
         goto deinit_symbols;
     }
 
@@ -2330,13 +2330,13 @@ static FimoError ctx_init_(FimoInternalModuleContext *ctx) {
                                                  (FreeFn_)namespace_free_, NULL);
     if (ctx->namespaces == NULL) {
         error = FIMO_ENOMEM;
-        ERROR_SIMPLE_(ctx, FIMO_EUNKNOWN, "could not initialize namespaces map")
+        ERROR_SIMPLE_(ctx, error, "could not initialize namespaces map")
         goto deinit_modules;
     }
 
     error = fimo_graph_new(sizeof(const FimoModule *), 0, NULL, NULL, &ctx->dependency_graph);
     if (FIMO_IS_ERROR(error)) {
-        ERROR_SIMPLE_(ctx, FIMO_EUNKNOWN, "could not initialize dependency graph")
+        ERROR_SIMPLE_(ctx, error, "could not initialize dependency graph")
         goto deinit_namespaces;
     }
 
@@ -3382,7 +3382,7 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
         error = export->module_constructor(*element, set, &module_data);
         ctx_lock_(ctx);
         loading_set_lock_(set);
-        module_info_unlock_(info_inner);
+        module_info_lock_(info);
         (*element)->module_data = module_data;
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not construct the module data")
@@ -4546,11 +4546,11 @@ FimoError fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx
 
     loading_set_lock_(set);
     error = extract_exports_(ctx, set, handle, data.exports);
+    loading_set_unlock_(set);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not extract the module exports")
         goto extract_exports;
     }
-    loading_set_unlock_(set);
 
     fimo_array_list_free(&data.exports, sizeof(const FimoModuleExport *), _Alignof(const FimoModuleExport *), NULL);
     module_handle_release_(handle);
@@ -4576,6 +4576,7 @@ FimoError fimo_internal_module_set_dismiss(FimoInternalModuleContext *ctx, FimoM
     TRACE_SIMPLE_(ctx, "dismissing set")
     loading_set_lock_(set);
     if (set->is_loading) {
+        loading_set_unlock_(set);
         ERROR_SIMPLE_(ctx, FIMO_EPERM, "set is being loaded")
         return FIMO_EPERM;
     }
