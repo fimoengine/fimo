@@ -38,6 +38,7 @@ function(fimo_add_python_bindings NAME)
     add_custom_target(fimo_python_bindings_${NAME}
             COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/cmake/fimo/PythonBuild.py build
             --src-dir ${CMAKE_CURRENT_SOURCE_DIR}
+            --target-dir ${CMAKE_BINARY_DIR}/python_target
             --out-dir ${CMAKE_BINARY_DIR}/python_target/bindings
     )
 
