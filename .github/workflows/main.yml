@@ -18,6 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '>=3.11'
+      - run: python -m ensurepip --upgrade --default-pip
 
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
