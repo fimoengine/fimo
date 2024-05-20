@@ -6,7 +6,12 @@
 #include <fimo_std/module.h>
 
 #include <hashmap/hashmap.h>
+
+#if __APPLE__
 #include <tinycthread/tinycthread.h>
+#else
+#include <threads.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -130,7 +130,7 @@ target_sources(fimo_std PUBLIC
         TYPE HEADERS
         FILES ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS}
 )
-target_link_libraries(fimo_std PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(fimo_std PRIVATE btree hashmap ${CMAKE_THREAD_LIBS_INIT})
 set_property(TARGET fimo_std PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET fimo_std PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 set_property(TARGET fimo_std PROPERTY
@@ -142,11 +142,16 @@ target_link_libraries(fimo_std_shared PRIVATE fimo_std__private_config)
 target_compile_definitions(fimo_std_shared PUBLIC FIMO_STD_BUILD_SHARED)
 target_compile_definitions(fimo_std_shared PRIVATE FIMO_STD_EXPORT_SYMBOLS)
 target_sources(fimo_std_shared PUBLIC ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS})
-target_link_libraries(fimo_std_shared PRIVATE btree hashmap tinycthread ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(fimo_std_shared PRIVATE btree hashmap ${CMAKE_THREAD_LIBS_INIT})
 set_property(TARGET fimo_std_shared PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET fimo_std_shared PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 set_property(TARGET fimo_std_shared PROPERTY
         MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>")
+
+if (APPLE)
+    target_link_libraries(fimo_std PRIVATE tinycthread)
+    target_link_libraries(fimo_std_shared PRIVATE tinycthread)
+endif ()
 
 if (FIMO_TEST_BINDINGS)
     add_subdirectory(tests)
