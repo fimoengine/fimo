@@ -79,12 +79,13 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         length = self.string_length() + 1
         buffer = memory.DefaultAllocator.malloc(length * c.sizeof(c.c_char))
         buffer_str = c.cast(buffer, c.c_char_p)
-        err = _ffi.fimo_version_write_str(c.byref(self._version), buffer_str, c.c_size_t(length), None)
-        err = error.ErrorCode(err.value)
+        err_ffi = _ffi.fimo_version_write_str(c.byref(self._version), buffer_str, c.c_size_t(length), None)
+        err = error.ErrorCode(err_ffi.value)
 
         if err.is_error():
             memory.DefaultAllocator.free(buffer)
             err.raise_if_error()
+        assert buffer_str.value is not None
         string = buffer_str.value.decode()
         memory.DefaultAllocator.free(buffer)
         return string
@@ -94,12 +95,13 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         length = self.string_length_long() + 1
         buffer = memory.DefaultAllocator.malloc(length * c.sizeof(c.c_char))
         buffer_str = c.cast(buffer, c.c_char_p)
-        err = _ffi.fimo_version_write_str_long(c.byref(self._version), buffer_str, c.c_size_t(length), None)
-        err = error.ErrorCode(err.value)
+        err_ffi = _ffi.fimo_version_write_str_long(c.byref(self._version), buffer_str, c.c_size_t(length), None)
+        err = error.ErrorCode(err_ffi.value)
 
         if err.is_error():
             memory.DefaultAllocator.free(buffer)
             err.raise_if_error()
+        assert buffer_str.value is not None
         string = buffer_str.value.decode()
         memory.DefaultAllocator.free(buffer)
         return string
@@ -198,4 +200,4 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         minor = ffi.minor.value
         patch = ffi.patch.value
         build = ffi.build.value
-        return Version(major, minor, patch, build)
+        return cls(major, minor, patch, build)

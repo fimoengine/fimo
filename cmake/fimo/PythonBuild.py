@@ -4,6 +4,7 @@ import argparse
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import json
 import time
@@ -28,7 +29,8 @@ def execute_subprocess(args) -> None:
                           env=dict(os.environ, MACOSX_DEPLOYMENT_TARGET='10.15')) as p:
         for line in p.stdout:
             print(f'\t{line}', end='')
-
+    sys.stdout.flush()
+    
     if p.returncode != 0:
         raise subprocess.CalledProcessError(p.returncode, p.args)
 
@@ -162,6 +164,7 @@ def test(package, dist_dir, dependencies, **kwargs):
         #
         requirements = [
             'pytest',
+            'mypy',
             *dependencies
         ]
         print(f" *** Installing {requirements}...")
@@ -184,6 +187,17 @@ def test(package, dist_dir, dependencies, **kwargs):
             package
         ]
         execute_subprocess(pip_test_command)
+        #
+        print(f" *** Running type checker for {package}...")
+        pip_mypy_command = [
+            venv_context.env_exe,
+            '-m',
+            'mypy',
+            '-p',
+            package,
+            '--ignore-missing-imports'
+        ]
+        execute_subprocess(pip_mypy_command)
 
 
 global_parser = argparse.ArgumentParser()
