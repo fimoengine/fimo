@@ -558,8 +558,7 @@ impl<T> ArrayList<T> {
     ///
     /// # Safety
     ///
-    /// - `new_len` must be less than or equal to
-    /// [`capacity()`](ArrayList::capacity)
+    /// - `new_len` must be less than or equal to [`capacity()`](ArrayList::capacity)
     /// - The elements at `old_len..new_len` must be initialized.
     pub unsafe fn set_len(&mut self, new_len: usize) {
         self.inner.size = new_len;
