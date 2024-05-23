@@ -137,7 +137,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
 
         return (high.value << 64) | low.value
 
-    def __add__(self, other: Self) -> Self:
+    def __add__(self, other: Self) -> "Duration":
         if not isinstance(other, Duration):
             raise TypeError("`other` must be a `Duration`")
 
@@ -146,7 +146,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
-    def saturating_add(self, other: Self) -> Self:
+    def saturating_add(self, other: Self) -> "Duration":
         """Adds two durations.
 
         The result saturates to `Duration.max()`, if an overflow occurs.
@@ -160,7 +160,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
         ffi = _ffi.fimo_duration_saturating_add(c.byref(self._ffi), c.byref(other._ffi))
         return Duration.transfer_from_ffi(ffi)
 
-    def __sub__(self, other: Self) -> Self:
+    def __sub__(self, other: Self) -> "Duration":
         if not isinstance(other, Duration):
             raise TypeError("`other` must be a `Duration`")
 
@@ -169,7 +169,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
-    def saturating_sub(self, other: Self) -> Self:
+    def saturating_sub(self, other: Self) -> "Duration":
         """Subtracts two durations.
 
         The result saturates to `Duration.zero()`, if an overflow occurs or the resulting duration is negative.
@@ -195,7 +195,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
 
         return self.as_nanos() <= other.as_nanos()
 
-    def __eq__(self, other: Self) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Duration):
             raise TypeError("`other` must be a `Duration`")
 
@@ -273,7 +273,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
-    def duration_since(self, earlier: Self) -> Duration:
+    def duration_since(self, earlier: "Time") -> Duration:
         """Returns the difference between two time points.
 
         :raises Error: `earlier` is after `self`.
@@ -288,7 +288,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
-    def __add__(self, other: Duration) -> Self:
+    def __add__(self, other: Duration) -> "Time":
         if not isinstance(other, Duration):
             raise TypeError("`other` must be a `Duration`")
 
@@ -298,7 +298,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Time.transfer_from_ffi(ffi)
 
-    def saturating_add(self, other: Duration) -> Self:
+    def saturating_add(self, other: Duration) -> "Time":
         """Adds two durations.
 
         The result saturates to `Time.max()`, if an overflow occurs.
@@ -313,7 +313,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         ffi = _ffi.fimo_time_saturating_add(c.byref(self._ffi), c.byref(other_ffi))
         return Time.transfer_from_ffi(ffi)
 
-    def __sub__(self, other: Duration) -> Self:
+    def __sub__(self, other: Duration) -> "Time":
         if not isinstance(other, Duration):
             raise TypeError("`other` must be a `Duration`")
 
@@ -323,7 +323,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Time.transfer_from_ffi(ffi)
 
-    def saturating_sub(self, other: Duration) -> Self:
+    def saturating_sub(self, other: Duration) -> "Time":
         """Subtracts two durations.
 
         The result saturates to `Time.unix_epoch()`, if an overflow occurs or the resulting time is negative.
@@ -350,7 +350,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
 
         return self.duration_since(Time.unix_epoch()) <= other.duration_since(Time.unix_epoch())
 
-    def __eq__(self, other: Self) -> bool:
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Time):
             raise TypeError("`other` must be a `Time`")
 

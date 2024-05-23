@@ -1,14 +1,20 @@
+from __future__ import annotations
+
+import ctypes
 import inspect
 import ctypes as c
 from enum import IntEnum
-from abc import ABC, abstractmethod
-from typing import Self, Optional, Generic, TypeVar
+from abc import abstractmethod
+from typing import Self, Optional, Generic, TypeVar, TYPE_CHECKING
 
 from .time import Time
 from .enum import ABCEnum
 from . import error
 from . import context
 from . import ffi as _ffi
+
+if TYPE_CHECKING:
+    from .context import Context as _Context, ContextView as _ContextView
 
 
 class Level(_ffi.FFITransferable[_ffi.FimoTracingLevel], IntEnum, metaclass=ABCEnum):
@@ -51,20 +57,19 @@ class Metadata(_ffi.FFITransferable[_ffi.FimoTracingMetadata]):
         if line_number is not None and not (line_number >= 0 and line_number.bit_length() < 32):
             raise ValueError("`line_number` must fit in a 32-bit integer")
 
-        name = name.encode()
-        target = target.encode()
-        level = level
-        if file_name is not None:
-            file_name = file_name.encode()
+        name_ffi: bytes = name.encode()
+        target_ffi: bytes = target.encode()
+        level_ffi: _ffi.FimoTracingLevel = level.transfer_to_ffi()
+        file_name_ffi: Optional[bytes] = file_name.encode() if file_name is not None else None
         if line_number is None:
             line_number = -1
 
         self._metadata = _ffi.FimoTracingMetadata(_ffi.FimoStructType.FIMO_STRUCT_TYPE_TRACING_METADATA,
                                                   c.POINTER(_ffi.FimoBaseStructIn)(),
-                                                  name,
-                                                  target,
-                                                  level,
-                                                  file_name,
+                                                  name_ffi,
+                                                  target_ffi,
+                                                  level_ffi,
+                                                  file_name_ffi,
                                                   line_number)
 
     def transfer_to_ffi(self) -> _ffi.FimoTracingMetadata:
@@ -184,7 +189,7 @@ class Event(_ffi.FFITransferable[_ffi.FimoTracingEvent]):
 class CallStack:
     """RAII wrapper of a tracing call stack."""
 
-    def __init__(self, ctx: "context.ContextView") -> None:
+    def __init__(self, ctx: _ContextView) -> None:
         """Creates a new empty call stack.
 
         If successful, the new call stack is marked as suspended. The new call stack is not set to
@@ -196,8 +201,8 @@ class CallStack:
         stack = c.POINTER(_ffi.FimoTracingCallStack)()
         err = _ffi.fimo_tracing_call_stack_create(ctx.ffi, c.byref(stack))
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
-        self._ctx = ctx.acquire()
-        self._stack = stack
+        self._ctx: Optional[_Context] = ctx.acquire()
+        self._stack: Optional[_ffi.Ref[_ffi.FimoTracingCallStack]] = stack
 
     def __del__(self) -> None:
         if self._ctx is not None:
@@ -235,7 +240,7 @@ class CallStack:
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
     @staticmethod
-    def suspend_current(ctx: "context.ContextView", block: bool) -> None:
+    def suspend_current(ctx: _ContextView, block: bool) -> None:
         """Marks the current call stack as being suspended.
 
         While suspended, the call stack can not be utilized for tracing messages. The call stack
@@ -251,7 +256,7 @@ class CallStack:
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
     @staticmethod
-    def resume_current(ctx: "context.ContextView") -> None:
+    def resume_current(ctx: _ContextView) -> None:
         """Marks the current call stack as being resumed.
 
         Once resumed, the context can be used to trace messages. To be successful, the current
@@ -267,7 +272,7 @@ class CallStack:
 class ThreadAccess:
     """RAII access provider to the tracing subsystem for a thread."""
 
-    def __init__(self, ctx: "context.ContextView") -> None:
+    def __init__(self, ctx: _ContextView) -> None:
         """Registers the calling thread with the tracing subsystem.
 
         The tracing of the subsystem is opt-in on a per-thread basis, where unregistered threads
@@ -277,7 +282,7 @@ class ThreadAccess:
         if not isinstance(ctx, context.ContextView):
             raise TypeError("`ctx` must be an instance of `ContextView`")
 
-        self._ctx = ctx.acquire()
+        self._ctx: Optional[_Context] = ctx.acquire()
         err = _ffi.fimo_tracing_register_thread(self._ctx.ffi)
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
@@ -286,10 +291,10 @@ class ThreadAccess:
             self.unregister()
 
     @property
-    def context(self) -> "context.ContextView":
+    def context(self) -> _ContextView:
         """Returns the `ContextView`."""
         if self._ctx is None:
-            error.ErrorCode.EINVAL.raise_if_error()
+            raise ValueError("the object has already been consumed")
 
         return self._ctx
 
@@ -299,7 +304,7 @@ class ThreadAccess:
         Once unregistered, the calling thread looses access to the tracing subsystem until it is
         registered again. The thread can not be unregistered until the call stack is empty.
         """
-        err = _ffi.fimo_tracing_unregister_thread(self._ctx.ffi)
+        err = _ffi.fimo_tracing_unregister_thread(self.context.ffi)
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         self._ctx = None
 
@@ -318,8 +323,8 @@ class _FormatArgs:
         self.kwargs = kwargs
 
 
-def _format_msg(buffer: c.POINTER(c.c_char), buffer_len: _ffi.FimoUSize, args: int,
-                written: c.POINTER(_ffi.FimoUSize)) -> error.ErrorCode:
+def _format_msg(buffer: c._Pointer[c.c_char], buffer_len: _ffi.FimoUSize, args: int,
+                written: c._Pointer[_ffi.FimoUSize]) -> error.ErrorCode:
     try:
         args = c.cast(args, c.POINTER(c.py_object)).contents.value
         if not isinstance(args, _FormatArgs):
@@ -339,7 +344,7 @@ def _format_msg(buffer: c.POINTER(c.c_char), buffer_len: _ffi.FimoUSize, args: i
 class Span:
     """RAII wrapper of a span in the tracing subsystem."""
 
-    def __init__(self, ctx: "context.ContextView", descriptor: SpanDescriptor, msg: str, *args, **kwargs) -> None:
+    def __init__(self, ctx: _ContextView, descriptor: SpanDescriptor, msg: str, *args, **kwargs) -> None:
         if not isinstance(ctx, context.ContextView):
             raise TypeError("`ctx` must be an instance of `ContextView`")
         if not isinstance(descriptor, SpanDescriptor):
@@ -348,7 +353,7 @@ class Span:
             raise TypeError("`msg` must be a `str`")
 
         ctx_ffi = ctx.ffi
-        desc_ffi = descriptor.transfer_to_ffi()
+        desc_ffi = c.pointer(descriptor.transfer_to_ffi())
         span_ffi = c.POINTER(_ffi.FimoTracingSpan)()
         format_ffi = _ffi.FimoTracingFormat(_format_msg)
         data_ffi = c.cast(c.pointer(c.py_object(_FormatArgs(msg, *args, **kwargs))), c.c_void_p)
@@ -356,22 +361,24 @@ class Span:
         err = _ffi.fimo_tracing_span_create_custom(ctx_ffi, desc_ffi, c.byref(span_ffi), format_ffi, data_ffi)
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
-        self._ctx = ctx.acquire()
-        self._span = span_ffi
+        self._ctx: Optional[_Context] = ctx.acquire()
+        self._span: Optional[c._Pointer[_ffi.FimoTracingSpan]] = span_ffi
 
     def __del__(self) -> None:
         if self._ctx is not None:
             self._destroy()
 
     def _destroy(self) -> None:
-        err = _ffi.fimo_tracing_span_destroy(self._ctx.ffi, self._span)
+        err = _ffi.fimo_tracing_span_destroy(self.context.ffi, self._span)
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         self._span = None
         self._ctx = None
 
     @property
-    def context(self) -> "context.ContextView":
+    def context(self) -> _ContextView:
         """Returns the `ContextView`."""
+        if self._ctx is None:
+            raise ValueError('the `Span` has been consumed')
         return self._ctx
 
     def __enter__(self) -> Self:
@@ -382,7 +389,7 @@ class Span:
             self._destroy()
 
     @classmethod
-    def _new_span(cls, ctx: "context.ContextView", level: Level, msg: str, *args, **kwargs) -> Self:
+    def _new_span(cls, ctx: _ContextView, level: Level, msg: str, *args, **kwargs) -> Self:
         curr_frame = inspect.currentframe()
         caller_frame = inspect.getouterframes(curr_frame, 3)[2]
 
@@ -396,33 +403,33 @@ class Span:
         return cls(ctx, descriptor, msg, *args, **kwargs)
 
     @classmethod
-    def error_span(cls, ctx: "context.ContextView", msg: str, *args, **kwargs) -> Self:
+    def error_span(cls, ctx: _ContextView, msg: str, *args, **kwargs) -> Self:
         """Creates a new error span."""
         return cls._new_span(ctx, Level.Error, msg, *args, **kwargs)
 
     @classmethod
-    def warn_span(cls, ctx: "context.ContextView", msg: str, *args, **kwargs) -> Self:
+    def warn_span(cls, ctx: _ContextView, msg: str, *args, **kwargs) -> Self:
         """Creates a new warn span."""
         return cls._new_span(ctx, Level.Warn, msg, *args, **kwargs)
 
     @classmethod
-    def info_span(cls, ctx: "context.ContextView", msg: str, *args, **kwargs) -> Self:
+    def info_span(cls, ctx: _ContextView, msg: str, *args, **kwargs) -> Self:
         """Creates a new info span."""
         return cls._new_span(ctx, Level.Info, msg, *args, **kwargs)
 
     @classmethod
-    def debug_span(cls, ctx: "context.ContextView", msg: str, *args, **kwargs) -> Self:
+    def debug_span(cls, ctx: _ContextView, msg: str, *args, **kwargs) -> Self:
         """Creates a new debug span."""
         return cls._new_span(ctx, Level.Debug, msg, *args, **kwargs)
 
     @classmethod
-    def trace_span(cls, ctx: "context.ContextView", msg: str, *args, **kwargs) -> Self:
+    def trace_span(cls, ctx: _ContextView, msg: str, *args, **kwargs) -> Self:
         """Creates a new trace span."""
         return cls._new_span(ctx, Level.Trace, msg, *args, **kwargs)
 
 
 class _SubscriberWrapper:
-    def __init__(self, vtable: _ffi.FimoTracingSubscriberVTable, obj: "Subscriber") -> None:
+    def __init__(self, vtable: _ffi.FimoTracingSubscriberVTable, obj: Subscriber) -> None:
         self.vtable = vtable
         self.obj = obj
 
@@ -436,8 +443,8 @@ def _subscriber_destroy(ptr: int) -> None:
         pass
 
 
-def _subscriber_call_stack_create(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime),
-                                  call_stack_ffi: c.POINTER(c.c_void_p)) -> error.ErrorCode:
+def _subscriber_call_stack_create(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime],
+                                  call_stack_ffi: c._Pointer[c.c_void_p]) -> error.ErrorCode:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
@@ -460,7 +467,7 @@ def _subscriber_call_stack_drop(ptr: int, call_stack_ffi: int) -> None:
         pass
 
 
-def _subscriber_call_stack_destroy(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stack_ffi: int) -> None:
+def _subscriber_call_stack_destroy(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime], call_stack_ffi: int) -> None:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
@@ -472,7 +479,7 @@ def _subscriber_call_stack_destroy(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime),
         pass
 
 
-def _subscriber_call_stack_unblock(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stack_ffi: int) -> None:
+def _subscriber_call_stack_unblock(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime], call_stack_ffi: int) -> None:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
@@ -483,7 +490,7 @@ def _subscriber_call_stack_unblock(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime),
         pass
 
 
-def _subscriber_call_stack_suspend(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stack_ffi: int,
+def _subscriber_call_stack_suspend(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime], call_stack_ffi: int,
                                    block: bool) -> None:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
@@ -495,7 +502,7 @@ def _subscriber_call_stack_suspend(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime),
         pass
 
 
-def _subscriber_call_stack_resume(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stack_ffi: int) -> None:
+def _subscriber_call_stack_resume(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime], call_stack_ffi: int) -> None:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
@@ -506,9 +513,9 @@ def _subscriber_call_stack_resume(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), 
         pass
 
 
-def _subscriber_span_push(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime),
-                          span_descriptor_ffi: c.POINTER(_ffi.FimoTracingSpanDesc),
-                          message_ffi: c.POINTER(c.c_char),
+def _subscriber_span_push(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime],
+                          span_descriptor_ffi: c._Pointer[_ffi.FimoTracingSpanDesc],
+                          message_ffi: c._Pointer[c.c_char],
                           message_len: _ffi.FimoUSize,
                           call_stack_ffi: int) -> error.ErrorCode:
     try:
@@ -516,6 +523,7 @@ def _subscriber_span_push(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime),
         time = Time.transfer_from_ffi(time_ffi[0])
         span_descriptor = SpanDescriptor.transfer_from_ffi(span_descriptor_ffi[0])
         message = message_ffi[:message_len.value]
+        assert isinstance(message, bytes)
         call_stack = c.cast(call_stack_ffi, c.py_object).value
 
         obj.obj.create_span(time, span_descriptor, message, call_stack)
@@ -534,7 +542,7 @@ def _subscriber_span_drop(ptr: int, call_stack_ffi: int) -> None:
         pass
 
 
-def _subscriber_span_pop(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stack_ffi: int) -> None:
+def _subscriber_span_pop(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime], call_stack_ffi: int) -> None:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
@@ -545,20 +553,21 @@ def _subscriber_span_pop(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stac
         pass
 
 
-def _subscriber_event_emit(ptr: int, time_ffi: c.POINTER(_ffi.FimoTime), call_stack_ffi: int,
-                           event_ffi: c.POINTER(_ffi.FimoTracingEvent),
-                           message_ffi: c.POINTER(c.c_char),
+def _subscriber_event_emit(ptr: int, time_ffi: c._Pointer[_ffi.FimoTime], call_stack_ffi: int,
+                           event_ffi: c._Pointer[_ffi.FimoTracingEvent],
+                           message_ffi: c._Pointer[c.c_char],
                            message_len: _ffi.FimoUSize) -> None:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
         event = Event.transfer_from_ffi(event_ffi[0])
         message = message_ffi[:message_len.value]
+        assert isinstance(message, bytes)
         call_stack = c.cast(call_stack_ffi, c.py_object).value
 
         obj.obj.emit_event(time, call_stack, event, message)
     except Exception as e:
-        print(e)
+        pass
 
 
 def _subscriber_flush(ptr: int) -> None:
@@ -608,11 +617,12 @@ class Subscriber(Generic[SubscriberCallStack], _ffi.FFITransferable[_ffi.FimoTra
                 self.obj = obj
 
         wrapper = Wrapper(vtable, self)
+        wrapper_ffi = ctypes.py_object(wrapper)
 
         # Create the struct
         subscriber = _ffi.FimoTracingSubscriber(_ffi.FimoStructType.FIMO_STRUCT_TYPE_TRACING_SUBSCRIBER,
                                                 c.POINTER(_ffi.FimoBaseStructIn)(),
-                                                c.c_void_p(id(wrapper)),
+                                                c.c_void_p.from_buffer(wrapper_ffi),
                                                 c.pointer(vtable))
 
         # Since the subscriber will be passed to a C-interface it must take
@@ -622,7 +632,12 @@ class Subscriber(Generic[SubscriberCallStack], _ffi.FFITransferable[_ffi.FimoTra
 
     @classmethod
     def transfer_from_ffi(cls, ffi: _ffi.FimoTracingSubscriber) -> Self:
-        return FfiSubscriber.transfer_from_ffi(ffi)
+        ptr = c.c_void_p(ffi.ptr)
+        obj = c.cast(ptr, c.py_object).value
+        if not isinstance(obj, cls):
+            raise TypeError('`ffi` does not point to an instance of the `Subscriber`')
+
+        return obj
 
     @abstractmethod
     def create_call_stack(self, time: Time) -> SubscriberCallStack:
@@ -690,11 +705,11 @@ class FfiSubscriberCallStack(_ffi.FFITransferable[c.c_void_p]):
         if not ffi:
             raise ValueError("`ffi` may not be null.")
 
-        self._ffi = ffi
+        self._ffi: Optional[c.c_void_p] = ffi
 
     def transfer_to_ffi(self) -> c.c_void_p:
         if self._ffi is None:
-            raise ValueError("call stack has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberCallStack` has been consumed")
 
         ffi, self._ffi = self._ffi, None
         return ffi
@@ -705,18 +720,18 @@ class FfiSubscriberCallStack(_ffi.FFITransferable[c.c_void_p]):
 
 
 class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
-                        _ffi.FFISharable[_ffi.FimoTracingSubscriber, Self]):
+                        _ffi.FFISharable[_ffi.FimoTracingSubscriber, "FfiSubscriberView"]):
     """A non-owning view to a ffi subscriber."""
 
     def __init__(self, ffi: _ffi.FimoTracingSubscriber) -> None:
         if not isinstance(ffi, _ffi.FimoTracingSubscriber):
             raise TypeError("`ffi` must be an instance of a `FimoTracingSubscriber`.")
 
-        self._ffi = ffi
+        self._ffi: Optional[_ffi.FimoTracingSubscriber] = ffi
 
     def transfer_to_ffi(self) -> _ffi.FimoTracingSubscriber:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         return self._ffi
 
@@ -727,7 +742,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
     @property
     def ffi(self) -> _ffi.FimoTracingSubscriber:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         return self._ffi
 
@@ -735,9 +750,12 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
     def borrow_from_ffi(cls, ffi: _ffi.FimoTracingSubscriber) -> Self:
         return cls(ffi)
 
+    def _consume(self) -> None:
+        self._ffi = None
+
     def create_call_stack(self, time: Time) -> FfiSubscriberCallStack:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         ffi = c.c_void_p()
@@ -750,7 +768,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def drop_call_stack(self, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         call_stack_ffi = call_stack.transfer_to_ffi()
 
@@ -760,7 +778,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def destroy_call_stack(self, time: Time, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         call_stack_ffi = call_stack.transfer_to_ffi()
@@ -771,7 +789,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def unblock_call_stack(self, time: Time, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         call_stack_ffi = call_stack.transfer_to_ffi()
@@ -782,7 +800,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def suspend_call_stack(self, time: Time, call_stack: FfiSubscriberCallStack, block: bool) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         call_stack_ffi = call_stack.transfer_to_ffi()
@@ -794,7 +812,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def resume_call_stack(self, time: Time, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         call_stack_ffi = call_stack.transfer_to_ffi()
@@ -806,7 +824,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
     def create_span(self, time: Time, span_descriptor: SpanDescriptor, message: bytes,
                     call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         span_descriptor_ffi = span_descriptor.transfer_to_ffi()
@@ -821,7 +839,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def drop_span(self, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         call_stack_ffi = call_stack.transfer_to_ffi()
 
@@ -831,7 +849,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def destroy_span(self, time: Time, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         call_stack_ffi = call_stack.transfer_to_ffi()
@@ -842,7 +860,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def emit_event(self, time: Time, call_stack: FfiSubscriberCallStack, event: Event, message: bytes) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         time_ffi = time.transfer_to_ffi()
         call_stack_ffi = call_stack.transfer_to_ffi()
@@ -856,7 +874,7 @@ class FfiSubscriberView(Subscriber[FfiSubscriberCallStack],
 
     def flush(self) -> None:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
         ptr = self._ffi.ptr
         ffi_fn = self._ffi.vtable.contents.flush
@@ -876,13 +894,14 @@ class FfiSubscriber(FfiSubscriberView):
         ptr = self._ffi.ptr
         destroy_fn = self._ffi.vtable.contents.destroy
         destroy_fn(ptr)
-        self._ffi = None
+        self._consume()
 
     def transfer_to_ffi(self) -> _ffi.FimoTracingSubscriber:
         if self._ffi is None:
-            raise ValueError("subscriber has been transferred to ffi")
+            raise ValueError("the `FfiSubscriberView` has been consumed")
 
-        ffi, self._ffi = self._ffi, None
+        ffi = self._ffi
+        self._consume()
         return ffi
 
     @classmethod
@@ -897,14 +916,14 @@ DefaultSubscriber = FfiSubscriberView.transfer_from_ffi(_ffi.FIMO_TRACING_DEFAUL
 class TracingCtx:
     """Entry point to the tracing subsystem."""
 
-    def __init__(self, ctx: "context.ContextView") -> None:
+    def __init__(self, ctx: _ContextView) -> None:
         if not isinstance(ctx, context.ContextView):
             raise TypeError("`ctx` must be an instance of `ContextView`")
 
         self._ctx = ctx
 
     @property
-    def context(self) -> "context.ContextView":
+    def context(self) -> _ContextView:
         """Returns the `ContextView`."""
         return self._ctx
 
@@ -921,7 +940,7 @@ class TracingCtx:
 
         format_args = c.cast(c.pointer(c.py_object(_FormatArgs(msg, *args, **kwargs))), c.c_void_p)
         format_func = _ffi.FimoTracingFormat(_format_msg)
-        err = _ffi.fimo_tracing_event_emit_custom(self._ctx.ffi, event.transfer_to_ffi(), format_func,
+        err = _ffi.fimo_tracing_event_emit_custom(self._ctx.ffi, c.byref(event.transfer_to_ffi()), format_func,
                                                   format_args)
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
@@ -985,7 +1004,7 @@ class CreationConfig(context.ContextOption):
     def __init__(self) -> None:
         self._format_buffer_len = 0
         self._max_level = Level.Off
-        self._subscribers = []
+        self._subscribers: list[Subscriber] = []
 
     def with_format_buffer_length(self, format_buffer_length: Optional[int]) -> Self:
         """Sets the format-buffer length of the tracing subsystem."""
@@ -1010,7 +1029,7 @@ class CreationConfig(context.ContextOption):
         self._subscribers.append(subscriber)
         return self
 
-    def to_context_option(self) -> c.POINTER(_ffi.FimoBaseStructIn):
+    def to_context_option(self) -> c._Pointer[_ffi.FimoBaseStructIn]:
         format_buffer_size_ffi = _ffi.FimoUSize(self._format_buffer_len)
         max_level_ffi = self._max_level.transfer_to_ffi()
         subscribers_ffi = (_ffi.FimoTracingSubscriber * len(self._subscribers))()

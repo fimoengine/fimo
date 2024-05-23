@@ -1,3 +1,4 @@
+from __future__ import annotations
 import ctypes as c
 from abc import ABC, abstractmethod
 from typing import Self, Optional
@@ -10,32 +11,38 @@ class ContextOption(ABC):
     """A type that can be passed to the context at creation time."""
 
     @abstractmethod
-    def to_context_option(self) -> c.POINTER(_ffi.FimoBaseStructIn):
+    def to_context_option(self) -> _ffi.Ref[_ffi.FimoBaseStructIn]:
         """Constructs a pointer to the option."""
         pass
 
 
-class ContextView(_ffi.FFISharable[_ffi.FimoContext, Self]):
+class ContextView(_ffi.FFISharable[_ffi.FimoContext, "ContextView"]):
     """View of the context of the fimo library."""
     from . import tracing as _tracing
     _create_key = object()
 
     def __init__(self, create_key: object, context: _ffi.FimoContext):
         if create_key is not ContextView._create_key:
-            error.ErrorCode.EINVAL.raise_if_error()
-        self._context = context
+            raise ValueError('`create_key` must be an instance of `_create_key`')
+        if not isinstance(context, _ffi.FimoContext):
+            raise TypeError('`context` must be an instance of `FimoContext`')
+
+        self._context: _ffi.FimoContext | None = context
 
     @property
     def ffi(self) -> _ffi.FimoContext:
+        if self._context is None:
+            raise ValueError("context has been consumed")
+
         return self._context
 
     @classmethod
-    def borrow_from_ffi(cls, ffi: _ffi.FimoContext) -> Self:
+    def borrow_from_ffi(cls, ffi: _ffi.FimoContext) -> ContextView:
         return ContextView(ContextView._create_key, ffi)
 
     @property
     def _as_parameter_(self) -> _ffi.FimoContext:
-        return self._context
+        return self.ffi
 
     def check_version(self) -> None:
         """Checks the compatibility of the context version.
@@ -45,10 +52,13 @@ class ContextView(_ffi.FFISharable[_ffi.FimoContext, Self]):
         another shared library. Failure of doing so, may cause undefined
         behavior, if the context is later utilized.
         """
+        if self._context is None:
+            raise ValueError("context has been consumed")
+
         err = _ffi.fimo_context_check_version(self._context)
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
-    def acquire(self) -> "Context":
+    def acquire(self) -> Context:
         """Acquires a reference to the context.
 
         Increases the reference count of the context. May abort the program,
@@ -57,12 +67,24 @@ class ContextView(_ffi.FFISharable[_ffi.FimoContext, Self]):
 
         :return: New `Context`.
         """
+        if self._context is None:
+            raise ValueError("context has been consumed")
+
         _ffi.fimo_context_acquire(self._context)
         return Context.transfer_from_ffi(self._context)
 
     def tracing(self) -> _tracing.TracingCtx:
         """Returns a reference to the tracing subsystem."""
+        if self._context is None:
+            raise ValueError("context has been consumed")
+
         return self._tracing.TracingCtx(self)
+
+    def _consume(self) -> None:
+        if self._context is None:
+            raise ValueError("context has been consumed")
+
+        self._context = None
 
 
 class Context(ContextView, _ffi.FFITransferable[_ffi.FimoContext]):
@@ -75,11 +97,11 @@ class Context(ContextView, _ffi.FFITransferable[_ffi.FimoContext]):
     def __del__(self):
         if self._context is not None:
             _ffi.fimo_context_release(self._context)
-            self._context = None
+            self._consume()
 
     def transfer_to_ffi(self) -> _ffi.FimoContext:
         ctx = self.ffi
-        self._context = None
+        self._consume()
         return ctx
 
     @classmethod

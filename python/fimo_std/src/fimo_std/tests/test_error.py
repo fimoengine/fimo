@@ -29,11 +29,11 @@ def test_raise_if_error():
 
 def test_name():
     for c in ErrorCode:
-        assert isinstance(c.name(), str)
-        print(c.name())
+        assert isinstance(c.name, str)
+        print(c.name)
 
 
 def test_description():
     for c in ErrorCode:
-        assert isinstance(c.description(), str)
-        print(c.description())
+        assert isinstance(c.description, str)
+        print(c.description)

@@ -288,21 +288,21 @@ class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum
     def from_exception(cls, exception: Exception) -> Self:
         """Constructs the `ErrorCode` from a python exception."""
         if isinstance(exception, Error):
-            return exception.error_code()
+            return cls(exception.error_code())
         elif isinstance(exception, MemoryError):
-            return ErrorCode.ENOMEM
+            return cls(ErrorCode.ENOMEM)
         elif isinstance(exception, MemoryError):
-            return ErrorCode.ENOMEM
+            return cls(ErrorCode.ENOMEM)
         elif isinstance(exception, NotImplementedError):
-            return ErrorCode.ENOSYS
+            return cls(ErrorCode.ENOSYS)
         elif isinstance(exception, OSError):
             return cls.from_errno(exception.errno)
         elif isinstance(exception, TypeError):
-            return ErrorCode.EINVAL
+            return cls(ErrorCode.EINVAL)
         elif isinstance(exception, ValueError):
-            return ErrorCode.EINVAL
+            return cls(ErrorCode.EINVAL)
         else:
-            return ErrorCode.EUNKNOWN
+            return cls(ErrorCode.EUNKNOWN)
 
     def is_valid(self) -> bool:
         """Checks if an error number is valid."""
@@ -317,6 +317,7 @@ class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum
         if self.is_error():
             raise Error(self)
 
+    @property
     def name(self) -> str:
         """Returns the name of the error code"""
         error = _ffi.FimoError(0)
@@ -325,6 +326,7 @@ class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum
         error_code.raise_if_error()
         return name.decode()
 
+    @property
     def description(self) -> str:
         """Returns the description of the error code"""
         error = _ffi.FimoError(0)
@@ -342,7 +344,7 @@ class Error(Exception):
         if code is None or not isinstance(code, ErrorCode):
             code = ErrorCode.EUNKNOWN
 
-        super().__init__(code.description())
+        super().__init__(code.description)
         self._error_code = code
 
     def error_code(self) -> ErrorCode:

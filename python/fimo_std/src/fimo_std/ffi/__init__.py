@@ -1,8 +1,15 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar, Self
+from typing import Generic, TypeVar, Self, TYPE_CHECKING
 import ctypes as c
 import platform
 import os
+
+if TYPE_CHECKING:
+    T = TypeVar('T', bound=c._CData)
+    Ref = c._Pointer[T] | c.Array[T] | c._CArgObject | None
+    PtrRef = c._Pointer[c._Pointer[T]] | c.Array[c._Pointer[T]] | c._CArgObject | None
+    FuncPointer = c._FuncPointer
 
 FfiType = TypeVar('FfiType')
 FfiTypeView = TypeVar('FfiTypeView')
@@ -64,25 +71,22 @@ class FimoError(c.c_int):
     pass
 
 
-FimoErrorPtr = c.POINTER(FimoError)
-"""Pointer to a FimoError"""
-
 _fimo_strerrorname = _lib.fimo_strerrorname
-_fimo_strerrorname.argtypes = [FimoError, FimoErrorPtr]
+_fimo_strerrorname.argtypes = [FimoError, c.POINTER(FimoError)]
 _fimo_strerrorname.restype = c.c_char_p
 
 
-def fimo_strerrorname(errnum: FimoError, err: FimoErrorPtr) -> bytes:
+def fimo_strerrorname(errnum: FimoError, err: Ref[FimoError]) -> bytes:
     """Get the name of the error"""
     return _fimo_strerrorname(errnum, err)
 
 
 _fimo_strerrordesc = _lib.fimo_strerrordesc
-_fimo_strerrordesc.argtypes = [FimoError, FimoErrorPtr]
+_fimo_strerrordesc.argtypes = [FimoError, c.POINTER(FimoError)]
 _fimo_strerrordesc.restype = c.c_char_p
 
 
-def fimo_strerrordesc(errnum: FimoError, err: FimoErrorPtr) -> bytes:
+def fimo_strerrordesc(errnum: FimoError, err: Ref[FimoError]) -> bytes:
     """Get the description of the error"""
     return _fimo_strerrordesc(errnum, err)
 
@@ -110,11 +114,11 @@ class FimoMallocBuffer(c.Structure):
 
 
 _fimo_malloc = _lib.fimo_malloc
-_fimo_malloc.argtypes = [c.c_size_t, FimoErrorPtr]
+_fimo_malloc.argtypes = [c.c_size_t, c.POINTER(FimoError)]
 _fimo_malloc.restype = c.c_void_p
 
 
-def fimo_malloc(size: c.c_size_t, error: FimoErrorPtr) -> c.c_void_p:
+def fimo_malloc(size: c.c_size_t, error: Ref[FimoError]) -> c.c_void_p:
     """Allocate memory.
 
     This function allocates at least `size` bytes and returns a pointer to the allocated
@@ -131,11 +135,11 @@ def fimo_malloc(size: c.c_size_t, error: FimoErrorPtr) -> c.c_void_p:
 
 
 _fimo_calloc = _lib.fimo_calloc
-_fimo_calloc.argtypes = [c.c_size_t, FimoErrorPtr]
+_fimo_calloc.argtypes = [c.c_size_t, c.POINTER(FimoError)]
 _fimo_calloc.restype = c.c_void_p
 
 
-def fimo_calloc(size: c.c_size_t, error: FimoErrorPtr) -> c.c_void_p:
+def fimo_calloc(size: c.c_size_t, error: Ref[FimoError]) -> c.c_void_p:
     """Zero-allocate memory.
 
     This function allocates at least `size` bytes and returns a pointer to the allocated
@@ -152,11 +156,11 @@ def fimo_calloc(size: c.c_size_t, error: FimoErrorPtr) -> c.c_void_p:
 
 
 _fimo_aligned_alloc = _lib.fimo_aligned_alloc
-_fimo_aligned_alloc.argtypes = [c.c_size_t, c.c_size_t, FimoErrorPtr]
+_fimo_aligned_alloc.argtypes = [c.c_size_t, c.c_size_t, c.POINTER(FimoError)]
 _fimo_aligned_alloc.restype = c.c_void_p
 
 
-def fimo_aligned_alloc(alignment: c.c_size_t, size: c.c_size_t, error: FimoErrorPtr) -> c.c_void_p:
+def fimo_aligned_alloc(alignment: c.c_size_t, size: c.c_size_t, error: Ref[FimoError]) -> c.c_void_p:
     """Allocate memory.
 
     This function allocates at least `size` bytes and returns a pointer to the allocated
@@ -175,11 +179,11 @@ def fimo_aligned_alloc(alignment: c.c_size_t, size: c.c_size_t, error: FimoError
 
 
 _fimo_malloc_sized = _lib.fimo_malloc_sized
-_fimo_malloc_sized.argtypes = [c.c_size_t, FimoErrorPtr]
+_fimo_malloc_sized.argtypes = [c.c_size_t, c.POINTER(FimoError)]
 _fimo_malloc_sized.restype = FimoMallocBuffer
 
 
-def fimo_malloc_sized(size: c.c_size_t, error: FimoErrorPtr) -> FimoMallocBuffer:
+def fimo_malloc_sized(size: c.c_size_t, error: Ref[FimoError]) -> FimoMallocBuffer:
     """Allocate memory.
 
     This function allocates at least `size` bytes and returns a pointer to the allocated
@@ -196,11 +200,11 @@ def fimo_malloc_sized(size: c.c_size_t, error: FimoErrorPtr) -> FimoMallocBuffer
 
 
 _fimo_calloc_sized = _lib.fimo_calloc_sized
-_fimo_calloc_sized.argtypes = [c.c_size_t, FimoErrorPtr]
+_fimo_calloc_sized.argtypes = [c.c_size_t, c.POINTER(FimoError)]
 _fimo_calloc_sized.restype = FimoMallocBuffer
 
 
-def fimo_calloc_sized(size: c.c_size_t, error: FimoErrorPtr) -> FimoMallocBuffer:
+def fimo_calloc_sized(size: c.c_size_t, error: Ref[FimoError]) -> FimoMallocBuffer:
     """Zero-allocate memory.
 
     This function allocates at least `size` bytes and returns a pointer to the allocated
@@ -217,11 +221,11 @@ def fimo_calloc_sized(size: c.c_size_t, error: FimoErrorPtr) -> FimoMallocBuffer
 
 
 _fimo_aligned_alloc_sized = _lib.fimo_aligned_alloc_sized
-_fimo_aligned_alloc_sized.argtypes = [c.c_size_t, c.c_size_t, FimoErrorPtr]
+_fimo_aligned_alloc_sized.argtypes = [c.c_size_t, c.c_size_t, c.POINTER(FimoError)]
 _fimo_aligned_alloc_sized.restype = FimoMallocBuffer
 
 
-def fimo_aligned_alloc_sized(alignment: c.c_size_t, size: c.c_size_t, error: FimoErrorPtr) -> FimoMallocBuffer:
+def fimo_aligned_alloc_sized(alignment: c.c_size_t, size: c.c_size_t, error: Ref[FimoError]) -> FimoMallocBuffer:
     """Allocate memory.
 
     This function allocates at least `size` bytes and returns a pointer to the allocated
@@ -375,15 +379,12 @@ class FimoVersion(c.Structure):
                 ("build", FimoU64)]
 
 
-FimoVersionPtr = c.POINTER(FimoVersion)
-"""Pointer to a `FimoVersion`"""
-
 _fimo_version_parse_str = _lib.fimo_version_parse_str
-_fimo_version_parse_str.argtypes = [c.c_char_p, c.c_size_t, FimoVersionPtr]
+_fimo_version_parse_str.argtypes = [c.c_char_p, c.c_size_t, c.POINTER(FimoVersion)]
 _fimo_version_parse_str.restype = FimoError
 
 
-def fimo_version_parse_str(str: c.c_char_p, str_len: c.c_size_t, version: FimoVersionPtr) -> FimoError:
+def fimo_version_parse_str(str: c.c_char_p, str_len: c.c_size_t, version: Ref[FimoVersion]) -> FimoError:
     """Parses a string into a `FimoVersion`.
 
     The string must be of the form "major.minor.patch" or "major.minor.patch+build".
@@ -398,11 +399,11 @@ def fimo_version_parse_str(str: c.c_char_p, str_len: c.c_size_t, version: FimoVe
 
 
 _fimo_version_str_len = _lib.fimo_version_str_len
-_fimo_version_str_len.argtypes = [FimoVersionPtr]
+_fimo_version_str_len.argtypes = [c.POINTER(FimoVersion)]
 _fimo_version_str_len.restype = FimoUSize
 
 
-def fimo_version_str_len(version: FimoVersionPtr) -> FimoUSize:
+def fimo_version_str_len(version: Ref[FimoVersion]) -> FimoUSize:
     """Calculates the string length required to represent the version as a string.
 
     If `version` is `NULL`, this function returns `0`. The returned length is
@@ -417,11 +418,11 @@ def fimo_version_str_len(version: FimoVersionPtr) -> FimoUSize:
 
 
 _fimo_version_str_len_full = _lib.fimo_version_str_len_full
-_fimo_version_str_len_full.argtypes = [FimoVersionPtr]
+_fimo_version_str_len_full.argtypes = [c.POINTER(FimoVersion)]
 _fimo_version_str_len_full.restype = FimoUSize
 
 
-def fimo_version_str_len_full(version: FimoVersionPtr) -> FimoUSize:
+def fimo_version_str_len_full(version: Ref[FimoVersion]) -> FimoUSize:
     """Calculates the string length required to represent the version as a string.
 
     If `version` is `NULL`, this function returns `0`. The returned length is
@@ -436,12 +437,12 @@ def fimo_version_str_len_full(version: FimoVersionPtr) -> FimoUSize:
 
 
 _fimo_version_write_str = _lib.fimo_version_write_str
-_fimo_version_write_str.argtypes = [FimoVersionPtr, c.c_char_p, c.c_size_t, c.POINTER(c.c_size_t)]
+_fimo_version_write_str.argtypes = [c.POINTER(FimoVersion), c.c_char_p, c.c_size_t, c.POINTER(c.c_size_t)]
 _fimo_version_write_str.restype = FimoError
 
 
-def fimo_version_write_str(version: FimoVersionPtr, str: c.c_char_p, str_len: c.c_size_t,
-                           written: c.POINTER(c.c_size_t)) -> FimoError:
+def fimo_version_write_str(version: Ref[FimoVersion], str: c.c_char_p, str_len: c.c_size_t,
+                           written: Ref[c.c_size_t]) -> FimoError:
     """Represents the version as a string.
 
     Writes a string of the form "major.minor.patch" into `str`. If `str` is
@@ -460,12 +461,12 @@ def fimo_version_write_str(version: FimoVersionPtr, str: c.c_char_p, str_len: c.
 
 
 _fimo_version_write_str_long = _lib.fimo_version_write_str_long
-_fimo_version_write_str_long.argtypes = [FimoVersionPtr, c.c_char_p, c.c_size_t, c.POINTER(c.c_size_t)]
+_fimo_version_write_str_long.argtypes = [c.POINTER(FimoVersion), c.c_char_p, c.c_size_t, c.POINTER(c.c_size_t)]
 _fimo_version_write_str_long.restype = FimoError
 
 
-def fimo_version_write_str_long(version: FimoVersionPtr, str: c.c_char_p, str_len: c.c_size_t,
-                                written: c.POINTER(c.c_size_t)) -> FimoError:
+def fimo_version_write_str_long(version: Ref[FimoVersion], str: c.c_char_p, str_len: c.c_size_t,
+                                written: Ref[c.c_size_t]) -> FimoError:
     """Represents the version as a string.
 
     Writes a string of the form "major.minor.patch+build" into `str`. If `str`
@@ -484,11 +485,11 @@ def fimo_version_write_str_long(version: FimoVersionPtr, str: c.c_char_p, str_le
 
 
 _fimo_version_cmp = _lib.fimo_version_cmp
-_fimo_version_cmp.argtypes = [FimoVersionPtr, FimoVersionPtr]
+_fimo_version_cmp.argtypes = [c.POINTER(FimoVersion), c.POINTER(FimoVersion)]
 _fimo_version_cmp.restype = c.c_int
 
 
-def fimo_version_cmp(lhs: FimoVersionPtr, rhs: FimoVersionPtr) -> int:
+def fimo_version_cmp(lhs: Ref[FimoVersion], rhs: Ref[FimoVersion]) -> int:
     """Compares two versions.
 
     Returns an ordering of the two versions, without taking into consideration
@@ -504,11 +505,11 @@ def fimo_version_cmp(lhs: FimoVersionPtr, rhs: FimoVersionPtr) -> int:
 
 
 _fimo_version_cmp_long = _lib.fimo_version_cmp_long
-_fimo_version_cmp_long.argtypes = [FimoVersionPtr, FimoVersionPtr]
+_fimo_version_cmp_long.argtypes = [c.POINTER(FimoVersion), c.POINTER(FimoVersion)]
 _fimo_version_cmp_long.restype = c.c_int
 
 
-def fimo_version_cmp_long(lhs: FimoVersionPtr, rhs: FimoVersionPtr) -> int:
+def fimo_version_cmp_long(lhs: Ref[FimoVersion], rhs: Ref[FimoVersion]) -> int:
     """Compares two versions.
 
     Returns an ordering of the two versions, taking into consideration the build
@@ -523,11 +524,11 @@ def fimo_version_cmp_long(lhs: FimoVersionPtr, rhs: FimoVersionPtr) -> int:
 
 
 _fimo_version_compatible = _lib.fimo_version_compatible
-_fimo_version_compatible.argtypes = [FimoVersionPtr, FimoVersionPtr]
+_fimo_version_compatible.argtypes = [c.POINTER(FimoVersion), c.POINTER(FimoVersion)]
 _fimo_version_compatible.restype = c.c_bool
 
 
-def fimo_version_compatible(got: FimoVersionPtr, required: FimoVersionPtr) -> bool:
+def fimo_version_compatible(got: Ref[FimoVersion], required: Ref[FimoVersion]) -> bool:
     """Checks for the compatibility of two versions.
 
     If `got` is compatible with `required` it indicates that an object which is
@@ -585,7 +586,7 @@ FIMO_TIME_MAX = FimoTime((1 << 64) - 1, 999999999)
 """Largest possible time point."""
 
 _fimo_duration_zero = _lib.fimo_duration_zero
-_fimo_duration_zero.argtypes = None
+_fimo_duration_zero.argtypes = []
 _fimo_duration_zero.restype = FimoDuration
 
 
@@ -598,7 +599,7 @@ def fimo_duration_zero() -> FimoDuration:
 
 
 _fimo_duration_max = _lib.fimo_duration_max
-_fimo_duration_max.argtypes = None
+_fimo_duration_max.argtypes = []
 _fimo_duration_max.restype = FimoDuration
 
 
@@ -654,7 +655,7 @@ _fimo_duration_is_zero.argtypes = [c.POINTER(FimoDuration)]
 _fimo_duration_is_zero.restype = c.c_bool
 
 
-def fimo_duration_is_zero(duration: c.POINTER(FimoDuration)) -> bool:
+def fimo_duration_is_zero(duration: Ref[FimoDuration]) -> bool:
     """Checks if a duration is zero.
 
     :return: `true` if the duration is zero.
@@ -667,7 +668,7 @@ _fimo_duration_as_secs.argtypes = [c.POINTER(FimoDuration)]
 _fimo_duration_as_secs.restype = FimoU64
 
 
-def fimo_duration_as_secs(duration: c.POINTER(FimoDuration)) -> FimoU64:
+def fimo_duration_as_secs(duration: Ref[FimoDuration]) -> FimoU64:
     """Returns the whole seconds in a duration.
 
     :return: Whole seconds.
@@ -680,7 +681,7 @@ _fimo_duration_subsec_millis.argtypes = [c.POINTER(FimoDuration)]
 _fimo_duration_subsec_millis.restype = FimoU32
 
 
-def fimo_duration_subsec_millis(duration: c.POINTER(FimoDuration)) -> FimoU32:
+def fimo_duration_subsec_millis(duration: Ref[FimoDuration]) -> FimoU32:
     """Returns the fractional part in milliseconds.
 
     :return: Fractional part in whole milliseconds
@@ -693,7 +694,7 @@ _fimo_duration_subsec_micros.argtypes = [c.POINTER(FimoDuration)]
 _fimo_duration_subsec_micros.restype = FimoU32
 
 
-def fimo_duration_subsec_micros(duration: c.POINTER(FimoDuration)) -> FimoU32:
+def fimo_duration_subsec_micros(duration: Ref[FimoDuration]) -> FimoU32:
     """Returns the fractional part in microseconds.
 
     :return: Fractional part in whole microseconds.
@@ -706,7 +707,7 @@ _fimo_duration_subsec_nanos.argtypes = [c.POINTER(FimoDuration)]
 _fimo_duration_subsec_nanos.restype = FimoU32
 
 
-def fimo_duration_subsec_nanos(duration: c.POINTER(FimoDuration)) -> FimoU32:
+def fimo_duration_subsec_nanos(duration: Ref[FimoDuration]) -> FimoU32:
     """Returns the fractional part in nanoseconds.
 
     :return: Fractional part in whole nanoseconds.
@@ -719,7 +720,7 @@ _fimo_duration_as_millis.argtypes = [c.POINTER(FimoDuration), c.POINTER(FimoU32)
 _fimo_duration_as_millis.restype = FimoU64
 
 
-def fimo_duration_as_millis(duration: c.POINTER(FimoDuration), high: c.POINTER(FimoU32)) -> FimoU32:
+def fimo_duration_as_millis(duration: Ref[FimoDuration], high: Ref[FimoU32]) -> FimoU32:
     """Returns the whole milliseconds in a duration.
 
     If `high` is not null, it is set to store the overflow portion of the milliseconds.
@@ -734,7 +735,7 @@ _fimo_duration_as_micros.argtypes = [c.POINTER(FimoDuration), c.POINTER(FimoU32)
 _fimo_duration_as_micros.restype = FimoU64
 
 
-def fimo_duration_as_micros(duration: c.POINTER(FimoDuration), high: c.POINTER(FimoU32)) -> FimoU32:
+def fimo_duration_as_micros(duration: Ref[FimoDuration], high: Ref[FimoU32]) -> FimoU32:
     """Returns the whole microseconds in a duration.
 
     If `high` is not null, it is set to store the overflow portion of the microseconds.
@@ -749,7 +750,7 @@ _fimo_duration_as_nanos.argtypes = [c.POINTER(FimoDuration), c.POINTER(FimoU32)]
 _fimo_duration_as_nanos.restype = FimoU64
 
 
-def fimo_duration_as_nanos(duration: c.POINTER(FimoDuration), high: c.POINTER(FimoU32)) -> FimoU32:
+def fimo_duration_as_nanos(duration: Ref[FimoDuration], high: Ref[FimoU32]) -> FimoU32:
     """Returns the whole nanoseconds in a duration.
 
     If `high` is not null, it is set to store the overflow portion of the nanoseconds.
@@ -764,8 +765,7 @@ _fimo_duration_add.argtypes = [c.POINTER(FimoDuration), c.POINTER(FimoDuration),
 _fimo_duration_add.restype = FimoError
 
 
-def fimo_duration_add(lhs: c.POINTER(FimoDuration), rhs: c.POINTER(FimoDuration),
-                      out: c.POINTER(FimoDuration)) -> FimoError:
+def fimo_duration_add(lhs: Ref[FimoDuration], rhs: Ref[FimoDuration], out: Ref[FimoDuration]) -> FimoError:
     """Adds two durations.
 
     :return: Status code.
@@ -778,7 +778,7 @@ _fimo_duration_saturating_add.argtypes = [c.POINTER(FimoDuration), c.POINTER(Fim
 _fimo_duration_saturating_add.restype = FimoDuration
 
 
-def fimo_duration_saturating_add(lhs: c.POINTER(FimoDuration), rhs: c.POINTER(FimoDuration)) -> FimoDuration:
+def fimo_duration_saturating_add(lhs: Ref[FimoDuration], rhs: Ref[FimoDuration]) -> FimoDuration:
     """Adds two durations.
 
     The result saturates to `FIMO_DURATION_MAX`, if an overflow occurs.
@@ -793,8 +793,7 @@ _fimo_duration_sub.argtypes = [c.POINTER(FimoDuration), c.POINTER(FimoDuration),
 _fimo_duration_sub.restype = FimoError
 
 
-def fimo_duration_sub(lhs: c.POINTER(FimoDuration), rhs: c.POINTER(FimoDuration),
-                      out: c.POINTER(FimoDuration)) -> FimoError:
+def fimo_duration_sub(lhs: Ref[FimoDuration], rhs: Ref[FimoDuration], out: Ref[FimoDuration]) -> FimoError:
     """Subtracts two durations.
 
     :return: Status code.
@@ -807,7 +806,7 @@ _fimo_duration_saturating_sub.argtypes = [c.POINTER(FimoDuration), c.POINTER(Fim
 _fimo_duration_saturating_sub.restype = FimoDuration
 
 
-def fimo_duration_saturating_sub(lhs: c.POINTER(FimoDuration), rhs: c.POINTER(FimoDuration)) -> FimoDuration:
+def fimo_duration_saturating_sub(lhs: Ref[FimoDuration], rhs: Ref[FimoDuration]) -> FimoDuration:
     """Subtracts two durations.
 
     The result saturates to `FIMO_DURATION_ZERO`, if an overflow occurs or the resulting duration is negative.
@@ -818,7 +817,7 @@ def fimo_duration_saturating_sub(lhs: c.POINTER(FimoDuration), rhs: c.POINTER(Fi
 
 
 _fimo_time_now = _lib.fimo_time_now
-_fimo_time_now.argtypes = None
+_fimo_time_now.argtypes = []
 _fimo_time_now.restype = FimoTime
 
 
@@ -835,7 +834,7 @@ _fimo_time_elapsed.argtypes = [c.POINTER(FimoTime), c.POINTER(FimoDuration)]
 _fimo_time_elapsed.restype = FimoError
 
 
-def fimo_time_elapsed(time_point: c.POINTER(FimoTime), elapsed: c.POINTER(FimoDuration)) -> FimoError:
+def fimo_time_elapsed(time_point: Ref[FimoTime], elapsed: Ref[FimoDuration]) -> FimoError:
     """Returns the duration elapsed since a prior time point.
 
     :return: Status code.
@@ -848,8 +847,8 @@ _fimo_time_duration_since.argtypes = [c.POINTER(FimoTime), c.POINTER(FimoTime), 
 _fimo_time_duration_since.restype = FimoError
 
 
-def fimo_time_duration_since(time_point: c.POINTER(FimoTime), earlier_time_point: c.POINTER(FimoTime),
-                             duration: c.POINTER(FimoDuration)) -> FimoError:
+def fimo_time_duration_since(time_point: Ref[FimoTime], earlier_time_point: Ref[FimoTime],
+                             duration: Ref[FimoDuration]) -> FimoError:
     """Returns the difference between two time points.
 
     :return: Status code.
@@ -862,8 +861,7 @@ _fimo_time_add.argtypes = [c.POINTER(FimoTime), c.POINTER(FimoDuration), c.POINT
 _fimo_time_add.restype = FimoError
 
 
-def fimo_time_add(time_point: c.POINTER(FimoTime), duration: c.POINTER(FimoDuration),
-                  out: c.POINTER(FimoTime)) -> FimoError:
+def fimo_time_add(time_point: Ref[FimoTime], duration: Ref[FimoDuration], out: Ref[FimoTime]) -> FimoError:
     """Adds a duration to a time point.
 
     :return: Status code.
@@ -876,7 +874,7 @@ _fimo_time_saturating_add.argtypes = [c.POINTER(FimoTime), c.POINTER(FimoDuratio
 _fimo_time_saturating_add.restype = FimoTime
 
 
-def fimo_time_saturating_add(time_point: c.POINTER(FimoTime), duration: c.POINTER(FimoDuration)) -> FimoTime:
+def fimo_time_saturating_add(time_point: Ref[FimoTime], duration: Ref[FimoDuration]) -> FimoTime:
     """Adds a duration to a time point.
 
     The result saturates to `FIMO_TIME_MAX`, if an overflow occurs.
@@ -891,8 +889,7 @@ _fimo_time_sub.argtypes = [c.POINTER(FimoTime), c.POINTER(FimoDuration), c.POINT
 _fimo_time_sub.restype = FimoError
 
 
-def fimo_time_sub(time_point: c.POINTER(FimoTime), duration: c.POINTER(FimoDuration),
-                  out: c.POINTER(FimoTime)) -> FimoError:
+def fimo_time_sub(time_point: Ref[FimoTime], duration: Ref[FimoDuration], out: Ref[FimoTime]) -> FimoError:
     """Subtracts a duration from a time point.
 
     :return: Status code.
@@ -905,7 +902,7 @@ _fimo_time_saturating_sub.argtypes = [c.POINTER(FimoTime), c.POINTER(FimoDuratio
 _fimo_time_saturating_sub.restype = FimoTime
 
 
-def fimo_time_saturating_sub(time_point: c.POINTER(FimoTime), duration: c.POINTER(FimoDuration)) -> FimoTime:
+def fimo_time_saturating_sub(time_point: Ref[FimoTime], duration: Ref[FimoDuration]) -> FimoTime:
     """Subtracts a duration from a time point.
 
     The result saturates to `FIMO_UNIX_EPOCH`, if an overflow occurs or the resulting duration is negative.
@@ -921,10 +918,6 @@ class FimoContext(c.Structure):
     """Context of the fimo std."""
     _fields_ = [("data", c.c_void_p),
                 ("vtable", c.c_void_p)]
-
-
-FimoContextPtr = c.POINTER(FimoContext)
-"""Pointer to a `FimoContext`."""
 
 
 class FimoStructType(c.c_int):
@@ -964,7 +957,7 @@ class FimoContextVTableHeader(c.Structure):
     given `FimoContext` instance is compatible with the definitions
     available to us.
     """
-    _fields_ = [("check_version", c.CFUNCTYPE(FimoError, c.c_void_p, FimoVersionPtr))]
+    _fields_ = [("check_version", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoVersion)))]
 
 
 class FimoContextVTableV0(c.Structure):
@@ -977,11 +970,11 @@ class FimoContextVTableV0(c.Structure):
 
 
 _fimo_context_init = _lib.fimo_context_init
-_fimo_context_init.argtypes = [c.POINTER(c.POINTER(FimoBaseStructIn)), FimoContextPtr]
+_fimo_context_init.argtypes = [c.POINTER(c.POINTER(FimoBaseStructIn)), c.POINTER(FimoContext)]
 _fimo_context_init.restype = FimoError
 
 
-def fimo_context_init(options: c.POINTER(c.POINTER(FimoBaseStructIn)), context: FimoContextPtr) -> FimoError:
+def fimo_context_init(options: PtrRef[FimoBaseStructIn], context: Ref[FimoContext]) -> FimoError:
     """Initializes a new context with the given options.
 
     If `options` is `NULL`, the context is initialized with the default options,
@@ -1098,10 +1091,6 @@ class FimoTracingSpanDesc(c.Structure):
                 ("metadata", FimoTracingMetadataPtr)]
 
 
-FimoTracingSpanDescPtr = c.POINTER(FimoTracingSpanDesc)
-"""Pointer to a `FimoTracingSpanDesc`."""
-
-
 class FimoTracingSpan(c.Structure):
     """A period of time, during which events can occur."""
     _fields_ = [("type", FimoStructType),
@@ -1114,9 +1103,6 @@ class FimoTracingEvent(c.Structure):
                 ("next", c.POINTER(FimoBaseStructIn)),
                 ("metadata", FimoTracingMetadataPtr)]
 
-
-FimoTracingEventPtr = c.POINTER(FimoTracingEvent)
-"""Pointer to a `FimoTracingEvent`."""
 
 FimoTracingFormat = c.CFUNCTYPE(FimoError, c.POINTER(c.c_char), FimoUSize, c.c_void_p, c.POINTER(FimoUSize))
 """Signature of a message formatter.
@@ -1199,10 +1185,10 @@ class FimoTracingVTableV0(c.Structure):
                 ("call_stack_unblock", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoTracingCallStack))),
                 ("call_stack_suspend_current", c.CFUNCTYPE(FimoError, c.c_void_p, c.c_bool)),
                 ("call_stack_resume_current", c.CFUNCTYPE(FimoError, c.c_void_p)),
-                ("span_create", c.CFUNCTYPE(FimoError, c.c_void_p, FimoTracingSpanDescPtr,
+                ("span_create", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoTracingSpanDesc),
                                             c.POINTER(c.POINTER(FimoTracingSpan)), FimoTracingFormat, c.c_void_p)),
                 ("span_destroy", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoTracingSpan))),
-                ("event_emit", c.CFUNCTYPE(FimoError, c.c_void_p, FimoTracingEventPtr, FimoTracingFormat,
+                ("event_emit", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoTracingEvent), FimoTracingFormat,
                                            c.c_void_p)),
                 ("is_enabled", c.CFUNCTYPE(c.c_bool, c.c_void_p)),
                 ("register_thread", c.CFUNCTYPE(FimoError, c.c_void_p)),
@@ -1216,7 +1202,7 @@ _fimo_tracing_call_stack_create.restype = FimoError
 
 
 def fimo_tracing_call_stack_create(context: FimoContext,
-                                   call_stack: c.POINTER(c.POINTER(FimoTracingCallStack))) -> FimoError:
+                                   call_stack: PtrRef[FimoTracingCallStack]) -> FimoError:
     """Creates a new empty call stack.
 
     If successful, the new call stack is marked as suspended, and written
@@ -1236,7 +1222,7 @@ _fimo_tracing_call_stack_destroy.argtypes = [FimoContext, c.POINTER(FimoTracingC
 _fimo_tracing_call_stack_destroy.restype = FimoError
 
 
-def fimo_tracing_call_stack_destroy(context: FimoContext, call_stack: c.POINTER(FimoTracingCallStack)) -> FimoError:
+def fimo_tracing_call_stack_destroy(context: FimoContext, call_stack: Ref[FimoTracingCallStack]) -> FimoError:
     """Destroys an empty call stack.
 
     Marks the completion of a task. Before calling this function, the
@@ -1260,8 +1246,8 @@ _fimo_tracing_call_stack_switch.argtypes = [FimoContext, c.POINTER(FimoTracingCa
 _fimo_tracing_call_stack_switch.restype = FimoError
 
 
-def fimo_tracing_call_stack_switch(context: FimoContext, call_stack: c.POINTER(FimoTracingCallStack),
-                                   old: c.POINTER(c.POINTER(FimoTracingCallStack))) -> FimoError:
+def fimo_tracing_call_stack_switch(context: FimoContext, call_stack: Ref[FimoTracingCallStack],
+                                   old: PtrRef[FimoTracingCallStack]) -> FimoError:
     """Switches the call stack of the current thread.
 
     If successful, `new_call_stack` will be used as the active call
@@ -1288,7 +1274,7 @@ _fimo_tracing_call_stack_unblock.argtypes = [FimoContext, c.POINTER(FimoTracingC
 _fimo_tracing_call_stack_unblock.restype = FimoError
 
 
-def fimo_tracing_call_stack_unblock(context: FimoContext, call_stack: c.POINTER(FimoTracingCallStack)) -> FimoError:
+def fimo_tracing_call_stack_unblock(context: FimoContext, call_stack: Ref[FimoTracingCallStack]) -> FimoError:
     """Unblocks a blocked call stack.
 
     Once unblocked, the call stack may be resumed. The call stack
@@ -1348,13 +1334,13 @@ def fimo_tracing_call_stack_resume_current(context: FimoContext) -> FimoError:
 
 
 _fimo_tracing_span_create_fmt = _lib.fimo_tracing_span_create_fmt
-_fimo_tracing_span_create_fmt.argtypes = [FimoContext, FimoTracingSpanDescPtr, c.POINTER(c.POINTER(FimoTracingSpan)),
-                                          c.c_char_p]
+_fimo_tracing_span_create_fmt.argtypes = [FimoContext, c.POINTER(FimoTracingSpanDesc),
+                                          c.POINTER(c.POINTER(FimoTracingSpan)), c.c_char_p]
 _fimo_tracing_span_create_fmt.restype = FimoError
 
 
-def fimo_tracing_span_create_fmt(context: FimoContext, span_desc: FimoTracingSpanDescPtr,
-                                 span: c.POINTER(c.POINTER(FimoTracingSpan)), format: c.c_char_p, *args) -> FimoError:
+def fimo_tracing_span_create_fmt(context: FimoContext, span_desc: Ref[FimoTracingSpanDesc],
+                                 span: PtrRef[FimoTracingSpan], format: c.c_char_p, *args) -> FimoError:
     """Creates a new span with the standard formatter and enters it.
 
     If successful, the newly created span is used as the context for
@@ -1378,13 +1364,13 @@ def fimo_tracing_span_create_fmt(context: FimoContext, span_desc: FimoTracingSpa
 
 
 _fimo_tracing_span_create_custom = _lib.fimo_tracing_span_create_custom
-_fimo_tracing_span_create_custom.argtypes = [FimoContext, FimoTracingSpanDescPtr, c.POINTER(c.POINTER(FimoTracingSpan)),
-                                             FimoTracingFormat, c.c_void_p]
+_fimo_tracing_span_create_custom.argtypes = [FimoContext, c.POINTER(FimoTracingSpanDesc),
+                                             c.POINTER(c.POINTER(FimoTracingSpan)), FimoTracingFormat, c.c_void_p]
 _fimo_tracing_span_create_custom.restype = FimoError
 
 
-def fimo_tracing_span_create_custom(context: FimoContext, span_desc: FimoTracingSpanDescPtr,
-                                    span: c.POINTER(c.POINTER(FimoTracingSpan)), format: FimoTracingFormat,
+def fimo_tracing_span_create_custom(context: FimoContext, span_desc: Ref[FimoTracingSpanDesc],
+                                    span: PtrRef[FimoTracingSpan], format: FuncPointer,
                                     data: c.c_void_p) -> FimoError:
     """Creates a new span with a custom formatter and enters it.
 
@@ -1413,7 +1399,7 @@ _fimo_tracing_span_destroy.argtypes = [FimoContext, c.POINTER(FimoTracingSpan)]
 _fimo_tracing_span_destroy.restype = FimoError
 
 
-def fimo_tracing_span_destroy(context: FimoContext, span: c.POINTER(FimoTracingSpan)) -> FimoError:
+def fimo_tracing_span_destroy(context: FimoContext, span: Ref[FimoTracingSpan]) -> FimoError:
     """Exits and destroys a span.
 
     If successful, succeeding events won't occur inside the context of the
@@ -1433,11 +1419,11 @@ def fimo_tracing_span_destroy(context: FimoContext, span: c.POINTER(FimoTracingS
 
 
 _fimo_tracing_event_emit_fmt = _lib.fimo_tracing_event_emit_fmt
-_fimo_tracing_event_emit_fmt.argtypes = [FimoContext, FimoTracingEventPtr, c.c_char_p]
+_fimo_tracing_event_emit_fmt.argtypes = [FimoContext, c.POINTER(FimoTracingEvent), c.c_char_p]
 _fimo_tracing_event_emit_fmt.restype = FimoError
 
 
-def fimo_tracing_event_emit_fmt(context: FimoContext, event: FimoTracingEventPtr, format: c.c_char_p,
+def fimo_tracing_event_emit_fmt(context: FimoContext, event: Ref[FimoTracingEvent], format: c.c_char_p,
                                 *args) -> FimoError:
     """Emits a new event with the standard formatter.
 
@@ -1456,11 +1442,11 @@ def fimo_tracing_event_emit_fmt(context: FimoContext, event: FimoTracingEventPtr
 
 
 _fimo_tracing_event_emit_custom = _lib.fimo_tracing_event_emit_custom
-_fimo_tracing_event_emit_custom.argtypes = [FimoContext, FimoTracingEventPtr, FimoTracingFormat, c.c_void_p]
+_fimo_tracing_event_emit_custom.argtypes = [FimoContext, c.POINTER(FimoTracingEvent), FimoTracingFormat, c.c_void_p]
 _fimo_tracing_event_emit_custom.restype = FimoError
 
 
-def fimo_tracing_event_emit_custom(context: FimoContext, event: FimoTracingEventPtr, format: FimoTracingFormat,
+def fimo_tracing_event_emit_custom(context: FimoContext, event: Ref[FimoTracingEvent], format: FuncPointer,
                                    data: c.c_void_p) -> FimoError:
     """Emits a new event with a custom formatter.
 
@@ -1554,3 +1540,628 @@ def fimo_tracing_flush(context: FimoContext) -> FimoError:
     :return: Status code.
     """
     return _fimo_tracing_flush(context)
+
+
+# Header: fimo_std/module.h
+
+class FimoModule(c.Structure):
+    """State of a loaded module.
+
+    A module is self-contained, and may not be passed to other modules.
+    An instance of `FimoModule` is valid for as long as the owning module
+    remains loaded. Modules must not leak any resources outside their own
+    module, ensuring that they are destroyed upon module unloading.
+    """
+    pass
+
+
+FimoModuleDynamicSymbolConstructor = c.CFUNCTYPE(FimoError, c.POINTER(FimoModule), c.POINTER(c.c_void_p))
+"""Constructor function for a dynamic symbol.
+
+The constructor is in charge of constructing an instance of
+a symbol. To that effect, it is provided  an instance to the
+module. The resulting symbol is written into the last argument.
+
+:param arg0: pointer to the module
+:param arg1: pointer to the resulting symbol
+
+:return: Status code.
+"""
+
+FimoModuleDynamicSymbolDestructor = c.CFUNCTYPE(None, c.c_void_p)
+"""Destructor function for a dynamic symbol.
+
+The destructor is safe to assume, that the symbol is no longer
+used by any other module. During its destruction, a symbol is
+not allowed to access the module backend.
+
+:param arg0: symbol to destroy
+"""
+
+
+class FimoModuleLoadingSet(c.Structure):
+    """Type-erased set of modules to load by the backend."""
+    pass
+
+
+FimoModuleConstructor = c.CFUNCTYPE(FimoError, c.POINTER(FimoModule), c.POINTER(FimoModuleLoadingSet),
+                                    c.POINTER(c.c_void_p))
+"""Constructor function for a module.
+
+The module constructor allows a module implementor to initialize
+some module specific data at module load time. Some use cases for
+module constructors are initialization of global module data, or
+fetching optional symbols. Returning an error aborts the loading
+of the module. Is called before the symbols of the modules are
+exported/initialized.
+
+:param arg0: pointer to the partially initialized module
+:param arg1: module set that contained the module
+:param arg1: pointer to the resulting module data
+
+:return: Status code.
+"""
+
+FimoModuleDestructor = c.CFUNCTYPE(None, c.POINTER(FimoModule), c.c_void_p)
+"""Destructor function for a module.
+
+During its destruction, a module is not allowed to access the
+module backend.
+
+:param arg0: pointer to the module
+:param arg1: module data to destroy
+"""
+
+
+class FimoModuleParamType(c.c_int):
+    """Data type of module parameter."""
+    FIMO_MODULE_PARAM_TYPE_U8 = c.c_int(0)
+    FIMO_MODULE_PARAM_TYPE_U16 = c.c_int(1)
+    FIMO_MODULE_PARAM_TYPE_U32 = c.c_int(2)
+    FIMO_MODULE_PARAM_TYPE_U64 = c.c_int(3)
+    FIMO_MODULE_PARAM_TYPE_I8 = c.c_int(4)
+    FIMO_MODULE_PARAM_TYPE_I16 = c.c_int(5)
+    FIMO_MODULE_PARAM_TYPE_I32 = c.c_int(6)
+    FIMO_MODULE_PARAM_TYPE_I64 = c.c_int(7)
+    pass
+
+
+class FimoModuleParamAccess(c.c_int):
+    """Access group for a module parameter."""
+    FIMO_MODULE_PARAM_ACCESS_PUBLIC = c.c_int(0)
+    FIMO_MODULE_PARAM_ACCESS_DEPENDENCY = c.c_int(1)
+    FIMO_MODULE_PARAM_ACCESS_PRIVATE = c.c_int(2)
+    pass
+
+
+class FimoModuleParam(c.Structure):
+    """A type-erased module parameter."""
+    pass
+
+
+class FimoModuleParamData(c.Structure):
+    """A type-erased internal data type for a module parameter."""
+    pass
+
+
+FimoModuleParamSet = c.CFUNCTYPE(FimoError, c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType,
+                                 c.POINTER(FimoModuleParamData))
+"""Setter for a module parameter.
+
+The setter can perform some validation before the parameter is set.
+If the setter produces an error, the parameter won't be modified.
+
+:param arg0: pointer to the module
+:param arg1: pointer to the new value
+:param arg2: type of the value
+:param arg3: data of the parameter
+
+:return: Status code.
+"""
+
+FimoModuleParamGet = c.CFUNCTYPE(FimoError, c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                                 c.POINTER(FimoModuleParamData))
+"""Getter for a module parameter.
+
+:param arg0: pointer to the module
+:param arg1: buffer to store the value into
+:param arg2: buffer to store the type of the value into
+:param arg3: data of the parameter
+
+:return: Status code.
+"""
+
+
+class _FimoModuleParamDeclDefaultValue(c.Union):
+    _fields_ = [("u8", FimoU8),
+                ("u16", FimoU16),
+                ("u32", FimoU32),
+                ("u64", FimoU64),
+                ("i8", FimoI8),
+                ("i16", FimoI16),
+                ("i32", FimoI32),
+                ("i64", FimoI64)]
+
+
+class FimoModuleParamDecl(c.Structure):
+    """Declaration of a module parameter."""
+    _fields_ = [("type", FimoModuleParamType),
+                ("read_access", FimoModuleParamAccess),
+                ("write_access", FimoModuleParamAccess),
+                ("setter", FimoModuleParamSet),
+                ("getter", FimoModuleParamGet),
+                ("name", c.c_char_p),
+                ("default_value", _FimoModuleParamDeclDefaultValue)]
+
+
+class FimoModuleResourceDecl(c.Structure):
+    """Declaration of a module resource."""
+    _fields_ = [("path", c.c_char_p)]
+
+
+class FimoModuleNamespaceImport(c.Structure):
+    """Declaration of a module namespace import."""
+    _fields_ = [("name", c.c_char_p)]
+
+
+class FimoModuleSymbolImport(c.Structure):
+    """Declaration of a module symbol import."""
+    _fields_ = [("version", FimoVersion),
+                ("name", c.c_char_p),
+                ("ns", c.c_char_p)]
+
+
+class FimoModuleSymbolExport(c.Structure):
+    """Declaration of a static module symbol export."""
+    _fields_ = [("symbol", c.c_void_p),
+                ("version", FimoVersion),
+                ("name", c.c_char_p),
+                ("ns", c.c_char_p)]
+
+
+class FimoModuleDynamicSymbolExport(c.Structure):
+    """Declaration of a dynamic module symbol export."""
+    _fields_ = [("constructor", FimoModuleDynamicSymbolConstructor),
+                ("destructor", FimoModuleDynamicSymbolDestructor),
+                ("version", FimoVersion),
+                ("name", c.c_char_p),
+                ("ns", c.c_char_p)]
+
+
+class FimoModuleExportModifierKey(c.c_int):
+    """Valid keys of `FimoModuleExportModifier`."""
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR = c.c_int(0)
+    FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY = c.c_int(1)
+    pass
+
+
+class FimoModuleExportModifier(c.Structure):
+    """A modifier declaration for a module export."""
+    _fields_ = [("key", FimoModuleExportModifierKey),
+                ("value", c.c_void_p)]
+
+
+class FimoModuleExportModifierDestructor(c.Structure):
+    """Value for the `FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR` modifier key."""
+    _fields_ = [("data", c.c_void_p),
+                ("destructor", c.CFUNCTYPE(None, c.c_void_p))]
+
+
+class FimoModuleExport(c.Structure):
+    """Declaration of a module export."""
+    _fields_ = [("type", FimoStructType),
+                ("next", c.POINTER(FimoBaseStructIn)),
+                ("export_abi", FimoI32),
+                ("name", c.c_char_p),
+                ("description", c.c_char_p),
+                ("author", c.c_char_p),
+                ("license", c.c_char_p),
+                ("parameters", c.POINTER(FimoModuleParamDecl)),
+                ("parameters_count", FimoU32),
+                ("resources", c.POINTER(FimoModuleResourceDecl)),
+                ("resources_count", FimoU32),
+                ("namespace_imports", c.POINTER(FimoModuleNamespaceImport)),
+                ("namespace_imports_count", FimoU32),
+                ("symbol_imports", c.POINTER(FimoModuleSymbolImport)),
+                ("symbol_imports_count", FimoU32),
+                ("symbol_exports", c.POINTER(FimoModuleSymbolExport)),
+                ("symbol_exports_count", FimoU32),
+                ("dynamic_symbol_exports", c.POINTER(FimoModuleDynamicSymbolExport)),
+                ("dynamic_symbol_exports_count", FimoU32),
+                ("modifiers", c.POINTER(FimoModuleExportModifier)),
+                ("modifiers_count", FimoU32),
+                ("module_constructor", FimoModuleConstructor),
+                ("module_destructor", FimoModuleDestructor)]
+
+
+class FimoModuleRawSymbol(c.Structure):
+    """Type-erased symbol definition."""
+    _fields_ = [("data", c.c_void_p),
+                ("lock", FimoUSize)]
+
+
+_fimo_impl_module_symbol_is_used = _lib.fimo_impl_module_symbol_is_used
+_fimo_impl_module_symbol_is_used.argtypes = [c.POINTER(FimoUSize)]
+_fimo_impl_module_symbol_is_used.restype = c.c_bool
+
+
+def fimo_impl_module_symbol_is_used(lock: Ref[FimoUSize]) -> bool:
+    return _fimo_impl_module_symbol_is_used(lock)
+
+
+_fimo_impl_module_symbol_acquire = _lib.fimo_impl_module_symbol_acquire
+_fimo_impl_module_symbol_acquire.argtypes = [c.POINTER(FimoUSize)]
+_fimo_impl_module_symbol_acquire.restype = None
+
+
+def fimo_impl_module_symbol_acquire(lock: Ref[FimoUSize]) -> None:
+    _fimo_impl_module_symbol_acquire(lock)
+
+
+_fimo_impl_module_symbol_release = _lib.fimo_impl_module_symbol_release
+_fimo_impl_module_symbol_release.argtypes = [c.POINTER(FimoUSize)]
+_fimo_impl_module_symbol_release.restype = None
+
+
+def fimo_impl_module_symbol_release(lock: Ref[FimoUSize]) -> None:
+    _fimo_impl_module_symbol_release(lock)
+
+
+class FimoModuleParamTable(c.Structure):
+    """Opaque type for a parameter table of a module.
+
+    The layout of a parameter table is equivalent to an array of
+    `FimoModuleParam*`, where each entry represents one parameter
+    of the module parameter declaration list.
+    """
+    pass
+
+
+class FimoModuleResourceTable(c.Structure):
+    """Opaque type for a resource path table of a module.
+
+    The import table is equivalent to an array of `const char*`,
+    where each entry represents one resource path. The resource
+    paths are ordered in declaration order.
+    """
+    pass
+
+
+class FimoModuleSymbolImportTable(c.Structure):
+    """Opaque type for a symbol import table of a module.
+
+    The import table is equivalent to an array of `const FimoModuleRawSymbol*`,
+    where each entry represents one symbol of the module symbol
+    import list. The symbols are ordered in declaration order.
+    """
+    pass
+
+
+class FimoModuleSymbolExportTable(c.Structure):
+    """Opaque type for a symbol export table of a module.
+
+    The export table is equivalent to an array of `const FimoModuleRawSymbol*`,
+    where each entry represents one symbol of the module symbol
+    export list, followed by the entries of the dynamic symbol
+    export list.
+    """
+    pass
+
+
+class FimoModuleInfo(c.Structure):
+    """Info of a loaded module."""
+    pass
+
+
+FimoModuleInfo._fields_ = [("type", FimoStructType),
+                           ("next", c.POINTER(FimoBaseStructIn)),
+                           ("name", c.c_char_p),
+                           ("description", c.c_char_p),
+                           ("author", c.c_char_p),
+                           ("license", c.c_char_p),
+                           ("module_path", c.c_char_p),
+                           ("acquire", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo))),
+                           ("release", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo))),
+                           ("is_loaded", c.CFUNCTYPE(c.c_bool, c.POINTER(FimoModuleInfo))),
+                           ("lock_unload", c.CFUNCTYPE(FimoError, c.POINTER(FimoModuleInfo))),
+                           ("unlock_unload", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo)))]
+
+_fimo_impl_module_info_acquire = _lib.fimo_impl_module_info_acquire
+_fimo_impl_module_info_acquire.argtypes = [c.POINTER(FimoModuleInfo)]
+_fimo_impl_module_info_acquire.restype = None
+
+
+def fimo_impl_module_info_acquire(info: Ref[FimoModuleInfo]) -> None:
+    _fimo_impl_module_info_acquire(info)
+
+
+_fimo_impl_module_info_release = _lib.fimo_impl_module_info_release
+_fimo_impl_module_info_release.argtypes = [c.POINTER(FimoModuleInfo)]
+_fimo_impl_module_info_release.restype = None
+
+
+def fimo_impl_module_info_release(info: Ref[FimoModuleInfo]) -> None:
+    _fimo_impl_module_info_release(info)
+
+
+_fimo_impl_module_info_is_loaded = _lib.fimo_impl_module_info_is_loaded
+_fimo_impl_module_info_is_loaded.argtypes = [c.POINTER(FimoModuleInfo)]
+_fimo_impl_module_info_is_loaded.restype = c.c_bool
+
+
+def fimo_impl_module_info_is_loaded(info: Ref[FimoModuleInfo]) -> bool:
+    return _fimo_impl_module_info_is_loaded(info)
+
+
+_fimo_impl_module_info_lock_unload = _lib.fimo_impl_module_info_lock_unload
+_fimo_impl_module_info_lock_unload.argtypes = [c.POINTER(FimoModuleInfo)]
+_fimo_impl_module_info_lock_unload.restype = FimoError
+
+
+def fimo_impl_module_info_lock_unload(info: Ref[FimoModuleInfo]) -> FimoError:
+    return _fimo_impl_module_info_lock_unload(info)
+
+
+_fimo_impl_module_info_unlock_unload = _lib.fimo_impl_module_info_unlock_unload
+_fimo_impl_module_info_unlock_unload.argtypes = [c.POINTER(FimoModuleInfo)]
+_fimo_impl_module_info_unlock_unload.restype = None
+
+
+def fimo_impl_module_info_unlock_unload(info: Ref[FimoModuleInfo]) -> None:
+    _fimo_impl_module_info_unlock_unload(info)
+
+
+FimoModule._fields_ = [("parameters", c.POINTER(FimoModuleParamTable)),
+                       ("resources", c.POINTER(FimoModuleResourceTable)),
+                       ("imports", c.POINTER(FimoModuleSymbolImportTable)),
+                       ("exports", c.POINTER(FimoModuleSymbolExportTable)),
+                       ("module_info", c.POINTER(FimoModuleInfo)),
+                       ("context", FimoContext),
+                       ("module_data", c.c_void_p)]
+
+FimoModuleLoadingFilter = c.CFUNCTYPE(c.c_bool, c.POINTER(FimoModuleExport), c.c_void_p)
+"""A filter for selection modules to load by the module backend.
+
+The filter function is passed the module export declaration
+and can then decide whether the module should be loaded by
+the backend.
+
+:param arg0: module export to inspect
+:param arg1: filter data
+
+:return: `True`, if the module should be loaded.
+"""
+
+FimoModuleLoadingSuccessCallback = c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo), c.c_void_p)
+"""A callback for successfully loading a module.
+
+The callback function is called when the backend was successful
+in loading the requested module, making it then possible to
+request symbols.
+
+:param arg0: loaded module
+:param arg1: callback data
+"""
+
+FimoModuleLoadingErrorCallback = c.CFUNCTYPE(None, c.POINTER(FimoModuleExport), c.c_void_p)
+"""A callback for a module loading error.
+
+The callback function is called when the backend was not
+successful in loading the requested module.
+
+:param arg0: module that caused the error
+:param arg1: callback data
+"""
+
+
+class FimoModuleVTableV0(c.Structure):
+    """VTable of the module subsystem.
+
+    Changing the VTable is a breaking change.
+    """
+    __fields__ = [("pseudo_module_new", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(c.POINTER(FimoModule)))),
+                  ("pseudo_module_destroy",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.POINTER(FimoContext))),
+                  ("set_new", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(c.POINTER(FimoModuleLoadingSet)))),
+                  ("set_has_module", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleLoadingSet), c.c_char_p,
+                                                 c.POINTER(c.c_bool))),
+                  ("set_has_symbol",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleLoadingSet), c.c_char_p, c.c_char_p,
+                               FimoVersion, c.POINTER(c.c_bool))),
+                  ("set_append_callback",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleLoadingSet), c.c_char_p,
+                               FimoModuleLoadingSuccessCallback, FimoModuleLoadingErrorCallback, c.c_void_p)),
+                  ("set_append_freestanding_module",
+                   c.CFUNCTYPE(FimoError, c.POINTER(FimoModule), c.POINTER(FimoModuleLoadingSet),
+                               c.POINTER(FimoModuleExport))),
+                  ("set_append_modules", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleLoadingSet), c.c_char_p,
+                                                     FimoModuleLoadingFilter, c.c_void_p, c.CFUNCTYPE(None, c.CFUNCTYPE(
+                          c.c_bool, c.POINTER(FimoModuleExport), c.c_void_p), c.c_void_p))),
+                  ("set_dismiss", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleLoadingSet))),
+                  ("set_finish", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleLoadingSet))),
+                  (
+                      "find_by_name",
+                      c.CFUNCTYPE(FimoError, c.c_void_p, c.c_char_p, c.POINTER(c.POINTER(FimoModuleInfo)))),
+                  ("find_by_symbol", c.CFUNCTYPE(FimoError, c.c_void_p, c.c_char_p, c.c_char_p, FimoVersion,
+                                                 c.POINTER(c.POINTER(FimoModuleInfo)))),
+                  ("namespace_exists", c.CFUNCTYPE(FimoError, c.c_void_p, c.c_char_p, c.POINTER(c.c_bool))),
+                  ("namespace_include", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_char_p)),
+                  ("namespace_exclude", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_char_p)),
+                  ("namespace_included",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_char_p, c.POINTER(c.c_bool),
+                               c.POINTER(c.c_bool))),
+                  ("acquire_dependency",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.POINTER(FimoModuleInfo))),
+                  ("relinquish_dependency",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.POINTER(FimoModuleInfo))),
+                  ("has_dependency",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.POINTER(FimoModuleInfo),
+                               c.POINTER(c.c_bool), c.POINTER(c.c_bool))),
+                  ("load_symbol",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_char_p, c.c_char_p, FimoVersion,
+                               c.POINTER(c.POINTER(FimoModuleRawSymbol)))),
+                  ("unload", c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModuleInfo))),
+                  ("param_query",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.c_char_p, c.c_char_p, c.POINTER(FimoModuleParamType),
+                               c.POINTER(FimoModuleParamAccess), c.POINTER(FimoModuleParamAccess))),
+                  ("param_set_public",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.c_void_p, FimoModuleParamType, c.c_char_p, c.c_char_p)),
+                  ("param_get_public",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.c_void_p, c.POINTER(FimoModuleParamType), c.c_char_p,
+                               c.c_char_p)),
+                  ("param_set_dependency",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType,
+                               c.c_char_p, c.c_char_p)),
+                  ("param_get_dependency",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                               c.c_char_p, c.c_char_p)),
+                  ("param_set_private",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType,
+                               c.POINTER(FimoModuleParam))),
+                  ("param_get_private",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                               c.POINTER(FimoModuleParam))),
+                  ("param_set_inner",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType,
+                               c.POINTER(FimoModuleParamData))),
+                  ("param_get_inner",
+                   c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                               c.POINTER(FimoModuleParamData)))]
+
+
+_fimo_module_pseudo_module_new = _lib.fimo_module_pseudo_module_new
+_fimo_module_pseudo_module_new.argtypes = [FimoContext, c.POINTER(c.POINTER(FimoModule))]
+_fimo_module_pseudo_module_new.restype = FimoError
+
+
+def fimo_module_pseudo_module_new(context: FimoContext, module: PtrRef[FimoModule]) -> FimoError:
+    """Constructs a new pseudo module.
+
+    The functions of the module backend require that the caller owns
+    a reference to their own module. This is a problem, as the constructor
+    of the context won't be assigned a module instance during bootstrapping.
+    As a workaround, we allow for the creation of pseudo modules, i.e.,
+    module handles without an associated module.
+
+    :param context: the context
+    :param module: resulting pseudo module
+
+    :return: Status code.
+    """
+    return _fimo_module_pseudo_module_new(context, module)
+
+
+_fimo_module_pseudo_module_destroy = _lib.fimo_module_pseudo_module_destroy
+_fimo_module_pseudo_module_destroy.argtypes = [c.POINTER(FimoModule), c.POINTER(FimoContext)]
+_fimo_module_pseudo_module_destroy.restype = FimoError
+
+
+def fimo_module_pseudo_module_destroy(module: Ref[FimoModule], context: Ref[FimoContext]) -> FimoError:
+    """Destroys an existing pseudo module.
+
+    By destroying the pseudo module, the caller ensures that they
+    relinquished all access to handles derived by the module backend.
+
+    :param module: pseudo module to destroy
+    :param context: extracted context from the module
+
+    :return: Status code.
+    """
+    return _fimo_module_pseudo_module_destroy(module, context)
+
+
+_fimo_module_set_new = _lib.fimo_module_set_new
+_fimo_module_set_new.argtypes = [FimoContext, c.POINTER(c.POINTER(FimoModuleLoadingSet))]
+_fimo_module_set_new.restype = FimoError
+
+
+def fimo_module_set_new(context: FimoContext, module_set: PtrRef[FimoModuleLoadingSet]) -> FimoError:
+    """Constructs a new empty module set.
+
+    The loading of a module fails, if at least one dependency can
+    not be satisfied, which requires the caller to manually find a
+    suitable loading order. To facilitate the loading, we load
+    multiple modules together, and automatically determine an
+    appropriate load order for all modules inside the module set.
+
+    :param context: the context
+    :param module_set: new module set
+
+    :return: Status code.
+    """
+    return _fimo_module_set_new(context, module_set)
+
+
+_fimo_module_set_has_module = _lib.fimo_module_set_has_module
+_fimo_module_set_has_module.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet), c.c_char_p, c.POINTER(c.c_bool)]
+_fimo_module_set_has_module.restype = FimoError
+
+
+def fimo_module_set_has_module(context: FimoContext, module_set: Ref[FimoModuleLoadingSet], name: c.c_char_p,
+                               has_module: Ref[c.c_bool]) -> FimoError:
+    """Checks whether a module set contains a module.
+
+    :param context: the context
+    :param module_set: new module set
+    :param name: name of the module
+    :param has_module: query result
+
+    :return: Status code.
+    """
+    return _fimo_module_set_has_module(context, module_set, name, has_module)
+
+
+_fimo_module_set_has_symbol = _lib.fimo_module_set_has_symbol
+_fimo_module_set_has_symbol.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet), c.c_char_p, c.c_char_p,
+                                        FimoVersion, c.POINTER(c.c_bool)]
+_fimo_module_set_has_symbol.restype = FimoError
+
+
+def fimo_module_set_has_symbol(context: FimoContext, module_set: Ref[FimoModuleLoadingSet], name: c.c_char_p,
+                               ns: c.c_char_p, version: FimoVersion, has_symbol: Ref[c.c_bool]) -> FimoError:
+    """Checks whether a module set contains a symbol.
+
+    :param context: the context
+    :param module_set: new module set
+    :param name: symbol name
+    :param ns: namespace name
+    :param version: symbol version
+    :param has_symbol: query result
+
+    :return: Status code.
+    """
+    return _fimo_module_set_has_symbol(context, module_set, name, ns, version, has_symbol)
+
+
+_fimo_module_set_append_callback = _lib.fimo_module_set_append_callback
+_fimo_module_set_append_callback.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet), c.c_char_p,
+                                             FimoModuleLoadingSuccessCallback, FimoModuleLoadingErrorCallback,
+                                             c.c_void_p]
+_fimo_module_set_append_callback.restype = FimoError
+
+
+def fimo_module_set_append_callback(context: FimoContext, module_set: Ref[FimoModuleLoadingSet],
+                                    module_name: c.c_char_p, on_success: FuncPointer,
+                                    on_error: FuncPointer, user_data: c.c_void_p) -> FimoError:
+    """Adds a status callback to the module set.
+
+    Adds a set of callbacks to report a successful or failed loading of
+    a module. The `on_success` callback wil be called if the set was
+    able to load all requested modules, whereas the `on_error` callback
+    will be called immediately after the failed loading of the module. Since
+    the module set can be in a partially loaded state at the time of calling
+    this function, the `on_error` callback may be invoked immediately. The
+    callbacks will be provided with a user-specified data pointer, which they
+    are in charge of cleaning up. If the requested module `module_name` does
+    not exist, this function will return an error.
+
+    :param context: the context
+    :param module_set: new module set
+    :param module_name: module to query
+    :param on_success: success callback
+    :param on_error: error callback
+    :param user_data: callback user data
+
+    :return: Status code.
+    """
+    return _fimo_module_set_append_callback(context, module_set, module_name, on_success, on_error, user_data)
