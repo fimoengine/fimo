@@ -7,6 +7,7 @@ import os
 
 if TYPE_CHECKING:
     T = TypeVar('T', bound=c._CData)
+    Pointer = c._Pointer[T]
     Ref = c._Pointer[T] | c.Array[T] | c._CArgObject | None
     PtrRef = c._Pointer[c._Pointer[T]] | c.Array[c._Pointer[T]] | c._CArgObject | None
     FuncPointer = c._FuncPointer
@@ -2519,11 +2520,11 @@ def fimo_module_load_symbol(module: Ref[FimoModule], name: c.c_char_p, ns: c.c_c
 
 
 _fimo_module_unload = _lib.fimo_module_unload
-_fimo_module_unload.argtypes = [FimoContext, c.POINTER(FimoModule)]
+_fimo_module_unload.argtypes = [FimoContext, c.POINTER(FimoModuleInfo)]
 _fimo_module_unload.restype = FimoError
 
 
-def fimo_module_unload(context: FimoContext, module: Ref[FimoModule]) -> FimoError:
+def fimo_module_unload(context: FimoContext, module: Ref[FimoModuleInfo]) -> FimoError:
     """Unloads a module.
 
     If successful, this function unloads the module `module`.
