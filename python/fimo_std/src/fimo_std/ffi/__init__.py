@@ -2165,3 +2165,595 @@ def fimo_module_set_append_callback(context: FimoContext, module_set: Ref[FimoMo
     :return: Status code.
     """
     return _fimo_module_set_append_callback(context, module_set, module_name, on_success, on_error, user_data)
+
+
+_fimo_module_set_append_freestanding_module = _lib.fimo_module_set_append_freestanding_module
+_fimo_module_set_append_freestanding_module.argtypes = [c.POINTER(FimoModule), c.POINTER(FimoModuleLoadingSet),
+                                                        c.POINTER(FimoModuleExport)]
+_fimo_module_set_append_freestanding_module.restype = FimoError
+
+
+def fimo_module_set_append_freestanding_module(module: Ref[FimoModule], module_set: Ref[FimoModuleLoadingSet],
+                                               module_export: Ref[FimoModuleExport]) -> FimoError:
+    """Adds a freestanding module to the module set.
+
+    Adds a freestanding module to the set, so that it may be loaded
+    by a future call to `fimo_module_set_finish`. Trying to include
+    an invalid module, a module with duplicate exports or duplicate
+    name will result in an error. Unlike `fimo_module_set_append_modules`,
+    this function allows for the loading of dynamic modules, i.e.
+    modules that are created at runtime, like non-native modules,
+    which may require a runtime to be executed in. To ensure that
+    the binary of the module calling this function is not unloaded
+    while the new module is instantiated, the new module inherits
+    a strong reference to the same binary as the caller's module.
+    Note that the new module is not setup to automatically depend
+    on `module`, but may prevent it from being unloaded while
+    the set exists.
+
+    :param module: owner of the export
+    :param module_set: set of modules
+    :param module_export: module to append to the set
+
+    :return: Status code.
+    """
+    return _fimo_module_set_append_freestanding_module(module, module_set, module_export)
+
+
+_fimo_module_set_append_modules = _lib.fimo_module_set_append_modules
+_fimo_module_set_append_modules.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet), c.c_char_p,
+                                            FimoModuleLoadingFilter, c.c_void_p]
+_fimo_module_set_append_modules.restype = FimoError
+
+
+def fimo_module_set_append_modules(context: FimoContext, module_set: Ref[FimoModuleLoadingSet],
+                                   module_path: c.c_char_p, filter: FuncPointer, filter_data: c.c_void_p) -> FimoError:
+    """Adds modules to the module set.
+
+    Opens up a module binary to select which modules to load.
+    The binary path `module_path` must be encoded as `UTF-8`,
+    and point to the binary that contains the modules.  If the
+    path is `NULL`, it iterates over the exported modules of the
+    current binary. Each exported module is then passed to the
+    `filter`, along with the provided `filter_data`, which can
+    then filter which modules to load. This function may skip
+    invalid module exports. Trying to include a module with duplicate
+    exports or duplicate name will result in an error. This function
+    signals an error, if the binary does not contain the symbols
+    necessary to query the exported modules, but does not return
+    in an error, if it does not export any modules. The necessary
+    symbols are set up automatically, if the binary was linked with
+    the fimo library. In case of an error, no modules are appended
+    to the set.
+
+    :param context: the context
+    :param module_set: set of modules
+    :param module_path: path to the binary to inspect
+    :param filter: filter function
+    :param filter_data: custom data to pass to the filter function
+
+    :return: Status code.
+    """
+    return _fimo_module_set_append_modules(context, module_set, module_path, filter, filter_data)
+
+
+_fimo_module_set_dismiss = _lib.fimo_module_set_dismiss
+_fimo_module_set_dismiss.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet)]
+_fimo_module_set_dismiss.restype = FimoError
+
+
+def fimo_module_set_dismiss(context: FimoContext, module_set: Ref[FimoModuleLoadingSet]) -> FimoError:
+    """Destroys the module set without loading any modules.
+
+    It is not possible to dismiss a module set that is currently
+    being loaded.
+
+    :param context: the context
+    :param module_set: the module set to destroy
+
+    :return: Status code.
+    """
+    return _fimo_module_set_dismiss(context, module_set)
+
+
+_fimo_module_set_finish = _lib.fimo_module_set_finish
+_fimo_module_set_finish.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet)]
+_fimo_module_set_finish.restype = FimoError
+
+
+def fimo_module_set_finish(context: FimoContext, module_set: Ref[FimoModuleLoadingSet]) -> FimoError:
+    """Destroys the module set and loads the modules contained in it.
+
+    After successfully calling this function, the modules contained
+    in the set are loaded, and their symbols are available to all
+    other modules. If the construction of one module results in an
+    error, or if a dependency can not be satisfied, this function
+    rolls back the loading of all modules contained in the set
+    and returns an error. It is not possible to load a module set,
+    while another set is being loaded.
+
+    :param context: the context
+    :param module_set: a set of modules to load
+
+    :return: Status code.
+    """
+    return _fimo_module_set_finish(context, module_set)
+
+
+_fimo_module_find_by_name = _lib.fimo_module_find_by_name
+_fimo_module_find_by_name.argtypes = [FimoContext, c.c_char_p, c.POINTER(c.POINTER(FimoModuleInfo))]
+_fimo_module_find_by_name.restype = FimoError
+
+
+def fimo_module_find_by_name(context: FimoContext, name: c.c_char_p, module: PtrRef[FimoModuleInfo]) -> FimoError:
+    """Searches for a module by its name.
+
+    Queries a module by its unique name. The returned `FimoModuleInfo`
+    will have its reference count increased.
+
+    :param context: context
+    :param name: module name
+    :param module: resulting module
+
+    :return: Status code.
+    """
+    return _fimo_module_find_by_name(context, name, module)
+
+
+_fimo_module_find_by_symbol = _lib.fimo_module_find_by_symbol
+_fimo_module_find_by_symbol.argtypes = [FimoContext, c.c_char_p, c.c_char_p, FimoVersion,
+                                        c.POINTER(c.POINTER(FimoModuleInfo))]
+_fimo_module_find_by_symbol.restype = FimoError
+
+
+def fimo_module_find_by_symbol(context: FimoContext, name: c.c_char_p, ns: c.c_char_p, version: FimoVersion,
+                               module: PtrRef[FimoModuleInfo]) -> FimoError:
+    """Searches for a module by a symbol it exports.
+
+    Queries the module that exported the specified symbol. The returned
+    `FimoModuleInfo` will have its reference count increased.
+
+    :param context: context
+    :param name: symbol name
+    :param ns: symbol namespace
+    :param version: symbol version
+    :param module: resulting module
+
+    :return: Status code.
+    """
+    return _fimo_module_find_by_symbol(context, name, ns, version, module)
+
+
+_fimo_module_namespace_exists = _lib.fimo_module_namespace_exists
+_fimo_module_namespace_exists.argtypes = [FimoContext, c.c_char_p, c.POINTER(c.c_bool)]
+_fimo_module_namespace_exists.restype = FimoError
+
+
+def fimo_module_namespace_exists(context: FimoContext, ns: c.c_char_p, exists: Ref[c.c_bool]) -> FimoError:
+    """Checks for the presence of a namespace in the module backend.
+
+    A namespace exists, if at least one loaded module exports
+    one symbol in said namespace.
+
+    :param context: context
+    :param ns: symbol namespace
+    :param exists: query result
+
+    :return: Status code.
+    """
+    return _fimo_module_namespace_exists(context, ns, exists)
+
+
+_fimo_module_namespace_include = _lib.fimo_module_namespace_include
+_fimo_module_namespace_include.argtypes = [c.POINTER(FimoModule), c.c_char_p]
+_fimo_module_namespace_include.restype = FimoError
+
+
+def fimo_module_namespace_include(module: Ref[FimoModule], ns: c.c_char_p) -> FimoError:
+    """Includes a namespace by the module.
+
+    Once included, the module gains access to the symbols
+    of its dependencies that are exposed in said namespace.
+    A namespace can not be included multiple times.
+
+    :param module: module of the caller
+    :param ns: namespace to include
+
+    :return: Status code.
+    """
+    return _fimo_module_namespace_include(module, ns)
+
+
+_fimo_module_namespace_exclude = _lib.fimo_module_namespace_exclude
+_fimo_module_namespace_exclude.argtypes = [c.POINTER(FimoModule), c.c_char_p]
+_fimo_module_namespace_exclude.restype = FimoError
+
+
+def fimo_module_namespace_exclude(module: Ref[FimoModule], ns: c.c_char_p) -> FimoError:
+    """Removes a namespace include from the module.
+
+    Once excluded, the caller guarantees to relinquish
+    access to the symbols contained in said namespace.
+    It is only possible to exclude namespaces that were
+    manually added, whereas static namespace includes
+    remain valid until the module is unloaded.
+
+    :param module: module of the caller
+    :param ns: namespace to exclude
+
+    :return: Status code.
+    """
+    return _fimo_module_namespace_exclude(module, ns)
+
+
+_fimo_module_namespace_included = _lib.fimo_module_namespace_included
+_fimo_module_namespace_included.argtypes = [c.POINTER(FimoModule), c.c_char_p, c.POINTER(c.c_bool), c.POINTER(c.c_bool)]
+_fimo_module_namespace_included.restype = FimoError
+
+
+def fimo_module_namespace_included(module: Ref[FimoModule], ns: c.c_char_p, is_included: Ref[c.c_bool],
+                                   is_static: Ref[c.c_bool]) -> FimoError:
+    """Checks if a module includes a namespace.
+
+    Checks if `module` specified that it includes the
+    namespace `ns`. In that case, the module is allowed access
+    to the symbols in the namespace. The result of the query
+    is stored in `is_included`. Additionally, this function also
+    queries whether the include is static, i.e., the include was
+    specified by the module at load time. The include type is
+    stored in `is_static`.
+
+    :param module: module of the caller
+    :param ns: namespace to query
+    :param is_included: result of the query
+    :param is_static: resulting include type
+
+    :return: Status code.
+    """
+    return _fimo_module_namespace_included(module, ns, is_included, is_static)
+
+
+_fimo_module_acquire_dependency = _lib.fimo_module_acquire_dependency
+_fimo_module_acquire_dependency.argtypes = [c.POINTER(FimoModule), c.POINTER(FimoModuleInfo)]
+_fimo_module_acquire_dependency.restype = FimoError
+
+
+def fimo_module_acquire_dependency(module: Ref[FimoModule], dependency: Ref[FimoModuleInfo]) -> FimoError:
+    """Acquires another module as a dependency.
+
+    After acquiring a module as a dependency, the module
+    is allowed access to the symbols and protected parameters
+    of said dependency. Trying to acquire a dependency to a
+    module that is already a dependency, or to a module that
+    would result in a circular dependency will result in an
+    error.
+
+    :param module: module of the caller
+    :param dependency: module to acquire as a dependency
+
+    :return: Status code.
+    """
+    return _fimo_module_acquire_dependency(module, dependency)
+
+
+_fimo_module_relinquish_dependency = _lib.fimo_module_relinquish_dependency
+_fimo_module_relinquish_dependency.argtypes = [c.POINTER(FimoModule), c.POINTER(FimoModuleInfo)]
+_fimo_module_relinquish_dependency.restype = FimoError
+
+
+def fimo_module_relinquish_dependency(module: Ref[FimoModule], dependency: Ref[FimoModuleInfo]) -> FimoError:
+    """Removes a module as a dependency.
+
+    By removing a module as a dependency, the caller
+    ensures that it does not own any references to resources
+    originating from the former dependency, and allows for
+    the unloading of the module. A module can only relinquish
+    dependencies to modules that were acquired dynamically,
+    as static dependencies remain valid until the module is
+    unloaded.
+
+    :param module: module of the caller
+    :param dependency: dependency to remove
+
+    :return: Status code.
+    """
+    return _fimo_module_relinquish_dependency(module, dependency)
+
+
+_fimo_module_has_dependency = _lib.fimo_module_has_dependency
+_fimo_module_has_dependency.argtypes = [c.POINTER(FimoModule), c.POINTER(FimoModuleInfo), c.POINTER(c.c_bool),
+                                        c.POINTER(c.c_bool)]
+_fimo_module_has_dependency.restype = FimoError
+
+
+def fimo_module_has_dependency(module: Ref[FimoModule], other: Ref[FimoModuleInfo], has_dependency: Ref[c.c_bool],
+                               is_static: Ref[c.c_bool]) -> FimoError:
+    """Checks if a module depends on another module.
+
+    Checks if `other` is a dependency of `module`. In that
+    case `module` is allowed to access the symbols exported
+    by `other`. The result of the query is stored in
+    `has_dependency`. Additionally, this function also
+    queries whether the dependency is static, i.e., the
+    dependency was set by the module backend at load time.
+    The dependency type is stored in `is_static`.
+
+    :param module: module of the caller
+    :param other: other module to check as a dependency
+    :param has_dependency: result of the query
+    :param is_static: resulting dependency type
+
+    :return: Status code.
+    """
+    return _fimo_module_has_dependency(module, other, has_dependency, is_static)
+
+
+_fimo_module_load_symbol = _lib.fimo_module_load_symbol
+_fimo_module_load_symbol.argtypes = [c.POINTER(FimoModule), c.c_char_p, c.c_char_p, FimoVersion,
+                                     c.POINTER(c.POINTER(FimoModuleRawSymbol))]
+_fimo_module_load_symbol.restype = FimoError
+
+
+def fimo_module_load_symbol(module: Ref[FimoModule], name: c.c_char_p, ns: c.c_char_p, version: FimoVersion,
+                            symbol: PtrRef[FimoModuleRawSymbol]) -> FimoError:
+    """Loads a symbol from the module backend.
+
+    The caller can query the backend for a symbol of a loaded
+    module. This is useful for loading optional symbols, or
+    for loading symbols after the creation of a module. The
+    symbol, if it exists, is written into `symbol`, and can
+    be used until the module relinquishes the dependency to
+    the module that exported the symbol. This function fails,
+    if the module containing the symbol is not a dependency
+    of the module.
+
+    :param module: module that requires the symbol
+    :param name: symbol name
+    :param ns: symbol namespace
+    :param version: symbol version
+    :param symbol: resulting symbol
+
+    :return: Status code.
+    """
+    return _fimo_module_load_symbol(module, name, ns, version, symbol)
+
+
+_fimo_module_unload = _lib.fimo_module_unload
+_fimo_module_unload.argtypes = [FimoContext, c.POINTER(FimoModule)]
+_fimo_module_unload.restype = FimoError
+
+
+def fimo_module_unload(context: FimoContext, module: Ref[FimoModule]) -> FimoError:
+    """Unloads a module.
+
+    If successful, this function unloads the module `module`.
+    To succeed, the module no other module may depend on the module.
+    This function automatically unloads cleans up unreferenced modules,
+    except if they are a pseudo module.
+
+    Setting `module` to `NULL` only runs the cleanup of all loose modules.
+
+    :param context: the context
+    :param module: module to unload
+
+    :return: Status code.
+    """
+    return _fimo_module_unload(context, module)
+
+
+_fimo_module_param_query = _lib.fimo_module_param_query
+_fimo_module_param_query.argtypes = [FimoContext, c.c_char_p, c.c_char_p, c.POINTER(FimoModuleParamType),
+                                     c.POINTER(FimoModuleParamAccess), c.POINTER(FimoModuleParamAccess)]
+_fimo_module_param_query.restype = FimoError
+
+
+def fimo_module_param_query(context: FimoContext, module_name: c.c_char_p, param: c.c_char_p,
+                            type: Ref[FimoModuleParamType], read: Ref[FimoModuleParamAccess],
+                            write: Ref[FimoModuleParamAccess]) -> FimoError:
+    """Queries the info of a module parameter.
+
+    This function can be used to query the datatype, the read access,
+    and the write access of a module parameter. This function fails,
+    if the parameter can not be found.
+
+    :param context: context
+    :param module_name: name of the module containing the parameter
+    :param param: parameter to query
+    :param type: queried parameter datatype
+    :param read: queried parameter read access
+    :param write: queried parameter write access
+
+    :return: Status code.
+    """
+    return _fimo_module_param_query(context, module_name, param, type, read, write)
+
+
+_fimo_module_param_set_public = _lib.fimo_module_param_set_public
+_fimo_module_param_set_public.argtypes = [FimoContext, c.c_void_p, FimoModuleParamType, c.c_char_p, c.c_char_p]
+_fimo_module_param_set_public.restype = FimoError
+
+
+def fimo_module_param_set_public(context: FimoContext, value: c.c_void_p, type: FimoModuleParamType,
+                                 module_name: c.c_char_p, param: c.c_char_p) -> FimoError:
+    """Sets a module parameter with public write access.
+
+    Sets the value of a module parameter with public write access.
+    The operation fails, if the parameter does not exist, or if
+    the parameter does not allow writing with a public access.
+    The caller must ensure that `value` points to an instance of
+    the same datatype as the parameter in question.
+
+    :param context: context
+    :param value: pointer to the value to store
+    :param type: type of the value
+    :param module_name: name of the module containing the parameter
+    :param param: name of the parameter
+
+    :return: Status code.
+    """
+    return _fimo_module_param_set_public(context, value, type, module_name, param)
+
+
+_fimo_module_param_get_public = _lib.fimo_module_param_get_public
+_fimo_module_param_get_public.argtypes = [FimoContext, c.c_void_p, c.POINTER(FimoModuleParamType), c.c_char_p,
+                                          c.c_char_p]
+_fimo_module_param_get_public.restype = FimoError
+
+
+def fimo_module_param_get_public(context: FimoContext, value: c.c_void_p, type: Ref[FimoModuleParamType],
+                                 module_name: c.c_char_p, param: c.c_char_p) -> FimoError:
+    """Reads a module parameter with public read access.
+
+    Reads the value of a module parameter with public read access.
+    The operation fails, if the parameter does not exist, or if
+    the parameter does not allow reading with a public access.
+    The caller must ensure that `value` points to an instance of
+    the same datatype as the parameter in question.
+
+    :param context: context
+    :param value: pointer where to store the value
+    :param type: buffer where to store the type of the parameter
+    :param module_name: name of the module containing the parameter
+    :param param: name of the parameter
+
+    :return: Status code.
+    """
+    return _fimo_module_param_get_public(context, value, type, module_name, param)
+
+
+_fimo_module_param_set_dependency = _lib.fimo_module_param_set_dependency
+_fimo_module_param_set_dependency.argtypes = [c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType, c.c_char_p,
+                                              c.c_char_p]
+_fimo_module_param_set_dependency.restype = FimoError
+
+
+def fimo_module_param_set_dependency(module: Ref[FimoModule], value: c.c_void_p, type: FimoModuleParamType,
+                                     module_name: c.c_char_p, param: c.c_char_p) -> FimoError:
+    """Sets a module parameter with dependency write access.
+
+    Sets the value of a module parameter with dependency write
+    access. The operation fails, if the parameter does not exist,
+    or if the parameter does not allow writing with a dependency
+    access. The caller must ensure that `value` points to an
+    instance of the same datatype as the parameter in question.
+
+    :param module: module of the caller
+    :param value: pointer to the value to store
+    :param type: type of the value
+    :param module_name: name of the module containing the parameter
+    :param param: name of the parameter
+
+    :return: Status code.
+    """
+    return _fimo_module_param_set_dependency(module, value, type, module_name, param)
+
+
+_fimo_module_param_get_dependency = _lib.fimo_module_param_get_dependency
+_fimo_module_param_get_dependency.argtypes = [c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                                              c.c_char_p, c.c_char_p]
+_fimo_module_param_get_dependency.restype = FimoError
+
+
+def fimo_module_param_get_dependency(module: Ref[FimoModule], value: c.c_void_p, type: Ref[FimoModuleParamType],
+                                     module_name: c.c_char_p, param: c.c_char_p) -> FimoError:
+    """Reads a module parameter with dependency read access.
+
+    Reads the value of a module parameter with dependency read
+    access. The operation fails, if the parameter does not exist,
+    or if the parameter does not allow reading with a dependency
+    access. The caller must ensure that `value` points to an
+    instance of the same datatype as the parameter in question.
+
+    :param module: module of the caller
+    :param value: pointer where to store the value
+    :param type: buffer where to store the type of the parameter
+    :param module_name: name of the module containing the parameter
+    :param param: name of the parameter
+
+    :return: Status code.
+    """
+    return _fimo_module_param_get_dependency(module, value, type, module_name, param)
+
+
+_fimo_module_param_set_private = _lib.fimo_module_param_set_private
+_fimo_module_param_set_private.argtypes = [c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType,
+                                           c.POINTER(FimoModuleParam)]
+_fimo_module_param_set_private.restype = FimoError
+
+
+def fimo_module_param_set_private(module: Ref[FimoModule], value: c.c_void_p, type: FimoModuleParamType,
+                                  param: Ref[FimoModuleParam]) -> FimoError:
+    """Setter for a module parameter.
+
+    If the setter produces an error, the parameter won't be modified.
+
+    :param module: module of the caller
+    :param value: value to write
+    :param type: type of the value
+    :param param: parameter to write
+
+    :return: Status code.
+    """
+    return _fimo_module_param_set_private(module, value, type, param)
+
+
+_fimo_module_param_get_private = _lib.fimo_module_param_get_private
+_fimo_module_param_get_private.argtypes = [c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                                           c.POINTER(FimoModuleParam)]
+_fimo_module_param_get_private.restype = FimoError
+
+
+def fimo_module_param_get_private(module: Ref[FimoModule], value: c.c_void_p, type: Ref[FimoModuleParamType],
+                                  param: Ref[FimoModuleParam]) -> FimoError:
+    """Getter for a module parameter.
+
+    :param module: module of the caller
+    :param value: buffer where to store the parameter
+    :param type: buffer where to store the type of the parameter
+    :param param: parameter to load
+
+    :return: Status code.
+    """
+    return _fimo_module_param_get_private(module, value, type, param)
+
+
+_fimo_module_param_set_inner = _lib.fimo_module_param_set_inner
+_fimo_module_param_set_inner.argtypes = [c.POINTER(FimoModule), c.c_void_p, FimoModuleParamType,
+                                         c.POINTER(FimoModuleParamData)]
+_fimo_module_param_set_inner.restype = FimoError
+
+
+def fimo_module_param_set_inner(module: Ref[FimoModule], value: c.c_void_p, type: FimoModuleParamType,
+                                param: Ref[FimoModuleParamData]) -> FimoError:
+    """Internal setter for a module parameter.
+
+    If the setter produces an error, the parameter won't be modified.
+
+    :param module: module of the caller
+    :param value: value to write
+    :param type: type of the value
+    :param param: parameter to write
+
+    :return: Status code.
+    """
+    return _fimo_module_param_set_inner(module, value, type, param)
+
+
+_fimo_module_param_get_inner = _lib.fimo_module_param_get_inner
+_fimo_module_param_get_inner.argtypes = [c.POINTER(FimoModule), c.c_void_p, c.POINTER(FimoModuleParamType),
+                                         c.POINTER(FimoModuleParamData)]
+_fimo_module_param_get_inner.restype = FimoError
+
+
+def fimo_module_param_get_inner(module: Ref[FimoModule], value: c.c_void_p, type: Ref[FimoModuleParamType],
+                                param: Ref[FimoModuleParamData]) -> FimoError:
+    """Internal getter for a module parameter.
+
+    :param module: module of the caller
+    :param value: buffer where to store the parameter
+    :param type: buffer where to store the type of the parameter
+    :param param: parameter to load
+
+    :return: Status code.
+    """
+    return _fimo_module_param_get_inner(module, value, type, param)
