@@ -25,6 +25,9 @@ static void destroy_module_(const FimoModule *module, void *data);
 static FimoError run_string_(void *data, const char *code, const char *home);
 static FimoError construct_run_string_(const FimoModule *module, void **symbol);
 static void destroy_run_string_(void *symbol);
+static FimoError load_module_(void *data, FimoModuleLoadingSet *set, const char *filepath);
+static FimoError construct_load_module_(const FimoModule *module, void **symbol);
+static void destroy_load_module_(void *symbol);
 
 static FimoModuleResourceDecl module_resources[] = {
         FIMO_MODULE_RESOURCE(""),
@@ -49,10 +52,16 @@ FIMO_MODULE_RESOURCE_TABLE(
             FIMO_MODULE_RESOURCE_TABLE_PARAM(dynload_path);
         })
 #endif
-static FimoModuleDynamicSymbolExport module_dynamic_exports[] = {FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(
-        FIPY_SYMBOL_NAME_RUN_STRING, FIPY_SYMBOL_NAMESPACE, FIPY_SYMBOL_VERSION_MAJOR_RUN_STRING,
-        FIPY_SYMBOL_VERSION_MINOR_RUN_STRING, FIPY_SYMBOL_VERSION_PATCH_RUN_STRING, construct_run_string_,
-        destroy_run_string_)};
+static FimoModuleDynamicSymbolExport module_dynamic_exports[] = {
+        FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(FIPY_SYMBOL_NAME_RUN_STRING, FIPY_SYMBOL_NAMESPACE,
+                                             FIPY_SYMBOL_VERSION_MAJOR_RUN_STRING, FIPY_SYMBOL_VERSION_MINOR_RUN_STRING,
+                                             FIPY_SYMBOL_VERSION_PATCH_RUN_STRING, construct_run_string_,
+                                             destroy_run_string_),
+        FIMO_MODULE_EXPORT_DYNAMIC_SYMBOL_NS(
+                FIPY_SYMBOL_NAME_LOAD_MODULE, FIPY_SYMBOL_NAMESPACE, FIPY_SYMBOL_VERSION_MAJOR_LOAD_MODULE,
+                FIPY_SYMBOL_VERSION_MINOR_LOAD_MODULE, FIPY_SYMBOL_VERSION_PATCH_LOAD_MODULE, construct_load_module_,
+                destroy_load_module_),
+};
 
 FIMO_MODULE_EXPORT_MODULE(FIMO_CURRENT_MODULE_NAME, "Loader for Python modules", "fimo", "MIT + APACHE 2.0",
                           FIMO_MODULE_EXPORT_MODULE_RESOURCES(module_resources),
@@ -60,6 +69,11 @@ FIMO_MODULE_EXPORT_MODULE(FIMO_CURRENT_MODULE_NAME, "Loader for Python modules",
                           FIMO_MODULE_EXPORT_MODULE_CONSTRUCTOR(construct_module_, destroy_module_))
 
 static FimoError construct_module_(const FimoModule *module, FimoModuleLoadingSet *set, void **data) {
+    FimoError error = fimo_context_check_version(module->context);
+    if (FIMO_IS_ERROR(error)) {
+        return error;
+    }
+
     FIMO_TRACING_EMIT_TRACE_SIMPLE(module->context, __func__, FIMO_CURRENT_MODULE_NAME, "initializing module")
     (void)set;
 
@@ -279,6 +293,36 @@ static FimoError construct_run_string_(const FimoModule *module, void **symbol) 
 }
 
 static void destroy_run_string_(void *symbol) {
+    FIMO_DEBUG_ASSERT(symbol);
+    fimo_free(symbol);
+}
+
+static FimoError load_module_(void *data, FimoModuleLoadingSet *set, const char *filepath) {
+    (void)data;
+    (void)set;
+    (void)filepath;
+    return FIMO_ENOSYS;
+}
+
+static FimoError construct_load_module_(const FimoModule *module, void **symbol) {
+    FIMO_DEBUG_ASSERT(module && symbol)
+    FIMO_TRACING_EMIT_TRACE_SIMPLE(module->context, __func__, FIMO_CURRENT_MODULE_NAME, "initializing 'load_module'")
+    FimoError error;
+    FipyLoadModule **load_module = (FipyLoadModule **)symbol;
+    *load_module = fimo_malloc(sizeof(**load_module), &error);
+    if (FIMO_IS_ERROR(error)) {
+        FIMO_TRACING_EMIT_ERROR_SIMPLE(module->context, __func__, FIMO_CURRENT_MODULE_NAME,
+                                       "could not allocate symbol");
+    }
+    **load_module = (FipyLoadModule){
+            .data = (void *)module,
+            .func = load_module_,
+    };
+
+    return FIMO_EOK;
+}
+
+static void destroy_load_module_(void *symbol) {
     FIMO_DEBUG_ASSERT(symbol);
     fimo_free(symbol);
 }
