@@ -18,14 +18,16 @@ class ContextOption(ABC):
 
 class ContextView(_ffi.FFISharable[_ffi.FimoContext, "ContextView"]):
     """View of the context of the fimo library."""
+
     from . import tracing as _tracing
+
     _create_key = object()
 
     def __init__(self, create_key: object, context: _ffi.FimoContext):
         if create_key is not ContextView._create_key:
-            raise ValueError('`create_key` must be an instance of `_create_key`')
+            raise ValueError("`create_key` must be an instance of `_create_key`")
         if not isinstance(context, _ffi.FimoContext):
-            raise TypeError('`context` must be an instance of `FimoContext`')
+            raise TypeError("`context` must be an instance of `FimoContext`")
 
         self._context: _ffi.FimoContext | None = context
 

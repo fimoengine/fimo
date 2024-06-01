@@ -8,6 +8,7 @@ from . import ffi as _ffi
 
 class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum):
     """Error codes."""
+
     EOK = 0
     """Operation completed successfully"""
     E2BIG = 1

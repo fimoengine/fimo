@@ -12,14 +12,14 @@ def test_construction():
     assert version.patch() == 0
     assert version.build() == 0
 
-    version = Version.parse_str('2.55.7')
+    version = Version.parse_str("2.55.7")
     assert isinstance(version, Version)
     assert version.major() == 2
     assert version.minor() == 55
     assert version.patch() == 7
     assert version.build() == 0
 
-    version = Version.parse_str('3.4.1+99')
+    version = Version.parse_str("3.4.1+99")
     assert isinstance(version, Version)
     assert version.major() == 3
     assert version.minor() == 4
@@ -28,11 +28,11 @@ def test_construction():
 
 
 def test_string():
-    version = Version.parse_str('3.4.1+99')
-    assert version.as_str() == '3.4.1'
-    assert version.as_str_long() == '3.4.1+99'
-    assert str(version) == '3.4.1'
-    assert repr(version) == '3.4.1+99'
+    version = Version.parse_str("3.4.1+99")
+    assert version.as_str() == "3.4.1"
+    assert version.as_str_long() == "3.4.1+99"
+    assert str(version) == "3.4.1"
+    assert repr(version) == "3.4.1+99"
 
     assert version.string_length() >= 5
     assert version.string_length_long() >= 8

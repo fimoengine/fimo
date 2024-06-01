@@ -56,7 +56,9 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
 
         string_ = string.encode()
         vers = _ffi.FimoVersion()
-        err = _ffi.fimo_version_parse_str(c.c_char_p(string_), c.c_size_t(len(string_)), c.byref(vers))
+        err = _ffi.fimo_version_parse_str(
+            c.c_char_p(string_), c.c_size_t(len(string_)), c.byref(vers)
+        )
         error.ErrorCode(err.value).raise_if_error()
 
         major = vers.major.value
@@ -79,7 +81,9 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         length = self.string_length() + 1
         buffer = memory.DefaultAllocator.malloc(length * c.sizeof(c.c_char))
         buffer_str = c.cast(buffer, c.c_char_p)
-        err_ffi = _ffi.fimo_version_write_str(c.byref(self._version), buffer_str, c.c_size_t(length), None)
+        err_ffi = _ffi.fimo_version_write_str(
+            c.byref(self._version), buffer_str, c.c_size_t(length), None
+        )
         err = error.ErrorCode(err_ffi.value)
 
         if err.is_error():
@@ -95,7 +99,9 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         length = self.string_length_long() + 1
         buffer = memory.DefaultAllocator.malloc(length * c.sizeof(c.c_char))
         buffer_str = c.cast(buffer, c.c_char_p)
-        err_ffi = _ffi.fimo_version_write_str_long(c.byref(self._version), buffer_str, c.c_size_t(length), None)
+        err_ffi = _ffi.fimo_version_write_str_long(
+            c.byref(self._version), buffer_str, c.c_size_t(length), None
+        )
         err = error.ErrorCode(err_ffi.value)
 
         if err.is_error():
@@ -132,7 +138,9 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         if not isinstance(other, Version):
             error.ErrorCode.EINTR.raise_if_error()
 
-        return _ffi.fimo_version_cmp_long(c.byref(self._version), c.byref(other._version))
+        return _ffi.fimo_version_cmp_long(
+            c.byref(self._version), c.byref(other._version)
+        )
 
     def is_compatible(self, required: Self) -> bool:
         """Checks for the compatibility of two versions.
@@ -154,7 +162,9 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         if not isinstance(required, Version):
             error.ErrorCode.EINTR.raise_if_error()
 
-        return _ffi.fimo_version_compatible(c.byref(self._version), c.byref(required._version))
+        return _ffi.fimo_version_compatible(
+            c.byref(self._version), c.byref(required._version)
+        )
 
     def __lt__(self, other) -> bool:
         if not isinstance(other, Version):

@@ -142,7 +142,9 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
             raise TypeError("`other` must be a `Duration`")
 
         ffi = _ffi.FimoDuration()
-        err = _ffi.fimo_duration_add(c.byref(self._ffi), c.byref(other._ffi), c.byref(ffi))
+        err = _ffi.fimo_duration_add(
+            c.byref(self._ffi), c.byref(other._ffi), c.byref(ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
@@ -165,7 +167,9 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
             raise TypeError("`other` must be a `Duration`")
 
         ffi = _ffi.FimoDuration()
-        err = _ffi.fimo_duration_sub(c.byref(self._ffi), c.byref(other._ffi), c.byref(ffi))
+        err = _ffi.fimo_duration_sub(
+            c.byref(self._ffi), c.byref(other._ffi), c.byref(ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
@@ -284,7 +288,9 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
             raise TypeError("`earlier` must be a `Time`")
 
         ffi = _ffi.FimoDuration()
-        err = _ffi.fimo_time_duration_since(c.byref(self._ffi), c.byref(earlier._ffi), c.byref(ffi))
+        err = _ffi.fimo_time_duration_since(
+            c.byref(self._ffi), c.byref(earlier._ffi), c.byref(ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
@@ -342,28 +348,38 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         if not isinstance(other, Time):
             raise TypeError("`other` must be a `Time`")
 
-        return self.duration_since(Time.unix_epoch()) < other.duration_since(Time.unix_epoch())
+        return self.duration_since(Time.unix_epoch()) < other.duration_since(
+            Time.unix_epoch()
+        )
 
     def __le__(self, other: Self) -> bool:
         if not isinstance(other, Time):
             raise TypeError("`other` must be a `Time`")
 
-        return self.duration_since(Time.unix_epoch()) <= other.duration_since(Time.unix_epoch())
+        return self.duration_since(Time.unix_epoch()) <= other.duration_since(
+            Time.unix_epoch()
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Time):
             raise TypeError("`other` must be a `Time`")
 
-        return self.duration_since(Time.unix_epoch()) == other.duration_since(Time.unix_epoch())
+        return self.duration_since(Time.unix_epoch()) == other.duration_since(
+            Time.unix_epoch()
+        )
 
     def __ge__(self, other: Self) -> bool:
         if not isinstance(other, Time):
             raise TypeError("`other` must be a `Time`")
 
-        return self.duration_since(Time.unix_epoch()) >= other.duration_since(Time.unix_epoch())
+        return self.duration_since(Time.unix_epoch()) >= other.duration_since(
+            Time.unix_epoch()
+        )
 
     def __gt__(self, other: Self) -> bool:
         if not isinstance(other, Time):
             raise TypeError("`other` must be a `Time`")
 
-        return self.duration_since(Time.unix_epoch()) > other.duration_since(Time.unix_epoch())
+        return self.duration_since(Time.unix_epoch()) > other.duration_since(
+            Time.unix_epoch()
+        )

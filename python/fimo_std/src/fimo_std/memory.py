@@ -110,7 +110,9 @@ class DefaultAllocator:
         :raises Error: Buffer could not be allocated
         """
         err = _ffi.FimoError(0)
-        result = _ffi.fimo_aligned_alloc(c.c_size_t(alignment), c.c_size_t(size), c.byref(err))
+        result = _ffi.fimo_aligned_alloc(
+            c.c_size_t(alignment), c.c_size_t(size), c.byref(err)
+        )
         error.ErrorCode(err.value).raise_if_error()
         return result
 
@@ -130,7 +132,9 @@ class DefaultAllocator:
         :raises Error: Buffer could not be allocated
         """
         err = _ffi.FimoError(0)
-        result = _ffi.fimo_aligned_alloc_sized(c.c_size_t(alignment), c.c_size_t(size), c.byref(err))
+        result = _ffi.fimo_aligned_alloc_sized(
+            c.c_size_t(alignment), c.c_size_t(size), c.byref(err)
+        )
         error.ErrorCode(err.value).raise_if_error()
 
         ptr = result.ptr
@@ -168,7 +172,9 @@ class DefaultAllocator:
         _ffi.fimo_free_sized(ptr, c.c_size_t(size))
 
     @staticmethod
-    def free_with_alignment_and_size(ptr: c.c_void_p, alignment: int, size: int) -> None:
+    def free_with_alignment_and_size(
+        ptr: c.c_void_p, alignment: int, size: int
+    ) -> None:
         """Free allocated memory.
 
         Deallocates the memory allocated by an allocation function, If `ptr` is a null pointer
