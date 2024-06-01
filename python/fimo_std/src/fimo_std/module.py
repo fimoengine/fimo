@@ -364,7 +364,7 @@ _Data = TypeVar("_Data", bound=_ffi.FFITransferable[c.c_void_p])
 class _ModuleBase(
     Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
     _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModule]],
-    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModule], "_OpaqueModule"],
+    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModule], "_ModuleBase"],
     ABC,
 ):
     """Base class of all modules."""
@@ -394,7 +394,7 @@ class _ModuleBase(
         return self._ffi
 
     @classmethod
-    def borrow_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModule]) -> _OpaqueModule:
+    def borrow_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModule]) -> _ModuleBase:
         return _OpaqueModule(ffi)
 
     def _consume(self) -> None:
@@ -716,6 +716,12 @@ class ParameterType(
     def from_param(cls, obj):
         return cls(obj)
 
+    def __repr__(self) -> str:
+        return f"ParameterType({self.name})"
+
+    def __str__(self) -> str:
+        return self.name
+
 
 class ParameterAccess(
     _ffi.FFITransferable[_ffi.FimoModuleParamAccess], IntEnum, metaclass=ABCEnum
@@ -736,6 +742,12 @@ class ParameterAccess(
     @classmethod
     def from_param(cls, obj):
         return cls(obj)
+
+    def __repr__(self) -> str:
+        return f"ParameterAccess({self.name})"
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class Parameter(_ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleParam], "Parameter"]):
@@ -857,9 +869,7 @@ class ParameterValue:
                 raise ValueError("unknown parameter type")
 
     @classmethod
-    def read_dependency(
-        cls, caller: _OpaqueModule, module: str, parameter: str
-    ) -> Self:
+    def read_dependency(cls, caller: _ModuleBase, module: str, parameter: str) -> Self:
         """Reads a module parameter with dependency read access.
 
         Reads the value of a module parameter with dependency read access. The operation fails, if
@@ -872,8 +882,8 @@ class ParameterValue:
 
         :return: Parameter value.
         """
-        if not isinstance(caller, _OpaqueModule):
-            raise TypeError("`caller` must be an instance of `_OpaqueModule`")
+        if not isinstance(caller, _ModuleBase):
+            raise TypeError("`caller` must be an instance of `_ModuleBase`")
         if not isinstance(module, str):
             raise TypeError("`module` must be an instance of `str`")
         if not isinstance(parameter, str):
@@ -913,7 +923,7 @@ class ParameterValue:
                 raise ValueError("unknown parameter type")
 
     @classmethod
-    def read_private(cls, caller: _OpaqueModule, parameter: Parameter) -> Self:
+    def read_private(cls, caller: _ModuleBase, parameter: Parameter) -> Self:
         """Reads a module parameter with private read access.
 
         :param caller: caller module
@@ -921,8 +931,8 @@ class ParameterValue:
 
         :return: Parameter value.
         """
-        if not isinstance(caller, _OpaqueModule):
-            raise TypeError("`caller` must be an instance of `_OpaqueModule`")
+        if not isinstance(caller, _ModuleBase):
+            raise TypeError("`caller` must be an instance of `_ModuleBase`")
         if not isinstance(parameter, Parameter):
             raise TypeError("`parameter` must be an instance of `Parameter`")
 
@@ -959,7 +969,7 @@ class ParameterValue:
                 raise ValueError("unknown parameter type")
 
     @classmethod
-    def read_inner(cls, caller: _OpaqueModule, parameter: ParameterData) -> Self:
+    def read_inner(cls, caller: _ModuleBase, parameter: ParameterData) -> Self:
         """Reads a module parameter.
 
         :param caller: caller module
@@ -967,8 +977,8 @@ class ParameterValue:
 
         :return: Parameter value.
         """
-        if not isinstance(caller, _OpaqueModule):
-            raise TypeError("`caller` must be an instance of `_OpaqueModule`")
+        if not isinstance(caller, _ModuleBase):
+            raise TypeError("`caller` must be an instance of `_ModuleBase`")
         if not isinstance(parameter, ParameterData):
             raise TypeError("`parameter` must be an instance of `ParameterData`")
 
@@ -1053,7 +1063,7 @@ class ParameterValue:
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
     def write_dependency(
-        self, caller: _OpaqueModule, module: str, parameter: str
+        self, caller: _ModuleBase, module: str, parameter: str
     ) -> None:
         """Writes a module parameter with dependency write access.
 
@@ -1065,8 +1075,8 @@ class ParameterValue:
         :param module: module containing the parameter
         :param parameter: parameter name
         """
-        if not isinstance(caller, _OpaqueModule):
-            raise TypeError("`caller` must be an instance of `_OpaqueModule`")
+        if not isinstance(caller, _ModuleBase):
+            raise TypeError("`caller` must be an instance of `_ModuleBase`")
         if not isinstance(module, str):
             raise TypeError("`module` must be an instance of `str`")
         if not isinstance(parameter, str):
@@ -1102,14 +1112,14 @@ class ParameterValue:
         )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
-    def write_private(self, caller: _OpaqueModule, parameter: Parameter) -> None:
+    def write_private(self, caller: _ModuleBase, parameter: Parameter) -> None:
         """Writes a module parameter with private write access.
 
         :param caller: caller module
         :param parameter: parameter
         """
-        if not isinstance(caller, _OpaqueModule):
-            raise TypeError("`caller` must be an instance of `_OpaqueModule`")
+        if not isinstance(caller, _ModuleBase):
+            raise TypeError("`caller` must be an instance of `_ModuleBase`")
         if not isinstance(parameter, Parameter):
             raise TypeError("`parameter` must be an instance of `Parameter`")
 
@@ -1142,14 +1152,14 @@ class ParameterValue:
         )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
-    def write_inner(self, caller: _OpaqueModule, parameter: ParameterData) -> None:
+    def write_inner(self, caller: _ModuleBase, parameter: ParameterData) -> None:
         """Writes a module parameter.
 
         :param caller: caller module
         :param parameter: parameter
         """
-        if not isinstance(caller, _OpaqueModule):
-            raise TypeError("`caller` must be an instance of `_OpaqueModule`")
+        if not isinstance(caller, _ModuleBase):
+            raise TypeError("`caller` must be an instance of `_ModuleBase`")
         if not isinstance(parameter, ParameterData):
             raise TypeError("`parameter` must be an instance of `ParameterData`")
 
@@ -1182,6 +1192,1005 @@ class ParameterValue:
         )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
+    def __repr__(self) -> str:
+        return f"ParameterValue.{self._type}({self._value})"
+
+    def __str__(self) -> str:
+        return f"{self._value}"
+
+
+class ParameterDeclaration(
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamDecl]]
+):
+    """Declaration of a module parameter."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleParamDecl]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleParamDecl)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleParamDecl*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleParamDecl]:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleParamDecl]) -> Self:
+        return cls(ffi)
+
+    def parameter_type(self) -> ParameterType:
+        """Fetches the type of the parameter."""
+        value = self._ffi.contents.type
+        assert isinstance(value, _ffi.FimoModuleParamType)
+        return ParameterType.transfer_from_ffi(value)
+
+    def read_access(self) -> ParameterAccess:
+        """Fetches the access group specifier for the read permission."""
+        value = self._ffi.contents.read_access
+        assert isinstance(value, _ffi.FimoModuleParamAccess)
+        return ParameterAccess.transfer_from_ffi(value)
+
+    def write_access(self) -> ParameterAccess:
+        """Fetches the access group specifier for the write permission."""
+        value = self._ffi.contents.write_access
+        assert isinstance(value, _ffi.FimoModuleParamAccess)
+        return ParameterAccess.transfer_from_ffi(value)
+
+    def name(self) -> str:
+        """Fetches the name of the parameter."""
+        value = self._ffi.contents.name
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def default_value(self) -> ParameterValue:
+        """Fetches the default value of the parameter."""
+        value = self._ffi.contents.default_value
+        assert isinstance(value, _ffi._FimoModuleParamDeclDefaultValue)
+
+        parameter_type = self.parameter_type()
+        match parameter_type:
+            case ParameterType.U8:
+                return ParameterValue(value.u8.value, parameter_type)
+            case ParameterType.U16:
+                return ParameterValue(value.u16.value, parameter_type)
+            case ParameterType.U32:
+                return ParameterValue(value.u32.value, parameter_type)
+            case ParameterType.U64:
+                return ParameterValue(value.u64.value, parameter_type)
+            case ParameterType.I8:
+                return ParameterValue(value.i8.value, parameter_type)
+            case ParameterType.I16:
+                return ParameterValue(value.i16.value, parameter_type)
+            case ParameterType.I32:
+                return ParameterValue(value.i32.value, parameter_type)
+            case ParameterType.I64:
+                return ParameterValue(value.i64.value, parameter_type)
+            case _:
+                raise ValueError("unknown parameter type")
+
+    def __repr__(self) -> str:
+        read_access = self.read_access()
+        write_access = self.write_access()
+        name = self.name()
+        default_value = self.default_value()
+        return f"ParameterDeclaration({read_access=!r}, {write_access=!r}, {name=!r}, {default_value=!r})"
+
+    def __str__(self) -> str:
+        return f"{self.name()} ({self.read_access()}/{self.write_access()}), Default={self.default_value()}"
+
+
+class ResourceDeclaration(
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceDecl]]
+):
+    """Declaration of a module resource."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleResourceDecl]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleResourceDecl)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleResourceDecl*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleResourceDecl]:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleResourceDecl]) -> Self:
+        return cls(ffi)
+
+    def path(self) -> str:
+        """Fetches the path of the resource."""
+        value = self._ffi.contents.path
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def __repr__(self) -> str:
+        path = self.path()
+        return f"ResourceDeclaration({path=})"
+
+    def __str__(self) -> str:
+        return self.path()
+
+
+class NamespaceImport(
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleNamespaceImport]]
+):
+    """Declaration of a module namespace import."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleNamespaceImport]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleNamespaceImport)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleNamespaceImport*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleNamespaceImport]:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(
+        cls, ffi: _ffi.Pointer[_ffi.FimoModuleNamespaceImport]
+    ) -> Self:
+        return cls(ffi)
+
+    def name(self) -> str:
+        """Fetches the name of the namespace."""
+        value = self._ffi.contents.name
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def __repr__(self) -> str:
+        name = self.name()
+        return f"NamespaceImport({name=})"
+
+    def __str__(self) -> str:
+        return self.name()
+
+
+class SymbolImport(_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImport]]):
+    """Declaration of a module symbol import."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolImport]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleSymbolImport)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleSymbolImport*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleSymbolImport]:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolImport]) -> Self:
+        return cls(ffi)
+
+    def version(self) -> Version:
+        """Fetches the version of the symbol."""
+        value = self._ffi.contents.version
+        assert isinstance(value, _ffi.FimoVersion)
+        return Version.transfer_from_ffi(value)
+
+    def name(self) -> str:
+        """Fetches the name of the symbol."""
+        value = self._ffi.contents.name
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def namespace(self) -> str:
+        """Fetches the namespace of the symbol."""
+        value = self._ffi.contents.ns
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def __repr__(self) -> str:
+        name = self.name()
+        namespace = self.namespace()
+        version = self.version()
+        return f"SymbolImport({name=!r}, {namespace=!r}, {version=!r})"
+
+    def __str__(self) -> str:
+        return f"{self.namespace()}::{self.name()} ({self.version()})"
+
+
+class SymbolExport(_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExport]]):
+    """Declaration of a module symbol export."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolExport]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleSymbolExport)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleSymbolExport*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleSymbolExport]:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolExport]) -> Self:
+        return cls(ffi)
+
+    def symbol(self) -> c.c_void_p:
+        """Fetches a pointer to the exported symbol."""
+        value = self._ffi.contents.symbol
+        assert isinstance(value, int)
+        return c.c_void_p(value)
+
+    def version(self) -> Version:
+        """Fetches the version of the symbol."""
+        value = self._ffi.contents.version
+        assert isinstance(value, _ffi.FimoVersion)
+        return Version.transfer_from_ffi(value)
+
+    def name(self) -> str:
+        """Fetches the name of the symbol."""
+        value = self._ffi.contents.name
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def namespace(self) -> str:
+        """Fetches the namespace of the symbol."""
+        value = self._ffi.contents.ns
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def __repr__(self) -> str:
+        name = self.name()
+        namespace = self.namespace()
+        version = self.version()
+        symbol = self.symbol()
+        return f"SymbolExport({name=!r}, {namespace=!r}, {version=!r}, {symbol=!r})"
+
+    def __str__(self) -> str:
+        return f"{self.namespace()}::{self.name()} ({self.version()})"
+
+
+class DynamicSymbolExport(
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleDynamicSymbolExport]]
+):
+    """Declaration of a dynamic module symbol export."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleDynamicSymbolExport]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleDynamicSymbolExport)):
+            raise TypeError(
+                "`ffi` must be an instance of `FimoModuleDynamicSymbolExport*`"
+            )
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleDynamicSymbolExport]:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(
+        cls, ffi: _ffi.Pointer[_ffi.FimoModuleDynamicSymbolExport]
+    ) -> Self:
+        return cls(ffi)
+
+    def constructor(self) -> _ffi.FuncPointer:
+        """Fetches the symbol constructor."""
+        value = self._ffi.contents.constructor
+        return value
+
+    def destructor(self) -> _ffi.FuncPointer:
+        """Fetches the symbol destructor."""
+        value = self._ffi.contents.destructor
+        return value
+
+    def version(self) -> Version:
+        """Fetches the version of the symbol."""
+        value = self._ffi.contents.version
+        assert isinstance(value, _ffi.FimoVersion)
+        return Version.transfer_from_ffi(value)
+
+    def name(self) -> str:
+        """Fetches the name of the symbol."""
+        value = self._ffi.contents.name
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def namespace(self) -> str:
+        """Fetches the namespace of the symbol."""
+        value = self._ffi.contents.ns
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def __repr__(self) -> str:
+        name = self.name()
+        namespace = self.namespace()
+        version = self.version()
+        constructor = self.constructor()
+        destructor = self.destructor()
+        return f"DynamicSymbolExport({name=!r}, {namespace=!r}, {version=!r}, {symbol=!r}, {constructor=!r}, {destructor=!r})"
+
+    def __str__(self) -> str:
+        return f"{self.namespace()}::{self.name()} ({self.version()})"
+
+
+class ExportModifierKey(
+    _ffi.FFITransferable[_ffi.FimoModuleExportModifierKey], IntEnum, metaclass=ABCEnum
+):
+    """Key of a module modifier."""
+
+    Destructor = (
+        _ffi.FimoModuleExportModifierKey.FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR.value
+    )
+    Dependency = (
+        _ffi.FimoModuleExportModifierKey.FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY.value
+    )
+
+    def transfer_to_ffi(self) -> _ffi.FimoModuleExportModifierKey:
+        return _ffi.FimoModuleExportModifierKey(self)
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.FimoModuleExportModifierKey) -> Self:
+        return cls(ffi.value)
+
+    @classmethod
+    def from_param(cls, obj):
+        return cls(obj)
+
+    def __repr__(self) -> str:
+        return f"ExportModifierKey({self.name})"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ExportModifierDestructor(_ffi.FFITransferable[c.c_void_p]):
+    """A destructor module modifier."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleExportModifierDestructor]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleExportModifierDestructor)):
+            raise TypeError(
+                "`ffi` must be an instance of `FimoModuleExportModifierDestructor*`"
+            )
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> c.c_void_p:
+        return c.cast(self._ffi, c.c_void_p)
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: c.c_void_p) -> Self:
+        return cls(c.cast(ffi, c.POINTER(_ffi.FimoModuleExportModifierDestructor)))
+
+    def data(self) -> c.c_void_p:
+        """Fetches the type-erased data to pass to the destructor."""
+        value = self._ffi.contents.data
+        assert isinstance(value, int)
+        return c.c_void_p(value)
+
+    def destructor(self) -> _ffi.FuncPointer:
+        """Fetches the destructor."""
+        value = self._ffi.contents.destructor
+        assert isinstance(value, c.CFUNCTYPE(None, c.c_void_p))
+        return value
+
+    def __repr__(self) -> str:
+        data = self.data()
+        destructor = self.destructor()
+        return f"ExportModifierDestructor({data=!r}, {destructor=!r})"
+
+
+class ExportModifierDependency(_ffi.FFITransferable[c.c_void_p]):
+    """A dependency module modifier."""
+
+    def __init__(self, ffi: c.c_void_p):
+        if not isinstance(ffi, c.c_void_p):
+            raise TypeError("`ffi` must be an instance of `void*`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> c.c_void_p:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: c.c_void_p) -> Self:
+        return cls(ffi)
+
+    def __repr__(self) -> str:
+        ptr = self._ffi
+        return f"ExportModifierDependency({ptr=!r})"
+
+
+class ExportModifier(_ffi.FFITransferable[_ffi.FimoModuleExportModifier]):
+    """Declaration of a module modifier."""
+
+    def __init__(self, ffi: _ffi.FimoModuleExportModifier):
+        if not isinstance(ffi, _ffi.FimoModuleExportModifier):
+            raise TypeError("`ffi` must be an instance of `FimoModuleExportModifier`")
+
+        self._ffi = ffi
+
+    def transfer_to_ffi(self) -> _ffi.FimoModuleExportModifier:
+        return self._ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.FimoModuleExportModifier) -> Self:
+        return cls(ffi)
+
+    def key(self) -> ExportModifierKey:
+        """Fetches the key of the modifier."""
+        value = self._ffi.key
+        assert isinstance(value, _ffi.FimoModuleExportModifierKey)
+        return ExportModifierKey.transfer_from_ffi(value)
+
+    def value(self) -> ExportModifierDestructor | ExportModifierDependency:
+        """Fetches the value of the modifier."""
+        value = self._ffi.value
+        assert isinstance(value, int)
+        ptr = c.c_void_p(value)
+
+        match self.key():
+            case ExportModifierKey.Destructor:
+                return ExportModifierDestructor.transfer_from_ffi(ptr)
+            case ExportModifierKey.Dependency:
+                return ExportModifierDependency.transfer_from_ffi(ptr)
+            case _:
+                raise ValueError("unknown modifier key")
+
+    def __repr__(self) -> str:
+        key = self.key()
+        value = self.value()
+        return f"ExportModifier({key=!r}, {value=!r})"
+
+    def __str__(self) -> str:
+        return self.key().name
+
+
+class ModuleExport(
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleExport]],
+    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleExport], "ModuleExport"],
+):
+    """An exported module."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleExport]):
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleExport)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleExport*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi: Optional[_ffi.Pointer[_ffi.FimoModuleExport]] = ffi
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleExport]:
+        ffi = self.ffi
+        self._consume()
+        return ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleExport]) -> Self:
+        return cls(ffi)
+
+    @property
+    def ffi(self) -> _ffi.Pointer[_ffi.FimoModuleExport]:
+        if self._ffi is None:
+            raise ValueError("the object has already been consumed")
+
+        return self._ffi
+
+    @classmethod
+    def borrow_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleExport]) -> ModuleExport:
+        return ModuleExport(ffi)
+
+    def _consume(self) -> None:
+        self._ffi = None
+
+    def export_abi(self) -> int:
+        """Fetches the abi of the module declaration."""
+        value = self.ffi.contents.export_abi
+        assert isinstance(value, int)
+        return value
+
+    def name(self) -> str:
+        """Fetches the name of the module declaration."""
+        value = self.ffi.contents.name
+        assert isinstance(value, bytes)
+        return value.decode()
+
+    def description(self) -> Optional[str]:
+        """Fetches the description of the module declaration."""
+        value = self.ffi.contents.description
+        assert isinstance(value, bytes) or value is None
+        if value is None:
+            return value
+        return value.decode()
+
+    def author(self) -> Optional[str]:
+        """Fetches the author of the module declaration."""
+        value = self.ffi.contents.author
+        assert isinstance(value, bytes) or value is None
+        if value is None:
+            return value
+        return value.decode()
+
+    def license(self) -> Optional[str]:
+        """Fetches the license of the module declaration."""
+        value = self.ffi.contents.license
+        assert isinstance(value, bytes) or value is None
+        if value is None:
+            return value
+        return value.decode()
+
+    def parameters(self) -> list[ParameterDeclaration]:
+        """Fetches the list of parameters exposed by the module."""
+        value = self.ffi.contents.parameters
+        count = self.ffi.contents.parameters_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleParamDecl))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(ParameterDeclaration.transfer_from_ffi(type(value)(value[i])))
+        return lst
+
+    def resources(self) -> list[ResourceDeclaration]:
+        """Fetches the list of resources declared in the module."""
+        value = self.ffi.contents.resources
+        count = self.ffi.contents.resources_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleResourceDecl))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(ResourceDeclaration.transfer_from_ffi(type(value)(value[i])))
+        return lst
+
+    def imported_namespaces(self) -> list[NamespaceImport]:
+        """Fetches the list of namespaces imported by the module."""
+        value = self.ffi.contents.namespace_imports
+        count = self.ffi.contents.namespace_imports_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleNamespaceImport))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(NamespaceImport.transfer_from_ffi(type(value)(value[i])))
+        return lst
+
+    def imported_symbols(self) -> list[SymbolImport]:
+        """Fetches the list of symbols imported by the module."""
+        value = self.ffi.contents.symbol_imports
+        count = self.ffi.contents.symbol_imports_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleSymbolImport))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(SymbolImport.transfer_from_ffi(type(value)(value[i])))
+        return lst
+
+    def exported_symbols(self) -> list[SymbolExport]:
+        """Fetches the list of symbols exported by the module."""
+        value = self.ffi.contents.symbol_exports
+        count = self.ffi.contents.symbol_exports_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleSymbolExport))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(SymbolExport.transfer_from_ffi(type(value)(value[i])))
+        return lst
+
+    def exported_dynamic_symbols(self) -> list[DynamicSymbolExport]:
+        """Fetches the list of symbols exported by the module."""
+        value = self.ffi.contents.dynamic_symbol_exports
+        count = self.ffi.contents.dynamic_symbol_exports_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleDynamicSymbolExport))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(DynamicSymbolExport.transfer_from_ffi(type(value)(value[i])))
+        return lst
+
+    def modifiers(self) -> list[ExportModifier]:
+        """Fetches the list of modifiers for the module."""
+        value = self.ffi.contents.modifiers
+        count = self.ffi.contents.modifiers_count
+        assert isinstance(value, c.POINTER(_ffi.FimoModuleExportModifier))
+        assert isinstance(count, int)
+
+        lst = []
+        for i in range(count):
+            lst.append(ExportModifier.transfer_from_ffi(value[i]))
+        return lst
+
+    def module_constructor(self) -> _ffi.FuncPointer:
+        """Fetches the module constructor."""
+        value = self.ffi.contents.module_constructor
+        assert isinstance(value, _ffi.FimoModuleConstructor)
+        return value
+
+    def module_destructor(self) -> _ffi.FuncPointer:
+        """Fetches the module destructor."""
+        value = self.ffi.contents.contents.module_destructor
+        assert isinstance(value, _ffi.FimoModuleDestructor)
+        return value
+
+    def __repr__(self) -> str:
+        export_abi = self.export_abi()
+        name = self.name()
+        description = self.description()
+        author = self.author()
+        license = self.license()
+        parameters = self.parameters()
+        resources = self.resources()
+        imported_namespaces = self.imported_namespaces()
+        imported_symbols = self.imported_symbols()
+        exported_symbols = self.exported_symbols()
+        exported_dynamic_symbols = self.exported_dynamic_symbols()
+        module_constructor = self.module_constructor()
+        module_destructor = self.module_destructor()
+        return (
+            f"ModuleExport({export_abi=}, {name=}, {description=}, "
+            f"{author=}, {license=}, {parameters=}, {resources=}, {imported_namespaces=}, "
+            f"{imported_symbols=}, {exported_symbols=}, {exported_dynamic_symbols=}, "
+            f"{module_constructor=}, {module_destructor=}, ...)"
+        )
+
+    def __str__(self) -> str:
+        return f'{self.name()} ({self.author() or ""}/{self.license() or ""}): {self.description() or ""}'
+
+
+class _LoadingSetCallbackWrapper:
+    def __init__(
+        self,
+        on_success: Callable[[ModuleInfoView], None],
+        on_error: Callable[[ModuleExport], None],
+    ):
+        self._on_success = on_success
+        self._on_error = on_error
+
+    def on_success(self, info: ModuleInfo):
+        self._on_success(info)
+
+    def on_error(self, export: ModuleExport):
+        self._on_error(export)
+
+
+def _loading_set_callback_on_success(
+    info_ffi: _ffi.Pointer[_ffi.FimoModuleInfo], data_address: int
+):
+    try:
+        info = ModuleInfo.transfer_from_ffi(info_ffi)
+        data_ptr = c.c_void_p(data_address)
+        data = c.cast(data_ptr, c.py_object).value
+        assert isinstance(data, _LoadingSetCallbackWrapper)
+        data.on_success(info)
+        _ffi.c_dec_ref(data)
+        del data
+    except Exception:
+        assert False
+
+
+def _loading_set_callback_on_error(
+    export_ffi: _ffi.Pointer[_ffi.FimoModuleExport], data_address: int
+):
+    try:
+        export = ModuleExport.transfer_from_ffi(export_ffi)
+        data_ptr = c.c_void_p(data_address)
+        data = c.cast(data_ptr, c.py_object).value
+        assert isinstance(data, _LoadingSetCallbackWrapper)
+        data.on_error(export)
+        _ffi.c_dec_ref(data)
+        del data
+    except Exception:
+        assert False
+
+
+_loading_set_callback_on_success_func = c.CFUNCTYPE(
+    None, c.POINTER(_ffi.FimoModuleInfo), c.c_void_p
+)(_loading_set_callback_on_success)
+
+
+_loading_set_callback_on_error_func = c.CFUNCTYPE(
+    None, c.POINTER(_ffi.FimoModuleExport), c.c_void_p
+)(_loading_set_callback_on_error)
+
+
+class LoadingSetView(
+    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleLoadingSet], "LoadingSetView"]
+):
+    """A borrowed module loading set."""
+
+    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet]) -> None:
+        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleLoadingSet)):
+            raise TypeError("`ffi` must be an instance of `FimoModuleLoadingSet*`")
+        if not ffi:
+            raise ValueError("`ffi` may not be `null`")
+
+        self._ffi: Optional[_ffi.Pointer[_ffi.FimoModuleLoadingSet]] = ffi
+
+    @property
+    def ffi(self) -> _ffi.Pointer[_ffi.FimoModuleLoadingSet]:
+        if self._ffi is None:
+            raise ValueError("the object has already been consumed")
+
+        return self._ffi
+
+    @classmethod
+    def borrow_from_ffi(
+        cls, ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet]
+    ) -> LoadingSetView:
+        return LoadingSetView(ffi)
+
+    def _consume(self) -> None:
+        self._ffi = None
+
+    def has_module(self, ctx: _ContextView, name: str) -> bool:
+        """Checks if the loading set contains a specific module."""
+        if not isinstance(ctx, context.ContextView):
+            raise TypeError("`ctx` must be an instance of `ContextView`")
+        if not isinstance(name, str):
+            raise TypeError("`name` must be an instance of `str`")
+
+        name_ffi = c.c_char_p(name.encode())
+        has_module_ffi = c.c_bool()
+
+        err = _ffi.fimo_module_set_has_module(
+            ctx.ffi, self.ffi, name_ffi, c.byref(has_module_ffi)
+        )
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        return has_module_ffi.value
+
+    def has_symbol(
+        self, ctx: _ContextView, name: str, namespace: str, version: Version
+    ) -> bool:
+        """Checks if the loading set contains a specific symbol."""
+        if not isinstance(ctx, context.ContextView):
+            raise TypeError("`ctx` must be an instance of `ContextView`")
+        if not isinstance(name, str):
+            raise TypeError("`name` must be an instance of `str`")
+        if not isinstance(namespace, str):
+            raise TypeError("`namespace` must be an instance of `str`")
+        if not isinstance(version, Version):
+            raise TypeError("`version` must be an instance of `Version`")
+
+        name_ffi = c.c_char_p(name.encode())
+        namespace_ffi = c.c_char_p(namespace.encode())
+        version_ffi = version.transfer_to_ffi()
+        has_symbol_ffi = c.c_bool()
+
+        err = _ffi.fimo_module_set_has_symbol(
+            ctx.ffi,
+            self.ffi,
+            name_ffi,
+            namespace_ffi,
+            version_ffi,
+            c.byref(has_symbol_ffi),
+        )
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        return has_symbol_ffi.value
+
+    def append_callback(
+        self,
+        ctx: _ContextView,
+        module: str,
+        on_success: Callable[[ModuleInfoView], None],
+        on_error: Callable[[ModuleExport], None],
+    ) -> None:
+        """Adds a status callback to the module set.
+
+        Adds a set of callbacks to report a successful or failed loading of
+        a module. The `on_success` callback wil be called if the set was
+        able to load all requested modules, whereas the `on_error` callback
+        will be called immediately after the failed loading of the module. Since
+        the module set can be in a partially loaded state at the time of calling
+        this function, the `on_error` callback may be invoked immediately. If the
+        requested module `module_name` does not exist, this function will return
+        an error.
+        """
+        if not isinstance(ctx, context.ContextView):
+            raise TypeError("`ctx` must be an instance of `ContextView`")
+        if not isinstance(module, str):
+            raise TypeError("`module` must be an instance of `str`")
+
+        module_ffi = c.c_char_p(module.encode())
+
+        wrapper = _LoadingSetCallbackWrapper(on_success, on_error)
+        wrapper_ffi = c.py_object(wrapper)
+
+        err = _ffi.fimo_module_set_append_callback(
+            ctx.ffi,
+            self.ffi,
+            module_ffi,
+            _loading_set_callback_on_success_func,
+            _loading_set_callback_on_error_func,
+            c.c_void_p.from_buffer(wrapper_ffi),
+        )
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        # Since the callbacks will be passed to a C-interface it must take
+        # ownership of the object. We do this by increasing the reference count
+        _ffi.c_inc_ref(wrapper)
+
+    def append_freestanding_module(
+        self, owner: _ModuleBase, export: ModuleExport
+    ) -> None:
+        """Adds a freestanding module to the module set.
+
+        Adds a freestanding module to the set, so that it may be loaded
+        by a future call to `finish`. Trying to include an invalid module,
+        a module with duplicate exports or duplicate name will result in an
+        error. Unlike `append_modules`, this function allows for the loading
+        of dynamic modules, i.e. modules that are created at runtime, like
+        non-native modules, which may require a runtime to be executed in.
+        To ensure that the binary of the module calling this function is not
+        unloaded while the new module is instantiated, the new module inherits
+        a strong reference to the same binary as the caller's module.
+
+        Note that the new module is not setup to automatically depend on `owner`,
+        but may prevent it from being unloaded while the set exists.
+
+        The export must manually manage its reference count, so as not to be
+        cleaned up while being owned by the ffi.
+        """
+        if not isinstance(owner, _ModuleBase):
+            raise TypeError("`owner` must be an instance of `_ModuleBase`")
+        if not isinstance(export, ModuleExport):
+            raise TypeError("`module_path` must be an instance of `ModuleExport`")
+
+        err = _ffi.fimo_module_set_append_freestanding_module(
+            owner.ffi, self.ffi, export.ffi
+        )
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        # Now that we transferred the export without an error we also confirm it
+        # on the python side
+        _ = export.transfer_to_ffi()
+
+    def append_modules(
+        self,
+        ctx: _ContextView,
+        module_path: Optional[str],
+        filter: Callable[[ModuleExport], bool],
+    ) -> None:
+        """Adds modules to the module set.
+
+        Opens up a module binary to select which modules to load.
+        The binary path `module_path` must be encoded as `UTF-8`,
+        and point to the binary that contains the modules.  If the
+        path is `NULL`, it iterates over the exported modules of the
+        current binary. Each exported module is then passed to the
+        `filter`, which can then filter which modules to load. This
+        function may skip invalid module exports. Trying to include
+        a module with duplicate exports or duplicate name will result
+        in an error. This function signals an error, if the binary does
+        not contain the symbols necessary to query the exported modules,
+        but does not return in an error, if it does not export any modules.
+        The necessary symbols are set up automatically, if the binary was
+        linked with the fimo library. In case of an error, no modules are
+        appended to the set.
+        """
+        if not isinstance(ctx, context.ContextView):
+            raise TypeError("`ctx` must be an instance of `ContextView`")
+        if not isinstance(module_path, str) and module_path is not None:
+            raise TypeError("`module_path` must be an instance of `str` or be `None`")
+
+        def filter_func(
+            export_ffi: _ffi.Pointer[_ffi.FimoModuleExport], data_address: int
+        ) -> c.c_bool:
+            # noinspection PyBroadException
+            try:
+                export = ModuleExport.borrow_from_ffi(export_ffi)
+                assert data_address == 0
+                load = filter(export)
+                assert isinstance(load, bool)
+                return c.c_bool(load)
+            except Exception:
+                return c.c_bool(False)
+
+        module_path_ffi = (
+            c.c_char_p(module_path.encode())
+            if module_path is not None
+            else c.c_char_p()
+        )
+        filter_ffi = c.CFUNCTYPE(
+            c.c_bool, c.POINTER(_ffi.FimoModuleExport), c.c_void_p
+        )(filter_func)
+
+        err = _ffi.fimo_module_set_append_modules(
+            ctx.ffi, self.ffi, module_path_ffi, filter_ffi, c.c_void_p()
+        )
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+
+class LoadingSet(
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleLoadingSet]],
+    LoadingSetView,
+):
+    """A module loading set."""
+
+    def __init__(
+        self, ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet], ctx: _ContextView
+    ) -> None:
+        if not isinstance(ctx, context.ContextView):
+            raise TypeError("`ctx` must be an instance of `ContextView`")
+
+        super().__init__(ffi)
+        self._ctx: Optional[_Context] = ctx.acquire()
+
+    def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleLoadingSet]:
+        ffi = self.ffi
+        self._consume()
+        return ffi
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet]) -> Self:
+        raise NotImplementedError("can not take ownership of a `LoadingSet`")
+
+    def __del__(self) -> None:
+        if self._ffi is not None:
+            self.dismiss()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self._ffi is not None:
+            self.finish()
+
+    @classmethod
+    def new(cls, ctx: _ContextView) -> Self:
+        """Constructs a new empty module set.
+
+        The loading of a module fails, if at least one dependency can
+        not be satisfied, which requires the caller to manually find a
+        suitable loading order. To facilitate the loading, we load
+        multiple modules together, and automatically determine an
+        appropriate load order for all modules inside the module set.
+        """
+        if not isinstance(ctx, context.ContextView):
+            raise TypeError("`ctx` must be an instance of `ContextView`")
+
+        ffi = c.POINTER(_ffi.FimoModuleLoadingSet)()
+        err = _ffi.fimo_module_set_new(ctx.ffi, c.byref(ffi))
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        return cls(ffi, ctx)
+
+    def dismiss(self) -> None:
+        """Destroys the module set without loading any modules.
+
+        It is not possible to dismiss a module set that is currently
+        being loaded.
+        """
+        assert self._ctx is not None
+        err = _ffi.fimo_module_set_dismiss(self._ctx.ffi, self.ffi)
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        self._consume()
+        del self._ctx
+
+    def finish(self) -> None:
+        """Destroys the module set and loads the modules contained in it.
+
+        After successfully calling this function, the modules contained
+        in the set are loaded, and their symbols are available to all
+        other modules. If the construction of one module results in an
+        error, or if a dependency can not be satisfied, this function
+        rolls back the loading of all modules contained in the set
+        and returns an error. It is not possible to load a module set,
+        while another set is being loaded.
+        """
+        assert self._ctx is not None
+        err = _ffi.fimo_module_set_finish(self._ctx.ffi, self.ffi)
+        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+
+        self._consume()
+        del self._ctx
+
 
 class _ParameterDeclaration:
     def __init__(
@@ -1190,8 +2199,8 @@ class _ParameterDeclaration:
         type: ParameterType,
         read: ParameterAccess,
         write: ParameterAccess,
-        setter: Callable[[_OpaqueModule, ParameterValue, ParameterData], None],
-        getter: Callable[[_OpaqueModule, ParameterData], ParameterValue],
+        setter: Callable[[_ModuleBase, ParameterValue, ParameterData], None],
+        getter: Callable[[_ModuleBase, ParameterData], ParameterValue],
         default: int,
     ) -> None:
         self.name = name
@@ -1208,20 +2217,29 @@ _NamespaceImportDeclaration = NewType("_NamespaceImportDeclaration", str)
 
 
 class _SymbolImportDeclaration:
-    def __init__(self, name: str, namespace: str, version: Version) -> None:
+    def __init__(
+        self, name: str, namespace: str, version: Version, cls: type[Symbol]
+    ) -> None:
         self.name = name
         self.namespace = namespace
         self.version = version
+        self.cls = cls
 
 
 class _SymbolStaticExportDeclaration:
     def __init__(
-        self, name: str, namespace: str, version: Version, symbol: c.c_void_p
+        self,
+        name: str,
+        namespace: str,
+        version: Version,
+        symbol: c.c_void_p,
+        cls: type[Symbol],
     ) -> None:
         self.name = name
         self.namespace = namespace
         self.version = version
         self.symbol = symbol
+        self.cls = cls
 
 
 class _SymbolDynamicExportDeclaration:
@@ -1230,8 +2248,9 @@ class _SymbolDynamicExportDeclaration:
         name: str,
         namespace: str,
         version: Version,
-        constructor: _ffi.FuncPointer,
-        destructor: _ffi.FuncPointer,
+        constructor: Callable[[_ModuleBase, _ffi.Pointer[c.c_void_p]], None],
+        destructor: Callable[[c.c_void_p], None],
+        cls: type[Symbol],
     ) -> None:
         self.name = name
         self.namespace = namespace
@@ -1239,6 +2258,7 @@ class _SymbolDynamicExportDeclaration:
         self.symbol = symbol
         self.constructor = constructor
         self.destructor = destructor
+        self.cls = cls
 
 
 class _DataBase:
@@ -1264,8 +2284,8 @@ def module_parameter(
     type: ParameterType,
     read: Optional[ParameterAccess] = None,
     write: Optional[ParameterAccess] = None,
-    setter: Optional[Callable[[_OpaqueModule, ParameterValue, ParameterData], None]],
-    getter: Optional[Callable[[_OpaqueModule, ParameterData], ParameterValue]],
+    setter: Optional[Callable[[_ModuleBase, ParameterValue, ParameterData], None]],
+    getter: Optional[Callable[[_ModuleBase, ParameterData], ParameterValue]],
     default: Optional[int] = 0,
 ) -> _ParameterDeclaration:
     """Declares a new module parameter."""
@@ -1277,16 +2297,14 @@ def module_parameter(
     if setter is None:
 
         def default_setter(
-            module: _OpaqueModule, value: ParameterValue, data: ParameterData
+            module: _ModuleBase, value: ParameterValue, data: ParameterData
         ) -> None:
             return value.write_inner(module, data)
 
         setter = default_setter
     if getter is None:
 
-        def default_getter(
-            module: _OpaqueModule, data: ParameterData
-        ) -> ParameterValue:
+        def default_getter(module: _ModuleBase, data: ParameterData) -> ParameterValue:
             return ParameterValue.read_inner(module, data)
 
         getter = default_getter
@@ -1337,7 +2355,7 @@ def module_symbol_import(*, symbol: type[Symbol[_T]]) -> _SymbolImportDeclaratio
     namespace = symbol._symbol_namespace()
     version = symbol._symbol_version()
 
-    return _SymbolImportDeclaration(name, namespace, version)
+    return _SymbolImportDeclaration(name, namespace, version, symbol)
 
 
 # noinspection PyProtectedMember
@@ -1354,7 +2372,7 @@ def module_static_symbol_export(
     version = symbol._symbol_version()
     obj_ffi = c.cast(obj, c.c_void_p)
 
-    return _SymbolStaticExportDeclaration(name, namespace, version, obj_ffi)
+    return _SymbolStaticExportDeclaration(name, namespace, version, obj_ffi, symbol)
 
 
 # noinspection PyProtectedMember
@@ -1368,68 +2386,37 @@ def module_dynamic_symbol_export(
     if not isinstance(symbol, type):
         raise TypeError("`symbol` must be an instance of `type`")
 
-    def construct_symbol(
-        module: _ModuleBase, sym: _ffi.Pointer[c.c_void_p]
-    ) -> _ffi.FimoError:
-        try:
-            obj = factory(module)
-            obj_ptr = c.cast(obj, c.c_void_p)
+    def construct_symbol(module: _ModuleBase, sym: _ffi.Pointer[c.c_void_p]) -> None:
+        obj = factory(module)
+        obj_ptr = c.cast(obj, c.c_void_p)
 
-            data = module.data()
-            if not isinstance(data, _DataBase):
-                raise TypeError("module data must be an instance of `_DataBase`")
+        data = module.data()
+        if not isinstance(data, _DataBase):
+            raise TypeError("module data must be an instance of `_DataBase`")
 
-            # noinspection PyProtectedMember
-            data._add_dynamic_symbol(obj_ptr)
-            sym[0] = obj_ptr
+        # noinspection PyProtectedMember
+        data._add_dynamic_symbol(obj_ptr)
+        sym[0] = obj_ptr
 
-            return error.ErrorCode.EOK.transfer_to_ffi()
-        except Exception as e:
-            return error.ErrorCode.from_exception(e).transfer_to_ffi()
-
-    def destroy_symbol(sym: _ffi.Pointer[c.c_void_p]) -> None:
+    def destroy_symbol(_sym: c.c_void_p) -> None:
         pass
 
     name = symbol._symbol_name()
     namespace = symbol._symbol_namespace()
     version = symbol._symbol_version()
-    constructor_ffi = _ffi.FimoModuleDynamicSymbolConstructor(construct_symbol)
-    destructor_ffi = _ffi.FimoModuleDynamicSymbolDestructor(destroy_symbol)
 
     return _SymbolDynamicExportDeclaration(
-        name, namespace, version, constructor_ffi, destructor_ffi
+        name, namespace, version, construct_symbol, destroy_symbol, symbol
     )
 
 
 _DataT = TypeVar("_DataT")
 
 
-def export_module(
-    *,
-    name: str,
-    description: Optional[str] = None,
-    author: Optional[str] = None,
-    license: Optional[str] = None,
-    parameters: Optional[dict[str, _ParameterDeclaration]] = None,
-    resources: Optional[dict[str, _ResourceDeclaration]] = None,
-    namespaces: Optional[list[_NamespaceImportDeclaration]] = None,
-    imports: Optional[list[_SymbolImportDeclaration]] = None,
-    exports: Optional[
-        list[_SymbolStaticExportDeclaration | _SymbolDynamicExportDeclaration]
-    ] = None,
-    data_type: Optional[type[_DataT]] = None,
-    factory: Optional[Callable[[_ModuleBase, Any, type[_DataT]], _DataT]] = None,
-):
-    """Exports a new module."""
-    parameters_ = parameters if parameters is not None else {}
-    resources_ = resources if resources is not None else {}
-    namespaces_ = namespaces if namespaces is not None else []
-    imports_ = imports if imports is not None else []
-    exports_ = exports if exports is not None else []
-    data_type_ = data_type if data_type is not None else object
-
-    # Generate the class types for the module tables
-    parameter_index_map = {key: i for i, key in enumerate(parameters_.keys())}
+def _create_module_parameter_map(
+    parameters: dict[str, _ParameterDeclaration]
+) -> type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]]]:
+    index_map = {key: i for i, key in enumerate(parameters.keys())}
 
     class _ModuleParameterMap(
         _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]]
@@ -1446,9 +2433,10 @@ def export_module(
             )
 
         def __getattribute__(self, name: str) -> Parameter:
-            if name in parameter_index_map:
-                parameter_idx = parameter_index_map[name]
-                parameter = self._ffi[parameter_idx]
+            nonlocal index_map
+            if name in index_map:
+                idx = index_map[name]
+                parameter = self._ffi[idx]
                 return Parameter(parameter)
 
             raise ValueError(f"invalid attribute name: {name}")
@@ -1462,7 +2450,13 @@ def export_module(
         ) -> Self:
             return cls(ffi)
 
-    resource_index_map = {key: i for i, key in enumerate(resources_.keys())}
+    return _ModuleParameterMap
+
+
+def _create_module_resource_map(
+    resources: dict[str, _ResourceDeclaration]
+) -> type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]]]:
+    index_map = {key: i for i, key in enumerate(resources.keys())}
 
     class _ModuleResourceMap(
         _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]]
@@ -1477,9 +2471,10 @@ def export_module(
             self._ffi: _ffi.Pointer[c.c_void_p] = c.cast(ffi, c.POINTER(c.c_void_p))
 
         def __getattribute__(self, name: str) -> str:
-            if name in resource_index_map:
-                resource_idx = parameter_index_map[name]
-                resource: bytes = self._ffi[resource_idx]
+            nonlocal index_map
+            if name in index_map:
+                idx = index_map[name]
+                resource: bytes = self._ffi[idx]
                 return resource.decode()
 
             raise ValueError(f"invalid attribute name: {name}")
@@ -1493,11 +2488,112 @@ def export_module(
         ) -> Self:
             return cls(ffi)
 
-    # We require some additional functionality for the data
-    # of the module, so we create a wrapper which inherits
-    # both from our internal mixin and the original class
-    # passed by the user.
-    data_bases = (_DataBase,) if data_type_ is object else (_DataBase, data_type_)
+    return _ModuleResourceMap
+
+
+def _create_module_import_map(
+    imports: dict[str, _SymbolImportDeclaration]
+) -> type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]]]:
+    index_map = {key: (i, value.cls) for i, (key, value) in enumerate(imports.items())}
+
+    class _ModuleImportMap(
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]]
+    ):
+        def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolImportTable]) -> None:
+            if not isinstance(ffi, c.POINTER(_ffi.FimoModuleSymbolImportTable)):
+                raise TypeError(
+                    "`ffi` must be an instance of an `FimoModuleSymbolImportTable*`"
+                )
+            if not ffi:
+                raise ValueError("`ffi` may not be `null`")
+            self._ffi: _ffi.Pointer[_ffi.FimoModuleRawSymbol] = c.cast(
+                ffi, c.POINTER(_ffi.FimoModuleRawSymbol)
+            )
+
+        def __getattribute__(self, name: str) -> Symbol:
+            nonlocal index_map
+            if name in index_map:
+                (idx, cls) = index_map[name]
+                raw_symbol: RawSymbol = RawSymbol(type(self._ffi)(self._ffi[idx]))
+                return cls(raw_symbol)
+
+            raise ValueError(f"invalid attribute name: {name}")
+
+        def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleSymbolImportTable]:
+            return c.cast(self._ffi, c.POINTER(_ffi.FimoModuleSymbolImportTable))
+
+        @classmethod
+        def transfer_from_ffi(
+            cls, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolImportTable]
+        ) -> Self:
+            return cls(ffi)
+
+    return _ModuleImportMap
+
+
+def _create_module_export_map(
+    exports: dict[str, _SymbolStaticExportDeclaration | _SymbolDynamicExportDeclaration]
+) -> type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]]]:
+    static_exports = {
+        key: value
+        for key, value in exports.items()
+        if isinstance(value, _SymbolStaticExportDeclaration)
+    }
+    dynamic_exports = {
+        key: value
+        for key, value in exports.items()
+        if isinstance(value, _SymbolDynamicExportDeclaration)
+    }
+
+    index_map = {
+        key: (i, value.cls) for i, (key, value) in enumerate(static_exports.items())
+    }
+    for i, (key, value) in enumerate(dynamic_exports.items()):
+        index_map[key] = (i + len(static_exports), value.cls)
+
+    class _ModuleExportMap(
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]]
+    ):
+        def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolExportTable]) -> None:
+            if not isinstance(ffi, c.POINTER(_ffi.FimoModuleSymbolExportTable)):
+                raise TypeError(
+                    "`ffi` must be an instance of an `FimoModuleSymbolExportTable*`"
+                )
+            if not ffi:
+                raise ValueError("`ffi` may not be `null`")
+            self._ffi: _ffi.Pointer[_ffi.FimoModuleRawSymbol] = c.cast(
+                ffi, c.POINTER(_ffi.FimoModuleRawSymbol)
+            )
+
+        def __getattribute__(self, name: str) -> Symbol:
+            nonlocal index_map
+            if name in index_map:
+                (idx, cls) = index_map[name]
+                raw_symbol: RawSymbol = RawSymbol(type(self._ffi)(self._ffi[idx]))
+                return cls(raw_symbol)
+
+            raise ValueError(f"invalid attribute name: {name}")
+
+        def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleSymbolExportTable]:
+            return c.cast(self._ffi, c.POINTER(_ffi.FimoModuleSymbolExportTable))
+
+        @classmethod
+        def transfer_from_ffi(
+            cls, ffi: _ffi.Pointer[_ffi.FimoModuleSymbolExportTable]
+        ) -> Self:
+            return cls(ffi)
+
+    return _ModuleExportMap
+
+
+def _create_module_data(
+    data_type: Optional[type],
+) -> type[Any]:
+    data_bases: tuple[type, ...] = (_DataBase,)
+    if data_type is not None:
+        assert isinstance(data_type, type)
+        data_bases += (data_type,)
+
     _ModuleData = type(
         "_ModuleData",
         data_bases,
@@ -1518,34 +2614,113 @@ def export_module(
     _ModuleData.transfer_to_ffi = module_data_transfer_to_ffi  # type: ignore[attr-defined]
     _ModuleData.transfer_from_ffi = classmethod(module_data_transfer_from_ffi)  # type: ignore[attr-defined]
 
+    return _ModuleData
+
+
+def _create_module_type(
+    module_parameter_map: type[
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]]
+    ],
+    module_resource_map: type[
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]]
+    ],
+    module_import_map: type[
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]]
+    ],
+    module_export_map: type[
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]]
+    ],
+    module_data_type: type[_ffi.FFITransferable[c.c_void_p]],
+) -> type[_ModuleBase]:
     class _Module(_ModuleBase):
         @staticmethod
-        def _parameters_type() -> type[_OpaqueParameters]:
-            return _OpaqueParameters
+        def _parameters_type() -> (
+            type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]]]
+        ):
+            nonlocal module_parameter_map
+            return module_parameter_map
 
         @staticmethod
-        def _resources_type() -> type[_OpaqueResources]:
-            return _OpaqueResources
+        def _resources_type() -> (
+            type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]]]
+        ):
+            nonlocal module_resource_map
+            return module_resource_map
 
         @staticmethod
-        def _imports_type() -> type[_OpaqueImports]:
-            return _OpaqueImports
+        def _imports_type() -> (
+            type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]]]
+        ):
+            nonlocal module_import_map
+            return module_import_map
 
         @staticmethod
-        def _exports_type() -> type[_OpaqueExports]:
-            return _OpaqueExports
+        def _exports_type() -> (
+            type[_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]]]
+        ):
+            nonlocal module_export_map
+            return module_export_map
 
         @staticmethod
-        def _data_type() -> type[Any]:
-            return _ModuleData
+        def _data_type() -> type[_ffi.FFITransferable[c.c_void_p]]:
+            nonlocal module_data_type
+            return module_data_type
+
+    return _Module
+
+
+def export_module(
+    *,
+    name: str,
+    description: Optional[str] = None,
+    author: Optional[str] = None,
+    license: Optional[str] = None,
+    parameters: Optional[dict[str, _ParameterDeclaration]] = None,
+    resources: Optional[dict[str, _ResourceDeclaration]] = None,
+    namespaces: Optional[list[_NamespaceImportDeclaration]] = None,
+    imports: Optional[dict[str, _SymbolImportDeclaration]] = None,
+    exports: Optional[
+        dict[str, _SymbolStaticExportDeclaration | _SymbolDynamicExportDeclaration]
+    ] = None,
+    data_type: Optional[type[_DataT]] = None,
+    factory: Optional[
+        Callable[[_ModuleBase, LoadingSetView, type[_DataT]], _DataT]
+    ] = None,
+):
+    """Exports a new module."""
+    parameters_ = parameters if parameters is not None else {}
+    resources_ = resources if resources is not None else {}
+    namespaces_ = namespaces if namespaces is not None else []
+    imports_ = imports if imports is not None else {}
+    exports_ = exports if exports is not None else {}
+
+    # Generate the class types for the module tables
+    module_parameter_map = _create_module_parameter_map(parameters_)
+    module_resource_map = _create_module_resource_map(resources_)
+    module_import_map = _create_module_import_map(imports_)
+    module_export_map = _create_module_export_map(exports_)
+    module_data_type = _create_module_data(data_type)
+
+    assert isinstance(module_data_type, _ffi.FFITransferable) and isinstance(
+        module_data_type, _DataBase
+    )
+
+    module_type = _create_module_type(
+        module_parameter_map,
+        module_resource_map,
+        module_import_map,
+        module_export_map,
+        module_data_type,
+    )
 
     def default_factory(
-        module: _ModuleBase, module_set: Any, cls: type[_DataT]
+        _module: _ModuleBase, _module_set: LoadingSetView, cls: type[_DataT]
     ) -> _DataT:
         return cls()
 
     factory_ = factory if factory is not None else default_factory
 
+    # Generate the ffi module export
     name_ffi = c.c_char_p(name.encode())
     description_ffi = (
         c.c_char_p(description.encode()) if description is not None else c.c_char_p()
@@ -1565,10 +2740,10 @@ def export_module(
     parameters_ffi = (_ffi.FimoModuleParamDecl * len(parameters_))()
     parameters_count_ffi = _ffi.FimoU32(len(parameters_))
     for i, param in enumerate(parameters_.values()):
-        setter: Callable[[_OpaqueModule, ParameterValue, ParameterData], None] = (
+        setter: Callable[[_ModuleBase, ParameterValue, ParameterData], None] = (
             param.setter
         )
-        getter: Callable[[_OpaqueModule, ParameterData], ParameterValue] = param.getter
+        getter: Callable[[_ModuleBase, ParameterData], ParameterValue] = param.getter
 
         def setter_wrapper(
             module_ffi: _ffi.Pointer[_ffi.FimoModule],
@@ -1577,7 +2752,7 @@ def export_module(
             data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData],
         ) -> _ffi.FimoError:
             try:
-                module = _OpaqueModule.borrow_from_ffi(module_ffi)
+                module = module_type.transfer_from_ffi(module_ffi)
                 value_ffi = c.c_void_p.from_address(value_addr)
                 type = ParameterType.transfer_from_ffi(type_ffi)
                 match type:
@@ -1627,7 +2802,7 @@ def export_module(
             data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData],
         ) -> _ffi.FimoError:
             try:
-                module = _OpaqueModule.borrow_from_ffi(module_ffi)
+                module = module_type.transfer_from_ffi(module_ffi)
                 value_ffi = c.c_void_p.from_address(value_addr)
                 data = ParameterData.borrow_from_ffi(data_ffi)
 
@@ -1728,7 +2903,7 @@ def export_module(
 
     imports_ffi = (_ffi.FimoModuleSymbolImport * len(imports_))()
     imports_count_ffi = _ffi.FimoU32(len(imports_))
-    for i, imp in enumerate(imports_):
+    for i, imp in enumerate(imports_.values()):
         import_ffi = _ffi.FimoModuleSymbolImport()
         import_ffi.version = imp.version.transfer_to_ffi()
         import_ffi.name = c.c_char_p(imp.name.encode())
@@ -1740,7 +2915,7 @@ def export_module(
     export_names: set[str] = set()
     static_exports: list[_SymbolStaticExportDeclaration] = []
     dynamic_exports: list[_SymbolDynamicExportDeclaration] = []
-    for exp in exports_:
+    for exp in exports_.values():
         if exp.name in export_names:
             raise ValueError(f"duplicate export defined: {exp.name}")
         export_names.add(exp.name)
@@ -1767,9 +2942,33 @@ def export_module(
     dynamic_exports_ffi = (_ffi.FimoModuleDynamicSymbolExport * len(dynamic_exports))()
     dynamic_exports_count_ffi = _ffi.FimoU32(len(dynamic_exports))
     for i, exp in enumerate(dynamic_exports):
+        symbol_constructor = exp.constructor
+        symbol_destructor = exp.destructor
+
+        def ffi_symbol_constructor(
+            module_ffi: _ffi.Pointer[_ffi.FimoModule], sym: _ffi.Pointer[c.c_void_p]
+        ) -> _ffi.FimoError:
+            try:
+                module = module_type.transfer_from_ffi(module_ffi)
+                symbol_constructor(module, sym)
+                return error.ErrorCode.EOK.transfer_to_ffi()
+            except Exception as e:
+                return error.ErrorCode.from_exception(e).transfer_to_ffi()
+
+        def ffi_symbol_destructor(ffi: c.c_void_p) -> None:
+            # noinspection PyBroadException
+            try:
+                symbol_destructor(ffi)
+            except Exception:
+                assert False
+
         d_export_ffi = _ffi.FimoModuleDynamicSymbolExport()
-        d_export_ffi.constructor = exp.constructor
-        d_export_ffi.destructor = exp.destructor
+        d_export_ffi.constructor = _ffi.FimoModuleDynamicSymbolConstructor(
+            ffi_symbol_constructor
+        )
+        d_export_ffi.destructor = _ffi.FimoModuleDynamicSymbolDestructor(
+            ffi_symbol_destructor
+        )
         d_export_ffi.version = exp.version.transfer_to_ffi()
         d_export_ffi.name = c.c_char_p(exp.name.encode())
         d_export_ffi.ns = c.c_char_p(exp.namespace.encode())
@@ -1786,10 +2985,14 @@ def export_module(
         data_ffi: _ffi.Pointer[c.c_void_p],
     ) -> _ffi.FimoError:
         try:
-            module = _Module.borrow_from_ffi(module_ffi)
+            module = module_type.transfer_from_ffi(module_ffi)
+            assert isinstance(module, _ModuleBase)
+            module.context().check_version()
+
+            module_set = LoadingSetView.borrow_from_ffi(module_set_ffi)
 
             # noinspection PyTypeChecker
-            obj = factory_(module, module_set_ffi, _ModuleData)
+            obj = factory_(module, module_set, module_data_type)
             obj_ptr = obj.transfer_to_ffi()  # type: ignore[attr-defined]
 
             data_ffi[0] = obj_ptr
@@ -1800,10 +3003,10 @@ def export_module(
             return error.ErrorCode.from_exception(e).transfer_to_ffi()
 
     def destructor(
-        module_ffi: _ffi.Pointer[_ffi.FimoModule], data_ffi: _ffi.Pointer[c.c_void_p]
+        _module_ffi: _ffi.Pointer[_ffi.FimoModule], data_ffi: _ffi.Pointer[c.c_void_p]
     ) -> None:
         try:
-            obj = _ModuleData.transfer_from_ffi(data_ffi.contents)  # type: ignore[attr-defined]
+            obj = module_data_type.transfer_from_ffi(data_ffi.contents)  # type: ignore[attr-defined]
             _ffi.c_dec_ref(obj)
         except Exception:
             assert False
