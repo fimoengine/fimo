@@ -3,7 +3,16 @@ from __future__ import annotations
 import ctypes as c
 from enum import IntEnum
 from abc import ABC, abstractmethod
-from typing import Self, Any, Optional, Generic, TypeVar, NewType, Callable, TYPE_CHECKING
+from typing import (
+    Self,
+    Any,
+    Optional,
+    Generic,
+    TypeVar,
+    NewType,
+    Callable,
+    TYPE_CHECKING,
+)
 
 from .enum import ABCEnum
 from .version import Version
@@ -15,7 +24,9 @@ if TYPE_CHECKING:
     from .context import Context as _Context, ContextView as _ContextView
 
 
-class ModuleInfoView(_ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleInfo], "ModuleInfoView"]):
+class ModuleInfoView(
+    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleInfo], "ModuleInfoView"]
+):
     """View of a `ModuleInfo`."""
 
     def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleInfo]) -> None:
@@ -129,7 +140,9 @@ class ModuleInfoView(_ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleInfo], "Module
         self._ffi = None
 
 
-class ModuleInfo(ModuleInfoView, _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleInfo]]):
+class ModuleInfo(
+    ModuleInfoView, _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleInfo]]
+):
     """Public handle to a loaded module."""
 
     def __del__(self):
@@ -162,7 +175,9 @@ class ModuleInfo(ModuleInfoView, _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModu
         return cls(module_ffi)
 
     @classmethod
-    def find_by_symbol(cls, ctx: _ContextView, name: str, namespace: str, version: Version) -> Self:
+    def find_by_symbol(
+        cls, ctx: _ContextView, name: str, namespace: str, version: Version
+    ) -> Self:
         """Searches for a module by a symbol it exports."""
         if not isinstance(ctx, context.ContextView):
             raise TypeError("`ctx` must be an instance of `ContextView`")
@@ -177,7 +192,9 @@ class ModuleInfo(ModuleInfoView, _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModu
         name_ffi = c.c_char_p(name.encode())
         namespace_ffi = c.c_char_p(namespace.encode())
         version_ffi = version.transfer_to_ffi()
-        err = _ffi.fimo_module_find_by_symbol(ctx.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(module_ffi))
+        err = _ffi.fimo_module_find_by_symbol(
+            ctx.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(module_ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
         return cls(module_ffi)
@@ -185,6 +202,7 @@ class ModuleInfo(ModuleInfoView, _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModu
 
 class DependencyType(IntEnum):
     """Type of dependency between a module and a namespace."""
+
     Static = 0
     Dynamic = 1
 
@@ -262,7 +280,9 @@ class Symbol(Generic[_T], ABC):
         self._sym.__exit__(exc_type, exc_val, exc_tb)
 
 
-def symbol(*, sym_type: type[_T], name: str, namespace: Optional[str], version: Version) -> type[Symbol[_T]]:
+def symbol(
+    *, sym_type: type[_T], name: str, namespace: Optional[str], version: Version
+) -> type[Symbol[_T]]:
     """Defines a new symbol type."""
     if not isinstance(sym_type, type):
         raise TypeError("`sym_type` must be an instance of `type`")
@@ -310,22 +330,43 @@ class _OpaqueType(Generic[_OpaqueT], _ffi.FFITransferable[_OpaqueT]):
         return cls(ffi)
 
 
-_OpaqueParameters = NewType("_OpaqueParameters", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleParamTable]])
-_OpaqueResources = NewType("_OpaqueResources", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleResourceTable]])
-_OpaqueImports = NewType("_OpaqueImports", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]])
-_OpaqueExports = NewType("_OpaqueExports", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]])
+_OpaqueParameters = NewType(
+    "_OpaqueParameters", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleParamTable]]
+)
+_OpaqueResources = NewType(
+    "_OpaqueResources", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleResourceTable]]
+)
+_OpaqueImports = NewType(
+    "_OpaqueImports", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]]
+)
+_OpaqueExports = NewType(
+    "_OpaqueExports", _OpaqueType[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]]
+)
 _OpaqueData = NewType("_OpaqueData", _OpaqueType[c.c_void_p])
 
-_Parameters = TypeVar("_Parameters", bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]])
-_Resources = TypeVar("_Resources", bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]])
-_Imports = TypeVar("_Imports", bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]])
-_Exports = TypeVar("_Exports", bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]])
+_Parameters = TypeVar(
+    "_Parameters", bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]]
+)
+_Resources = TypeVar(
+    "_Resources", bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]]
+)
+_Imports = TypeVar(
+    "_Imports",
+    bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolImportTable]],
+)
+_Exports = TypeVar(
+    "_Exports",
+    bound=_ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleSymbolExportTable]],
+)
 _Data = TypeVar("_Data", bound=_ffi.FFITransferable[c.c_void_p])
 
 
-class _ModuleBase(Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
-                  _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModule]],
-                  _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModule], "_OpaqueModule"], ABC):
+class _ModuleBase(
+    Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
+    _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModule]],
+    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModule], "_OpaqueModule"],
+    ABC,
+):
     """Base class of all modules."""
 
     def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModule]):
@@ -391,27 +432,37 @@ class _ModuleBase(Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
 
     def parameters(self) -> _Parameters:
         """Fetches the parameter table of the module."""
-        parameters_ffi: _ffi.Pointer[_ffi.FimoModuleParamTable] = self.ffi.contents.parameters
+        parameters_ffi: _ffi.Pointer[_ffi.FimoModuleParamTable] = (
+            self.ffi.contents.parameters
+        )
         return self._parameters_type().transfer_from_ffi(parameters_ffi)
 
     def resources(self) -> _Resources:
         """Fetches the resource path table of the module."""
-        resources_ffi: _ffi.Pointer[_ffi.FimoModuleResourceTable] = self.ffi.contents.resources
+        resources_ffi: _ffi.Pointer[_ffi.FimoModuleResourceTable] = (
+            self.ffi.contents.resources
+        )
         return self._resources_type().transfer_from_ffi(resources_ffi)
 
     def imports(self) -> _Imports:
         """Fetches the symbol import table of the module."""
-        imports_ffi: _ffi.Pointer[_ffi.FimoModuleSymbolImportTable] = self.ffi.contents.imports
+        imports_ffi: _ffi.Pointer[_ffi.FimoModuleSymbolImportTable] = (
+            self.ffi.contents.imports
+        )
         return self._imports_type().transfer_from_ffi(imports_ffi)
 
     def exports(self) -> _Exports:
         """Fetches the symbol export table of the module."""
-        exports_ffi: _ffi.Pointer[_ffi.FimoModuleSymbolExportTable] = self.ffi.contents.exports
+        exports_ffi: _ffi.Pointer[_ffi.FimoModuleSymbolExportTable] = (
+            self.ffi.contents.exports
+        )
         return self._exports_type().transfer_from_ffi(exports_ffi)
 
     def module_info(self) -> ModuleInfoView:
         """Fetches the module info."""
-        module_info_ffi: _ffi.Pointer[_ffi.FimoModuleInfo] = self.ffi.contents.module_info
+        module_info_ffi: _ffi.Pointer[_ffi.FimoModuleInfo] = (
+            self.ffi.contents.module_info
+        )
         return ModuleInfoView(module_info_ffi)
 
     def context(self) -> _ContextView:
@@ -436,8 +487,9 @@ class _ModuleBase(Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
         namespace_ffi = c.c_char_p(namespace.encode())
         is_included_ffi = c.c_bool(False)
         is_static_ffi = c.c_bool(False)
-        err = _ffi.fimo_module_namespace_included(self.ffi, namespace_ffi, c.byref(is_included_ffi),
-                                                  c.byref(is_static_ffi))
+        err = _ffi.fimo_module_namespace_included(
+            self.ffi, namespace_ffi, c.byref(is_included_ffi), c.byref(is_static_ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
         if not is_included_ffi.value:
@@ -486,8 +538,9 @@ class _ModuleBase(Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
         module_ffi = module.ffi
         has_dependency_ffi = c.c_bool(False)
         is_static_ffi = c.c_bool(False)
-        err = _ffi.fimo_module_has_dependency(self.ffi, module_ffi, c.byref(has_dependency_ffi),
-                                              c.byref(is_static_ffi))
+        err = _ffi.fimo_module_has_dependency(
+            self.ffi, module_ffi, c.byref(has_dependency_ffi), c.byref(is_static_ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
         if not has_dependency_ffi.value:
@@ -566,13 +619,19 @@ class _ModuleBase(Generic[_Parameters, _Resources, _Imports, _Exports, _Data],
         namespace_ffi = c.c_char_p(namespace.encode())
         version_ffi = version.transfer_to_ffi()
         symbol_ffi = c.POINTER(_ffi.FimoModuleRawSymbol)()
-        err = _ffi.fimo_module_load_symbol(self.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(symbol_ffi))
+        err = _ffi.fimo_module_load_symbol(
+            self.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(symbol_ffi)
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
         return RawSymbol(symbol_ffi)
 
 
-class _OpaqueModule(_ModuleBase[_OpaqueParameters, _OpaqueResources, _OpaqueImports, _OpaqueExports, _OpaqueData]):
+class _OpaqueModule(
+    _ModuleBase[
+        _OpaqueParameters, _OpaqueResources, _OpaqueImports, _OpaqueExports, _OpaqueData
+    ]
+):
     @staticmethod
     def _parameters_type() -> type[_OpaqueParameters]:
         """Returns the type of the parameter table"""
@@ -632,8 +691,11 @@ class PseudoModule(_OpaqueModule):
         return context.Context.transfer_from_ffi(ctx_ffi)
 
 
-class ParameterType(_ffi.FFITransferable[_ffi.FimoModuleParamType], IntEnum, metaclass=ABCEnum):
+class ParameterType(
+    _ffi.FFITransferable[_ffi.FimoModuleParamType], IntEnum, metaclass=ABCEnum
+):
     """Datatype of a module parameter."""
+
     U8 = 0
     U16 = 1
     U32 = 2
@@ -655,8 +717,11 @@ class ParameterType(_ffi.FFITransferable[_ffi.FimoModuleParamType], IntEnum, met
         return cls(obj)
 
 
-class ParameterAccess(_ffi.FFITransferable[_ffi.FimoModuleParamAccess], IntEnum, metaclass=ABCEnum):
+class ParameterAccess(
+    _ffi.FFITransferable[_ffi.FimoModuleParamAccess], IntEnum, metaclass=ABCEnum
+):
     """Access group of a module parameter."""
+
     Public = 0
     Dependency = 1
     Private = 2
@@ -693,7 +758,9 @@ class Parameter(_ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleParam], "Parameter"
         return Parameter(ffi)
 
 
-class ParameterData(_ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleParamData], "ParameterData"]):
+class ParameterData(
+    _ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleParamData], "ParameterData"]
+):
     """A module parameter."""
 
     def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleParamData]):
@@ -709,7 +776,9 @@ class ParameterData(_ffi.FFISharable[_ffi.Pointer[_ffi.FimoModuleParamData], "Pa
         return self._ffi
 
     @classmethod
-    def borrow_from_ffi(cls, ffi: _ffi.Pointer[_ffi.FimoModuleParamData]) -> ParameterData:
+    def borrow_from_ffi(
+        cls, ffi: _ffi.Pointer[_ffi.FimoModuleParamData]
+    ) -> ParameterData:
         return ParameterData(ffi)
 
 
@@ -761,7 +830,9 @@ class ParameterValue:
         module_ffi = c.c_char_p(module.encode())
         parameter_ffi = c.c_char_p(parameter.encode())
 
-        err = _ffi.fimo_module_param_get_public(ctx.ffi, value_ffi_ptr, c.byref(type_ffi), module_ffi, parameter_ffi)
+        err = _ffi.fimo_module_param_get_public(
+            ctx.ffi, value_ffi_ptr, c.byref(type_ffi), module_ffi, parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
@@ -786,7 +857,9 @@ class ParameterValue:
                 raise ValueError("unknown parameter type")
 
     @classmethod
-    def read_dependency(cls, caller: _OpaqueModule, module: str, parameter: str) -> Self:
+    def read_dependency(
+        cls, caller: _OpaqueModule, module: str, parameter: str
+    ) -> Self:
         """Reads a module parameter with dependency read access.
 
         Reads the value of a module parameter with dependency read access. The operation fails, if
@@ -813,8 +886,9 @@ class ParameterValue:
         module_ffi = c.c_char_p(module.encode())
         parameter_ffi = c.c_char_p(parameter.encode())
 
-        err = _ffi.fimo_module_param_get_dependency(caller.ffi, value_ffi_ptr, c.byref(type_ffi), module_ffi,
-                                                    parameter_ffi)
+        err = _ffi.fimo_module_param_get_dependency(
+            caller.ffi, value_ffi_ptr, c.byref(type_ffi), module_ffi, parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
@@ -858,7 +932,9 @@ class ParameterValue:
         type_ffi = _ffi.FimoModuleParamType()
         parameter_ffi = parameter.ffi
 
-        err = _ffi.fimo_module_param_get_private(caller.ffi, value_ffi_ptr, c.byref(type_ffi), parameter_ffi)
+        err = _ffi.fimo_module_param_get_private(
+            caller.ffi, value_ffi_ptr, c.byref(type_ffi), parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
@@ -902,7 +978,9 @@ class ParameterValue:
         type_ffi = _ffi.FimoModuleParamType()
         parameter_ffi = parameter.ffi
 
-        err = _ffi.fimo_module_param_get_inner(caller.ffi, value_ffi_ptr, c.byref(type_ffi), parameter_ffi)
+        err = _ffi.fimo_module_param_get_inner(
+            caller.ffi, value_ffi_ptr, c.byref(type_ffi), parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
@@ -969,10 +1047,14 @@ class ParameterValue:
             case ParameterType.I64:
                 value_ffi.i64 = _ffi.FimoI64(self.value)
 
-        err = _ffi.fimo_module_param_set_public(ctx.ffi, value_ffi_ptr, type_ffi, module_ffi, parameter_ffi)
+        err = _ffi.fimo_module_param_set_public(
+            ctx.ffi, value_ffi_ptr, type_ffi, module_ffi, parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
-    def write_dependency(self, caller: _OpaqueModule, module: str, parameter: str) -> None:
+    def write_dependency(
+        self, caller: _OpaqueModule, module: str, parameter: str
+    ) -> None:
         """Writes a module parameter with dependency write access.
 
         Sets the value of a module parameter with dependency write access. The operation fails, if
@@ -1015,7 +1097,9 @@ class ParameterValue:
             case ParameterType.I64:
                 value_ffi.i64 = _ffi.FimoI64(self.value)
 
-        err = _ffi.fimo_module_param_set_dependency(caller.ffi, value_ffi_ptr, type_ffi, module_ffi, parameter_ffi)
+        err = _ffi.fimo_module_param_set_dependency(
+            caller.ffi, value_ffi_ptr, type_ffi, module_ffi, parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
     def write_private(self, caller: _OpaqueModule, parameter: Parameter) -> None:
@@ -1053,7 +1137,9 @@ class ParameterValue:
             case ParameterType.I64:
                 value_ffi.i64 = _ffi.FimoI64(self.value)
 
-        err = _ffi.fimo_module_param_set_private(caller.ffi, value_ffi_ptr, type_ffi, parameter_ffi)
+        err = _ffi.fimo_module_param_set_private(
+            caller.ffi, value_ffi_ptr, type_ffi, parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
     def write_inner(self, caller: _OpaqueModule, parameter: ParameterData) -> None:
@@ -1091,15 +1177,23 @@ class ParameterValue:
             case ParameterType.I64:
                 value_ffi.i64 = _ffi.FimoI64(self.value)
 
-        err = _ffi.fimo_module_param_set_inner(caller.ffi, value_ffi_ptr, type_ffi, parameter_ffi)
+        err = _ffi.fimo_module_param_set_inner(
+            caller.ffi, value_ffi_ptr, type_ffi, parameter_ffi
+        )
         error.ErrorCode.transfer_from_ffi(err).raise_if_error()
 
 
 class _ParameterDeclaration:
-    def __init__(self, name: str, type: ParameterType, read: ParameterAccess, write: ParameterAccess,
-                 setter: Callable[[_OpaqueModule, ParameterValue, ParameterData], None],
-                 getter: Callable[[_OpaqueModule, ParameterData], ParameterValue],
-                 default: int) -> None:
+    def __init__(
+        self,
+        name: str,
+        type: ParameterType,
+        read: ParameterAccess,
+        write: ParameterAccess,
+        setter: Callable[[_OpaqueModule, ParameterValue, ParameterData], None],
+        getter: Callable[[_OpaqueModule, ParameterData], ParameterValue],
+        default: int,
+    ) -> None:
         self.name = name
         self.type = type
         self.read = read
@@ -1121,7 +1215,9 @@ class _SymbolImportDeclaration:
 
 
 class _SymbolStaticExportDeclaration:
-    def __init__(self, name: str, namespace: str, version: Version, symbol: c.c_void_p) -> None:
+    def __init__(
+        self, name: str, namespace: str, version: Version, symbol: c.c_void_p
+    ) -> None:
         self.name = name
         self.namespace = namespace
         self.version = version
@@ -1129,8 +1225,14 @@ class _SymbolStaticExportDeclaration:
 
 
 class _SymbolDynamicExportDeclaration:
-    def __init__(self, name: str, namespace: str, version: Version, constructor: _ffi.FuncPointer,
-                 destructor: _ffi.FuncPointer) -> None:
+    def __init__(
+        self,
+        name: str,
+        namespace: str,
+        version: Version,
+        constructor: _ffi.FuncPointer,
+        destructor: _ffi.FuncPointer,
+    ) -> None:
         self.name = name
         self.namespace = namespace
         self.version = version
@@ -1156,11 +1258,16 @@ class _DataBase:
         self._dynamic_symbols[sym.value] = sym
 
 
-def module_parameter(*, name: str, type: ParameterType, read: Optional[ParameterAccess] = None,
-                     write: Optional[ParameterAccess] = None,
-                     setter: Optional[Callable[[_OpaqueModule, ParameterValue, ParameterData], None]],
-                     getter: Optional[Callable[[_OpaqueModule, ParameterData], ParameterValue]],
-                     default: Optional[int] = 0) -> _ParameterDeclaration:
+def module_parameter(
+    *,
+    name: str,
+    type: ParameterType,
+    read: Optional[ParameterAccess] = None,
+    write: Optional[ParameterAccess] = None,
+    setter: Optional[Callable[[_OpaqueModule, ParameterValue, ParameterData], None]],
+    getter: Optional[Callable[[_OpaqueModule, ParameterData], ParameterValue]],
+    default: Optional[int] = 0,
+) -> _ParameterDeclaration:
     """Declares a new module parameter."""
 
     if read is None:
@@ -1168,12 +1275,18 @@ def module_parameter(*, name: str, type: ParameterType, read: Optional[Parameter
     if write is None:
         write = ParameterAccess.Private
     if setter is None:
-        def default_setter(module: _OpaqueModule, value: ParameterValue, data: ParameterData) -> None:
+
+        def default_setter(
+            module: _OpaqueModule, value: ParameterValue, data: ParameterData
+        ) -> None:
             return value.write_inner(module, data)
 
         setter = default_setter
     if getter is None:
-        def default_getter(module: _OpaqueModule, data: ParameterData) -> ParameterValue:
+
+        def default_getter(
+            module: _OpaqueModule, data: ParameterData
+        ) -> ParameterValue:
             return ParameterValue.read_inner(module, data)
 
         getter = default_getter
@@ -1198,7 +1311,7 @@ def module_resource(*, path: str) -> _ResourceDeclaration:
 
     if not isinstance(path, str):
         raise TypeError("`path` must be an instance of `str`")
-    if path.startswith('/') or path.startswith('\\'):
+    if path.startswith("/") or path.startswith("\\"):
         raise ValueError("`path` may not start with a slash")
 
     return _ResourceDeclaration(path)
@@ -1228,8 +1341,9 @@ def module_symbol_import(*, symbol: type[Symbol[_T]]) -> _SymbolImportDeclaratio
 
 
 # noinspection PyProtectedMember
-def module_static_symbol_export(*, symbol: type[Symbol[_T]],
-                                obj: c._Pointer | _ffi.FuncPointer) -> _SymbolStaticExportDeclaration:
+def module_static_symbol_export(
+    *, symbol: type[Symbol[_T]], obj: c._Pointer | _ffi.FuncPointer
+) -> _SymbolStaticExportDeclaration:
     """Declares a new static module symbol export."""
 
     if not isinstance(symbol, type):
@@ -1244,15 +1358,19 @@ def module_static_symbol_export(*, symbol: type[Symbol[_T]],
 
 
 # noinspection PyProtectedMember
-def module_dynamic_symbol_export(*, symbol: type[Symbol[_T]],
-                                 factory: Callable[
-                                     [_ModuleBase], c._Pointer | _ffi.FuncPointer]) -> _SymbolDynamicExportDeclaration:
+def module_dynamic_symbol_export(
+    *,
+    symbol: type[Symbol[_T]],
+    factory: Callable[[_ModuleBase], c._Pointer | _ffi.FuncPointer],
+) -> _SymbolDynamicExportDeclaration:
     """Declares a new dynamic module symbol export."""
 
     if not isinstance(symbol, type):
         raise TypeError("`symbol` must be an instance of `type`")
 
-    def construct_symbol(module: _ModuleBase, sym: _ffi.Pointer[c.c_void_p]) -> _ffi.FimoError:
+    def construct_symbol(
+        module: _ModuleBase, sym: _ffi.Pointer[c.c_void_p]
+    ) -> _ffi.FimoError:
         try:
             obj = factory(module)
             obj_ptr = c.cast(obj, c.c_void_p)
@@ -1278,31 +1396,160 @@ def module_dynamic_symbol_export(*, symbol: type[Symbol[_T]],
     constructor_ffi = _ffi.FimoModuleDynamicSymbolConstructor(construct_symbol)
     destructor_ffi = _ffi.FimoModuleDynamicSymbolDestructor(destroy_symbol)
 
-    return _SymbolDynamicExportDeclaration(name, namespace, version, constructor_ffi, destructor_ffi)
+    return _SymbolDynamicExportDeclaration(
+        name, namespace, version, constructor_ffi, destructor_ffi
+    )
 
 
 _DataT = TypeVar("_DataT")
 
 
-def export_module(*, name: str, description: Optional[str] = None, author: Optional[str] = None,
-                  license: Optional[str] = None,
-                  parameters: Optional[dict[str, _ParameterDeclaration]] = None,
-                  resources: Optional[list[_ResourceDeclaration]] = None,
-                  namespaces: Optional[list[_NamespaceImportDeclaration]] = None,
-                  imports: Optional[list[_SymbolImportDeclaration]] = None,
-                  exports: Optional[list[_SymbolStaticExportDeclaration | _SymbolDynamicExportDeclaration]] = None,
-                  data_type: Optional[type[_DataT]] = None,
-                  factory: Optional[Callable[[_ModuleBase, Any, type[_DataT]], _DataT]] = None):
+def export_module(
+    *,
+    name: str,
+    description: Optional[str] = None,
+    author: Optional[str] = None,
+    license: Optional[str] = None,
+    parameters: Optional[dict[str, _ParameterDeclaration]] = None,
+    resources: Optional[dict[str, _ResourceDeclaration]] = None,
+    namespaces: Optional[list[_NamespaceImportDeclaration]] = None,
+    imports: Optional[list[_SymbolImportDeclaration]] = None,
+    exports: Optional[
+        list[_SymbolStaticExportDeclaration | _SymbolDynamicExportDeclaration]
+    ] = None,
+    data_type: Optional[type[_DataT]] = None,
+    factory: Optional[Callable[[_ModuleBase, Any, type[_DataT]], _DataT]] = None,
+):
     """Exports a new module."""
     parameters_ = parameters if parameters is not None else {}
-    resources_ = resources if resources is not None else []
+    resources_ = resources if resources is not None else {}
     namespaces_ = namespaces if namespaces is not None else []
     imports_ = imports if imports is not None else []
     exports_ = exports if exports is not None else []
     data_type_ = data_type if data_type is not None else object
 
+    # Generate the class types for the module tables
+    parameter_index_map = {key: i for i, key in enumerate(parameters_.keys())}
+
+    class _ModuleParameterMap(
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleParamTable]]
+    ):
+        def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleParamTable]) -> None:
+            if not isinstance(ffi, c.POINTER(_ffi.FimoModuleParamTable)):
+                raise TypeError(
+                    "`ffi` must be an instance of an `FimoModuleParamTable*`"
+                )
+            if not ffi:
+                raise ValueError("`ffi` may not be `null`")
+            self._ffi: _ffi.Pointer[_ffi.Pointer[_ffi.FimoModuleParam]] = c.cast(
+                ffi, c.POINTER(c.POINTER(_ffi.FimoModuleParam))
+            )
+
+        def __getattribute__(self, name: str) -> Parameter:
+            if name in parameter_index_map:
+                parameter_idx = parameter_index_map[name]
+                parameter = self._ffi[parameter_idx]
+                return Parameter(parameter)
+
+            raise ValueError(f"invalid attribute name: {name}")
+
+        def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleParamTable]:
+            return c.cast(self._ffi, c.POINTER(_ffi.FimoModuleParamTable))
+
+        @classmethod
+        def transfer_from_ffi(
+            cls, ffi: _ffi.Pointer[_ffi.FimoModuleParamTable]
+        ) -> Self:
+            return cls(ffi)
+
+    resource_index_map = {key: i for i, key in enumerate(resources_.keys())}
+
+    class _ModuleResourceMap(
+        _ffi.FFITransferable[_ffi.Pointer[_ffi.FimoModuleResourceTable]]
+    ):
+        def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleResourceTable]) -> None:
+            if not isinstance(ffi, c.POINTER(_ffi.FimoModuleResourceTable)):
+                raise TypeError(
+                    "`ffi` must be an instance of an `FimoModuleResourceTable*`"
+                )
+            if not ffi:
+                raise ValueError("`ffi` may not be `null`")
+            self._ffi: _ffi.Pointer[c.c_void_p] = c.cast(ffi, c.POINTER(c.c_void_p))
+
+        def __getattribute__(self, name: str) -> str:
+            if name in resource_index_map:
+                resource_idx = parameter_index_map[name]
+                resource: bytes = self._ffi[resource_idx]
+                return resource.decode()
+
+            raise ValueError(f"invalid attribute name: {name}")
+
+        def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleResourceTable]:
+            return c.cast(self._ffi, c.POINTER(_ffi.FimoModuleResourceTable))
+
+        @classmethod
+        def transfer_from_ffi(
+            cls, ffi: _ffi.Pointer[_ffi.FimoModuleResourceTable]
+        ) -> Self:
+            return cls(ffi)
+
+    # We require some additional functionality for the data
+    # of the module, so we create a wrapper which inherits
+    # both from our internal mixin and the original class
+    # passed by the user.
+    data_bases = (_DataBase,) if data_type_ is object else (_DataBase, data_type_)
+    _ModuleData = type(
+        "_ModuleData",
+        data_bases,
+        {"__init__": lambda self, *args, **kwargs: _DataBase.__init__(*args, **kwargs)},
+    )
+
+    def module_data_transfer_to_ffi(self) -> c.c_void_p:
+        obj_ffi = c.py_object(self)
+        obj_ptr = c.c_void_p.from_buffer(obj_ffi)
+        return obj_ptr
+
+    def module_data_transfer_from_ffi(cls, ffi: c.c_void_p) -> Any:
+        obj = c.cast(ffi, c.py_object).value
+        if not isinstance(obj, _ModuleData):
+            raise TypeError("invalid module data type")
+        return obj
+
+    _ModuleData.transfer_to_ffi = module_data_transfer_to_ffi  # type: ignore[attr-defined]
+    _ModuleData.transfer_from_ffi = classmethod(module_data_transfer_from_ffi)  # type: ignore[attr-defined]
+
+    class _Module(_ModuleBase):
+        @staticmethod
+        def _parameters_type() -> type[_OpaqueParameters]:
+            return _OpaqueParameters
+
+        @staticmethod
+        def _resources_type() -> type[_OpaqueResources]:
+            return _OpaqueResources
+
+        @staticmethod
+        def _imports_type() -> type[_OpaqueImports]:
+            return _OpaqueImports
+
+        @staticmethod
+        def _exports_type() -> type[_OpaqueExports]:
+            return _OpaqueExports
+
+        @staticmethod
+        def _data_type() -> type[Any]:
+            return _ModuleData
+
+    def default_factory(
+        module: _ModuleBase, module_set: Any, cls: type[_DataT]
+    ) -> _DataT:
+        return cls()
+
+    factory_ = factory if factory is not None else default_factory
+
     name_ffi = c.c_char_p(name.encode())
-    description_ffi = c.c_char_p(description.encode()) if description is not None else c.c_char_p()
+    description_ffi = (
+        c.c_char_p(description.encode()) if description is not None else c.c_char_p()
+    )
     author_ffi = c.c_char_p(author.encode()) if author is not None else c.c_char_p()
     license_ffi = c.c_char_p(license.encode()) if license is not None else c.c_char_p()
 
@@ -1318,12 +1565,17 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
     parameters_ffi = (_ffi.FimoModuleParamDecl * len(parameters_))()
     parameters_count_ffi = _ffi.FimoU32(len(parameters_))
     for i, param in enumerate(parameters_.values()):
-        setter: Callable[[_OpaqueModule, ParameterValue, ParameterData], None] = param.setter
+        setter: Callable[[_OpaqueModule, ParameterValue, ParameterData], None] = (
+            param.setter
+        )
         getter: Callable[[_OpaqueModule, ParameterData], ParameterValue] = param.getter
 
-        def setter_wrapper(module_ffi: _ffi.Pointer[_ffi.FimoModule], value_addr: int,
-                           type_ffi: _ffi.FimoModuleParamType,
-                           data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData]) -> _ffi.FimoError:
+        def setter_wrapper(
+            module_ffi: _ffi.Pointer[_ffi.FimoModule],
+            value_addr: int,
+            type_ffi: _ffi.FimoModuleParamType,
+            data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData],
+        ) -> _ffi.FimoError:
             try:
                 module = _OpaqueModule.borrow_from_ffi(module_ffi)
                 value_ffi = c.c_void_p.from_address(value_addr)
@@ -1332,19 +1584,31 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
                     case ParameterType.U8:
                         value = c.cast(value_ffi, c.POINTER(_ffi.FimoU8)).contents.value
                     case ParameterType.U16:
-                        value = c.cast(value_ffi, c.POINTER(_ffi.FimoU16)).contents.value
+                        value = c.cast(
+                            value_ffi, c.POINTER(_ffi.FimoU16)
+                        ).contents.value
                     case ParameterType.U32:
-                        value = c.cast(value_ffi, c.POINTER(_ffi.FimoU32)).contents.value
+                        value = c.cast(
+                            value_ffi, c.POINTER(_ffi.FimoU32)
+                        ).contents.value
                     case ParameterType.U64:
-                        value = c.cast(value_ffi, c.POINTER(_ffi.FimoU64)).contents.value
+                        value = c.cast(
+                            value_ffi, c.POINTER(_ffi.FimoU64)
+                        ).contents.value
                     case ParameterType.I8:
                         value = c.cast(value_ffi, c.POINTER(_ffi.FimoI8)).contents.value
                     case ParameterType.I16:
-                        value = c.cast(value_ffi, c.POINTER(_ffi.FimoI16)).contents.value
+                        value = c.cast(
+                            value_ffi, c.POINTER(_ffi.FimoI16)
+                        ).contents.value
                     case ParameterType.I32:
-                        value = c.cast(value_ffi, c.POINTER(_ffi.FimoI32)).contents.value
+                        value = c.cast(
+                            value_ffi, c.POINTER(_ffi.FimoI32)
+                        ).contents.value
                     case ParameterType.I64:
-                        value = c.cast(value_ffi, c.POINTER(_ffi.FimoI64)).contents.value
+                        value = c.cast(
+                            value_ffi, c.POINTER(_ffi.FimoI64)
+                        ).contents.value
                     case _:
                         raise ValueError("unknown parameter type")
 
@@ -1356,9 +1620,12 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
             except Exception as e:
                 return error.ErrorCode.from_exception(e).transfer_to_ffi()
 
-        def getter_wrapper(module_ffi: _ffi.Pointer[_ffi.FimoModule], value_addr: int,
-                           type_ffi: _ffi.Pointer[_ffi.FimoModuleParamType],
-                           data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData]) -> _ffi.FimoError:
+        def getter_wrapper(
+            module_ffi: _ffi.Pointer[_ffi.FimoModule],
+            value_addr: int,
+            type_ffi: _ffi.Pointer[_ffi.FimoModuleParamType],
+            data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData],
+        ) -> _ffi.FimoError:
             try:
                 module = _OpaqueModule.borrow_from_ffi(module_ffi)
                 value_ffi = c.c_void_p.from_address(value_addr)
@@ -1371,21 +1638,37 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
                 type_ffi[0] = type.transfer_to_ffi()
                 match type:
                     case ParameterType.U8:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoU8))[0] = _ffi.FimoU8(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoU8))[0] = _ffi.FimoU8(
+                            value
+                        )
                     case ParameterType.U16:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoU16))[0] = _ffi.FimoU16(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoU16))[0] = _ffi.FimoU16(
+                            value
+                        )
                     case ParameterType.U32:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoU32))[0] = _ffi.FimoU32(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoU32))[0] = _ffi.FimoU32(
+                            value
+                        )
                     case ParameterType.U64:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoU64))[0] = _ffi.FimoU64(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoU64))[0] = _ffi.FimoU64(
+                            value
+                        )
                     case ParameterType.I8:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoI8))[0] = _ffi.FimoI8(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoI8))[0] = _ffi.FimoI8(
+                            value
+                        )
                     case ParameterType.I16:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoI16))[0] = _ffi.FimoI16(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoI16))[0] = _ffi.FimoI16(
+                            value
+                        )
                     case ParameterType.I32:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoI32))[0] = _ffi.FimoI32(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoI32))[0] = _ffi.FimoI32(
+                            value
+                        )
                     case ParameterType.I64:
-                        c.cast(value_ffi, c.POINTER(_ffi.FimoI64))[0] = _ffi.FimoI64(value)
+                        c.cast(value_ffi, c.POINTER(_ffi.FimoI64))[0] = _ffi.FimoI64(
+                            value
+                        )
                     case _:
                         raise ValueError("unknown parameter type")
 
@@ -1427,7 +1710,7 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
 
     resources_ffi = (_ffi.FimoModuleResourceDecl * len(resources_))()
     resources_count_ffi = _ffi.FimoU32(len(resources_))
-    for i, res in enumerate(resources_):
+    for i, res in enumerate(resources_.values()):
         res_ffi = _ffi.FimoModuleResourceDecl()
         res_ffi.path = c.c_char_p(res.encode())
         resources_ffi[i] = res_ffi
@@ -1497,54 +1780,11 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
     export.modifiers = c.POINTER(_ffi.FimoModuleExportModifier)()
     export.modifiers_count = _ffi.FimoU32(0)
 
-    data_bases = (_DataBase,) if data_type_ is object else (_DataBase, data_type_)
-    _ModuleData = type("_ModuleData", data_bases, {
-        "__init__": lambda self, *args, **kwargs: _DataBase.__init__(*args, **kwargs)
-    })
-
-    def module_data_transfer_to_ffi(self) -> c.c_void_p:
-        obj_ffi = c.py_object(self)
-        obj_ptr = c.c_void_p.from_buffer(obj_ffi)
-        return obj_ptr
-
-    def module_data_transfer_from_ffi(cls, ffi: c.c_void_p) -> Any:
-        obj = c.cast(ffi, c.py_object).value
-        if not isinstance(obj, _ModuleData):
-            raise TypeError("invalid module data type")
-        return obj
-
-    _ModuleData.transfer_to_ffi = module_data_transfer_to_ffi  # type: ignore[attr-defined]
-    _ModuleData.transfer_from_ffi = classmethod(module_data_transfer_from_ffi)  # type: ignore[attr-defined]
-
-    class _Module(_ModuleBase):
-        @staticmethod
-        def _parameters_type() -> type[_OpaqueParameters]:
-            return _OpaqueParameters
-
-        @staticmethod
-        def _resources_type() -> type[_OpaqueResources]:
-            return _OpaqueResources
-
-        @staticmethod
-        def _imports_type() -> type[_OpaqueImports]:
-            return _OpaqueImports
-
-        @staticmethod
-        def _exports_type() -> type[_OpaqueExports]:
-            return _OpaqueExports
-
-        @staticmethod
-        def _data_type() -> type[Any]:
-            return _ModuleData
-
-    def default_factory(module: _ModuleBase, module_set: Any, cls: type[_DataT]) -> _DataT:
-        return cls()
-
-    factory_ = factory if factory is not None else default_factory
-
-    def constructor(module_ffi: _ffi.Pointer[_ffi.FimoModule],
-                    module_set_ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet],
-                    data_ffi: _ffi.Pointer[c.c_void_p]) -> _ffi.FimoError:
+    def constructor(
+        module_ffi: _ffi.Pointer[_ffi.FimoModule],
+        module_set_ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet],
+        data_ffi: _ffi.Pointer[c.c_void_p],
+    ) -> _ffi.FimoError:
         try:
             module = _Module.borrow_from_ffi(module_ffi)
 
@@ -1559,7 +1799,9 @@ def export_module(*, name: str, description: Optional[str] = None, author: Optio
         except Exception as e:
             return error.ErrorCode.from_exception(e).transfer_to_ffi()
 
-    def destructor(module_ffi: _ffi.Pointer[_ffi.FimoModule], data_ffi: _ffi.Pointer[c.c_void_p]) -> None:
+    def destructor(
+        module_ffi: _ffi.Pointer[_ffi.FimoModule], data_ffi: _ffi.Pointer[c.c_void_p]
+    ) -> None:
         try:
             obj = _ModuleData.transfer_from_ffi(data_ffi.contents)  # type: ignore[attr-defined]
             _ffi.c_dec_ref(obj)
