@@ -146,8 +146,10 @@ def test_time_add():
     b = Duration.from_seconds(2)
     t = a + b
     assert isinstance(t, Time)
-    assert (t.duration_since(t.unix_epoch()).as_secs()
-            == a.duration_since(t.unix_epoch()).as_secs() + 2)
+    assert (
+        t.duration_since(t.unix_epoch()).as_secs()
+        == a.duration_since(t.unix_epoch()).as_secs() + 2
+    )
 
     with pytest.raises(Error):
         Time.max() + b
@@ -165,8 +167,10 @@ def test_time_sub():
     b = Duration.from_seconds(2)
     t = a - b
     assert isinstance(t, Time)
-    assert (t.duration_since(t.unix_epoch()).as_secs()
-            == a.duration_since(t.unix_epoch()).as_secs() - 2)
+    assert (
+        t.duration_since(t.unix_epoch()).as_secs()
+        == a.duration_since(t.unix_epoch()).as_secs() - 2
+    )
 
     with pytest.raises(Error):
         Time.unix_epoch() - b

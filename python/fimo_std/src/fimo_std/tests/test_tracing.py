@@ -51,14 +51,21 @@ class Subscriber(tracing.Subscriber[CallStack]):
     def unblock_call_stack(self, t: time.Time, call_stack: CallStack) -> None:
         pass
 
-    def suspend_call_stack(self, t: time.Time, call_stack: CallStack, block: bool) -> None:
+    def suspend_call_stack(
+        self, t: time.Time, call_stack: CallStack, block: bool
+    ) -> None:
         pass
 
     def resume_call_stack(self, t: time.Time, call_stack: CallStack) -> None:
         pass
 
-    def create_span(self, t: time.Time, span_descriptor: tracing.SpanDescriptor, message: bytes,
-                    call_stack: CallStack) -> None:
+    def create_span(
+        self,
+        t: time.Time,
+        span_descriptor: tracing.SpanDescriptor,
+        message: bytes,
+        call_stack: CallStack,
+    ) -> None:
         call_stack.push_span(span_descriptor, message)
 
     def drop_span(self, call_stack: CallStack) -> None:
@@ -67,7 +74,9 @@ class Subscriber(tracing.Subscriber[CallStack]):
     def destroy_span(self, t: time.Time, call_stack: CallStack) -> None:
         call_stack.pop_span()
 
-    def emit_event(self, t: time.Time, call_stack: CallStack, event: tracing.Event, message: bytes) -> None:
+    def emit_event(
+        self, t: time.Time, call_stack: CallStack, event: tracing.Event, message: bytes
+    ) -> None:
         match event.metadata.level:
             case tracing.Level.Error:
                 event_type = "ERROR"
@@ -98,55 +107,77 @@ def test_enabled():
     assert context.tracing().is_enabled() is False
     del context
 
-    tracing_config = tracing.CreationConfig().with_max_level(tracing.Level.Trace).with_subscriber(
-        tracing.DefaultSubscriber)
+    tracing_config = (
+        tracing.CreationConfig()
+        .with_max_level(tracing.Level.Trace)
+        .with_subscriber(tracing.DefaultSubscriber)
+    )
     context = Context.new_context([tracing_config])
     assert context.tracing().is_enabled() is True
 
 
 def test_events():
-    tracing_config = tracing.CreationConfig().with_max_level(tracing.Level.Trace).with_subscriber(
-        tracing.DefaultSubscriber)
+    tracing_config = (
+        tracing.CreationConfig()
+        .with_max_level(tracing.Level.Trace)
+        .with_subscriber(tracing.DefaultSubscriber)
+    )
     context = Context.new_context([tracing_config])
 
     with tracing.ThreadAccess(context) as t:
-        t.context.tracing().emit_error('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_warn('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_info('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_debug('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_trace('Message: x={}, y={}, z={z}', 0, 1, z=2)
+        t.context.tracing().emit_error("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_warn("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_info("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_debug("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_trace("Message: x={}, y={}, z={z}", 0, 1, z=2)
         t.context.tracing().flush()
 
 
 def test_span():
-    tracing_config = tracing.CreationConfig().with_max_level(tracing.Level.Trace).with_subscriber(
-        tracing.DefaultSubscriber)
+    tracing_config = (
+        tracing.CreationConfig()
+        .with_max_level(tracing.Level.Trace)
+        .with_subscriber(tracing.DefaultSubscriber)
+    )
     context = Context.new_context([tracing_config])
 
     with tracing.ThreadAccess(context) as t:
-        with tracing.Span.error_span(t.context, "Error span: a={}, b={}, c={c}", "a", "b", c="c"):
-            t.context.tracing().emit_error('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        with tracing.Span.warn_span(t.context, "Warn span: a={}, b={}, c={c}", "a", "b", c="c"):
-            t.context.tracing().emit_warn('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        with tracing.Span.info_span(t.context, "Info span: a={}, b={}, c={c}", "a", "b", c="c"):
-            t.context.tracing().emit_info('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        with tracing.Span.debug_span(t.context, "Debug span: a={}, b={}, c={c}", "a", "b", c="c"):
-            t.context.tracing().emit_debug('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        with tracing.Span.trace_span(t.context, "Trace span: a={}, b={}, c={c}", "a", "b", c="c"):
-            t.context.tracing().emit_trace('Message: x={}, y={}, z={z}', 0, 1, z=2)
+        with tracing.Span.error_span(
+            t.context, "Error span: a={}, b={}, c={c}", "a", "b", c="c"
+        ):
+            t.context.tracing().emit_error("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        with tracing.Span.warn_span(
+            t.context, "Warn span: a={}, b={}, c={c}", "a", "b", c="c"
+        ):
+            t.context.tracing().emit_warn("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        with tracing.Span.info_span(
+            t.context, "Info span: a={}, b={}, c={c}", "a", "b", c="c"
+        ):
+            t.context.tracing().emit_info("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        with tracing.Span.debug_span(
+            t.context, "Debug span: a={}, b={}, c={c}", "a", "b", c="c"
+        ):
+            t.context.tracing().emit_debug("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        with tracing.Span.trace_span(
+            t.context, "Trace span: a={}, b={}, c={c}", "a", "b", c="c"
+        ):
+            t.context.tracing().emit_trace("Message: x={}, y={}, z={z}", 0, 1, z=2)
 
 
 def test_custom_subscriber():
-    tracing_config = tracing.CreationConfig().with_max_level(tracing.Level.Trace).with_subscriber(
-        Subscriber())
+    tracing_config = (
+        tracing.CreationConfig()
+        .with_max_level(tracing.Level.Trace)
+        .with_subscriber(Subscriber())
+    )
     context = Context.new_context([tracing_config])
 
     with tracing.ThreadAccess(context) as t:
-        t.context.tracing().emit_error('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_warn('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_info('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_debug('Message: x={}, y={}, z={z}', 0, 1, z=2)
-        t.context.tracing().emit_trace('Message: x={}, y={}, z={z}', 0, 1, z=2)
+        t.context.tracing().emit_error("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_warn("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_info("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_debug("Message: x={}, y={}, z={z}", 0, 1, z=2)
+        t.context.tracing().emit_trace("Message: x={}, y={}, z={z}", 0, 1, z=2)
         t.context.tracing().flush()
 
     del context

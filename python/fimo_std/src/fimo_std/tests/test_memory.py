@@ -63,7 +63,9 @@ def test_aligned_allocation():
     assert isinstance(ptr, ctypes.c_void_p)
     assert ptr
     assert ptr.value % 256 == 0
-    DefaultAllocator.free_with_alignment_and_size(ptr, 256, ctypes.sizeof(ctypes.c_longlong))
+    DefaultAllocator.free_with_alignment_and_size(
+        ptr, 256, ctypes.sizeof(ctypes.c_longlong)
+    )
 
     ptr, size = DefaultAllocator.aligned_alloc_with_size(256, 1339)
     assert isinstance(ptr, ctypes.c_void_p)
