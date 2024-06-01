@@ -8,7 +8,7 @@ from abc import abstractmethod
 from typing import Self, Optional, Generic, TypeVar, TYPE_CHECKING
 
 from .time import Time
-from .enum import ABCEnum
+from ._enum import ABCEnum
 from . import error
 from . import context
 from . import ffi as _ffi

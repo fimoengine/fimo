@@ -14,7 +14,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
-from .enum import ABCEnum
+from ._enum import ABCEnum
 from .version import Version
 from . import error
 from . import context

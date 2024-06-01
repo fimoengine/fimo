@@ -2,7 +2,7 @@ import ctypes as c
 from enum import IntEnum
 from typing import Self
 
-from .enum import ABCEnum
+from ._enum import ABCEnum
 from . import ffi as _ffi
 
 
