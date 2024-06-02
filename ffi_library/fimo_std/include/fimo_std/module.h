@@ -1376,7 +1376,7 @@ typedef struct FimoModuleVTableV0 {
     FimoError (*set_append_freestanding_module)(void *, const FimoModule *, FimoModuleLoadingSet *,
                                                 const FimoModuleExport *);
     FimoError (*set_append_modules)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingFilter, void *,
-                                    void (*)(bool (*)(const FimoModuleExport *, void *), void *));
+                                    void (*)(bool (*)(const FimoModuleExport *, void *), void *), const void *);
     FimoError (*set_dismiss)(void *, FimoModuleLoadingSet *);
     FimoError (*set_finish)(void *, FimoModuleLoadingSet *);
     FimoError (*find_by_name)(void *, const char *, const FimoModuleInfo **);

@@ -374,7 +374,7 @@ static bool module_info_next_dependency_(struct ModuleInfoInner_ *inner, FimoUSi
 struct ModuleHandle_;
 
 static FimoError module_handle_new_local_(void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
-                                          struct ModuleHandle_ **element);
+                                          const void *binary_handle, struct ModuleHandle_ **element);
 static FimoError module_handle_new_plugin_(const char *path, struct ModuleHandle_ **element);
 static void module_handle_acquire_(struct ModuleHandle_ *element);
 static void module_handle_release_(struct ModuleHandle_ *element);
@@ -1303,8 +1303,8 @@ struct ModuleHandle_ {
 };
 
 static FimoError module_handle_new_local_(void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
-                                          struct ModuleHandle_ **element) {
-    FIMO_DEBUG_ASSERT(export_iterator && element)
+                                          const void *binary_handle, struct ModuleHandle_ **element) {
+    FIMO_DEBUG_ASSERT(export_iterator && binary_handle && element)
     FimoError error = FIMO_EOK;
     *element = fimo_malloc(sizeof(**element), &error);
     if (FIMO_IS_ERROR(error)) {
@@ -1315,7 +1315,7 @@ static FimoError module_handle_new_local_(void (*export_iterator)(bool (*)(const
     char *module_path;
 
 #if _WIN32
-    bool found_handle = GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)export_iterator, &handle);
+    bool found_handle = GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, binary_handle, &handle);
     if (!found_handle) {
         error = FIMO_EUNKNOWN;
         goto get_handle;
@@ -1361,8 +1361,8 @@ static FimoError module_handle_new_local_(void (*export_iterator)(bool (*)(const
 
 #else
     Dl_info dl_info;
-    const void *export_iterator_ptr = *(const void **)&export_iterator;
-    if (dladdr(export_iterator_ptr, &dl_info) == 0) {
+    // const void *export_iterator_ptr = *(const void **)&export_iterator;
+    if (dladdr(binary_handle, &dl_info) == 0) {
         error = FIMO_EINVAL;
         goto find_symbol;
     }
@@ -3167,7 +3167,8 @@ static FimoError fi_module_new_pseudo_(FimoInternalModuleContext *ctx, const cha
     FIMO_DEBUG_ASSERT(ctx && name && element)
     TRACE_(ctx, "name='%s', element='%p'", name, (void *)element)
     struct ModuleHandle_ *handle;
-    FimoError error = module_handle_new_local_(fimo_impl_module_export_iterator, &handle);
+    void (*iterator)(bool (*)(const FimoModuleExport *, void *), void *) = fimo_impl_module_export_iterator;
+    FimoError error = module_handle_new_local_(fimo_impl_module_export_iterator, *(const void **)&iterator, &handle);
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not construct module handle")
         return error;
@@ -3925,10 +3926,11 @@ FimoError fimo_internal_trampoline_module_set_append_freestanding_module(void *c
 
 FimoError fimo_internal_trampoline_module_set_append_modules(
         void *ctx, FimoModuleLoadingSet *set, const char *module_path, FimoModuleLoadingFilter filter,
-        void *filter_data, void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *)) {
+        void *filter_data, void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
+        const void *binary_handle) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_module_set_append_modules(TO_MODULE_CTX_(ctx), set, module_path, filter, filter_data,
-                                                   export_iterator);
+                                                   export_iterator, binary_handle);
 }
 
 FimoError fimo_internal_trampoline_module_set_dismiss(void *ctx, FimoModuleLoadingSet *set) {
@@ -4505,15 +4507,15 @@ alloc_symbols:
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
-                                                  const char *module_path, const FimoModuleLoadingFilter filter,
-                                                  void *filter_data,
-                                                  void (*export_iterator)(bool (*)(const FimoModuleExport *, void *),
-                                                                          void *)) {
+FimoError fimo_internal_module_set_append_modules(
+        FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set, const char *module_path,
+        const FimoModuleLoadingFilter filter, void *filter_data,
+        void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *), const void *binary_handle) {
     FIMO_DEBUG_ASSERT(ctx)
-    if (set == NULL || export_iterator == NULL) {
-        ERROR_(ctx, FIMO_EINVAL, "invalid null parameter, set='%p', module_path='%s', export_iterator='%p'",
-               (void *)set, module_path, *(void **)&export_iterator)
+    if (set == NULL || export_iterator == NULL || binary_handle == NULL) {
+        ERROR_(ctx, FIMO_EINVAL,
+               "invalid null parameter, set='%p', module_path='%s', export_iterator='%p', binary_handle='%p'",
+               (void *)set, module_path, *(void **)&export_iterator, binary_handle)
         return FIMO_EINVAL;
     }
 
@@ -4525,7 +4527,7 @@ FimoError fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx
     }
     else {
         TRACE_SIMPLE_(ctx, "local module")
-        error = module_handle_new_local_(export_iterator, &handle);
+        error = module_handle_new_local_(export_iterator, binary_handle, &handle);
     }
     if (FIMO_IS_ERROR(error)) {
         ERROR_SIMPLE_(ctx, error, "could not create module handle")
