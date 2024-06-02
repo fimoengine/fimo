@@ -116,9 +116,10 @@ FIMO_MUST_USE
 FimoError fimo_module_set_append_modules(const FimoContext context, FimoModuleLoadingSet *module_set,
                                          const char *module_path, const FimoModuleLoadingFilter filter,
                                          void *filter_data) {
+    void (*iterator)(bool (*)(const FimoModuleExport *, void *), void *) = fimo_impl_module_export_iterator;
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_append_modules(context.data, module_set, module_path, filter, filter_data,
-                                                fimo_impl_module_export_iterator);
+                                                fimo_impl_module_export_iterator, *(const void **)&iterator);
 }
 
 FIMO_EXPORT

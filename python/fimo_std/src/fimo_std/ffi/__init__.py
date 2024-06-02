@@ -11,6 +11,17 @@ if TYPE_CHECKING:
     Ref = c._Pointer[T] | c.Array[T] | c._CArgObject | None
     PtrRef = c._Pointer[c._Pointer[T]] | c.Array[c._Pointer[T]] | c._CArgObject | None
     FuncPointer = c._FuncPointer
+else:
+    T = TypeVar("T")
+
+    class Pointer(Generic[T], c._Pointer): ...
+
+    class Ref(Generic[T], c._Pointer): ...
+
+    class PtrRef(Generic[T], c._Pointer): ...
+
+    class FuncPointer: ...
+
 
 FfiType = TypeVar("FfiType")
 FfiTypeView = TypeVar("FfiTypeView")
@@ -1065,7 +1076,7 @@ class FimoContextVTableHeader(c.Structure):
     ]
 
 
-class FimoContextVTableV0(c.Structure):
+class FimoContextCoreVTableV0(c.Structure):
     """Core VTable of a `FimoContext`.
 
     Changing the VTable is a breaking change.
@@ -2283,7 +2294,7 @@ class FimoModuleVTableV0(c.Structure):
     Changing the VTable is a breaking change.
     """
 
-    __fields__ = [
+    _fields_ = [
         (
             "pseudo_module_new",
             c.CFUNCTYPE(FimoError, c.c_void_p, c.POINTER(c.POINTER(FimoModule))),
@@ -2357,6 +2368,7 @@ class FimoModuleVTableV0(c.Structure):
                     c.CFUNCTYPE(c.c_bool, c.POINTER(FimoModuleExport), c.c_void_p),
                     c.c_void_p,
                 ),
+                c.c_void_p,
             ),
         ),
         (
@@ -2546,6 +2558,45 @@ class FimoModuleVTableV0(c.Structure):
             ),
         ),
     ]
+
+
+FimoImplModuleInspector = c.CFUNCTYPE(c.c_bool, c.POINTER(FimoModuleExport), c.c_void_p)
+"""Inspector function for the iterator of exported modules.
+
+:param arg0: export declaration
+:param arg1: user defined data
+
+:return: `True`, if the iteration should continue.
+"""
+
+
+_fimo_impl_modules_export_list: list[Pointer[FimoModuleExport]] = []
+
+
+@c.CFUNCTYPE(None, FimoImplModuleInspector, c.c_void_p)
+def fimo_impl_module_export_iterator(inspector: FuncPointer, data: int) -> None:
+    """Iterates over the modules exported by the current binary.
+
+    :param inspector: inspection function.
+    :param data: user defined data to pass to the inspector.
+    """
+    # noinspection PyBroadException
+    try:
+        if not inspector:
+            return
+
+        data_ptr = c.c_void_p(data)
+
+        for export in _fimo_impl_modules_export_list:
+            if not export:
+                continue
+
+            continue_iteration = inspector(export, data_ptr)
+            assert isinstance(continue_iteration, bool)
+            if not continue_iteration:
+                break
+    except Exception:
+        pass
 
 
 _fimo_module_pseudo_module_new = _lib.fimo_module_pseudo_module_new
@@ -2779,17 +2830,6 @@ def fimo_module_set_append_freestanding_module(
     )
 
 
-_fimo_module_set_append_modules = _lib.fimo_module_set_append_modules
-_fimo_module_set_append_modules.argtypes = [
-    FimoContext,
-    c.POINTER(FimoModuleLoadingSet),
-    c.c_char_p,
-    FimoModuleLoadingFilter,
-    c.c_void_p,
-]
-_fimo_module_set_append_modules.restype = FimoError
-
-
 def fimo_module_set_append_modules(
     context: FimoContext,
     module_set: Ref[FimoModuleLoadingSet],
@@ -2823,8 +2863,18 @@ def fimo_module_set_append_modules(
 
     :return: Status code.
     """
-    return _fimo_module_set_append_modules(
-        context, module_set, module_path, filter, filter_data
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    module_vtable = vtable.contents.module_v0
+    set_append_modules = module_vtable.set_append_modules
+    return set_append_modules(
+        c.c_void_p(context.data),
+        module_set,
+        module_path,
+        filter,
+        filter_data,
+        fimo_impl_module_export_iterator,
+        c.cast(_fimo_module_set_append_freestanding_module, c.c_void_p),
     )
 
 
@@ -3491,3 +3541,27 @@ def fimo_module_param_get_inner(
     :return: Status code.
     """
     return _fimo_module_param_get_inner(module, value, type, param)
+
+
+# Header: fimo_std/vtable.h
+
+
+class FimoContextVTable(c.Structure):
+    """VTable of a `FimoContext`.
+
+    The abi of this type is semi-stable, where given two compatible
+    versions `v1` and `v2` with `v1 <= v2`, a pointer to the vtable
+    in `v2`, i.e., `FimoContextVTable_v2*` can be cast to a pointer
+    to the vtable in version `v1`, or `FimoContextVTable_v1*`. To
+    that end, we are allowed to add new fields to this struct and
+    restricting the alignment. Further, to detect a version mismatch,
+    we require that `FimoContextVTableHeader` is always the first
+    member of the VTable.
+    """
+
+    _fields_ = [
+        ("header", FimoContextVTableHeader),
+        ("core", FimoContextCoreVTableV0),
+        ("tracing_v0", FimoTracingVTableV0),
+        ("module_v0", FimoModuleVTableV0),
+    ]

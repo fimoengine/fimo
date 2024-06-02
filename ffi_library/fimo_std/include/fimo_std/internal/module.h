@@ -47,7 +47,8 @@ FimoError fimo_internal_trampoline_module_set_append_freestanding_module(void *c
                                                                          const FimoModuleExport *export);
 FimoError fimo_internal_trampoline_module_set_append_modules(
         void *ctx, FimoModuleLoadingSet *set, const char *module_path, FimoModuleLoadingFilter filter,
-        void *filter_data, void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *));
+        void *filter_data, void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
+        const void *binary_handle);
 FimoError fimo_internal_trampoline_module_set_dismiss(void *ctx, FimoModuleLoadingSet *set);
 FimoError fimo_internal_trampoline_module_set_finish(void *ctx, FimoModuleLoadingSet *set);
 FimoError fimo_internal_trampoline_module_find_by_name(void *ctx, const char *name, const FimoModuleInfo **module);
@@ -272,6 +273,7 @@ FimoError fimo_internal_module_set_append_freestanding_module(FimoInternalModule
  * @param filter filter function
  * @param filter_data custom data to pass to the filter function
  * @param export_iterator iterator over all exports of a binary
+ * @param binary_handle handle to a resource contained in the module binary
  *
  * @return Status code.
  */
@@ -279,7 +281,8 @@ FIMO_MUST_USE
 FimoError
 fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
                                         const char *module_path, FimoModuleLoadingFilter filter, void *filter_data,
-                                        void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *));
+                                        void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
+                                        const void *binary_handle);
 
 /**
  * Destroys the module set without loading any modules.

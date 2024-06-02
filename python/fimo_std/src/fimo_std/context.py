@@ -20,6 +20,7 @@ class ContextView(_ffi.FFISharable[_ffi.FimoContext, "ContextView"]):
     """View of the context of the fimo library."""
 
     from . import tracing as _tracing
+    from . import module as _module
 
     _create_key = object()
 
@@ -81,6 +82,13 @@ class ContextView(_ffi.FFISharable[_ffi.FimoContext, "ContextView"]):
             raise ValueError("context has been consumed")
 
         return self._tracing.TracingCtx(self)
+
+    def module(self) -> _module.ModuleCtx:
+        """Returns a reference to the module subsystem."""
+        if self._context is None:
+            raise ValueError("context has been consumed")
+
+        return self._module.ModuleCtx(self)
 
     def _consume(self) -> None:
         if self._context is None:
