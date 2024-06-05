@@ -9,6 +9,7 @@ project(
 )
 enable_language(C)
 enable_language(CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/fimo)
 include(FimoUtils)
@@ -48,6 +49,7 @@ option(FIMO_INSTALL_BINDINGS "Install the c bindings for the modules" ON)
 
 # Bindings
 fimo_declare_bindings(fimo_std ON)
+fimo_declare_bindings(fimo_tasks ON)
 fimo_declare_bindings(python_module_loader ON)
 
 # Rust Bindings
