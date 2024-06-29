@@ -13,31 +13,37 @@ pub struct Duration(bindings::FimoDuration);
 
 impl Duration {
     /// The maximum duration.
-    pub const MAX: Self = Self(bindings::FimoDuration {
-        secs: u64::MAX,
-        nanos: 999999999,
-    });
+    pub const MAX: Self = Self::new(u64::MAX, 999999999);
 
     /// The duration of one millisecond.
-    pub const SECOND: Self = Self(bindings::FimoDuration { secs: 1, nanos: 0 });
+    pub const SECOND: Self = Self::new(1, 0);
 
     /// The duration of one millisecond.
-    pub const MILLISECOND: Self = Self(bindings::FimoDuration {
-        secs: 0,
-        nanos: 1000000,
-    });
+    pub const MILLISECOND: Self = Self::new(0, 1000000);
 
     /// The duration of one microsecond.
-    pub const MICROSECOND: Self = Self(bindings::FimoDuration {
-        secs: 0,
-        nanos: 1000,
-    });
+    pub const MICROSECOND: Self = Self::new(0, 1000);
 
     /// The duration of one nanosecond.
-    pub const NANOSECOND: Self = Self(bindings::FimoDuration { secs: 0, nanos: 1 });
+    pub const NANOSECOND: Self = Self::new(0, 1);
 
     /// The zero duration.
-    pub const ZERO: Self = Self(bindings::FimoDuration { secs: 0, nanos: 0 });
+    pub const ZERO: Self = Self::new(0, 0);
+
+    /// Creates a new `Duration` from the specified number of whole seconds and
+    /// additional nanoseconds.
+    ///
+    /// # Panics
+    ///
+    /// If the number of nanoseconds is greater or equal to 1 billion (the number of
+    /// nanoseconds in a second), then it will panic.
+    pub const fn new(secs: u64, nanos: u32) -> Self {
+        if nanos > 999999999 {
+            panic!("overflow in Duration::new")
+        }
+
+        Self(bindings::FimoDuration { secs, nanos })
+    }
 
     /// Constructs a `Duration` from seconds.
     pub fn from_seconds(seconds: u64) -> Self {
