@@ -5,7 +5,7 @@ use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
 
 use crate::{bindings, error::to_result_indirect};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FimoAllocator;
 
 impl FimoAllocator {
