@@ -1,0 +1,21 @@
+[package]
+name = "fimo_tasks"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+description = "Bindings to the fimo tasks symbols"
+
+[lints]
+workspace = true
+
+[dependencies.fimo_std]
+version = "0.1"
+path = "../fimo_std"
+
+[build-dependencies.bindgen]
+version = "0.69.1"
+
+[build-dependencies.doxygen-rs]
+version = "0.4.2"
