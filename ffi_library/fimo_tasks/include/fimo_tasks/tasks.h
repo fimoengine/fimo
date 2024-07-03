@@ -217,6 +217,9 @@ typedef struct FiTasksCommandBuffer {
      * Optional callback function that will be called
      * after the completion of all commands.
      *
+     * If present, this function may be invoked on an
+     * unspecified thread, outside the scope of a task.
+     *
      * @param arg0 optional user data
      * @param arg1 pointer to the command buffer
      */
@@ -225,6 +228,9 @@ typedef struct FiTasksCommandBuffer {
      * Optional callback function that will be called
      * if the command buffer could not be executed
      * without an error.
+     *
+     * If present, this function may be invoked on an
+     * unspecified thread, outside the scope of a task.
      *
      * @param arg0 optional user data
      * @param arg1 pointer to the command buffer
@@ -238,6 +244,9 @@ typedef struct FiTasksCommandBuffer {
     /**
      * Optional callback to invoke when cleaning up the
      * command buffer.
+     *
+     * If present, this function may be invoked on an
+     * unspecified thread, outside the scope of a task.
      *
      * @param arg0 optional user data
      * @param arg1 pointer to the command buffer
@@ -269,6 +278,9 @@ typedef struct FiTasksTask {
      * Optional callback function that will be called
      * after the completion of the task.
      *
+     * If present, this function may be invoked on an
+     * unspecified thread, outside the scope of a task.
+     *
      * @param arg0 optional user data
      * @param arg1 pointer to the task
      */
@@ -276,6 +288,9 @@ typedef struct FiTasksTask {
     /**
      * Optional callback function that will be called
      * if the task could not be executed without an error.
+     *
+     * If present, this function may be invoked on an
+     * unspecified thread, outside the scope of a task.
      *
      * @param arg0 optional user data
      * @param arg1 pointer to the task
@@ -288,6 +303,9 @@ typedef struct FiTasksTask {
     void *status_callback_data;
     /**
      * Optional callback to invoke when cleaning up the task.
+     *
+     * If present, this function may be invoked on an
+     * unspecified thread, outside the scope of a task.
      *
      * @param arg0 optional user data
      * @param arg1 pointer to the task

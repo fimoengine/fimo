@@ -1,4 +1,10 @@
-use core::{ffi::CStr, marker::PhantomData, mem::ManuallyDrop, ops::Deref};
+use core::{
+    ffi::CStr,
+    fmt::{Debug, Formatter},
+    marker::PhantomData,
+    mem::ManuallyDrop,
+    ops::Deref,
+};
 
 use crate::{
     bindings,
@@ -637,7 +643,7 @@ impl FFITransferable<*const bindings::FimoModule> for OpaqueModule<'_> {
 ///
 /// An instance of this type may not be shared or transferred to other modules.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct GenericModule<'a, Par, Res, Imp, Exp, Data>
 where
     Par: Send + Sync,
@@ -754,6 +760,21 @@ where
             self.module
                 .load_symbol_unchecked::<T>(name, namespace, version)
         }
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> Debug for GenericModule<'_, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync,
+    Res: Send + Sync,
+    Imp: Send + Sync,
+    Exp: Send + Sync,
+    Data: Send + Sync,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GenericModule")
+            .field("module_info", &self.module_info())
+            .finish_non_exhaustive()
     }
 }
 

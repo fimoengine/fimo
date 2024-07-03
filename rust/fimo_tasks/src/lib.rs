@@ -18,6 +18,7 @@ mod task;
 mod worker_group;
 
 pub use command_buffer::*;
+use fimo_std::ffi::FFISharable;
 pub use local::*;
 pub use task::*;
 pub use worker_group::*;
@@ -157,3 +158,15 @@ unsafe impl Send for Context {}
 
 // Safety: Sound by invariant
 unsafe impl Sync for Context {}
+
+impl FFISharable<bindings::FiTasksContext> for Context {
+    type BorrowedView<'a> = std::convert::Infallible;
+
+    fn share_to_ffi(&self) -> bindings::FiTasksContext {
+        self.0
+    }
+
+    unsafe fn borrow_from_ffi<'a>(_ffi: bindings::FiTasksContext) -> Self::BorrowedView<'a> {
+        unreachable!("can not borrow a ffi context")
+    }
+}
