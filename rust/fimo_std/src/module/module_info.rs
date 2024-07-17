@@ -339,19 +339,19 @@ pub unsafe trait Module:
     Send + Sync + for<'a> FFISharable<*const bindings::FimoModule, BorrowedView<'a> = OpaqueModule<'a>>
 {
     /// Type of the parameter table.
-    type Parameters: Send + Sync;
+    type Parameters: Send + Sync + 'static;
 
     /// Type of the resource table.
-    type Resources: Send + Sync;
+    type Resources: Send + Sync + 'static;
 
     /// Type of the import table.
-    type Imports: Send + Sync;
+    type Imports: Send + Sync + 'static;
 
     /// Type of the export table.
-    type Exports: Send + Sync;
+    type Exports: Send + Sync + 'static;
 
     /// Type of the associated module data.
-    type Data: Send + Sync;
+    type Data: Send + Sync + 'static;
 
     /// Fetches the parameter table of the module.
     fn parameters(&self) -> &Self::Parameters;
@@ -643,14 +643,13 @@ impl FFITransferable<*const bindings::FimoModule> for OpaqueModule<'_> {
 ///
 /// An instance of this type may not be shared or transferred to other modules.
 #[repr(transparent)]
-#[derive(Clone, Copy)]
 pub struct GenericModule<'a, Par, Res, Imp, Exp, Data>
 where
-    Par: Send + Sync,
-    Res: Send + Sync,
-    Imp: Send + Sync,
-    Exp: Send + Sync,
-    Data: Send + Sync,
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
 {
     module: OpaqueModule<'a>,
     _parameters: PhantomData<&'a Par>,
@@ -660,14 +659,59 @@ where
     _data: PhantomData<&'a Data>,
 }
 
+impl<'a, Par, Res, Imp, Exp, Data> GenericModule<'a, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    pub fn lock_module(&self) -> Result<GenericLockedModule<Par, Res, Imp, Exp, Data>, Error> {
+        let info = self.module_info();
+        let guard = info.lock_unload()?;
+        #[allow(clippy::mem_forget)]
+        std::mem::forget(guard);
+
+        // Safety: The module is locked, therefore it can not be unloaded.
+        let module = unsafe {
+            std::mem::transmute::<Self, GenericModule<'static, Par, Res, Imp, Exp, Data>>(*self)
+        };
+        Ok(GenericLockedModule { module })
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> Copy for GenericModule<'_, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+}
+
+impl<Par, Res, Imp, Exp, Data> Clone for GenericModule<'_, Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 // Safety:
 unsafe impl<Par, Res, Imp, Exp, Data> Module for GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
-    Par: Send + Sync,
-    Res: Send + Sync,
-    Imp: Send + Sync,
-    Exp: Send + Sync,
-    Data: Send + Sync,
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
 {
     type Parameters = Par;
     type Resources = Res;
@@ -765,11 +809,11 @@ where
 
 impl<Par, Res, Imp, Exp, Data> Debug for GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
-    Par: Send + Sync,
-    Res: Send + Sync,
-    Imp: Send + Sync,
-    Exp: Send + Sync,
-    Data: Send + Sync,
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("GenericModule")
@@ -781,11 +825,11 @@ where
 impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModule>
     for GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
-    Par: Send + Sync,
-    Res: Send + Sync,
-    Imp: Send + Sync,
-    Exp: Send + Sync,
-    Data: Send + Sync,
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
 {
     type BorrowedView<'a> = OpaqueModule<'a>;
 
@@ -802,11 +846,11 @@ where
 impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModule>
     for GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
-    Par: Send + Sync,
-    Res: Send + Sync,
-    Imp: Send + Sync,
-    Exp: Send + Sync,
-    Data: Send + Sync,
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
 {
     fn into_ffi(self) -> *const bindings::FimoModule {
         self.module.into_ffi()
@@ -822,6 +866,108 @@ where
                 _imports: PhantomData,
                 _exports: PhantomData,
                 _data: PhantomData,
+            }
+        }
+    }
+}
+
+/// A strong reference to a locked module.
+///
+/// Constructing an instance of this will block the module from being unloaded.
+#[derive(Debug)]
+pub struct GenericLockedModule<Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    module: GenericModule<'static, Par, Res, Imp, Exp, Data>,
+}
+
+impl<Par, Res, Imp, Exp, Data> Deref for GenericLockedModule<Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    type Target = GenericModule<'static, Par, Res, Imp, Exp, Data>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.module
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> Clone for GenericLockedModule<Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        self.lock_module()
+            .expect("should be able to lock a module multiple times")
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> Drop for GenericLockedModule<Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    fn drop(&mut self) {
+        // Safety: The module is locked.
+        unsafe { self.module_info().unlock_unload() }
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModule>
+    for GenericLockedModule<Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    type BorrowedView<'a> = GenericModule<'a, Par, Res, Imp, Exp, Data>;
+
+    fn share_to_ffi(&self) -> *const bindings::FimoModule {
+        self.module.into_ffi()
+    }
+
+    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModule) -> Self::BorrowedView<'a> {
+        // Safety: `GenericLockedModule` is a wrapper over a `GenericModule`.
+        unsafe { GenericModule::from_ffi(ffi) }
+    }
+}
+
+impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModule>
+    for GenericLockedModule<Par, Res, Imp, Exp, Data>
+where
+    Par: Send + Sync + 'static,
+    Res: Send + Sync + 'static,
+    Imp: Send + Sync + 'static,
+    Exp: Send + Sync + 'static,
+    Data: Send + Sync + 'static,
+{
+    fn into_ffi(self) -> *const bindings::FimoModule {
+        self.module.into_ffi()
+    }
+
+    unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
+        // Safety: The value must be valid.
+        unsafe {
+            Self {
+                module: GenericModule::from_ffi(ffi),
             }
         }
     }

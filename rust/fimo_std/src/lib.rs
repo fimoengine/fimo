@@ -4,7 +4,6 @@
 #![feature(maybe_uninit_slice)]
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
-#![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 

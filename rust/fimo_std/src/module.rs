@@ -167,17 +167,92 @@ macro_rules! export_module {
         );
 
         $crate::paste::paste! {
-            #[doc = "Alias for the `" $mod_ident "` module"]
+            #[doc = "Alias for the `" $mod_ident "` module."]
             pub type $mod_ident<'a> = $crate::module::GenericModule<'a,
-                [<$mod_ident Parameters>]<'a>,
-                [<$mod_ident Resources>]<'a>,
-                [<$mod_ident Imports>]<'a>,
-                [<$mod_ident Exports>]<'a>,
+                [<$mod_ident Parameters>],
+                [<$mod_ident Resources>],
+                [<$mod_ident Imports>],
+                [<$mod_ident Exports>],
                 $crate::export_module_private_data!(state $($state)?),
             >;
+
+            #[doc = "Alias for the locked `" $mod_ident "` module."]
+            pub type [<$mod_ident Locked>] = $crate::module::GenericLockedModule<
+                [<$mod_ident Parameters>],
+                [<$mod_ident Resources>],
+                [<$mod_ident Imports>],
+                [<$mod_ident Exports>],
+                $crate::export_module_private_data!(state $($state)?),
+            >;
+
+            #[doc = "A marker type for accessing the current [`" $mod_ident "`] instance."]
+            pub struct [<$mod_ident Token>];
         }
 
         const _: () = {
+            struct ModuleLock(std::sync::RwLock<*const $crate::bindings::FimoModule>);
+            // Safety:
+            unsafe impl Send for ModuleLock {}
+            // Safety:
+            unsafe impl Sync for ModuleLock {}
+
+            static CURRENT: ModuleLock = ModuleLock(std::sync::RwLock::new(std::ptr::null()));
+
+            static INIT_COUNTER: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+            const INIT_STEPS: usize = const {
+                $crate::export_module_private_exports!(
+                    count_dynamic { $($($dyn_exports_block)*)? }
+                )
+            };
+
+            $crate::paste::paste! {
+                impl [<$mod_ident Token>]{
+                    pub fn with_current<F, R>(f: F) -> R
+                    where
+                        F: for<'ctx> FnOnce(&'ctx [<$mod_ident Locked>]) -> R,
+                    {
+                        // Safety: We immediately lock the module from being unloaded.
+                        unsafe {
+                            Self::with_current_unlocked(|module| {
+                                let module = module.lock_module().expect("could not lock the module");
+                                f(&module)
+                            })
+                        }
+                    }
+
+                    /// Acquires an instance to the current module.
+                    ///
+                    /// # Panics
+                    ///
+                    /// This function panics if the module is not fully loaded.
+                    ///
+                    /// # Safety
+                    ///
+                    /// May only be called be a symbol exported from the module, or it is otherwise
+                    /// known that the module can not be unloaded.
+                    pub unsafe fn with_current_unlocked<F, R>(f: F) -> R
+                    where
+                        F: for<'ctx> FnOnce($mod_ident<'ctx>) -> R,
+                    {
+                        let init_counter = INIT_COUNTER.load(core::sync::atomic::Ordering::Relaxed);
+                        if init_counter != INIT_STEPS {
+                            panic!("the module exports are not initialized")
+                        }
+
+                        let guard = CURRENT.0.read().unwrap();
+                        if guard.is_null() {
+                            panic!("the module is not initialized");
+                        }
+
+                        // Safety:
+                        unsafe {
+                            let module = <$mod_ident<'_> as $crate::ffi::FFITransferable<*const $crate::bindings::FimoModule>>::from_ffi(*guard);
+                            f(module)
+                        }
+                    }
+                }
+            }
+
             const fn build_export() -> $crate::bindings::FimoModuleExport {
                 let name = $crate::optional_c_str!($name);
                 let description = $crate::optional_c_str!($($descr)?);
@@ -451,17 +526,16 @@ macro_rules! export_module_private_parameter {
         $crate::paste::paste! {
             #[repr(C)]
             #[doc = "Parameter table for the `" $mod_ident "` module"]
-            pub struct [<$mod_ident Parameters>]<'a> {
+            pub struct [<$mod_ident Parameters>] {
                 $(
                     $name: $crate::module::Parameter<
-                        'a,
+                        'static,
                         $crate::export_module_private_parameter!(param_type $default_ty $($param_ty)?)
                     >,
                 )*
-                _private_phantom: core::marker::PhantomData<&'a ()>,
             }
 
-            impl [<$mod_ident Parameters>]<'_> {
+            impl [<$mod_ident Parameters>] {
                 $(
                     #[doc = "Fetches the `" $name "` parameter"]
                     pub fn $name(&self) -> &$crate::module::Parameter<
@@ -508,14 +582,13 @@ macro_rules! export_module_private_resources {
         $crate::paste::paste! {
             #[repr(C)]
             #[doc = "Resource table for the `" $mod_type "` module"]
-            pub struct [<$mod_type Resources>]<'a> {
+            pub struct [<$mod_type Resources>] {
                 $(
-                    $name: &'a core::ffi::c_char,
+                    $name: &'static core::ffi::c_char,
                 )*
-                _private_phantom: core::marker::PhantomData<&'a ()>,
             }
 
-            impl [<$mod_type Resources>]<'_> {
+            impl [<$mod_type Resources>] {
                 $(
                     #[doc = "Fetches the `" $name "` resource path"]
                     pub fn $name(&self) -> &core::ffi::CStr {
@@ -600,17 +673,16 @@ macro_rules! export_module_private_imports {
         $crate::paste::paste! {
             #[repr(C)]
             #[doc = "Import table for the `" $mod_ident "` module"]
-            pub struct [<$mod_ident Imports>]<'a> {
+            pub struct [<$mod_ident Imports>] {
                 $(
                     $name: $crate::module::Symbol<
-                        'a,
+                        'static,
                         <$import as $crate::module::SymbolItem>::Type
                     >,
                 )*
-                _private_phantom: core::marker::PhantomData<&'a ()>,
             }
 
-            impl [<$mod_ident Imports>]<'_> {
+            impl [<$mod_ident Imports>] {
                 $(
                     #[doc = "Fetches the `" $name "` import symbol"]
                     pub fn $name(&self) -> $crate::module::SymbolGuard<
@@ -627,6 +699,13 @@ macro_rules! export_module_private_imports {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! export_module_private_exports {
+    (count_dynamic { $($block:tt)* }) => {
+        $crate::export_module_private_exports!(count_dynamic_inner $($block)*)
+    };
+    (count_dynamic_inner $(,)?) => { 0 };
+    (count_dynamic_inner $name:ident: $export:path $(, $($rest:tt)*)?) => {
+        1 + $($crate::export_module_private_exports!(count_dynamic_inner $($rest)*))?
+    };
     (static_ptr { $($block:tt)* }) => {{
         const X: &[$crate::bindings::FimoModuleSymbolExport] =
             $crate::export_module_private_exports!(static $($block)*);
@@ -671,12 +750,56 @@ macro_rules! export_module_private_exports {
             ),*
         ]
     };
-    (dynamic $mod_ident:ident; $($name:ident: $export:path),* $(,)?) => {
+    (dynamic $mod_ident:ident; $($name:ident: $export:path),* $(,)?) => {{
+        unsafe extern "C" fn construct_dynamic_symbol<T, S>(
+            module: *const $crate::bindings::FimoModule,
+            symbol: *mut *mut core::ffi::c_void,
+        ) -> $crate::bindings::FimoError
+        where
+            T: $crate::module::Module,
+            S: $crate::module::DynamicExport<T>,
+        {
+            let mut guard = match CURRENT.0.write() {
+                Ok(x) => x,
+                Err(_e) => return $crate::bindings::FimoError::FIMO_EUNKNOWN,
+            };
+            if guard.is_null() {
+                return $crate::bindings::FimoError::FIMO_EUNKNOWN;
+            }
+
+            // Safety:
+            unsafe {
+                match $crate::module::c_ffi::construct_dynamic_symbol::<T, S>(module, symbol) {
+                    Ok(_) => {
+                        INIT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        $crate::bindings::FimoError::FIMO_EOK
+                    }
+                    Err(e) => e.into_error()
+                }
+            }
+        }
+
+        unsafe extern "C" fn destroy_dynamic_symbol<T, S>(symbol: *mut core::ffi::c_void)
+        where
+            T: $crate::module::Module,
+            S: $crate::module::DynamicExport<T>,
+        {
+            let mut guard = match CURRENT.0.write() {
+                Ok(x) => x,
+                Err(_e) => std::process::abort(),
+            };
+            if guard.is_null() {
+                std::process::abort();
+            }
+            $crate::module::c_ffi::destroy_dynamic_symbol::<T, S>(symbol);
+            INIT_COUNTER.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
         &[
             $(
                 $crate::bindings::FimoModuleDynamicSymbolExport {
-                    constructor: Some($crate::module::c_ffi::construct_dynamic_symbol::<$mod_ident<'_>, $export> as _),
-                    destructor: Some($crate::module::c_ffi::destroy_dynamic_symbol::<$mod_ident<'_>, $export> as _),
+                    constructor: Some(construct_dynamic_symbol::<$mod_ident<'_>, $export> as _),
+                    destructor: Some(destroy_dynamic_symbol::<$mod_ident<'_>, $export> as _),
                     version: {
                         let x = <<$export as $crate::module::DynamicExport<$mod_ident<'_>>>::Item as $crate::module::SymbolItem>::VERSION;
                         $crate::module::c_ffi::extract_version(x)
@@ -694,30 +817,29 @@ macro_rules! export_module_private_exports {
                 }
             ),*
         ]
-    };
+    }};
     (table $mod_ident:ident;
         static $($s_name:ident: $s_export:path = $s_expr:expr),* $(,)?;
         dynamic $($d_name:ident: $d_export:path),* $(,)?) => {
         $crate::paste::paste! {
             #[repr(C)]
             #[doc = "Export table for the `" $mod_ident "` module"]
-            pub struct [<$mod_ident Exports>]<'a> {
+            pub struct [<$mod_ident Exports>] {
                 $(
                     $s_name: $crate::module::Symbol<
-                        'a,
+                        'static,
                         <$s_export as $crate::module::SymbolItem>::Type
                     >,
                 )*
                 $(
                     $d_name: $crate::module::Symbol<
-                        'a,
-                        <<$d_export as $crate::module::DynamicExport<$mod_ident<'a>>>::Item as $crate::module::SymbolItem>::Type
+                        'static,
+                        <<$d_export as $crate::module::DynamicExport<$mod_ident<'static>>>::Item as $crate::module::SymbolItem>::Type
                     >,
                 )*
-                _private_phantom: core::marker::PhantomData<&'a ()>,
             }
 
-            impl [<$mod_ident Exports>]<'_> {
+            impl [<$mod_ident Exports>] {
                 $(
                     #[doc = "Fetches the `" $s_name "` import symbol"]
                     pub fn $s_name(&self) -> $crate::module::SymbolGuard<
@@ -755,12 +877,60 @@ macro_rules! export_module_private_data {
         $constructor
     };
     (constructor $mod_ident:ident $($constructor:path)?) => {{
+        unsafe extern "C" fn construct_module<T, C>(
+            module: *const $crate::bindings::FimoModule,
+            set: *mut $crate::bindings::FimoModuleLoadingSet,
+            data: *mut *mut core::ffi::c_void,
+        ) -> $crate::bindings::FimoError
+        where
+            T: $crate::module::Module,
+            C: $crate::module::ModuleConstructor<T>,
+        {
+            let mut guard = match CURRENT.0.write() {
+                Ok(x) => x,
+                Err(_e) => return $crate::bindings::FimoError::FIMO_EUNKNOWN,
+            };
+            if !guard.is_null() {
+                return $crate::bindings::FimoError::FIMO_EBUSY;
+            }
+
+            // Safety:
+            unsafe {
+                match $crate::module::c_ffi::construct_module::<T, C>(module, set, data) {
+                    Ok(_) => {
+                        *guard = module;
+                        $crate::bindings::FimoError::FIMO_EOK
+                    },
+                    Err(e) => e.into_error(),
+                }
+            }
+        }
+
         type Constructor = $crate::export_module_private_data!(constructor_path $($constructor)?);
-        Some($crate::module::c_ffi::construct_module::<$mod_ident<'_>, Constructor> as _)
+        Some(construct_module::<$mod_ident<'_>, Constructor> as _)
     }};
     (destructor $mod_ident:ident $($constructor:path)?) => {{
+        unsafe extern "C" fn destroy_module<T, C>(
+            module: *const $crate::bindings::FimoModule,
+            data: *mut core::ffi::c_void,
+        ) where
+            T: $crate::module::Module,
+            C: $crate::module::ModuleConstructor<T>,
+        {
+            let mut guard = match CURRENT.0.write() {
+                Ok(x) => x,
+                Err(_e) => std::process::abort(),
+            };
+
+            // Safety:
+            unsafe {
+                $crate::module::c_ffi::destroy_module::<T, C>(module, data);
+                *guard = std::ptr::null();
+            }
+        }
+
         type Constructor = $crate::export_module_private_data!(constructor_path $($constructor)?);
-        Some($crate::module::c_ffi::destroy_module::<$mod_ident<'_>, Constructor> as _)
+        Some(destroy_module::<$mod_ident<'_>, Constructor> as _)
     }};
 }
 
@@ -793,70 +963,79 @@ pub mod c_ffi {
         T: Module,
         F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
     {
-        // Safety:
-        unsafe {
-            let module = &*module.cast();
-            let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
-            match f(module, data) {
-                Ok(x) => {
-                    use bindings::FimoModuleParamType;
-                    match x {
-                        ParameterValue::U8(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(type_, FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Safety:
+            unsafe {
+                let module = &*module.cast();
+                let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
+                match f(module, data) {
+                    Ok(x) => {
+                        use bindings::FimoModuleParamType;
+                        match x {
+                            ParameterValue::U8(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8,
+                                );
+                            }
+                            ParameterValue::U16(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U16,
+                                );
+                            }
+                            ParameterValue::U32(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U32,
+                                );
+                            }
+                            ParameterValue::U64(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U64,
+                                );
+                            }
+                            ParameterValue::I8(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I8,
+                                );
+                            }
+                            ParameterValue::I16(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I16,
+                                );
+                            }
+                            ParameterValue::I32(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I32,
+                                );
+                            }
+                            ParameterValue::I64(x) => {
+                                core::ptr::write(value.cast(), x);
+                                core::ptr::write(
+                                    type_,
+                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I64,
+                                );
+                            }
                         }
-                        ParameterValue::U16(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(
-                                type_,
-                                FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U16,
-                            );
-                        }
-                        ParameterValue::U32(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(
-                                type_,
-                                FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U32,
-                            );
-                        }
-                        ParameterValue::U64(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(
-                                type_,
-                                FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U64,
-                            );
-                        }
-                        ParameterValue::I8(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(type_, FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I8);
-                        }
-                        ParameterValue::I16(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(
-                                type_,
-                                FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I16,
-                            );
-                        }
-                        ParameterValue::I32(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(
-                                type_,
-                                FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I32,
-                            );
-                        }
-                        ParameterValue::I64(x) => {
-                            core::ptr::write(value.cast(), x);
-                            core::ptr::write(
-                                type_,
-                                FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I64,
-                            );
-                        }
+                        Error::EOK.into_error()
                     }
-                    Error::EOK.into_error()
+                    Err(x) => x.into_error(),
                 }
-                Err(x) => x.into_error(),
             }
-        }
+        }))
+        .unwrap_or(bindings::FimoError::FIMO_EUNKNOWN)
     }
 
     pub unsafe extern "C" fn set_param<T, F>(
@@ -870,101 +1049,116 @@ pub mod c_ffi {
         T: Module,
         F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
     {
-        // Safety:
-        unsafe {
-            let module = &*module.cast();
-            let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
-            let type_ = match ParameterType::try_from(type_) {
-                Ok(x) => x,
-                Err(e) => return e.into_error(),
-            };
-            let value = match type_ {
-                ParameterType::U8 => ParameterValue::U8(core::ptr::read(value.cast())),
-                ParameterType::U16 => ParameterValue::U16(core::ptr::read(value.cast())),
-                ParameterType::U32 => ParameterValue::U32(core::ptr::read(value.cast())),
-                ParameterType::U64 => ParameterValue::U64(core::ptr::read(value.cast())),
-                ParameterType::I8 => ParameterValue::I8(core::ptr::read(value.cast())),
-                ParameterType::I16 => ParameterValue::I16(core::ptr::read(value.cast())),
-                ParameterType::I32 => ParameterValue::I32(core::ptr::read(value.cast())),
-                ParameterType::I64 => ParameterValue::I64(core::ptr::read(value.cast())),
-            };
-            match f(module, value, data) {
-                Ok(_) => Error::EOK.into_error(),
-                Err(x) => x.into_error(),
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // Safety:
+            unsafe {
+                let module = &*module.cast();
+                let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
+                let type_ = match ParameterType::try_from(type_) {
+                    Ok(x) => x,
+                    Err(e) => return e.into_error(),
+                };
+                let value = match type_ {
+                    ParameterType::U8 => ParameterValue::U8(core::ptr::read(value.cast())),
+                    ParameterType::U16 => ParameterValue::U16(core::ptr::read(value.cast())),
+                    ParameterType::U32 => ParameterValue::U32(core::ptr::read(value.cast())),
+                    ParameterType::U64 => ParameterValue::U64(core::ptr::read(value.cast())),
+                    ParameterType::I8 => ParameterValue::I8(core::ptr::read(value.cast())),
+                    ParameterType::I16 => ParameterValue::I16(core::ptr::read(value.cast())),
+                    ParameterType::I32 => ParameterValue::I32(core::ptr::read(value.cast())),
+                    ParameterType::I64 => ParameterValue::I64(core::ptr::read(value.cast())),
+                };
+                match f(module, value, data) {
+                    Ok(_) => Error::EOK.into_error(),
+                    Err(x) => x.into_error(),
+                }
             }
-        }
+        }))
+        .unwrap_or(bindings::FimoError::FIMO_EUNKNOWN)
     }
 
-    pub unsafe extern "C" fn construct_dynamic_symbol<T, S>(
+    pub unsafe fn construct_dynamic_symbol<T, S>(
         module: *const bindings::FimoModule,
         symbol: *mut *mut core::ffi::c_void,
-    ) -> bindings::FimoError
+    ) -> Result<(), Error>
     where
         T: Module,
         S: DynamicExport<T>,
     {
-        // Safety: The function is only called internally,
-        // where we know the type of the module.
-        unsafe {
-            let module = PartialModule::<'_, T>::from_ffi(module);
-            match S::construct(module) {
-                Ok(data) => {
-                    let data = core::ptr::from_mut(data).cast();
-                    core::ptr::write(symbol, data);
-                    Error::EOK.into_error()
+        std::panic::catch_unwind(|| {
+            // Safety: The function is only called internally,
+            // where we know the type of the module.
+            unsafe {
+                let module = PartialModule::<'_, T>::from_ffi(module);
+                match S::construct(module) {
+                    Ok(data) => {
+                        let data = core::ptr::from_mut(data).cast();
+                        core::ptr::write(symbol, data);
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
                 }
-                Err(e) => e.into_error(),
             }
-        }
+        })
+        .unwrap_or(Err(Error::EUNKNOWN))
     }
 
-    pub unsafe extern "C" fn destroy_dynamic_symbol<T, S>(symbol: *mut core::ffi::c_void)
+    pub unsafe fn destroy_dynamic_symbol<T, S>(symbol: *mut core::ffi::c_void)
     where
         T: Module,
         S: DynamicExport<T>,
     {
-        // Safety: The function is only called internally,
-        // where we know the type of the symbol.
-        unsafe {
-            S::destroy(&mut *symbol.cast());
-        }
+        std::panic::catch_unwind(|| {
+            // Safety: The function is only called internally,
+            // where we know the type of the symbol.
+            unsafe {
+                S::destroy(&mut *symbol.cast());
+            }
+        })
+        .unwrap_or_else(|_e| std::process::abort());
     }
 
-    pub unsafe extern "C" fn construct_module<T, C>(
+    pub unsafe fn construct_module<T, C>(
         module: *const bindings::FimoModule,
         set: *mut bindings::FimoModuleLoadingSet,
         data: *mut *mut core::ffi::c_void,
-    ) -> bindings::FimoError
+    ) -> Result<(), Error>
     where
         T: Module,
         C: ModuleConstructor<T>,
     {
-        // Safety: See above.
-        unsafe {
-            let module = PreModule::<T>::from_ffi(module);
-            let set = LoadingSet::from_ffi(set);
-            match C::construct(module.into(), set) {
-                Ok(v) => {
-                    core::ptr::write(data, core::ptr::from_mut(v).cast());
-                    Error::EOK.into_error()
+        std::panic::catch_unwind(|| {
+            // Safety: See above.
+            unsafe {
+                let module = PreModule::<T>::from_ffi(module);
+                let set = LoadingSet::from_ffi(set);
+                match C::construct(module.into(), set) {
+                    Ok(v) => {
+                        core::ptr::write(data, core::ptr::from_mut(v).cast());
+                        Ok(())
+                    }
+                    Err(x) => Err(x),
                 }
-                Err(x) => x.into_error(),
             }
-        }
+        })
+        .unwrap_or(Err(Error::EUNKNOWN))
     }
 
-    pub unsafe extern "C" fn destroy_module<T, C>(
+    pub unsafe fn destroy_module<T, C>(
         module: *const bindings::FimoModule,
         data: *mut core::ffi::c_void,
     ) where
         T: Module,
         C: ModuleConstructor<T>,
     {
-        // Safety: See above
-        unsafe {
-            let module = PreModule::<T>::from_ffi(module);
-            let data = &mut *data.cast();
-            C::destroy(module, data);
-        }
+        std::panic::catch_unwind(|| {
+            // Safety: See above
+            unsafe {
+                let module = PreModule::<T>::from_ffi(module);
+                let data = &mut *data.cast();
+                C::destroy(module, data);
+            }
+        })
+        .unwrap_or_else(|_e| std::process::abort());
     }
 }
