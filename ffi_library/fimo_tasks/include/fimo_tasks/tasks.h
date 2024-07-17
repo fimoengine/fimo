@@ -154,14 +154,6 @@ typedef struct FiTasksCommandBuffer {
      */
     const char *label;
     /**
-     * Reference to the owning module.
-     *
-     * Must be a strong handle and be locked.
-     *
-     * The handle will not be released, nor unlocked by the runtime.
-     */
-    const FimoModuleInfo *owner;
-    /**
      * List of commands to process.
      */
     const FiTasksCommandBufferEntry *entries;
@@ -227,14 +219,6 @@ typedef struct FiTasksTask {
      * function.
      */
     const char *label;
-    /**
-     * Reference to the owning module.
-     *
-     * Must be a strong handle and be locked.
-     *
-     * The handle will not be released, nor unlocked by the runtime.
-     */
-    const FimoModuleInfo *owner;
     /**
      * Entry function of the task.
      *
