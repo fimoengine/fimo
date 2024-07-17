@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <fimo_std/error.h>
+#include <fimo_std/module.h>
 #include <fimo_std/time.h>
 #include <fimo_std/utils.h>
 
@@ -43,13 +44,13 @@ extern "C" {
  * @param TASK pointer to the task to spawn
  */
 #define FI_TASKS_SPAWN_TASK_COMMAND(TASK)                                                                              \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK, .data = (void *)(TASK), }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK, .data = {.spawn_task = (TASK)}, }
 
 /**
  * Constructs a new command.
  */
 #define FI_TASKS_WAIT_BARRIER_COMMAND()                                                                                \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_BARRIER, .data = (void *)(0), }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_BARRIER, .data = {.wait_barrier = 0}, }
 
 /**
  * Constructs a new command.
@@ -57,7 +58,10 @@ extern "C" {
  * @param BUFFER_HANDLE command buffer to wait for
  */
 #define FI_TASKS_WAIT_COMMAND_BUFFER_COMMAND(BUFFER_HANDLE)                                                            \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER, .data = (BUFFER_HANDLE).data, }
+    {                                                                                                                  \
+        .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER,                                                \
+        .data = {.wait_command_buffer = (BUFFER_HANDLE)},                                                              \
+    }
 
 /**
  * Constructs a new command.
@@ -65,7 +69,10 @@ extern "C" {
  * @param ENABLE whether to run all tasks sequentially
  */
 #define FI_TASKS_SET_SEQUENTIAL_EXECUTION_COMMAND(ENABLE)                                                              \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION, .data = (void *)(ENABLE), }
+    {                                                                                                                  \
+        .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION,                                           \
+        .data = {.set_sequential_execution = (ENABLE)},                                                                \
+    }
 
 /**
  * Constructs a new command.
@@ -73,19 +80,19 @@ extern "C" {
  * @param WORKER worker id
  */
 #define FI_TASKS_SET_WORKER_COMMAND(WORKER)                                                                            \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER, .data = (void *)(WORKER), }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER, .data = {.set_worker = (WORKER)}, }
 
 /**
  * Constructs a new command.
  */
 #define FI_TASKS_ENABLE_ALL_WORKERS_COMMAND()                                                                          \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS, .data = NULL, }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS, .data = {.enable_all_workers = 0}, }
 
 /**
  * Constructs a new command.
  */
 #define FI_TASKS_DISABLE_ALL_WORKERS_COMMAND()                                                                         \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS, .data = NULL, }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS, .data = {.disable_all_workers = 0}, }
 
 /**
  * Constructs a new command.
@@ -93,7 +100,7 @@ extern "C" {
  * @param WORKER worker id
  */
 #define FI_TASKS_ENABLE_WORKER_COMMAND(WORKER)                                                                         \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER, .data = (void *)(WORKER), }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER, .data = {.enable_worker = (WORKER)}, }
 
 /**
  * Constructs a new command.
@@ -101,7 +108,7 @@ extern "C" {
  * @param WORKER worker id
  */
 #define FI_TASKS_DISABLE_WORKER_COMMAND(WORKER)                                                                        \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER, .data = (void *)(WORKER), }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER, .data = {.disable_worker = (WORKER)}, }
 
 /**
  * Constructs a new command.
@@ -109,7 +116,7 @@ extern "C" {
  * @param STACK_SIZE minimum stack size
  */
 #define FI_TASKS_SET_STACK_SIZE_COMMAND(STACK_SIZE)                                                                    \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE, .data = (void *)(STACK_SIZE), }
+    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE, .data = {.set_stack_size = (STACK_SIZE)}, }
 
 
 /**
@@ -129,82 +136,31 @@ typedef struct FiTasksContext {
 } FiTasksContext;
 
 /**
- * Type for an entry in a command buffer.
- */
-typedef enum FiTasksCommandBufferEntryType {
-    /**
-     * Specifies that the runtime should spawn a new task.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK = 0,
-    /**
-     * A barrier command.
-     *
-     * Barriers synchronize the execution of a command buffer,
-     * ensuring that the preceding commands have been completed.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_BARRIER = 1,
-    /**
-     * A command buffer synchronization command.
-     *
-     * Synchronizes the following commands with the completion
-     * of another command buffer.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER = 2,
-    /**
-     * Specifies whether to execute the following tasks sequentially.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION = 3,
-    /**
-     * Specifies the worker thread on which the following
-     * must be spawned.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER = 4,
-    /**
-     * Enables the following tasks to be spawned on all
-     * available workers of the worker group.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS = 5,
-    /**
-     * Disables all worker threads of the current worker
-     * group for the selection of suitable workers.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS = 6,
-    /**
-     * Enables a single worker to be used in the following
-     * commands.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER = 7,
-    /**
-     * Disables a single worker to be used in the following
-     * commands.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER = 8,
-    /**
-     * Requests a minimum stack size for the following
-     * tasks.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE = 10,
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_FORCE32 = 0x7FFFFFFF
-} FiTasksCommandBufferEntryType;
-
-/**
  * An entry of a command buffer.
  */
-typedef struct FiTasksCommandBufferEntry {
-    /**
-     * Command identifier.
-     */
-    FiTasksCommandBufferEntryType type;
-    /**
-     * Type-erased data associated with the command.
-     */
-    void *data;
-} FiTasksCommandBufferEntry;
+typedef struct FiTasksCommandBufferEntry FiTasksCommandBufferEntry;
 
 /**
  * A command buffer.
  */
 typedef struct FiTasksCommandBuffer {
+    /**
+     * Optional label of the command buffer.
+     *
+     * May be used by the runtime for tracing purposes.
+     * If present, the string must live until the completion
+     * of the command buffer, and may be released by the
+     * `on_cleanup` function.
+     */
+    const char *label;
+    /**
+     * Reference to the owning module.
+     *
+     * Must be a strong handle and be locked.
+     *
+     * The handle will not be released, nor unlocked by the runtime.
+     */
+    const FimoModuleInfo *owner;
     /**
      * List of commands to process.
      */
@@ -262,6 +218,23 @@ typedef struct FiTasksCommandBuffer {
  * A task.
  */
 typedef struct FiTasksTask {
+    /**
+     * Optional label of the task.
+     *
+     * May be used by the runtime for tracing purposes.
+     * If present, the string must live until the completion
+     * of the task, and may be released by the `on_cleanup`
+     * function.
+     */
+    const char *label;
+    /**
+     * Reference to the owning module.
+     *
+     * Must be a strong handle and be locked.
+     *
+     * The handle will not be released, nor unlocked by the runtime.
+     */
+    const FimoModuleInfo *owner;
     /**
      * Entry function of the task.
      *
@@ -479,6 +452,122 @@ typedef struct FiTasksWorkerGroupConfig {
      */
     bool is_queryable;
 } FiTasksWorkerGroupConfig;
+
+/**
+ * Type for an entry in a command buffer.
+ */
+typedef enum FiTasksCommandBufferEntryType {
+    /**
+     * Specifies that the runtime should spawn a new task.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK = 0,
+    /**
+     * A barrier command.
+     *
+     * Barriers synchronize the execution of a command buffer,
+     * ensuring that the preceding commands have been completed.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_BARRIER = 1,
+    /**
+     * A command buffer synchronization command.
+     *
+     * Synchronizes the following commands with the completion
+     * of another command buffer.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER = 2,
+    /**
+     * Specifies whether to execute the following tasks sequentially.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION = 3,
+    /**
+     * Specifies the worker thread on which the following
+     * must be spawned.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER = 4,
+    /**
+     * Enables the following tasks to be spawned on all
+     * available workers of the worker group.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS = 5,
+    /**
+     * Disables all worker threads of the current worker
+     * group for the selection of suitable workers.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS = 6,
+    /**
+     * Enables a single worker to be used in the following
+     * commands.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER = 7,
+    /**
+     * Disables a single worker to be used in the following
+     * commands.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER = 8,
+    /**
+     * Requests a minimum stack size for the following
+     * tasks.
+     */
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE = 10,
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_FORCE32 = 0x7FFFFFFF
+} FiTasksCommandBufferEntryType;
+
+/**
+ * Data for an entry in a command buffer.
+ */
+typedef union FiTasksCommandBufferEntryData {
+    /**
+     * Pointer to the task to spawn.
+     */
+    FiTasksTask *spawn_task;
+    /**
+     * Placeholder.
+     */
+    FimoU8 wait_barrier;
+    /**
+     * Strong reference to a command buffer handle.
+     */
+    FiTasksCommandBufferHandle wait_command_buffer;
+    /**
+     * Whether to enable sequential execution of commands.
+     */
+    bool set_sequential_execution;
+    /**
+     * Worker.
+     */
+    FimoUSize set_worker;
+    /**
+     * Placeholder.
+     */
+    FimoU8 enable_all_workers;
+    /**
+     * Placeholder.
+     */
+    FimoU8 disable_all_workers;
+    /**
+     * Worker to enable.
+     */
+    FimoUSize enable_worker;
+    /**
+     * Worker to disable.
+     */
+    FimoUSize disable_worker;
+    /**
+     * Stack size.
+     */
+    FimoUSize set_stack_size;
+} FiTasksCommandBufferEntryData;
+
+struct FiTasksCommandBufferEntry {
+    /**
+     * Command identifier.
+     */
+    FiTasksCommandBufferEntryType type;
+    /**
+     * Data associated with the command.
+     */
+    FiTasksCommandBufferEntryData data;
+};
 
 /**
  * A key for a task-specific-storage.
