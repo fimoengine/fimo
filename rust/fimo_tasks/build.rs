@@ -15,6 +15,7 @@ fn main() {
         .derive_partialord(true)
         .derive_ord(true)
         .derive_hash(true)
+        .default_non_copy_union_style(bindgen::NonCopyUnionStyle::ManuallyDrop)
         .enable_function_attribute_detection()
         .allowlist_item("fi_tasks_.*")
         .allowlist_item("FI_TASKS_.*")
