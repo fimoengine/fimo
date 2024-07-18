@@ -11,6 +11,7 @@ use fimo_std::{
 use std::{
     alloc::Allocator,
     cell::UnsafeCell,
+    ffi::CString,
     marker::PhantomData,
     mem::{ManuallyDrop, MaybeUninit},
     num::NonZeroUsize,
@@ -50,7 +51,7 @@ where
     /// Builds a new empty command buffer with a custom allocator.
     pub fn new_in(alloc: A) -> Self {
         Self {
-            inner: RawCommandBuffer::new_in(alloc),
+            inner: RawCommandBuffer::new_in(None, alloc),
         }
     }
 
@@ -316,10 +317,10 @@ where
 
 impl<A> Default for CommandBuffer<'_, A>
 where
-    A: Allocator + Default + Clone + Send + 'static,
+    A: Allocator + Clone + Send + Default + 'static,
 {
     fn default() -> Self {
-        Self::new_in(Default::default())
+        CommandBuffer::new_in(Default::default())
     }
 }
 
@@ -339,7 +340,7 @@ where
         let alloc = scope.allocator().clone();
         Self {
             scope,
-            inner: RawCommandBuffer::new_in(alloc),
+            inner: RawCommandBuffer::new_in(None, alloc),
         }
     }
 
@@ -587,6 +588,7 @@ pub enum CommandBufferStatus {
 
 #[derive(Debug)]
 struct RawCommandBuffer<'scope, 'ctx, A: Allocator = FimoAllocator> {
+    label: Option<CString>,
     commands: Vec<Command<'scope, 'ctx, A>, A>,
 }
 
@@ -594,8 +596,9 @@ impl<'scope, 'ctx, A> RawCommandBuffer<'scope, 'ctx, A>
 where
     A: Allocator + Clone + Send + 'scope,
 {
-    fn new_in(alloc: A) -> Self {
+    fn new_in(label: Option<CString>, alloc: A) -> Self {
         Self {
+            label,
             commands: Vec::new_in(alloc),
         }
     }
@@ -657,7 +660,7 @@ where
             }
         };
 
-        let task = RawTask::new_in(f, s, alloc);
+        let task = RawTask::new_in(None, f, s, alloc);
         self.commands.push(Command::Task(task));
 
         TaskHandle { inner: handle }
@@ -714,6 +717,7 @@ where
             A: Allocator + Clone,
         {
             buffer: bindings::FiTasksCommandBuffer,
+            label: Option<CString>,
             entries: Option<Box<[bindings::FiTasksCommandBufferEntry], A>>,
             on_finish: Option<F>,
         }
@@ -725,16 +729,12 @@ where
             F: FnOnce(CommandBufferStatus) + Send,
             A: Allocator + Clone,
         {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            fimo_std::panic::abort_on_panic(|| {
                 // Safety: We are the only ones with a reference to the buffer.
                 let buffer = unsafe { &mut *buffer.cast::<FfiBuffer<A, F>>() };
                 let f = buffer.on_finish.take().unwrap();
                 f(CommandBufferStatus::Completed);
-            }))
-            .is_err()
-            {
-                std::process::abort();
-            }
+            });
         }
 
         unsafe extern "C" fn on_abort<A, F>(
@@ -745,16 +745,12 @@ where
             F: FnOnce(CommandBufferStatus) + Send,
             A: Allocator + Clone,
         {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            fimo_std::panic::abort_on_panic(|| {
                 // Safety: We are the only ones with a reference to the buffer.
                 let buffer = unsafe { &mut *buffer.cast::<FfiBuffer<A, F>>() };
                 let f = buffer.on_finish.take().unwrap();
                 f(CommandBufferStatus::Aborted(entry));
-            }))
-            .is_err()
-            {
-                std::process::abort();
-            }
+            });
         }
 
         unsafe extern "C" fn on_cleanup<A, F>(
@@ -764,18 +760,14 @@ where
             F: FnOnce(CommandBufferStatus) + Send,
             A: Allocator + Clone,
         {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            fimo_std::panic::abort_on_panic(|| {
                 // Safety: We know that the type must match and that we own the data.
                 let mut buffer = unsafe { FfiBufferBox::<A, F>::from_ffi(buffer) };
 
                 // Remove the entries so that the destructor does not try to drop them again.
                 drop(buffer.0.entries.take());
                 drop(buffer);
-            }))
-            .is_err()
-            {
-                std::process::abort();
-            }
+            });
         }
 
         impl<A, F> Drop for FfiBuffer<A, F>
@@ -784,25 +776,33 @@ where
             A: Allocator + Clone,
         {
             fn drop(&mut self) {
-                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                fimo_std::panic::abort_on_panic(|| {
                     let entries = self.entries.take().unwrap();
                     for entry in entries.iter() {
-                        if entry.type_ == bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK {
-                            let task = entry.data.cast::<bindings::FiTasksTask>();
-                            // Safety:
-                            unsafe {
-                                if let Some(on_cleanup) = (*task).on_cleanup {
-                                    on_cleanup(entry.data, task);
+                        match entry.type_ {
+                            bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK => {
+                                // Safety:
+                                unsafe {
+                                    let task = *entry.data.spawn_task;
+                                    if let Some(on_cleanup) = (*task).on_cleanup {
+                                        on_cleanup((*task).cleanup_data, task);
+                                    }
                                 }
                             }
+                            bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER => {
+                                // Safety:
+                                unsafe {
+                                    let handle = *entry.data.wait_command_buffer;
+                                    if let Some(release)  = (*handle.vtable).v0.release {
+                                        release(handle.data);
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     drop(self.on_finish.take());
-                }))
-                    .is_err()
-                {
-                    std::process::abort()
-                }
+                });
             }
         }
 
@@ -836,48 +836,56 @@ where
         let alloc = self.allocator().clone();
         let mut entries = Box::new_uninit_slice_in(self.commands.len(), alloc.clone());
 
+        // Safety: We can safely destructure `self`
+        let (label, commands) = unsafe {
+            let this = ManuallyDrop::new(self);
+            let label = std::ptr::from_ref(&this.label).read();
+            let commands = std::ptr::from_ref(&this.commands).read();
+            (label, commands)
+        };
+
         // Can not panic since we pre-allocated all entries
-        for (entry, command) in entries.iter_mut().zip(self.commands) {
+        for (entry, command) in entries.iter_mut().zip(commands) {
             match command {
                 Command::Task(task) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK,
-                    data: Box::into_raw(task).cast(),
+                    data: bindings::FiTasksCommandBufferEntryData { spawn_task: ManuallyDrop::new(Box::into_raw(task).cast())},
                 }),
                 Command::Barrier => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_BARRIER,
-                    data: std::ptr::null_mut(),
+                    data: bindings::FiTasksCommandBufferEntryData { wait_barrier: ManuallyDrop::new(0) },
                 }),
                 Command::Handle(handle) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER,
-                    data: handle.into_raw_ptr(),
+                    data: bindings::FiTasksCommandBufferEntryData { wait_command_buffer: ManuallyDrop::new(handle.into_raw_handle()) },
                 }),
                 Command::SequentialExecution(enabled) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION,
-                    data: enabled as usize as *mut std::ffi::c_void,
+                    data: bindings::FiTasksCommandBufferEntryData {set_sequential_execution: ManuallyDrop::new(enabled)},
                 }),
                 Command::SetWorker(worker) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER,
-                    data: worker.0 as _,
+                    data: bindings::FiTasksCommandBufferEntryData {set_worker: ManuallyDrop::new(worker.0)},
                 }),
                 Command::EnableAllWorkers => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS,
-                    data: std::ptr::null_mut(),
+                    data: bindings::FiTasksCommandBufferEntryData {enable_all_workers: ManuallyDrop::new(0)},
                 }),
                 Command::DisableAllWorkers => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS,
-                    data: std::ptr::null_mut(),
+                    data: bindings::FiTasksCommandBufferEntryData {disable_all_workers: ManuallyDrop::new(0)},
                 }),
                 Command::EnableWorker(worker) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER,
-                    data: worker.0 as _,
+                    data: bindings::FiTasksCommandBufferEntryData {enable_worker: ManuallyDrop::new(worker.0)},
                 }),
                 Command::DisableWorker(worker) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER,
-                    data: worker.0 as _,
+                    data: bindings::FiTasksCommandBufferEntryData {disable_worker: ManuallyDrop::new(worker.0)},
                 }),
                 Command::SetStackSize(size) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE,
-                    data: size as _,
+                    data: bindings::FiTasksCommandBufferEntryData {set_stack_size: ManuallyDrop::new(size)},
                 }),
             };
         }
@@ -887,6 +895,7 @@ where
         FfiBufferBox(Box::new_in(
             FfiBuffer {
                 buffer: bindings::FiTasksCommandBuffer {
+                    label: label.as_ref().map_or(std::ptr::null(), |x| x.as_ptr()),
                     entries: entries.as_mut_ptr(),
                     num_entries: entries.len(),
                     on_complete: Some(on_complete::<A, F>),
@@ -895,6 +904,7 @@ where
                     on_cleanup: Some(on_cleanup::<A, F>),
                     cleanup_data: std::ptr::null_mut(),
                 },
+                label,
                 entries: Some(entries),
                 on_finish: Some(f),
             },
@@ -991,15 +1001,6 @@ where
     }
 }
 
-impl<'scope, 'ctx, A> Default for RawCommandBuffer<'scope, 'ctx, A>
-where
-    A: Allocator + Default + Clone + Send + 'scope,
-{
-    fn default() -> Self {
-        Self::new_in(Default::default())
-    }
-}
-
 /// A handle to an enqueued [`CommandBuffer`] or [`ScopedCommandBuffer`].
 #[derive(Debug, Clone)]
 pub struct CommandBufferHandle<'ctx, A: Allocator> {
@@ -1075,9 +1076,9 @@ impl<'ctx> CommandBufferHandleInner<'ctx> {
         Ok(WorkerGroup(group, PhantomData))
     }
 
-    fn into_raw_ptr(self) -> *mut std::ffi::c_void {
+    fn into_raw_handle(self) -> bindings::FiTasksCommandBufferHandle {
         let this = ManuallyDrop::new(self);
-        this.data()
+        this.handle
     }
 
     #[inline(always)]

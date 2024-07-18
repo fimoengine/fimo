@@ -3,6 +3,7 @@ use std::{
     alloc::Allocator,
     any::Any,
     cell::UnsafeCell,
+    ffi::CString,
     marker::PhantomData,
     mem::MaybeUninit,
     sync::{
@@ -32,6 +33,7 @@ pub enum TaskStatus {
 pub(super) struct RawTask<'a, A> {
     raw: bindings::FiTasksTask,
     allocator: A,
+    label: Option<CString>,
     drop_raw: unsafe fn(*mut bindings::FiTasksTask),
     _phantom: PhantomData<dyn FnOnce() + 'a>,
 }
@@ -40,7 +42,7 @@ impl<'a, A> RawTask<'a, A>
 where
     A: Allocator + Clone + Send + 'a,
 {
-    pub(super) fn new_in<F, S>(f: F, s: S, allocator: A) -> Box<Self, A>
+    pub(super) fn new_in<F, S>(label: Option<CString>, f: F, s: S, allocator: A) -> Box<Self, A>
     where
         F: FnOnce(&Context) -> Result<(), ()> + Send + 'a,
         S: FnOnce(TaskStatus) + Send + 'a,
@@ -90,7 +92,7 @@ where
             S: FnOnce(TaskStatus) + 'a,
             A: Allocator + Clone,
         {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            fimo_std::panic::abort_on_panic(|| {
                 // Safety: We are the only ones with a reference to the task.
                 let task = unsafe { &mut *task.cast::<RawTask<'_, A>>() };
                 let allocator = task.allocator.clone();
@@ -100,11 +102,7 @@ where
                 task.raw.status_callback_data = std::ptr::null_mut();
 
                 f(TaskStatus::Completed);
-            }))
-            .is_err()
-            {
-                std::process::abort();
-            }
+            });
         }
 
         unsafe extern "C" fn on_abort<'a, S, A>(
@@ -115,7 +113,7 @@ where
             S: FnOnce(TaskStatus) + 'a,
             A: Allocator + Clone,
         {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            fimo_std::panic::abort_on_panic(|| {
                 // Safety: We are the only ones with a reference to the task.
                 let task = unsafe { &mut *task.cast::<RawTask<'_, A>>() };
                 let allocator = task.allocator.clone();
@@ -125,11 +123,7 @@ where
                 task.raw.status_callback_data = std::ptr::null_mut();
 
                 f(TaskStatus::Aborted);
-            }))
-            .is_err()
-            {
-                std::process::abort();
-            }
+            });
         }
 
         unsafe extern "C" fn on_cleanup<A>(
@@ -138,18 +132,14 @@ where
         ) where
             A: Allocator + Clone,
         {
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            fimo_std::panic::abort_on_panic(|| {
                 // Safety: We are the only ones with a reference to the task.
                 let task = unsafe { &mut *task.cast::<RawTask<'_, A>>() };
                 let allocator = task.allocator.clone();
 
                 // Safety: We know that the task is contained in a `Box`.
                 unsafe { drop(Box::from_raw_in(task, allocator)) };
-            }))
-            .is_err()
-            {
-                std::process::abort();
-            }
+            });
         }
 
         unsafe fn on_drop<'a, F, S, A>(task: *mut bindings::FiTasksTask)
@@ -190,8 +180,14 @@ where
         let f = Box::new_in(f, allocator.clone());
         let s = Box::new_in(s, allocator.clone());
 
+        let label_ffi = match label.as_ref() {
+            None => std::ptr::null(),
+            Some(label) => label.as_ptr(),
+        };
+
         x.write(Self {
             raw: bindings::FiTasksTask {
+                label: label_ffi,
                 start: Some(start::<F, A>),
                 user_data: Box::into_raw(f).cast(),
                 on_complete: Some(on_complete::<S, A>),
@@ -201,6 +197,7 @@ where
                 cleanup_data: std::ptr::null_mut(),
             },
             allocator,
+            label,
             drop_raw: on_drop::<F, S, A>,
             _phantom: PhantomData,
         });

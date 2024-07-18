@@ -136,7 +136,7 @@ impl<T: 'static> TssKey<T> {
         let tss_value = if tss_value.is_null() {
             let mut v = init();
             extern "C" fn drop_box<T>(ptr: *mut std::ffi::c_void) {
-                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                fimo_std::panic::abort_on_panic(|| {
                     let ptr = ptr.cast::<T>();
                     assert!(!ptr.is_null());
 
@@ -144,11 +144,7 @@ impl<T: 'static> TssKey<T> {
                     unsafe {
                         drop(Box::from_raw(ptr));
                     }
-                }))
-                .is_err()
-                {
-                    std::process::abort();
-                }
+                });
             }
 
             // Safety: FFI call is safe
