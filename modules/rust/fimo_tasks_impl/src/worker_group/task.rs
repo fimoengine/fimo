@@ -1,4 +1,9 @@
-use crate::worker_group::worker_thread::{abort_task, complete_task, with_worker_context_lock};
+#![allow(dead_code)]
+
+use crate::{
+    module_export::ModuleToken,
+    worker_group::worker_thread::{abort_task, complete_task, with_worker_context_lock},
+};
 use fimo_std::{error::Error, ffi::FFISharable, module::Module};
 use fimo_tasks::{TaskId, WorkerId};
 use rustc_hash::FxHashMap;
@@ -33,9 +38,12 @@ impl EnqueuedTask {
                     worker.resume_context = Some(context);
 
                     // Extract the context.
-                    // Note: We can forgo the lock since the module can not be unloaded until
-                    // all commands have been executed.
-                    let context = worker.module.exports().context().share_to_ffi();
+                    // Safety: The module can not be unloaded until all commands have been executed.
+                    let context = unsafe {
+                        ModuleToken::with_current_unlocked(|module| {
+                            module.exports().context().share_to_ffi()
+                        })
+                    };
 
                     // Extract the `RawTask`.
                     let task = worker.current_task.as_ref().unwrap();
@@ -70,6 +78,10 @@ impl EnqueuedTask {
             local_data: Some(local_data),
             resume_context: Some(resume_context),
         }
+    }
+
+    pub fn id(&self) -> TaskId {
+        self.id
     }
 
     pub fn worker(&self) -> WorkerId {

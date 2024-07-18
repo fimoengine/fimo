@@ -5,7 +5,7 @@ use std::{
     sync::Weak,
 };
 
-use crate::{context::ContextImpl, module_export::Module};
+use crate::{context::ContextImpl};
 
 mod command_buffer;
 mod event_loop;
@@ -16,8 +16,7 @@ pub struct WorkerGroupImpl {
     id: WorkerId,
     name: CString,
     event_loop: event_loop::EventLoopHandle,
-    ctx: Weak<ContextImpl>,
-    module: Module<'static>,
+    _ctx: Weak<ContextImpl>,
 }
 
 impl WorkerGroupImpl {}

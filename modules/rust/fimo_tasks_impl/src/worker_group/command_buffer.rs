@@ -19,6 +19,10 @@ pub struct CommandBufferHandleImpl {
 }
 
 impl CommandBufferHandleImpl {
+    pub fn id(&self) -> CommandBufferHandleId {
+        self.id
+    }
+
     pub fn completion_status(&self) -> Option<bool> {
         if self.completed.load(Ordering::Acquire) {
             Some(self.completed.load(Ordering::Relaxed))
@@ -64,8 +68,10 @@ impl Debug for CommandBufferHandleImpl {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RawCommandBuffer(*mut fimo_tasks::bindings::FiTasksCommandBuffer);
 
+#[allow(dead_code)]
 impl RawCommandBuffer {
     fn buffer(&self) -> &fimo_tasks::bindings::FiTasksCommandBuffer {
         // Safety: A `RawCommandBuffer` works like a `Box`. We own the buffer.

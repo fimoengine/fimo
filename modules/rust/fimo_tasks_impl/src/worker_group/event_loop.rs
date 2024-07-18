@@ -1,11 +1,10 @@
-use crate::{
-    module_export::Module,
-    worker_group::{
-        command_buffer::{CommandBufferHandleId, CommandBufferHandleImpl},
-        task::EnqueuedTask,
-        worker_thread::{TaskRequest, TaskResponse, WorkerHandle, WorkerRequest, WorkerResponse},
-        WorkerGroupImpl,
-    },
+#![allow(dead_code, clippy::todo)]
+
+use crate::worker_group::{
+    command_buffer::{CommandBufferHandleId, CommandBufferHandleImpl},
+    task::EnqueuedTask,
+    worker_thread::{TaskRequest, TaskResponse, WorkerHandle, WorkerRequest, WorkerResponse},
+    WorkerGroupImpl,
 };
 use crossbeam_channel::{select, Receiver, Sender, TrySendError};
 use fimo_std::error::Error;
@@ -15,7 +14,10 @@ use std::{
     cell::Cell,
     collections::VecDeque,
     fmt::{Debug, Formatter},
-    sync::{Arc, RwLock, Weak},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock, Weak,
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -27,6 +29,7 @@ pub enum OuterRequest {
 
 #[derive(Debug)]
 pub enum InnerRequest {
+    UnblockTask(TaskId),
     WorkerRequest(WorkerRequest),
 }
 
@@ -99,10 +102,10 @@ struct EventLoop {
     public_messages: Receiver<OuterRequest>,
     private_messages: Receiver<InnerRequest>,
     workers: FxHashMap<WorkerId, WorkerHandle>,
+    blocked_tasks: FxHashMap<TaskId, EnqueuedTask>,
     handles: FxHashMap<CommandBufferHandleId, CommandBufferHandleData>,
     tasks: FxHashMap<TaskId, usize>,
     timeouts: Vec<TimeOut>,
-    module: Module<'static>,
 }
 
 // Outer requests.
@@ -130,14 +133,44 @@ impl EventLoop {
                 // Insert the timeout into our timeout queue.
                 let timeout = TimeOut {
                     time,
-                    handle: TimeOutHandle::TaskWaitUntil(task),
+                    handle: TimeOutHandle::Internal(task.id()),
                 };
                 self.add_timeout(timeout);
+                self.blocked_tasks.insert(task.id(), task);
             }
-            TaskRequest::WaitOnCommandBuffer(_) => {
-                todo!("Check if the handle is complete");
+            TaskRequest::WaitOnCommandBuffer(handle) => {
+                match handle.completion_status() {
+                    None => {
+                        // Add the task to the block list.
+                        let state = self
+                            .handles
+                            .get_mut(&handle.id())
+                            .expect("command buffer does not exist");
+                        state.waiters.push_back(Waiter::Task(task.id()));
+                        self.blocked_tasks.insert(task.id(), task);
+                    }
+                    Some(aborted) => {
+                        // Enqueue the task.
+                        let worker_id = task.worker();
+                        let worker = &self.workers[&worker_id];
+                        worker.push_local_response(WorkerResponse {
+                            task,
+                            response: TaskResponse::WaitOnCommandBuffer(Ok(aborted)),
+                        });
+                    }
+                }
             }
         }
+    }
+
+    fn on_unblock_task(&mut self, task: TaskId) {
+        let task = self.blocked_tasks.remove(&task).expect("task not found");
+        let worker_id = task.worker();
+        let worker = &self.workers[&worker_id];
+        worker.push_local_response(WorkerResponse {
+            task,
+            response: TaskResponse::WaitUntil,
+        });
     }
 }
 
@@ -156,6 +189,7 @@ impl EventLoop {
     fn handle_inner_request(&mut self, msg: InnerRequest) {
         match msg {
             InnerRequest::WorkerRequest(request) => self.on_worker_request(request),
+            InnerRequest::UnblockTask(_) => {}
         }
     }
 
@@ -180,16 +214,22 @@ impl EventLoop {
 
             // Remove the instance now that we know that the timeout time has passed.
             let TimeOut { handle, .. } = self.timeouts.pop().unwrap();
-            match handle {
-                // Wake the task back up now that the timer has passed.
-                TimeOutHandle::TaskWaitUntil(task) => {
-                    let worker_id = task.worker();
-                    let worker = &self.workers[&worker_id];
-                    worker.push_local_response(WorkerResponse {
-                        task,
-                        response: TaskResponse::WaitUntil,
-                    });
-                }
+
+            // Some handles are shared outside the event loop, e.g. synchronization operations
+            // between multiple event loops. In those cases we have to ensure that the task is not
+            // enqueued multiple times due to race conditions.
+            if let Some(task) = handle.try_consume() {
+                // Now that consuming the handle was successful, we can wake the task back up.
+                let task = self
+                    .blocked_tasks
+                    .remove(&task)
+                    .expect("task should be blocked");
+                let worker_id = task.worker();
+                let worker = &self.workers[&worker_id];
+                worker.push_local_response(WorkerResponse {
+                    task,
+                    response: TaskResponse::WaitUntil,
+                });
             }
         }
     }
@@ -248,6 +288,7 @@ impl EventLoop {
 
 #[derive(Debug)]
 struct CommandBufferHandleData {
+    running_tasks: usize,
     handle: Arc<CommandBufferHandleImpl>,
     waiters: VecDeque<Waiter>,
 }
@@ -265,5 +306,39 @@ struct TimeOut {
 
 #[derive(Debug)]
 enum TimeOutHandle {
-    TaskWaitUntil(EnqueuedTask),
+    Internal(TaskId),
+    External(Arc<ExternalTimeOutHandle>),
+}
+
+impl TimeOutHandle {
+    fn try_consume(self) -> Option<TaskId> {
+        match self {
+            TimeOutHandle::Internal(task) => Some(task),
+            TimeOutHandle::External(handle) => handle.try_consume(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ExternalTimeOutHandle {
+    task: TaskId,
+    consumed: AtomicBool,
+}
+
+impl ExternalTimeOutHandle {
+    fn new(task: TaskId) -> Arc<Self> {
+        Arc::new(Self {
+            task,
+            consumed: AtomicBool::new(false),
+        })
+    }
+
+    pub fn try_consume(self: Arc<Self>) -> Option<TaskId> {
+        let is_consumed = self.consumed.swap(true, Ordering::Acquire);
+        if is_consumed {
+            None
+        } else {
+            Some(self.task)
+        }
+    }
 }
