@@ -1,5 +1,5 @@
-use fimo_std::export_module;
 use crate::context::ContextImpl;
+use fimo_std::export_module;
 
 export_module! {
     mod Module {

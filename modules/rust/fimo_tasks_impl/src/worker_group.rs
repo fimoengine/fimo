@@ -5,7 +5,7 @@ use std::{
     sync::Weak,
 };
 
-use crate::{context::ContextImpl};
+use crate::context::ContextImpl;
 
 mod command_buffer;
 mod event_loop;
