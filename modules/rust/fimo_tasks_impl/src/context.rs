@@ -1,6 +1,6 @@
 #![allow(dead_code, clippy::todo)]
 
-use crate::module_export::Module;
+use crate::module_export::TasksModule;
 use fimo_std::{
     error::Error,
     module::{DynamicExport, PartialModule, SymbolItem},
@@ -9,11 +9,11 @@ use fimo_std::{
 #[derive(Debug)]
 pub struct ContextImpl {}
 
-impl DynamicExport<Module<'_>> for ContextImpl {
+impl DynamicExport<TasksModule<'_>> for ContextImpl {
     type Item = fimo_tasks::symbols::fimo_tasks::Context;
 
     fn construct<'a>(
-        _module: PartialModule<'a, Module<'_>>,
+        _module: PartialModule<'a, TasksModule<'_>>,
     ) -> Result<&'a mut <Self::Item as SymbolItem>::Type, Error> {
         todo!()
     }

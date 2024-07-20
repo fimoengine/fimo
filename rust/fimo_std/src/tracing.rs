@@ -530,7 +530,7 @@ impl Span {
     /// If successful, the newly created span is used as the context for succeeding events. The
     /// message may be cut of, if the length exceeds the internal formatting buffer size.
     pub fn new(
-        ctx: &ContextView<'_>,
+        ctx: ContextView<'_>,
         span_descriptor: &'static SpanDescriptor,
         arguments: Arguments<'_>,
     ) -> Result<Self, Error> {

@@ -17,7 +17,7 @@ use std::{
 /// The id is guaranteed to be unique for as long as the task has not finished its execution.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TaskId(pub(super) usize);
+pub struct TaskId(pub usize);
 
 /// Status of a task that has finished being executed by the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

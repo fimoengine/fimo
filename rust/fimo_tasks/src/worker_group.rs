@@ -8,17 +8,12 @@ use std::{ffi::CStr, fmt::Formatter, marker::PhantomData, num::NonZeroUsize};
 /// A unique identifier for a [`WorkerGroup`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WorkerGroupId(pub(super) usize);
-
-impl WorkerGroupId {
-    /// ID of the default [`WorkerGroup`].
-    pub const DEFAULT: Self = Self(0);
-}
+pub struct WorkerGroupId(pub usize);
 
 /// A unique identifier for a thread managed by a [`WorkerGroup`].
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WorkerId(pub(super) usize);
+pub struct WorkerId(pub usize);
 
 /// A group of workers.
 ///
