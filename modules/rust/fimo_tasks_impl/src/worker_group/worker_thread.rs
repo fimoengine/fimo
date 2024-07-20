@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    module_export::TasksModuleToken,
+    module_export::{TasksModule, TasksModuleToken},
     worker_group::{
         command_buffer::CommandBufferHandleImpl, event_loop::InnerRequest, task::EnqueuedTask,
         WorkerGroupImpl,
@@ -9,7 +9,8 @@ use crate::{
 };
 use crossbeam_channel::{Receiver, Sender};
 use crossbeam_deque::{Injector, Stealer, Worker};
-use fimo_std::{error::Error, tracing::ThreadAccess};
+use fimo_std::{error::Error, module::Module, tracing, tracing::ThreadAccess};
+use fimo_tasks::WorkerId;
 use std::{
     cell::{RefCell, RefMut},
     fmt::Debug,
@@ -24,6 +25,74 @@ use std::{
 
 #[thread_local]
 static WORKER_THREAD: WorkerContextLock = WorkerContextLock::new();
+
+#[derive(Debug)]
+pub struct WorkerBootstrapper {
+    id: WorkerId,
+    latch: Sender<Arc<WorkerSyncInfo>>,
+    stealer: Stealer<WorkerResponse>,
+    join_handle: JoinHandle<()>,
+    bound_tasks_sender: Sender<WorkerResponse>,
+}
+
+impl WorkerBootstrapper {
+    pub fn new(
+        id: WorkerId,
+        group: Arc<WorkerGroupImpl>,
+        event_loop_sender: Sender<InnerRequest>,
+    ) -> Self {
+        let worker = Worker::new_fifo();
+        let stealer = worker.stealer();
+        let (sx, rx) = crossbeam_channel::unbounded();
+        let (latch_sx, latch_rx) = crossbeam_channel::bounded(1);
+
+        let join_handle = std::thread::spawn({
+            let sx = sx.clone();
+            move || {
+                // Wait for the sync object.
+                let sync = latch_rx.recv().expect("no signal received");
+
+                let worker = WorkerThread {
+                    id,
+                    sync,
+                    group,
+                    event_loop_sender,
+                    bound_tasks_sender: sx,
+                    bound_tasks: rx,
+                    local_queue: worker,
+                };
+                worker_event_loop(worker);
+            }
+        });
+
+        Self {
+            id,
+            latch: latch_sx,
+            stealer,
+            join_handle,
+            bound_tasks_sender: sx,
+        }
+    }
+
+    pub fn bootstrap_data(&self) -> (Thread, Stealer<WorkerResponse>) {
+        let thread = self.join_handle.thread().clone();
+        let stealer = self.stealer.clone();
+        (thread, stealer)
+    }
+
+    pub fn start(self, sync: Arc<WorkerSyncInfo>) -> (WorkerId, WorkerHandle) {
+        self.latch.send(sync.clone()).expect("can not send signal");
+
+        (
+            self.id,
+            WorkerHandle {
+                sync,
+                bound_tasks_sender: self.bound_tasks_sender,
+                join_handle: Some(self.join_handle),
+            },
+        )
+    }
+}
 
 #[derive(Debug)]
 pub struct WorkerHandle {
@@ -66,6 +135,7 @@ impl Drop for WorkerHandle {
 
 #[derive(Debug)]
 pub struct WorkerContext {
+    pub id: WorkerId,
     pub group: Arc<WorkerGroupImpl>,
     pub current_task: Option<EnqueuedTask>,
     pub resume_context: Option<context::Context>,
@@ -73,6 +143,7 @@ pub struct WorkerContext {
 
 #[derive(Debug)]
 struct WorkerThread {
+    id: WorkerId,
     sync: Arc<WorkerSyncInfo>,
     group: Arc<WorkerGroupImpl>,
     event_loop_sender: Sender<InnerRequest>,
@@ -93,10 +164,16 @@ pub struct WorkerResponse {
     pub response: TaskResponse,
 }
 
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct AssertSend<T>(pub T);
+
+// Safety: The user must ensure that it is sound.
+unsafe impl<T> Send for AssertSend<T> {}
+
 #[derive(Debug)]
 pub enum TaskRequest {
     Complete,
-    Abort(*mut std::ffi::c_void),
+    Abort(AssertSend<*mut std::ffi::c_void>),
     Yield,
     WaitUntil(Instant),
     WaitOnCommandBuffer(Arc<CommandBufferHandleImpl>),
@@ -117,11 +194,24 @@ pub struct WorkerSyncInfo {
     join_requested: AtomicBool,
     enqueued_command_buffers: AtomicUsize,
     global_queue: Injector<WorkerResponse>,
-    queue_stealer: Box<[Stealer<WorkerResponse>]>,
+    queue_stealers: Box<[Stealer<WorkerResponse>]>,
     worker_threads: Box<[Thread]>,
 }
 
 impl WorkerSyncInfo {
+    pub fn new(
+        queue_stealers: Box<[Stealer<WorkerResponse>]>,
+        worker_threads: Box<[Thread]>,
+    ) -> Self {
+        Self {
+            join_requested: AtomicBool::new(false),
+            enqueued_command_buffers: AtomicUsize::new(0),
+            global_queue: Injector::new(),
+            queue_stealers,
+            worker_threads,
+        }
+    }
+
     pub fn push_global_response(&self, worker_response: WorkerResponse) {
         self.global_queue.push(worker_response);
 
@@ -159,7 +249,7 @@ impl WorkerSyncInfo {
                 self.global_queue
                     .steal_batch_and_pop(local)
                     // Or try stealing a task from one of the other threads.
-                    .or_else(|| self.queue_stealer.iter().map(|s| s.steal()).collect())
+                    .or_else(|| self.queue_stealers.iter().map(|s| s.steal()).collect())
             })
             // Loop while no task was stolen and any steal operation needs to be retried.
             .find(|s| !s.is_retry())
@@ -174,6 +264,12 @@ impl WorkerSyncInfo {
             std::thread::park();
             None
         }
+    }
+}
+
+impl Drop for WorkerSyncInfo {
+    fn drop(&mut self) {
+        self.request_join();
     }
 }
 
@@ -256,7 +352,7 @@ pub unsafe fn complete_task() -> Result<std::convert::Infallible, Error> {
 /// May only be called upon abortion of a task.
 pub unsafe fn abort_task(error: *mut std::ffi::c_void) -> Result<std::convert::Infallible, Error> {
     // Safety: Ensured by the caller.
-    let response = unsafe { send_worker_request(TaskRequest::Abort(error))? };
+    let response = unsafe { send_worker_request(TaskRequest::Abort(AssertSend(error)))? };
     match response {
         TaskResponse::Abort(x) => Ok(x),
         _ => unreachable!("should not happen"),
@@ -312,6 +408,7 @@ fn worker_event_loop(data: WorkerThread) {
     // Safety: While the event loop is running, the task can not be unloaded.
     unsafe {
         let WorkerThread {
+            id,
             sync,
             group,
             event_loop_sender,
@@ -324,135 +421,181 @@ fn worker_event_loop(data: WorkerThread) {
             // Initialize the tracing for the worker thread.
             use fimo_std::module::Module;
             let _tracing = ThreadAccess::new(&module.context());
-        });
+            let _span =
+                fimo_std::span_trace!(module.context(), "worker event loop, worker: {id:?}");
 
-        // Initialize the shared worker data.
-        let shared = WorkerContext {
-            group: group.clone(),
-            current_task: None,
-            resume_context: None,
-        };
-        // Safety: We are the event loop and are going to uninitialize it.
-        WORKER_THREAD.init(shared);
-
-        // Loop until we must join.
-        while !sync.can_join() {
-            // First handle the bound tasks.
-            let WorkerResponse { mut task, response } = match bound_tasks.try_recv() {
-                Ok(task) => task,
-                Err(_) => {
-                    // If we don't own any tasks we try to dequeue one.
-                    match sync.dequeue_task(&local_queue) {
-                        None => continue,
-                        Some(task) => task,
-                    }
-                }
+            // Initialize the shared worker data.
+            let shared = WorkerContext {
+                id,
+                group: group.clone(),
+                current_task: None,
+                resume_context: None,
             };
+            // Safety: We are the event loop and are going to uninitialize it.
+            WORKER_THREAD.init(shared);
 
-            // Retrieve the context of the task.
-            let context = task.take_resume_context();
+            // Loop until we must join.
+            while !sync.can_join() {
+                // First handle the bound tasks.
+                let WorkerResponse { mut task, response } = match bound_tasks.try_recv() {
+                    Ok(task) => task,
+                    Err(_) => {
+                        // If we don't own any tasks we try to dequeue one.
+                        match sync.dequeue_task(&local_queue) {
+                            None => continue,
+                            Some(task) => task,
+                        }
+                    }
+                };
 
-            // Set the task as active.
-            with_worker_context_lock(|worker| worker.current_task = Some(task)).unwrap();
+                // Retrieve the context of the task.
+                let context = task.take_resume_context();
 
-            // Jump into the task.
-            let response = MaybeUninit::new(response);
-            // Safety: We ensure that everything is set up properly.
-            let context::Transfer { context, data } =
-                context.resume(response.as_ptr().expose_provenance());
+                // Switch the call stack.
+                tracing::CallStack::suspend_current(&module.context(), false)
+                    .expect("could not suspend current event loop call stack");
+                let call_stack = task.take_call_stack();
+                let call_stack = call_stack
+                    .switch()
+                    .expect("could not switch to task call stack");
 
-            // Safety: We are passed ownership to a `TaskRequest` instance.
-            let request = std::ptr::with_exposed_provenance::<TaskRequest>(data).read();
+                // Set the task as active.
+                with_worker_context_lock(|worker| worker.current_task = Some(task)).unwrap();
 
-            // Set the task as inactive.
-            let mut task =
-                with_worker_context_lock(|worker| worker.current_task.take().unwrap()).unwrap();
-            task.set_resume_context(context);
+                // Jump into the task.
+                let response = MaybeUninit::new(response);
+                // Safety: We ensure that everything is set up properly.
+                let context::Transfer { context, data } =
+                    context.resume(response.as_ptr().expose_provenance());
 
-            // Process the request.
-            match request {
-                TaskRequest::Complete => {
-                    // Lock the context so that the callbacks can not call into the context.
-                    with_worker_context_lock(|_| {
-                        // Safety: The task has been completed and the context is locked.
-                        task.run_cleanup();
-                    })
-                    .unwrap();
+                // Safety: We are passed ownership to a `TaskRequest` instance.
+                let request = std::ptr::with_exposed_provenance::<TaskRequest>(data).read();
 
-                    // Notify the main event loop.
-                    event_loop_sender
-                        .send(InnerRequest::WorkerRequest(WorkerRequest { task, request }))
-                        .expect("event loop queue should be open");
-                }
-                TaskRequest::Abort(error) => {
-                    // Lock the context so that the callbacks can not call into the context.
-                    with_worker_context_lock(|_| {
-                        // Safety: The task has been aborted and the context is locked.
-                        task.run_abort(error);
-                    })
-                    .unwrap();
+                // Set the task as inactive.
+                let mut task =
+                    with_worker_context_lock(|worker| worker.current_task.take().unwrap()).unwrap();
+                task.set_resume_context(context);
 
-                    // Notify the main event loop.
-                    event_loop_sender
-                        .send(InnerRequest::WorkerRequest(WorkerRequest { task, request }))
-                        .expect("event loop queue should be open");
-                }
-                TaskRequest::Yield => {
-                    // Push the task onto our task queue.
-                    bound_tasks_sender
-                        .send(WorkerResponse {
-                            task,
-                            response: TaskResponse::Yield,
+                // Process the request.
+                match request {
+                    TaskRequest::Complete => {
+                        // Switch back to the event loop call stack.
+                        swap_call_stack(module, &mut task, call_stack, false);
+
+                        // Lock the context so that the callbacks can not call into the context.
+                        with_worker_context_lock(|_| {
+                            // Safety: The task has been completed and the context is locked.
+                            task.run_cleanup();
                         })
                         .unwrap();
-                }
-                TaskRequest::WaitUntil(timeout) => {
-                    // If the timeout has passed we can enqueue the task.
-                    if Instant::now() >= timeout {
+
+                        // Notify the main event loop.
+                        event_loop_sender
+                            .send(InnerRequest::WorkerRequest(WorkerRequest { task, request }))
+                            .expect("event loop queue should be open");
+                    }
+                    TaskRequest::Abort(AssertSend(error)) => {
+                        // Switch back to the event loop call stack.
+                        swap_call_stack(module, &mut task, call_stack, false);
+
+                        // Lock the context so that the callbacks can not call into the context.
+                        with_worker_context_lock(|_| {
+                            // Safety: The task has been aborted and the context is locked.
+                            task.run_abort(error);
+                        })
+                        .unwrap();
+
+                        // Notify the main event loop.
+                        event_loop_sender
+                            .send(InnerRequest::WorkerRequest(WorkerRequest { task, request }))
+                            .expect("event loop queue should be open");
+                    }
+                    TaskRequest::Yield => {
+                        // Switch back to the event loop call stack.
+                        swap_call_stack(module, &mut task, call_stack, false);
+
                         // Push the task onto our task queue.
                         bound_tasks_sender
                             .send(WorkerResponse {
                                 task,
-                                response: TaskResponse::WaitUntil,
+                                response: TaskResponse::Yield,
                             })
                             .unwrap();
-                        continue;
                     }
+                    TaskRequest::WaitUntil(timeout) => {
+                        // If the timeout has passed we can enqueue the task.
+                        if Instant::now() >= timeout {
+                            // Switch back to the event loop call stack.
+                            swap_call_stack(module, &mut task, call_stack, false);
 
-                    // Otherwise we notify the event loop.
-                    event_loop_sender
-                        .send(InnerRequest::WorkerRequest(WorkerRequest {
-                            task,
-                            request: TaskRequest::WaitUntil(timeout),
-                        }))
-                        .expect("event loop queue should be open");
-                }
-                TaskRequest::WaitOnCommandBuffer(handle) => {
-                    // If the command buffer is already completed we can enqueue the task.
-                    if let Some(aborted) = handle.completion_status() {
-                        // Push the task onto our task queue.
-                        bound_tasks_sender
-                            .send(WorkerResponse {
+                            // Push the task onto our task queue.
+                            bound_tasks_sender
+                                .send(WorkerResponse {
+                                    task,
+                                    response: TaskResponse::WaitUntil,
+                                })
+                                .unwrap();
+                            continue;
+                        }
+
+                        // Switch back to the event loop call stack.
+                        swap_call_stack(module, &mut task, call_stack, true);
+
+                        // Otherwise we notify the event loop.
+                        event_loop_sender
+                            .send(InnerRequest::WorkerRequest(WorkerRequest {
                                 task,
-                                response: TaskResponse::WaitOnCommandBuffer(aborted),
-                            })
-                            .unwrap();
-                        continue;
+                                request: TaskRequest::WaitUntil(timeout),
+                            }))
+                            .expect("event loop queue should be open");
                     }
+                    TaskRequest::WaitOnCommandBuffer(handle) => {
+                        // If the command buffer is already completed we can enqueue the task.
+                        if let Some(aborted) = handle.completion_status() {
+                            // Switch back to the event loop call stack.
+                            swap_call_stack(module, &mut task, call_stack, false);
 
-                    // Otherwise we notify the event loop.
-                    event_loop_sender
-                        .send(InnerRequest::WorkerRequest(WorkerRequest {
-                            task,
-                            request: TaskRequest::WaitOnCommandBuffer(handle),
-                        }))
-                        .expect("event loop queue should be open");
+                            // Push the task onto our task queue.
+                            bound_tasks_sender
+                                .send(WorkerResponse {
+                                    task,
+                                    response: TaskResponse::WaitOnCommandBuffer(aborted),
+                                })
+                                .unwrap();
+                            continue;
+                        }
+
+                        // Switch back to the event loop call stack.
+                        swap_call_stack(module, &mut task, call_stack, true);
+
+                        // Otherwise we notify the event loop.
+                        event_loop_sender
+                            .send(InnerRequest::WorkerRequest(WorkerRequest {
+                                task,
+                                request: TaskRequest::WaitOnCommandBuffer(handle),
+                            }))
+                            .expect("event loop queue should be open");
+                    }
                 }
             }
-        }
 
-        // Drop the shared worker data.
-        // Safety: We are the event loop.
-        drop(WORKER_THREAD.uninit());
+            // Drop the shared worker data.
+            // Safety: We are the event loop.
+            drop(WORKER_THREAD.uninit());
+        });
     }
+}
+
+fn swap_call_stack(
+    module: TasksModule<'_>,
+    task: &mut EnqueuedTask,
+    call_stack: tracing::CallStack,
+    block: bool,
+) {
+    // Switch back to the event loop call stack.
+    tracing::CallStack::suspend_current(&module.context(), block)
+        .expect("could not suspend task call stack");
+    task.set_call_stack(call_stack.switch().expect("could not switch to event loop"));
+    tracing::CallStack::resume_current(&module.context())
+        .expect("could not resume event loop call stack");
 }

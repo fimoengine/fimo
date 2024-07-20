@@ -1,13 +1,11 @@
-#![allow(dead_code)]
-
 use crate::{
-    module_export::TasksModuleToken,
+    module_export::{TasksModule, TasksModuleToken},
     worker_group::{
         command_buffer::CommandBufferId,
         worker_thread::{abort_task, complete_task, with_worker_context_lock},
     },
 };
-use fimo_std::{error::Error, ffi::FFISharable, module::Module};
+use fimo_std::{error::Error, ffi::FFISharable, module::Module, tracing::CallStack};
 use fimo_tasks::{TaskId, WorkerId};
 use rustc_hash::FxHashMap;
 use std::{mem::ManuallyDrop, ops::Deref};
@@ -22,10 +20,12 @@ pub struct EnqueuedTask {
     worker: Option<WorkerId>,
     local_data: Option<LocalData>,
     resume_context: Option<context::Context>,
+    call_stack: Option<CallStack>,
 }
 
 impl EnqueuedTask {
     pub fn new(
+        module: &TasksModule<'_>,
         id: TaskId,
         buffer_id: CommandBufferId,
         index: usize,
@@ -44,6 +44,10 @@ impl EnqueuedTask {
                     // Safety: The module can not be unloaded until all commands have been executed.
                     let context = unsafe {
                         TasksModuleToken::with_current_unlocked(|module| {
+                            // Resume the current call stack.
+                            CallStack::resume_current(&module.context())
+                                .expect("could not resume current call stack");
+
                             module.exports().context().share_to_ffi()
                         })
                     };
@@ -71,6 +75,8 @@ impl EnqueuedTask {
         let local_data = LocalData::new();
         // Safety: The stack will outlive the task.
         let resume_context = unsafe { context::Context::new(stack.memory(), task_start) };
+        let call_stack =
+            CallStack::new(&module.context()).expect("could not create task call stack");
 
         Self {
             id,
@@ -81,6 +87,7 @@ impl EnqueuedTask {
             worker: None,
             local_data: Some(local_data),
             resume_context: Some(resume_context),
+            call_stack: Some(call_stack),
         }
     }
 
@@ -132,6 +139,21 @@ impl EnqueuedTask {
         self.resume_context = Some(context);
     }
 
+    pub fn peek_call_stack(&mut self) -> &mut CallStack {
+        self.call_stack.as_mut().expect("call stack missing")
+    }
+    
+    pub fn take_call_stack(&mut self) -> CallStack {
+        self.call_stack.take().expect("call stack missing")
+    }
+
+    pub fn set_call_stack(&mut self, call_stack: CallStack) {
+        if self.call_stack.is_some() {
+            panic!("call stack already present");
+        }
+        self.call_stack = Some(call_stack);
+    }
+
     /// # Safety
     ///
     /// Must be called by the thread that executed the task.
@@ -141,6 +163,7 @@ impl EnqueuedTask {
         // Safety: The caller ensures that it is sound.
         unsafe {
             self.cleanup_local_data();
+            self.cleanup_call_stack();
 
             self.task.run_completion_handler();
             self.task.run_cleanup_handler();
@@ -156,6 +179,7 @@ impl EnqueuedTask {
         // Safety: The caller ensures that it is sound.
         unsafe {
             self.cleanup_local_data();
+            self.cleanup_call_stack();
 
             self.task.run_abortion_handler(error);
             self.task.run_cleanup_handler();
@@ -173,6 +197,13 @@ impl EnqueuedTask {
             .expect("local data already cleaned up");
         // Safety: The caller ensures that it is sound.
         unsafe { local_data.clear_all_values() };
+    }
+
+    fn cleanup_call_stack(&mut self) {
+        let _ = self
+            .call_stack
+            .take()
+            .expect("call stack already cleaned up");
     }
 }
 
@@ -329,11 +360,6 @@ impl RawTask {
     pub fn id(&self) -> TaskId {
         // Use the address of the task as its unique id.
         TaskId(self.0.addr())
-    }
-
-    fn task(&self) -> &fimo_tasks::bindings::FiTasksTask {
-        // Safety: A `RawTask` works like a `Box`. We own the buffer.
-        unsafe { &*self.0 }
     }
 
     fn task_mut(&mut self) -> &mut fimo_tasks::bindings::FiTasksTask {

@@ -568,6 +568,7 @@ impl Drop for Span {
 }
 
 /// A call stack.
+#[derive(Debug)]
 pub struct CallStack(Context, *mut bindings::FimoTracingCallStack);
 
 impl CallStack {

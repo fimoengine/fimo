@@ -34,7 +34,7 @@ impl CommandBufferHandleImpl {
     pub fn is_completed(&self) -> bool {
         self.completion_status().is_some()
     }
-    
+
     pub fn completion_status(&self) -> Option<bool> {
         if self.completed.load(Ordering::Acquire) {
             Some(self.completed.load(Ordering::Relaxed))
@@ -124,7 +124,7 @@ impl CommandBufferImpl {
         _task: RawTask,
     ) {
         self.num_enqueued_tasks -= 1;
-        if self.num_enqueued_tasks == 0 {
+        if self.num_enqueued_tasks == 0 && self.buffer.is_done() {
             // Safety: Is only called once.
             unsafe { self.handle.mark_completed(false) };
         }
@@ -155,10 +155,23 @@ impl CommandBufferImpl {
         check_worker: impl Fn(WorkerId) -> bool,
         check_stack_size: impl Fn(Option<NonZeroUsize>) -> bool,
     ) -> CommandBufferEventLoopCommand {
+        // Skip if we are completed.
+        if self.handle.completion_status().is_some() {
+            return match self.num_enqueued_tasks {
+                0 => CommandBufferEventLoopCommand::Completed,
+                _ => CommandBufferEventLoopCommand::Processed,
+            };
+        }
+
         // Skip if we are still waiting.
         match &self.wait_reason {
             WaitReason::None => {}
-            WaitReason::Barrier => return CommandBufferEventLoopCommand::Waiting,
+            WaitReason::Barrier => {
+                if self.num_enqueued_tasks != 0 {
+                    return CommandBufferEventLoopCommand::Waiting;
+                }
+                self.wait_reason = WaitReason::None;
+            }
             WaitReason::CommandBuffer {
                 index,
                 command_buffer,
@@ -180,14 +193,6 @@ impl CommandBufferImpl {
                     }
                 }
             }
-        }
-
-        // Skip if we are completed.
-        if self.handle.completion_status().is_some() {
-            return match self.num_enqueued_tasks {
-                0 => CommandBufferEventLoopCommand::Completed,
-                _ => CommandBufferEventLoopCommand::Processed,
-            };
         }
 
         // Process all commands we can.
@@ -334,10 +339,10 @@ pub enum CommandBufferEventLoopCommand {
     WaitCommandBuffer(CommandBufferId),
 }
 
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone)]
 pub enum Waiter {
     Task(TaskId),
-    CommandBuffer(CommandBufferId),
+    CommandBuffer(Arc<CommandBufferHandleImpl>),
 }
 
 #[derive(Debug)]

@@ -76,7 +76,7 @@ extern "C" {
  */
 #define FI_TASKS_ENABLE_ALL_WORKERS_COMMAND()                                                                          \
     { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS, .data = {.enable_all_workers = 0}, }
-    
+
 /**
  * Constructs a new command.
  *
@@ -99,7 +99,7 @@ typedef struct FiTasksVTable FiTasksVTable;
  */
 typedef struct FiTasksContext {
     void *data;
-    FiTasksVTable *vtable;
+    const FiTasksVTable *vtable;
 } FiTasksContext;
 
 /**
@@ -256,7 +256,7 @@ typedef struct FiTasksWorkerGroupVTable FiTasksWorkerGroupVTable;
  */
 typedef struct FiTasksWorkerGroup {
     void *data;
-    FiTasksWorkerGroupVTable *vtable;
+    const FiTasksWorkerGroupVTable *vtable;
 } FiTasksWorkerGroup;
 
 /**
