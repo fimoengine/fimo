@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 
 use crate::{
-    module_export::ModuleToken,
-    worker_group::worker_thread::{abort_task, complete_task, with_worker_context_lock},
+    module_export::TasksModuleToken,
+    worker_group::{
+        command_buffer::CommandBufferId,
+        worker_thread::{abort_task, complete_task, with_worker_context_lock},
+    },
 };
 use fimo_std::{error::Error, ffi::FFISharable, module::Module};
 use fimo_tasks::{TaskId, WorkerId};
@@ -12,6 +15,7 @@ use std::{mem::ManuallyDrop, ops::Deref};
 #[derive(Debug)]
 pub struct EnqueuedTask {
     id: TaskId,
+    buffer_id: CommandBufferId,
     index: usize,
     task: RawTask,
     stack: AcquiredStack,
@@ -23,12 +27,11 @@ pub struct EnqueuedTask {
 impl EnqueuedTask {
     pub fn new(
         id: TaskId,
+        buffer_id: CommandBufferId,
         index: usize,
-        task: *mut fimo_tasks::bindings::FiTasksTask,
+        task: RawTask,
         stack: AcquiredStack,
     ) -> Self {
-        debug_assert!(!task.is_null());
-
         extern "C" fn task_start(t: context::Transfer) -> ! {
             let context::Transfer { context, .. } = t;
 
@@ -40,7 +43,7 @@ impl EnqueuedTask {
                     // Extract the context.
                     // Safety: The module can not be unloaded until all commands have been executed.
                     let context = unsafe {
-                        ModuleToken::with_current_unlocked(|module| {
+                        TasksModuleToken::with_current_unlocked(|module| {
                             module.exports().context().share_to_ffi()
                         })
                     };
@@ -71,12 +74,35 @@ impl EnqueuedTask {
 
         Self {
             id,
+            buffer_id,
             index,
-            task: RawTask(task),
+            task,
             stack,
             worker: None,
             local_data: Some(local_data),
             resume_context: Some(resume_context),
+        }
+    }
+
+    pub fn into_raw_parts(self) -> (TaskId, CommandBufferId, usize, RawTask, AcquiredStack) {
+        assert!(
+            self.local_data.is_none(),
+            "local data has not been cleaned up"
+        );
+        assert!(
+            self.resume_context.is_none(),
+            "context has not been cleaned up"
+        );
+        let this = ManuallyDrop::new(self);
+
+        // Safety: We are destructuring the instance.
+        unsafe {
+            let id = this.id;
+            let buffer_id = this.buffer_id;
+            let index = this.index;
+            let task = this.task;
+            let stack = std::ptr::from_ref(&this.stack).read();
+            (id, buffer_id, index, task, stack)
         }
     }
 
@@ -159,17 +185,21 @@ impl Drop for EnqueuedTask {
 
 #[derive(Debug)]
 pub struct AcquiredStack {
-    size: usize,
+    id: usize,
     memory: StackMemory,
 }
 
 impl AcquiredStack {
-    pub fn new(size: usize, memory: StackMemory) -> Self {
-        Self { size, memory }
+    pub fn new(id: usize, memory: StackMemory) -> Self {
+        Self { id, memory }
     }
 
     pub fn into_raw_parts(self) -> (usize, StackMemory) {
-        (self.size, self.memory)
+        (self.id, self.memory)
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
     }
 
     pub fn memory(&self) -> &StackMemory {
@@ -285,9 +315,27 @@ impl LocalDataValue {
 unsafe impl Send for LocalDataValue {}
 
 #[derive(Debug, Copy, Clone)]
-struct RawTask(*mut fimo_tasks::bindings::FiTasksTask);
+pub struct RawTask(*mut fimo_tasks::bindings::FiTasksTask);
 
 impl RawTask {
+    /// # Safety
+    ///
+    /// The pointer must be valid and unaliased.
+    pub unsafe fn new(raw: *mut fimo_tasks::bindings::FiTasksTask) -> Self {
+        debug_assert!(!raw.is_null());
+        Self(raw)
+    }
+
+    pub fn id(&self) -> TaskId {
+        // Use the address of the task as its unique id.
+        TaskId(self.0.addr())
+    }
+
+    fn task(&self) -> &fimo_tasks::bindings::FiTasksTask {
+        // Safety: A `RawTask` works like a `Box`. We own the buffer.
+        unsafe { &*self.0 }
+    }
+
     fn task_mut(&mut self) -> &mut fimo_tasks::bindings::FiTasksTask {
         // Safety: A `RawTask` works like a `Box`. We own the buffer.
         unsafe { &mut *self.0 }
@@ -322,7 +370,7 @@ impl RawTask {
     /// # Safety
     ///
     /// May only be called once when the task was aborted.
-    unsafe fn run_abortion_handler(&mut self, error: *mut std::ffi::c_void) {
+    pub unsafe fn run_abortion_handler(&mut self, error: *mut std::ffi::c_void) {
         let task = self.task_mut();
 
         if let Some(on_abort) = task.on_abort {
@@ -336,7 +384,7 @@ impl RawTask {
     /// # Safety
     ///
     /// May only be called once when the task is dropped.
-    unsafe fn run_cleanup_handler(&mut self) {
+    pub unsafe fn run_cleanup_handler(&mut self) {
         let task = self.task_mut();
 
         if let Some(on_cleanup) = task.on_cleanup {

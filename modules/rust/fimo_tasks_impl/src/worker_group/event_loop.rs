@@ -1,26 +1,34 @@
-#![allow(dead_code, clippy::todo)]
+#![allow(dead_code)]
 
-use crate::worker_group::{
-    command_buffer::{CommandBufferHandleId, CommandBufferHandleImpl},
-    task::EnqueuedTask,
-    worker_thread::{TaskRequest, TaskResponse, WorkerHandle, WorkerRequest, WorkerResponse},
-    WorkerGroupImpl,
+use crate::{
+    module_export::TasksModule,
+    worker_group::{
+        command_buffer::{
+            CommandBufferEventLoopCommand, CommandBufferHandleImpl, CommandBufferId,
+            CommandBufferImpl, Waiter,
+        },
+        task::EnqueuedTask,
+        worker_thread::{
+            TaskRequest, TaskResponse, WorkerHandle, WorkerRequest, WorkerResponse, WorkerSyncInfo,
+        },
+        WorkerGroupImpl,
+    },
 };
 use crossbeam_channel::{select, Receiver, Sender, TrySendError};
-use fimo_std::error::Error;
-use fimo_tasks::{TaskId, WorkerId};
+use fimo_std::{error::Error, module::Module};
+use fimo_tasks::{TaskId, WorkerGroupId, WorkerId};
 use rustc_hash::FxHashMap;
 use std::{
     cell::Cell,
-    collections::VecDeque,
     fmt::{Debug, Formatter},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock, Weak,
-    },
+    num::NonZeroUsize,
+    sync::{Arc, RwLock, Weak},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+
+mod stack_manager;
+pub mod time_out;
 
 #[derive(Debug)]
 pub enum OuterRequest {
@@ -30,6 +38,7 @@ pub enum OuterRequest {
 #[derive(Debug)]
 pub enum InnerRequest {
     UnblockTask(TaskId),
+    UnblockCommandBuffer(Arc<CommandBufferHandleImpl>),
     WorkerRequest(WorkerRequest),
 }
 
@@ -97,46 +106,65 @@ impl Debug for EventLoopHandle {
 #[derive(Debug)]
 struct EventLoop {
     is_closed: bool,
+    id: WorkerGroupId,
     next_timeout: Instant,
     group: Arc<WorkerGroupImpl>,
+    stack_manager: stack_manager::StackManager,
     public_messages: Receiver<OuterRequest>,
     private_messages: Receiver<InnerRequest>,
+    private_messages_sender: Sender<InnerRequest>,
+    worker_shared: Arc<WorkerSyncInfo>,
     workers: FxHashMap<WorkerId, WorkerHandle>,
-    blocked_tasks: FxHashMap<TaskId, EnqueuedTask>,
-    handles: FxHashMap<CommandBufferHandleId, CommandBufferHandleData>,
-    tasks: FxHashMap<TaskId, usize>,
-    timeouts: Vec<TimeOut>,
+    blocked_tasks: FxHashMap<TaskId, BlockedTask>,
+    handles: FxHashMap<CommandBufferId, CommandBufferImpl>,
+    timeouts: Vec<time_out::TimeOut>,
+}
+
+#[derive(Debug)]
+enum BlockedTask {
+    WaitTimeout {
+        task: EnqueuedTask,
+    },
+    WaitCommandBuffer {
+        task: EnqueuedTask,
+        buffer: Arc<CommandBufferHandleImpl>,
+    },
+    External {
+        task: EnqueuedTask,
+    },
 }
 
 // Outer requests.
 impl EventLoop {
-    fn on_close(&mut self) {
+    fn on_close(&mut self, module: &TasksModule<'_>) {
+        fimo_std::emit_trace!(module.context(), "closing queue");
         self.is_closed = true;
     }
 }
 
 // Inner requests.
 impl EventLoop {
-    fn on_worker_request(&mut self, request: WorkerRequest) {
+    fn on_worker_request(&mut self, module: &TasksModule<'_>, request: WorkerRequest) {
+        fimo_std::emit_trace!(module.context(), "worker_request: {request:?}");
+
         let WorkerRequest { task, request } = request;
         match request {
             TaskRequest::Complete => {
-                todo!("Run complete of the command buffer");
+                self.finish_task(module, task, false);
             }
             TaskRequest::Abort(_) => {
-                todo!("Run abort of the command buffer");
+                self.finish_task(module, task, true);
             }
             TaskRequest::Yield => {
                 unreachable!("yields should not return to the event loop")
             }
             TaskRequest::WaitUntil(time) => {
                 // Insert the timeout into our timeout queue.
-                let timeout = TimeOut {
-                    time,
-                    handle: TimeOutHandle::Internal(task.id()),
-                };
-                self.add_timeout(timeout);
-                self.blocked_tasks.insert(task.id(), task);
+                let timeout =
+                    time_out::TimeOut::new(time, time_out::TimeOutHandle::Internal(task.id()));
+                self.add_timeout(module, timeout);
+                self.blocked_tasks
+                    .insert(task.id(), BlockedTask::WaitTimeout { task });
             }
             TaskRequest::WaitOnCommandBuffer(handle) => {
                 match handle.completion_status() {
@@ -146,8 +174,14 @@ impl EventLoop {
                             .handles
                             .get_mut(&handle.id())
                             .expect("command buffer does not exist");
-                        state.waiters.push_back(Waiter::Task(task.id()));
-                        self.blocked_tasks.insert(task.id(), task);
+                        state.register_waiter(Waiter::Task(task.id()));
+                        self.blocked_tasks.insert(
+                            task.id(),
+                            BlockedTask::WaitCommandBuffer {
+                                task,
+                                buffer: handle,
+                            },
+                        );
                     }
                     Some(aborted) => {
                         // Enqueue the task.
@@ -155,7 +189,7 @@ impl EventLoop {
                         let worker = &self.workers[&worker_id];
                         worker.push_local_response(WorkerResponse {
                             task,
-                            response: TaskResponse::WaitOnCommandBuffer(Ok(aborted)),
+                            response: TaskResponse::WaitOnCommandBuffer(aborted),
                         });
                     }
                 }
@@ -163,14 +197,263 @@ impl EventLoop {
         }
     }
 
-    fn on_unblock_task(&mut self, task: TaskId) {
+    fn on_unblock_task(&mut self, module: &TasksModule<'_>, task: TaskId, time_out: bool) {
+        fimo_std::emit_trace!(module.context(), "unblocking task: {task:?}",);
+
         let task = self.blocked_tasks.remove(&task).expect("task not found");
-        let worker_id = task.worker();
-        let worker = &self.workers[&worker_id];
-        worker.push_local_response(WorkerResponse {
-            task,
-            response: TaskResponse::WaitUntil,
-        });
+        match task {
+            BlockedTask::WaitTimeout { task } => {
+                if !time_out {
+                    panic!("tried to manually wake sleeping task, task: {task:?}");
+                }
+
+                let worker_id = task.worker();
+                let worker = &self.workers[&worker_id];
+                worker.push_local_response(WorkerResponse {
+                    task,
+                    response: TaskResponse::WaitUntil,
+                });
+            }
+            BlockedTask::WaitCommandBuffer { task, buffer } => {
+                if time_out {
+                    panic!("time outs are not supported while waiting on command buffer, task: {task:?}, command buffer: {buffer:?}");
+                }
+
+                let aborted = buffer
+                    .completion_status()
+                    .expect("command buffer is not completed");
+                let worker_id = task.worker();
+                let worker = &self.workers[&worker_id];
+                worker.push_local_response(WorkerResponse {
+                    task,
+                    response: TaskResponse::WaitOnCommandBuffer(aborted),
+                });
+            }
+            #[allow(clippy::unimplemented)]
+            BlockedTask::External { .. } => unimplemented!(),
+        }
+    }
+}
+
+// Task management.
+impl EventLoop {
+    fn enqueue_task(
+        &mut self,
+        module: &TasksModule<'_>,
+        task: EnqueuedTask,
+        worker: Option<WorkerId>,
+    ) {
+        fimo_std::emit_trace!(
+            module.context(),
+            "enqueueing task: {task:?}, worker: {worker:?}"
+        );
+
+        if let Some(worker) = worker {
+            let worker = self.workers.get(&worker).expect("worker not found");
+            worker.push_local_response(WorkerResponse {
+                task,
+                response: TaskResponse::Start,
+            });
+        } else {
+            self.worker_shared.push_global_response(WorkerResponse {
+                task,
+                response: TaskResponse::Start,
+            });
+        }
+    }
+
+    fn finish_task(&mut self, module: &TasksModule<'_>, task: EnqueuedTask, aborted: bool) {
+        fimo_std::emit_trace!(
+            module.context(),
+            "finishing task: {task:?}, aborted: {aborted:?}"
+        );
+
+        let (_, buffer_id, index, task, stack) = task.into_raw_parts();
+
+        // Release the stack.
+        let allocator = self
+            .stack_manager
+            .allocator_by_id_mut(stack.id())
+            .expect("stack allocator not found");
+        allocator.release_stack(stack);
+        if let Some((buffer_handle, task_id, stack)) = allocator.pop_waiter() {
+            let command_buffer = self
+                .handles
+                .get_mut(&buffer_handle.id())
+                .expect("command buffer not found");
+            let (index, worker, task) = command_buffer.mark_task_as_unblocked(task_id);
+            let task = EnqueuedTask::new(task_id, buffer_id, index, task, stack);
+            self.enqueue_task(module, task, worker);
+        }
+
+        // Mark the command buffer as completed.
+        let command_buffer = self
+            .handles
+            .get_mut(&buffer_id)
+            .expect("command buffer not found");
+
+        if aborted {
+            command_buffer.mark_task_as_aborted(module, index, task);
+        } else {
+            command_buffer.mark_task_as_completed(module, index, task);
+        }
+        self.process_command_buffer_commands(module, buffer_id);
+    }
+
+    fn process_command_buffer_commands(
+        &mut self,
+        module: &TasksModule<'_>,
+        command_buffer_id: CommandBufferId,
+    ) {
+        fimo_std::emit_trace!(
+            module.context(),
+            "processing command buffer: {command_buffer_id:?}"
+        );
+
+        let command_buffer = self
+            .handles
+            .get_mut(&command_buffer_id)
+            .expect("command buffer not found");
+
+        let check_command_buffer = |handle: &CommandBufferHandleImpl| {
+            if handle.id() == command_buffer_id {
+                fimo_std::emit_error!(module.context(), "a command buffer can not wait on itself");
+                return false;
+            }
+
+            let group = handle.worker_group_weak().as_ptr();
+            if !std::ptr::eq(group, Arc::as_ptr(&self.group)) {
+                fimo_std::emit_error!(
+                    module.context(),
+                    "command buffer handle does not belong to the same worker group"
+                );
+                return false;
+            }
+
+            true
+        };
+        let check_worker = |worker| {
+            if !self.workers.contains_key(&worker) {
+                fimo_std::emit_error!(
+                    module.context(),
+                    "specified worker {worker:?} does not exist"
+                );
+                return false;
+            }
+
+            true
+        };
+        let check_stack_size = |stack_size: Option<NonZeroUsize>| {
+            let stack_size =
+                stack_size.map_or(self.stack_manager.default_stack_size(), |x| x.get());
+            if !self.stack_manager.has_allocator(stack_size) {
+                fimo_std::emit_error!(
+                    module.context(),
+                    "required stack size of {stack_size} can not be satisfied"
+                );
+                return false;
+            }
+
+            true
+        };
+
+        match command_buffer.process_commands(
+            module,
+            check_command_buffer,
+            check_worker,
+            check_stack_size,
+        ) {
+            CommandBufferEventLoopCommand::Waiting | CommandBufferEventLoopCommand::Processed => {}
+            CommandBufferEventLoopCommand::Completed => {
+                fimo_std::emit_trace!(
+                    module.context(),
+                    "command buffer completed: {command_buffer:?}"
+                );
+
+                // Wake all waiters of the command buffer and clean up.
+                let waiters = command_buffer.take_waiters();
+                for waiter in waiters {
+                    match waiter {
+                        Waiter::Task(task) => {
+                            self.on_unblock_task(module, task, false);
+                        }
+                        // Avoid recursive call by sending a message back to ourselves.
+                        Waiter::CommandBuffer(buffer_id) => {
+                            let buffer = self
+                                .handles
+                                .get(&buffer_id)
+                                .expect("command buffer not found");
+                            let handle = buffer.handle().clone();
+                            self.private_messages_sender
+                                .send(InnerRequest::UnblockCommandBuffer(handle))
+                                .unwrap();
+                        }
+                    }
+                }
+
+                self.handles.remove(&command_buffer_id);
+                self.worker_shared.notify_command_buffer_completed();
+            }
+            CommandBufferEventLoopCommand::SpawnTask(index, task) => {
+                fimo_std::emit_trace!(
+                    module.context(),
+                    "spawning task, command buffer: {command_buffer:?}, task: {task:?}"
+                );
+
+                // Try to allocate a stack that is large enough to execute the task.
+                let stack_size = command_buffer.stack_size();
+                let stack_size =
+                    stack_size.map_or(self.stack_manager.default_stack_size(), |x| x.get());
+                let allocator = self
+                    .stack_manager
+                    .allocator_by_size_mut(stack_size)
+                    .expect("allocator not found");
+
+                let stack = match allocator.acquire_stack() {
+                    Ok(stack) => stack,
+                    Err(Error::EBUSY) => {
+                        // If we aren't successful due to reaching the maximum number of
+                        // allowed stacks we block the task.
+                        fimo_std::emit_info!(
+                            module.context(),
+                            "maximum number of allowed stacks reached for size {stack_size}"
+                        );
+                        allocator.register_waiter(command_buffer.handle().clone(), task.id());
+                        return;
+                    }
+                    Err(e) => {
+                        fimo_std::emit_info!(
+                            module.context(),
+                            "could not allocate stack, error: {e}"
+                        );
+                        panic!("unknown error")
+                    }
+                };
+
+                let task_id = task.id();
+                let buffer_id = command_buffer.handle().id();
+                let worker = command_buffer.worker();
+                let task = EnqueuedTask::new(task_id, buffer_id, index, task, stack);
+                self.enqueue_task(module, task, worker);
+            }
+            CommandBufferEventLoopCommand::WaitCommandBuffer(buffer_id) => {
+                fimo_std::emit_trace!(
+                    module.context(),
+                    "waiting on command buffer, command buffer: {command_buffer:?}, wait on: {buffer_id:?}"
+                );
+
+                let buffer = self
+                    .handles
+                    .get_mut(&buffer_id)
+                    .expect("command buffer not found");
+                debug_assert!(
+                    !buffer.handle().is_completed(),
+                    "buffer has already finished executing"
+                );
+
+                buffer.register_waiter(Waiter::CommandBuffer(command_buffer_id));
+            }
+        }
     }
 }
 
@@ -180,20 +463,21 @@ impl EventLoop {
         self.is_closed && self.handles.is_empty()
     }
 
-    fn handle_outer_request(&mut self, msg: OuterRequest) {
+    fn handle_outer_request(&mut self, module: &TasksModule<'_>, msg: OuterRequest) {
         match msg {
-            OuterRequest::Close => self.on_close(),
+            OuterRequest::Close => self.on_close(module),
         }
     }
 
-    fn handle_inner_request(&mut self, msg: InnerRequest) {
+    fn handle_inner_request(&mut self, module: &TasksModule<'_>, msg: InnerRequest) {
         match msg {
-            InnerRequest::WorkerRequest(request) => self.on_worker_request(request),
-            InnerRequest::UnblockTask(_) => {}
+            InnerRequest::WorkerRequest(request) => self.on_worker_request(module, request),
+            InnerRequest::UnblockCommandBuffer(_) => {}
+            InnerRequest::UnblockTask(task) => self.on_unblock_task(module, task, false),
         }
     }
 
-    fn handle_timeouts(&mut self) {
+    fn handle_timeouts(&mut self, module: &TasksModule<'_>) {
         let now = Instant::now();
 
         // Loop over all timeout instances.
@@ -204,45 +488,38 @@ impl EventLoop {
             if timeout.is_none() {
                 break;
             }
-            let TimeOut { time, .. } = timeout.unwrap();
+            let time = timeout.unwrap().peek_time();
 
             // Stop if the timeout has not passed yet.
-            if now < *time {
-                self.next_timeout = (*time).min(self.next_timeout);
+            if now < time {
+                self.next_timeout = time.min(self.next_timeout);
                 break;
             }
 
             // Remove the instance now that we know that the timeout time has passed.
-            let TimeOut { handle, .. } = self.timeouts.pop().unwrap();
+            let handle = self.timeouts.pop().unwrap().consume();
 
             // Some handles are shared outside the event loop, e.g. synchronization operations
             // between multiple event loops. In those cases we have to ensure that the task is not
             // enqueued multiple times due to race conditions.
             if let Some(task) = handle.try_consume() {
                 // Now that consuming the handle was successful, we can wake the task back up.
-                let task = self
-                    .blocked_tasks
-                    .remove(&task)
-                    .expect("task should be blocked");
-                let worker_id = task.worker();
-                let worker = &self.workers[&worker_id];
-                worker.push_local_response(WorkerResponse {
-                    task,
-                    response: TaskResponse::WaitUntil,
-                });
+                self.on_unblock_task(module, task, true);
             }
         }
     }
 
-    fn add_timeout(&mut self, timeout: TimeOut) {
+    fn add_timeout(&mut self, module: &TasksModule<'_>, timeout: time_out::TimeOut) {
+        fimo_std::emit_trace!(module.context(), "adding time out, time out: {timeout:?}");
+
         let insertion_position = self
             .timeouts
-            .binary_search_by_key(&timeout.time, |t| t.time)
+            .binary_search_by_key(&timeout.peek_time(), |t| t.peek_time())
             .unwrap_or_else(|pos| pos);
         self.timeouts.insert(insertion_position, timeout);
     }
 
-    fn handle_request(&mut self) {
+    fn handle_request(&mut self, module: &TasksModule<'_>) {
         const MIN_TIMEOUT: Duration = Duration::ZERO;
         const MAX_TIMEOUT: Duration = Duration::from_millis(5);
 
@@ -270,75 +547,22 @@ impl EventLoop {
 
         // Handle the messages.
         match request {
-            Request::Outer(msg) => self.handle_outer_request(msg),
-            Request::Inner(msg) => self.handle_inner_request(msg),
+            Request::Outer(msg) => self.handle_outer_request(module, msg),
+            Request::Inner(msg) => self.handle_inner_request(module, msg),
             Request::None => {}
         }
 
         // Check whether some operation timed out.
-        self.handle_timeouts();
+        self.handle_timeouts(module);
     }
 
-    fn enter_event_loop(mut self) {
-        while !self.can_join() {
-            self.handle_request();
-        }
-    }
-}
+    fn enter_event_loop(mut self, module: &TasksModule<'_>) {
+        fimo_std::panic::abort_on_panic(|| {
+            fimo_std::span_trace!(module.context(), "event loop, worker group {:?}", self.id);
 
-#[derive(Debug)]
-struct CommandBufferHandleData {
-    running_tasks: usize,
-    handle: Arc<CommandBufferHandleImpl>,
-    waiters: VecDeque<Waiter>,
-}
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-enum Waiter {
-    Task(TaskId),
-    CommandBuffer(CommandBufferHandleId),
-}
-
-#[derive(Debug)]
-struct TimeOut {
-    time: Instant,
-    handle: TimeOutHandle,
-}
-
-#[derive(Debug)]
-enum TimeOutHandle {
-    Internal(TaskId),
-    External(Arc<ExternalTimeOutHandle>),
-}
-
-impl TimeOutHandle {
-    fn try_consume(self) -> Option<TaskId> {
-        match self {
-            TimeOutHandle::Internal(task) => Some(task),
-            TimeOutHandle::External(handle) => handle.try_consume(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ExternalTimeOutHandle {
-    task: TaskId,
-    consumed: AtomicBool,
-}
-
-impl ExternalTimeOutHandle {
-    fn new(task: TaskId) -> Arc<Self> {
-        Arc::new(Self {
-            task,
-            consumed: AtomicBool::new(false),
-        })
-    }
-
-    pub fn try_consume(self: Arc<Self>) -> Option<TaskId> {
-        let is_consumed = self.consumed.swap(true, Ordering::Acquire);
-        if is_consumed {
-            None
-        } else {
-            Some(self.task)
-        }
+            while !self.can_join() {
+                self.handle_request(module);
+            }
+        });
     }
 }

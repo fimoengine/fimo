@@ -204,56 +204,14 @@ where
         self.inner.wait_command_buffer(handle.handle);
     }
 
-    /// Specifies whether to execute the following commands sequentially.
-    ///
-    /// This is equivalent to inserting a barrier after each command.
-    pub fn set_sequential_execution(&mut self, enabled: bool) {
-        self.inner.set_sequential_execution(enabled);
-    }
-
     /// Specifies the single worker that is allowed to execute the following commands.
-    pub fn set_single_worker(&mut self, worker: WorkerId) {
+    pub fn set_worker(&mut self, worker: WorkerId) {
         self.inner.set_worker(worker);
-    }
-
-    /// Disables all workers of the [`WorkerGroup`] from executing the following commands.
-    ///
-    /// # Note
-    ///
-    /// This function is typically combined with [`CommandBuffer::enable_worker`], as trying to
-    /// execute commands without any specified workers may result in a validation error.
-    pub fn disable_all_workers(&mut self) {
-        self.inner.disable_all_workers();
     }
 
     /// Allows all workers of the [`WorkerGroup`] to execute the following commands.
     pub fn enable_all_workers(&mut self) {
         self.inner.enable_all_workers();
-    }
-
-    /// Allows `worker` to execute the following commands.
-    pub fn enable_worker(&mut self, worker: WorkerId) {
-        self.inner.enable_worker(worker);
-    }
-
-    /// Disallows `worker` from executing the following commands.
-    pub fn disable_worker(&mut self, worker: WorkerId) {
-        self.inner.disable_worker(worker);
-    }
-
-    /// Specifies the workers that are allowed to execute the following commands.
-    ///
-    /// Is functionally equivalent to disabling all workers and then enabling each
-    /// worker in `workers`.
-    pub fn set_workers(&mut self, workers: &[WorkerId]) {
-        if workers.len() == 1 {
-            self.set_single_worker(workers[0]);
-        } else {
-            self.disable_all_workers();
-            for &worker in workers {
-                self.enable_worker(worker);
-            }
-        }
     }
 
     /// Specifies the minimum stack size for the following commands.
@@ -405,56 +363,14 @@ where
         self.inner.wait_command_buffer(handle.handle);
     }
 
-    /// Specifies whether to execute the following commands sequentially.
-    ///
-    /// This is equivalent to inserting a barrier after each command.
-    pub fn set_sequential_execution(&mut self, enabled: bool) {
-        self.inner.set_sequential_execution(enabled);
-    }
-
     /// Specifies the single worker that is allowed to execute the following commands.
-    pub fn set_single_worker(&mut self, worker: WorkerId) {
+    pub fn set_worker(&mut self, worker: WorkerId) {
         self.inner.set_worker(worker);
-    }
-
-    /// Disables all workers of the [`WorkerGroup`] from executing the following commands.
-    ///
-    /// # Note
-    ///
-    /// This function is typically combined with [`ScopedCommandBuffer::enable_worker`], as trying
-    /// to execute commands without any specified workers may result in a validation error.
-    pub fn disable_all_workers(&mut self) {
-        self.inner.disable_all_workers();
     }
 
     /// Allows all workers of the [`WorkerGroup`] to execute the following commands.
     pub fn enable_all_workers(&mut self) {
         self.inner.enable_all_workers();
-    }
-
-    /// Allows `worker` to execute the following commands.
-    pub fn enable_worker(&mut self, worker: WorkerId) {
-        self.inner.enable_worker(worker);
-    }
-
-    /// Disallows `worker` from executing the following commands.
-    pub fn disable_worker(&mut self, worker: WorkerId) {
-        self.inner.disable_worker(worker);
-    }
-
-    /// Specifies the workers that are allowed to execute the following commands.
-    ///
-    /// Is functionally equivalent to disabling all workers and then enabling each
-    /// worker in `workers`.
-    pub fn set_workers(&mut self, workers: &[WorkerId]) {
-        if workers.len() == 1 {
-            self.set_single_worker(workers[0]);
-        } else {
-            self.disable_all_workers();
-            for &worker in workers {
-                self.enable_worker(worker);
-            }
-        }
     }
 
     /// Specifies the minimum stack size for the following commands.
@@ -566,12 +482,8 @@ enum Command<'scope, 'ctx, A: Allocator> {
     Task(Box<RawTask<'scope, A>, A>),
     Barrier,
     Handle(CommandBufferHandleInner<'ctx>),
-    SequentialExecution(bool),
     SetWorker(WorkerId),
     EnableAllWorkers,
-    DisableAllWorkers,
-    EnableWorker(WorkerId),
-    DisableWorker(WorkerId),
     SetStackSize(usize),
 }
 
@@ -674,28 +586,12 @@ where
         self.commands.push(Command::Handle(handle));
     }
 
-    fn set_sequential_execution(&mut self, enabled: bool) {
-        self.commands.push(Command::SequentialExecution(enabled));
-    }
-
     fn set_worker(&mut self, worker: WorkerId) {
         self.commands.push(Command::SetWorker(worker));
     }
 
     fn enable_all_workers(&mut self) {
         self.commands.push(Command::EnableAllWorkers);
-    }
-
-    fn disable_all_workers(&mut self) {
-        self.commands.push(Command::DisableAllWorkers);
-    }
-
-    fn enable_worker(&mut self, worker: WorkerId) {
-        self.commands.push(Command::EnableWorker(worker));
-    }
-
-    fn disable_worker(&mut self, worker: WorkerId) {
-        self.commands.push(Command::DisableWorker(worker));
     }
 
     fn set_stack_size(&mut self, size: Option<NonZeroUsize>) {
@@ -859,10 +755,6 @@ where
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER,
                     data: bindings::FiTasksCommandBufferEntryData { wait_command_buffer: ManuallyDrop::new(handle.into_raw_handle()) },
                 }),
-                Command::SequentialExecution(enabled) => entry.write(bindings::FiTasksCommandBufferEntry {
-                    type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION,
-                    data: bindings::FiTasksCommandBufferEntryData {set_sequential_execution: ManuallyDrop::new(enabled)},
-                }),
                 Command::SetWorker(worker) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER,
                     data: bindings::FiTasksCommandBufferEntryData {set_worker: ManuallyDrop::new(worker.0)},
@@ -870,18 +762,6 @@ where
                 Command::EnableAllWorkers => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS,
                     data: bindings::FiTasksCommandBufferEntryData {enable_all_workers: ManuallyDrop::new(0)},
-                }),
-                Command::DisableAllWorkers => entry.write(bindings::FiTasksCommandBufferEntry {
-                    type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS,
-                    data: bindings::FiTasksCommandBufferEntryData {disable_all_workers: ManuallyDrop::new(0)},
-                }),
-                Command::EnableWorker(worker) => entry.write(bindings::FiTasksCommandBufferEntry {
-                    type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER,
-                    data: bindings::FiTasksCommandBufferEntryData {enable_worker: ManuallyDrop::new(worker.0)},
-                }),
-                Command::DisableWorker(worker) => entry.write(bindings::FiTasksCommandBufferEntry {
-                    type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER,
-                    data: bindings::FiTasksCommandBufferEntryData {disable_worker: ManuallyDrop::new(worker.0)},
                 }),
                 Command::SetStackSize(size) => entry.write(bindings::FiTasksCommandBufferEntry {
                     type_: bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE,

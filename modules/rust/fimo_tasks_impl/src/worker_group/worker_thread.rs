@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    module_export::ModuleToken,
+    module_export::TasksModuleToken,
     worker_group::{
         command_buffer::CommandBufferHandleImpl, event_loop::InnerRequest, task::EnqueuedTask,
         WorkerGroupImpl,
@@ -33,15 +33,6 @@ pub struct WorkerHandle {
 }
 
 impl WorkerHandle {
-    pub fn push_global_response(&self, worker_response: WorkerResponse) {
-        self.sync.global_queue.push(worker_response);
-
-        // Wake all worker threads.
-        for thread in &self.sync.worker_threads {
-            thread.unpark();
-        }
-    }
-
     pub fn push_local_response(&self, worker_response: WorkerResponse) {
         self.bound_tasks_sender
             .send(worker_response)
@@ -55,7 +46,7 @@ impl WorkerHandle {
 
     pub fn join(&mut self) {
         // Notify all workers to stop executing tasks.
-        self.sync.join_requested.store(true, Ordering::Release);
+        self.sync.request_join();
         let handle = self.join_handle.take().expect("handle already joined");
 
         // Wake the worker so that we don't deadlock.
@@ -118,7 +109,7 @@ pub enum TaskResponse {
     Abort(std::convert::Infallible),
     Yield,
     WaitUntil,
-    WaitOnCommandBuffer(Result<bool, Error>),
+    WaitOnCommandBuffer(bool),
 }
 
 #[derive(Debug)]
@@ -131,6 +122,29 @@ pub struct WorkerSyncInfo {
 }
 
 impl WorkerSyncInfo {
+    pub fn push_global_response(&self, worker_response: WorkerResponse) {
+        self.global_queue.push(worker_response);
+
+        // Wake all worker threads.
+        for thread in &self.worker_threads {
+            thread.unpark();
+        }
+    }
+
+    pub fn request_join(&self) {
+        self.join_requested.store(true, Ordering::Release);
+    }
+
+    pub fn notify_command_buffer_enqueued(&self) {
+        self.enqueued_command_buffers
+            .fetch_add(1, Ordering::Release);
+    }
+
+    pub fn notify_command_buffer_completed(&self) {
+        self.enqueued_command_buffers
+            .fetch_sub(1, Ordering::Release);
+    }
+
     fn can_join(&self) -> bool {
         self.join_requested.load(Ordering::Acquire)
             && self.enqueued_command_buffers.load(Ordering::Acquire) == 0
@@ -288,7 +302,7 @@ pub fn wait_on_command_buffer(
     // Safety: Is always safe.
     let response = unsafe { send_worker_request(TaskRequest::WaitOnCommandBuffer(handle.clone())) };
     match response {
-        Ok(TaskResponse::WaitOnCommandBuffer(x)) => x.map_err(|e| (e, handle)),
+        Ok(TaskResponse::WaitOnCommandBuffer(aborted)) => Ok(aborted),
         Err(e) => Err((e, handle)),
         _ => unreachable!("should not happen"),
     }
@@ -306,7 +320,7 @@ fn worker_event_loop(data: WorkerThread) {
             local_queue,
         } = data;
 
-        ModuleToken::with_current_unlocked(move |module| {
+        TasksModuleToken::with_current_unlocked(move |module| {
             // Initialize the tracing for the worker thread.
             use fimo_std::module::Module;
             let _tracing = ThreadAccess::new(&module.context());
@@ -420,7 +434,7 @@ fn worker_event_loop(data: WorkerThread) {
                         bound_tasks_sender
                             .send(WorkerResponse {
                                 task,
-                                response: TaskResponse::WaitOnCommandBuffer(Ok(aborted)),
+                                response: TaskResponse::WaitOnCommandBuffer(aborted),
                             })
                             .unwrap();
                         continue;

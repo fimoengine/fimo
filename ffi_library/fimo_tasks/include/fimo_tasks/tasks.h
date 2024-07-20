@@ -66,17 +66,6 @@ extern "C" {
 /**
  * Constructs a new command.
  *
- * @param ENABLE whether to run all tasks sequentially
- */
-#define FI_TASKS_SET_SEQUENTIAL_EXECUTION_COMMAND(ENABLE)                                                              \
-    {                                                                                                                  \
-        .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION,                                           \
-        .data = {.set_sequential_execution = (ENABLE)},                                                                \
-    }
-
-/**
- * Constructs a new command.
- *
  * @param WORKER worker id
  */
 #define FI_TASKS_SET_WORKER_COMMAND(WORKER)                                                                            \
@@ -87,29 +76,7 @@ extern "C" {
  */
 #define FI_TASKS_ENABLE_ALL_WORKERS_COMMAND()                                                                          \
     { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS, .data = {.enable_all_workers = 0}, }
-
-/**
- * Constructs a new command.
- */
-#define FI_TASKS_DISABLE_ALL_WORKERS_COMMAND()                                                                         \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS, .data = {.disable_all_workers = 0}, }
-
-/**
- * Constructs a new command.
- *
- * @param WORKER worker id
- */
-#define FI_TASKS_ENABLE_WORKER_COMMAND(WORKER)                                                                         \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER, .data = {.enable_worker = (WORKER)}, }
-
-/**
- * Constructs a new command.
- *
- * @param WORKER worker id
- */
-#define FI_TASKS_DISABLE_WORKER_COMMAND(WORKER)                                                                        \
-    { .type = FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER, .data = {.disable_worker = (WORKER)}, }
-
+    
 /**
  * Constructs a new command.
  *
@@ -460,39 +427,20 @@ typedef enum FiTasksCommandBufferEntryType {
      */
     FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER = 2,
     /**
-     * Specifies whether to execute the following tasks sequentially.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_SEQUENTIAL_EXECUTION = 3,
-    /**
      * Specifies the worker thread on which the following
      * must be spawned.
      */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER = 4,
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_WORKER = 3,
     /**
      * Enables the following tasks to be spawned on all
      * available workers of the worker group.
      */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS = 5,
-    /**
-     * Disables all worker threads of the current worker
-     * group for the selection of suitable workers.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_ALL_WORKERS = 6,
-    /**
-     * Enables a single worker to be used in the following
-     * commands.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_WORKER = 7,
-    /**
-     * Disables a single worker to be used in the following
-     * commands.
-     */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_DISABLE_WORKER = 8,
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_ENABLE_ALL_WORKERS = 4,
     /**
      * Requests a minimum stack size for the following
      * tasks.
      */
-    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE = 10,
+    FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SET_STACK_SIZE = 5,
     FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_FORCE32 = 0x7FFFFFFF
 } FiTasksCommandBufferEntryType;
 
@@ -513,10 +461,6 @@ typedef union FiTasksCommandBufferEntryData {
      */
     FiTasksCommandBufferHandle wait_command_buffer;
     /**
-     * Whether to enable sequential execution of commands.
-     */
-    bool set_sequential_execution;
-    /**
      * Worker.
      */
     FimoUSize set_worker;
@@ -524,18 +468,6 @@ typedef union FiTasksCommandBufferEntryData {
      * Placeholder.
      */
     FimoU8 enable_all_workers;
-    /**
-     * Placeholder.
-     */
-    FimoU8 disable_all_workers;
-    /**
-     * Worker to enable.
-     */
-    FimoUSize enable_worker;
-    /**
-     * Worker to disable.
-     */
-    FimoUSize disable_worker;
     /**
      * Stack size.
      */

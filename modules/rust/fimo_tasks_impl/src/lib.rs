@@ -1,6 +1,7 @@
 #![feature(arbitrary_self_types)]
 #![feature(exposed_provenance)]
 #![feature(result_flattening)]
+#![feature(strict_provenance)]
 #![feature(thread_local)]
 
 use fimo_std::allocator::FimoAllocator;
