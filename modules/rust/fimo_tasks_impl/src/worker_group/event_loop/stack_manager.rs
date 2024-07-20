@@ -6,6 +6,15 @@ use fimo_std::error::Error;
 use fimo_tasks::TaskId;
 use std::{collections::VecDeque, sync::Arc};
 
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct StackDescriptor {
+    pub min_size: usize,
+    pub preallocated: usize,
+    pub target_allocated: usize,
+    pub max_allocated: usize,
+    pub overflow_protection: bool,
+}
+
 #[derive(Debug)]
 pub struct StackManager {
     default_stack_size: usize,
@@ -13,6 +22,39 @@ pub struct StackManager {
 }
 
 impl StackManager {
+    pub fn new(default_stack_size: usize, mut stacks: Vec<StackDescriptor>) -> Self {
+        // Sort by ascending stack size.
+        stacks.sort_by_key(|s| s.min_size);
+
+        let allocators = stacks
+            .into_iter()
+            .enumerate()
+            .map(|(id, stack)| {
+                let StackDescriptor {
+                    min_size,
+                    preallocated,
+                    target_allocated,
+                    max_allocated,
+                    overflow_protection,
+                } = stack;
+
+                StackAllocator::new(
+                    id,
+                    min_size,
+                    preallocated,
+                    target_allocated,
+                    max_allocated,
+                    overflow_protection,
+                )
+            })
+            .collect();
+
+        Self {
+            default_stack_size,
+            allocators,
+        }
+    }
+
     pub fn default_stack_size(&self) -> usize {
         self.default_stack_size
     }
@@ -59,6 +101,34 @@ pub struct StackAllocator {
 }
 
 impl StackAllocator {
+    fn new(
+        id: usize,
+        size: usize,
+        preallocated: usize,
+        target_allocated: usize,
+        max_allocated: usize,
+        overflow_protection: bool,
+    ) -> Self {
+        let mut this = Self {
+            id,
+            size,
+            protected: overflow_protection,
+            num_acquired: 0,
+            max_num_allocated: max_allocated,
+            deallocation_threshold: target_allocated,
+            free_list: vec![],
+            waiting_tasks: Default::default(),
+        };
+
+        // Preallocate stacks.
+        for _ in 0..preallocated {
+            let stack = this.acquire_stack().expect("could not preallocate stack");
+            this.release_stack(stack);
+        }
+
+        this
+    }
+
     pub fn acquire_stack(&mut self) -> Result<AcquiredStack, Error> {
         if self.num_acquired == self.max_num_allocated {
             return Err(Error::EBUSY);

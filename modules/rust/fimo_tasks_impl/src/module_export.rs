@@ -7,7 +7,13 @@ export_module! {
         description: "Threading subsystem of the Fimo Engine",
         author: "Fimo",
         license: "MIT License and Apache License, Version 2.0",
-        parameters: {},
+        parameters: {
+            default_stack_size: {
+                default: u32(524288), // 512KB
+                read_group: public,
+                write_group: dependency,
+            },
+        },
         resources: {},
         namespaces: [],
         imports: {},

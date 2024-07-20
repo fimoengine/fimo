@@ -1,25 +1,26 @@
 #![allow(dead_code)]
 
 use crate::{
-    module_export::TasksModule,
+    module_export::{TasksModule, TasksModuleToken},
     worker_group::{
         command_buffer::{
             CommandBufferEventLoopCommand, CommandBufferHandleImpl, CommandBufferId,
             CommandBufferImpl, Waiter,
         },
+        event_loop::stack_manager::StackDescriptor,
         task::EnqueuedTask,
         worker_thread::{
-            TaskRequest, TaskResponse, WorkerHandle, WorkerRequest, WorkerResponse, WorkerSyncInfo,
+            TaskRequest, TaskResponse, WorkerBootstrapper, WorkerHandle, WorkerRequest,
+            WorkerResponse, WorkerSyncInfo,
         },
         WorkerGroupImpl,
     },
 };
 use crossbeam_channel::{select, Receiver, Sender, TrySendError};
 use fimo_std::{error::Error, module::Module};
-use fimo_tasks::{TaskId, WorkerGroupId, WorkerId};
+use fimo_tasks::{TaskId, WorkerId};
 use rustc_hash::FxHashMap;
 use std::{
-    cell::Cell,
     fmt::{Debug, Formatter},
     num::NonZeroUsize,
     sync::{Arc, RwLock, Weak},
@@ -27,7 +28,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod stack_manager;
+pub mod stack_manager;
 pub mod time_out;
 
 #[derive(Debug)]
@@ -44,7 +45,7 @@ pub enum InnerRequest {
 
 pub struct EventLoopHandle {
     group: Weak<WorkerGroupImpl>,
-    connection_status: RwLock<Cell<ConnectionStatus>>,
+    connection_status: RwLock<ConnectionStatus>,
     outer_requests: Sender<OuterRequest>,
     inner_requests: Sender<InnerRequest>,
     handle: Option<JoinHandle<()>>,
@@ -57,23 +58,89 @@ enum ConnectionStatus {
 }
 
 impl EventLoopHandle {
+    pub fn new(
+        _module: TasksModule<'_>,
+        group: Arc<WorkerGroupImpl>,
+        num_workers: usize,
+        default_stack_size: usize,
+        stacks: Vec<StackDescriptor>,
+    ) -> Self {
+        let connection_status = RwLock::new(ConnectionStatus::Open);
+        let (outer_sx, outer_rx) = crossbeam_channel::unbounded();
+        let (inner_sx, inner_rx) = crossbeam_channel::unbounded();
+
+        // Synchronize the initialization of the event loop.
+        let (error_sx, error_rx) = crossbeam_channel::bounded::<std::thread::Result<()>>(1);
+        let handle = std::thread::spawn({
+            let group = group.clone();
+            let inner_sx = inner_sx.clone();
+            move || {
+                // Safety: The module can not be unloaded until the event loop finished.
+                unsafe {
+                    TasksModuleToken::with_current_unlocked(|module| {
+                        // Initialize the tracing for the event loop thread.
+                        use fimo_std::module::Module;
+                        let _tracing = fimo_std::tracing::ThreadAccess::new(&module.context());
+
+                        let event_loop =
+                            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                EventLoop::new(
+                                    &module,
+                                    group,
+                                    num_workers,
+                                    default_stack_size,
+                                    stacks,
+                                    outer_rx,
+                                    inner_sx,
+                                    inner_rx,
+                                )
+                            })) {
+                                Ok(event_loop) => {
+                                    error_sx.send(Ok(())).expect("could not send status");
+                                    event_loop
+                                }
+                                Err(e) => {
+                                    error_sx.send(Err(e)).expect("could not send status");
+                                    return;
+                                }
+                            };
+                        event_loop.enter_event_loop(&module);
+                    });
+                }
+            }
+        });
+
+        // Panic if we could not create the event loop.
+        if let Err(e) = error_rx.recv().expect("could not receive status") {
+            std::panic::resume_unwind(e);
+        }
+
+        Self {
+            group: Arc::downgrade(&group),
+            connection_status,
+            outer_requests: outer_sx,
+            inner_requests: inner_sx,
+            handle: Some(handle),
+        }
+    }
+
     pub fn is_open(&self) -> bool {
         self.connection_status
             .read()
-            .map(|s| s.get() == ConnectionStatus::Open)
+            .map(|s| *s == ConnectionStatus::Open)
             .unwrap_or(false)
     }
 
     pub fn request_close(&self) -> Result<(), Error> {
         // Acquire the `RwLock` with `write` permissions, such that no messages are sent while we
         // try to send the close message.
-        let status = self
+        let mut status = self
             .connection_status
             .write()
             .map_err(|_e| Error::ECANCELED)?;
 
         // If the channel is already closed we can return.
-        if status.get() == ConnectionStatus::Closed {
+        if *status == ConnectionStatus::Closed {
             return Ok(());
         }
 
@@ -87,7 +154,7 @@ impl EventLoopHandle {
 
         // Change the status, so that other threads don't keep sending new messages while the
         // channel is still open.
-        status.set(ConnectionStatus::Closed);
+        *status = ConnectionStatus::Closed;
 
         Ok(())
     }
@@ -103,10 +170,18 @@ impl Debug for EventLoopHandle {
     }
 }
 
+impl Drop for EventLoopHandle {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = self.request_close();
+            let _ = handle.join();
+        }
+    }
+}
+
 #[derive(Debug)]
 struct EventLoop {
     is_closed: bool,
-    id: WorkerGroupId,
     next_timeout: Instant,
     group: Arc<WorkerGroupImpl>,
     stack_manager: stack_manager::StackManager,
@@ -184,6 +259,13 @@ impl EventLoop {
                         );
                     }
                     Some(aborted) => {
+                        // Unblock the call stack.
+                        let mut task = task;
+                        let call_stack = task.peek_call_stack();
+                        call_stack
+                            .unblock()
+                            .expect("could not unblock task call stack");
+
                         // Enqueue the task.
                         let worker_id = task.worker();
                         let worker = &self.workers[&worker_id];
@@ -202,10 +284,16 @@ impl EventLoop {
 
         let task = self.blocked_tasks.remove(&task).expect("task not found");
         match task {
-            BlockedTask::WaitTimeout { task } => {
+            BlockedTask::WaitTimeout { mut task } => {
                 if !time_out {
                     panic!("tried to manually wake sleeping task, task: {task:?}");
                 }
+
+                // Unblock the call stack.
+                let call_stack = task.peek_call_stack();
+                call_stack
+                    .unblock()
+                    .expect("could not unblock task call stack");
 
                 let worker_id = task.worker();
                 let worker = &self.workers[&worker_id];
@@ -214,10 +302,16 @@ impl EventLoop {
                     response: TaskResponse::WaitUntil,
                 });
             }
-            BlockedTask::WaitCommandBuffer { task, buffer } => {
+            BlockedTask::WaitCommandBuffer { mut task, buffer } => {
                 if time_out {
                     panic!("time outs are not supported while waiting on command buffer, task: {task:?}, command buffer: {buffer:?}");
                 }
+
+                // Unblock the call stack.
+                let call_stack = task.peek_call_stack();
+                call_stack
+                    .unblock()
+                    .expect("could not unblock task call stack");
 
                 let aborted = buffer
                     .completion_status()
@@ -232,6 +326,25 @@ impl EventLoop {
             #[allow(clippy::unimplemented)]
             BlockedTask::External { .. } => unimplemented!(),
         }
+    }
+
+    fn on_unblock_command_buffer(
+        &mut self,
+        module: &TasksModule<'_>,
+        command_buffer: Arc<CommandBufferHandleImpl>,
+    ) {
+        fimo_std::emit_trace!(
+            module.context(),
+            "unblocking command buffer: {command_buffer:?}",
+        );
+
+        // Check if it was aborted.
+        if command_buffer.is_completed() {
+            return;
+        }
+
+        // Continue processing the commands.
+        self.process_command_buffer_commands(module, command_buffer.id());
     }
 }
 
@@ -282,7 +395,7 @@ impl EventLoop {
                 .get_mut(&buffer_handle.id())
                 .expect("command buffer not found");
             let (index, worker, task) = command_buffer.mark_task_as_unblocked(task_id);
-            let task = EnqueuedTask::new(task_id, buffer_id, index, task, stack);
+            let task = EnqueuedTask::new(module, task_id, buffer_id, index, task, stack);
             self.enqueue_task(module, task, worker);
         }
 
@@ -378,15 +491,12 @@ impl EventLoop {
                             self.on_unblock_task(module, task, false);
                         }
                         // Avoid recursive call by sending a message back to ourselves.
-                        Waiter::CommandBuffer(buffer_id) => {
-                            let buffer = self
-                                .handles
-                                .get(&buffer_id)
-                                .expect("command buffer not found");
-                            let handle = buffer.handle().clone();
-                            self.private_messages_sender
-                                .send(InnerRequest::UnblockCommandBuffer(handle))
-                                .unwrap();
+                        Waiter::CommandBuffer(handle) => {
+                            if !handle.is_completed() {
+                                self.private_messages_sender
+                                    .send(InnerRequest::UnblockCommandBuffer(handle))
+                                    .unwrap();
+                            }
                         }
                     }
                 }
@@ -433,7 +543,7 @@ impl EventLoop {
                 let task_id = task.id();
                 let buffer_id = command_buffer.handle().id();
                 let worker = command_buffer.worker();
-                let task = EnqueuedTask::new(task_id, buffer_id, index, task, stack);
+                let task = EnqueuedTask::new(module, task_id, buffer_id, index, task, stack);
                 self.enqueue_task(module, task, worker);
             }
             CommandBufferEventLoopCommand::WaitCommandBuffer(buffer_id) => {
@@ -451,7 +561,7 @@ impl EventLoop {
                     "buffer has already finished executing"
                 );
 
-                buffer.register_waiter(Waiter::CommandBuffer(command_buffer_id));
+                buffer.register_waiter(Waiter::CommandBuffer(buffer.handle().clone()));
             }
         }
     }
@@ -459,6 +569,64 @@ impl EventLoop {
 
 // Event loop implementation.
 impl EventLoop {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        _module: &TasksModule<'_>,
+        group: Arc<WorkerGroupImpl>,
+        num_workers: usize,
+        default_stack_size: usize,
+        stacks: Vec<StackDescriptor>,
+        outer_receiver: Receiver<OuterRequest>,
+        inner_sender: Sender<InnerRequest>,
+        inner_receiver: Receiver<InnerRequest>,
+    ) -> Self {
+        let is_closed = false;
+        let next_timeout = Instant::now();
+        let stack_manager = stack_manager::StackManager::new(default_stack_size, stacks);
+        let public_messages = outer_receiver;
+        let private_messages = inner_receiver;
+        let private_messages_sender = inner_sender;
+        let blocked_tasks = FxHashMap::default();
+        let handles = FxHashMap::default();
+        let timeouts = Vec::default();
+
+        // Bootstrap for the worker threads.
+        let worker_bootstrappers = (0..num_workers)
+            .map(|id| {
+                let id = WorkerId(id);
+                WorkerBootstrapper::new(id, group.clone(), private_messages_sender.clone())
+            })
+            .collect::<Vec<_>>();
+        let (worker_threads, queue_stealers): (Vec<_>, Vec<_>) = worker_bootstrappers
+            .iter()
+            .map(|w| w.bootstrap_data())
+            .unzip();
+        let queue_stealers = queue_stealers.into_boxed_slice();
+        let worker_threads = worker_threads.into_boxed_slice();
+        let worker_shared = Arc::new(WorkerSyncInfo::new(queue_stealers, worker_threads));
+
+        // Start the worker threads.
+        let workers = worker_bootstrappers
+            .into_iter()
+            .map(|w| w.start(worker_shared.clone()))
+            .collect();
+
+        Self {
+            is_closed,
+            next_timeout,
+            group,
+            stack_manager,
+            public_messages,
+            private_messages,
+            private_messages_sender,
+            worker_shared,
+            workers,
+            blocked_tasks,
+            handles,
+            timeouts,
+        }
+    }
+
     fn can_join(&self) -> bool {
         self.is_closed && self.handles.is_empty()
     }
@@ -558,11 +726,23 @@ impl EventLoop {
 
     fn enter_event_loop(mut self, module: &TasksModule<'_>) {
         fimo_std::panic::abort_on_panic(|| {
-            fimo_std::span_trace!(module.context(), "event loop, worker group {:?}", self.id);
+            let _span = fimo_std::span_trace!(
+                module.context(),
+                "event loop, worker group {:?} {:?}",
+                self.group.name,
+                self.group.id
+            );
 
+            fimo_std::emit_trace!(module.context(), "starting event loop");
             while !self.can_join() {
                 self.handle_request(module);
             }
+
+            fimo_std::emit_trace!(module.context(), "joining worker threads");
+            for worker in self.workers.values_mut() {
+                worker.join();
+            }
+            fimo_std::emit_trace!(module.context(), "worker threads joined");
         });
     }
 }
