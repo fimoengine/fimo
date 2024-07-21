@@ -1,4 +1,6 @@
-use crate::{context::ContextImpl, worker_group::worker_thread::with_worker_context_lock};
+use crate::{
+    context::ContextImpl, worker_group::worker_thread::with_worker_context_lock, RuntimeShared,
+};
 use fimo_std::{
     error::Error,
     ffi::{FFISharable, FFITransferable},
@@ -15,11 +17,12 @@ pub mod event_loop;
 mod task;
 pub mod worker_thread;
 
+#[derive(Debug)]
 pub struct WorkerGroupImpl {
     id: WorkerGroupId,
     name: CString,
     event_loop: event_loop::EventLoopHandle,
-    _ctx: Weak<ContextImpl>,
+    runtime: Arc<RuntimeShared>,
 }
 
 impl WorkerGroupImpl {
@@ -45,18 +48,12 @@ impl WorkerGroupImpl {
 
     pub fn request_close(&self) -> Result<(), Error> {
         self.event_loop.request_close()?;
-        todo!("unregister from context");
+        self.runtime.shutdown_worker_group(self.id());
         Ok(())
     }
-}
 
-impl Debug for WorkerGroupImpl {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WorkerGroupImpl")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("event_loop", &self.event_loop)
-            .finish_non_exhaustive()
+    pub fn wait_for_close(&self) {
+        self.event_loop.wait_for_close();
     }
 }
 
