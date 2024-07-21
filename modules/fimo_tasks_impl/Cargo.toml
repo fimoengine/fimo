@@ -7,6 +7,9 @@ repository = { workspace = true }
 rust-version = { workspace = true }
 description = "Implementation of the fimo tasks symbols"
 
+[lib]
+crate-type = ["cdylib"]
+
 [lints]
 workspace = true
 

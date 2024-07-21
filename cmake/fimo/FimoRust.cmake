@@ -80,11 +80,32 @@ function(fimo_add_rust_module)
             COMMAND cargo build -Z unstable-options
             --manifest-path ${CMAKE_SOURCE_DIR}/Cargo.toml
             --target-dir ${CMAKE_BINARY_DIR}/target
-            --out-dir ${FIMO_CURRENT_MODULE_INSTALL_DIR}
+            --artifact-dir ${FIMO_CURRENT_MODULE_BUILD_DIR}
             --package ${FIMO_CURRENT_MODULE}
             $<$<NOT:$<CONFIG:Debug>>:--release>
     )
     add_dependencies(fimo_all ${FIMO_CURRENT_MODULE_TARGET})
+
+    # Rename the module file
+    if (WIN32)
+        set(FIMO_CURRENT_MODULE_BIN ${FIMO_CURRENT_MODULE}${CMAKE_SHARED_LIBRARY_SUFFIX})
+    else ()
+        set(FIMO_CURRENT_MODULE_BIN lib${FIMO_CURRENT_MODULE}${CMAKE_SHARED_LIBRARY_SUFFIX})
+    endif ()
+    add_custom_command(
+            TARGET ${FIMO_CURRENT_MODULE_TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E rename ${FIMO_CURRENT_MODULE_BUILD_DIR}/${FIMO_CURRENT_MODULE_BIN}
+            ${FIMO_CURRENT_MODULE_BUILD_DIR}/module.module
+    )
+    unset(FIMO_CURRENT_MODULE_BIN)
+
+    # Remove link file on windows
+    if (WIN32)
+        add_custom_command(
+                TARGET ${FIMO_CURRENT_MODULE_TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm ${FIMO_CURRENT_MODULE_BUILD_DIR}/${FIMO_CURRENT_MODULE}.dll.lib
+        )
+    endif ()
 
     # Add the tests
     if (FIMO_TEST_MODULES)
@@ -104,6 +125,10 @@ function(fimo_add_rust_module)
                 --config $<CONFIG>
                 --target fimo_module_test_${FIMO_CURRENT_MODULE}
         )
+    endif ()
+
+    if (FIMO_INSTALL_MODULES)
+        install(DIRECTORY ${FIMO_CURRENT_MODULE_BUILD_DIR} DESTINATION modules)
     endif ()
 endfunction()
 

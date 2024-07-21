@@ -1,0 +1,1 @@
+fimo_add_rust_bindings(fimo_tasks)
