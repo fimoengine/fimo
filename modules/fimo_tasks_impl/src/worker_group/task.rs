@@ -142,7 +142,7 @@ impl EnqueuedTask {
     pub fn peek_call_stack(&mut self) -> &mut CallStack {
         self.call_stack.as_mut().expect("call stack missing")
     }
-    
+
     pub fn take_call_stack(&mut self) -> CallStack {
         self.call_stack.take().expect("call stack missing")
     }
