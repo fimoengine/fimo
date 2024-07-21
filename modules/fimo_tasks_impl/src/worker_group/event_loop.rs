@@ -23,7 +23,7 @@ use rustc_hash::FxHashMap;
 use std::{
     fmt::{Debug, Formatter},
     num::NonZeroUsize,
-    sync::{Arc, RwLock, Weak},
+    sync::{Arc, Mutex, RwLock, Weak},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -48,7 +48,7 @@ pub struct EventLoopHandle {
     connection_status: RwLock<ConnectionStatus>,
     outer_requests: Sender<OuterRequest>,
     inner_requests: Sender<InnerRequest>,
-    handle: Option<JoinHandle<()>>,
+    handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -120,7 +120,7 @@ impl EventLoopHandle {
             connection_status,
             outer_requests: outer_sx,
             inner_requests: inner_sx,
-            handle: Some(handle),
+            handle: Mutex::new(Some(handle)),
         }
     }
 
@@ -158,6 +158,17 @@ impl EventLoopHandle {
 
         Ok(())
     }
+
+    pub fn wait_for_close(&self) {
+        let handle = {
+            let mut guard = self.handle.lock().expect("could not lock thread handle");
+            guard.take()
+        };
+
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl Debug for EventLoopHandle {
@@ -172,7 +183,7 @@ impl Debug for EventLoopHandle {
 
 impl Drop for EventLoopHandle {
     fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
+        if let Some(handle) = self.handle.get_mut().expect("could not get handle").take() {
             let _ = self.request_close();
             let _ = handle.join();
         }

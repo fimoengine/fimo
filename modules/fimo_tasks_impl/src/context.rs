@@ -1,9 +1,11 @@
 use crate::{
     module_export::TasksModuleToken,
-    worker_group::{worker_thread::with_worker_context_lock, WorkerGroupFFI},
+    worker_group::{worker_thread::with_worker_context_lock, WorkerGroupFFI, WorkerGroupImpl},
+    WorkerGroupQuery,
 };
 use fimo_std::{bindings as std_bindings, error::Error, ffi::FFITransferable, module::Module};
-use fimo_tasks::bindings;
+use fimo_tasks::{bindings, WorkerGroupId};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ContextImpl {}
@@ -47,7 +49,8 @@ impl ContextImpl {
         fimo_std::panic::abort_on_panic(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
-                TasksModuleToken::with_current_unlocked(|_module| {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "");
                     with_worker_context_lock(|_| {}).is_ok()
                 })
             }
@@ -62,6 +65,7 @@ impl ContextImpl {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "id: {id:?}");
                     if id.is_null() {
                         fimo_std::emit_error!(module.context(), "`id` is null");
                         return Err(Error::EINVAL);
@@ -96,6 +100,7 @@ impl ContextImpl {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "id: {id:?}");
                     if id.is_null() {
                         fimo_std::emit_error!(module.context(), "`id` is null");
                         return Err(Error::EINVAL);
@@ -119,6 +124,7 @@ impl ContextImpl {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "group: {group:?}");
                     if group.is_null() {
                         fimo_std::emit_error!(module.context(), "`group` is null");
                         return Err(Error::EINVAL);
@@ -138,24 +144,91 @@ impl ContextImpl {
 
     unsafe extern "C" fn worker_group_by_id(
         _this: *mut std::ffi::c_void,
-        _id: usize,
-        _group: *mut bindings::FiTasksWorkerGroup,
+        id: usize,
+        group: *mut bindings::FiTasksWorkerGroup,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span =
+                        fimo_std::span_trace!(module.context(), "id: {id:?}, group: {group:?}");
+                    if group.is_null() {
+                        fimo_std::emit_error!(module.context(), "`group` is null");
+                        return Err(Error::EINVAL);
+                    }
+
+                    let runtime = module.data().shared_runtime();
+                    match runtime.worker_group_by_id(WorkerGroupId(id)) {
+                        None => {
+                            fimo_std::emit_error!(module.context(), "no group found");
+                            Err(Error::EINVAL)
+                        }
+                        Some(grp) => {
+                            fimo_std::emit_trace!(module.context(), "found group: {grp:?}");
+                            let grp = WorkerGroupFFI(grp).into_ffi();
+                            group.write(grp);
+                            Ok(())
+                        }
+                    }
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn query_worker_groups(
         _this: *mut std::ffi::c_void,
-        _query: *mut *mut bindings::FiTasksWorkerGroupQuery,
+        query: *mut *mut bindings::FiTasksWorkerGroupQuery,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "query: {query:?}");
+                    if query.is_null() {
+                        fimo_std::emit_error!(module.context(), "`query` is null");
+                        return Err(Error::EINVAL);
+                    }
+
+                    let runtime = module.data().shared_runtime();
+                    let groups = runtime.query_worker_groups();
+                    fimo_std::emit_trace!(module.context(), "found groups: {groups:?}");
+
+                    let groups = groups.into_ffi();
+                    query.write(groups);
+                    Ok(())
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn release_worker_group_query(
         _this: *mut std::ffi::c_void,
-        _query: *mut bindings::FiTasksWorkerGroupQuery,
+        query: *mut bindings::FiTasksWorkerGroupQuery,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "query: {query:?}");
+                    if query.is_null() {
+                        fimo_std::emit_error!(module.context(), "`query` is null");
+                        return Err(Error::EINVAL);
+                    }
+
+                    let query = WorkerGroupQuery::from_ffi(query);
+                    fimo_std::emit_trace!(module.context(), "dropping query: {query:?}");
+                    drop(query);
+                    Ok(())
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn create_worker_group(
