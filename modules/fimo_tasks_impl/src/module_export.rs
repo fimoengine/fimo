@@ -17,9 +17,9 @@ export_module! {
         resources: {},
         namespaces: [],
         imports: {},
-        exports: {},
-        dyn_exports: {
-            context: ContextImpl,
+        exports: {
+            context: fimo_tasks::symbols::fimo_tasks::Context = &ContextImpl::ffi_context(),
         },
+        dyn_exports: {},
     }
 }
