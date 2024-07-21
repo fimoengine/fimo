@@ -168,8 +168,7 @@ where
 /// ## Existing namespaces
 ///
 /// ```
-/// use fimo_std::declare_items;
-/// use fimo_std::module::GlobalNs;
+/// use fimo_std::{declare_items, module::GlobalNs};
 ///
 /// declare_items! {
 ///     // Creates the new items in the `GlobalNs` namespace.
