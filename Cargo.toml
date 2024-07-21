@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["modules/rust/*", "rust/*", "src/*"]
+members = ["modules/*", "rust/*", "src/*"]
+exclude = ["modules/python_module_loader"]
 
 [workspace.package]
 version = "0.1.0"
