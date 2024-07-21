@@ -167,7 +167,7 @@ impl Error {
     ///
     /// In case of an invalid error code, this returns `EINVAL`.
     pub fn from_error(error: bindings::FimoError) -> Self {
-        if is_valid_error(error) {
+        if !is_valid_error(error) {
             Self(bindings::FimoError::FIMO_EINVAL)
         } else {
             Self(error)

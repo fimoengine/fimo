@@ -964,7 +964,7 @@ impl<N, E> Graph<N, E> {
     /// `externals_type` to the desired type of externals.
     ///
     /// ```
-    /// use fimo_std::graph::{Graph, ExternalsType};
+    /// use fimo_std::graph::{ExternalsType, Graph};
     ///
     /// let mut graph = Graph::<u32, ()>::new().unwrap();
     ///
@@ -1017,7 +1017,7 @@ impl<N, E> Graph<N, E> {
     /// `externals_type` to the desired type of externals.
     ///
     /// ```
-    /// use fimo_std::graph::{Graph, ExternalsType};
+    /// use fimo_std::graph::{ExternalsType, Graph};
     ///
     /// let mut graph = Graph::<u32, ()>::new().unwrap();
     ///
@@ -1083,7 +1083,7 @@ impl<N, E> Graph<N, E> {
     /// ([`EdgeDirection::Inward`]).
     ///
     /// ```
-    /// use fimo_std::graph::{Graph, EdgeDirection};
+    /// use fimo_std::graph::{EdgeDirection, Graph};
     ///
     /// let mut graph = <Graph>::new().unwrap();
     ///
@@ -1096,12 +1096,30 @@ impl<N, E> Graph<N, E> {
     /// let e2 = graph.add_edge(b, c, ()).unwrap();
     /// let e3 = graph.add_edge(c, d, ()).unwrap();
     ///
-    /// assert_eq!(graph.neighbors(a, EdgeDirection::Inward).unwrap().count(), 0);
-    /// assert_eq!(graph.neighbors(a, EdgeDirection::Outward).unwrap().count(), 1);
-    /// assert_eq!(graph.neighbors(c, EdgeDirection::Inward).unwrap().count(), 2);
-    /// assert_eq!(graph.neighbors(c, EdgeDirection::Outward).unwrap().count(), 1);
-    /// assert_eq!(graph.neighbors(d, EdgeDirection::Inward).unwrap().count(), 1);
-    /// assert_eq!(graph.neighbors(d, EdgeDirection::Outward).unwrap().count(), 0);
+    /// assert_eq!(
+    ///     graph.neighbors(a, EdgeDirection::Inward).unwrap().count(),
+    ///     0
+    /// );
+    /// assert_eq!(
+    ///     graph.neighbors(a, EdgeDirection::Outward).unwrap().count(),
+    ///     1
+    /// );
+    /// assert_eq!(
+    ///     graph.neighbors(c, EdgeDirection::Inward).unwrap().count(),
+    ///     2
+    /// );
+    /// assert_eq!(
+    ///     graph.neighbors(c, EdgeDirection::Outward).unwrap().count(),
+    ///     1
+    /// );
+    /// assert_eq!(
+    ///     graph.neighbors(d, EdgeDirection::Inward).unwrap().count(),
+    ///     1
+    /// );
+    /// assert_eq!(
+    ///     graph.neighbors(d, EdgeDirection::Outward).unwrap().count(),
+    ///     0
+    /// );
     /// ```
     pub fn neighbors(
         &self,
@@ -1142,7 +1160,7 @@ impl<N, E> Graph<N, E> {
     /// the node `node` as their end node ([`EdgeDirection::Inward`]).
     ///
     /// ```
-    /// use fimo_std::graph::{Graph, EdgeDirection};
+    /// use fimo_std::graph::{EdgeDirection, Graph};
     ///
     /// let mut graph = <Graph>::new().unwrap();
     ///
@@ -1155,12 +1173,48 @@ impl<N, E> Graph<N, E> {
     /// let e2 = graph.add_edge(b, c, ()).unwrap();
     /// let e3 = graph.add_edge(c, d, ()).unwrap();
     ///
-    /// assert_eq!(graph.neighbors_edges(a, EdgeDirection::Inward).unwrap().count(), 0);
-    /// assert_eq!(graph.neighbors_edges(a, EdgeDirection::Outward).unwrap().count(), 1);
-    /// assert_eq!(graph.neighbors_edges(c, EdgeDirection::Inward).unwrap().count(), 2);
-    /// assert_eq!(graph.neighbors_edges(c, EdgeDirection::Outward).unwrap().count(), 1);
-    /// assert_eq!(graph.neighbors_edges(d, EdgeDirection::Inward).unwrap().count(), 1);
-    /// assert_eq!(graph.neighbors_edges(d, EdgeDirection::Outward).unwrap().count(), 0);
+    /// assert_eq!(
+    ///     graph
+    ///         .neighbors_edges(a, EdgeDirection::Inward)
+    ///         .unwrap()
+    ///         .count(),
+    ///     0
+    /// );
+    /// assert_eq!(
+    ///     graph
+    ///         .neighbors_edges(a, EdgeDirection::Outward)
+    ///         .unwrap()
+    ///         .count(),
+    ///     1
+    /// );
+    /// assert_eq!(
+    ///     graph
+    ///         .neighbors_edges(c, EdgeDirection::Inward)
+    ///         .unwrap()
+    ///         .count(),
+    ///     2
+    /// );
+    /// assert_eq!(
+    ///     graph
+    ///         .neighbors_edges(c, EdgeDirection::Outward)
+    ///         .unwrap()
+    ///         .count(),
+    ///     1
+    /// );
+    /// assert_eq!(
+    ///     graph
+    ///         .neighbors_edges(d, EdgeDirection::Inward)
+    ///         .unwrap()
+    ///         .count(),
+    ///     1
+    /// );
+    /// assert_eq!(
+    ///     graph
+    ///         .neighbors_edges(d, EdgeDirection::Outward)
+    ///         .unwrap()
+    ///         .count(),
+    ///     0
+    /// );
     /// ```
     pub fn neighbors_edges(
         &self,

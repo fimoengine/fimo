@@ -743,11 +743,13 @@ impl<T> ArrayList<T> {
     /// use fimo_std::array_list;
     ///
     /// let mut arr = array_list![1, 2, 3, 4].unwrap();
-    /// arr.retain_mut(|x| if *x <= 3 {
-    ///     *x += 1;
-    ///     true
-    /// } else {
-    ///     false
+    /// arr.retain_mut(|x| {
+    ///     if *x <= 3 {
+    ///         *x += 1;
+    ///         true
+    ///     } else {
+    ///         false
+    ///     }
     /// });
     /// assert_eq!(arr, [2, 3, 4]);
     /// ```
@@ -1092,7 +1094,11 @@ impl<T> ArrayList<T> {
     ///
     /// let mut arr = array_list![].unwrap();
     /// let mut p = 1;
-    /// arr.resize_with(4, || { p *= 2; p }).unwrap();
+    /// arr.resize_with(4, || {
+    ///     p *= 2;
+    ///     p
+    /// })
+    /// .unwrap();
     /// assert_eq!(arr, [2, 4, 8, 16]);
     /// ```
     pub fn resize_with(&mut self, new_len: usize, mut f: impl FnMut() -> T) -> Result<(), Error> {
@@ -1138,7 +1144,12 @@ impl<T> ArrayList<T> {
     ///
     /// let mut arr = array_list![].unwrap();
     /// let mut p = 1;
-    /// assert!(arr.try_resize_with(4, || { p *= 2; p }).is_err());
+    /// assert!(arr
+    ///     .try_resize_with(4, || {
+    ///         p *= 2;
+    ///         p
+    ///     })
+    ///     .is_err());
     /// assert_eq!(arr, []);
     /// ```
     pub fn try_resize_with(
