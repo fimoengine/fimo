@@ -54,11 +54,13 @@ fimo_declare_bindings(python_module_loader ON)
 
 # Rust Bindings
 fimo_declare_rust_bindings(NAME fimo_std ENABLED ON)
+fimo_declare_rust_bindings(NAME fimo_tasks ENABLED ON)
 
 # Python Bindings
 fimo_declare_python_bindings(NAME fimo_std ENABLED ON)
 
 # Modules
+fimo_declare_module(fimo_tasks_impl ON)
 fimo_declare_module(python_module_loader ON)
 
 if (FIMO_TEST_MODULES OR FIMO_TEST_BINDINGS)
