@@ -18,7 +18,10 @@ mod task;
 mod worker_group;
 
 pub use command_buffer::*;
-use fimo_std::ffi::FFISharable;
+use fimo_std::{
+    ffi::FFISharable,
+    tracing::{Config, Level, ThreadAccess},
+};
 pub use local::*;
 pub use task::*;
 pub use worker_group::*;
@@ -33,6 +36,32 @@ impl Context {
     /// context.
     ///
     /// Some operations can only be performed by worker threads.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    ///
+    /// // Outside a worker group.
+    /// assert_eq!(context.is_worker(), false);
+    ///
+    /// // Inside a worker group.
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    ///
+    /// let mut buffer = CommandBuffer::new();
+    /// let task = buffer.spawn_task(|context| {
+    ///     assert_eq!(context.is_worker(), true);
+    /// });
+    ///
+    /// buffer
+    ///     .block_on(&group)
+    ///     .expect("could not enqueue command buffer");
+    /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
+    /// # });
+    /// ```
     pub fn is_worker(&self) -> bool {
         // Safety: FFI call is safe
         unsafe { (self.vtable().v0.is_worker.unwrap_unchecked())(self.data()) }
@@ -44,6 +73,32 @@ impl Context {
     /// tasks upon completion.
     ///
     /// Can only be called successfully from a task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    ///
+    /// // Outside a worker group.
+    /// assert!(context.task_id().is_err());
+    ///
+    /// // Inside a worker group.
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    ///
+    /// let mut buffer = CommandBuffer::new();
+    /// let task = buffer.spawn_task(|context| {
+    ///     assert!(context.task_id().is_ok());
+    /// });
+    ///
+    /// buffer
+    ///     .block_on(&group)
+    ///     .expect("could not enqueue command buffer");
+    /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
+    /// # });
+    /// ```
     pub fn task_id(&self) -> Result<TaskId, Error> {
         // Safety: FFI call is safe
         let id = unsafe {
@@ -58,6 +113,32 @@ impl Context {
     /// Returns the unique id of the current worker.
     ///
     /// Can only be called successfully from a task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    ///
+    /// // Outside a worker group.
+    /// assert!(context.worker_id().is_err());
+    ///
+    /// // Inside a worker group.
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    ///
+    /// let mut buffer = CommandBuffer::new();
+    /// let task = buffer.spawn_task(|context| {
+    ///     assert!(context.worker_id().is_ok());
+    /// });
+    ///
+    /// buffer
+    ///     .block_on(&group)
+    ///     .expect("could not enqueue command buffer");
+    /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
+    /// # });
+    /// ```
     pub fn worker_id(&self) -> Result<WorkerId, Error> {
         // Safety: FFI call is safe
         let id = unsafe {
@@ -73,6 +154,34 @@ impl Context {
     /// Returns a handle to the current [`WorkerGroup`].
     ///
     /// Can only be called successfully from a task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    ///
+    /// // Outside a worker group.
+    /// assert!(context.worker_group().is_err());
+    ///
+    /// // Inside a worker group.
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    /// let group_id = group.id();
+    ///
+    /// let mut buffer = CommandBuffer::new();
+    /// let task = buffer.spawn_task(move |context| {
+    ///     let group = context.worker_group().unwrap();
+    ///     assert_eq!(group.id(), group_id);
+    /// });
+    ///
+    /// buffer
+    ///     .block_on(&group)
+    ///     .expect("could not enqueue command buffer");
+    /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
+    /// # });
+    /// ```
     pub fn worker_group(&self) -> Result<WorkerGroup<'_>, Error> {
         // Safety: FFI call is safe
         let group = unsafe {
@@ -88,6 +197,24 @@ impl Context {
     }
 
     /// Acquires a handle to a [`WorkerGroup`] assigned to the identifier `id`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::WorkerGroupBuilder;
+    ///
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    /// let group_id = group.id();
+    ///
+    /// let doctest_group = context
+    ///     .worker_group_by_id(group_id)
+    ///     .expect("could not find worker group");
+    /// assert_eq!(group.id(), doctest_group.id());
+    /// # });
+    /// ```
     pub fn worker_group_by_id(&self, id: WorkerGroupId) -> Result<WorkerGroup<'_>, Error> {
         // Safety: FFI call is safe
         let group = unsafe {
@@ -104,6 +231,22 @@ impl Context {
     }
 
     /// Queries a list of [`WorkerGroup`]s available in the context.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::WorkerGroupBuilder;
+    ///
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    /// let group_id = group.id();
+    ///
+    /// let query = context.query_worker_groups().unwrap();
+    /// assert!(query.iter().any(|grp| grp.id() == group_id));
+    /// # });
+    /// ```
     pub fn query_worker_groups(&self) -> Result<WorkerGroupQuery<'_>, Error> {
         // Safety: FFI call is safe
         let query = unsafe {
@@ -120,13 +263,78 @@ impl Context {
 
     /// Yields the execution of the current task back to the scheduler.
     ///
-    /// Yielding a task may allow other tasks to be scheduled. May only be called in a task.
+    /// Yielding a task may allow other tasks to be scheduled.
+    ///
+    /// Can only be called successfully from a task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    ///
+    /// // Outside a worker group.
+    /// assert!(context.yield_now().is_err());
+    ///
+    /// // Inside a worker group.
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    /// let group_id = group.id();
+    ///
+    /// let mut buffer = CommandBuffer::new();
+    /// let task = buffer.spawn_task(move |context| {
+    ///     assert!(context.yield_now().is_ok());
+    /// });
+    ///
+    /// buffer
+    ///     .block_on(&group)
+    ///     .expect("could not enqueue command buffer");
+    /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
+    /// # });
+    /// ```
     pub fn yield_now(&self) -> Result<(), Error> {
         // Safety: FFI call is safe
         unsafe { to_result((self.vtable().v0.yield_.unwrap_unchecked())(self.data())) }
     }
 
     /// Pauses the execution of the current task for the specified duration.
+    ///
+    /// The task may sleep longer than the duration specified. It will never sleep less.
+    ///
+    /// Can only be called successfully from a task.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fimo_tasks::__private_with_context(|_module, context| {
+    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// use std::time;
+    ///
+    /// let ten_millis = time::Duration::from_millis(10);
+    ///
+    /// // Outside a worker group.
+    /// assert!(context.sleep(ten_millis).is_err());
+    ///
+    /// // Inside a worker group.
+    /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .build(&context)
+    ///     .expect("could not create worker group");
+    /// let group_id = group.id();
+    ///
+    /// let mut buffer = CommandBuffer::new();
+    /// let task = buffer.spawn_task(move |context| {
+    ///     let now = time::Instant::now();
+    ///     context.sleep(ten_millis).unwrap();
+    ///     assert!(now.elapsed() >= ten_millis);
+    /// });
+    ///
+    /// buffer
+    ///     .block_on(&group)
+    ///     .expect("could not enqueue command buffer");
+    /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
+    /// # });
+    /// ```
     pub fn sleep(&self, duration: Duration) -> Result<(), Error> {
         let secs = duration.as_secs();
         let nanos = duration.subsec_nanos();
@@ -169,4 +377,58 @@ impl FFISharable<bindings::FiTasksContext> for Context {
     unsafe fn borrow_from_ffi<'a>(_ffi: bindings::FiTasksContext) -> Self::BorrowedView<'a> {
         unreachable!("can not borrow a ffi context")
     }
+}
+
+#[doc(hidden)]
+pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &Context)) {
+    use fimo_std::{
+        context::ContextBuilder,
+        module::{LoadingSet, LoadingSetRequest, Module, NamespaceItem},
+        tracing::default_subscriber,
+    };
+    use std::{ffi::CString, path::PathBuf};
+
+    let modules_dir = std::env::var("MODULES_DIR")
+        .expect("MODULES_DIR environment variable is required while testing");
+    let mut tasks_dir = PathBuf::from(modules_dir);
+    tasks_dir.push("fimo_tasks_impl");
+    tasks_dir.push("module.module");
+    let tasks_dir = CString::new(tasks_dir.into_os_string().into_string().unwrap()).unwrap();
+
+    let context = <ContextBuilder>::new()
+        .with_tracing_config(Config::new(
+            None,
+            Some(Level::Trace),
+            [default_subscriber()],
+        ))
+        .build()
+        .expect("could not build fimo context");
+    let _access = ThreadAccess::new(&context).expect("could not register thread");
+
+    LoadingSet::with_loading_set(&*context, |ctx, set| {
+        set.append_modules(ctx, Some(&tasks_dir), |_| {
+            fimo_std::module::LoadingFilterRequest::Load
+        })?;
+        Ok(LoadingSetRequest::Load)
+    })
+    .expect("could not load modules");
+
+    let module =
+        fimo_std::module::PseudoModule::new(&*context).expect("could not create pseudo module");
+    let tasks_module = fimo_std::module::ModuleInfo::find_by_name(&*context, c"fimo_tasks_impl")
+        .expect("could not find the tasks module");
+
+    module
+        .include_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
+        .expect("could not include the tasks namespace");
+    module
+        .acquire_dependency(&tasks_module)
+        .expect("could not acquire the dependency to the tasks module");
+
+    let context = module
+        .load_symbol::<symbols::fimo_tasks::Context>()
+        .expect("could not load context symbol");
+    let guard = context.lock();
+
+    f(&module, &guard);
 }
