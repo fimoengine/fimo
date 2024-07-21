@@ -10,10 +10,10 @@ use std::{
     sync::{Arc, Weak},
 };
 
-mod command_buffer;
-mod event_loop;
+pub mod command_buffer;
+pub mod event_loop;
 mod task;
-mod worker_thread;
+pub mod worker_thread;
 
 pub struct WorkerGroupImpl {
     id: WorkerGroupId,

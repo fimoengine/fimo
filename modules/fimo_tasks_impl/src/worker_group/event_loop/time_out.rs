@@ -1,7 +1,11 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 use fimo_tasks::TaskId;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 #[derive(Debug)]
 pub(super) struct TimeOut {
@@ -9,18 +13,15 @@ pub(super) struct TimeOut {
     handle: TimeOutHandle,
 }
 
-impl TimeOut {    
+impl TimeOut {
     pub fn new(time: Instant, handle: TimeOutHandle) -> Self {
-        Self {
-            time,
-            handle
-        }
+        Self { time, handle }
     }
-    
+
     pub fn peek_time(&self) -> Instant {
         self.time
     }
-    
+
     pub fn consume(self) -> TimeOutHandle {
         self.handle
     }
