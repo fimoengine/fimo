@@ -3,6 +3,13 @@
 #include <fimo_std/error.h>
 #include <fimo_std/memory.h>
 #include <fimo_std/tracing.h>
+#include <fimo_std/utils.h>
+
+#if __APPLE__
+#include <tinycthread/tinycthread.h>
+#else
+#include <threads.h>
+#endif
 
 #include <stdio.h>
 
@@ -47,6 +54,8 @@ FimoError fimo_impl_tracing_fmt(char *buffer, FimoUSize buffer_size, const void 
 
 #define PRINT_BUFFER_LEN 1024
 static _Thread_local char PRINT_BUFFER[PRINT_BUFFER_LEN + 1] = {0};
+static once_flag PRINT_LOCK_INIT = ONCE_FLAG_INIT;
+static mtx_t PRINT_LOCK;
 
 struct Span_ {
     struct Span_ *next;
@@ -59,6 +68,11 @@ struct Span_ {
 struct CallStack_ {
     struct Span_ *tail;
 };
+
+static void init_print_lock_(void) {
+    int result = mtx_init(&PRINT_LOCK, mtx_plain);
+    FIMO_ASSERT(result == thrd_success);
+}
 
 FimoError fimo_impl_tracing_default_subscriber_call_stack_create(void *subscriber, const FimoTime *time, void **stack) {
     (void)PRINT_BUFFER;
@@ -218,6 +232,10 @@ void fimo_impl_tracing_default_subscriber_event_emit(void *subscriber, const Fim
 
     FIMO_PRAGMA_MSVC(warning(pop))
 
+    call_once(&PRINT_LOCK_INIT, init_print_lock_);
+    int lock_result = mtx_lock(&PRINT_LOCK);
+    FIMO_ASSERT(lock_result == thrd_success);
+
     if (is_error) {
         fflush(stdout);
         fputs(PRINT_BUFFER, stderr);
@@ -225,6 +243,9 @@ void fimo_impl_tracing_default_subscriber_event_emit(void *subscriber, const Fim
     else {
         fputs(PRINT_BUFFER, stdout);
     }
+
+    lock_result = mtx_unlock(&PRINT_LOCK);
+    FIMO_ASSERT(lock_result == thrd_success);
 }
 
 void fimo_impl_tracing_default_subscriber_flush(void *subscriber) {
