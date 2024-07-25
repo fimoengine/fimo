@@ -211,13 +211,11 @@ macro_rules! export_module {
                     where
                         F: for<'ctx> FnOnce(&'ctx [<$mod_ident Locked>]) -> R,
                     {
-                        // Safety: We immediately lock the module from being unloaded.
-                        unsafe {
-                            Self::with_current_unlocked(|module| {
-                                let module = module.lock_module().expect("could not lock the module");
-                                f(&module)
-                            })
-                        }
+                        let module = Self::with_lock(|module| {
+                            module.lock_module()
+                        }).expect("could not lock the module");
+
+                        f(&module)
                     }
 
                     /// Acquires an instance to the current module.
@@ -231,6 +229,17 @@ macro_rules! export_module {
                     /// May only be called be a symbol exported from the module, or it is otherwise
                     /// known that the module can not be unloaded.
                     pub unsafe fn with_current_unlocked<F, R>(f: F) -> R
+                    where
+                        F: for<'ctx> FnOnce($mod_ident<'ctx>) -> R,
+                    {
+                        let module = Self::with_lock(|module| {
+                            // Safety: The caller ensures that the module is locked.
+                            unsafe { std::mem::transmute(module) }
+                        });
+                        f(module)
+                    }
+
+                    fn with_lock<F, R>(f: F) -> R
                     where
                         F: for<'ctx> FnOnce($mod_ident<'ctx>) -> R,
                     {
