@@ -233,9 +233,28 @@ impl ContextImpl {
     unsafe extern "C" fn create_worker_group(
         _this: *mut std::ffi::c_void,
         _cfg: bindings::FiTasksWorkerGroupConfig,
-        _group: *mut bindings::FiTasksWorkerGroup,
+        group: *mut bindings::FiTasksWorkerGroup,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "group: {group:?}");
+                    if group.is_null() {
+                        fimo_std::emit_error!(module.context(), "`query` is null");
+                        return Err(Error::EINVAL);
+                    }
+
+                    let runtime = module.data().shared_runtime();
+                    let g = runtime.spawn_worker_group()?;
+                    let g = WorkerGroupFFI(g).into_ffi();
+                    group.write(g);
+                    Ok(())
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn yield_(_this: *mut std::ffi::c_void) -> std_bindings::FimoError {

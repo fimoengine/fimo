@@ -126,7 +126,10 @@ impl CommandBufferImpl {
         self.num_enqueued_tasks -= 1;
         if self.num_enqueued_tasks == 0 && self.buffer.is_done() {
             // Safety: Is only called once.
-            unsafe { self.handle.mark_completed(false) };
+            unsafe {
+                self.buffer.mark_completed();
+                self.handle.mark_completed(false);
+            }
         }
     }
 
@@ -261,7 +264,10 @@ impl CommandBufferImpl {
 
         if self.num_enqueued_tasks == 0 {
             // Safety: Is only called once.
-            unsafe { self.handle.mark_completed(false) };
+            unsafe {
+                self.buffer.mark_completed();
+                self.handle.mark_completed(false);
+            };
         }
 
         match self.num_enqueued_tasks {
@@ -350,16 +356,35 @@ struct CommandBufferIterator {
     index: usize,
     num_commands: usize,
     buffer: RawCommandBuffer,
+    state: CommandBufferState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum CommandBufferState {
+    Running,
+    Aborted,
+    Completed,
 }
 
 impl CommandBufferIterator {
+    fn new(buffer: RawCommandBuffer) -> Self {
+        let num_commands = buffer.buffer().num_entries;
+        Self {
+            index: 0,
+            num_commands,
+            buffer,
+            state: CommandBufferState::Running,
+        }
+    }
+
     fn is_done(&self) -> bool {
         self.index == self.num_commands
     }
 
     fn abort(&mut self, cause: usize) {
+        debug_assert_eq!(self.state, CommandBufferState::Running);
         debug_assert!(cause <= self.num_commands);
-        for (_, command) in self {
+        for (_, command) in self.by_ref() {
             if let Command::SpawnTask(mut t) = command {
                 // Safety:
                 unsafe {
@@ -367,6 +392,26 @@ impl CommandBufferIterator {
                     t.run_cleanup_handler();
                 }
             }
+        }
+        self.state = CommandBufferState::Aborted;
+
+        // Safety: Is only called once.
+        unsafe {
+            self.buffer.run_abortion_handler(cause);
+        }
+    }
+
+    /// # Safety
+    ///
+    /// All commands must have finished executing.
+    unsafe fn mark_completed(&mut self) {
+        debug_assert_eq!(self.state, CommandBufferState::Running);
+        debug_assert_eq!(self.index, self.num_commands);
+        self.state = CommandBufferState::Completed;
+
+        // Safety: Is only called once.
+        unsafe {
+            self.buffer.run_completion_handler();
         }
     }
 }
@@ -430,7 +475,12 @@ impl Drop for CommandBufferIterator {
     fn drop(&mut self) {
         assert_eq!(
             self.index, self.num_commands,
-            "Not all commands have been processed"
+            "not all commands have been processed"
+        );
+        assert_ne!(
+            self.state,
+            CommandBufferState::Running,
+            "not all commands have finished executing"
         );
     }
 }
