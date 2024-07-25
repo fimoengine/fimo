@@ -1,11 +1,10 @@
 use crate::{
     module_export::TasksModuleToken,
-    worker_group::{worker_thread::with_worker_context_lock, WorkerGroupFFI, WorkerGroupImpl},
+    worker_group::{self, worker_thread::with_worker_context_lock, WorkerGroupFFI},
     WorkerGroupQuery,
 };
 use fimo_std::{bindings as std_bindings, error::Error, ffi::FFITransferable, module::Module};
 use fimo_tasks::{bindings, WorkerGroupId};
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct ContextImpl {}
@@ -240,45 +239,151 @@ impl ContextImpl {
     }
 
     unsafe extern "C" fn yield_(_this: *mut std::ffi::c_void) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "");
+                    fimo_std::emit_trace!(module.context(), "yielding task");
+                    worker_group::worker_thread::yield_now()
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn abort(
         _this: *mut std::ffi::c_void,
-        _error: *mut std::ffi::c_void,
+        error: *mut std::ffi::c_void,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "error: {error:?}");
+                    fimo_std::emit_trace!(module.context(), "aborting task");
+                    worker_group::worker_thread::abort_task(error)
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn sleep(
         _this: *mut std::ffi::c_void,
-        _duration: std_bindings::FimoDuration,
+        duration: std_bindings::FimoDuration,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "duration: {duration:?}");
+                    let now = std::time::Instant::now();
+                    let duration = std::time::Duration::new(duration.secs, duration.nanos);
+                    let until = now + duration;
+                    fimo_std::emit_trace!(module.context(), "sleeping task until {until:?}");
+                    worker_group::worker_thread::wait_until(until)
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn tss_set(
         _this: *mut std::ffi::c_void,
-        _key: bindings::FiTasksTssKey,
-        _value: *mut std::ffi::c_void,
-        _dtor: bindings::FiTasksTssDtor,
+        key: bindings::FiTasksTssKey,
+        value: *mut std::ffi::c_void,
+        dtor: bindings::FiTasksTssDtor,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(
+                        module.context(),
+                        "key: {key:?}, value: {value:?}, dtor: {dtor:?}"
+                    );
+                    fimo_std::emit_trace!(module.context(), "writing tss");
+                    with_worker_context_lock(|worker| {
+                        let task = worker
+                            .current_task
+                            .as_mut()
+                            .expect("no task is being executed by the worker");
+                        task.write_tss_value(key, value, dtor);
+                    })
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn tss_get(
         _this: *mut std::ffi::c_void,
-        _key: bindings::FiTasksTssKey,
-        _value: *mut *mut std::ffi::c_void,
+        key: bindings::FiTasksTssKey,
+        value: *mut *mut std::ffi::c_void,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span =
+                        fimo_std::span_trace!(module.context(), "key: {key:?}, value: {value:?}");
+                    if value.is_null() {
+                        fimo_std::emit_error!(module.context(), "`value` is null");
+                        return Err(Error::EINVAL);
+                    }
+
+                    fimo_std::emit_trace!(module.context(), "reading tss");
+                    with_worker_context_lock(|worker| {
+                        let task = worker
+                            .current_task
+                            .as_mut()
+                            .expect("no task is being executed by the worker");
+
+                        if let Some(v) = task.read_tss_value(key) {
+                            fimo_std::emit_trace!(module.context(), "found value {v:?}");
+                            value.write(v);
+                            Ok(())
+                        } else {
+                            fimo_std::emit_error!(module.context(), "tss key not set");
+                            Err(Error::EINVAL)
+                        }
+                    })
+                    .flatten()
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn tss_clear(
         _this: *mut std::ffi::c_void,
-        _key: bindings::FiTasksTssKey,
+        key: bindings::FiTasksTssKey,
     ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is safe since we are calling it from an exported symbol.
+            unsafe {
+                TasksModuleToken::with_current_unlocked(|module| {
+                    let _span = fimo_std::span_trace!(module.context(), "key: {key:?}");
+                    fimo_std::emit_trace!(module.context(), "clearing tss");
+                    with_worker_context_lock(|worker| {
+                        let task = worker
+                            .current_task
+                            .as_mut()
+                            .expect("no task is being executed by the worker");
+                        task.clear_tss_value(key)
+                    })
+                    .flatten()
+                })
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
     unsafe extern "C" fn park_conditionally(

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::{
     module_export::{TasksModule, TasksModuleToken},
     worker_group::{
@@ -182,7 +180,9 @@ pub enum TaskRequest {
 #[derive(Debug)]
 pub enum TaskResponse {
     Start,
+    #[allow(dead_code)]
     Complete(std::convert::Infallible),
+    #[allow(dead_code)]
     Abort(std::convert::Infallible),
     Yield,
     WaitUntil,

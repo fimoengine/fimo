@@ -156,6 +156,60 @@ impl EnqueuedTask {
 
     /// # Safety
     ///
+    /// May only be called in the thread that owns the task.
+    pub unsafe fn write_tss_value(
+        &mut self,
+        key: fimo_tasks::bindings::FiTasksTssKey,
+        value: *mut std::ffi::c_void,
+        dtor: fimo_tasks::bindings::FiTasksTssDtor,
+    ) {
+        let local_data = self
+            .local_data
+            .as_mut()
+            .expect("local data is not initialized");
+        let key = key.addr();
+        local_data.set_value(
+            key,
+            LocalDataValue {
+                value,
+                on_cleanup: dtor,
+            },
+        );
+    }
+
+    /// # Safety
+    ///
+    /// May only be called in the thread that owns the task.
+    pub unsafe fn read_tss_value(
+        &mut self,
+        key: fimo_tasks::bindings::FiTasksTssKey,
+    ) -> Option<*mut std::ffi::c_void> {
+        let local_data = self
+            .local_data
+            .as_mut()
+            .expect("local data is not initialized");
+        let key = key.addr();
+        local_data.get_value(key)
+    }
+
+    /// # Safety
+    ///
+    /// May only be called in the thread that owns the task.
+    pub unsafe fn clear_tss_value(
+        &mut self,
+        key: fimo_tasks::bindings::FiTasksTssKey,
+    ) -> Result<(), Error> {
+        let local_data = self
+            .local_data
+            .as_mut()
+            .expect("local data is not initialized");
+        let key = key.addr();
+        // Safety: Is called from the thread that owns the task.
+        unsafe { local_data.clear_value(key) }
+    }
+
+    /// # Safety
+    ///
     /// Must be called by the thread that executed the task.
     /// The task must have been completed.
     /// The context must be locked.
@@ -315,19 +369,12 @@ impl Drop for LocalData {
 }
 
 #[derive(Debug)]
-pub struct LocalDataValue {
+struct LocalDataValue {
     value: *mut std::ffi::c_void,
     on_cleanup: fimo_tasks::bindings::FiTasksTssDtor,
 }
 
 impl LocalDataValue {
-    pub fn new(
-        value: *mut std::ffi::c_void,
-        on_cleanup: fimo_tasks::bindings::FiTasksTssDtor,
-    ) -> Self {
-        Self { value, on_cleanup }
-    }
-
     /// # Safety
     ///
     /// Must be called from the same thread that created the instance.

@@ -1,0 +1,57 @@
+// Static tasks configuration.
+//
+// Example:
+[
+  {
+    "label": "CMake: Configure (Debug)",
+    "command": "rm -rf $ZED_WORKTREE_ROOT/build; cmake -B $ZED_WORKTREE_ROOT/build -S $ZED_WORKTREE_ROOT -DCMAKE_BUILD_TYPE=Debug -DCMAKE_FIND_FRAMEWORK=LAST"
+  },
+  {
+    "label": "CMake: Build (Debug)",
+    "command": "cmake --build $ZED_WORKTREE_ROOT/build"
+  },
+  {
+    "label": "CMake: Clean (Debug)",
+    "command": "cmake --build $ZED_WORKTREE_ROOT/build --target clean"
+  },
+  {
+    "label": "CMake: Test (Debug)",
+    "command": "ctest --output-on-failure --test-dir $ZED_WORKTREE_ROOT/build"
+  },
+  {
+    "label": "Cargo Format",
+    "command": "cargo",
+    "args": [
+      "fmt",
+      "--all",
+      "--manifest-path",
+      "$ZED_WORKTREE_ROOT/Cargo.toml",
+      "--",
+      "--unstable-features",
+      "--config",
+      "format_code_in_doc_comments=true"
+    ],
+    "reveal": "never"
+  },
+  {
+    "label": "Cargo Doc",
+    "command": "cargo",
+    "args": [
+      "doc",
+      "--manifest-path",
+      "$ZED_WORKTREE_ROOT/Cargo.toml"
+    ],
+    "reveal": "never"
+  },
+  {
+    "label": "Cargo Doc (Open)",
+    "command": "cargo",
+    "args": [
+      "doc",
+      "--manifest-path",
+      "$ZED_WORKTREE_ROOT/Cargo.toml",
+      "--open"
+    ],
+    "reveal": "never"
+  }
+]
