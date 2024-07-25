@@ -21,7 +21,7 @@ use rustc_hash::FxHashMap;
 use std::{
     fmt::{Debug, Formatter},
     num::NonZeroUsize,
-    sync::{Arc, Mutex, RwLock, Weak},
+    sync::{Arc, Mutex, RwLock},
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -42,10 +42,9 @@ pub enum InnerRequest {
 }
 
 pub struct EventLoopHandle {
-    group: Weak<WorkerGroupImpl>,
     connection_status: RwLock<ConnectionStatus>,
     outer_requests: Sender<OuterRequest>,
-    inner_requests: Sender<InnerRequest>,
+    _inner_requests: Sender<InnerRequest>,
     handle: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -57,12 +56,19 @@ enum ConnectionStatus {
 
 impl EventLoopHandle {
     pub fn new(
-        _module: TasksModule<'_>,
+        ctx: fimo_std::context::ContextView<'_>,
         group: Arc<WorkerGroupImpl>,
         num_workers: usize,
         default_stack_size: usize,
         stacks: Vec<StackDescriptor>,
     ) -> Self {
+        let _span = fimo_std::span_trace!(
+            ctx,
+            "group: {group:?}, num_workers: {num_workers:?}, \
+            default_stack_size: {default_stack_size:?}, stacks: {stacks:?}"
+        );
+        fimo_std::emit_trace!(ctx, "spawning event loop");
+
         let connection_status = RwLock::new(ConnectionStatus::Open);
         let (outer_sx, outer_rx) = crossbeam_channel::unbounded();
         let (inner_sx, inner_rx) = crossbeam_channel::unbounded();
@@ -79,6 +85,12 @@ impl EventLoopHandle {
                         // Initialize the tracing for the event loop thread.
                         use fimo_std::module::Module;
                         let _tracing = fimo_std::tracing::ThreadAccess::new(&module.context());
+                        let _span = fimo_std::span_trace!(
+                            module.context(),
+                            "event loop, name: {:?}, id: {:?}",
+                            group.name,
+                            group.id,
+                        );
 
                         let event_loop =
                             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -94,10 +106,18 @@ impl EventLoopHandle {
                                 )
                             })) {
                                 Ok(event_loop) => {
+                                    fimo_std::emit_trace!(
+                                        module.context(),
+                                        "event_loop: {event_loop:?}"
+                                    );
                                     error_sx.send(Ok(())).expect("could not send status");
                                     event_loop
                                 }
                                 Err(e) => {
+                                    fimo_std::emit_error!(
+                                        module.context(),
+                                        "event loop creation failed"
+                                    );
                                     error_sx.send(Err(e)).expect("could not send status");
                                     return;
                                 }
@@ -110,14 +130,14 @@ impl EventLoopHandle {
 
         // Panic if we could not create the event loop.
         if let Err(e) = error_rx.recv().expect("could not receive status") {
+            fimo_std::emit_error!(ctx, "could not spawn event loop");
             std::panic::resume_unwind(e);
         }
 
         Self {
-            group: Arc::downgrade(&group),
             connection_status,
             outer_requests: outer_sx,
-            inner_requests: inner_sx,
+            _inner_requests: inner_sx,
             handle: Mutex::new(Some(handle)),
         }
     }
@@ -171,10 +191,8 @@ impl EventLoopHandle {
 
 impl Debug for EventLoopHandle {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MainThreadDataPublic")
+        f.debug_struct("EventLoopHandle")
             .field("connection_status", &self.connection_status)
-            .field("public_messages", &self.outer_requests)
-            .field("handle", &self.handle)
             .finish_non_exhaustive()
     }
 }
@@ -649,7 +667,9 @@ impl EventLoop {
     fn handle_inner_request(&mut self, module: &TasksModule<'_>, msg: InnerRequest) {
         match msg {
             InnerRequest::WorkerRequest(request) => self.on_worker_request(module, request),
-            InnerRequest::UnblockCommandBuffer(_) => {}
+            InnerRequest::UnblockCommandBuffer(command_buffer) => {
+                self.on_unblock_command_buffer(module, command_buffer);
+            }
             InnerRequest::UnblockTask(task) => self.on_unblock_task(module, task, false),
         }
     }
@@ -735,13 +755,6 @@ impl EventLoop {
 
     fn enter_event_loop(mut self, module: &TasksModule<'_>) {
         fimo_std::panic::abort_on_panic(|| {
-            let _span = fimo_std::span_trace!(
-                module.context(),
-                "event loop, worker group {:?} {:?}",
-                self.group.name,
-                self.group.id
-            );
-
             fimo_std::emit_trace!(module.context(), "starting event loop");
             while !self.can_join() {
                 self.handle_request(module);

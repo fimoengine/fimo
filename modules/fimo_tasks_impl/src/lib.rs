@@ -45,10 +45,12 @@ use fimo_std::{
 use fimo_tasks::{bindings, WorkerGroupId};
 use rustc_hash::FxHashMap;
 use std::{
+    ffi::CString,
     mem::ManuallyDrop,
     sync::{Arc, RwLock},
     thread::JoinHandle,
 };
+use worker_group::event_loop::stack_manager::StackDescriptor;
 
 // We are currently building each module in separate dynamic library.
 // If we decide to support static linking in the future this should be
@@ -192,6 +194,22 @@ impl RuntimeShared {
         guard.find_by_id(group_id)
     }
 
+    fn spawn_worker_group(self: &Arc<Self>) -> Result<Arc<WorkerGroupImpl>, Error> {
+        let _span = fimo_std::span_trace!(*self.context, "");
+        {
+            fimo_std::emit_trace!(*self.context, "requesting a new worker group");
+            let mut guard = self.worker_group_manager.write().unwrap();
+            guard.spawn_new(
+                CString::new("").unwrap(),
+                false,
+                1,
+                512 * 1024,
+                vec![],
+                self,
+            )
+        }
+    }
+
     fn shutdown_worker_group(&self, group_id: WorkerGroupId) {
         let _span = fimo_std::span_trace!(*self.context, "group_id: {group_id:?}");
         {
@@ -223,6 +241,7 @@ impl RuntimeShared {
 #[derive(Debug)]
 struct WorkerGroupManager {
     closed: bool,
+    next_id: WorkerGroupId,
     groups: FxHashMap<WorkerGroupId, Arc<WorkerGroupImpl>>,
 }
 
@@ -230,12 +249,54 @@ impl WorkerGroupManager {
     fn new() -> Self {
         Self {
             closed: false,
+            next_id: WorkerGroupId(0),
             groups: Default::default(),
         }
     }
 
     fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    fn spawn_new(
+        &mut self,
+        name: CString,
+        visible: bool,
+        num_workers: usize,
+        default_stack_size: usize,
+        stacks: Vec<StackDescriptor>,
+        runtime: &Arc<RuntimeShared>,
+    ) -> Result<Arc<WorkerGroupImpl>, Error> {
+        let ctx = *runtime.context;
+        let _span = fimo_std::span_trace!(
+            ctx,
+            "this: {self:?}, name: {name:?}, visible: {visible:?}, num_workers: {num_workers:?}, \
+            default_stack_size: {default_stack_size:?}, stacks: {stacks:?}, runtime: {runtime:?}"
+        );
+
+        if self.closed {
+            fimo_std::emit_error!(ctx, "manager is already closed");
+            return Err(Error::EPERM);
+        }
+
+        let id = self.next_id;
+        if id.0 == usize::MAX {
+            fimo_std::emit_error!(ctx, "run out of worker group ids");
+            return Err(Error::E2BIG);
+        }
+
+        let group = WorkerGroupImpl::new(
+            ctx,
+            id,
+            name,
+            visible,
+            num_workers,
+            default_stack_size,
+            stacks,
+            runtime.clone(),
+        );
+        self.groups.insert(id, group.clone());
+        Ok(group)
     }
 
     fn close(&mut self) -> FxHashMap<WorkerGroupId, Arc<WorkerGroupImpl>> {
@@ -245,7 +306,7 @@ impl WorkerGroupManager {
     }
 
     fn query_workers(&self) -> WorkerGroupQuery {
-        let groups = self.groups.values().cloned();
+        let groups = self.groups.values().filter(|g| g.is_visible()).cloned();
         WorkerGroupQuery::new(groups)
     }
 
