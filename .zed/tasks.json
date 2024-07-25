@@ -16,7 +16,10 @@
   },
   {
     "label": "CMake: Test (Debug)",
-    "command": "ctest --output-on-failure --test-dir $ZED_WORKTREE_ROOT/build"
+    "command": "ctest --output-on-failure --test-dir $ZED_WORKTREE_ROOT/build",
+    "env": {
+      "RUST_BACKTRACE": "full"
+    }
   },
   {
     "label": "Cargo Format",
@@ -53,5 +56,21 @@
       "--open"
     ],
     "reveal": "never"
+  },
+  {
+    "label": "Cargo Test (Current)",
+    "command": "cargo",
+    "args": [
+      "test",
+      "--manifest-path",
+      "$ZED_WORKTREE_ROOT/Cargo.toml",
+      "--package",
+      "$ZED_CUSTOM_RUST_PACKAGE"
+    ],
+    "env": {
+      "MODULES_DIR": "$ZED_WORKTREE_ROOT/build/_modules",
+      "RUST_BACKTRACE": "1",
+      "RUSTDOCFLAGS": "-Zunstable-options --nocapture"
+    }
   }
 ]
