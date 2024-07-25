@@ -1162,3 +1162,18 @@ pub mod c_ffi {
         .unwrap_or_else(|_e| std::process::abort());
     }
 }
+
+// Reexport the module entry function.
+#[link(name = "fimo_std", kind = "static")]
+extern "C" {
+    #[no_mangle]
+    #[doc(hidden)]
+    #[allow(unused_attributes)]
+    #[cfg(target_vendor = "apple")]
+    pub fn fimo_impl_module_export_iterator(
+        inspector: Option<
+            unsafe extern "C" fn(*const bindings::FimoModuleExport, *mut std::ffi::c_void) -> bool,
+        >,
+        data: *mut std::ffi::c_void,
+    );
+}
