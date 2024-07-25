@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::{
     module_export::{TasksModule, TasksModuleToken},
     worker_group::{

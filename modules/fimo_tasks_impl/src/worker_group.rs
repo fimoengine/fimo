@@ -1,6 +1,4 @@
-use crate::{
-    context::ContextImpl, worker_group::worker_thread::with_worker_context_lock, RuntimeShared,
-};
+use crate::{worker_group::worker_thread::with_worker_context_lock, RuntimeShared};
 use fimo_std::{
     error::Error,
     ffi::{FFISharable, FFITransferable},
@@ -8,8 +6,8 @@ use fimo_std::{
 use fimo_tasks::WorkerGroupId;
 use std::{
     ffi::{CStr, CString},
-    fmt::{Debug, Formatter},
-    sync::{Arc, Weak},
+    fmt::Debug,
+    sync::Arc,
 };
 
 pub mod command_buffer;

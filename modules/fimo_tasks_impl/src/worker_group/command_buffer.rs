@@ -448,7 +448,6 @@ enum Command {
 #[derive(Debug)]
 struct RawCommandBuffer(*mut fimo_tasks::bindings::FiTasksCommandBuffer);
 
-#[allow(dead_code)]
 impl RawCommandBuffer {
     fn buffer(&self) -> &fimo_tasks::bindings::FiTasksCommandBuffer {
         // Safety: A `RawCommandBuffer` works like a `Box`. We own the buffer.

@@ -5,6 +5,11 @@
 //!
 //! # Module info
 //!
+//! - Name: `fimo_tasks_impl`
+//! - Description: Threading subsystem of the Fimo Engine
+//! - Author: Fimo
+//! - License: MIT License and Apache License, Version 2.0
+//!
 //! ## Parameters:
 //!
 //! - `default_stack_size: u32` (public, dependency, `default = 512KB`): Default stack size in
