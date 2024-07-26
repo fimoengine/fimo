@@ -37,6 +37,7 @@ impl<'m> ModuleConstructor<TasksModule<'m>> for TasksModuleConstructor {
         module: ConstructorModule<'a, TasksModule<'m>>,
         _set: LoadingSet<'_>,
     ) -> Result<&'a mut <TasksModule<'m> as Module>::Data, Error> {
+        fimo_std::panic::set_panic_hook();
         let module = module.unwrap()?;
 
         let runtime = Box::new(Runtime::new(module)?);
