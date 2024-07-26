@@ -211,11 +211,13 @@ macro_rules! export_module {
                     where
                         F: for<'ctx> FnOnce(&'ctx [<$mod_ident Locked>]) -> R,
                     {
+                        use $crate::module::Module;
                         let module = Self::with_lock(|module| {
                             module.lock_module()
                         }).expect("could not lock the module");
 
-                        f(&module)
+                        let context = module.context();
+                        $crate::panic::with_panic_context(context, |_| f(&module))
                     }
 
                     /// Acquires an instance to the current module.
@@ -232,11 +234,14 @@ macro_rules! export_module {
                     where
                         F: for<'ctx> FnOnce($mod_ident<'ctx>) -> R,
                     {
-                        let module = Self::with_lock(|module| {
+                        use $crate::module::Module;
+                        let module: $mod_ident<'_> = Self::with_lock(|module| {
                             // Safety: The caller ensures that the module is locked.
                             unsafe { std::mem::transmute(module) }
                         });
-                        f(module)
+
+                        let context = module.context();
+                        $crate::panic::with_panic_context(context, |_| f(module))
                     }
 
                     fn with_lock<F, R>(f: F) -> R
@@ -972,12 +977,13 @@ pub mod c_ffi {
         T: Module,
         F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
     {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Safety:
             unsafe {
-                let module = &*module.cast();
+                let module: &T = &*module.cast();
                 let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
-                match f(module, data) {
+                let context = module.context();
+                match crate::panic::with_panic_context(context, |_| f(module, data)) {
                     Ok(x) => {
                         use bindings::FimoModuleParamType;
                         match x {
@@ -1038,13 +1044,14 @@ pub mod c_ffi {
                                 );
                             }
                         }
-                        Error::EOK.into_error()
+                        Ok(())
                     }
-                    Err(x) => x.into_error(),
+                    Err(x) => Err(x),
                 }
             }
         }))
-        .unwrap_or(bindings::FimoError::FIMO_EUNKNOWN)
+        .flatten()
+        .map_or_else(Error::into_error, |_| Error::EOK.into_error())
     }
 
     pub unsafe extern "C" fn set_param<T, F>(
@@ -1058,14 +1065,14 @@ pub mod c_ffi {
         T: Module,
         F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
     {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::panic::catch_unwind(|| {
             // Safety:
             unsafe {
-                let module = &*module.cast();
+                let module: &T = &*module.cast();
                 let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
                 let type_ = match ParameterType::try_from(type_) {
                     Ok(x) => x,
-                    Err(e) => return e.into_error(),
+                    Err(e) => return Err(e),
                 };
                 let value = match type_ {
                     ParameterType::U8 => ParameterValue::U8(core::ptr::read(value.cast())),
@@ -1077,13 +1084,12 @@ pub mod c_ffi {
                     ParameterType::I32 => ParameterValue::I32(core::ptr::read(value.cast())),
                     ParameterType::I64 => ParameterValue::I64(core::ptr::read(value.cast())),
                 };
-                match f(module, value, data) {
-                    Ok(_) => Error::EOK.into_error(),
-                    Err(x) => x.into_error(),
-                }
+                let context = module.context();
+                crate::panic::with_panic_context(context, |_| f(module, value, data))
             }
-        }))
-        .unwrap_or(bindings::FimoError::FIMO_EUNKNOWN)
+        })
+        .flatten()
+        .map_or_else(Error::into_error, |_| Error::EOK.into_error())
     }
 
     pub unsafe fn construct_dynamic_symbol<T, S>(
@@ -1094,22 +1100,22 @@ pub mod c_ffi {
         T: Module,
         S: DynamicExport<T>,
     {
-        std::panic::catch_unwind(|| {
-            // Safety: The function is only called internally,
-            // where we know the type of the module.
+        crate::panic::catch_unwind(|| {
+            // Safety: The function is only called internally, where we know the type of the module.
             unsafe {
                 let module = PartialModule::<'_, T>::from_ffi(module);
-                match S::construct(module) {
+                let context = module.context();
+                crate::panic::with_panic_context(context, |_| match S::construct(module) {
                     Ok(data) => {
                         let data = core::ptr::from_mut(data).cast();
                         core::ptr::write(symbol, data);
                         Ok(())
                     }
                     Err(e) => Err(e),
-                }
+                })
             }
         })
-        .unwrap_or(Err(Error::EUNKNOWN))
+        .flatten()
     }
 
     pub unsafe fn destroy_dynamic_symbol<T, S>(symbol: *mut core::ffi::c_void)
@@ -1117,14 +1123,13 @@ pub mod c_ffi {
         T: Module,
         S: DynamicExport<T>,
     {
-        std::panic::catch_unwind(|| {
+        crate::panic::abort_on_panic(|| {
             // Safety: The function is only called internally,
             // where we know the type of the symbol.
             unsafe {
                 S::destroy(&mut *symbol.cast());
             }
-        })
-        .unwrap_or_else(|_e| std::process::abort());
+        });
     }
 
     pub unsafe fn construct_module<T, C>(
@@ -1136,21 +1141,24 @@ pub mod c_ffi {
         T: Module,
         C: ModuleConstructor<T>,
     {
-        std::panic::catch_unwind(|| {
+        crate::panic::catch_unwind(|| {
             // Safety: See above.
             unsafe {
                 let module = PreModule::<T>::from_ffi(module);
                 let set = LoadingSet::from_ffi(set);
-                match C::construct(module.into(), set) {
-                    Ok(v) => {
-                        core::ptr::write(data, core::ptr::from_mut(v).cast());
-                        Ok(())
+                let context = module.context();
+                crate::panic::with_panic_context(context, |_| {
+                    match C::construct(module.into(), set) {
+                        Ok(v) => {
+                            core::ptr::write(data, core::ptr::from_mut(v).cast());
+                            Ok(())
+                        }
+                        Err(x) => Err(x),
                     }
-                    Err(x) => Err(x),
-                }
+                })
             }
         })
-        .unwrap_or(Err(Error::EUNKNOWN))
+        .flatten()
     }
 
     pub unsafe fn destroy_module<T, C>(
@@ -1160,15 +1168,17 @@ pub mod c_ffi {
         T: Module,
         C: ModuleConstructor<T>,
     {
-        std::panic::catch_unwind(|| {
+        crate::panic::abort_on_panic(|| {
             // Safety: See above
             unsafe {
                 let module = PreModule::<T>::from_ffi(module);
                 let data = &mut *data.cast();
-                C::destroy(module, data);
+                let context = module.context();
+                crate::panic::with_panic_context(context, |_| {
+                    C::destroy(module, data);
+                });
             }
-        })
-        .unwrap_or_else(|_e| std::process::abort());
+        });
     }
 }
 

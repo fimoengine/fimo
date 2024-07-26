@@ -69,8 +69,7 @@
     ],
     "env": {
       "MODULES_DIR": "$ZED_WORKTREE_ROOT/build/_modules",
-      "RUST_BACKTRACE": "1",
-      "RUSTDOCFLAGS": "-Zunstable-options --nocapture"
+      "RUST_BACKTRACE": "1"
     }
   }
 ]
