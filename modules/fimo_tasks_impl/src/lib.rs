@@ -43,10 +43,12 @@ use fimo_std::{
     tracing::ThreadAccess,
 };
 use fimo_tasks::{bindings, WorkerGroupId};
+use module_export::TasksModuleToken;
 use rustc_hash::FxHashMap;
 use std::{
-    ffi::CString,
+    ffi::{CStr, CString},
     mem::ManuallyDrop,
+    num::NonZeroUsize,
     sync::{Arc, RwLock},
     thread::JoinHandle,
 };
@@ -194,17 +196,127 @@ impl RuntimeShared {
         guard.find_by_id(group_id)
     }
 
-    fn spawn_worker_group(self: &Arc<Self>) -> Result<Arc<WorkerGroupImpl>, Error> {
-        let _span = fimo_std::span_trace!(*self.context, "");
+    fn spawn_worker_group(
+        self: &Arc<Self>,
+        name: &CStr,
+        stacks: &[bindings::FiTasksWorkerGroupConfigStack],
+        default_stack_index: usize,
+        number_of_workers: Option<NonZeroUsize>,
+        is_queryable: bool,
+    ) -> Result<Arc<WorkerGroupImpl>, Error> {
+        let _span = fimo_std::span_trace!(
+            *self.context,
+            "self: {self:?}, name: {name:?}, number of workers: {number_of_workers:?}, \
+            is queryable: {is_queryable:?}"
+        );
+        if stacks.is_empty() {
+            fimo_std::emit_error!(*self.context, "stacks is empty");
+            return Err(Error::EINVAL);
+        }
+        if default_stack_index >= stacks.len() {
+            fimo_std::emit_error!(*self.context, "default stack index is out of bounds");
+            return Err(Error::EINVAL);
+        }
+
+        // Determine the stacks to utilize
+        let default_stack_size_config = TasksModuleToken::with_current(|module| {
+            module.parameters().default_stack_size().read(&**module)
+        })? as usize;
+        let min_stack_size = ::context::stack::Stack::min_size();
+        let max_stack_size = ::context::stack::Stack::max_size();
+
+        let mut default_stack_size = 0;
+        let mut stacks_: Vec<StackDescriptor> = vec![];
+        for (i, stack) in stacks.iter().enumerate() {
+            let bindings::FiTasksWorkerGroupConfigStack {
+                next,
+                mut size,
+                starting_residency,
+                residency_target,
+                max_residency,
+                enable_stack_overflow_protection,
+            } = *stack;
+            if !next.is_null() {
+                fimo_std::emit_error!(*self.context, "`stack.next` is not null");
+                return Err(Error::EINVAL);
+            }
+            if size == 0 {
+                size = default_stack_size_config;
+            }
+            if size < min_stack_size {
+                fimo_std::emit_warn!(
+                    *self.context,
+                    "increasing `stack.size` of {size} to the \
+                    minimum size of {min_stack_size} for the current system"
+                );
+                size = min_stack_size;
+            }
+            if size > max_stack_size {
+                fimo_std::emit_warn!(
+                    *self.context,
+                    "reducing `stack.size` of {size} to the \
+                    maximum size of {max_stack_size} for the current system"
+                );
+                size = max_stack_size;
+            }
+            let target_allocated = if residency_target == 0 {
+                0
+            } else {
+                residency_target
+            };
+            let max_allocated = if max_residency == 0 {
+                usize::MAX
+            } else {
+                max_residency
+            };
+
+            if i == default_stack_index {
+                default_stack_size = size;
+            }
+
+            let stack = StackDescriptor {
+                min_size: size,
+                preallocated: starting_residency,
+                target_allocated,
+                max_allocated,
+                overflow_protection: enable_stack_overflow_protection,
+            };
+
+            match stacks_.binary_search_by_key(&size, |s| s.min_size) {
+                Ok(p) => {
+                    fimo_std::emit_warn!(
+                        *self.context,
+                        "overwritting stack description for the stack size of {size}"
+                    );
+                    stacks_[p] = stack;
+                }
+                Err(p) => stacks_.insert(p, stack),
+            }
+        }
+
+        // Query the number of workers that should be spawned.
+        let number_of_workers = {
+            let parallelism = std::thread::available_parallelism().unwrap();
+            let workers = number_of_workers.unwrap_or(parallelism);
+            if workers > parallelism {
+                fimo_std::emit_warn!(
+                    *self.context,
+                    "specified number of workers {workers} \
+                    exceeds the available number of logical cpu cores {parallelism}"
+                );
+            }
+            workers
+        };
+
         {
             fimo_std::emit_trace!(*self.context, "requesting a new worker group");
             let mut guard = self.worker_group_manager.write().unwrap();
             guard.spawn_new(
-                CString::new("").unwrap(),
-                false,
-                1,
-                512 * 1024,
-                vec![],
+                name.to_owned(),
+                is_queryable,
+                number_of_workers.get(),
+                default_stack_size,
+                stacks_,
                 self,
             )
         }
