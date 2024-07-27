@@ -1,37 +1,208 @@
+use std::sync::Arc;
+
 use crate::{
-    module_export::TasksModuleToken,
-    worker_group::{self, worker_thread::with_worker_context_lock, WorkerGroupFFI},
+    module_export::{TasksModule, TasksModuleToken},
+    worker_group::{
+        self, worker_thread::with_worker_context_lock, WorkerGroupFFI, WorkerGroupImpl,
+    },
     WorkerGroupQuery,
 };
 use fimo_std::{bindings as std_bindings, error::Error, ffi::FFITransferable, module::Module};
-use fimo_tasks::{bindings, WorkerGroupId};
+use fimo_tasks::{bindings, TaskId, WorkerGroupId, WorkerId};
 
 #[derive(Debug)]
-pub struct ContextImpl {}
+pub struct ContextImpl;
+
+impl ContextImpl {
+    pub fn is_worker_(&self, module: TasksModule<'_>) -> bool {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        with_worker_context_lock(|_| {}).is_ok()
+    }
+
+    pub fn task_id(&self, module: TasksModule<'_>) -> Result<TaskId, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        with_worker_context_lock(|worker| match &worker.current_task {
+            None => {
+                fimo_std::emit_error!(module.context(), "no task registered for current worker");
+                Err(Error::EUNKNOWN)
+            }
+            Some(t) => Ok(t.id()),
+        })
+        .flatten()
+    }
+
+    pub fn worker_id(&self, module: TasksModule<'_>) -> Result<WorkerId, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        with_worker_context_lock(|worker| worker.id)
+    }
+
+    pub fn worker_group(&self, module: TasksModule<'_>) -> Result<Arc<WorkerGroupImpl>, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        with_worker_context_lock(|worker| worker.group.clone())
+    }
+
+    pub fn worker_group_by_id(
+        &self,
+        module: TasksModule<'_>,
+        id: WorkerGroupId,
+    ) -> Result<Arc<WorkerGroupImpl>, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}, id: {id:?}");
+        let runtime = module.data().shared_runtime();
+        match runtime.worker_group_by_id(id) {
+            None => {
+                fimo_std::emit_error!(module.context(), "no group found");
+                Err(Error::EINVAL)
+            }
+            Some(group) => {
+                fimo_std::emit_trace!(module.context(), "found group: {group:?}");
+                Ok(group)
+            }
+        }
+    }
+
+    pub fn query_worker_groups(&self, module: TasksModule<'_>) -> Result<WorkerGroupQuery, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        let runtime = module.data().shared_runtime();
+        let groups = runtime.query_worker_groups();
+        fimo_std::emit_trace!(module.context(), "found groups: {groups:?}");
+        Ok(groups)
+    }
+
+    pub fn create_worker_group(
+        &self,
+        module: TasksModule<'_>,
+    ) -> Result<Arc<WorkerGroupImpl>, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        let runtime = module.data().shared_runtime();
+        runtime.spawn_worker_group()
+    }
+
+    pub fn yield_now(&self, module: TasksModule<'_>) -> Result<(), Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        fimo_std::emit_trace!(module.context(), "yielding task");
+        worker_group::worker_thread::yield_now()
+    }
+
+    /// # Safety
+    ///
+    /// Aborting a task does not unwind the stack, possibly resulting in broken invariants. This
+    /// function should only be called as a last resort.
+    pub unsafe fn abort(
+        &self,
+        module: TasksModule<'_>,
+        error: *mut std::ffi::c_void,
+    ) -> Result<std::convert::Infallible, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}, error: {error:?}");
+        fimo_std::emit_trace!(module.context(), "aborting task");
+
+        // Safety: The caller ensures that it is safe.
+        unsafe { worker_group::worker_thread::abort_task(error) }
+    }
+
+    pub fn sleep_for(
+        &self,
+        module: TasksModule<'_>,
+        duration: std::time::Duration,
+    ) -> Result<(), Error> {
+        let _span =
+            fimo_std::span_trace!(module.context(), "self: {self:?}, duration: {duration:?}");
+        let now = std::time::Instant::now();
+        let until = now + duration;
+        fimo_std::emit_trace!(module.context(), "sleeping task until {until:?}");
+        worker_group::worker_thread::wait_until(until)
+    }
+
+    pub fn tss_set(
+        &self,
+        module: TasksModule<'_>,
+        key: bindings::FiTasksTssKey,
+        value: *mut std::ffi::c_void,
+        dtor: bindings::FiTasksTssDtor,
+    ) -> Result<(), Error> {
+        let _span = fimo_std::span_trace!(
+            module.context(),
+            "self: {self:?}, key: {key:?}, value: {value:?}, dtor: {dtor:?}"
+        );
+        fimo_std::emit_trace!(module.context(), "writing tss");
+        with_worker_context_lock(|worker| {
+            let task = worker
+                .current_task
+                .as_mut()
+                .expect("no task is being executed by the worker");
+
+            // Safety: The task is owned by the current worker, since it is being executed by it.
+            unsafe { task.write_tss_value(key, value, dtor) };
+        })
+    }
+
+    pub fn tss_get(
+        &self,
+        module: TasksModule<'_>,
+        key: bindings::FiTasksTssKey,
+    ) -> Result<*mut std::ffi::c_void, Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}, key: {key:?}");
+        fimo_std::emit_trace!(module.context(), "reading tss");
+        with_worker_context_lock(|worker| {
+            let task = worker
+                .current_task
+                .as_mut()
+                .expect("no task is being executed by the worker");
+
+            // Safety: The task is being executed by the current worker, which therefore owns it.
+            if let Some(value) = unsafe { task.read_tss_value(key) } {
+                fimo_std::emit_trace!(module.context(), "found value {value:?}");
+                Ok(value)
+            } else {
+                fimo_std::emit_error!(module.context(), "tss key not set");
+                Err(Error::EINVAL)
+            }
+        })
+        .flatten()
+    }
+
+    pub fn tss_clear(
+        &self,
+        module: TasksModule<'_>,
+        key: bindings::FiTasksTssKey,
+    ) -> Result<(), Error> {
+        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}, key: {key:?}");
+        fimo_std::emit_trace!(module.context(), "clearing tss");
+        with_worker_context_lock(|worker| {
+            let task = worker
+                .current_task
+                .as_mut()
+                .expect("no task is being executed by the worker");
+
+            // Safety: The task is being executed by the current worker, which therefore owns it.
+            unsafe { task.clear_tss_value(key) }
+        })
+        .flatten()
+    }
+}
 
 impl ContextImpl {
     pub(crate) const fn ffi_context() -> fimo_tasks::Context {
         const VTABLE: &bindings::FiTasksVTable = &bindings::FiTasksVTable {
             v0: bindings::FiTasksVTableV0 {
-                is_worker: Some(ContextImpl::is_worker),
-                task_id: Some(ContextImpl::task_id),
-                worker_id: Some(ContextImpl::worker_id),
-                worker_group: Some(ContextImpl::worker_group),
-                worker_group_by_id: Some(ContextImpl::worker_group_by_id),
-                query_worker_groups: Some(ContextImpl::query_worker_groups),
-                release_worker_group_query: Some(ContextImpl::release_worker_group_query),
-                create_worker_group: Some(ContextImpl::create_worker_group),
-                yield_: Some(ContextImpl::yield_),
-                abort: Some(ContextImpl::abort),
-                sleep: Some(ContextImpl::sleep),
-                tss_set: Some(ContextImpl::tss_set),
-                tss_get: Some(ContextImpl::tss_get),
-                tss_clear: Some(ContextImpl::tss_clear),
-                park_conditionally: Some(ContextImpl::park_conditionally),
-                unpark_one: Some(ContextImpl::unpark_one),
-                unpark_all: Some(ContextImpl::unpark_all),
-                unpark_requeue: Some(ContextImpl::unpark_requeue),
-                unpark_filter: Some(ContextImpl::unpark_filter),
+                is_worker: Some(ContextImpl::is_worker_ffi),
+                task_id: Some(ContextImpl::task_id_ffi),
+                worker_id: Some(ContextImpl::worker_id_ffi),
+                worker_group: Some(ContextImpl::worker_group_ffi),
+                worker_group_by_id: Some(ContextImpl::worker_group_by_id_ffi),
+                query_worker_groups: Some(ContextImpl::query_worker_groups_ffi),
+                release_worker_group_query: Some(ContextImpl::release_worker_group_query_ffi),
+                create_worker_group: Some(ContextImpl::create_worker_group_ffi),
+                yield_: Some(ContextImpl::yield_ffi),
+                abort: Some(ContextImpl::abort_ffi),
+                sleep: Some(ContextImpl::sleep_ffi),
+                tss_set: Some(ContextImpl::tss_set_ffi),
+                tss_get: Some(ContextImpl::tss_get_ffi),
+                tss_clear: Some(ContextImpl::tss_clear_ffi),
+                park_conditionally: Some(ContextImpl::park_conditionally_ffi),
+                unpark_one: Some(ContextImpl::unpark_one_ffi),
+                unpark_all: Some(ContextImpl::unpark_all_ffi),
+                unpark_requeue: Some(ContextImpl::unpark_requeue_ffi),
+                unpark_filter: Some(ContextImpl::unpark_filter_ffi),
             },
         };
 
@@ -44,19 +215,14 @@ impl ContextImpl {
         unsafe { std::mem::transmute(context) }
     }
 
-    unsafe extern "C" fn is_worker(_this: *mut std::ffi::c_void) -> bool {
+    unsafe extern "C" fn is_worker_ffi(_this: *mut std::ffi::c_void) -> bool {
         fimo_std::panic::abort_on_panic(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
-            unsafe {
-                TasksModuleToken::with_current_unlocked(|module| {
-                    let _span = fimo_std::span_trace!(module.context(), "");
-                    with_worker_context_lock(|_| {}).is_ok()
-                })
-            }
+            unsafe { TasksModuleToken::with_current_unlocked(|module| Self.is_worker_(module)) }
         })
     }
 
-    unsafe extern "C" fn task_id(
+    unsafe extern "C" fn task_id_ffi(
         _this: *mut std::ffi::c_void,
         id: *mut usize,
     ) -> std_bindings::FimoError {
@@ -69,21 +235,8 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`id` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    with_worker_context_lock(|worker| match &worker.current_task {
-                        None => {
-                            fimo_std::emit_error!(
-                                module.context(),
-                                "no task registered for current worker"
-                            );
-                            Err(Error::EUNKNOWN)
-                        }
-                        Some(t) => {
-                            id.write(t.id().0);
-                            Ok(())
-                        }
-                    })
-                    .flatten()
+                    id.write(Self.task_id(module)?.0);
+                    Ok(())
                 })
             }
         })
@@ -91,7 +244,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn worker_id(
+    unsafe extern "C" fn worker_id_ffi(
         _this: *mut std::ffi::c_void,
         id: *mut usize,
     ) -> std_bindings::FimoError {
@@ -104,10 +257,8 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`id` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    with_worker_context_lock(|worker| {
-                        id.write(worker.id.0);
-                    })
+                    id.write(Self.worker_id(module)?.0);
+                    Ok(())
                 })
             }
         })
@@ -115,7 +266,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn worker_group(
+    unsafe extern "C" fn worker_group_ffi(
         _this: *mut std::ffi::c_void,
         group: *mut bindings::FiTasksWorkerGroup,
     ) -> std_bindings::FimoError {
@@ -128,12 +279,11 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`group` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    with_worker_context_lock(|worker| {
-                        let grp = worker.group.clone();
-                        let grp = WorkerGroupFFI(grp).into_ffi();
-                        group.write(grp);
-                    })
+                    group.write(
+                        Self.worker_group(module)
+                            .map(|g| WorkerGroupFFI(g).into_ffi())?,
+                    );
+                    Ok(())
                 })
             }
         })
@@ -141,7 +291,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn worker_group_by_id(
+    unsafe extern "C" fn worker_group_by_id_ffi(
         _this: *mut std::ffi::c_void,
         id: usize,
         group: *mut bindings::FiTasksWorkerGroup,
@@ -156,20 +306,11 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`group` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    let runtime = module.data().shared_runtime();
-                    match runtime.worker_group_by_id(WorkerGroupId(id)) {
-                        None => {
-                            fimo_std::emit_error!(module.context(), "no group found");
-                            Err(Error::EINVAL)
-                        }
-                        Some(grp) => {
-                            fimo_std::emit_trace!(module.context(), "found group: {grp:?}");
-                            let grp = WorkerGroupFFI(grp).into_ffi();
-                            group.write(grp);
-                            Ok(())
-                        }
-                    }
+                    group.write(
+                        Self.worker_group_by_id(module, WorkerGroupId(id))
+                            .map(|g| WorkerGroupFFI(g).into_ffi())?,
+                    );
+                    Ok(())
                 })
             }
         })
@@ -177,7 +318,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn query_worker_groups(
+    unsafe extern "C" fn query_worker_groups_ffi(
         _this: *mut std::ffi::c_void,
         query: *mut *mut bindings::FiTasksWorkerGroupQuery,
     ) -> std_bindings::FimoError {
@@ -190,13 +331,7 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`query` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    let runtime = module.data().shared_runtime();
-                    let groups = runtime.query_worker_groups();
-                    fimo_std::emit_trace!(module.context(), "found groups: {groups:?}");
-
-                    let groups = groups.into_ffi();
-                    query.write(groups);
+                    query.write(Self.query_worker_groups(module)?.into_ffi());
                     Ok(())
                 })
             }
@@ -205,7 +340,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn release_worker_group_query(
+    unsafe extern "C" fn release_worker_group_query_ffi(
         _this: *mut std::ffi::c_void,
         query: *mut bindings::FiTasksWorkerGroupQuery,
     ) -> std_bindings::FimoError {
@@ -230,7 +365,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn create_worker_group(
+    unsafe extern "C" fn create_worker_group_ffi(
         _this: *mut std::ffi::c_void,
         _cfg: bindings::FiTasksWorkerGroupConfig,
         group: *mut bindings::FiTasksWorkerGroup,
@@ -244,11 +379,10 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`query` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    let runtime = module.data().shared_runtime();
-                    let g = runtime.spawn_worker_group()?;
-                    let g = WorkerGroupFFI(g).into_ffi();
-                    group.write(g);
+                    group.write(
+                        Self.create_worker_group(module)
+                            .map(|g| WorkerGroupFFI(g).into_ffi())?,
+                    );
                     Ok(())
                 })
             }
@@ -257,14 +391,13 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn yield_(_this: *mut std::ffi::c_void) -> std_bindings::FimoError {
+    unsafe extern "C" fn yield_ffi(_this: *mut std::ffi::c_void) -> std_bindings::FimoError {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "");
-                    fimo_std::emit_trace!(module.context(), "yielding task");
-                    worker_group::worker_thread::yield_now()
+                    Self.yield_now(module)
                 })
             }
         })
@@ -272,7 +405,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn abort(
+    unsafe extern "C" fn abort_ffi(
         _this: *mut std::ffi::c_void,
         error: *mut std::ffi::c_void,
     ) -> std_bindings::FimoError {
@@ -281,8 +414,7 @@ impl ContextImpl {
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "error: {error:?}");
-                    fimo_std::emit_trace!(module.context(), "aborting task");
-                    worker_group::worker_thread::abort_task(error)
+                    Self.abort(module, error)
                 })
             }
         })
@@ -290,7 +422,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn sleep(
+    unsafe extern "C" fn sleep_ffi(
         _this: *mut std::ffi::c_void,
         duration: std_bindings::FimoDuration,
     ) -> std_bindings::FimoError {
@@ -299,11 +431,8 @@ impl ContextImpl {
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "duration: {duration:?}");
-                    let now = std::time::Instant::now();
                     let duration = std::time::Duration::new(duration.secs, duration.nanos);
-                    let until = now + duration;
-                    fimo_std::emit_trace!(module.context(), "sleeping task until {until:?}");
-                    worker_group::worker_thread::wait_until(until)
+                    Self.sleep_for(module, duration)
                 })
             }
         })
@@ -311,7 +440,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn tss_set(
+    unsafe extern "C" fn tss_set_ffi(
         _this: *mut std::ffi::c_void,
         key: bindings::FiTasksTssKey,
         value: *mut std::ffi::c_void,
@@ -325,14 +454,7 @@ impl ContextImpl {
                         module.context(),
                         "key: {key:?}, value: {value:?}, dtor: {dtor:?}"
                     );
-                    fimo_std::emit_trace!(module.context(), "writing tss");
-                    with_worker_context_lock(|worker| {
-                        let task = worker
-                            .current_task
-                            .as_mut()
-                            .expect("no task is being executed by the worker");
-                        task.write_tss_value(key, value, dtor);
-                    })
+                    Self.tss_set(module, key, value, dtor)
                 })
             }
         })
@@ -340,7 +462,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn tss_get(
+    unsafe extern "C" fn tss_get_ffi(
         _this: *mut std::ffi::c_void,
         key: bindings::FiTasksTssKey,
         value: *mut *mut std::ffi::c_void,
@@ -355,24 +477,8 @@ impl ContextImpl {
                         fimo_std::emit_error!(module.context(), "`value` is null");
                         return Err(Error::EINVAL);
                     }
-
-                    fimo_std::emit_trace!(module.context(), "reading tss");
-                    with_worker_context_lock(|worker| {
-                        let task = worker
-                            .current_task
-                            .as_mut()
-                            .expect("no task is being executed by the worker");
-
-                        if let Some(v) = task.read_tss_value(key) {
-                            fimo_std::emit_trace!(module.context(), "found value {v:?}");
-                            value.write(v);
-                            Ok(())
-                        } else {
-                            fimo_std::emit_error!(module.context(), "tss key not set");
-                            Err(Error::EINVAL)
-                        }
-                    })
-                    .flatten()
+                    value.write(Self.tss_get(module, key)?);
+                    Ok(())
                 })
             }
         })
@@ -380,7 +486,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn tss_clear(
+    unsafe extern "C" fn tss_clear_ffi(
         _this: *mut std::ffi::c_void,
         key: bindings::FiTasksTssKey,
     ) -> std_bindings::FimoError {
@@ -389,15 +495,7 @@ impl ContextImpl {
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "key: {key:?}");
-                    fimo_std::emit_trace!(module.context(), "clearing tss");
-                    with_worker_context_lock(|worker| {
-                        let task = worker
-                            .current_task
-                            .as_mut()
-                            .expect("no task is being executed by the worker");
-                        task.clear_tss_value(key)
-                    })
-                    .flatten()
+                    Self.tss_clear(module, key)
                 })
             }
         })
@@ -405,7 +503,7 @@ impl ContextImpl {
         .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 
-    unsafe extern "C" fn park_conditionally(
+    unsafe extern "C" fn park_conditionally_ffi(
         _this: *mut std::ffi::c_void,
         _key: *const std::ffi::c_void,
         _validate: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> bool>,
@@ -423,7 +521,7 @@ impl ContextImpl {
         Error::ENOSYS.into_error()
     }
 
-    unsafe extern "C" fn unpark_one(
+    unsafe extern "C" fn unpark_one_ffi(
         _this: *mut std::ffi::c_void,
         _key: *const std::ffi::c_void,
         _callback: Option<
@@ -438,7 +536,7 @@ impl ContextImpl {
         Error::ENOSYS.into_error()
     }
 
-    unsafe extern "C" fn unpark_all(
+    unsafe extern "C" fn unpark_all_ffi(
         _this: *mut std::ffi::c_void,
         _key: *const std::ffi::c_void,
         _unpark_token: *const std::ffi::c_void,
@@ -447,7 +545,7 @@ impl ContextImpl {
         Error::ENOSYS.into_error()
     }
 
-    unsafe extern "C" fn unpark_requeue(
+    unsafe extern "C" fn unpark_requeue_ffi(
         _this: *mut std::ffi::c_void,
         _key_from: *const std::ffi::c_void,
         _key_to: *const std::ffi::c_void,
@@ -468,7 +566,7 @@ impl ContextImpl {
         Error::ENOSYS.into_error()
     }
 
-    unsafe extern "C" fn unpark_filter(
+    unsafe extern "C" fn unpark_filter_ffi(
         _this: *mut std::ffi::c_void,
         _key: *const std::ffi::c_void,
         _filter: Option<
