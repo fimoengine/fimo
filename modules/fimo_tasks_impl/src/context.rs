@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ffi::CStr, num::NonZeroUsize, sync::Arc};
 
 use crate::{
     module_export::{TasksModule, TasksModuleToken},
@@ -71,10 +71,25 @@ impl ContextImpl {
     pub fn create_worker_group(
         &self,
         module: TasksModule<'_>,
+        name: &CStr,
+        stacks: &[bindings::FiTasksWorkerGroupConfigStack],
+        default_stack_index: usize,
+        number_of_workers: Option<NonZeroUsize>,
+        is_queryable: bool,
     ) -> Result<Arc<WorkerGroupImpl>, Error> {
-        let _span = fimo_std::span_trace!(module.context(), "self: {self:?}");
+        let _span = fimo_std::span_trace!(
+            module.context(),
+            "self: {self:?}, name: {name:?}, number of workers: {number_of_workers:?}, \
+            is queryable: {is_queryable:?}"
+        );
         let runtime = module.data().shared_runtime();
-        runtime.spawn_worker_group()
+        runtime.spawn_worker_group(
+            name,
+            stacks,
+            default_stack_index,
+            number_of_workers,
+            is_queryable,
+        )
     }
 
     pub fn yield_now(&self, module: TasksModule<'_>) -> Result<(), Error> {
@@ -367,7 +382,7 @@ impl ContextImpl {
 
     unsafe extern "C" fn create_worker_group_ffi(
         _this: *mut std::ffi::c_void,
-        _cfg: bindings::FiTasksWorkerGroupConfig,
+        cfg: bindings::FiTasksWorkerGroupConfig,
         group: *mut bindings::FiTasksWorkerGroup,
     ) -> std_bindings::FimoError {
         fimo_std::panic::catch_unwind(|| {
@@ -375,13 +390,58 @@ impl ContextImpl {
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "group: {group:?}");
+                    if !cfg.next.is_null() {
+                        fimo_std::emit_error!(module.context(), "`cfg.next` is not null");
+                        return Err(Error::EINVAL);
+                    }
+
+                    let name = {
+                        if cfg.name.is_null() {
+                            fimo_std::emit_error!(module.context(), "`cfg.name` is null");
+                            return Err(Error::EINVAL);
+                        }
+                        CStr::from_ptr(cfg.name)
+                    };
+                    let stacks = {
+                        if cfg.stacks.is_null() || cfg.num_stacks == 0 {
+                            fimo_std::emit_error!(module.context(), "`cfg` specifies no stacks");
+                            return Err(Error::EINVAL);
+                        }
+                        std::slice::from_raw_parts(cfg.stacks, cfg.num_stacks)
+                    };
+                    let default_stack_index = {
+                        if cfg.default_stack_index >= stacks.len() {
+                            fimo_std::emit_error!(
+                                module.context(),
+                                "`cfg.default_stack_index` is out of bounds"
+                            );
+                            return Err(Error::EINVAL);
+                        }
+                        cfg.default_stack_index
+                    };
+                    let number_of_workers = NonZeroUsize::new(cfg.number_of_workers);
+                    let is_queryable = cfg.is_queryable;
+
+                    if cfg.name.is_null() {
+                        fimo_std::emit_error!(module.context(), "`cfg.next` is not null");
+                        return Err(Error::EINVAL);
+                    }
+
                     if group.is_null() {
                         fimo_std::emit_error!(module.context(), "`query` is null");
                         return Err(Error::EINVAL);
                     }
+
                     group.write(
-                        Self.create_worker_group(module)
-                            .map(|g| WorkerGroupFFI(g).into_ffi())?,
+                        Self.create_worker_group(
+                            module,
+                            name,
+                            stacks,
+                            default_stack_index,
+                            number_of_workers,
+                            is_queryable,
+                        )
+                        .map(|g| WorkerGroupFFI(g).into_ffi())?,
                     );
                     Ok(())
                 })
