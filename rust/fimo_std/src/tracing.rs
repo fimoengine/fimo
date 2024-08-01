@@ -603,8 +603,9 @@ impl CallStack {
         // Safety: FFI call is safe.
         let stack = unsafe {
             to_result_indirect_in_place(|error, stack| {
-                *error = bindings::fimo_tracing_call_stack_create(
+                *error = bindings::fimo_tracing_call_stack_switch(
                     this.0.share_to_ffi(),
+                    this.1,
                     stack.as_mut_ptr(),
                 );
             })
