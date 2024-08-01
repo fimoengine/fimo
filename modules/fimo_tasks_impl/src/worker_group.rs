@@ -1,4 +1,5 @@
 use crate::{worker_group::worker_thread::with_worker_context_lock, RuntimeShared};
+use command_buffer::{CommandBufferHandleFFI, CommandBufferHandleImpl};
 use event_loop::{stack_manager::StackDescriptor, EventLoopHandle};
 use fimo_std::{
     error::Error,
@@ -105,6 +106,17 @@ impl WorkerGroupImpl {
             self.runtime.shutdown_worker_group(self.id());
         }
         Ok(())
+    }
+
+    /// # Safety
+    ///
+    /// The buffer must be dereferencable.
+    pub unsafe fn enqueue_buffer(
+        self: Arc<Self>,
+        buffer: *mut bindings::FiTasksCommandBuffer,
+    ) -> Result<Arc<CommandBufferHandleImpl>, Error> {
+        // Safety: Ensured by the caller.
+        unsafe { CommandBufferHandleImpl::new(self, buffer) }
     }
 
     pub fn wait_for_close(&self) {
@@ -234,12 +246,37 @@ impl WorkerGroupFFI {
     }
 
     unsafe extern "C" fn enqueue_buffer(
-        _this: *mut std::ffi::c_void,
-        _buffer: *const bindings::FiTasksCommandBuffer,
-        _detached: bool,
-        _handle: *mut bindings::FiTasksCommandBufferHandle,
+        this: *mut std::ffi::c_void,
+        buffer: *mut bindings::FiTasksCommandBuffer,
+        detached: bool,
+        handle: *mut bindings::FiTasksCommandBufferHandle,
     ) -> fimo_std::bindings::FimoError {
-        Error::ENOSYS.into_error()
+        fimo_std::panic::catch_unwind(|| {
+            if this.is_null() || buffer.is_null() || (handle.is_null() != detached) {
+                return Err(Error::EINVAL);
+            }
+
+            // Safety: Must be ensured by the caller.
+            let this = unsafe { Self::borrow_from_ffi(this) };
+            // Safety: Is always in an Arc.
+            let this = unsafe {
+                Arc::increment_strong_count(this);
+                Arc::from_raw(this)
+            };
+
+            // Safety: We assume that it is sound, as we can't realy check it.
+            let handle_impl = unsafe { this.enqueue_buffer(buffer)? };
+            if detached {
+                // Safety: Again, we assume that the pointer can be dereferenced.
+                unsafe { handle.write(CommandBufferHandleFFI(handle_impl).into_ffi()) };
+            } else {
+                drop(handle_impl);
+            }
+
+            Ok(())
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 }
 

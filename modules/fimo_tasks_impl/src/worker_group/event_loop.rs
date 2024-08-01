@@ -177,6 +177,21 @@ impl EventLoopHandle {
         Ok(())
     }
 
+    pub fn enqueue_command_buffer(&self) -> Result<Arc<CommandBufferHandleImpl>, Error> {
+        // Acquire the lock, such that it can not be closed in the meantime.
+        let status = self
+            .connection_status
+            .read()
+            .map_err(|_e| Error::ECANCELED)?;
+
+        // If the channel is already closed we can return.
+        if *status == ConnectionStatus::Closed {
+            return Err(Error::ECANCELED);
+        }
+
+        todo!()
+    }
+
     pub fn wait_for_close(&self) {
         let handle = {
             let mut guard = self.handle.lock().expect("could not lock thread handle");
