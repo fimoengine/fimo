@@ -1500,14 +1500,6 @@ static void module_handle_release_(struct ModuleHandle_ *element) {
     if (!can_destroy) {
         return;
     }
-
-    if (element->handle) {
-#if _WIN32
-        FreeLibrary(element->handle);
-#else
-        dlclose(element->handle);
-#endif
-    }
     fimo_free((char *)element->module_path);
     fimo_free(element);
 }
@@ -3403,8 +3395,9 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
             goto release_exports;
         }
         FIMO_DEBUG_ASSERT(info_symbol)
+        const FimoModuleRawSymbol *raw_symbol = &info_symbol->symbol;
         error = fimo_array_list_push(&exports, sizeof(const FimoModuleRawSymbol *),
-                                     _Alignof(const FimoModuleRawSymbol *), (void *)&info_symbol->symbol, NULL);
+                                     _Alignof(const FimoModuleRawSymbol *), &raw_symbol, NULL);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the export table")
             goto release_exports;
@@ -3429,8 +3422,9 @@ static FimoError fi_module_new_from_export(FimoInternalModuleContext *ctx, FimoM
             goto release_exports;
         }
         FIMO_DEBUG_ASSERT(info_symbol)
+        const FimoModuleRawSymbol *raw_symbol = &info_symbol->symbol;
         error = fimo_array_list_push(&exports, sizeof(const FimoModuleRawSymbol *),
-                                     _Alignof(const FimoModuleRawSymbol *), (void *)&info_symbol->symbol, NULL);
+                                     _Alignof(const FimoModuleRawSymbol *), &raw_symbol, NULL);
         if (FIMO_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the export table")
             goto release_exports;
