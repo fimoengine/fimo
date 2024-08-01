@@ -242,12 +242,12 @@ impl CommandBufferImpl {
             id: CommandBufferId(0),
             status: AtomicBool::new(false),
             completed: AtomicBool::new(false),
-            group: Arc::downgrade(&group),
+            group: Arc::downgrade(group),
         });
         let id = CommandBufferId(Arc::as_ptr(&handle).addr());
         Arc::get_mut(&mut handle).unwrap().id = id;
 
-        let this = Self {
+        Self {
             num_enqueued_tasks: 0,
             handle,
             buffer: CommandBufferIterator::new(RawCommandBuffer(buffer)),
@@ -256,9 +256,7 @@ impl CommandBufferImpl {
             blocked_tasks: Default::default(),
             worker: None,
             stack_size: None,
-        };
-
-        this
+        }
     }
 
     pub fn handle(&self) -> &Arc<CommandBufferHandleImpl> {
