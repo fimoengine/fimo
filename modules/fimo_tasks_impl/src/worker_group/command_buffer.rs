@@ -2,8 +2,15 @@ use crate::{
     module_export::TasksModule,
     worker_group::{task::RawTask, worker_thread::wait_on_command_buffer, WorkerGroupImpl},
 };
-use fimo_std::{error::Error, module::Module};
-use fimo_tasks::{bindings::FiTasksCommandBufferEntryType, TaskId, WorkerId};
+use fimo_std::{
+    error::Error,
+    ffi::{FFISharable, FFITransferable},
+    module::Module,
+};
+use fimo_tasks::{
+    bindings::{self, FiTasksCommandBufferEntryType},
+    TaskId, WorkerId,
+};
 use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
@@ -27,6 +34,25 @@ pub struct CommandBufferHandleImpl {
 }
 
 impl CommandBufferHandleImpl {
+    /// # Safety
+    ///
+    /// - `buffer` must be dereferencable.
+    pub unsafe fn new(
+        group: Arc<WorkerGroupImpl>,
+        buffer: *mut fimo_tasks::bindings::FiTasksCommandBuffer,
+    ) -> Result<Arc<Self>, Error> {
+        assert!(!buffer.is_null());
+        let buffer = RawCommandBuffer(buffer);
+        let guard = group
+            .event_loop
+            .read()
+            .expect("failed to lock event loop handle");
+        match guard.as_ref() {
+            Some(handle) => handle.enqueue_command_buffer(),
+            None => Err(Error::EINVAL),
+        }
+    }
+
     pub fn id(&self) -> CommandBufferId {
         self.id
     }
@@ -80,7 +106,70 @@ impl Debug for CommandBufferHandleImpl {
 }
 
 #[derive(Debug)]
-pub struct CommandBufferImpl {
+#[repr(transparent)]
+pub struct CommandBufferHandleFFI(pub Arc<CommandBufferHandleImpl>);
+
+impl CommandBufferHandleFFI {
+    const VTABLE: &bindings::FiTasksCommandBufferHandleVTable =
+        &bindings::FiTasksCommandBufferHandleVTable {
+            v0: bindings::FiTasksCommandBufferHandleVTableV0 {
+                acquire: Some(Self::acquire),
+                release: Some(Self::release),
+                worker_group: None,
+                wait_on: None,
+            },
+        };
+
+    unsafe extern "C" fn acquire(this: *mut std::ffi::c_void) {
+        fimo_std::panic::abort_on_panic(|| {
+            // Safety: Must be ensured by the caller.
+            let this = unsafe { Self::borrow_from_ffi(this) };
+
+            // Safety: Is always in an Arc.
+            unsafe { Arc::increment_strong_count(this) };
+        });
+    }
+
+    unsafe extern "C" fn release(this: *mut std::ffi::c_void) {
+        fimo_std::panic::abort_on_panic(|| {
+            // Safety: Must be ensured by the caller.
+            let this = unsafe { Self::borrow_from_ffi(this) };
+
+            // Safety: Is always in an Arc.
+            unsafe { Arc::decrement_strong_count(this) };
+        });
+    }
+}
+
+impl FFISharable<*mut std::ffi::c_void> for CommandBufferHandleFFI {
+    type BorrowedView<'a> = &'a CommandBufferHandleImpl;
+
+    fn share_to_ffi(&self) -> *mut std::ffi::c_void {
+        Arc::as_ptr(&self.0).cast_mut().cast()
+    }
+
+    unsafe fn borrow_from_ffi<'a>(ffi: *mut std::ffi::c_void) -> Self::BorrowedView<'a> {
+        // Safety: Is sound if `ffi` is the result of `Self::share_to_ffi`.
+        unsafe { &*ffi.cast_const().cast() }
+    }
+}
+
+impl FFITransferable<bindings::FiTasksCommandBufferHandle> for CommandBufferHandleFFI {
+    fn into_ffi(self) -> bindings::FiTasksCommandBufferHandle {
+        bindings::FiTasksCommandBufferHandle {
+            data: Arc::into_raw(self.0).cast_mut().cast(),
+            vtable: Self::VTABLE,
+        }
+    }
+
+    unsafe fn from_ffi(ffi: bindings::FiTasksCommandBufferHandle) -> Self {
+        // Safety: Is always in an `Arc`.
+        unsafe { Self(Arc::from_raw(ffi.data.cast_const().cast())) }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct CommandBufferImpl {
     num_enqueued_tasks: usize,
     handle: Arc<CommandBufferHandleImpl>,
     buffer: CommandBufferIterator,
