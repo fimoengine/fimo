@@ -44,24 +44,28 @@ impl WorkerBootstrapper {
         let (sx, rx) = crossbeam_channel::unbounded();
         let (latch_sx, latch_rx) = crossbeam_channel::bounded(1);
 
-        let join_handle = std::thread::spawn({
-            let sx = sx.clone();
-            move || {
-                // Wait for the sync object.
-                let sync = latch_rx.recv().expect("no signal received");
+        let name = format!("{:?} Worker: {id:?}", group.name);
+        let join_handle = std::thread::Builder::new()
+            .name(name)
+            .spawn({
+                let sx = sx.clone();
+                move || {
+                    // Wait for the sync object.
+                    let sync = latch_rx.recv().expect("no signal received");
 
-                let worker = WorkerThread {
-                    id,
-                    sync,
-                    group,
-                    event_loop_sender,
-                    bound_tasks_sender: sx,
-                    bound_tasks: rx,
-                    local_queue: worker,
-                };
-                worker_event_loop(worker);
-            }
-        });
+                    let worker = WorkerThread {
+                        id,
+                        sync,
+                        group,
+                        event_loop_sender,
+                        bound_tasks_sender: sx,
+                        bound_tasks: rx,
+                        local_queue: worker,
+                    };
+                    worker_event_loop(worker);
+                }
+            })
+            .expect("could not create worker thread");
 
         Self {
             id,
@@ -261,7 +265,9 @@ impl WorkerSyncInfo {
         if let Some(x) = task {
             Some(x)
         } else {
-            std::thread::park();
+            if !self.can_join() {
+                std::thread::park();
+            }
             None
         }
     }
@@ -417,7 +423,9 @@ fn worker_event_loop(data: WorkerThread) {
             local_queue,
         } = data;
 
-        TasksModuleToken::with_current_unlocked(move |module| {
+        TasksModuleToken::with_current(move |module| {
+            let module = **module;
+
             // Initialize the tracing for the worker thread.
             use fimo_std::module::Module;
             let _tracing = ThreadAccess::new(&module.context());
@@ -458,6 +466,8 @@ fn worker_event_loop(data: WorkerThread) {
                 let call_stack = call_stack
                     .switch()
                     .expect("could not switch to task call stack");
+                tracing::CallStack::resume_current(&module.context())
+                    .expect("could not resume task call stack");
 
                 // Set the task as active.
                 with_worker_context_lock(|worker| worker.current_task = Some(task)).unwrap();

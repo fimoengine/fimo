@@ -252,7 +252,7 @@ impl WorkerGroupFFI {
         handle: *mut bindings::FiTasksCommandBufferHandle,
     ) -> fimo_std::bindings::FimoError {
         fimo_std::panic::catch_unwind(|| {
-            if this.is_null() || buffer.is_null() || (handle.is_null() != detached) {
+            if this.is_null() || buffer.is_null() || (handle.is_null() && !detached) {
                 return Err(Error::EINVAL);
             }
 
@@ -266,13 +266,18 @@ impl WorkerGroupFFI {
 
             // Safety: We assume that it is sound, as we can't realy check it.
             let handle_impl = unsafe { this.enqueue_buffer(buffer)? };
-            if detached {
-                // Safety: Again, we assume that the pointer can be dereferenced.
-                unsafe { handle.write(CommandBufferHandleFFI(handle_impl).into_ffi()) };
+            let handle_ffi = if !detached {
+                CommandBufferHandleFFI(handle_impl).into_ffi()
             } else {
                 drop(handle_impl);
-            }
+                bindings::FiTasksCommandBufferHandle {
+                    data: std::ptr::null_mut(),
+                    vtable: std::ptr::null(),
+                }
+            };
 
+            // Safety: Again, we assume that the pointer can be dereferenced.
+            unsafe { handle.write(handle_ffi) };
             Ok(())
         })
         .flatten()

@@ -30,6 +30,7 @@ impl TimeOut {
 #[derive(Debug)]
 pub(super) enum TimeOutHandle {
     Internal(TaskId),
+    #[allow(dead_code)]
     External(Arc<ExternalTimeOutHandle>),
 }
 
@@ -49,6 +50,7 @@ pub struct ExternalTimeOutHandle {
 }
 
 impl ExternalTimeOutHandle {
+    #[allow(dead_code)]
     fn new(task: TaskId) -> Arc<Self> {
         Arc::new(Self {
             task,

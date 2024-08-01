@@ -1,8 +1,11 @@
 use crate::{
     module_export::TasksModule,
-    worker_group::{task::RawTask, worker_thread::wait_on_command_buffer, WorkerGroupImpl},
+    worker_group::{
+        task::RawTask, worker_thread::wait_on_command_buffer, WorkerGroupFFI, WorkerGroupImpl,
+    },
 };
 use fimo_std::{
+    bindings as std_bindings,
     error::Error,
     ffi::{FFISharable, FFITransferable},
     module::Module,
@@ -39,16 +42,17 @@ impl CommandBufferHandleImpl {
     /// - `buffer` must be dereferencable.
     pub unsafe fn new(
         group: Arc<WorkerGroupImpl>,
-        buffer: *mut fimo_tasks::bindings::FiTasksCommandBuffer,
+        buffer: *mut bindings::FiTasksCommandBuffer,
     ) -> Result<Arc<Self>, Error> {
-        assert!(!buffer.is_null());
-        let buffer = RawCommandBuffer(buffer);
+        // Safety: Ensured by the caller.
+        let buffer = unsafe { CommandBufferImpl::new(&group, buffer) };
+
         let guard = group
             .event_loop
             .read()
             .expect("failed to lock event loop handle");
         match guard.as_ref() {
-            Some(handle) => handle.enqueue_command_buffer(),
+            Some(handle) => handle.enqueue_command_buffer(buffer),
             None => Err(Error::EINVAL),
         }
     }
@@ -115,8 +119,8 @@ impl CommandBufferHandleFFI {
             v0: bindings::FiTasksCommandBufferHandleVTableV0 {
                 acquire: Some(Self::acquire),
                 release: Some(Self::release),
-                worker_group: None,
-                wait_on: None,
+                worker_group: Some(Self::worker_group),
+                wait_on: Some(Self::wait_on),
             },
         };
 
@@ -138,6 +142,52 @@ impl CommandBufferHandleFFI {
             // Safety: Is always in an Arc.
             unsafe { Arc::decrement_strong_count(this) };
         });
+    }
+
+    unsafe extern "C" fn worker_group(
+        this: *mut std::ffi::c_void,
+        group: *mut bindings::FiTasksWorkerGroup,
+    ) -> std_bindings::FimoError {
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Must be ensured by the caller.
+            let this = unsafe { Self::borrow_from_ffi(this) };
+            if group.is_null() {
+                return Err(Error::EINVAL);
+            }
+
+            // Safety: We checked that the caller provided a valid pointer.
+            unsafe { group.write(WorkerGroupFFI(this.worker_group()?).into_ffi()) }
+            Ok(())
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+    }
+
+    unsafe extern "C" fn wait_on(
+        this: *mut std::ffi::c_void,
+        aborted: *mut bool,
+    ) -> std_bindings::FimoError {
+        fimo_std::panic::catch_unwind(|| {
+            // Safety: Is always in an `Arc`.
+            let handle = unsafe { Self(Arc::from_raw(this.cast_const().cast())).0 };
+            match handle.wait_on() {
+                Ok(x) => {
+                    if !aborted.is_null() {
+                        // Safety: We checked that the caller provided a valid pointer.
+                        unsafe { aborted.write(x) };
+                    }
+                    Ok(())
+                }
+                Err((e, handle)) => {
+                    // Don't decrease the reference count.
+                    #[allow(clippy::mem_forget)]
+                    std::mem::forget(handle);
+                    Err(e)
+                }
+            }
+        })
+        .flatten()
+        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
     }
 }
 
@@ -169,7 +219,7 @@ impl FFITransferable<bindings::FiTasksCommandBufferHandle> for CommandBufferHand
 }
 
 #[derive(Debug)]
-pub(super) struct CommandBufferImpl {
+pub struct CommandBufferImpl {
     num_enqueued_tasks: usize,
     handle: Arc<CommandBufferHandleImpl>,
     buffer: CommandBufferIterator,
@@ -181,6 +231,36 @@ pub(super) struct CommandBufferImpl {
 }
 
 impl CommandBufferImpl {
+    /// # Safety
+    ///
+    /// - `buffer` must be dereferencable.
+    unsafe fn new(
+        group: &Arc<WorkerGroupImpl>,
+        buffer: *mut bindings::FiTasksCommandBuffer,
+    ) -> Self {
+        let mut handle = Arc::new(CommandBufferHandleImpl {
+            id: CommandBufferId(0),
+            status: AtomicBool::new(false),
+            completed: AtomicBool::new(false),
+            group: Arc::downgrade(&group),
+        });
+        let id = CommandBufferId(Arc::as_ptr(&handle).addr());
+        Arc::get_mut(&mut handle).unwrap().id = id;
+
+        let this = Self {
+            num_enqueued_tasks: 0,
+            handle,
+            buffer: CommandBufferIterator::new(RawCommandBuffer(buffer)),
+            wait_reason: WaitReason::None,
+            waiters: Default::default(),
+            blocked_tasks: Default::default(),
+            worker: None,
+            stack_size: None,
+        };
+
+        this
+    }
+
     pub fn handle(&self) -> &Arc<CommandBufferHandleImpl> {
         &self.handle
     }
@@ -365,7 +445,11 @@ impl CommandBufferImpl {
         }
     }
 
-    fn abort(&mut self, module: &TasksModule<'_>, cause: usize) -> CommandBufferEventLoopCommand {
+    pub fn abort(
+        &mut self,
+        module: &TasksModule<'_>,
+        cause: usize,
+    ) -> CommandBufferEventLoopCommand {
         // Do nothing if it is already complete.
         if self.handle.completion_status().is_some() {
             return match self.num_enqueued_tasks {
@@ -585,15 +669,15 @@ enum Command {
 }
 
 #[derive(Debug)]
-struct RawCommandBuffer(*mut fimo_tasks::bindings::FiTasksCommandBuffer);
+struct RawCommandBuffer(*mut bindings::FiTasksCommandBuffer);
 
 impl RawCommandBuffer {
-    fn buffer(&self) -> &fimo_tasks::bindings::FiTasksCommandBuffer {
+    fn buffer(&self) -> &bindings::FiTasksCommandBuffer {
         // Safety: A `RawCommandBuffer` works like a `Box`. We own the buffer.
         unsafe { &*self.0 }
     }
 
-    fn buffer_mut(&mut self) -> &mut fimo_tasks::bindings::FiTasksCommandBuffer {
+    fn buffer_mut(&mut self) -> &mut bindings::FiTasksCommandBuffer {
         // Safety: A `RawCommandBuffer` works like a `Box`. We own the buffer.
         unsafe { &mut *self.0 }
     }

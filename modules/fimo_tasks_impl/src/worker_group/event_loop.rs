@@ -32,10 +32,12 @@ pub mod time_out;
 #[derive(Debug)]
 pub enum OuterRequest {
     Close,
+    EnqueueCommandBuffer(CommandBufferImpl),
 }
 
 #[derive(Debug)]
 pub enum InnerRequest {
+    #[allow(dead_code)]
     UnblockTask(TaskId),
     UnblockCommandBuffer(Arc<CommandBufferHandleImpl>),
     WorkerRequest(WorkerRequest),
@@ -74,14 +76,17 @@ impl EventLoopHandle {
         let (inner_sx, inner_rx) = crossbeam_channel::unbounded();
 
         // Synchronize the initialization of the event loop.
+        let name = format!("{:?} Event Loop", group.name);
         let (error_sx, error_rx) = crossbeam_channel::bounded::<std::thread::Result<()>>(1);
-        let handle = std::thread::spawn({
-            let group = group.clone();
-            let inner_sx = inner_sx.clone();
-            move || {
-                // Safety: The module can not be unloaded until the event loop finished.
-                unsafe {
-                    TasksModuleToken::with_current_unlocked(|module| {
+        let handle = std::thread::Builder::new()
+            .name(name)
+            .spawn({
+                let group = group.clone();
+                let inner_sx = inner_sx.clone();
+                move || {
+                    TasksModuleToken::with_current(|module| {
+                        let module = **module;
+
                         // Initialize the tracing for the event loop thread.
                         use fimo_std::module::Module;
                         let _tracing = fimo_std::tracing::ThreadAccess::new(&module.context());
@@ -125,8 +130,8 @@ impl EventLoopHandle {
                         event_loop.enter_event_loop(&module);
                     });
                 }
-            }
-        });
+            })
+            .expect("could not spawn event loop");
 
         // Panic if we could not create the event loop.
         if let Err(e) = error_rx.recv().expect("could not receive status") {
@@ -177,7 +182,10 @@ impl EventLoopHandle {
         Ok(())
     }
 
-    pub fn enqueue_command_buffer(&self) -> Result<Arc<CommandBufferHandleImpl>, Error> {
+    pub(in super::super::worker_group) fn enqueue_command_buffer(
+        &self,
+        buffer: CommandBufferImpl,
+    ) -> Result<Arc<CommandBufferHandleImpl>, Error> {
         // Acquire the lock, such that it can not be closed in the meantime.
         let status = self
             .connection_status
@@ -189,7 +197,16 @@ impl EventLoopHandle {
             return Err(Error::ECANCELED);
         }
 
-        todo!()
+        // Send the message.
+        let handle = buffer.handle().clone();
+        self.outer_requests
+            .try_send(OuterRequest::EnqueueCommandBuffer(buffer))
+            .map_err(|e| match e {
+                TrySendError::Full(_) => Error::ECOMM,
+                TrySendError::Disconnected(_) => Error::ECONNABORTED,
+            })?;
+
+        Ok(handle)
     }
 
     pub fn wait_for_close(&self) {
@@ -246,6 +263,7 @@ enum BlockedTask {
         task: EnqueuedTask,
         buffer: Arc<CommandBufferHandleImpl>,
     },
+    #[allow(dead_code)]
     External {
         task: EnqueuedTask,
     },
@@ -256,6 +274,24 @@ impl EventLoop {
     fn on_close(&mut self, module: &TasksModule<'_>) {
         fimo_std::emit_trace!(module.context(), "closing queue");
         self.is_closed = true;
+    }
+
+    fn on_enqueue_command_buffer(&mut self, module: &TasksModule<'_>, buffer: CommandBufferImpl) {
+        fimo_std::emit_trace!(module.context(), "enqueueing command buffer: {buffer:?}");
+        let id = buffer.handle().id();
+        if self.handles.contains_key(&id) {
+            fimo_std::emit_error!(
+                module.context(),
+                "command buffer is already enqueued, buffer: {buffer:?}"
+            );
+            let mut buffer = buffer;
+            buffer.abort(module, usize::MAX);
+            return;
+        }
+
+        self.handles.insert(id, buffer);
+        self.worker_shared.notify_command_buffer_enqueued();
+        self.process_command_buffer_commands(module, id);
     }
 }
 
@@ -676,6 +712,9 @@ impl EventLoop {
     fn handle_outer_request(&mut self, module: &TasksModule<'_>, msg: OuterRequest) {
         match msg {
             OuterRequest::Close => self.on_close(module),
+            OuterRequest::EnqueueCommandBuffer(buffer) => {
+                self.on_enqueue_command_buffer(module, buffer);
+            }
         }
     }
 

@@ -364,11 +364,6 @@ impl ContextImpl {
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "query: {query:?}");
-                    if query.is_null() {
-                        fimo_std::emit_error!(module.context(), "`query` is null");
-                        return Err(Error::EINVAL);
-                    }
-
                     let query = WorkerGroupQuery::from_ffi(query);
                     fimo_std::emit_trace!(module.context(), "dropping query: {query:?}");
                     drop(query);
