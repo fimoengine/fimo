@@ -1,4 +1,4 @@
-//! Implementation of the fimo_tasks symbols.
+//! Implementation of the `fimo_tasks` symbols.
 //!
 //! The main and only task of this crate is the implementation and export of a fimo module which
 //! exposes the symbols declared by the [`fimo_tasks`] interface.
