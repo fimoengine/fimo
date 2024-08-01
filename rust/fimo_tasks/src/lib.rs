@@ -239,6 +239,7 @@ impl Context {
     /// use fimo_tasks::WorkerGroupBuilder;
     ///
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_queryable(true)
     ///     .build(&context)
     ///     .expect("could not create worker group");
     /// let group_id = group.id();
@@ -280,7 +281,6 @@ impl Context {
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
     ///     .build(&context)
     ///     .expect("could not create worker group");
-    /// let group_id = group.id();
     ///
     /// let mut buffer = CommandBuffer::new();
     /// let task = buffer.spawn_task(move |context| {
@@ -320,7 +320,6 @@ impl Context {
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
     ///     .build(&context)
     ///     .expect("could not create worker group");
-    /// let group_id = group.id();
     ///
     /// let mut buffer = CommandBuffer::new();
     /// let task = buffer.spawn_task(move |context| {
@@ -403,32 +402,36 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
         ))
         .build()
         .expect("could not build fimo context");
-    let _access = ThreadAccess::new(&context).expect("could not register thread");
+    {
+        let _access = ThreadAccess::new(&context).expect("could not register thread");
 
-    LoadingSet::with_loading_set(&*context, |ctx, set| {
-        set.append_modules(ctx, Some(&tasks_dir), |_| {
-            fimo_std::module::LoadingFilterRequest::Load
-        })?;
-        Ok(LoadingSetRequest::Load)
-    })
-    .expect("could not load modules");
+        LoadingSet::with_loading_set(&*context, |ctx, set| {
+            set.append_modules(ctx, Some(&tasks_dir), |_| {
+                fimo_std::module::LoadingFilterRequest::Load
+            })?;
+            Ok(LoadingSetRequest::Load)
+        })
+        .expect("could not load modules");
 
-    let module =
-        fimo_std::module::PseudoModule::new(&*context).expect("could not create pseudo module");
-    let tasks_module = fimo_std::module::ModuleInfo::find_by_name(&*context, c"fimo_tasks_impl")
-        .expect("could not find the tasks module");
+        let module =
+            fimo_std::module::PseudoModule::new(&*context).expect("could not create pseudo module");
+        let tasks_module =
+            fimo_std::module::ModuleInfo::find_by_name(&*context, c"fimo_tasks_impl")
+                .expect("could not find the tasks module");
 
-    module
-        .include_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
-        .expect("could not include the tasks namespace");
-    module
-        .acquire_dependency(&tasks_module)
-        .expect("could not acquire the dependency to the tasks module");
+        module
+            .include_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
+            .expect("could not include the tasks namespace");
+        module
+            .acquire_dependency(&tasks_module)
+            .expect("could not acquire the dependency to the tasks module");
 
-    let context = module
-        .load_symbol::<symbols::fimo_tasks::Context>()
-        .expect("could not load context symbol");
-    let guard = context.lock();
+        let context = module
+            .load_symbol::<symbols::fimo_tasks::Context>()
+            .expect("could not load context symbol");
+        let guard = context.lock();
 
-    f(&module, &guard);
+        f(&module, &guard);
+    }
+    drop(context);
 }

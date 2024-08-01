@@ -44,16 +44,13 @@ impl EnqueuedTask {
                     // Safety: The module can not be unloaded until all commands have been executed.
                     let context = unsafe {
                         TasksModuleToken::with_current_unlocked(|module| {
-                            // Resume the current call stack.
-                            CallStack::resume_current(&module.context())
-                                .expect("could not resume current call stack");
-
                             module.exports().context().share_to_ffi()
                         })
                     };
 
-                    // Extract the `RawTask`.
-                    let task = worker.current_task.as_ref().unwrap();
+                    // Bind the task to the current worker and extract the `RawTask`.
+                    let task = worker.current_task.as_mut().unwrap();
+                    task.bind_to_worker(worker.id);
                     (context, task.task)
                 })
                 .unwrap();
@@ -121,7 +118,7 @@ impl EnqueuedTask {
         self.worker.expect("task not bound to a worker")
     }
 
-    pub fn bind_to_worker(&mut self, worker: WorkerId) {
+    fn bind_to_worker(&mut self, worker: WorkerId) {
         if self.worker.is_some() {
             panic!("task already bound to a worker");
         }
@@ -217,6 +214,7 @@ impl EnqueuedTask {
         // Safety: The caller ensures that it is sound.
         unsafe {
             self.cleanup_local_data();
+            self.cleanup_resume_context();
             self.cleanup_call_stack();
 
             self.task.run_completion_handler();
@@ -233,6 +231,7 @@ impl EnqueuedTask {
         // Safety: The caller ensures that it is sound.
         unsafe {
             self.cleanup_local_data();
+            self.cleanup_resume_context();
             self.cleanup_call_stack();
 
             self.task.run_abortion_handler(error);
@@ -251,6 +250,13 @@ impl EnqueuedTask {
             .expect("local data already cleaned up");
         // Safety: The caller ensures that it is sound.
         unsafe { local_data.clear_all_values() };
+    }
+
+    fn cleanup_resume_context(&mut self) {
+        let _ = self
+            .resume_context
+            .take()
+            .expect("resume context already cleaned up");
     }
 
     fn cleanup_call_stack(&mut self) {

@@ -295,7 +295,7 @@ impl<'a> WorkerGroupBuilder<'a> {
     /// A value of `None` starts one worker for each logical core present in the system.
     ///
     /// Defaults to `None`.
-    pub fn with_worker_count(&mut self, count: Option<NonZeroUsize>) -> &mut Self {
+    pub fn with_worker_count(mut self, count: Option<NonZeroUsize>) -> Self {
         self.worker_count = count;
         self
     }
@@ -304,7 +304,7 @@ impl<'a> WorkerGroupBuilder<'a> {
     ///
     /// Specifying this does not stop others to acquire a reference to the worker group through its
     /// [`WorkerGroupId`].
-    pub fn with_queryable(&mut self, queryable: bool) -> &mut Self {
+    pub fn with_queryable(mut self, queryable: bool) -> Self {
         self.is_queryable = queryable;
         self
     }

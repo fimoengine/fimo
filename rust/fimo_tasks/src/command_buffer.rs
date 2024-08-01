@@ -673,28 +673,30 @@ where
         {
             fn drop(&mut self) {
                 fimo_std::panic::abort_on_panic(|| {
-                    let entries = self.entries.take().unwrap();
-                    for entry in entries.iter() {
-                        match entry.type_ {
-                            bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK => {
-                                // Safety:
-                                unsafe {
-                                    let task = *entry.data.spawn_task;
-                                    if let Some(on_cleanup) = (*task).on_cleanup {
-                                        on_cleanup((*task).cleanup_data, task);
+                    // Drop the array if it has not been processed yet.
+                    if let Some(entries) = self.entries.take() {
+                        for entry in entries.iter() {
+                            match entry.type_ {
+                                bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_SPAWN_TASK => {
+                                    // Safety:
+                                    unsafe {
+                                        let task = *entry.data.spawn_task;
+                                        if let Some(on_cleanup) = (*task).on_cleanup {
+                                            on_cleanup((*task).cleanup_data, task);
+                                        }
                                     }
                                 }
-                            }
-                            bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER => {
-                                // Safety:
-                                unsafe {
-                                    let handle = *entry.data.wait_command_buffer;
-                                    if let Some(release)  = (*handle.vtable).v0.release {
-                                        release(handle.data);
+                                bindings::FiTasksCommandBufferEntryType::FI_TASKS_COMMAND_BUFFER_ENTRY_TYPE_WAIT_COMMAND_BUFFER => {
+                                    // Safety:
+                                    unsafe {
+                                        let handle = *entry.data.wait_command_buffer;
+                                        if let Some(release)  = (*handle.vtable).v0.release {
+                                            release(handle.data);
+                                        }
                                     }
                                 }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
                     drop(self.on_finish.take());

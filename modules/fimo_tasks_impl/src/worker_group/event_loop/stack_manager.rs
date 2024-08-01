@@ -149,6 +149,7 @@ impl StackAllocator {
             StackMemory::Unprotected(stack)
         };
 
+        self.num_acquired += 1;
         Ok(AcquiredStack::new(self.id, stack))
     }
 

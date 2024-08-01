@@ -501,15 +501,23 @@ impl FFITransferable<*mut bindings::FiTasksWorkerGroupQuery> for WorkerGroupQuer
         // Safety: We don't drop self.
         unsafe {
             let groups = std::ptr::read(&this.groups);
-            let raw = Box::into_raw(groups);
-            raw.cast()
+            if groups.is_empty() {
+                drop(groups);
+                std::ptr::null_mut()
+            } else {
+                let raw = Box::into_raw(groups);
+                raw.cast()
+            }
         }
     }
 
     unsafe fn from_ffi(ffi: *mut bindings::FiTasksWorkerGroupQuery) -> Self {
         // Safety: The query is an allocated box.
         unsafe {
-            assert!(!ffi.is_null());
+            if ffi.is_null() {
+                let groups = Box::new([]);
+                return Self { groups };
+            }
 
             // Count the length of the slice.
             let mut len = 0;
