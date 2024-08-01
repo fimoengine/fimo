@@ -1188,7 +1188,6 @@ extern "C" {
     #[no_mangle]
     #[doc(hidden)]
     #[allow(unused_attributes)]
-    #[cfg(target_vendor = "apple")]
     pub fn fimo_impl_module_export_iterator(
         inspector: Option<
             unsafe extern "C" fn(*const bindings::FimoModuleExport, *mut std::ffi::c_void) -> bool,
