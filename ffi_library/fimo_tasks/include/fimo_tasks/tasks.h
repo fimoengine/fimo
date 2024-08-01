@@ -272,7 +272,7 @@ typedef struct FiTasksWorkerGroupVTableV0 {
     FimoError (*request_close)(void *);
     FimoError (*workers)(void *, FimoUSize **, FimoUSize *);
     FimoError (*stack_sizes)(void *, FimoUSize **, FimoUSize *);
-    FimoError (*enqueue_buffer)(void *, const FiTasksCommandBuffer *, bool, FiTasksCommandBufferHandle *);
+    FimoError (*enqueue_buffer)(void *, FiTasksCommandBuffer *, bool, FiTasksCommandBufferHandle *);
 } FiTasksWorkerGroupVTableV0;
 
 struct FiTasksWorkerGroupVTable {
@@ -301,7 +301,7 @@ typedef struct FiTasksCommandBufferHandleVTable {
  */
 typedef struct FiTasksCommandBufferHandle {
     void *data;
-    FiTasksCommandBufferHandleVTable *vtable;
+    const FiTasksCommandBufferHandleVTable *vtable;
 } FiTasksCommandBufferHandle;
 
 /**
@@ -778,8 +778,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_stack_sizes(FiTasksWor
  */
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_enqueue_buffer(FiTasksWorkerGroup grp,
-                                                                         const FiTasksCommandBuffer *buffer,
-                                                                         bool detached,
+                                                                         FiTasksCommandBuffer *buffer, bool detached,
                                                                          FiTasksCommandBufferHandle *handle) {
     return grp.vtable->v0.enqueue_buffer(grp.data, buffer, detached, handle);
 }
