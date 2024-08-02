@@ -28,8 +28,8 @@ jobs:
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install ninja-build
+          apt-get update
+          apt-get install ninja-build
       - name: Install (macOS)
         if: runner.os == 'macOS'
         run: brew install ninja
