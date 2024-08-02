@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-14, windows-latest, [ self-hosted, linux ] ]
+        os: [ macos-14, windows-latest, [ self-hosted, Linux ] ]
         build-type: [ Debug, Release ]
         rust:
           - nightly
