@@ -42,12 +42,14 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
     /// assert_eq!(context.is_worker(), false);
     ///
     /// // Inside a worker group.
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     ///
@@ -79,12 +81,14 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
     /// assert!(context.task_id().is_err());
     ///
     /// // Inside a worker group.
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     ///
@@ -119,12 +123,14 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
     /// assert!(context.worker_id().is_err());
     ///
     /// // Inside a worker group.
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     ///
@@ -160,12 +166,14 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
     /// assert!(context.worker_group().is_err());
     ///
     /// // Inside a worker group.
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     /// let group_id = group.id();
@@ -203,8 +211,10 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::WorkerGroupBuilder;
+    /// use std::num::NonZeroUsize;
     ///
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     /// let group_id = group.id();
@@ -237,8 +247,10 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::WorkerGroupBuilder;
+    /// use std::num::NonZeroUsize;
     ///
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .with_queryable(true)
     ///     .build(&context)
     ///     .expect("could not create worker group");
@@ -273,12 +285,14 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
     /// assert!(context.yield_now().is_err());
     ///
     /// // Inside a worker group.
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     ///
@@ -309,7 +323,7 @@ impl Context {
     /// ```
     /// # fimo_tasks::__private_with_context(|_module, context| {
     /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
-    /// use std::time;
+    /// use std::{num::NonZeroUsize, time};
     ///
     /// let ten_millis = time::Duration::from_millis(10);
     ///
@@ -318,6 +332,7 @@ impl Context {
     ///
     /// // Inside a worker group.
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
+    ///     .with_worker_count(NonZeroUsize::new(1))
     ///     .build(&context)
     ///     .expect("could not create worker group");
     ///
