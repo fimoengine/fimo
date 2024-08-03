@@ -663,7 +663,7 @@ typedef struct FimoModule FimoModule;
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleDynamicSymbolConstructor)(const FimoModule *arg0, void **arg1);
+typedef FimoResult (*FimoModuleDynamicSymbolConstructor)(const FimoModule *arg0, void **arg1);
 
 /**
  * Destructor function for a dynamic symbol.
@@ -697,7 +697,7 @@ typedef struct FimoModuleLoadingSet FimoModuleLoadingSet;
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLoadingSet *arg1, void **arg2);
+typedef FimoResult (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLoadingSet *arg1, void **arg2);
 
 /**
  * Destructor function for a module.
@@ -756,8 +756,8 @@ typedef struct FimoModuleParamData FimoModuleParamData;
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleParamSet)(const FimoModule *arg0, const void *arg1, FimoModuleParamType arg2,
-                                        FimoModuleParamData *arg3);
+typedef FimoResult (*FimoModuleParamSet)(const FimoModule *arg0, const void *arg1, FimoModuleParamType arg2,
+                                         FimoModuleParamData *arg3);
 
 /**
  * Getter for a module parameter.
@@ -769,8 +769,8 @@ typedef FimoError (*FimoModuleParamSet)(const FimoModule *arg0, const void *arg1
  *
  * @return Status code.
  */
-typedef FimoError (*FimoModuleParamGet)(const FimoModule *arg0, void *arg1, FimoModuleParamType *arg2,
-                                        const FimoModuleParamData *arg3);
+typedef FimoResult (*FimoModuleParamGet)(const FimoModule *arg0, void *arg1, FimoModuleParamType *arg2,
+                                         const FimoModuleParamData *arg3);
 
 /**
  * Declaration of a module parameter.
@@ -1235,7 +1235,7 @@ typedef struct FimoModuleInfo {
      *
      * Not `NULL`.
      */
-    FimoError (*lock_unload)(const struct FimoModuleInfo *);
+    FimoResult (*lock_unload)(const struct FimoModuleInfo *);
     /**
      * Unlocks a previously locked module, allowing it to be unloaded.
      *
@@ -1253,7 +1253,7 @@ void fimo_impl_module_info_release(const FimoModuleInfo *info);
 FIMO_EXPORT
 bool fimo_impl_module_info_is_loaded(const FimoModuleInfo *info);
 FIMO_EXPORT
-FimoError fimo_impl_module_info_lock_unload(const FimoModuleInfo *info);
+FimoResult fimo_impl_module_info_lock_unload(const FimoModuleInfo *info);
 FIMO_EXPORT
 void fimo_impl_module_info_unlock_unload(const FimoModuleInfo *info);
 #else
@@ -1272,7 +1272,7 @@ static FIMO_INLINE_ALWAYS bool fimo_impl_module_info_is_loaded(const FimoModuleI
     return info->is_loaded(info);
 }
 
-static FIMO_INLINE_ALWAYS FimoError fimo_impl_module_info_lock_unload(const FimoModuleInfo *info) {
+static FIMO_INLINE_ALWAYS FimoResult fimo_impl_module_info_lock_unload(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     return info->lock_unload(info);
 }
@@ -1366,44 +1366,44 @@ typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, voi
  * Changing the VTable is a breaking change.
  */
 typedef struct FimoModuleVTableV0 {
-    FimoError (*pseudo_module_new)(void *, const FimoModule **);
-    FimoError (*pseudo_module_destroy)(void *, const FimoModule *, FimoContext *);
-    FimoError (*set_new)(void *, FimoModuleLoadingSet **);
-    FimoError (*set_has_module)(void *, FimoModuleLoadingSet *, const char *, bool *);
-    FimoError (*set_has_symbol)(void *, FimoModuleLoadingSet *, const char *, const char *, FimoVersion, bool *);
-    FimoError (*set_append_callback)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingSuccessCallback,
-                                     FimoModuleLoadingErrorCallback, void *);
-    FimoError (*set_append_freestanding_module)(void *, const FimoModule *, FimoModuleLoadingSet *,
-                                                const FimoModuleExport *);
-    FimoError (*set_append_modules)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingFilter, void *,
-                                    void (*)(bool (*)(const FimoModuleExport *, void *), void *), const void *);
-    FimoError (*set_dismiss)(void *, FimoModuleLoadingSet *);
-    FimoError (*set_finish)(void *, FimoModuleLoadingSet *);
-    FimoError (*find_by_name)(void *, const char *, const FimoModuleInfo **);
-    FimoError (*find_by_symbol)(void *, const char *, const char *, FimoVersion, const FimoModuleInfo **);
-    FimoError (*namespace_exists)(void *, const char *, bool *);
-    FimoError (*namespace_include)(void *, const FimoModule *, const char *);
-    FimoError (*namespace_exclude)(void *, const FimoModule *, const char *);
-    FimoError (*namespace_included)(void *, const FimoModule *, const char *, bool *, bool *);
-    FimoError (*acquire_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
-    FimoError (*relinquish_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
-    FimoError (*has_dependency)(void *, const FimoModule *, const FimoModuleInfo *, bool *, bool *);
-    FimoError (*load_symbol)(void *, const FimoModule *, const char *, const char *, FimoVersion,
-                             const FimoModuleRawSymbol **);
-    FimoError (*unload)(void *, const FimoModuleInfo *);
-    FimoError (*param_query)(void *, const char *, const char *, FimoModuleParamType *, FimoModuleParamAccess *,
-                             FimoModuleParamAccess *);
-    FimoError (*param_set_public)(void *, const void *, FimoModuleParamType, const char *, const char *);
-    FimoError (*param_get_public)(void *, void *, FimoModuleParamType *, const char *, const char *);
-    FimoError (*param_set_dependency)(void *, const FimoModule *, const void *, FimoModuleParamType, const char *,
-                                      const char *);
-    FimoError (*param_get_dependency)(void *, const FimoModule *, void *, FimoModuleParamType *, const char *,
-                                      const char *);
-    FimoError (*param_set_private)(void *, const FimoModule *, const void *, FimoModuleParamType, FimoModuleParam *);
-    FimoError (*param_get_private)(void *, const FimoModule *, void *, FimoModuleParamType *, const FimoModuleParam *);
-    FimoError (*param_set_inner)(void *, const FimoModule *, const void *, FimoModuleParamType, FimoModuleParamData *);
-    FimoError (*param_get_inner)(void *, const FimoModule *, void *, FimoModuleParamType *,
-                                 const FimoModuleParamData *);
+    FimoResult (*pseudo_module_new)(void *, const FimoModule **);
+    FimoResult (*pseudo_module_destroy)(void *, const FimoModule *, FimoContext *);
+    FimoResult (*set_new)(void *, FimoModuleLoadingSet **);
+    FimoResult (*set_has_module)(void *, FimoModuleLoadingSet *, const char *, bool *);
+    FimoResult (*set_has_symbol)(void *, FimoModuleLoadingSet *, const char *, const char *, FimoVersion, bool *);
+    FimoResult (*set_append_callback)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingSuccessCallback,
+                                      FimoModuleLoadingErrorCallback, void *);
+    FimoResult (*set_append_freestanding_module)(void *, const FimoModule *, FimoModuleLoadingSet *,
+                                                 const FimoModuleExport *);
+    FimoResult (*set_append_modules)(void *, FimoModuleLoadingSet *, const char *, FimoModuleLoadingFilter, void *,
+                                     void (*)(bool (*)(const FimoModuleExport *, void *), void *), const void *);
+    FimoResult (*set_dismiss)(void *, FimoModuleLoadingSet *);
+    FimoResult (*set_finish)(void *, FimoModuleLoadingSet *);
+    FimoResult (*find_by_name)(void *, const char *, const FimoModuleInfo **);
+    FimoResult (*find_by_symbol)(void *, const char *, const char *, FimoVersion, const FimoModuleInfo **);
+    FimoResult (*namespace_exists)(void *, const char *, bool *);
+    FimoResult (*namespace_include)(void *, const FimoModule *, const char *);
+    FimoResult (*namespace_exclude)(void *, const FimoModule *, const char *);
+    FimoResult (*namespace_included)(void *, const FimoModule *, const char *, bool *, bool *);
+    FimoResult (*acquire_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
+    FimoResult (*relinquish_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
+    FimoResult (*has_dependency)(void *, const FimoModule *, const FimoModuleInfo *, bool *, bool *);
+    FimoResult (*load_symbol)(void *, const FimoModule *, const char *, const char *, FimoVersion,
+                              const FimoModuleRawSymbol **);
+    FimoResult (*unload)(void *, const FimoModuleInfo *);
+    FimoResult (*param_query)(void *, const char *, const char *, FimoModuleParamType *, FimoModuleParamAccess *,
+                              FimoModuleParamAccess *);
+    FimoResult (*param_set_public)(void *, const void *, FimoModuleParamType, const char *, const char *);
+    FimoResult (*param_get_public)(void *, void *, FimoModuleParamType *, const char *, const char *);
+    FimoResult (*param_set_dependency)(void *, const FimoModule *, const void *, FimoModuleParamType, const char *,
+                                       const char *);
+    FimoResult (*param_get_dependency)(void *, const FimoModule *, void *, FimoModuleParamType *, const char *,
+                                       const char *);
+    FimoResult (*param_set_private)(void *, const FimoModule *, const void *, FimoModuleParamType, FimoModuleParam *);
+    FimoResult (*param_get_private)(void *, const FimoModule *, void *, FimoModuleParamType *, const FimoModuleParam *);
+    FimoResult (*param_set_inner)(void *, const FimoModule *, const void *, FimoModuleParamType, FimoModuleParamData *);
+    FimoResult (*param_get_inner)(void *, const FimoModule *, void *, FimoModuleParamType *,
+                                  const FimoModuleParamData *);
 } FimoModuleVTableV0;
 
 /**
@@ -1422,7 +1422,7 @@ typedef struct FimoModuleVTableV0 {
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_pseudo_module_new(FimoContext context, const FimoModule **module);
+FimoResult fimo_module_pseudo_module_new(FimoContext context, const FimoModule **module);
 
 /**
  * Destroys an existing pseudo module.
@@ -1437,7 +1437,7 @@ FimoError fimo_module_pseudo_module_new(FimoContext context, const FimoModule **
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContext *module_context);
+FimoResult fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContext *module_context);
 
 /**
  * Constructs a new empty module set.
@@ -1455,7 +1455,7 @@ FimoError fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContex
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_new(FimoContext context, FimoModuleLoadingSet **module_set);
+FimoResult fimo_module_set_new(FimoContext context, FimoModuleLoadingSet **module_set);
 
 /**
  * Checks whether a module set contains a module.
@@ -1469,8 +1469,8 @@ FimoError fimo_module_set_new(FimoContext context, FimoModuleLoadingSet **module
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_has_module(FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
-                                     bool *has_module);
+FimoResult fimo_module_set_has_module(FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
+                                      bool *has_module);
 
 /**
  * Checks whether a module set contains a symbol.
@@ -1486,8 +1486,8 @@ FimoError fimo_module_set_has_module(FimoContext context, FimoModuleLoadingSet *
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_has_symbol(FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
-                                     const char *ns, FimoVersion version, bool *has_symbol);
+FimoResult fimo_module_set_has_symbol(FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
+                                      const char *ns, FimoVersion version, bool *has_symbol);
 
 /**
  * Adds a status callback to the module set.
@@ -1513,9 +1513,9 @@ FimoError fimo_module_set_has_symbol(FimoContext context, FimoModuleLoadingSet *
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_append_callback(FimoContext context, FimoModuleLoadingSet *module_set,
-                                          const char *module_name, FimoModuleLoadingSuccessCallback on_success,
-                                          FimoModuleLoadingErrorCallback on_error, void *user_data);
+FimoResult fimo_module_set_append_callback(FimoContext context, FimoModuleLoadingSet *module_set,
+                                           const char *module_name, FimoModuleLoadingSuccessCallback on_success,
+                                           FimoModuleLoadingErrorCallback on_error, void *user_data);
 
 /**
  * Adds a freestanding module to the module set.
@@ -1542,8 +1542,8 @@ FimoError fimo_module_set_append_callback(FimoContext context, FimoModuleLoading
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_append_freestanding_module(const FimoModule *module, FimoModuleLoadingSet *module_set,
-                                                     const FimoModuleExport *module_export);
+FimoResult fimo_module_set_append_freestanding_module(const FimoModule *module, FimoModuleLoadingSet *module_set,
+                                                      const FimoModuleExport *module_export);
 
 /**
  * Adds modules to the module set.
@@ -1574,8 +1574,8 @@ FimoError fimo_module_set_append_freestanding_module(const FimoModule *module, F
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_append_modules(FimoContext context, FimoModuleLoadingSet *module_set, const char *module_path,
-                                         FimoModuleLoadingFilter filter, void *filter_data);
+FimoResult fimo_module_set_append_modules(FimoContext context, FimoModuleLoadingSet *module_set,
+                                          const char *module_path, FimoModuleLoadingFilter filter, void *filter_data);
 
 /**
  * Destroys the module set without loading any modules.
@@ -1590,7 +1590,7 @@ FimoError fimo_module_set_append_modules(FimoContext context, FimoModuleLoadingS
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_dismiss(FimoContext context, FimoModuleLoadingSet *module_set);
+FimoResult fimo_module_set_dismiss(FimoContext context, FimoModuleLoadingSet *module_set);
 
 /**
  * Destroys the module set and loads the modules contained in it.
@@ -1610,7 +1610,7 @@ FimoError fimo_module_set_dismiss(FimoContext context, FimoModuleLoadingSet *mod
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_finish(FimoContext context, FimoModuleLoadingSet *module_set);
+FimoResult fimo_module_set_finish(FimoContext context, FimoModuleLoadingSet *module_set);
 
 /**
  * Searches for a module by it's name.
@@ -1626,7 +1626,7 @@ FimoError fimo_module_set_finish(FimoContext context, FimoModuleLoadingSet *modu
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_find_by_name(FimoContext context, const char *name, const FimoModuleInfo **module);
+FimoResult fimo_module_find_by_name(FimoContext context, const char *name, const FimoModuleInfo **module);
 
 /**
  * Searches for a module by a symbol it exports.
@@ -1644,8 +1644,8 @@ FimoError fimo_module_find_by_name(FimoContext context, const char *name, const 
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_find_by_symbol(FimoContext context, const char *name, const char *ns, FimoVersion version,
-                                     const FimoModuleInfo **module);
+FimoResult fimo_module_find_by_symbol(FimoContext context, const char *name, const char *ns, FimoVersion version,
+                                      const FimoModuleInfo **module);
 
 /**
  * Checks for the presence of a namespace in the module backend.
@@ -1661,7 +1661,7 @@ FimoError fimo_module_find_by_symbol(FimoContext context, const char *name, cons
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_exists(FimoContext context, const char *ns, bool *exists);
+FimoResult fimo_module_namespace_exists(FimoContext context, const char *ns, bool *exists);
 
 /**
  * Includes a namespace by the module.
@@ -1677,7 +1677,7 @@ FimoError fimo_module_namespace_exists(FimoContext context, const char *ns, bool
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_include(const FimoModule *module, const char *ns);
+FimoResult fimo_module_namespace_include(const FimoModule *module, const char *ns);
 
 /**
  * Removes a namespace include from the module.
@@ -1695,7 +1695,7 @@ FimoError fimo_module_namespace_include(const FimoModule *module, const char *ns
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_exclude(const FimoModule *module, const char *ns);
+FimoResult fimo_module_namespace_exclude(const FimoModule *module, const char *ns);
 
 /**
  * Checks if a module includes a namespace.
@@ -1717,7 +1717,7 @@ FimoError fimo_module_namespace_exclude(const FimoModule *module, const char *ns
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_included(const FimoModule *module, const char *ns, bool *is_included, bool *is_static);
+FimoResult fimo_module_namespace_included(const FimoModule *module, const char *ns, bool *is_included, bool *is_static);
 
 /**
  * Acquires another module as a dependency.
@@ -1736,7 +1736,7 @@ FimoError fimo_module_namespace_included(const FimoModule *module, const char *n
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_acquire_dependency(const FimoModule *module, const FimoModuleInfo *dependency);
+FimoResult fimo_module_acquire_dependency(const FimoModule *module, const FimoModuleInfo *dependency);
 
 /**
  * Removes a module as a dependency.
@@ -1756,7 +1756,7 @@ FimoError fimo_module_acquire_dependency(const FimoModule *module, const FimoMod
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_relinquish_dependency(const FimoModule *module, const FimoModuleInfo *dependency);
+FimoResult fimo_module_relinquish_dependency(const FimoModule *module, const FimoModuleInfo *dependency);
 
 /**
  * Checks if a module depends on another module.
@@ -1778,8 +1778,8 @@ FimoError fimo_module_relinquish_dependency(const FimoModule *module, const Fimo
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_has_dependency(const FimoModule *module, const FimoModuleInfo *other, bool *has_dependency,
-                                     bool *is_static);
+FimoResult fimo_module_has_dependency(const FimoModule *module, const FimoModuleInfo *other, bool *has_dependency,
+                                      bool *is_static);
 
 /**
  * Loads a symbol from the module backend.
@@ -1803,8 +1803,8 @@ FimoError fimo_module_has_dependency(const FimoModule *module, const FimoModuleI
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns, FimoVersion version,
-                                  const FimoModuleRawSymbol **symbol);
+FimoResult fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns, FimoVersion version,
+                                   const FimoModuleRawSymbol **symbol);
 
 /**
  * Unloads a module.
@@ -1823,7 +1823,7 @@ FimoError fimo_module_load_symbol(const FimoModule *module, const char *name, co
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_unload(FimoContext context, const FimoModuleInfo *module);
+FimoResult fimo_module_unload(FimoContext context, const FimoModuleInfo *module);
 
 /**
  * Queries the info of a module parameter.
@@ -1843,8 +1843,9 @@ FimoError fimo_module_unload(FimoContext context, const FimoModuleInfo *module);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_query(FimoContext context, const char *module_name, const char *param,
-                                  FimoModuleParamType *type, FimoModuleParamAccess *read, FimoModuleParamAccess *write);
+FimoResult fimo_module_param_query(FimoContext context, const char *module_name, const char *param,
+                                   FimoModuleParamType *type, FimoModuleParamAccess *read,
+                                   FimoModuleParamAccess *write);
 
 /**
  * Sets a module parameter with public write access.
@@ -1865,8 +1866,8 @@ FimoError fimo_module_param_query(FimoContext context, const char *module_name, 
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_public(FimoContext context, const void *value, FimoModuleParamType type,
-                                       const char *module_name, const char *param);
+FimoResult fimo_module_param_set_public(FimoContext context, const void *value, FimoModuleParamType type,
+                                        const char *module_name, const char *param);
 
 /**
  * Reads a module parameter with public read access.
@@ -1887,8 +1888,8 @@ FimoError fimo_module_param_set_public(FimoContext context, const void *value, F
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_public(FimoContext context, void *value, FimoModuleParamType *type,
-                                       const char *module_name, const char *param);
+FimoResult fimo_module_param_get_public(FimoContext context, void *value, FimoModuleParamType *type,
+                                        const char *module_name, const char *param);
 
 /**
  * Sets a module parameter with dependency write access.
@@ -1909,8 +1910,8 @@ FimoError fimo_module_param_get_public(FimoContext context, void *value, FimoMod
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_dependency(const FimoModule *module, const void *value, FimoModuleParamType type,
-                                           const char *module_name, const char *param);
+FimoResult fimo_module_param_set_dependency(const FimoModule *module, const void *value, FimoModuleParamType type,
+                                            const char *module_name, const char *param);
 
 /**
  * Reads a module parameter with dependency read access.
@@ -1931,8 +1932,8 @@ FimoError fimo_module_param_set_dependency(const FimoModule *module, const void 
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_dependency(const FimoModule *module, void *value, FimoModuleParamType *type,
-                                           const char *module_name, const char *param);
+FimoResult fimo_module_param_get_dependency(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                            const char *module_name, const char *param);
 
 /**
  * Setter for a module parameter.
@@ -1948,8 +1949,8 @@ FimoError fimo_module_param_get_dependency(const FimoModule *module, void *value
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_private(const FimoModule *module, const void *value, FimoModuleParamType type,
-                                        FimoModuleParam *param);
+FimoResult fimo_module_param_set_private(const FimoModule *module, const void *value, FimoModuleParamType type,
+                                         FimoModuleParam *param);
 
 /**
  * Getter for a module parameter.
@@ -1963,8 +1964,8 @@ FimoError fimo_module_param_set_private(const FimoModule *module, const void *va
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_private(const FimoModule *module, void *value, FimoModuleParamType *type,
-                                        const FimoModuleParam *param);
+FimoResult fimo_module_param_get_private(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                         const FimoModuleParam *param);
 
 /**
  * Internal setter for a module parameter.
@@ -1980,8 +1981,8 @@ FimoError fimo_module_param_get_private(const FimoModule *module, void *value, F
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_inner(const FimoModule *module, const void *value, FimoModuleParamType type,
-                                      FimoModuleParamData *param);
+FimoResult fimo_module_param_set_inner(const FimoModule *module, const void *value, FimoModuleParamType type,
+                                       FimoModuleParamData *param);
 
 /**
  * Internal getter for a module parameter.
@@ -1995,8 +1996,8 @@ FimoError fimo_module_param_set_inner(const FimoModule *module, const void *valu
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_inner(const FimoModule *module, void *value, FimoModuleParamType *type,
-                                      const FimoModuleParamData *param);
+FimoResult fimo_module_param_get_inner(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                       const FimoModuleParamData *param);
 
 #ifdef __cplusplus
 }

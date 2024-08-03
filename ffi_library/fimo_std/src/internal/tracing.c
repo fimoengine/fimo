@@ -34,16 +34,16 @@
 
 struct TSSData_;
 
-static FimoError tss_data_new_(FimoInternalTracingContext *ctx, struct TSSData_ **tss_data);
+static FimoResult tss_data_new_(FimoInternalTracingContext *ctx, struct TSSData_ **tss_data);
 static void tss_data_free_(struct TSSData_ *tss_data);
 
 struct StackFrame_;
 
-static FimoError stack_frame_new_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
-                                  FimoTracingFormat format, const void *data);
+static FimoResult stack_frame_new_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
+                                   FimoTracingFormat format, const void *data);
 static void stack_frame_free_(struct StackFrame_ *frame);
 
-static FimoError call_stack_new_(FimoInternalTracingContext *ctx, bool bound, FimoTracingCallStack **call_stack);
+static FimoResult call_stack_new_(FimoInternalTracingContext *ctx, bool bound, FimoTracingCallStack **call_stack);
 static void call_stack_free_(FimoTracingCallStack *call_stack, bool allow_bound);
 static bool call_stack_can_destroy_(FimoTracingCallStack *call_stack, bool allow_bound);
 static bool call_stack_is_bound_(FimoTracingCallStack *call_stack);
@@ -51,35 +51,35 @@ static bool call_stack_is_suspended_(FimoTracingCallStack *call_stack);
 static bool call_stack_is_blocked_(FimoTracingCallStack *call_stack);
 static bool call_stack_would_trace_(FimoTracingCallStack *call_stack, const FimoTracingMetadata *metadata);
 static bool call_stack_would_trace_(FimoTracingCallStack *call_stack, const FimoTracingMetadata *metadata);
-static FimoError call_stack_switch_(FimoTracingCallStack *call_stack, FimoTracingCallStack *old);
-static FimoError call_stack_unblock_(FimoTracingCallStack *call_stack);
-static FimoError call_stack_suspend_(FimoTracingCallStack *call_stack, bool block);
-static FimoError call_stack_resume_(FimoTracingCallStack *call_stack);
-static FimoError call_stack_create_span_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
-                                         FimoTracingSpan **span, FimoTracingFormat format, const void *data);
-static FimoError call_stack_destroy_span_(FimoTracingCallStack *call_stack, FimoTracingSpan *span);
-static FimoError call_stack_emit_event_(FimoTracingCallStack *call_stack, const FimoTracingEvent *event,
-                                        const FimoTracingFormat format, const void *data);
+static FimoResult call_stack_switch_(FimoTracingCallStack *call_stack, FimoTracingCallStack *old);
+static FimoResult call_stack_unblock_(FimoTracingCallStack *call_stack);
+static FimoResult call_stack_suspend_(FimoTracingCallStack *call_stack, bool block);
+static FimoResult call_stack_resume_(FimoTracingCallStack *call_stack);
+static FimoResult call_stack_create_span_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
+                                          FimoTracingSpan **span, FimoTracingFormat format, const void *data);
+static FimoResult call_stack_destroy_span_(FimoTracingCallStack *call_stack, FimoTracingSpan *span);
+static FimoResult call_stack_emit_event_(FimoTracingCallStack *call_stack, const FimoTracingEvent *event,
+                                         const FimoTracingFormat format, const void *data);
 
-static FimoError ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options);
+static FimoResult ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options);
 static void ctx_deinit_(FimoInternalTracingContext *ctx);
-static FimoError ctx_create_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack);
-static FimoError ctx_destroy_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
-static FimoError ctx_switch_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
-                                        FimoTracingCallStack **old);
-static FimoError ctx_unblock_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
-static FimoError ctx_suspend_current_call_stack_(FimoInternalTracingContext *ctx, bool block);
-static FimoError ctx_resume_current_call_stack_(FimoInternalTracingContext *ctx);
-static FimoError ctx_create_span_(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
-                                  FimoTracingSpan **span, FimoTracingFormat format, const void *data);
-static FimoError ctx_destroy_span_(FimoInternalTracingContext *ctx, FimoTracingSpan *span);
-static FimoError ctx_emit_event_(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
-                                 const FimoTracingFormat format, const void *data);
+static FimoResult ctx_create_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack);
+static FimoResult ctx_destroy_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
+static FimoResult ctx_switch_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
+                                         FimoTracingCallStack **old);
+static FimoResult ctx_unblock_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
+static FimoResult ctx_suspend_current_call_stack_(FimoInternalTracingContext *ctx, bool block);
+static FimoResult ctx_resume_current_call_stack_(FimoInternalTracingContext *ctx);
+static FimoResult ctx_create_span_(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
+                                   FimoTracingSpan **span, FimoTracingFormat format, const void *data);
+static FimoResult ctx_destroy_span_(FimoInternalTracingContext *ctx, FimoTracingSpan *span);
+static FimoResult ctx_emit_event_(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
+                                  const FimoTracingFormat format, const void *data);
 static bool ctx_is_enabled_(FimoInternalTracingContext *ctx);
 static bool ctx_is_enabled_for_thread_(FimoInternalTracingContext *ctx);
 static bool ctx_would_trace_(FimoInternalTracingContext *ctx, const FimoTracingMetadata *metadata);
-static FimoError ctx_register_thread_(FimoInternalTracingContext *ctx);
-static FimoError ctx_unregister_thread_(FimoInternalTracingContext *ctx);
+static FimoResult ctx_register_thread_(FimoInternalTracingContext *ctx);
+static FimoResult ctx_unregister_thread_(FimoInternalTracingContext *ctx);
 static void ctx_flush_(FimoInternalTracingContext *ctx);
 
 ///////////////////////////////////////////////////////////////////////
@@ -118,16 +118,16 @@ struct StackFrame_ {
     FimoTracingCallStack *call_stack;
 };
 
-static FimoError stack_frame_new_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
-                                  FimoTracingFormat format, const void *data) {
+static FimoResult stack_frame_new_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
+                                   FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(call_stack && span_desc && format)
 
     FimoUSize written_bytes;
     char *buffer_start = call_stack->buffer + call_stack->cursor;
     FimoUSize buffer_len = call_stack->ctx->buff_size - call_stack->cursor;
 
-    FimoError error = format(buffer_start, buffer_len, data, &written_bytes);
-    if (FIMO_IS_ERROR(error)) {
+    FimoResult error = format(buffer_start, buffer_len, data, &written_bytes);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
@@ -136,22 +136,22 @@ static FimoError stack_frame_new_(FimoTracingCallStack *call_stack, const FimoTr
     for (; num_spans < fimo_array_list_len(&call_stack->ctx->subscribers); num_spans++) {
         void **stack_;
         error = fimo_array_list_get(&call_stack->call_stacks, num_spans, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, num_spans, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
 
         error = subscriber->vtable->span_push(subscriber->ptr, &current_time, span_desc, buffer_start, written_bytes,
                                               *stack_);
-        if (FIMO_IS_ERROR(error)) {
+        if (FIMO_RESULT_IS_ERROR(error)) {
             goto cleanup;
         }
     }
 
     struct StackFrame_ *frame = fimo_malloc(sizeof(*frame), &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         goto cleanup;
     }
 
@@ -187,17 +187,17 @@ static FimoError stack_frame_new_(FimoTracingCallStack *call_stack, const FimoTr
 cleanup:
     for (FimoUSize i = 0; i < num_spans; i++) {
         void **stack_;
-        FimoError error_ = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
-        (void)error_;
+        FimoResult error_ = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error_))
+        FIMO_RESULT_IGNORE(error_);
 
         const FimoTracingSubscriber *subscriber;
         error_ = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                      (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
-        (void)error_;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error_))
+        FIMO_RESULT_IGNORE(error_);
 
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error_))
         subscriber->vtable->span_drop(subscriber->ptr, *stack_);
     }
 
@@ -209,16 +209,16 @@ static void stack_frame_free_(struct StackFrame_ *frame) {
     const FimoTime current_time = fimo_time_now();
     for (FimoUSize i = 0; i < fimo_array_list_len(&frame->call_stack->ctx->subscribers); i++) {
         void **stack_;
-        FimoError error =
+        FimoResult error =
                 fimo_array_list_get(&frame->call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&frame->call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
         subscriber->vtable->span_pop(subscriber->ptr, &current_time, *stack_);
     }
 
@@ -240,19 +240,19 @@ static void stack_frame_free_(struct StackFrame_ *frame) {
 //// Call Stack
 ///////////////////////////////////////////////////////////////////////
 
-static FimoError call_stack_new_(FimoInternalTracingContext *ctx, bool bound, FimoTracingCallStack **call_stack) {
+static FimoResult call_stack_new_(FimoInternalTracingContext *ctx, bool bound, FimoTracingCallStack **call_stack) {
     FIMO_DEBUG_ASSERT(ctx && call_stack)
 
-    FimoError error;
+    FimoResult error;
     char *buffer = fimo_calloc(ctx->buff_size, &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
     FimoArrayList call_stacks;
     error = fimo_array_list_with_capacity(fimo_array_list_len(&ctx->subscribers), sizeof(void *), alignof(void *),
                                           &call_stacks);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         fimo_free(buffer);
         return error;
     }
@@ -261,21 +261,21 @@ static FimoError call_stack_new_(FimoInternalTracingContext *ctx, bool bound, Fi
     for (FimoUSize i = 0; i < fimo_array_list_len(&ctx->subscribers); i++) {
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&ctx->subscribers, i, sizeof(FimoTracingSubscriber), (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
 
         void *stack_;
         error = subscriber->vtable->call_stack_create(subscriber->ptr, &current_time, &stack_);
-        if (FIMO_IS_ERROR(error)) {
+        if (FIMO_RESULT_IS_ERROR(error)) {
             goto cleanup_call_stacks;
         }
         error = fimo_array_list_try_push(&call_stacks, sizeof(void *), &stack_, NULL);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
     }
 
     unsigned int init_state = bound ? BOUND_BIT_ : SUSPENDED_BIT_;
 
     *call_stack = fimo_malloc(sizeof(**call_stack), &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         goto cleanup_call_stacks;
     }
 
@@ -295,14 +295,14 @@ static FimoError call_stack_new_(FimoInternalTracingContext *ctx, bool bound, Fi
 cleanup_call_stacks:
     for (FimoUSize i = 0; !fimo_array_list_is_empty(&call_stacks); i++) {
         void *stack_;
-        FimoError error_ = fimo_array_list_pop_front(&call_stacks, sizeof(void *), &stack_, NULL);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
-        (void)error_;
+        FimoResult error_ = fimo_array_list_pop_front(&call_stacks, sizeof(void *), &stack_, NULL);
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error_))
+        FIMO_RESULT_IGNORE(error_);
 
         const FimoTracingSubscriber *subscriber;
         error_ = fimo_array_list_get(&ctx->subscribers, i, sizeof(FimoTracingSubscriber), (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error_))
-        (void)error_;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error_))
+        FIMO_RESULT_IGNORE(error_);
         subscriber->vtable->call_stack_drop(subscriber->ptr, &stack_);
     }
 
@@ -319,15 +319,15 @@ static void call_stack_free_(FimoTracingCallStack *call_stack, bool allow_bound)
     const FimoTime current_time = fimo_time_now();
     for (FimoUSize i = 0; !fimo_array_list_is_empty(&call_stack->call_stacks); i++) {
         void *stack_;
-        FimoError error = fimo_array_list_pop_front(&call_stack->call_stacks, sizeof(void *), &stack_, NULL);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FimoResult error = fimo_array_list_pop_front(&call_stack->call_stacks, sizeof(void *), &stack_, NULL);
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
         subscriber->vtable->call_stack_destroy(subscriber->ptr, &current_time, stack_);
     }
     fimo_array_list_free(&call_stack->call_stacks, sizeof(void *), alignof(void *), NULL);
@@ -372,7 +372,7 @@ static bool call_stack_would_trace_(FimoTracingCallStack *call_stack, const Fimo
     return call_stack->max_level >= metadata->level;
 }
 
-static FimoError call_stack_switch_(FimoTracingCallStack *call_stack, FimoTracingCallStack *old) {
+static FimoResult call_stack_switch_(FimoTracingCallStack *call_stack, FimoTracingCallStack *old) {
     FIMO_DEBUG_ASSERT(call_stack && old && call_stack_is_bound_(old))
     FIMO_DEBUG_ASSERT_FALSE(call_stack == old)
 
@@ -402,7 +402,7 @@ static FimoError call_stack_switch_(FimoTracingCallStack *call_stack, FimoTracin
     return FIMO_EOK;
 }
 
-static FimoError call_stack_unblock_(FimoTracingCallStack *call_stack) {
+static FimoResult call_stack_unblock_(FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(call_stack)
 
     // We allow unblocking a call stack that is not bound,
@@ -427,15 +427,15 @@ static FimoError call_stack_unblock_(FimoTracingCallStack *call_stack) {
     const FimoTime current_time = fimo_time_now();
     for (FimoUSize i = 0; i < fimo_array_list_len(&call_stack->ctx->subscribers); i++) {
         void **stack_;
-        FimoError error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FimoResult error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
         subscriber->vtable->call_stack_unblock(subscriber->ptr, &current_time, *stack_);
     }
 
@@ -445,7 +445,7 @@ static FimoError call_stack_unblock_(FimoTracingCallStack *call_stack) {
     return FIMO_EOK;
 }
 
-static FimoError call_stack_suspend_(FimoTracingCallStack *call_stack, bool block) {
+static FimoResult call_stack_suspend_(FimoTracingCallStack *call_stack, bool block) {
     FIMO_DEBUG_ASSERT(call_stack && call_stack_is_bound_(call_stack))
     if (call_stack_is_suspended_(call_stack)) {
         return FIMO_EPERM;
@@ -459,22 +459,22 @@ static FimoError call_stack_suspend_(FimoTracingCallStack *call_stack, bool bloc
     const FimoTime current_time = fimo_time_now();
     for (FimoUSize i = 0; i < fimo_array_list_len(&call_stack->ctx->subscribers); i++) {
         void **stack_;
-        FimoError error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FimoResult error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
         subscriber->vtable->call_stack_suspend(subscriber->ptr, &current_time, *stack_, block);
     }
 
     return FIMO_EOK;
 }
 
-static FimoError call_stack_resume_(FimoTracingCallStack *call_stack) {
+static FimoResult call_stack_resume_(FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(call_stack && call_stack_is_bound_(call_stack))
     if (call_stack_is_blocked_(call_stack) || !call_stack_is_suspended_(call_stack)) {
         return FIMO_EPERM;
@@ -487,30 +487,30 @@ static FimoError call_stack_resume_(FimoTracingCallStack *call_stack) {
     const FimoTime current_time = fimo_time_now();
     for (FimoUSize i = 0; i < fimo_array_list_len(&call_stack->ctx->subscribers); i++) {
         void **stack_;
-        FimoError error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FimoResult error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
         subscriber->vtable->call_stack_resume(subscriber->ptr, &current_time, *stack_);
     }
 
     return FIMO_EOK;
 }
 
-static FimoError call_stack_create_span_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
-                                         FimoTracingSpan **span, FimoTracingFormat format, const void *data) {
+static FimoResult call_stack_create_span_(FimoTracingCallStack *call_stack, const FimoTracingSpanDesc *span_desc,
+                                          FimoTracingSpan **span, FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(call_stack && span_desc && span && format && call_stack_is_bound_(call_stack))
     if (call_stack_is_suspended_(call_stack)) {
         return FIMO_EPERM;
     }
 
-    FimoError error = stack_frame_new_(call_stack, span_desc, format, data);
-    if (FIMO_IS_ERROR(error)) {
+    FimoResult error = stack_frame_new_(call_stack, span_desc, format, data);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
@@ -520,7 +520,7 @@ static FimoError call_stack_create_span_(FimoTracingCallStack *call_stack, const
     return FIMO_EOK;
 }
 
-static FimoError call_stack_destroy_span_(FimoTracingCallStack *call_stack, FimoTracingSpan *span) {
+static FimoResult call_stack_destroy_span_(FimoTracingCallStack *call_stack, FimoTracingSpan *span) {
     FIMO_DEBUG_ASSERT(call_stack && span && call_stack_is_bound_(call_stack))
     if (call_stack_is_suspended_(call_stack)) {
         return FIMO_EPERM;
@@ -535,8 +535,8 @@ static FimoError call_stack_destroy_span_(FimoTracingCallStack *call_stack, Fimo
     return FIMO_EOK;
 }
 
-static FimoError call_stack_emit_event_(FimoTracingCallStack *call_stack, const FimoTracingEvent *event,
-                                        const FimoTracingFormat format, const void *data) {
+static FimoResult call_stack_emit_event_(FimoTracingCallStack *call_stack, const FimoTracingEvent *event,
+                                         const FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(call_stack && event && format && call_stack_is_bound_(call_stack))
     if (call_stack_is_suspended_(call_stack)) {
         return FIMO_EPERM;
@@ -549,8 +549,8 @@ static FimoError call_stack_emit_event_(FimoTracingCallStack *call_stack, const 
     FimoUSize buffer_len = call_stack->ctx->buff_size - call_stack->cursor;
 
     FimoUSize written_bytes = 0;
-    FimoError error = format(buffer_start, buffer_len, data, &written_bytes);
-    if (FIMO_IS_ERROR(error)) {
+    FimoResult error = format(buffer_start, buffer_len, data, &written_bytes);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
@@ -558,12 +558,12 @@ static FimoError call_stack_emit_event_(FimoTracingCallStack *call_stack, const 
     for (FimoUSize i = 0; i < fimo_array_list_len(&call_stack->ctx->subscribers); i++) {
         void **stack_;
         error = fimo_array_list_get(&call_stack->call_stacks, i, sizeof(void *), (const void **)&stack_);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
 
         const FimoTracingSubscriber *subscriber;
         error = fimo_array_list_get(&call_stack->ctx->subscribers, i, sizeof(FimoTracingSubscriber),
                                     (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
         subscriber->vtable->event_emit(subscriber->ptr, &current_time, *stack_, event, buffer_start, written_bytes);
     }
 
@@ -579,17 +579,17 @@ struct TSSData_ {
     FimoInternalTracingContext *ctx;
 };
 
-static FimoError tss_data_new_(FimoInternalTracingContext *ctx, struct TSSData_ **tss_data) {
+static FimoResult tss_data_new_(FimoInternalTracingContext *ctx, struct TSSData_ **tss_data) {
     FIMO_DEBUG_ASSERT(ctx && tss_data)
 
     FimoTracingCallStack *call_stack;
-    FimoError error = call_stack_new_(ctx, true, &call_stack);
-    if (FIMO_IS_ERROR(error)) {
+    FimoResult error = call_stack_new_(ctx, true, &call_stack);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
     *tss_data = fimo_malloc(sizeof(**tss_data), &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         call_stack_free_(call_stack, true);
         return error;
     }
@@ -626,7 +626,7 @@ static void creation_config_cleanup_(const FimoTracingCreationConfig *options) {
 //// Context
 ///////////////////////////////////////////////////////////////////////
 
-static FimoError ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options) {
+static FimoResult ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options) {
     FIMO_DEBUG_ASSERT(ctx)
     FimoUSize format_buffer_size = 1024;
     FimoTracingLevel maximum_level = FIMO_TRACING_LEVEL_OFF;
@@ -636,9 +636,9 @@ static FimoError ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCre
             format_buffer_size = options->format_buffer_size;
         }
         maximum_level = options->maximum_level;
-        FimoError error = fimo_array_list_with_capacity(options->subscriber_count, sizeof(FimoTracingSubscriber),
-                                                        alignof(FimoTracingSubscriber), &subscribers);
-        if (FIMO_IS_ERROR(error)) {
+        FimoResult error = fimo_array_list_with_capacity(options->subscriber_count, sizeof(FimoTracingSubscriber),
+                                                         alignof(FimoTracingSubscriber), &subscribers);
+        if (FIMO_RESULT_IS_ERROR(error)) {
             creation_config_cleanup_(options);
             return error;
         }
@@ -646,7 +646,7 @@ static FimoError ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCre
         for (FimoUSize i = 0; i < options->subscriber_count; i++) {
             error = fimo_array_list_try_push(&subscribers, sizeof(FimoTracingSubscriber), &options->subscribers[i],
                                              NULL);
-            FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
+            FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
         }
     }
 
@@ -654,7 +654,7 @@ static FimoError ctx_init_(FimoInternalTracingContext *ctx, const FimoTracingCre
     if (tss_create(&local_data, (tss_dtor_t)tss_data_free_) != thrd_success) {
         fimo_array_list_free(&subscribers, sizeof(FimoTracingSubscriber), alignof(FimoTracingSubscriber),
                              (FimoArrayListDropFunc)subscriber_free_);
-        return FIMO_EUNKNOWN;
+        return FIMO_RESULT_FROM_STRING("could not create tss slot");
     }
 
     *ctx = (FimoInternalTracingContext){
@@ -691,7 +691,7 @@ static void ctx_deinit_(FimoInternalTracingContext *ctx) {
                          (FimoArrayListDropFunc)subscriber_free_);
 }
 
-static FimoError ctx_create_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack) {
+static FimoResult ctx_create_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack) {
     FIMO_DEBUG_ASSERT(ctx && call_stack)
     if (!ctx_is_enabled_(ctx)) {
         *call_stack = NULL;
@@ -701,7 +701,7 @@ static FimoError ctx_create_call_stack_(FimoInternalTracingContext *ctx, FimoTra
     return call_stack_new_(ctx, false, call_stack);
 }
 
-static FimoError ctx_destroy_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
+static FimoResult ctx_destroy_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         FIMO_DEBUG_ASSERT_FALSE(call_stack)
@@ -715,8 +715,8 @@ static FimoError ctx_destroy_call_stack_(FimoInternalTracingContext *ctx, FimoTr
     return FIMO_EOK;
 }
 
-static FimoError ctx_switch_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
-                                        FimoTracingCallStack **old) {
+static FimoResult ctx_switch_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
+                                         FimoTracingCallStack **old) {
     FIMO_DEBUG_ASSERT(ctx && old)
     if (!ctx_is_enabled_(ctx)) {
         FIMO_DEBUG_ASSERT_FALSE(call_stack)
@@ -736,8 +736,8 @@ static FimoError ctx_switch_call_stack_(FimoInternalTracingContext *ctx, FimoTra
         return FIMO_EINVAL;
     }
 
-    const FimoError error = call_stack_switch_(call_stack, local_data->active);
-    if (FIMO_IS_ERROR(error)) {
+    const FimoResult error = call_stack_switch_(call_stack, local_data->active);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
@@ -747,7 +747,7 @@ static FimoError ctx_switch_call_stack_(FimoInternalTracingContext *ctx, FimoTra
     return FIMO_EOK;
 }
 
-static FimoError ctx_unblock_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
+static FimoResult ctx_unblock_call_stack_(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         FIMO_DEBUG_ASSERT_FALSE(call_stack)
@@ -759,7 +759,7 @@ static FimoError ctx_unblock_call_stack_(FimoInternalTracingContext *ctx, FimoTr
     return call_stack_unblock_(call_stack);
 }
 
-static FimoError ctx_suspend_current_call_stack_(FimoInternalTracingContext *ctx, bool block) {
+static FimoResult ctx_suspend_current_call_stack_(FimoInternalTracingContext *ctx, bool block) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         return FIMO_EOK;
@@ -773,7 +773,7 @@ static FimoError ctx_suspend_current_call_stack_(FimoInternalTracingContext *ctx
     return call_stack_suspend_(local_data->active, block);
 }
 
-static FimoError ctx_resume_current_call_stack_(FimoInternalTracingContext *ctx) {
+static FimoResult ctx_resume_current_call_stack_(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         return FIMO_EOK;
@@ -787,8 +787,8 @@ static FimoError ctx_resume_current_call_stack_(FimoInternalTracingContext *ctx)
     return call_stack_resume_(local_data->active);
 }
 
-static FimoError ctx_create_span_(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
-                                  FimoTracingSpan **span, FimoTracingFormat format, const void *data) {
+static FimoResult ctx_create_span_(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
+                                   FimoTracingSpan **span, FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(ctx && span_desc && span && format)
     if (!ctx_is_enabled_(ctx)) {
         *span = NULL;
@@ -803,7 +803,7 @@ static FimoError ctx_create_span_(FimoInternalTracingContext *ctx, const FimoTra
     return call_stack_create_span_(local_data->active, span_desc, span, format, data);
 }
 
-static FimoError ctx_destroy_span_(FimoInternalTracingContext *ctx, FimoTracingSpan *span) {
+static FimoResult ctx_destroy_span_(FimoInternalTracingContext *ctx, FimoTracingSpan *span) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         FIMO_DEBUG_ASSERT(span == NULL)
@@ -819,8 +819,8 @@ static FimoError ctx_destroy_span_(FimoInternalTracingContext *ctx, FimoTracingS
     return call_stack_destroy_span_(local_data->active, span);
 }
 
-static FimoError ctx_emit_event_(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
-                                 const FimoTracingFormat format, const void *data) {
+static FimoResult ctx_emit_event_(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
+                                  const FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(ctx && event && format)
     if (!ctx_would_trace_(ctx, event->metadata)) {
         return FIMO_EOK;
@@ -846,7 +846,7 @@ static bool ctx_would_trace_(FimoInternalTracingContext *ctx, const FimoTracingM
     return ctx_is_enabled_for_thread_(ctx) && ctx->max_level >= metadata->level;
 }
 
-static FimoError ctx_register_thread_(FimoInternalTracingContext *ctx) {
+static FimoResult ctx_register_thread_(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         return FIMO_EOK;
@@ -857,8 +857,8 @@ static FimoError ctx_register_thread_(FimoInternalTracingContext *ctx) {
     }
 
     struct TSSData_ *local_data;
-    const FimoError error = tss_data_new_(ctx, &local_data);
-    if (FIMO_IS_ERROR(error)) {
+    const FimoResult error = tss_data_new_(ctx, &local_data);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
     const int result = tss_set(ctx->tss_data, local_data);
@@ -868,7 +868,7 @@ static FimoError ctx_register_thread_(FimoInternalTracingContext *ctx) {
     return FIMO_EOK;
 }
 
-static FimoError ctx_unregister_thread_(FimoInternalTracingContext *ctx) {
+static FimoResult ctx_unregister_thread_(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     if (!ctx_is_enabled_(ctx)) {
         return FIMO_EOK;
@@ -895,10 +895,10 @@ static void ctx_flush_(FimoInternalTracingContext *ctx) {
 
     for (FimoUSize i = 0; i < fimo_array_list_len(&ctx->subscribers); i++) {
         const FimoTracingSubscriber *subscriber;
-        const FimoError error =
+        const FimoResult error =
                 fimo_array_list_get(&ctx->subscribers, i, sizeof(FimoTracingSubscriber), (const void **)&subscriber);
-        FIMO_DEBUG_ASSERT_FALSE(FIMO_IS_ERROR(error))
-        (void)error;
+        FIMO_DEBUG_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(error))
+        FIMO_RESULT_IGNORE(error);
         subscriber->vtable->flush(subscriber->ptr);
     }
 }
@@ -907,52 +907,52 @@ static void ctx_flush_(FimoInternalTracingContext *ctx) {
 //// Trampoline functions
 ///////////////////////////////////////////////////////////////////////
 
-FimoError fimo_internal_trampoline_tracing_call_stack_create(void *ctx, FimoTracingCallStack **call_stack) {
+FimoResult fimo_internal_trampoline_tracing_call_stack_create(void *ctx, FimoTracingCallStack **call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_call_stack_create(&((FimoInternalContext *)ctx)->tracing, call_stack);
 }
 
-FimoError fimo_internal_trampoline_tracing_call_stack_destroy(void *ctx, FimoTracingCallStack *call_stack) {
+FimoResult fimo_internal_trampoline_tracing_call_stack_destroy(void *ctx, FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_call_stack_destroy(&((FimoInternalContext *)ctx)->tracing, call_stack);
 }
 
-FimoError fimo_internal_trampoline_tracing_call_stack_switch(void *ctx, FimoTracingCallStack *call_stack,
-                                                             FimoTracingCallStack **old) {
+FimoResult fimo_internal_trampoline_tracing_call_stack_switch(void *ctx, FimoTracingCallStack *call_stack,
+                                                              FimoTracingCallStack **old) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_call_stack_switch(&((FimoInternalContext *)ctx)->tracing, call_stack, old);
 }
 
-FimoError fimo_internal_trampoline_tracing_call_stack_unblock(void *ctx, FimoTracingCallStack *call_stack) {
+FimoResult fimo_internal_trampoline_tracing_call_stack_unblock(void *ctx, FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_call_stack_unblock(&((FimoInternalContext *)ctx)->tracing, call_stack);
 }
 
-FimoError fimo_internal_trampoline_tracing_call_stack_suspend_current(void *ctx, const bool block) {
+FimoResult fimo_internal_trampoline_tracing_call_stack_suspend_current(void *ctx, const bool block) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_call_stack_suspend_current(&((FimoInternalContext *)ctx)->tracing, block);
 }
 
-FimoError fimo_internal_trampoline_tracing_call_stack_resume_current(void *ctx) {
+FimoResult fimo_internal_trampoline_tracing_call_stack_resume_current(void *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_call_stack_resume_current(&((FimoInternalContext *)ctx)->tracing);
 }
 
-FimoError fimo_internal_trampoline_tracing_span_create(void *ctx, const FimoTracingSpanDesc *span_desc,
-                                                       FimoTracingSpan **span, FimoTracingFormat format,
-                                                       const void *data) {
+FimoResult fimo_internal_trampoline_tracing_span_create(void *ctx, const FimoTracingSpanDesc *span_desc,
+                                                        FimoTracingSpan **span, FimoTracingFormat format,
+                                                        const void *data) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_span_create_custom(&((FimoInternalContext *)ctx)->tracing, span_desc, span, format,
                                                     data);
 }
 
-FimoError fimo_internal_trampoline_tracing_span_destroy(void *ctx, FimoTracingSpan *span) {
+FimoResult fimo_internal_trampoline_tracing_span_destroy(void *ctx, FimoTracingSpan *span) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_span_destroy(&((FimoInternalContext *)ctx)->tracing, span);
 }
 
-FimoError fimo_internal_trampoline_tracing_event_emit(void *ctx, const FimoTracingEvent *event,
-                                                      FimoTracingFormat format, const void *data) {
+FimoResult fimo_internal_trampoline_tracing_event_emit(void *ctx, const FimoTracingEvent *event,
+                                                       FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_event_emit_custom(&((FimoInternalContext *)ctx)->tracing, event, format, data);
 }
@@ -962,17 +962,17 @@ bool fimo_internal_trampoline_tracing_is_enabled(void *ctx) {
     return fimo_internal_tracing_is_enabled(&((FimoInternalContext *)ctx)->tracing);
 }
 
-FimoError fimo_internal_trampoline_tracing_register_thread(void *ctx) {
+FimoResult fimo_internal_trampoline_tracing_register_thread(void *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_register_thread(&((FimoInternalContext *)ctx)->tracing);
 }
 
-FimoError fimo_internal_trampoline_tracing_unregister_thread(void *ctx) {
+FimoResult fimo_internal_trampoline_tracing_unregister_thread(void *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_unregister_thread(&((FimoInternalContext *)ctx)->tracing);
 }
 
-FimoError fimo_internal_trampoline_tracing_flush(void *ctx) {
+FimoResult fimo_internal_trampoline_tracing_flush(void *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_tracing_flush(&((FimoInternalContext *)ctx)->tracing);
 }
@@ -982,7 +982,7 @@ FimoError fimo_internal_trampoline_tracing_flush(void *ctx) {
 ///////////////////////////////////////////////////////////////////////
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_init(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options) {
+FimoResult fimo_internal_tracing_init(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_init_(ctx, options);
 }
@@ -998,7 +998,7 @@ void fimo_internal_tracing_cleanup_options(const FimoTracingCreationConfig *opti
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack) {
+FimoResult fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     if (call_stack == NULL) {
         return FIMO_EINVAL;
@@ -1007,14 +1007,14 @@ FimoError fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ct
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_destroy(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
+FimoResult fimo_internal_tracing_call_stack_destroy(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_destroy_call_stack_(ctx, call_stack);
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
-                                                  FimoTracingCallStack **old) {
+FimoResult fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
+                                                   FimoTracingCallStack **old) {
     FIMO_DEBUG_ASSERT(ctx)
     if (old == NULL) {
         return FIMO_EINVAL;
@@ -1023,27 +1023,27 @@ FimoError fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ct
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_unblock(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
+FimoResult fimo_internal_tracing_call_stack_unblock(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_unblock_call_stack_(ctx, call_stack);
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_suspend_current(FimoInternalTracingContext *ctx, const bool block) {
+FimoResult fimo_internal_tracing_call_stack_suspend_current(FimoInternalTracingContext *ctx, const bool block) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_suspend_current_call_stack_(ctx, block);
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_resume_current(FimoInternalTracingContext *ctx) {
+FimoResult fimo_internal_tracing_call_stack_resume_current(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_resume_current_call_stack_(ctx);
 }
 
 FIMO_PRINT_F_FORMAT_ATTR(4, 5)
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
-                                                FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...) {
+FimoResult fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
+                                                 FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...) {
     FIMO_DEBUG_ASSERT(ctx)
     if (span_desc == NULL || span == NULL || format == NULL) {
         return FIMO_EINVAL;
@@ -1052,16 +1052,16 @@ FimoError fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx,
     va_list vlist;
     va_start(vlist, format);
     FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    const FimoError result =
+    const FimoResult result =
             fimo_internal_tracing_span_create_custom(ctx, span_desc, span, fimo_impl_tracing_fmt, &args);
     va_end(vlist);
     return result;
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *ctx,
-                                                   const FimoTracingSpanDesc *span_desc, FimoTracingSpan **span,
-                                                   FimoTracingFormat format, const void *data) {
+FimoResult fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *ctx,
+                                                    const FimoTracingSpanDesc *span_desc, FimoTracingSpan **span,
+                                                    FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(ctx)
     if (span_desc == NULL || span == NULL || format == NULL) {
         return FIMO_EINVAL;
@@ -1070,15 +1070,15 @@ FimoError fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *c
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_destroy(FimoInternalTracingContext *ctx, FimoTracingSpan *span) {
+FimoResult fimo_internal_tracing_span_destroy(FimoInternalTracingContext *ctx, FimoTracingSpan *span) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_destroy_span_(ctx, span);
 }
 
 FIMO_PRINT_F_FORMAT_ATTR(3, 4)
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
-                                               FIMO_PRINT_F_FORMAT const char *format, ...) {
+FimoResult fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
+                                                FIMO_PRINT_F_FORMAT const char *format, ...) {
     FIMO_DEBUG_ASSERT(ctx)
     if (event == NULL || format == NULL) {
         return FIMO_EINVAL;
@@ -1087,14 +1087,14 @@ FimoError fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, 
     va_list vlist;
     va_start(vlist, format);
     FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    const FimoError result = fimo_internal_tracing_event_emit_custom(ctx, event, fimo_impl_tracing_fmt, &args);
+    const FimoResult result = fimo_internal_tracing_event_emit_custom(ctx, event, fimo_impl_tracing_fmt, &args);
     va_end(vlist);
     return result;
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_custom(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
-                                                  const FimoTracingFormat format, const void *data) {
+FimoResult fimo_internal_tracing_event_emit_custom(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
+                                                   const FimoTracingFormat format, const void *data) {
     FIMO_DEBUG_ASSERT(ctx)
     if (event == NULL || format == NULL) {
         return FIMO_EINVAL;
@@ -1109,19 +1109,19 @@ bool fimo_internal_tracing_is_enabled(FimoInternalTracingContext *ctx) {
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_register_thread(FimoInternalTracingContext *ctx) {
+FimoResult fimo_internal_tracing_register_thread(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_register_thread_(ctx);
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_unregister_thread(FimoInternalTracingContext *ctx) {
+FimoResult fimo_internal_tracing_unregister_thread(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     return ctx_unregister_thread_(ctx);
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_flush(FimoInternalTracingContext *ctx) {
+FimoResult fimo_internal_tracing_flush(FimoInternalTracingContext *ctx) {
     FIMO_DEBUG_ASSERT(ctx)
     ctx_flush_(ctx);
     return FIMO_EOK;

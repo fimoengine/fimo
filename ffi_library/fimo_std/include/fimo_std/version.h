@@ -76,7 +76,7 @@ typedef struct FimoVersion {
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_version_parse_str(const char *str, size_t str_len, FimoVersion *version);
+FimoResult fimo_version_parse_str(const char *str, size_t str_len, FimoVersion *version);
 
 /**
  * Calculates the string length required to represent the version as a string.
@@ -125,7 +125,7 @@ size_t fimo_version_str_len_full(const FimoVersion *version);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_version_write_str(const FimoVersion *version, char *str, size_t str_len, size_t *written);
+FimoResult fimo_version_write_str(const FimoVersion *version, char *str, size_t str_len, size_t *written);
 
 /**
  * Represents the version as a string.
@@ -144,7 +144,7 @@ FimoError fimo_version_write_str(const FimoVersion *version, char *str, size_t s
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_version_write_str_long(const FimoVersion *version, char *str, size_t str_len, size_t *written);
+FimoResult fimo_version_write_str_long(const FimoVersion *version, char *str, size_t str_len, size_t *written);
 
 /**
  * Compares two versions.

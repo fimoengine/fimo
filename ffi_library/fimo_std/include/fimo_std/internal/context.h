@@ -40,7 +40,7 @@ typedef struct FimoInternalContext {
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_context_init(const FimoBaseStructIn **options, FimoContext *context);
+FimoResult fimo_internal_context_init(const FimoBaseStructIn **options, FimoContext *context);
 
 /**
  * Returns the public context for the internal context.
@@ -53,7 +53,7 @@ FimoError fimo_internal_context_init(const FimoBaseStructIn **options, FimoConte
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_context_to_public_ctx(void *ptr, FimoContext *context);
+FimoResult fimo_internal_context_to_public_ctx(void *ptr, FimoContext *context);
 
 /**
  * Acquires a reference to the context by increasing the reference count.
@@ -78,7 +78,7 @@ void fimo_internal_context_release(void *ptr);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_context_check_version(void *ptr, const FimoVersion *required);
+FimoResult fimo_internal_context_check_version(void *ptr, const FimoVersion *required);
 
 #ifdef __cplusplus
 }

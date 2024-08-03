@@ -36,8 +36,8 @@ extern "C" {
             .next = NULL,                                                                                              \
             .metadata = &META_VAR,                                                                                     \
     };                                                                                                                 \
-    FimoError ERROR_VAR = fimo_internal_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                     \
-    FIMO_ASSERT_FALSE(FIMO_IS_ERROR(ERROR_VAR))                                                                        \
+    FimoResult ERROR_VAR = fimo_internal_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                    \
+    FIMO_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(ERROR_VAR))                                                                 \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
@@ -203,23 +203,23 @@ typedef struct FimoInternalTracingContext {
 //// Trampoline functions
 ///////////////////////////////////////////////////////////////////////
 
-FimoError fimo_internal_trampoline_tracing_call_stack_create(void *ctx, FimoTracingCallStack **call_stack);
-FimoError fimo_internal_trampoline_tracing_call_stack_destroy(void *ctx, FimoTracingCallStack *call_stack);
-FimoError fimo_internal_trampoline_tracing_call_stack_switch(void *ctx, FimoTracingCallStack *call_stack,
-                                                             FimoTracingCallStack **old);
-FimoError fimo_internal_trampoline_tracing_call_stack_unblock(void *ctx, FimoTracingCallStack *call_stack);
-FimoError fimo_internal_trampoline_tracing_call_stack_suspend_current(void *ctx, bool block);
-FimoError fimo_internal_trampoline_tracing_call_stack_resume_current(void *ctx);
-FimoError fimo_internal_trampoline_tracing_span_create(void *ctx, const FimoTracingSpanDesc *span_desc,
-                                                       FimoTracingSpan **span, FimoTracingFormat format,
-                                                       const void *data);
-FimoError fimo_internal_trampoline_tracing_span_destroy(void *ctx, FimoTracingSpan *span);
-FimoError fimo_internal_trampoline_tracing_event_emit(void *ctx, const FimoTracingEvent *event,
-                                                      FimoTracingFormat format, const void *data);
+FimoResult fimo_internal_trampoline_tracing_call_stack_create(void *ctx, FimoTracingCallStack **call_stack);
+FimoResult fimo_internal_trampoline_tracing_call_stack_destroy(void *ctx, FimoTracingCallStack *call_stack);
+FimoResult fimo_internal_trampoline_tracing_call_stack_switch(void *ctx, FimoTracingCallStack *call_stack,
+                                                              FimoTracingCallStack **old);
+FimoResult fimo_internal_trampoline_tracing_call_stack_unblock(void *ctx, FimoTracingCallStack *call_stack);
+FimoResult fimo_internal_trampoline_tracing_call_stack_suspend_current(void *ctx, bool block);
+FimoResult fimo_internal_trampoline_tracing_call_stack_resume_current(void *ctx);
+FimoResult fimo_internal_trampoline_tracing_span_create(void *ctx, const FimoTracingSpanDesc *span_desc,
+                                                        FimoTracingSpan **span, FimoTracingFormat format,
+                                                        const void *data);
+FimoResult fimo_internal_trampoline_tracing_span_destroy(void *ctx, FimoTracingSpan *span);
+FimoResult fimo_internal_trampoline_tracing_event_emit(void *ctx, const FimoTracingEvent *event,
+                                                       FimoTracingFormat format, const void *data);
 bool fimo_internal_trampoline_tracing_is_enabled(void *ctx);
-FimoError fimo_internal_trampoline_tracing_register_thread(void *ctx);
-FimoError fimo_internal_trampoline_tracing_unregister_thread(void *ctx);
-FimoError fimo_internal_trampoline_tracing_flush(void *ctx);
+FimoResult fimo_internal_trampoline_tracing_register_thread(void *ctx);
+FimoResult fimo_internal_trampoline_tracing_unregister_thread(void *ctx);
+FimoResult fimo_internal_trampoline_tracing_flush(void *ctx);
 
 ///////////////////////////////////////////////////////////////////////
 //// Tracing Subsystem API
@@ -237,7 +237,7 @@ FimoError fimo_internal_trampoline_tracing_flush(void *ctx);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_init(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options);
+FimoResult fimo_internal_tracing_init(FimoInternalTracingContext *ctx, const FimoTracingCreationConfig *options);
 
 /**
  * Destroys the backend.
@@ -269,7 +269,7 @@ void fimo_internal_tracing_cleanup_options(const FimoTracingCreationConfig *opti
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack);
+FimoResult fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ctx, FimoTracingCallStack **call_stack);
 
 /**
  * Destroys an empty call stack.
@@ -287,7 +287,7 @@ FimoError fimo_internal_tracing_call_stack_create(FimoInternalTracingContext *ct
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_destroy(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
+FimoResult fimo_internal_tracing_call_stack_destroy(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
 
 /**
  * Switches the call stack of the current thread.
@@ -309,8 +309,8 @@ FimoError fimo_internal_tracing_call_stack_destroy(FimoInternalTracingContext *c
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
-                                                  FimoTracingCallStack **old);
+FimoResult fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack,
+                                                   FimoTracingCallStack **old);
 
 /**
  * Unblocks a blocked call stack.
@@ -324,7 +324,7 @@ FimoError fimo_internal_tracing_call_stack_switch(FimoInternalTracingContext *ct
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_unblock(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
+FimoResult fimo_internal_tracing_call_stack_unblock(FimoInternalTracingContext *ctx, FimoTracingCallStack *call_stack);
 
 /**
  * Marks the current call stack as being suspended.
@@ -343,7 +343,7 @@ FimoError fimo_internal_tracing_call_stack_unblock(FimoInternalTracingContext *c
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_suspend_current(FimoInternalTracingContext *ctx, bool block);
+FimoResult fimo_internal_tracing_call_stack_suspend_current(FimoInternalTracingContext *ctx, bool block);
 
 /**
  * Marks the current call stack as being resumed.
@@ -359,7 +359,7 @@ FimoError fimo_internal_tracing_call_stack_suspend_current(FimoInternalTracingCo
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_call_stack_resume_current(FimoInternalTracingContext *ctx);
+FimoResult fimo_internal_tracing_call_stack_resume_current(FimoInternalTracingContext *ctx);
 
 /**
  * Creates a new span with the standard formatter and enters it.
@@ -382,8 +382,8 @@ FimoError fimo_internal_tracing_call_stack_resume_current(FimoInternalTracingCon
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
-                                                FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
+FimoResult fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx, const FimoTracingSpanDesc *span_desc,
+                                                 FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
         FIMO_PRINT_F_FORMAT_ATTR(4, 5);
 
 /**
@@ -407,9 +407,9 @@ FimoError fimo_internal_tracing_span_create_fmt(FimoInternalTracingContext *ctx,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *ctx,
-                                                   const FimoTracingSpanDesc *span_desc, FimoTracingSpan **span,
-                                                   FimoTracingFormat format, const void *data);
+FimoResult fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *ctx,
+                                                    const FimoTracingSpanDesc *span_desc, FimoTracingSpan **span,
+                                                    FimoTracingFormat format, const void *data);
 
 /**
  * Exits and destroys a span.
@@ -428,7 +428,7 @@ FimoError fimo_internal_tracing_span_create_custom(FimoInternalTracingContext *c
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_span_destroy(FimoInternalTracingContext *ctx, FimoTracingSpan *span);
+FimoResult fimo_internal_tracing_span_destroy(FimoInternalTracingContext *ctx, FimoTracingSpan *span);
 
 /**
  * Emits a new event with the standard formatter.
@@ -445,8 +445,8 @@ FimoError fimo_internal_tracing_span_destroy(FimoInternalTracingContext *ctx, Fi
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
-                                               FIMO_PRINT_F_FORMAT const char *format, ...)
+FimoResult fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
+                                                FIMO_PRINT_F_FORMAT const char *format, ...)
         FIMO_PRINT_F_FORMAT_ATTR(3, 4);
 
 /**
@@ -463,8 +463,8 @@ FimoError fimo_internal_tracing_event_emit_fmt(FimoInternalTracingContext *ctx, 
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_event_emit_custom(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
-                                                  FimoTracingFormat format, const void *data);
+FimoResult fimo_internal_tracing_event_emit_custom(FimoInternalTracingContext *ctx, const FimoTracingEvent *event,
+                                                   FimoTracingFormat format, const void *data);
 
 /**
  * Checks whether the tracing backend is enabled.
@@ -497,7 +497,7 @@ bool fimo_internal_tracing_is_enabled(FimoInternalTracingContext *ctx);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_register_thread(FimoInternalTracingContext *ctx);
+FimoResult fimo_internal_tracing_register_thread(FimoInternalTracingContext *ctx);
 
 /**
  * Unregisters the calling thread from the tracing backend.
@@ -511,7 +511,7 @@ FimoError fimo_internal_tracing_register_thread(FimoInternalTracingContext *ctx)
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_unregister_thread(FimoInternalTracingContext *ctx);
+FimoResult fimo_internal_tracing_unregister_thread(FimoInternalTracingContext *ctx);
 
 /**
  * Flushes the streams used for tracing.
@@ -523,7 +523,7 @@ FimoError fimo_internal_tracing_unregister_thread(FimoInternalTracingContext *ct
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_tracing_flush(FimoInternalTracingContext *ctx);
+FimoResult fimo_internal_tracing_flush(FimoInternalTracingContext *ctx);
 
 #ifdef __cplusplus
 }

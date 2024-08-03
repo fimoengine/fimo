@@ -46,7 +46,7 @@ typedef struct FimoMallocBuffer {
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-void *fimo_malloc(size_t size, FimoError *error);
+void *fimo_malloc(size_t size, FimoResult *error);
 
 /**
  * Zero-allocate memory.
@@ -66,7 +66,7 @@ void *fimo_malloc(size_t size, FimoError *error);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-void *fimo_calloc(size_t size, FimoError *error);
+void *fimo_calloc(size_t size, FimoResult *error);
 
 /**
  * Allocate memory.
@@ -89,7 +89,7 @@ void *fimo_calloc(size_t size, FimoError *error);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-void *fimo_aligned_alloc(size_t alignment, size_t size, FimoError *error);
+void *fimo_aligned_alloc(size_t alignment, size_t size, FimoResult *error);
 
 /**
  * Allocate memory.
@@ -109,7 +109,7 @@ void *fimo_aligned_alloc(size_t alignment, size_t size, FimoError *error);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoMallocBuffer fimo_malloc_sized(size_t size, FimoError *error);
+FimoMallocBuffer fimo_malloc_sized(size_t size, FimoResult *error);
 
 /**
  * Zero-allocate memory.
@@ -129,7 +129,7 @@ FimoMallocBuffer fimo_malloc_sized(size_t size, FimoError *error);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoMallocBuffer fimo_calloc_sized(size_t size, FimoError *error);
+FimoMallocBuffer fimo_calloc_sized(size_t size, FimoResult *error);
 
 /**
  * Allocate memory.
@@ -154,7 +154,7 @@ FimoMallocBuffer fimo_calloc_sized(size_t size, FimoError *error);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoError *error);
+FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoResult *error);
 
 /**
  * Free allocated memory.

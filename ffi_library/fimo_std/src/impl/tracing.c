@@ -13,7 +13,7 @@
 
 #include <stdio.h>
 
-FimoError fimo_impl_tracing_fmt(char *buffer, FimoUSize buffer_size, const void *args, FimoUSize *written_size) {
+FimoResult fimo_impl_tracing_fmt(char *buffer, FimoUSize buffer_size, const void *args, FimoUSize *written_size) {
     if (buffer == NULL || args == NULL || written_size == NULL) {
         return FIMO_EINVAL;
     }
@@ -75,16 +75,17 @@ static void init_print_lock_(void) {
     FIMO_ASSERT(result == thrd_success);
 }
 
-FimoError fimo_impl_tracing_default_subscriber_call_stack_create(void *subscriber, const FimoTime *time, void **stack) {
+FimoResult fimo_impl_tracing_default_subscriber_call_stack_create(void *subscriber, const FimoTime *time,
+                                                                  void **stack) {
     (void)PRINT_BUFFER;
     (void)subscriber;
     (void)time;
 
     struct CallStack_ **stack_ = (struct CallStack_ **)stack;
 
-    FimoError error;
+    FimoResult error;
     *stack_ = fimo_malloc(sizeof(struct CallStack_), &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
     **stack_ = (struct CallStack_){
@@ -132,18 +133,18 @@ void fimo_impl_tracing_default_subscriber_call_stack_resume(void *subscriber, co
     FIMO_DEBUG_ASSERT(stack);
 }
 
-FimoError fimo_impl_tracing_default_subscriber_span_push(void *subscriber, const FimoTime *time,
-                                                         const FimoTracingSpanDesc *span_desc, const char *message,
-                                                         const FimoUSize message_len, void *stack) {
+FimoResult fimo_impl_tracing_default_subscriber_span_push(void *subscriber, const FimoTime *time,
+                                                          const FimoTracingSpanDesc *span_desc, const char *message,
+                                                          const FimoUSize message_len, void *stack) {
     (void)subscriber;
     (void)time;
 
     struct CallStack_ *stack_ = stack;
     FIMO_DEBUG_ASSERT(stack_);
 
-    FimoError error;
+    FimoResult error;
     struct Span_ *span = fimo_malloc(sizeof(struct Span_), &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
     *span = (struct Span_){

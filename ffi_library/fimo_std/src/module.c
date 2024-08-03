@@ -38,7 +38,7 @@ bool fimo_impl_module_info_is_loaded(const FimoModuleInfo *info) {
 }
 
 FIMO_EXPORT
-FimoError fimo_impl_module_info_lock_unload(const FimoModuleInfo *info) {
+FimoResult fimo_impl_module_info_lock_unload(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     return info->lock_unload(info);
 }
@@ -52,14 +52,14 @@ void fimo_impl_module_info_unlock_unload(const FimoModuleInfo *info) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_pseudo_module_new(const FimoContext context, const FimoModule **module) {
+FimoResult fimo_module_pseudo_module_new(const FimoContext context, const FimoModule **module) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.pseudo_module_new(context.data, module);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContext *module_context) {
+FimoResult fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContext *module_context) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -69,32 +69,32 @@ FimoError fimo_module_pseudo_module_destroy(const FimoModule *module, FimoContex
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_new(const FimoContext context, FimoModuleLoadingSet **module_set) {
+FimoResult fimo_module_set_new(const FimoContext context, FimoModuleLoadingSet **module_set) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_new(context.data, module_set);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_has_module(const FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
-                                     bool *has_module) {
+FimoResult fimo_module_set_has_module(const FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
+                                      bool *has_module) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_has_module(context.data, module_set, name, has_module);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_has_symbol(const FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
-                                     const char *ns, const FimoVersion version, bool *has_symbol) {
+FimoResult fimo_module_set_has_symbol(const FimoContext context, FimoModuleLoadingSet *module_set, const char *name,
+                                      const char *ns, const FimoVersion version, bool *has_symbol) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_has_symbol(context.data, module_set, name, ns, version, has_symbol);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_append_callback(const FimoContext context, FimoModuleLoadingSet *module_set,
-                                          const char *module_name, const FimoModuleLoadingSuccessCallback on_success,
-                                          const FimoModuleLoadingErrorCallback on_error, void *user_data) {
+FimoResult fimo_module_set_append_callback(const FimoContext context, FimoModuleLoadingSet *module_set,
+                                           const char *module_name, const FimoModuleLoadingSuccessCallback on_success,
+                                           const FimoModuleLoadingErrorCallback on_error, void *user_data) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_append_callback(context.data, module_set, module_name, on_success, on_error,
                                                  user_data);
@@ -102,8 +102,8 @@ FimoError fimo_module_set_append_callback(const FimoContext context, FimoModuleL
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_append_freestanding_module(const FimoModule *module, FimoModuleLoadingSet *module_set,
-                                                     const FimoModuleExport *module_export) {
+FimoResult fimo_module_set_append_freestanding_module(const FimoModule *module, FimoModuleLoadingSet *module_set,
+                                                      const FimoModuleExport *module_export) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -113,9 +113,9 @@ FimoError fimo_module_set_append_freestanding_module(const FimoModule *module, F
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_append_modules(const FimoContext context, FimoModuleLoadingSet *module_set,
-                                         const char *module_path, const FimoModuleLoadingFilter filter,
-                                         void *filter_data) {
+FimoResult fimo_module_set_append_modules(const FimoContext context, FimoModuleLoadingSet *module_set,
+                                          const char *module_path, const FimoModuleLoadingFilter filter,
+                                          void *filter_data) {
     void (*iterator)(bool (*)(const FimoModuleExport *, void *), void *) = fimo_impl_module_export_iterator;
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_append_modules(context.data, module_set, module_path, filter, filter_data,
@@ -124,43 +124,43 @@ FimoError fimo_module_set_append_modules(const FimoContext context, FimoModuleLo
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_dismiss(const FimoContext context, FimoModuleLoadingSet *module_set) {
+FimoResult fimo_module_set_dismiss(const FimoContext context, FimoModuleLoadingSet *module_set) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_dismiss(context.data, module_set);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_set_finish(const FimoContext context, FimoModuleLoadingSet *module_set) {
+FimoResult fimo_module_set_finish(const FimoContext context, FimoModuleLoadingSet *module_set) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.set_finish(context.data, module_set);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_find_by_name(const FimoContext context, const char *name, const FimoModuleInfo **module) {
+FimoResult fimo_module_find_by_name(const FimoContext context, const char *name, const FimoModuleInfo **module) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.find_by_name(context.data, name, module);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_find_by_symbol(const FimoContext context, const char *name, const char *ns,
-                                     const FimoVersion version, const FimoModuleInfo **module) {
+FimoResult fimo_module_find_by_symbol(const FimoContext context, const char *name, const char *ns,
+                                      const FimoVersion version, const FimoModuleInfo **module) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.find_by_symbol(context.data, name, ns, version, module);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_exists(const FimoContext context, const char *ns, bool *exists) {
+FimoResult fimo_module_namespace_exists(const FimoContext context, const char *ns, bool *exists) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.namespace_exists(context.data, ns, exists);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_include(const FimoModule *module, const char *ns) {
+FimoResult fimo_module_namespace_include(const FimoModule *module, const char *ns) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -170,7 +170,7 @@ FimoError fimo_module_namespace_include(const FimoModule *module, const char *ns
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_exclude(const FimoModule *module, const char *ns) {
+FimoResult fimo_module_namespace_exclude(const FimoModule *module, const char *ns) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -180,7 +180,8 @@ FimoError fimo_module_namespace_exclude(const FimoModule *module, const char *ns
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_namespace_included(const FimoModule *module, const char *ns, bool *is_included, bool *is_static) {
+FimoResult fimo_module_namespace_included(const FimoModule *module, const char *ns, bool *is_included,
+                                          bool *is_static) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -190,7 +191,7 @@ FimoError fimo_module_namespace_included(const FimoModule *module, const char *n
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_acquire_dependency(const FimoModule *module, const FimoModuleInfo *dependency) {
+FimoResult fimo_module_acquire_dependency(const FimoModule *module, const FimoModuleInfo *dependency) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -200,7 +201,7 @@ FimoError fimo_module_acquire_dependency(const FimoModule *module, const FimoMod
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_relinquish_dependency(const FimoModule *module, const FimoModuleInfo *dependency) {
+FimoResult fimo_module_relinquish_dependency(const FimoModule *module, const FimoModuleInfo *dependency) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -210,8 +211,8 @@ FimoError fimo_module_relinquish_dependency(const FimoModule *module, const Fimo
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_has_dependency(const FimoModule *module, const FimoModuleInfo *other, bool *has_dependency,
-                                     bool *is_static) {
+FimoResult fimo_module_has_dependency(const FimoModule *module, const FimoModuleInfo *other, bool *has_dependency,
+                                      bool *is_static) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -221,8 +222,8 @@ FimoError fimo_module_has_dependency(const FimoModule *module, const FimoModuleI
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns, const FimoVersion version,
-                                  const FimoModuleRawSymbol **symbol) {
+FimoResult fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns,
+                                   const FimoVersion version, const FimoModuleRawSymbol **symbol) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -232,40 +233,40 @@ FimoError fimo_module_load_symbol(const FimoModule *module, const char *name, co
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_unload(const FimoContext context, const FimoModuleInfo *module) {
+FimoResult fimo_module_unload(const FimoContext context, const FimoModuleInfo *module) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.unload(context.data, module);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_query(const FimoContext context, const char *module_name, const char *param,
-                                  FimoModuleParamType *type, FimoModuleParamAccess *read,
-                                  FimoModuleParamAccess *write) {
+FimoResult fimo_module_param_query(const FimoContext context, const char *module_name, const char *param,
+                                   FimoModuleParamType *type, FimoModuleParamAccess *read,
+                                   FimoModuleParamAccess *write) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.param_query(context.data, module_name, param, type, read, write);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_public(const FimoContext context, const void *value, const FimoModuleParamType type,
-                                       const char *module_name, const char *param) {
+FimoResult fimo_module_param_set_public(const FimoContext context, const void *value, const FimoModuleParamType type,
+                                        const char *module_name, const char *param) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.param_set_public(context.data, value, type, module_name, param);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_public(const FimoContext context, void *value, FimoModuleParamType *type,
-                                       const char *module_name, const char *param) {
+FimoResult fimo_module_param_get_public(const FimoContext context, void *value, FimoModuleParamType *type,
+                                        const char *module_name, const char *param) {
     const FimoContextVTable *vtable = context.vtable;
     return vtable->module_v0.param_get_public(context.data, value, type, module_name, param);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_dependency(const FimoModule *module, const void *value, const FimoModuleParamType type,
-                                           const char *module_name, const char *param) {
+FimoResult fimo_module_param_set_dependency(const FimoModule *module, const void *value, const FimoModuleParamType type,
+                                            const char *module_name, const char *param) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -275,8 +276,8 @@ FimoError fimo_module_param_set_dependency(const FimoModule *module, const void 
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_dependency(const FimoModule *module, void *value, FimoModuleParamType *type,
-                                           const char *module_name, const char *param) {
+FimoResult fimo_module_param_get_dependency(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                            const char *module_name, const char *param) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -286,8 +287,8 @@ FimoError fimo_module_param_get_dependency(const FimoModule *module, void *value
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_private(const FimoModule *module, const void *value, const FimoModuleParamType type,
-                                        FimoModuleParam *param) {
+FimoResult fimo_module_param_set_private(const FimoModule *module, const void *value, const FimoModuleParamType type,
+                                         FimoModuleParam *param) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -297,8 +298,8 @@ FimoError fimo_module_param_set_private(const FimoModule *module, const void *va
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_private(const FimoModule *module, void *value, FimoModuleParamType *type,
-                                        const FimoModuleParam *param) {
+FimoResult fimo_module_param_get_private(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                         const FimoModuleParam *param) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -308,8 +309,8 @@ FimoError fimo_module_param_get_private(const FimoModule *module, void *value, F
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_set_inner(const FimoModule *module, const void *value, const FimoModuleParamType type,
-                                      FimoModuleParamData *param) {
+FimoResult fimo_module_param_set_inner(const FimoModule *module, const void *value, const FimoModuleParamType type,
+                                       FimoModuleParamData *param) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }
@@ -319,8 +320,8 @@ FimoError fimo_module_param_set_inner(const FimoModule *module, const void *valu
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_module_param_get_inner(const FimoModule *module, void *value, FimoModuleParamType *type,
-                                      const FimoModuleParamData *param) {
+FimoResult fimo_module_param_get_inner(const FimoModule *module, void *value, FimoModuleParamType *type,
+                                       const FimoModuleParamData *param) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }

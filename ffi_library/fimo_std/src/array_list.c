@@ -21,8 +21,8 @@ FimoArrayList fimo_array_list_new(void) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_with_capacity(FimoUSize capacity, const FimoUSize elem_size, const FimoUSize elem_align,
-                                        FimoArrayList *array) {
+FimoResult fimo_array_list_with_capacity(FimoUSize capacity, const FimoUSize elem_size, const FimoUSize elem_align,
+                                         FimoArrayList *array) {
     FIMO_DEBUG_ASSERT(array)
     capacity = fimo_usize_next_power_of_two(capacity);
     return fimo_array_list_with_capacity_exact(capacity, elem_size, elem_align, array);
@@ -30,8 +30,8 @@ FimoError fimo_array_list_with_capacity(FimoUSize capacity, const FimoUSize elem
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_with_capacity_exact(const FimoUSize capacity, const FimoUSize elem_size,
-                                              const FimoUSize elem_align, FimoArrayList *array) {
+FimoResult fimo_array_list_with_capacity_exact(const FimoUSize capacity, const FimoUSize elem_size,
+                                               const FimoUSize elem_align, FimoArrayList *array) {
     FIMO_DEBUG_ASSERT(array)
     if (capacity > MAX_CAPACITY_) {
         return FIMO_EINVAL;
@@ -43,9 +43,9 @@ FimoError fimo_array_list_with_capacity_exact(const FimoUSize capacity, const Fi
     }
     const FimoUSize buffer_size = tmp.value;
 
-    FimoError error = FIMO_EOK;
+    FimoResult error = FIMO_EOK;
     array->elements = fimo_aligned_alloc(elem_align, buffer_size, &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
     array->capacity = capacity;
@@ -71,8 +71,8 @@ void fimo_array_list_free(FimoArrayList *array, const FimoUSize elem_size, const
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_reserve(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
-                                  const FimoUSize additional, const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_reserve(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
+                                   const FimoUSize additional, const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array)
     const FimoIntOverflowCheckUSize tmp = fimo_usize_overflowing_add(additional, array->size);
     if (tmp.overflow) {
@@ -88,8 +88,8 @@ FimoError fimo_array_list_reserve(FimoArrayList *array, const FimoUSize elem_siz
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_reserve_exact(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
-                                        const FimoUSize additional, const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_reserve_exact(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
+                                         const FimoUSize additional, const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array)
     const FimoIntOverflowCheckUSize tmp = fimo_usize_overflowing_add(additional, array->size);
     if (tmp.overflow) {
@@ -105,9 +105,9 @@ FimoError fimo_array_list_reserve_exact(FimoArrayList *array, const FimoUSize el
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_set_capacity(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
-                                       FimoUSize capacity, const FimoArrayListMoveFunc move_func,
-                                       const FimoArrayListDropFunc drop_func) {
+FimoResult fimo_array_list_set_capacity(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
+                                        FimoUSize capacity, const FimoArrayListMoveFunc move_func,
+                                        const FimoArrayListDropFunc drop_func) {
     FIMO_DEBUG_ASSERT(array)
     capacity = fimo_usize_next_power_of_two(capacity);
     return fimo_array_list_set_capacity_exact(array, elem_size, elem_align, capacity, move_func, drop_func);
@@ -115,10 +115,10 @@ FimoError fimo_array_list_set_capacity(FimoArrayList *array, const FimoUSize ele
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_set_capacity_exact(FimoArrayList *array, const FimoUSize elem_size,
-                                             const FimoUSize elem_align, const FimoUSize capacity,
-                                             const FimoArrayListMoveFunc move_func,
-                                             const FimoArrayListDropFunc drop_func) {
+FimoResult fimo_array_list_set_capacity_exact(FimoArrayList *array, const FimoUSize elem_size,
+                                              const FimoUSize elem_align, const FimoUSize capacity,
+                                              const FimoArrayListMoveFunc move_func,
+                                              const FimoArrayListDropFunc drop_func) {
     FIMO_DEBUG_ASSERT(array)
     if (capacity > MAX_CAPACITY_) {
         return FIMO_EINVAL;
@@ -130,9 +130,9 @@ FimoError fimo_array_list_set_capacity_exact(FimoArrayList *array, const FimoUSi
     }
     const FimoUSize buffer_size = tmp.value;
 
-    FimoError error = FIMO_EOK;
+    FimoResult error = FIMO_EOK;
     void *elements = fimo_aligned_alloc(elem_align, buffer_size, &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
@@ -180,7 +180,7 @@ FimoError fimo_array_list_set_capacity_exact(FimoArrayList *array, const FimoUSi
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_set_len(FimoArrayList *array, const FimoUSize len) {
+FimoResult fimo_array_list_set_len(FimoArrayList *array, const FimoUSize len) {
     FIMO_DEBUG_ASSERT(array)
     if (len > array->capacity) {
         return FIMO_EINVAL;
@@ -213,38 +213,38 @@ FimoUSize fimo_array_list_capacity(const FimoArrayList *array) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_peek_front(const FimoArrayList *array, const FimoUSize elem_size, const void **element) {
+FimoResult fimo_array_list_peek_front(const FimoArrayList *array, const FimoUSize elem_size, const void **element) {
     FIMO_DEBUG_ASSERT(array && element)
     return fimo_array_list_get(array, 0, elem_size, element);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_peek_back(const FimoArrayList *array, const FimoUSize elem_size, const void **element) {
+FimoResult fimo_array_list_peek_back(const FimoArrayList *array, const FimoUSize elem_size, const void **element) {
     FIMO_DEBUG_ASSERT(array && element)
     return fimo_array_list_get(array, array->size - 1, elem_size, element);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_pop_front(FimoArrayList *array, const FimoUSize elem_size, void *element,
-                                    const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_pop_front(FimoArrayList *array, const FimoUSize elem_size, void *element,
+                                     const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     return fimo_array_list_remove(array, 0, elem_size, element, move_func);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_pop_back(FimoArrayList *array, const FimoUSize elem_size, void *element,
-                                   const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_pop_back(FimoArrayList *array, const FimoUSize elem_size, void *element,
+                                    const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     return fimo_array_list_remove(array, array->size - 1, elem_size, element, move_func);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_get(const FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size,
-                              const void **element) {
+FimoResult fimo_array_list_get(const FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size,
+                               const void **element) {
     FIMO_DEBUG_ASSERT(array && element)
     if (array->size <= index) {
         return FIMO_EINVAL;
@@ -258,32 +258,32 @@ FimoError fimo_array_list_get(const FimoArrayList *array, const FimoUSize index,
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_push(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
-                               void *element, const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_push(FimoArrayList *array, const FimoUSize elem_size, const FimoUSize elem_align,
+                                void *element, const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     return fimo_array_list_insert(array, array->size, elem_size, elem_align, element, move_func);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_try_push(FimoArrayList *array, const FimoUSize elem_size, void *element,
-                                   const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_try_push(FimoArrayList *array, const FimoUSize elem_size, void *element,
+                                    const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     return fimo_array_list_try_insert(array, array->size, elem_size, element, move_func);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_insert(FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size,
-                                 const FimoUSize elem_align, void *element, const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_insert(FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size,
+                                  const FimoUSize elem_align, void *element, const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     if (array->size < index) {
         return FIMO_EINVAL;
     }
 
     if (array->size == array->capacity) {
-        const FimoError error = fimo_array_list_reserve(array, elem_size, elem_align, 1, move_func);
-        if (FIMO_IS_ERROR(error)) {
+        const FimoResult error = fimo_array_list_reserve(array, elem_size, elem_align, 1, move_func);
+        if (FIMO_RESULT_IS_ERROR(error)) {
             return error;
         }
     }
@@ -293,8 +293,8 @@ FimoError fimo_array_list_insert(FimoArrayList *array, const FimoUSize index, co
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_try_insert(FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size,
-                                     void *element, const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_try_insert(FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size,
+                                      void *element, const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     if (array->size < index || array->capacity == array->size) {
         return FIMO_EINVAL;
@@ -335,8 +335,8 @@ FimoError fimo_array_list_try_insert(FimoArrayList *array, const FimoUSize index
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_remove(FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size, void *element,
-                                 const FimoArrayListMoveFunc move_func) {
+FimoResult fimo_array_list_remove(FimoArrayList *array, const FimoUSize index, const FimoUSize elem_size, void *element,
+                                  const FimoArrayListMoveFunc move_func) {
     FIMO_DEBUG_ASSERT(array && element)
     if (array->size <= index) {
         return FIMO_EINVAL;

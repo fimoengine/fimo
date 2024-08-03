@@ -68,7 +68,7 @@ FIMO_MODULE_SYMBOL_TABLE(
             FIMO_MODULE_SYMBOL_TABLE_VAR(b_0, int);
             FIMO_MODULE_SYMBOL_TABLE_VAR(b_1, int);
         })
-static FimoError c_constructor(const FimoModule *module, FimoModuleLoadingSet *set, void **data) {
+static FimoResult c_constructor(const FimoModule *module, FimoModuleLoadingSet *set, void **data) {
     REQUIRE(module != nullptr);
     REQUIRE(set != nullptr);
     REQUIRE(data != nullptr);
@@ -83,59 +83,59 @@ static FimoError c_constructor(const FimoModule *module, FimoModuleLoadingSet *s
     const CParamTable *params = static_cast<const CParamTable *>(module->parameters);
     FimoU32 value;
     FimoModuleParamType type;
-    FimoError error = fimo_module_param_get_private(module, &value, &type, params->pub_pub);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    FimoResult error = fimo_module_param_get_private(module, &value, &type, params->pub_pub);
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 0 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->pub_pub);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->pub_dep);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 1 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->pub_dep);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->pub_pri);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 2 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->pub_pri);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->dep_pub);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 3 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->dep_pub);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->dep_dep);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 4 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->dep_dep);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->dep_pri);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 5 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->dep_pri);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->pri_pub);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 6 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->pri_pub);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->pri_dep);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 7 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->pri_dep);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_private(module, &value, &type, params->pri_pri);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 8 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_private(module, &value, type, params->pri_pri);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     const CResourceTable *resources = static_cast<const CResourceTable *>(module->resources);
     (void)resources;
@@ -184,70 +184,74 @@ TEST_CASE("Load modules", "[modules]") {
     const FimoBaseStructIn *options[] = {reinterpret_cast<FimoBaseStructIn *>(&config), nullptr};
 
     FimoContext context;
-    FimoError error = fimo_context_init(options, &context);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    FimoResult error = fimo_context_init(options, &context);
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_tracing_register_thread(context);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     FimoModuleLoadingSet *set;
     error = fimo_module_set_new(context, &set);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_set_append_modules(context, set, nullptr, modules_filter, nullptr);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_set_finish(context, set);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     const FimoModule *pseudo_module;
     error = fimo_module_pseudo_module_new(context, &pseudo_module);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     fimo_context_release(context);
 
     FimoU32 value;
     FimoModuleParamType type;
     error = fimo_module_param_get_public(pseudo_module->context, &value, &type, "c", "pub_pub");
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     REQUIRE((value == 0 && type == FIMO_MODULE_PARAM_TYPE_U32));
     error = fimo_module_param_set_public(pseudo_module->context, &value, type, "c", "pub_pub");
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_public(pseudo_module->context, &value, &type, "c", "dep_pub");
-    REQUIRE(FIMO_IS_ERROR(error));
+    REQUIRE(FIMO_RESULT_IS_ERROR(error));
+    fimo_result_release(error);
     error = fimo_module_param_get_public(pseudo_module->context, &value, &type, "c", "pri_pub");
-    REQUIRE(FIMO_IS_ERROR(error));
+    REQUIRE(FIMO_RESULT_IS_ERROR(error));
+    fimo_result_release(error);
     error = fimo_module_param_set_public(pseudo_module->context, &value, type, "c", "pub_dep");
-    REQUIRE(FIMO_IS_ERROR(error));
+    REQUIRE(FIMO_RESULT_IS_ERROR(error));
+    fimo_result_release(error);
     error = fimo_module_param_set_public(pseudo_module->context, &value, type, "c", "pub_pri");
-    REQUIRE(FIMO_IS_ERROR(error));
+    REQUIRE(FIMO_RESULT_IS_ERROR(error));
+    fimo_result_release(error);
 
     const FimoModuleInfo *a_info;
     error = fimo_module_find_by_name(pseudo_module->context, "a", &a_info);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     const FimoModuleInfo *c_info;
     error = fimo_module_find_by_name(pseudo_module->context, "c", &c_info);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_acquire_dependency(pseudo_module, a_info);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     error = fimo_module_acquire_dependency(pseudo_module, c_info);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     error = fimo_module_param_get_dependency(pseudo_module, &value, &type, "c", "dep_pub");
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     error = fimo_module_param_set_dependency(pseudo_module, &value, type, "c", "pub_dep");
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     const FimoModuleRawSymbol *a_export_0_symbol;
     error = fimo_module_load_symbol(pseudo_module, "a_export_0", "", FIMO_VERSION(0, 1, 0), &a_export_0_symbol);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
     const int *a_export_0_symbol_ptr = static_cast<const int *>(FIMO_MODULE_SYMBOL_LOCK(a_export_0_symbol));
     REQUIRE(*a_export_0_symbol_ptr == a_export_0);
     FIMO_MODULE_SYMBOL_RELEASE(a_export_0_symbol);
 
     error = fimo_module_pseudo_module_destroy(pseudo_module, &context);
-    REQUIRE_FALSE(FIMO_IS_ERROR(error));
+    REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
     FIMO_MODULE_INFO_RELEASE(a_info);
     FIMO_MODULE_INFO_RELEASE(c_info);

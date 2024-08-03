@@ -30,67 +30,68 @@ typedef struct FimoInternalModuleContext {
 //// Trampoline functions
 ///////////////////////////////////////////////////////////////////////
 
-FimoError fimo_internal_trampoline_module_pseudo_module_new(void *ctx, const FimoModule **module);
-FimoError fimo_internal_trampoline_module_pseudo_module_destroy(void *ctx, const FimoModule *module,
-                                                                FimoContext *module_context);
-FimoError fimo_internal_trampoline_module_set_new(void *ctx, FimoModuleLoadingSet **set);
-FimoError fimo_internal_trampoline_module_set_has_module(void *ctx, FimoModuleLoadingSet *set, const char *name,
-                                                         bool *has_module);
-FimoError fimo_internal_trampoline_module_set_has_symbol(void *ctx, FimoModuleLoadingSet *set, const char *name,
-                                                         const char *ns, FimoVersion version, bool *has_symbol);
-FimoError fimo_internal_trampoline_module_set_append_callback(void *ctx, FimoModuleLoadingSet *set,
-                                                              const char *module_name,
-                                                              FimoModuleLoadingSuccessCallback on_success,
-                                                              FimoModuleLoadingErrorCallback on_error, void *user_data);
-FimoError fimo_internal_trampoline_module_set_append_freestanding_module(void *ctx, const FimoModule *module,
-                                                                         FimoModuleLoadingSet *set,
-                                                                         const FimoModuleExport *export);
-FimoError fimo_internal_trampoline_module_set_append_modules(
+FimoResult fimo_internal_trampoline_module_pseudo_module_new(void *ctx, const FimoModule **module);
+FimoResult fimo_internal_trampoline_module_pseudo_module_destroy(void *ctx, const FimoModule *module,
+                                                                 FimoContext *module_context);
+FimoResult fimo_internal_trampoline_module_set_new(void *ctx, FimoModuleLoadingSet **set);
+FimoResult fimo_internal_trampoline_module_set_has_module(void *ctx, FimoModuleLoadingSet *set, const char *name,
+                                                          bool *has_module);
+FimoResult fimo_internal_trampoline_module_set_has_symbol(void *ctx, FimoModuleLoadingSet *set, const char *name,
+                                                          const char *ns, FimoVersion version, bool *has_symbol);
+FimoResult fimo_internal_trampoline_module_set_append_callback(void *ctx, FimoModuleLoadingSet *set,
+                                                               const char *module_name,
+                                                               FimoModuleLoadingSuccessCallback on_success,
+                                                               FimoModuleLoadingErrorCallback on_error,
+                                                               void *user_data);
+FimoResult fimo_internal_trampoline_module_set_append_freestanding_module(void *ctx, const FimoModule *module,
+                                                                          FimoModuleLoadingSet *set,
+                                                                          const FimoModuleExport *export);
+FimoResult fimo_internal_trampoline_module_set_append_modules(
         void *ctx, FimoModuleLoadingSet *set, const char *module_path, FimoModuleLoadingFilter filter,
         void *filter_data, void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
         const void *binary_handle);
-FimoError fimo_internal_trampoline_module_set_dismiss(void *ctx, FimoModuleLoadingSet *set);
-FimoError fimo_internal_trampoline_module_set_finish(void *ctx, FimoModuleLoadingSet *set);
-FimoError fimo_internal_trampoline_module_find_by_name(void *ctx, const char *name, const FimoModuleInfo **module);
-FimoError fimo_internal_trampoline_module_find_by_symbol(void *ctx, const char *name, const char *ns,
-                                                         FimoVersion version, const FimoModuleInfo **module);
-FimoError fimo_internal_trampoline_module_namespace_exists(void *ctx, const char *ns, bool *exists);
-FimoError fimo_internal_trampoline_module_namespace_include(void *ctx, const FimoModule *module, const char *ns);
-FimoError fimo_internal_trampoline_module_namespace_exclude(void *ctx, const FimoModule *module, const char *ns);
-FimoError fimo_internal_trampoline_module_namespace_included(void *ctx, const FimoModule *module, const char *ns,
-                                                             bool *is_included, bool *is_static);
-FimoError fimo_internal_trampoline_module_acquire_dependency(void *ctx, const FimoModule *module,
-                                                             const FimoModuleInfo *dependency);
-FimoError fimo_internal_trampoline_module_relinquish_dependency(void *ctx, const FimoModule *module,
-                                                                const FimoModuleInfo *dependency);
-FimoError fimo_internal_trampoline_module_has_dependency(void *ctx, const FimoModule *module,
-                                                         const FimoModuleInfo *other, bool *has_dependency,
-                                                         bool *is_static);
-FimoError fimo_internal_trampoline_module_param_query(void *ctx, const char *module_name, const char *param,
-                                                      FimoModuleParamType *type, FimoModuleParamAccess *read,
-                                                      FimoModuleParamAccess *write);
-FimoError fimo_internal_trampoline_module_param_set_public(void *ctx, const void *value, FimoModuleParamType type,
-                                                           const char *module_name, const char *param);
-FimoError fimo_internal_trampoline_module_param_get_public(void *ctx, void *value, FimoModuleParamType *type,
-                                                           const char *module_name, const char *param);
-FimoError fimo_internal_trampoline_module_param_set_dependency(void *ctx, const FimoModule *module, const void *value,
-                                                               FimoModuleParamType type, const char *module_name,
-                                                               const char *param);
-FimoError fimo_internal_trampoline_module_param_get_dependency(void *ctx, const FimoModule *module, void *value,
-                                                               FimoModuleParamType *type, const char *module_name,
-                                                               const char *param);
-FimoError fimo_internal_trampoline_module_load_symbol(void *ctx, const FimoModule *module, const char *name,
-                                                      const char *ns, FimoVersion version,
-                                                      const FimoModuleRawSymbol **symbol);
-FimoError fimo_internal_trampoline_module_unload(void *ctx, const FimoModuleInfo *module);
-FimoError fimo_internal_trampoline_module_param_set_private(void *ctx, const FimoModule *module, const void *value,
-                                                            FimoModuleParamType type, FimoModuleParam *param);
-FimoError fimo_internal_trampoline_module_param_get_private(void *ctx, const FimoModule *module, void *value,
-                                                            FimoModuleParamType *type, const FimoModuleParam *param);
-FimoError fimo_internal_trampoline_module_param_set_inner(void *ctx, const FimoModule *module, const void *value,
-                                                          FimoModuleParamType type, FimoModuleParamData *param);
-FimoError fimo_internal_trampoline_module_get_inner(void *ctx, const FimoModule *module, void *value,
-                                                    FimoModuleParamType *type, const FimoModuleParamData *param);
+FimoResult fimo_internal_trampoline_module_set_dismiss(void *ctx, FimoModuleLoadingSet *set);
+FimoResult fimo_internal_trampoline_module_set_finish(void *ctx, FimoModuleLoadingSet *set);
+FimoResult fimo_internal_trampoline_module_find_by_name(void *ctx, const char *name, const FimoModuleInfo **module);
+FimoResult fimo_internal_trampoline_module_find_by_symbol(void *ctx, const char *name, const char *ns,
+                                                          FimoVersion version, const FimoModuleInfo **module);
+FimoResult fimo_internal_trampoline_module_namespace_exists(void *ctx, const char *ns, bool *exists);
+FimoResult fimo_internal_trampoline_module_namespace_include(void *ctx, const FimoModule *module, const char *ns);
+FimoResult fimo_internal_trampoline_module_namespace_exclude(void *ctx, const FimoModule *module, const char *ns);
+FimoResult fimo_internal_trampoline_module_namespace_included(void *ctx, const FimoModule *module, const char *ns,
+                                                              bool *is_included, bool *is_static);
+FimoResult fimo_internal_trampoline_module_acquire_dependency(void *ctx, const FimoModule *module,
+                                                              const FimoModuleInfo *dependency);
+FimoResult fimo_internal_trampoline_module_relinquish_dependency(void *ctx, const FimoModule *module,
+                                                                 const FimoModuleInfo *dependency);
+FimoResult fimo_internal_trampoline_module_has_dependency(void *ctx, const FimoModule *module,
+                                                          const FimoModuleInfo *other, bool *has_dependency,
+                                                          bool *is_static);
+FimoResult fimo_internal_trampoline_module_param_query(void *ctx, const char *module_name, const char *param,
+                                                       FimoModuleParamType *type, FimoModuleParamAccess *read,
+                                                       FimoModuleParamAccess *write);
+FimoResult fimo_internal_trampoline_module_param_set_public(void *ctx, const void *value, FimoModuleParamType type,
+                                                            const char *module_name, const char *param);
+FimoResult fimo_internal_trampoline_module_param_get_public(void *ctx, void *value, FimoModuleParamType *type,
+                                                            const char *module_name, const char *param);
+FimoResult fimo_internal_trampoline_module_param_set_dependency(void *ctx, const FimoModule *module, const void *value,
+                                                                FimoModuleParamType type, const char *module_name,
+                                                                const char *param);
+FimoResult fimo_internal_trampoline_module_param_get_dependency(void *ctx, const FimoModule *module, void *value,
+                                                                FimoModuleParamType *type, const char *module_name,
+                                                                const char *param);
+FimoResult fimo_internal_trampoline_module_load_symbol(void *ctx, const FimoModule *module, const char *name,
+                                                       const char *ns, FimoVersion version,
+                                                       const FimoModuleRawSymbol **symbol);
+FimoResult fimo_internal_trampoline_module_unload(void *ctx, const FimoModuleInfo *module);
+FimoResult fimo_internal_trampoline_module_param_set_private(void *ctx, const FimoModule *module, const void *value,
+                                                             FimoModuleParamType type, FimoModuleParam *param);
+FimoResult fimo_internal_trampoline_module_param_get_private(void *ctx, const FimoModule *module, void *value,
+                                                             FimoModuleParamType *type, const FimoModuleParam *param);
+FimoResult fimo_internal_trampoline_module_param_set_inner(void *ctx, const FimoModule *module, const void *value,
+                                                           FimoModuleParamType type, FimoModuleParamData *param);
+FimoResult fimo_internal_trampoline_module_get_inner(void *ctx, const FimoModule *module, void *value,
+                                                     FimoModuleParamType *type, const FimoModuleParamData *param);
 
 ///////////////////////////////////////////////////////////////////////
 //// Module Subsystem API
@@ -104,7 +105,7 @@ FimoError fimo_internal_trampoline_module_get_inner(void *ctx, const FimoModule 
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_init(FimoInternalModuleContext *ctx);
+FimoResult fimo_internal_module_init(FimoInternalModuleContext *ctx);
 
 /**
  * Destroys the module subsystem.
@@ -128,7 +129,7 @@ void fimo_internal_module_destroy(FimoInternalModuleContext *ctx);
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_pseudo_module_new(FimoInternalModuleContext *ctx, const FimoModule **module);
+FimoResult fimo_internal_module_pseudo_module_new(FimoInternalModuleContext *ctx, const FimoModule **module);
 
 /**
  * Destroys an existing pseudo module.
@@ -143,8 +144,8 @@ FimoError fimo_internal_module_pseudo_module_new(FimoInternalModuleContext *ctx,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_pseudo_module_destroy(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                     FimoContext *module_context);
+FimoResult fimo_internal_module_pseudo_module_destroy(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                      FimoContext *module_context);
 
 /**
  * Constructs a new empty module set.
@@ -161,7 +162,7 @@ FimoError fimo_internal_module_pseudo_module_destroy(FimoInternalModuleContext *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_new(FimoInternalModuleContext *ctx, FimoModuleLoadingSet **set);
+FimoResult fimo_internal_module_set_new(FimoInternalModuleContext *ctx, FimoModuleLoadingSet **set);
 
 /**
  * Checks whether a module set contains a module.
@@ -174,8 +175,8 @@ FimoError fimo_internal_module_set_new(FimoInternalModuleContext *ctx, FimoModul
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_has_module(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
-                                              const char *name, bool *has_module);
+FimoResult fimo_internal_module_set_has_module(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
+                                               const char *name, bool *has_module);
 
 /**
  * Checks whether a module set contains a symbol.
@@ -190,8 +191,8 @@ FimoError fimo_internal_module_set_has_module(FimoInternalModuleContext *ctx, Fi
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_has_symbol(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
-                                              const char *name, const char *ns, FimoVersion version, bool *has_symbol);
+FimoResult fimo_internal_module_set_has_symbol(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
+                                               const char *name, const char *ns, FimoVersion version, bool *has_symbol);
 
 /**
  * Adds a status callback to the module set.
@@ -215,9 +216,10 @@ FimoError fimo_internal_module_set_has_symbol(FimoInternalModuleContext *ctx, Fi
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_append_callback(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
-                                                   const char *module_name, FimoModuleLoadingSuccessCallback on_success,
-                                                   FimoModuleLoadingErrorCallback on_error, void *user_data);
+FimoResult fimo_internal_module_set_append_callback(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
+                                                    const char *module_name,
+                                                    FimoModuleLoadingSuccessCallback on_success,
+                                                    FimoModuleLoadingErrorCallback on_error, void *user_data);
 
 /**
  * Adds a freestanding module to the module set.
@@ -244,9 +246,9 @@ FimoError fimo_internal_module_set_append_callback(FimoInternalModuleContext *ct
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_append_freestanding_module(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                              FimoModuleLoadingSet *set,
-                                                              const FimoModuleExport *export);
+FimoResult fimo_internal_module_set_append_freestanding_module(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                               FimoModuleLoadingSet *set,
+                                                               const FimoModuleExport *export);
 
 /**
  * Adds modules to the module set.
@@ -278,7 +280,7 @@ FimoError fimo_internal_module_set_append_freestanding_module(FimoInternalModule
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError
+FimoResult
 fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set,
                                         const char *module_path, FimoModuleLoadingFilter filter, void *filter_data,
                                         void (*export_iterator)(bool (*)(const FimoModuleExport *, void *), void *),
@@ -296,7 +298,7 @@ fimo_internal_module_set_append_modules(FimoInternalModuleContext *ctx, FimoModu
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_dismiss(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set);
+FimoResult fimo_internal_module_set_dismiss(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set);
 
 /**
  * Destroys the module set and loads the modules contained in it.
@@ -313,7 +315,7 @@ FimoError fimo_internal_module_set_dismiss(FimoInternalModuleContext *ctx, FimoM
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_set_finish(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set);
+FimoResult fimo_internal_module_set_finish(FimoInternalModuleContext *ctx, FimoModuleLoadingSet *set);
 
 /**
  * Searches for a module by it's name.
@@ -327,8 +329,8 @@ FimoError fimo_internal_module_set_finish(FimoInternalModuleContext *ctx, FimoMo
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_find_by_name(FimoInternalModuleContext *ctx, const char *name,
-                                            const FimoModuleInfo **module);
+FimoResult fimo_internal_module_find_by_name(FimoInternalModuleContext *ctx, const char *name,
+                                             const FimoModuleInfo **module);
 
 /**
  * Searches for a module by a symbol it exports.
@@ -344,8 +346,8 @@ FimoError fimo_internal_module_find_by_name(FimoInternalModuleContext *ctx, cons
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_find_by_symbol(FimoInternalModuleContext *ctx, const char *name, const char *ns,
-                                              FimoVersion version, const FimoModuleInfo **module);
+FimoResult fimo_internal_module_find_by_symbol(FimoInternalModuleContext *ctx, const char *name, const char *ns,
+                                               FimoVersion version, const FimoModuleInfo **module);
 
 /**
  * Checks for the presence of a namespace in the module backend.
@@ -360,7 +362,7 @@ FimoError fimo_internal_module_find_by_symbol(FimoInternalModuleContext *ctx, co
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_namespace_exists(FimoInternalModuleContext *ctx, const char *ns, bool *exists);
+FimoResult fimo_internal_module_namespace_exists(FimoInternalModuleContext *ctx, const char *ns, bool *exists);
 
 /**
  * Includes a namespace by the module.
@@ -376,8 +378,8 @@ FimoError fimo_internal_module_namespace_exists(FimoInternalModuleContext *ctx, 
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_namespace_include(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                 const char *ns);
+FimoResult fimo_internal_module_namespace_include(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                  const char *ns);
 
 /**
  * Removes a namespace include from the module.
@@ -395,8 +397,8 @@ FimoError fimo_internal_module_namespace_include(FimoInternalModuleContext *ctx,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_namespace_exclude(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                 const char *ns);
+FimoResult fimo_internal_module_namespace_exclude(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                  const char *ns);
 
 /**
  * Checks if a module includes a namespace.
@@ -418,8 +420,8 @@ FimoError fimo_internal_module_namespace_exclude(FimoInternalModuleContext *ctx,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_namespace_included(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                  const char *ns, bool *is_included, bool *is_static);
+FimoResult fimo_internal_module_namespace_included(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                   const char *ns, bool *is_included, bool *is_static);
 
 /**
  * Acquires another module as a dependency.
@@ -438,8 +440,8 @@ FimoError fimo_internal_module_namespace_included(FimoInternalModuleContext *ctx
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_acquire_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                  const FimoModuleInfo *dependency);
+FimoResult fimo_internal_module_acquire_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                   const FimoModuleInfo *dependency);
 
 /**
  * Removes a module as a dependency.
@@ -459,8 +461,8 @@ FimoError fimo_internal_module_acquire_dependency(FimoInternalModuleContext *ctx
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_relinquish_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                     const FimoModuleInfo *dependency);
+FimoResult fimo_internal_module_relinquish_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                      const FimoModuleInfo *dependency);
 
 /**
  * Checks if a module depends on another module.
@@ -482,8 +484,8 @@ FimoError fimo_internal_module_relinquish_dependency(FimoInternalModuleContext *
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                              const FimoModuleInfo *other, bool *has_dependency, bool *is_static);
+FimoResult fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                               const FimoModuleInfo *other, bool *has_dependency, bool *is_static);
 
 /**
  * Loads a symbol from the module backend.
@@ -507,8 +509,8 @@ FimoError fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, co
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const FimoModule *module, const char *name,
-                                           const char *ns, FimoVersion version, const FimoModuleRawSymbol **symbol);
+FimoResult fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const FimoModule *module, const char *name,
+                                            const char *ns, FimoVersion version, const FimoModuleRawSymbol **symbol);
 
 /**
  * Unloads a module.
@@ -526,7 +528,7 @@ FimoError fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_unload(FimoInternalModuleContext *ctx, const FimoModuleInfo *module);
+FimoResult fimo_internal_module_unload(FimoInternalModuleContext *ctx, const FimoModuleInfo *module);
 
 /**
  * Queries the info of a module parameter.
@@ -545,9 +547,9 @@ FimoError fimo_internal_module_unload(FimoInternalModuleContext *ctx, const Fimo
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_query(FimoInternalModuleContext *ctx, const char *module_name, const char *param,
-                                           FimoModuleParamType *type, FimoModuleParamAccess *read,
-                                           FimoModuleParamAccess *write);
+FimoResult fimo_internal_module_param_query(FimoInternalModuleContext *ctx, const char *module_name, const char *param,
+                                            FimoModuleParamType *type, FimoModuleParamAccess *read,
+                                            FimoModuleParamAccess *write);
 
 /**
  * Sets a module parameter with public write access.
@@ -566,9 +568,9 @@ FimoError fimo_internal_module_param_query(FimoInternalModuleContext *ctx, const
  *
  * @return Status code.
  */
-FIMO_MUST_USE FimoError fimo_internal_module_param_set_public(FimoInternalModuleContext *ctx, const void *value,
-                                                              FimoModuleParamType type, const char *module_name,
-                                                              const char *param);
+FIMO_MUST_USE
+FimoResult fimo_internal_module_param_set_public(FimoInternalModuleContext *ctx, const void *value,
+                                                 FimoModuleParamType type, const char *module_name, const char *param);
 
 /**
  * Reads a module parameter with public read access.
@@ -588,8 +590,8 @@ FIMO_MUST_USE FimoError fimo_internal_module_param_set_public(FimoInternalModule
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_get_public(FimoInternalModuleContext *ctx, void *value, FimoModuleParamType *type,
-                                                const char *module_name, const char *param);
+FimoResult fimo_internal_module_param_get_public(FimoInternalModuleContext *ctx, void *value, FimoModuleParamType *type,
+                                                 const char *module_name, const char *param);
 
 /**
  * Sets a module parameter with dependency write access.
@@ -610,9 +612,9 @@ FimoError fimo_internal_module_param_get_public(FimoInternalModuleContext *ctx, 
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_set_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                    const void *value, FimoModuleParamType type,
-                                                    const char *module_name, const char *param);
+FimoResult fimo_internal_module_param_set_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                     const void *value, FimoModuleParamType type,
+                                                     const char *module_name, const char *param);
 
 /**
  * Reads a module parameter with dependency read access.
@@ -633,9 +635,9 @@ FimoError fimo_internal_module_param_set_dependency(FimoInternalModuleContext *c
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_get_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                    void *value, FimoModuleParamType *type, const char *module_name,
-                                                    const char *param);
+FimoResult fimo_internal_module_param_get_dependency(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                     void *value, FimoModuleParamType *type, const char *module_name,
+                                                     const char *param);
 
 /**
  * Setter for a module parameter.
@@ -651,8 +653,8 @@ FimoError fimo_internal_module_param_get_dependency(FimoInternalModuleContext *c
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_set_private(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                                 const void *value, FimoModuleParamType type, FimoModuleParam *param);
+FimoResult fimo_internal_module_param_set_private(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                  const void *value, FimoModuleParamType type, FimoModuleParam *param);
 
 /**
  * Getter for a module parameter.
@@ -666,8 +668,8 @@ FimoError fimo_internal_module_param_set_private(FimoInternalModuleContext *ctx,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_get_private(FimoInternalModuleContext *ctx, const FimoModule *module, void *value,
-                                                 FimoModuleParamType *type, const FimoModuleParam *param);
+FimoResult fimo_internal_module_param_get_private(FimoInternalModuleContext *ctx, const FimoModule *module, void *value,
+                                                  FimoModuleParamType *type, const FimoModuleParam *param);
 
 /**
  * Internal setter for a module parameter.
@@ -683,8 +685,9 @@ FimoError fimo_internal_module_param_get_private(FimoInternalModuleContext *ctx,
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_set_inner(FimoInternalModuleContext *ctx, const FimoModule *module,
-                                               const void *value, FimoModuleParamType type, FimoModuleParamData *param);
+FimoResult fimo_internal_module_param_set_inner(FimoInternalModuleContext *ctx, const FimoModule *module,
+                                                const void *value, FimoModuleParamType type,
+                                                FimoModuleParamData *param);
 
 /**
  * Internal getter for a module parameter.
@@ -698,8 +701,8 @@ FimoError fimo_internal_module_param_set_inner(FimoInternalModuleContext *ctx, c
  * @return Status code.
  */
 FIMO_MUST_USE
-FimoError fimo_internal_module_param_get_inner(FimoInternalModuleContext *ctx, const FimoModule *module, void *value,
-                                               FimoModuleParamType *type, const FimoModuleParamData *param);
+FimoResult fimo_internal_module_param_get_inner(FimoInternalModuleContext *ctx, const FimoModule *module, void *value,
+                                                FimoModuleParamType *type, const FimoModuleParamData *param);
 
 #ifdef __cplusplus
 }

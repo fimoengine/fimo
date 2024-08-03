@@ -52,8 +52,8 @@ FimoArrayList fimo_array_list_new(void);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_with_capacity(FimoUSize capacity, FimoUSize elem_size, FimoUSize elem_align,
-                                        FimoArrayList *array);
+FimoResult fimo_array_list_with_capacity(FimoUSize capacity, FimoUSize elem_size, FimoUSize elem_align,
+                                         FimoArrayList *array);
 
 /**
  * Creates a new empty array with an exact capacity.
@@ -69,8 +69,8 @@ FimoError fimo_array_list_with_capacity(FimoUSize capacity, FimoUSize elem_size,
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_with_capacity_exact(FimoUSize capacity, FimoUSize elem_size, FimoUSize elem_align,
-                                              FimoArrayList *array);
+FimoResult fimo_array_list_with_capacity_exact(FimoUSize capacity, FimoUSize elem_size, FimoUSize elem_align,
+                                               FimoArrayList *array);
 
 /**
  * Frees an array.
@@ -97,8 +97,8 @@ void fimo_array_list_free(FimoArrayList *array, FimoUSize elem_size, FimoUSize e
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_reserve(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align, FimoUSize additional,
-                                  FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_reserve(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
+                                   FimoUSize additional, FimoArrayListMoveFunc move_func);
 
 /**
  * Reserve capacity for exactly `additional` more elements.
@@ -113,8 +113,8 @@ FimoError fimo_array_list_reserve(FimoArrayList *array, FimoUSize elem_size, Fim
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_reserve_exact(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
-                                        FimoUSize additional, FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_reserve_exact(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
+                                         FimoUSize additional, FimoArrayListMoveFunc move_func);
 
 /**
  * Resizes the array to a capacity of at least `capacity` elements.
@@ -130,9 +130,9 @@ FimoError fimo_array_list_reserve_exact(FimoArrayList *array, FimoUSize elem_siz
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_set_capacity(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
-                                       FimoUSize capacity, FimoArrayListMoveFunc move_func,
-                                       FimoArrayListDropFunc drop_func);
+FimoResult fimo_array_list_set_capacity(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
+                                        FimoUSize capacity, FimoArrayListMoveFunc move_func,
+                                        FimoArrayListDropFunc drop_func);
 
 /**
  * Resizes the array to a capacity of exactly `capacity` elements.
@@ -148,9 +148,9 @@ FimoError fimo_array_list_set_capacity(FimoArrayList *array, FimoUSize elem_size
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_set_capacity_exact(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
-                                             FimoUSize capacity, FimoArrayListMoveFunc move_func,
-                                             FimoArrayListDropFunc drop_func);
+FimoResult fimo_array_list_set_capacity_exact(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align,
+                                              FimoUSize capacity, FimoArrayListMoveFunc move_func,
+                                              FimoArrayListDropFunc drop_func);
 
 /**
  * Sets the number of elements contained in the array.
@@ -162,7 +162,7 @@ FimoError fimo_array_list_set_capacity_exact(FimoArrayList *array, FimoUSize ele
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_set_len(FimoArrayList *array, FimoUSize len);
+FimoResult fimo_array_list_set_len(FimoArrayList *array, FimoUSize len);
 
 /**
  * Returns whether the array is empty.
@@ -208,7 +208,7 @@ FimoUSize fimo_array_list_capacity(const FimoArrayList *array);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_peek_front(const FimoArrayList *array, FimoUSize elem_size, const void **element);
+FimoResult fimo_array_list_peek_front(const FimoArrayList *array, FimoUSize elem_size, const void **element);
 
 /**
  * Returns a pointer to the last element in the array.
@@ -221,7 +221,7 @@ FimoError fimo_array_list_peek_front(const FimoArrayList *array, FimoUSize elem_
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_peek_back(const FimoArrayList *array, FimoUSize elem_size, const void **element);
+FimoResult fimo_array_list_peek_back(const FimoArrayList *array, FimoUSize elem_size, const void **element);
 
 /**
  * Removes the first element of the array.
@@ -236,8 +236,8 @@ FimoError fimo_array_list_peek_back(const FimoArrayList *array, FimoUSize elem_s
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_pop_front(FimoArrayList *array, FimoUSize elem_size, void *element,
-                                    FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_pop_front(FimoArrayList *array, FimoUSize elem_size, void *element,
+                                     FimoArrayListMoveFunc move_func);
 
 /**
  * Removes the last element of the array.
@@ -252,8 +252,8 @@ FimoError fimo_array_list_pop_front(FimoArrayList *array, FimoUSize elem_size, v
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_pop_back(FimoArrayList *array, FimoUSize elem_size, void *element,
-                                   FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_pop_back(FimoArrayList *array, FimoUSize elem_size, void *element,
+                                    FimoArrayListMoveFunc move_func);
 
 /**
  * Returns a pointer to the element at position `index`.
@@ -267,7 +267,7 @@ FimoError fimo_array_list_pop_back(FimoArrayList *array, FimoUSize elem_size, vo
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_get(const FimoArrayList *array, FimoUSize index, FimoUSize elem_size, const void **element);
+FimoResult fimo_array_list_get(const FimoArrayList *array, FimoUSize index, FimoUSize elem_size, const void **element);
 
 /**
  * Pushes a new element to the end of the array.
@@ -284,8 +284,8 @@ FimoError fimo_array_list_get(const FimoArrayList *array, FimoUSize index, FimoU
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_push(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align, void *element,
-                               FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_push(FimoArrayList *array, FimoUSize elem_size, FimoUSize elem_align, void *element,
+                                FimoArrayListMoveFunc move_func);
 
 /**
  * Pushes a new element to the end of the array.
@@ -298,8 +298,8 @@ FimoError fimo_array_list_push(FimoArrayList *array, FimoUSize elem_size, FimoUS
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_try_push(FimoArrayList *array, FimoUSize elem_size, void *element,
-                                   FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_try_push(FimoArrayList *array, FimoUSize elem_size, void *element,
+                                    FimoArrayListMoveFunc move_func);
 
 /**
  * Inserts an element at the specified position.
@@ -320,8 +320,8 @@ FimoError fimo_array_list_try_push(FimoArrayList *array, FimoUSize elem_size, vo
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_insert(FimoArrayList *array, FimoUSize index, FimoUSize elem_size, FimoUSize elem_align,
-                                 void *element, FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_insert(FimoArrayList *array, FimoUSize index, FimoUSize elem_size, FimoUSize elem_align,
+                                  void *element, FimoArrayListMoveFunc move_func);
 
 /**
  * Inserts an element at the specified position.
@@ -339,8 +339,8 @@ FimoError fimo_array_list_insert(FimoArrayList *array, FimoUSize index, FimoUSiz
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_try_insert(FimoArrayList *array, FimoUSize index, FimoUSize elem_size, void *element,
-                                     FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_try_insert(FimoArrayList *array, FimoUSize index, FimoUSize elem_size, void *element,
+                                      FimoArrayListMoveFunc move_func);
 
 /**
  * Removes the element at the given position from the array.
@@ -359,8 +359,8 @@ FimoError fimo_array_list_try_insert(FimoArrayList *array, FimoUSize index, Fimo
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_array_list_remove(FimoArrayList *array, FimoUSize index, FimoUSize elem_size, void *element,
-                                 FimoArrayListMoveFunc move_func);
+FimoResult fimo_array_list_remove(FimoArrayList *array, FimoUSize index, FimoUSize elem_size, void *element,
+                                  FimoArrayListMoveFunc move_func);
 
 #ifdef __cplusplus
 }

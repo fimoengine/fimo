@@ -190,7 +190,7 @@ bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount *count);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount(FimoRefCount *count);
+FimoResult fimo_upgrade_refcount(FimoRefCount *count);
 
 /**
  * Upgrades a weak reference to a strong reference.
@@ -205,7 +205,7 @@ FimoError fimo_upgrade_refcount(FimoRefCount *count);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count);
+FimoResult fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count);
 
 /**
  * Downgrades a strong reference to a weak reference.
@@ -222,7 +222,7 @@ FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount(FimoRefCount *count);
+FimoResult fimo_downgrade_refcount(FimoRefCount *count);
 
 /**
  * Downgrades a strong reference to a weak reference.
@@ -239,7 +239,7 @@ FimoError fimo_downgrade_refcount(FimoRefCount *count);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count);
+FimoResult fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count);
 
 /**
  * Checks whether there is only one reference.

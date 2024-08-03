@@ -12,7 +12,7 @@
 #include <fimo_std/error.h>
 #include <fimo_std/utils.h>
 
-static FimoError parse_str_u32(const char **str, const size_t str_len, FimoU32 *num) {
+static FimoResult parse_str_u32(const char **str, const size_t str_len, FimoU32 *num) {
     // 2^32 requires up a maximum of 10 digits, with 1 extra for
     // the 0 termination and another one to detect out of range
     // numbers.
@@ -42,7 +42,7 @@ static FimoError parse_str_u32(const char **str, const size_t str_len, FimoU32 *
     return FIMO_EOK;
 }
 
-static FimoError parse_str_u64(const char **str, const size_t str_len, FimoU64 *num) {
+static FimoResult parse_str_u64(const char **str, const size_t str_len, FimoU64 *num) {
     // 2^64 requires up a maximum of 20 digits, with 1 extra for
     // the 0 termination and another one to detect out of range
     // numbers.
@@ -74,7 +74,7 @@ static FimoError parse_str_u64(const char **str, const size_t str_len, FimoU64 *
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_version_parse_str(const char *str, const size_t str_len, FimoVersion *version) {
+FimoResult fimo_version_parse_str(const char *str, const size_t str_len, FimoVersion *version) {
     if (str == NULL || str_len == 0 || isspace(*str) || version == NULL) {
         return FIMO_EINVAL;
     }
@@ -82,8 +82,8 @@ FimoError fimo_version_parse_str(const char *str, const size_t str_len, FimoVers
     const char *current = str;
     const char *str_end = str + str_len;
 
-    FimoError error = parse_str_u32(&current, str_end - current, &version->major);
-    if (FIMO_IS_ERROR(error)) {
+    FimoResult error = parse_str_u32(&current, str_end - current, &version->major);
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
     if (current == str_end || *current != '.') {
@@ -92,7 +92,7 @@ FimoError fimo_version_parse_str(const char *str, const size_t str_len, FimoVers
 
     current++;
     error = parse_str_u32(&current, str_end - current, &version->minor);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
     if (current == str_end || *current != '.') {
@@ -101,7 +101,7 @@ FimoError fimo_version_parse_str(const char *str, const size_t str_len, FimoVers
 
     current++;
     error = parse_str_u32(&current, str_end - current, &version->patch);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
@@ -148,7 +148,7 @@ size_t fimo_version_str_len_full(const FimoVersion *version) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_version_write_str(const FimoVersion *version, char *str, const size_t str_len, size_t *written) {
+FimoResult fimo_version_write_str(const FimoVersion *version, char *str, const size_t str_len, size_t *written) {
     if (version == NULL || str == NULL || str_len == 0) {
         return FIMO_EINVAL;
     }
@@ -182,7 +182,7 @@ FimoError fimo_version_write_str(const FimoVersion *version, char *str, const si
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_version_write_str_long(const FimoVersion *version, char *str, const size_t str_len, size_t *written) {
+FimoResult fimo_version_write_str_long(const FimoVersion *version, char *str, const size_t str_len, size_t *written) {
     if (version == NULL || str == NULL || str_len == 0) {
         return FIMO_EINVAL;
     }
