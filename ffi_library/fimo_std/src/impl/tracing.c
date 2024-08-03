@@ -53,7 +53,8 @@ FimoError fimo_impl_tracing_fmt(char *buffer, FimoUSize buffer_size, const void 
 #define TRACE_STR ANSI_COLOR_MAGENTA "TRACE " EVENT_MESSAGE ANSI_COLOR_RESET "\n"
 
 #define PRINT_BUFFER_LEN 1024
-static _Thread_local char PRINT_BUFFER[PRINT_BUFFER_LEN + 1] = {0};
+// 15 Additional Bytes for message overflow handling.
+static _Thread_local char PRINT_BUFFER[PRINT_BUFFER_LEN + 15] = {0};
 static once_flag PRINT_LOCK_INIT = ONCE_FLAG_INIT;
 static mtx_t PRINT_LOCK;
 
@@ -188,46 +189,88 @@ void fimo_impl_tracing_default_subscriber_event_emit(void *subscriber, const Fim
     FIMO_PRAGMA_MSVC(warning(disable : 4996))
 
     bool is_error = false;
-    FimoUSize written_bytes = 0;
+    FimoUSize cursor = 0;
+    FimoUSize formatted_lenth = 0;
+    FimoUSize remaining_bytes = PRINT_BUFFER_LEN;
     switch (event->metadata->level) {
         case FIMO_TRACING_LEVEL_OFF:
             break;
         case FIMO_TRACING_LEVEL_ERROR:
             is_error = true;
-            written_bytes += snprintf(PRINT_BUFFER, PRINT_BUFFER_LEN - written_bytes, ERROR_STR, event->metadata->name,
-                                      (int)message_len, message);
+            formatted_lenth += snprintf(PRINT_BUFFER, remaining_bytes, ERROR_STR, event->metadata->name,
+                                        (int)message_len, message);
             break;
         case FIMO_TRACING_LEVEL_WARN:
-            written_bytes += snprintf(PRINT_BUFFER, PRINT_BUFFER_LEN - written_bytes, WARN_STR, event->metadata->name,
-                                      (int)message_len, message);
+            formatted_lenth +=
+                    snprintf(PRINT_BUFFER, remaining_bytes, WARN_STR, event->metadata->name, (int)message_len, message);
             break;
         case FIMO_TRACING_LEVEL_INFO:
-            written_bytes += snprintf(PRINT_BUFFER, PRINT_BUFFER_LEN - written_bytes, INFO_STR, event->metadata->name,
-                                      (int)message_len, message);
+            formatted_lenth +=
+                    snprintf(PRINT_BUFFER, remaining_bytes, INFO_STR, event->metadata->name, (int)message_len, message);
             break;
         case FIMO_TRACING_LEVEL_DEBUG:
-            written_bytes += snprintf(PRINT_BUFFER, PRINT_BUFFER_LEN - written_bytes, DEBUG_STR, event->metadata->name,
-                                      (int)message_len, message);
+            formatted_lenth += snprintf(PRINT_BUFFER, remaining_bytes, DEBUG_STR, event->metadata->name,
+                                        (int)message_len, message);
             break;
         case FIMO_TRACING_LEVEL_TRACE:
-            written_bytes += snprintf(PRINT_BUFFER, PRINT_BUFFER_LEN - written_bytes, TRACE_STR, event->metadata->name,
-                                      (int)message_len, message);
+            formatted_lenth += snprintf(PRINT_BUFFER, remaining_bytes, TRACE_STR, event->metadata->name,
+                                        (int)message_len, message);
             break;
     }
+    remaining_bytes = fimo_usize_saturating_sub(PRINT_BUFFER_LEN, formatted_lenth);
+    cursor = PRINT_BUFFER_LEN - remaining_bytes;
 
     if (event->metadata->file_name != NULL) {
-        written_bytes += snprintf(PRINT_BUFFER + written_bytes, PRINT_BUFFER_LEN - written_bytes, AT_FILE_PATH_STR,
-                                  event->metadata->file_name, event->metadata->line_number);
+        formatted_lenth += snprintf(PRINT_BUFFER + cursor, remaining_bytes, AT_FILE_PATH_STR,
+                                    event->metadata->file_name, event->metadata->line_number);
     }
     else {
-        written_bytes +=
-                snprintf(PRINT_BUFFER + written_bytes, PRINT_BUFFER_LEN - written_bytes, AT_UNKNOWN_FILE_PATH_STR);
+        formatted_lenth += snprintf(PRINT_BUFFER + cursor, remaining_bytes, AT_UNKNOWN_FILE_PATH_STR);
+    }
+    remaining_bytes = fimo_usize_saturating_sub(PRINT_BUFFER_LEN, formatted_lenth);
+    cursor = PRINT_BUFFER_LEN - remaining_bytes;
+
+    for (const struct Span_ *current = stack_->tail; current != NULL; current = current->previous) {
+        formatted_lenth += snprintf(PRINT_BUFFER + cursor, remaining_bytes, BACKTRACE_STR,
+                                    current->span_desc->metadata->name, (int)current->message_len, current->message);
+        remaining_bytes = fimo_usize_saturating_sub(PRINT_BUFFER_LEN, formatted_lenth);
+        cursor = PRINT_BUFFER_LEN - remaining_bytes;
     }
 
-    for (const struct Span_ *current = stack_->tail; current != NULL && written_bytes < PRINT_BUFFER_LEN;
-         current = current->previous) {
-        written_bytes += snprintf(PRINT_BUFFER + written_bytes, PRINT_BUFFER_LEN - written_bytes, BACKTRACE_STR,
-                                  current->span_desc->metadata->name, (int)current->message_len, current->message);
+    if (formatted_lenth >= PRINT_BUFFER_LEN) {
+        // `snprintf` always inserts a '\0' at the end of the string
+        // therefore we move the cursor back once.
+        --cursor;
+
+        // See if we started an ANSI escape sequence.
+        // Our longest escape sequence consists of 5 bytes.
+        for (FimoUSize i = 0; i < 5 && PRINT_BUFFER[cursor - i - 1] != 'm'; ++i) {
+            // All or escape codes begin with an '\033'.
+            if (PRINT_BUFFER[cursor - i - 1] == '\033') {
+                cursor = cursor - i - 1;
+                break;
+            }
+        }
+
+        // Finish the message with a "...".
+        if (PRINT_BUFFER[cursor - 1] == '\n') {
+            PRINT_BUFFER[cursor++] = '\t';
+        }
+
+        // Add the "...".
+        PRINT_BUFFER[cursor++] = '.';
+        PRINT_BUFFER[cursor++] = '.';
+        PRINT_BUFFER[cursor++] = '.';
+
+        // Restore the ansi settings.
+        PRINT_BUFFER[cursor++] = '\033';
+        PRINT_BUFFER[cursor++] = '[';
+        PRINT_BUFFER[cursor++] = '0';
+        PRINT_BUFFER[cursor++] = 'm';
+
+        // Finish with a newline
+        PRINT_BUFFER[cursor++] = '\n';
+        FIMO_ASSERT(cursor <= sizeof(PRINT_BUFFER) - 1)
     }
 
     FIMO_PRAGMA_MSVC(warning(pop))
