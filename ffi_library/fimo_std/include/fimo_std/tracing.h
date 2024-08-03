@@ -31,8 +31,8 @@ extern "C" {
             .next = NULL,                                                                                              \
             .metadata = &META_VAR,                                                                                     \
     };                                                                                                                 \
-    FimoError ERROR_VAR = fimo_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                              \
-    FIMO_ASSERT_FALSE(FIMO_IS_ERROR(ERROR_VAR))                                                                        \
+    FimoResult ERROR_VAR = fimo_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                             \
+    FIMO_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(ERROR_VAR))                                                                 \
     FIMO_PRAGMA_GCC(GCC diagnostic pop)
 
 /**
@@ -329,7 +329,7 @@ typedef struct FimoTracingEvent {
  * @param arg3 number of written bytes of the formatter
  * @return Status code.
  */
-typedef FimoError (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
+typedef FimoResult (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
 
 /**
  * VTable of a tracing subscriber.
@@ -353,7 +353,7 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg2 pointer to the new stack
      * @return Status code.
      */
-    FimoError (*call_stack_create)(void *, const FimoTime *, void **);
+    FimoResult (*call_stack_create)(void *, const FimoTime *, void **);
     /**
      * Drops an empty call stack.
      *
@@ -406,7 +406,7 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg5 the call stack
      * @return Status code.
      */
-    FimoError (*span_push)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *);
+    FimoResult (*span_push)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *);
     /**
      * Drops a newly created span.
      *
@@ -527,19 +527,19 @@ typedef struct FimoTracingCreationConfig {
  * Changing the VTable is a breaking change.
  */
 typedef struct FimoTracingVTableV0 {
-    FimoError (*call_stack_create)(void *, FimoTracingCallStack **);
-    FimoError (*call_stack_destroy)(void *, FimoTracingCallStack *);
-    FimoError (*call_stack_switch)(void *, FimoTracingCallStack *, FimoTracingCallStack **);
-    FimoError (*call_stack_unblock)(void *, FimoTracingCallStack *);
-    FimoError (*call_stack_suspend_current)(void *, bool);
-    FimoError (*call_stack_resume_current)(void *);
-    FimoError (*span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan **, FimoTracingFormat, const void *);
-    FimoError (*span_destroy)(void *, FimoTracingSpan *);
-    FimoError (*event_emit)(void *, const FimoTracingEvent *, FimoTracingFormat, const void *);
+    FimoResult (*call_stack_create)(void *, FimoTracingCallStack **);
+    FimoResult (*call_stack_destroy)(void *, FimoTracingCallStack *);
+    FimoResult (*call_stack_switch)(void *, FimoTracingCallStack *, FimoTracingCallStack **);
+    FimoResult (*call_stack_unblock)(void *, FimoTracingCallStack *);
+    FimoResult (*call_stack_suspend_current)(void *, bool);
+    FimoResult (*call_stack_resume_current)(void *);
+    FimoResult (*span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan **, FimoTracingFormat, const void *);
+    FimoResult (*span_destroy)(void *, FimoTracingSpan *);
+    FimoResult (*event_emit)(void *, const FimoTracingEvent *, FimoTracingFormat, const void *);
     bool (*is_enabled)(void *);
-    FimoError (*register_thread)(void *);
-    FimoError (*unregister_thread)(void *);
-    FimoError (*flush)(void *);
+    FimoResult (*register_thread)(void *);
+    FimoResult (*unregister_thread)(void *);
+    FimoResult (*flush)(void *);
 } FimoTracingVTableV0;
 
 /**
@@ -556,7 +556,7 @@ typedef struct FimoTracingVTableV0 {
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallStack **call_stack);
+FimoResult fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallStack **call_stack);
 
 /**
  * Destroys an empty call stack.
@@ -575,7 +575,7 @@ FimoError fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallSta
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallStack *call_stack);
+FimoResult fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallStack *call_stack);
 
 /**
  * Switches the call stack of the current thread.
@@ -598,8 +598,8 @@ FimoError fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallSt
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallStack *call_stack,
-                                         FimoTracingCallStack **old);
+FimoResult fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallStack *call_stack,
+                                          FimoTracingCallStack **old);
 
 /**
  * Unblocks a blocked call stack.
@@ -614,7 +614,7 @@ FimoError fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallSta
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallStack *call_stack);
+FimoResult fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallStack *call_stack);
 
 /**
  * Marks the current call stack as being suspended.
@@ -634,7 +634,7 @@ FimoError fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallSt
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_suspend_current(FimoContext context, bool block);
+FimoResult fimo_tracing_call_stack_suspend_current(FimoContext context, bool block);
 
 /**
  * Marks the current call stack as being resumed.
@@ -651,7 +651,7 @@ FimoError fimo_tracing_call_stack_suspend_current(FimoContext context, bool bloc
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_call_stack_resume_current(FimoContext context);
+FimoResult fimo_tracing_call_stack_resume_current(FimoContext context);
 
 /**
  * Creates a new span with the standard formatter and enters it.
@@ -675,8 +675,8 @@ FimoError fimo_tracing_call_stack_resume_current(FimoContext context);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                       FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
+FimoResult fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
+                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
         FIMO_PRINT_F_FORMAT_ATTR(4, 5);
 
 /**
@@ -701,8 +701,8 @@ FimoError fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpa
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_span_create_custom(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                          FimoTracingSpan **span, FimoTracingFormat format, const void *data);
+FimoResult fimo_tracing_span_create_custom(FimoContext context, const FimoTracingSpanDesc *span_desc,
+                                           FimoTracingSpan **span, FimoTracingFormat format, const void *data);
 
 /**
  * Exits and destroys a span.
@@ -722,7 +722,7 @@ FimoError fimo_tracing_span_create_custom(FimoContext context, const FimoTracing
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
+FimoResult fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
 
 /**
  * Emits a new event with the standard formatter.
@@ -740,8 +740,8 @@ FimoError fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
-                                      FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4);
+FimoResult fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
+                                       FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4);
 
 /**
  * Emits a new event with a custom formatter.
@@ -758,8 +758,8 @@ FimoError fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEven
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_event_emit_custom(FimoContext context, const FimoTracingEvent *event, FimoTracingFormat format,
-                                         const void *data);
+FimoResult fimo_tracing_event_emit_custom(FimoContext context, const FimoTracingEvent *event, FimoTracingFormat format,
+                                          const void *data);
 
 /**
  * Checks whether the tracing backend is enabled.
@@ -794,7 +794,7 @@ bool fimo_tracing_is_enabled(FimoContext context);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_register_thread(FimoContext context);
+FimoResult fimo_tracing_register_thread(FimoContext context);
 
 /**
  * Unregisters the calling thread from the tracing backend.
@@ -809,7 +809,7 @@ FimoError fimo_tracing_register_thread(FimoContext context);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_unregister_thread(FimoContext context);
+FimoResult fimo_tracing_unregister_thread(FimoContext context);
 
 /**
  * Flushes the streams used for tracing.
@@ -822,7 +822,7 @@ FimoError fimo_tracing_unregister_thread(FimoContext context);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_tracing_flush(FimoContext context);
+FimoResult fimo_tracing_flush(FimoContext context);
 
 #ifdef __cplusplus
 }

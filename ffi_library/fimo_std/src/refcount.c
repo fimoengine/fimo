@@ -141,7 +141,7 @@ bool fimo_decrease_weak_count_atomic(FimoAtomicRefCount *count) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount(FimoRefCount *count) {
+FimoResult fimo_upgrade_refcount(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     if (count->strong_refs == 0) {
         return FIMO_EINVAL;
@@ -155,7 +155,7 @@ FimoError fimo_upgrade_refcount(FimoRefCount *count) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count) {
+FimoResult fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     // CAS loop
     FimoUSize expected_count = atomic_load_explicit(&count->strong_refs, memory_order_relaxed);
@@ -175,7 +175,7 @@ FimoError fimo_upgrade_refcount_atomic(FimoAtomicRefCount *count) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount(FimoRefCount *count) {
+FimoResult fimo_downgrade_refcount(FimoRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     if (count->weak_refs > MAX_REFCOUNT) {
         return FIMO_EOVERFLOW;
@@ -186,7 +186,7 @@ FimoError fimo_downgrade_refcount(FimoRefCount *count) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count) {
+FimoResult fimo_downgrade_refcount_atomic(FimoAtomicRefCount *count) {
     FIMO_DEBUG_ASSERT(count)
     FimoUSize current = atomic_load_explicit(&count->weak_refs, memory_order_relaxed);
     for (;;) {

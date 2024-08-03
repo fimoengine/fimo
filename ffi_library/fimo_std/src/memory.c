@@ -17,27 +17,27 @@
 
 FIMO_EXPORT
 FIMO_MUST_USE
-void *fimo_malloc(const size_t size, FimoError *error) { return fimo_malloc_sized(size, error).ptr; }
+void *fimo_malloc(const size_t size, FimoResult *error) { return fimo_malloc_sized(size, error).ptr; }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-void *fimo_calloc(const size_t size, FimoError *error) { return fimo_calloc_sized(size, error).ptr; }
+void *fimo_calloc(const size_t size, FimoResult *error) { return fimo_calloc_sized(size, error).ptr; }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-void *fimo_aligned_alloc(const size_t alignment, const size_t size, FimoError *error) {
+void *fimo_aligned_alloc(const size_t alignment, const size_t size, FimoResult *error) {
     return fimo_aligned_alloc_sized(alignment, size, error).ptr;
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoMallocBuffer fimo_malloc_sized(const size_t size, FimoError *error) {
+FimoMallocBuffer fimo_malloc_sized(const size_t size, FimoResult *error) {
     return fimo_aligned_alloc_sized(FIMO_MALLOC_ALIGNMENT, size, error);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoMallocBuffer fimo_calloc_sized(const size_t size, FimoError *error) {
+FimoMallocBuffer fimo_calloc_sized(const size_t size, FimoResult *error) {
     const FimoMallocBuffer buffer = fimo_malloc_sized(size, error);
     if (buffer.ptr == NULL) {
         return buffer;
@@ -50,7 +50,7 @@ FimoMallocBuffer fimo_calloc_sized(const size_t size, FimoError *error) {
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoError *error) {
+FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoResult *error) {
     if (size == 0 || alignment == 0 || ((alignment & (alignment - 1)) != 0)) {
         if (error) {
             *error = size == 0 ? FIMO_EOK : FIMO_EINVAL;
@@ -77,7 +77,7 @@ FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoErr
 #endif // defined(_WIN32) || defined(WIN32)
     if (ptr == NULL) {
         if (error) {
-            *error = fimo_error_from_errno(errno);
+            *error = FIMO_RESULT_FROM_ERROR_CODE(fimo_error_code_from_errno(errno));
         }
         return (FimoMallocBuffer){.ptr = NULL, .buff_size = 0};
     }
@@ -86,7 +86,7 @@ FimoMallocBuffer fimo_aligned_alloc_sized(size_t alignment, size_t size, FimoErr
     buff_size = _aligned_msize(ptr, alignment, 0);
     if (buff_size == (size_t)-1) {
         if (error) {
-            *error = fimo_error_from_errno(errno);
+            *error = FIMO_RESULT_FROM_ERROR_CODE(fimo_error_code_from_errno(errno));
         }
         _aligned_free(ptr);
         return (FimoMallocBuffer){.ptr = NULL, .buff_size = 0};

@@ -71,13 +71,13 @@ static FimoVersion FIMO_IMPLEMENTED_VERSION =
         FIMO_VERSION_LONG(FIMO_VERSION_MAJOR, FIMO_VERSION_MINOR, FIMO_VERSION_PATCH, FIMO_VERSION_BUILD_NUMBER);
 
 FIMO_MUST_USE
-FimoError fimo_internal_context_init(const FimoBaseStructIn **options, FimoContext *context) {
+FimoResult fimo_internal_context_init(const FimoBaseStructIn **options, FimoContext *context) {
     if (context == NULL) {
         return FIMO_EINVAL;
     }
 
     // Parse the options. Each option type may occur at most once.
-    FimoError error;
+    FimoResult error;
     const FimoTracingCreationConfig *tracing_config = NULL;
     if (options != NULL) {
         for (const FimoBaseStructIn **cursor = options; *cursor != NULL; cursor++) {
@@ -100,20 +100,20 @@ FimoError fimo_internal_context_init(const FimoBaseStructIn **options, FimoConte
     options = NULL;
 
     FimoInternalContext *ctx = fimo_aligned_alloc(_Alignof(FimoInternalContext), sizeof(FimoInternalContext), &error);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         return error;
     }
 
     ctx->ref_count = (FimoAtomicRefCount)FIMO_REFCOUNT_INIT;
 
     error = fimo_internal_tracing_init(&ctx->tracing, tracing_config);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         goto cleanup;
     }
     tracing_config = NULL;
 
     error = fimo_internal_module_init(&ctx->module);
-    if (FIMO_IS_ERROR(error)) {
+    if (FIMO_RESULT_IS_ERROR(error)) {
         goto deinit_tracing;
     }
 
@@ -146,7 +146,7 @@ cleanup_options:
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_context_to_public_ctx(void *ptr, FimoContext *context) {
+FimoResult fimo_internal_context_to_public_ctx(void *ptr, FimoContext *context) {
     if (ptr == NULL || context == NULL) {
         return FIMO_EINVAL;
     }
@@ -178,7 +178,7 @@ void fimo_internal_context_release(void *ptr) {
 }
 
 FIMO_MUST_USE
-FimoError fimo_internal_context_check_version(void *ptr, const FimoVersion *required) {
+FimoResult fimo_internal_context_check_version(void *ptr, const FimoVersion *required) {
     // Not strictly required, but we include it, in case we decide to embed
     // the version into the instance in the future.
     FimoInternalContext *context = ptr;

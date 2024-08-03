@@ -59,7 +59,7 @@ typedef struct FimoBaseStructOut {
  * available to us.
  */
 typedef struct FimoContextVTableHeader {
-    FimoError (*check_version)(void *, const FimoVersion *);
+    FimoResult (*check_version)(void *, const FimoVersion *);
 } FimoContextVTableHeader;
 
 /**
@@ -87,7 +87,7 @@ typedef struct FimoContextVTableV0 {
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_context_init(const FimoBaseStructIn **options, FimoContext *context);
+FimoResult fimo_context_init(const FimoBaseStructIn **options, FimoContext *context);
 
 /**
  * Checks the compatibility of the context version.
@@ -103,7 +103,7 @@ FimoError fimo_context_init(const FimoBaseStructIn **options, FimoContext *conte
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_context_check_version(FimoContext context);
+FimoResult fimo_context_check_version(FimoContext context);
 
 /**
  * Acquires a reference to the context.

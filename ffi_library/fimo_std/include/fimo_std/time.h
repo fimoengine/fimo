@@ -288,7 +288,7 @@ FimoU64 fimo_duration_as_nanos(const FimoDuration *duration, FimoU32 *high);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_duration_add(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out);
+FimoResult fimo_duration_add(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out);
 
 /**
  * Adds two durations.
@@ -318,7 +318,7 @@ FimoDuration fimo_duration_saturating_add(const FimoDuration *lhs, const FimoDur
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_duration_sub(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out);
+FimoResult fimo_duration_sub(const FimoDuration *lhs, const FimoDuration *rhs, FimoDuration *out);
 
 /**
  * Subtracts two durations.
@@ -356,7 +356,7 @@ FimoTime fimo_time_now(void);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed);
+FimoResult fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed);
 
 /**
  * Returns the difference between two time points.
@@ -372,8 +372,8 @@ FimoError fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_time_duration_since(const FimoTime *time_point, const FimoTime *earlier_time_point,
-                                   FimoDuration *duration);
+FimoResult fimo_time_duration_since(const FimoTime *time_point, const FimoTime *earlier_time_point,
+                                    FimoDuration *duration);
 
 /**
  * Adds a duration to a time point.
@@ -389,7 +389,7 @@ FimoError fimo_time_duration_since(const FimoTime *time_point, const FimoTime *e
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_time_add(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out);
+FimoResult fimo_time_add(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out);
 
 /**
  * Adds a duration to a time point.
@@ -419,7 +419,7 @@ FimoTime fimo_time_saturating_add(const FimoTime *time_point, const FimoDuration
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_time_sub(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out);
+FimoResult fimo_time_sub(const FimoTime *time_point, const FimoDuration *duration, FimoTime *out);
 
 /**
  * Subtracts a duration from a time point.

@@ -9,13 +9,13 @@ static const FimoVersion FIMO_REQUIRED_VERSION =
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_context_init(const FimoBaseStructIn **options, FimoContext *context) {
+FimoResult fimo_context_init(const FimoBaseStructIn **options, FimoContext *context) {
     return fimo_internal_context_init(options, context);
 }
 
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoError fimo_context_check_version(const FimoContext context) {
+FimoResult fimo_context_check_version(const FimoContext context) {
     const FimoContextVTableHeader *vtable = context.vtable;
     return vtable->check_version(context.data, &FIMO_REQUIRED_VERSION);
 }
