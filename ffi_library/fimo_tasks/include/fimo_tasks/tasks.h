@@ -269,10 +269,10 @@ typedef struct FiTasksWorkerGroupVTableV0 {
     bool (*is_open)(void *);
     bool (*is_worker)(void *);
     const char *(*name)(void *);
-    FimoError (*request_close)(void *);
-    FimoError (*workers)(void *, FimoUSize **, FimoUSize *);
-    FimoError (*stack_sizes)(void *, FimoUSize **, FimoUSize *);
-    FimoError (*enqueue_buffer)(void *, FiTasksCommandBuffer *, bool, FiTasksCommandBufferHandle *);
+    FimoResult (*request_close)(void *);
+    FimoResult (*workers)(void *, FimoUSize **, FimoUSize *);
+    FimoResult (*stack_sizes)(void *, FimoUSize **, FimoUSize *);
+    FimoResult (*enqueue_buffer)(void *, FiTasksCommandBuffer *, bool, FiTasksCommandBufferHandle *);
 } FiTasksWorkerGroupVTableV0;
 
 struct FiTasksWorkerGroupVTable {
@@ -285,8 +285,8 @@ struct FiTasksWorkerGroupVTable {
 typedef struct FiTasksCommandBufferHandleVTableV0 {
     void (*acquire)(void *);
     void (*release)(void *);
-    FimoError (*worker_group)(void *, FiTasksWorkerGroup *);
-    FimoError (*wait_on)(void *, bool *);
+    FimoResult (*worker_group)(void *, FiTasksWorkerGroup *);
+    FimoResult (*wait_on)(void *, bool *);
 } FiTasksCommandBufferHandleVTableV0;
 
 /**
@@ -596,29 +596,29 @@ typedef enum FiTasksRequeueOp {
  */
 typedef struct FiTasksVTableV0 {
     bool (*is_worker)(void *);
-    FimoError (*task_id)(void *, FimoUSize *);
-    FimoError (*worker_id)(void *, FimoUSize *);
-    FimoError (*worker_group)(void *, FiTasksWorkerGroup *);
-    FimoError (*worker_group_by_id)(void *, FimoUSize, FiTasksWorkerGroup *);
-    FimoError (*query_worker_groups)(void *, FiTasksWorkerGroupQuery **);
-    FimoError (*release_worker_group_query)(void *, FiTasksWorkerGroupQuery *);
-    FimoError (*create_worker_group)(void *, FiTasksWorkerGroupConfig, FiTasksWorkerGroup *);
-    FimoError (*yield)(void *);
-    FimoError (*abort)(void *, void *);
-    FimoError (*sleep)(void *, FimoDuration);
-    FimoError (*tss_set)(void *, FiTasksTssKey, void *, FiTasksTssDtor);
-    FimoError (*tss_get)(void *, FiTasksTssKey, void **);
-    FimoError (*tss_clear)(void *, FiTasksTssKey);
-    FimoError (*park_conditionally)(void *, const void *, bool (*)(void *), void *, void (*)(void *), void *,
+    FimoResult (*task_id)(void *, FimoUSize *);
+    FimoResult (*worker_id)(void *, FimoUSize *);
+    FimoResult (*worker_group)(void *, FiTasksWorkerGroup *);
+    FimoResult (*worker_group_by_id)(void *, FimoUSize, FiTasksWorkerGroup *);
+    FimoResult (*query_worker_groups)(void *, FiTasksWorkerGroupQuery **);
+    FimoResult (*release_worker_group_query)(void *, FiTasksWorkerGroupQuery *);
+    FimoResult (*create_worker_group)(void *, FiTasksWorkerGroupConfig, FiTasksWorkerGroup *);
+    FimoResult (*yield)(void *);
+    FimoResult (*abort)(void *, void *);
+    FimoResult (*sleep)(void *, FimoDuration);
+    FimoResult (*tss_set)(void *, FiTasksTssKey, void *, FiTasksTssDtor);
+    FimoResult (*tss_get)(void *, FiTasksTssKey, void **);
+    FimoResult (*tss_clear)(void *, FiTasksTssKey);
+    FimoResult (*park_conditionally)(void *, const void *, bool (*)(void *), void *, void (*)(void *), void *,
                                     void (*)(void *, const void *, bool), void *, const void *, const FimoDuration *,
                                     FiTasksParkResult *);
-    FimoError (*unpark_one)(void *, const void *, const void *(*)(void *, FiTasksUnparkResult), void *,
+    FimoResult (*unpark_one)(void *, const void *, const void *(*)(void *, FiTasksUnparkResult), void *,
                             FiTasksUnparkResult *);
-    FimoError (*unpark_all)(void *, const void *, const void *, FimoUSize *);
-    FimoError (*unpark_requeue)(void *, const void *, const void *, FiTasksRequeueOp (*)(void *), void *,
+    FimoResult (*unpark_all)(void *, const void *, const void *, FimoUSize *);
+    FimoResult (*unpark_requeue)(void *, const void *, const void *, FiTasksRequeueOp (*)(void *), void *,
                                 const void *(*)(void *, FiTasksRequeueOp, FiTasksUnparkResult), void *,
                                 FiTasksUnparkResult *);
-    FimoError (*unpark_filter)(void *, const void *, FiTasksUnparkFilterOp (*)(void *, const void *), void *,
+    FimoResult (*unpark_filter)(void *, const void *, FiTasksUnparkFilterOp (*)(void *, const void *), void *,
                                const void *(*)(void *, FiTasksUnparkResult), void *, FiTasksUnparkResult *);
 } FiTasksVTableV0;
 
@@ -709,7 +709,7 @@ static FIMO_INLINE_ALWAYS const char *fi_tasks_worker_group_name(FiTasksWorkerGr
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_request_close(FiTasksWorkerGroup grp) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_worker_group_request_close(FiTasksWorkerGroup grp) {
     return grp.vtable->v0.request_close(grp.data);
 }
 
@@ -729,7 +729,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_request_close(FiTasksW
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_workers(FiTasksWorkerGroup grp, FimoUSize **workers,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_worker_group_workers(FiTasksWorkerGroup grp, FimoUSize **workers,
                                                                   FimoUSize *count) {
     return grp.vtable->v0.workers(grp.data, workers, count);
 }
@@ -753,7 +753,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_workers(FiTasksWorkerG
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_stack_sizes(FiTasksWorkerGroup grp, FimoUSize **stack_sizes,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_worker_group_stack_sizes(FiTasksWorkerGroup grp, FimoUSize **stack_sizes,
                                                                       FimoUSize *count) {
     return grp.vtable->v0.stack_sizes(grp.data, stack_sizes, count);
 }
@@ -777,7 +777,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_stack_sizes(FiTasksWor
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_worker_group_enqueue_buffer(FiTasksWorkerGroup grp,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_worker_group_enqueue_buffer(FiTasksWorkerGroup grp,
                                                                          FiTasksCommandBuffer *buffer, bool detached,
                                                                          FiTasksCommandBufferHandle *handle) {
     return grp.vtable->v0.enqueue_buffer(grp.data, buffer, detached, handle);
@@ -810,7 +810,7 @@ static FIMO_INLINE_ALWAYS void fi_tasks_command_buffer_handle_release(FiTasksCom
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_command_buffer_worker_group(FiTasksCommandBufferHandle handle,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_command_buffer_worker_group(FiTasksCommandBufferHandle handle,
                                                                          FiTasksWorkerGroup *grp) {
     return handle.vtable->v0.worker_group(handle.data, grp);
 }
@@ -832,7 +832,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_command_buffer_worker_group(FiTasks
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_command_buffer_wait_on(FiTasksCommandBufferHandle handle, bool *error) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_command_buffer_wait_on(FiTasksCommandBufferHandle handle, bool *error) {
     return handle.vtable->v0.wait_on(handle.data, error);
 }
 
@@ -861,7 +861,7 @@ static FIMO_INLINE_ALWAYS bool fi_tasks_ctx_is_worker(FiTasksContext ctx) { retu
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_task_id(FiTasksContext ctx, FimoUSize *id) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_task_id(FiTasksContext ctx, FimoUSize *id) {
     return ctx.vtable->v0.task_id(ctx.data, id);
 }
 
@@ -879,7 +879,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_task_id(FiTasksContext ctx, Fim
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_worker_id(FiTasksContext ctx, FimoUSize *id) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_worker_id(FiTasksContext ctx, FimoUSize *id) {
     return ctx.vtable->v0.worker_id(ctx.data, id);
 }
 
@@ -894,7 +894,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_worker_id(FiTasksContext ctx, F
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_worker_group(FiTasksContext ctx, FiTasksWorkerGroup *grp) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_worker_group(FiTasksContext ctx, FiTasksWorkerGroup *grp) {
     return ctx.vtable->v0.worker_group(ctx.data, grp);
 }
 
@@ -910,7 +910,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_worker_group(FiTasksContext ctx
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_worker_group_by_id(FiTasksContext ctx, FimoUSize id,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_worker_group_by_id(FiTasksContext ctx, FimoUSize id,
                                                                     FiTasksWorkerGroup *grp) {
     return ctx.vtable->v0.worker_group_by_id(ctx.data, id, grp);
 }
@@ -929,7 +929,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_worker_group_by_id(FiTasksConte
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_query_worker_groups(FiTasksContext ctx,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_query_worker_groups(FiTasksContext ctx,
                                                                      FiTasksWorkerGroupQuery **query) {
     return ctx.vtable->v0.query_worker_groups(ctx.data, query);
 }
@@ -945,7 +945,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_query_worker_groups(FiTasksCont
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_release_worker_group_query(FiTasksContext ctx,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_release_worker_group_query(FiTasksContext ctx,
                                                                             FiTasksWorkerGroupQuery *query) {
     return ctx.vtable->v0.release_worker_group_query(ctx.data, query);
 }
@@ -963,7 +963,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_release_worker_group_query(FiTa
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_create_worker_group(FiTasksContext ctx, FiTasksWorkerGroupConfig cfg,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_create_worker_group(FiTasksContext ctx, FiTasksWorkerGroupConfig cfg,
                                                                      FiTasksWorkerGroup *grp) {
     return ctx.vtable->v0.create_worker_group(ctx.data, cfg, grp);
 }
@@ -979,7 +979,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_create_worker_group(FiTasksCont
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_yield(FiTasksContext ctx) { return ctx.vtable->v0.yield(ctx.data); }
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_yield(FiTasksContext ctx) { return ctx.vtable->v0.yield(ctx.data); }
 
 /**
  * Aborts the current task.
@@ -999,7 +999,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_yield(FiTasksContext ctx) { ret
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_abort(FiTasksContext ctx, void *error) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_abort(FiTasksContext ctx, void *error) {
     return ctx.vtable->v0.abort(ctx.data, error);
 }
 
@@ -1029,7 +1029,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_abort(FiTasksContext ctx, void 
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_tss_set(FiTasksContext ctx, FiTasksTssKey key, void *value,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_tss_set(FiTasksContext ctx, FiTasksTssKey key, void *value,
                                                          FiTasksTssDtor dtor) {
     return ctx.vtable->v0.tss_set(ctx.data, key, value, dtor);
 }
@@ -1051,7 +1051,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_tss_set(FiTasksContext ctx, FiT
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_tss_get(FiTasksContext ctx, FiTasksTssKey key, void **value) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_tss_get(FiTasksContext ctx, FiTasksTssKey key, void **value) {
     return ctx.vtable->v0.tss_get(ctx.data, key, value);
 }
 
@@ -1073,7 +1073,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_tss_get(FiTasksContext ctx, FiT
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_tss_clear(FiTasksContext ctx, FiTasksTssKey key) {
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_tss_clear(FiTasksContext ctx, FiTasksTssKey key) {
     return ctx.vtable->v0.tss_clear(ctx.data, key);
 }
 
@@ -1123,7 +1123,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_tss_clear(FiTasksContext ctx, F
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_park_conditionally(
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_park_conditionally(
         FiTasksContext ctx, const void *key, bool (*validate)(void *), void *validate_data,
         void (*before_sleep)(void *), void *before_sleep_data, void (*timed_out)(void *, const void *, bool),
         void *timed_out_data, const void *park_token, const FimoDuration *timeout, FiTasksParkResult *result) {
@@ -1165,7 +1165,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_park_conditionally(
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_one(FiTasksContext ctx, const void *key,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_unpark_one(FiTasksContext ctx, const void *key,
                                                             const void *(*callback)(void *, FiTasksUnparkResult),
                                                             void *callback_data, FiTasksUnparkResult *result) {
     return ctx.vtable->v0.unpark_one(ctx.data, key, callback, callback_data, result);
@@ -1196,7 +1196,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_one(FiTasksContext ctx, 
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_all(FiTasksContext ctx, const void *key,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_unpark_all(FiTasksContext ctx, const void *key,
                                                             const void *unpark_token, FimoUSize *unparked_tasks) {
     return ctx.vtable->v0.unpark_all(ctx.data, key, unpark_token, unparked_tasks);
 }
@@ -1242,7 +1242,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_all(FiTasksContext ctx, 
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_requeue(
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_unpark_requeue(
         FiTasksContext ctx, const void *key_from, const void *key_to, FiTasksRequeueOp (*validate)(void *),
         void *validate_data, const void *(*callback)(void *, FiTasksRequeueOp, FiTasksUnparkResult),
         void *callback_data, FiTasksUnparkResult *result) {
@@ -1291,7 +1291,7 @@ static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_requeue(
  * @return Status code.
  */
 FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoError fi_tasks_ctx_unpark_filter(FiTasksContext ctx, const void *key,
+static FIMO_INLINE_ALWAYS FimoResult fi_tasks_ctx_unpark_filter(FiTasksContext ctx, const void *key,
                                                                FiTasksUnparkFilterOp (*filter)(void *, const void *),
                                                                void *filter_data,
                                                                const void *(*callback)(void *, FiTasksUnparkResult),
