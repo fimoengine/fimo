@@ -273,6 +273,7 @@ impl CommandBufferImpl {
         self.stack_size
     }
 
+    #[allow(dead_code)]
     pub fn mark_task_as_blocked(&mut self, index: usize, worker: Option<WorkerId>, task: RawTask) {
         let id = task.id();
         let old = self.blocked_tasks.insert(id, (index, worker, task));
