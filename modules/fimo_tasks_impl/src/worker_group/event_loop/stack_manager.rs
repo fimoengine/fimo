@@ -143,12 +143,11 @@ impl StackAllocator {
         }
 
         let stack = if self.protected {
-            let stack = context::stack::ProtectedFixedSizeStack::new(self.size)
-                .map_err(|e| <Error>::new(e))?;
+            let stack =
+                context::stack::ProtectedFixedSizeStack::new(self.size).map_err(Error::new)?;
             StackMemory::Protected(stack)
         } else {
-            let stack =
-                context::stack::FixedSizeStack::new(self.size).map_err(|e| Error::new(e))?;
+            let stack = context::stack::FixedSizeStack::new(self.size).map_err(Error::new)?;
             StackMemory::Unprotected(stack)
         };
 
