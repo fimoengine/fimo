@@ -122,35 +122,38 @@ impl StackAllocator {
 
         // Preallocate stacks.
         for _ in 0..preallocated {
-            let stack = this.acquire_stack().expect("could not preallocate stack");
+            let stack = this
+                .acquire_stack()
+                .expect("could not preallocate stack")
+                .unwrap();
             this.release_stack(stack);
         }
 
         this
     }
 
-    pub fn acquire_stack(&mut self) -> Result<AcquiredStack, Error> {
+    pub fn acquire_stack(&mut self) -> Result<Option<AcquiredStack>, Error> {
         if self.num_acquired == self.max_num_allocated {
-            return Err(Error::EBUSY);
+            return Ok(None);
         }
 
         if let Some(memory) = self.free_list.pop() {
             self.num_acquired += 1;
-            return Ok(AcquiredStack::new(self.id, memory));
+            return Ok(Some(AcquiredStack::new(self.id, memory)));
         }
 
         let stack = if self.protected {
             let stack = context::stack::ProtectedFixedSizeStack::new(self.size)
-                .map_err(|_e| Error::EUNKNOWN)?;
+                .map_err(|e| <Error>::new(e))?;
             StackMemory::Protected(stack)
         } else {
             let stack =
-                context::stack::FixedSizeStack::new(self.size).map_err(|_e| Error::EUNKNOWN)?;
+                context::stack::FixedSizeStack::new(self.size).map_err(|e| Error::new(e))?;
             StackMemory::Unprotected(stack)
         };
 
         self.num_acquired += 1;
-        Ok(AcquiredStack::new(self.id, stack))
+        Ok(Some(AcquiredStack::new(self.id, stack)))
     }
 
     pub fn release_stack(&mut self, stack: AcquiredStack) {
@@ -184,11 +187,11 @@ impl StackAllocator {
             }
 
             return match self.acquire_stack() {
-                Ok(stack) => {
+                Ok(Some(stack)) => {
                     let (handle, task_id) = self.waiting_tasks.pop_front().unwrap();
                     Some((handle, task_id, stack))
                 }
-                Err(_) => None,
+                _ => None,
             };
         }
 

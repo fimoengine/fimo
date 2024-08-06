@@ -24,7 +24,7 @@ impl ContextImpl {
         with_worker_context_lock(|worker| match &worker.current_task {
             None => {
                 fimo_std::emit_error!(module.context(), "no task registered for current worker");
-                Err(Error::EUNKNOWN)
+                Err(Error::from_string(c"task not owned by worker"))
             }
             Some(t) => Ok(t.id()),
         })
@@ -240,7 +240,7 @@ impl ContextImpl {
     unsafe extern "C" fn task_id_ffi(
         _this: *mut std::ffi::c_void,
         id: *mut usize,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -255,14 +255,15 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn worker_id_ffi(
         _this: *mut std::ffi::c_void,
         id: *mut usize,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -277,14 +278,15 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn worker_group_ffi(
         _this: *mut std::ffi::c_void,
         group: *mut bindings::FiTasksWorkerGroup,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -302,15 +304,16 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn worker_group_by_id_ffi(
         _this: *mut std::ffi::c_void,
         id: usize,
         group: *mut bindings::FiTasksWorkerGroup,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -329,14 +332,15 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn query_worker_groups_ffi(
         _this: *mut std::ffi::c_void,
         query: *mut *mut bindings::FiTasksWorkerGroupQuery,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -351,14 +355,15 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn release_worker_group_query_ffi(
         _this: *mut std::ffi::c_void,
         query: *mut bindings::FiTasksWorkerGroupQuery,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -371,15 +376,16 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::<Error>::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn create_worker_group_ffi(
         _this: *mut std::ffi::c_void,
         cfg: bindings::FiTasksWorkerGroupConfig,
         group: *mut bindings::FiTasksWorkerGroup,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -442,11 +448,12 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
-    unsafe extern "C" fn yield_ffi(_this: *mut std::ffi::c_void) -> std_bindings::FimoError {
+    unsafe extern "C" fn yield_ffi(_this: *mut std::ffi::c_void) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -456,31 +463,34 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn abort_ffi(
         _this: *mut std::ffi::c_void,
         error: *mut std::ffi::c_void,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
                 TasksModuleToken::with_current_unlocked(|module| {
                     let _span = fimo_std::span_trace!(module.context(), "error: {error:?}");
-                    Self.abort(module, error)
+                    Self.abort(module, error)?;
+                    Ok(())
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn sleep_ffi(
         _this: *mut std::ffi::c_void,
         duration: std_bindings::FimoDuration,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -491,8 +501,9 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn tss_set_ffi(
@@ -500,7 +511,7 @@ impl ContextImpl {
         key: bindings::FiTasksTssKey,
         value: *mut std::ffi::c_void,
         dtor: bindings::FiTasksTssDtor,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -513,15 +524,16 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn tss_get_ffi(
         _this: *mut std::ffi::c_void,
         key: bindings::FiTasksTssKey,
         value: *mut *mut std::ffi::c_void,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -537,14 +549,15 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn tss_clear_ffi(
         _this: *mut std::ffi::c_void,
         key: bindings::FiTasksTssKey,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is safe since we are calling it from an exported symbol.
             unsafe {
@@ -554,8 +567,9 @@ impl ContextImpl {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn park_conditionally_ffi(
@@ -572,8 +586,8 @@ impl ContextImpl {
         _park_token: *const std::ffi::c_void,
         _timeout: *const std_bindings::FimoDuration,
         _result: *mut bindings::FiTasksParkResult,
-    ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> std_bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 
     unsafe extern "C" fn unpark_one_ffi(
@@ -587,8 +601,8 @@ impl ContextImpl {
         >,
         _callback_data: *mut std::ffi::c_void,
         _result: *mut bindings::FiTasksUnparkResult,
-    ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> std_bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 
     unsafe extern "C" fn unpark_all_ffi(
@@ -596,8 +610,8 @@ impl ContextImpl {
         _key: *const std::ffi::c_void,
         _unpark_token: *const std::ffi::c_void,
         _unparked_tasks: *mut usize,
-    ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> std_bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 
     unsafe extern "C" fn unpark_requeue_ffi(
@@ -617,8 +631,8 @@ impl ContextImpl {
         >,
         _callback_data: *mut std::ffi::c_void,
         _result: *mut bindings::FiTasksUnparkResult,
-    ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> std_bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 
     unsafe extern "C" fn unpark_filter_ffi(
@@ -639,7 +653,7 @@ impl ContextImpl {
         >,
         _callback_data: *mut std::ffi::c_void,
         _result: *mut bindings::FiTasksUnparkResult,
-    ) -> std_bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> std_bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 }

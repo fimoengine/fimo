@@ -219,30 +219,31 @@ impl WorkerGroupFFI {
 
     unsafe extern "C" fn request_close(
         this: *mut std::ffi::c_void,
-    ) -> fimo_std::bindings::FimoError {
+    ) -> fimo_std::bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Must be ensured by the caller.
             let this = unsafe { Self::borrow_from_ffi(this) };
             this.request_close()
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn workers(
         _this: *mut std::ffi::c_void,
         _workers: *mut *mut usize,
         _count: *mut usize,
-    ) -> fimo_std::bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> fimo_std::bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 
     unsafe extern "C" fn stack_sizes(
         _this: *mut std::ffi::c_void,
         _stack_sizes: *mut *mut usize,
         _count: *mut usize,
-    ) -> fimo_std::bindings::FimoError {
-        Error::ENOSYS.into_error()
+    ) -> fimo_std::bindings::FimoResult {
+        <Error>::ENOSYS.into_error()
     }
 
     unsafe extern "C" fn enqueue_buffer(
@@ -250,7 +251,7 @@ impl WorkerGroupFFI {
         buffer: *mut bindings::FiTasksCommandBuffer,
         detached: bool,
         handle: *mut bindings::FiTasksCommandBufferHandle,
-    ) -> fimo_std::bindings::FimoError {
+    ) -> fimo_std::bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             if this.is_null() || buffer.is_null() || (handle.is_null() && !detached) {
                 return Err(Error::EINVAL);
@@ -280,8 +281,9 @@ impl WorkerGroupFFI {
             unsafe { handle.write(handle_ffi) };
             Ok(())
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 }
 
@@ -298,15 +300,15 @@ impl FFISharable<*mut std::ffi::c_void> for WorkerGroupFFI {
     }
 }
 
-impl FFITransferable<fimo_tasks::bindings::FiTasksWorkerGroup> for WorkerGroupFFI {
-    fn into_ffi(self) -> fimo_tasks::bindings::FiTasksWorkerGroup {
-        fimo_tasks::bindings::FiTasksWorkerGroup {
+impl FFITransferable<bindings::FiTasksWorkerGroup> for WorkerGroupFFI {
+    fn into_ffi(self) -> bindings::FiTasksWorkerGroup {
+        bindings::FiTasksWorkerGroup {
             data: Arc::into_raw(self.0).cast_mut().cast(),
             vtable: Self::VTABLE,
         }
     }
 
-    unsafe fn from_ffi(ffi: fimo_tasks::bindings::FiTasksWorkerGroup) -> Self {
+    unsafe fn from_ffi(ffi: bindings::FiTasksWorkerGroup) -> Self {
         // Safety:
         unsafe { WorkerGroupFFI(Arc::from_raw(ffi.data.cast_const().cast())) }
     }
