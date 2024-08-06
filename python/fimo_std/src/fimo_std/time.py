@@ -145,7 +145,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
         err = _ffi.fimo_duration_add(
             c.byref(self._ffi), c.byref(other._ffi), c.byref(ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
     def saturating_add(self, other: Self) -> "Duration":
@@ -170,7 +170,7 @@ class Duration(_ffi.FFITransferable[_ffi.FimoDuration]):
         err = _ffi.fimo_duration_sub(
             c.byref(self._ffi), c.byref(other._ffi), c.byref(ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
     def saturating_sub(self, other: Self) -> "Duration":
@@ -274,7 +274,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         """
         ffi = _ffi.FimoDuration()
         err = _ffi.fimo_time_elapsed(c.byref(self._ffi), c.byref(ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
     def duration_since(self, earlier: "Time") -> Duration:
@@ -291,7 +291,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         err = _ffi.fimo_time_duration_since(
             c.byref(self._ffi), c.byref(earlier._ffi), c.byref(ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Duration.transfer_from_ffi(ffi)
 
     def __add__(self, other: Duration) -> "Time":
@@ -301,7 +301,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         ffi = _ffi.FimoTime()
         other_ffi = other.transfer_to_ffi()
         err = _ffi.fimo_time_add(c.byref(self._ffi), c.byref(other_ffi), c.byref(ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Time.transfer_from_ffi(ffi)
 
     def saturating_add(self, other: Duration) -> "Time":
@@ -326,7 +326,7 @@ class Time(_ffi.FFITransferable[_ffi.FimoTime]):
         ffi = _ffi.FimoTime()
         other_ffi = other.transfer_to_ffi()
         err = _ffi.fimo_time_sub(c.byref(self._ffi), c.byref(other_ffi), c.byref(ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Time.transfer_from_ffi(ffi)
 
     def saturating_sub(self, other: Duration) -> "Time":

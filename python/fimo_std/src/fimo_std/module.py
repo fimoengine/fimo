@@ -110,7 +110,7 @@ class ModuleInfoView(
             raise TypeError("`ctx` must be an instance of `ContextView`")
 
         err = _ffi.fimo_module_unload(ctx.ffi, self.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def is_loaded(self) -> bool:
         """Checks whether the underlying module is still loaded."""
@@ -122,7 +122,7 @@ class ModuleInfoView(
         The module may be locked multiple times.
         """
         err = _ffi.fimo_impl_module_info_lock_unload(self.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -181,7 +181,7 @@ class ModuleInfo(
         module_ffi = c.POINTER(_ffi.FimoModuleInfo)()
         name_ffi = c.c_char_p(name.encode())
         err = _ffi.fimo_module_find_by_name(ctx.ffi, name_ffi, c.byref(module_ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return cls(module_ffi)
 
@@ -206,7 +206,7 @@ class ModuleInfo(
         err = _ffi.fimo_module_find_by_symbol(
             ctx.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(module_ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return cls(module_ffi)
 
@@ -503,7 +503,7 @@ class ModuleBase(
         err = _ffi.fimo_module_namespace_included(
             self.ffi, namespace_ffi, c.byref(is_included_ffi), c.byref(is_static_ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         if not is_included_ffi.value:
             return None
@@ -523,7 +523,7 @@ class ModuleBase(
 
         namespace_ffi = c.c_char_p(namespace.encode())
         err = _ffi.fimo_module_namespace_include(self.ffi, namespace_ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def exclude_namespace(self, namespace: str) -> None:
         """Removes a namespace from the module.
@@ -537,7 +537,7 @@ class ModuleBase(
 
         namespace_ffi = c.c_char_p(namespace.encode())
         err = _ffi.fimo_module_namespace_exclude(self.ffi, namespace_ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def has_dependency(self, module: ModuleInfoView) -> Optional[DependencyType]:
         """Checks if a module depends on another module.
@@ -554,7 +554,7 @@ class ModuleBase(
         err = _ffi.fimo_module_has_dependency(
             self.ffi, module_ffi, c.byref(has_dependency_ffi), c.byref(is_static_ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         if not has_dependency_ffi.value:
             return None
@@ -576,7 +576,7 @@ class ModuleBase(
 
         module_ffi = module.ffi
         err = _ffi.fimo_module_acquire_dependency(self.ffi, module_ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def remove_dependency(self, module: ModuleInfoView) -> None:
         """Removes a module as a dependency.
@@ -591,7 +591,7 @@ class ModuleBase(
 
         module_ffi = module.ffi
         err = _ffi.fimo_module_relinquish_dependency(self.ffi, module_ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     # noinspection PyProtectedMember
     def load_symbol(self, sym_type: type[Symbol[_T]]) -> Symbol[_T]:
@@ -635,7 +635,7 @@ class ModuleBase(
         err = _ffi.fimo_module_load_symbol(
             self.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(symbol_ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return RawSymbol(symbol_ffi)
 
@@ -687,7 +687,7 @@ class PseudoModule(_OpaqueModule):
 
         module_ffi = c.POINTER(_ffi.FimoModule)()
         err = _ffi.fimo_module_pseudo_module_new(ctx.ffi, c.byref(module_ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         super().__init__(module_ffi)
 
@@ -699,7 +699,7 @@ class PseudoModule(_OpaqueModule):
         """Destroys the `PseudoModule."""
         ctx_ffi = _ffi.FimoContext()
         err = _ffi.fimo_module_pseudo_module_destroy(self.ffi, c.byref(ctx_ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         self._consume()
         return context.Context.transfer_from_ffi(ctx_ffi)
 
@@ -872,7 +872,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_get_public(
             ctx.ffi, value_ffi_ptr, c.byref(type_ffi), module_ffi, parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
         match type:
@@ -926,7 +926,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_get_dependency(
             caller.ffi, value_ffi_ptr, c.byref(type_ffi), module_ffi, parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
         match type:
@@ -972,7 +972,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_get_private(
             caller.ffi, value_ffi_ptr, c.byref(type_ffi), parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
         match type:
@@ -1018,7 +1018,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_get_inner(
             caller.ffi, value_ffi_ptr, c.byref(type_ffi), parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         type = ParameterType.transfer_from_ffi(type_ffi)
 
         match type:
@@ -1087,7 +1087,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_set_public(
             ctx.ffi, value_ffi_ptr, type_ffi, module_ffi, parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def write_dependency(self, caller: ModuleBase, module: str, parameter: str) -> None:
         """Writes a module parameter with dependency write access.
@@ -1135,7 +1135,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_set_dependency(
             caller.ffi, value_ffi_ptr, type_ffi, module_ffi, parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def write_private(self, caller: ModuleBase, parameter: Parameter) -> None:
         """Writes a module parameter with private write access.
@@ -1175,7 +1175,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_set_private(
             caller.ffi, value_ffi_ptr, type_ffi, parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def write_inner(self, caller: ModuleBase, parameter: ParameterData) -> None:
         """Writes a module parameter.
@@ -1215,7 +1215,7 @@ class ParameterValue:
         err = _ffi.fimo_module_param_set_inner(
             caller.ffi, value_ffi_ptr, type_ffi, parameter_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def __repr__(self) -> str:
         return f"ParameterValue.{self._type}({self._value})"
@@ -1964,7 +1964,7 @@ class LoadingSetView(
         err = _ffi.fimo_module_set_has_module(
             ctx.ffi, self.ffi, name_ffi, c.byref(has_module_ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return has_module_ffi.value
 
@@ -1994,7 +1994,7 @@ class LoadingSetView(
             version_ffi,
             c.byref(has_symbol_ffi),
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return has_symbol_ffi.value
 
@@ -2034,7 +2034,7 @@ class LoadingSetView(
             _loading_set_callback_on_error_func,
             c.c_void_p.from_buffer(wrapper_ffi),
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         # Since the callbacks will be passed to a C-interface it must take
         # ownership of the object. We do this by increasing the reference count
@@ -2069,7 +2069,7 @@ class LoadingSetView(
         err = _ffi.fimo_module_set_append_freestanding_module(
             owner.ffi, self.ffi, export.ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         # Now that we transferred the export without an error we also confirm it
         # on the python side
@@ -2128,7 +2128,7 @@ class LoadingSetView(
         err = _ffi.fimo_module_set_append_modules(
             ctx.ffi, self.ffi, module_path_ffi, filter_ffi, c.c_void_p()
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
 
 class LoadingSet(
@@ -2181,7 +2181,7 @@ class LoadingSet(
 
         ffi = c.POINTER(_ffi.FimoModuleLoadingSet)()
         err = _ffi.fimo_module_set_new(ctx.ffi, c.byref(ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return cls(ffi, ctx)
 
@@ -2193,7 +2193,7 @@ class LoadingSet(
         """
         assert self._ctx is not None
         err = _ffi.fimo_module_set_dismiss(self._ctx.ffi, self.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         self._consume()
         del self._ctx
@@ -2211,7 +2211,7 @@ class LoadingSet(
         """
         assert self._ctx is not None
         err = _ffi.fimo_module_set_finish(self._ctx.ffi, self.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         self._consume()
         del self._ctx
@@ -2329,7 +2329,7 @@ class ModuleCtx:
         err = _ffi.fimo_module_namespace_exists(
             self.context.ffi, namespace_ffi, c.byref(exists_ffi)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         return exists_ffi.value
 
@@ -2810,7 +2810,7 @@ def export_module(
                 value_addr: int,
                 type_ffi: _ffi.FimoModuleParamType,
                 data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData],
-            ) -> error.ErrorCode:
+            ) -> _ffi.FimoResult:
                 try:
                     module = module_type.transfer_from_ffi(module_ffi)
                     value_ffi = c.c_void_p(value_addr)
@@ -2855,16 +2855,16 @@ def export_module(
                     data = ParameterData.borrow_from_ffi(data_ffi)
                     setter(module, parameter, data)
 
-                    return error.ErrorCode.EOK
+                    return error.Result.new(None).transfer_to_ffi()
                 except Exception as e:
-                    return error.ErrorCode.from_exception(e)
+                    return error.Result.new(e).transfer_to_ffi()
 
             def getter_wrapper(
                 module_ffi: _ffi.Pointer[_ffi.FimoModule],
                 value_addr: int,
                 type_ffi: _ffi.Pointer[_ffi.FimoModuleParamType],
                 data_ffi: _ffi.Pointer[_ffi.FimoModuleParamData],
-            ) -> error.ErrorCode:
+            ) -> _ffi.FimoResult:
                 try:
                     module = module_type.transfer_from_ffi(module_ffi)
                     value_ffi = c.c_void_p(value_addr)
@@ -2911,9 +2911,9 @@ def export_module(
                         case _:
                             raise ValueError("unknown parameter type")
 
-                    return error.ErrorCode.EOK
+                    return error.Result.new(None).transfer_to_ffi()
                 except Exception as e:
-                    return error.ErrorCode.from_exception(e)
+                    return error.Result.new(e).transfer_to_ffi()
 
             # noinspection PyProtectedMember
             default_ffi = _ffi._FimoModuleParamDeclDefaultValue()
@@ -3018,13 +3018,13 @@ def export_module(
 
             def ffi_symbol_constructor(
                 module_ffi: _ffi.Pointer[_ffi.FimoModule], sym: _ffi.Pointer[c.c_void_p]
-            ) -> error.ErrorCode:
+            ) -> _ffi.FimoResult:
                 try:
                     module = module_type.transfer_from_ffi(module_ffi)
                     symbol_constructor(module, sym)
-                    return error.ErrorCode.EOK
+                    return error.Result.new(None).transfer_to_ffi()
                 except Exception as e:
-                    return error.ErrorCode.from_exception(e)
+                    return error.Result.new(e).transfer_to_ffi()
 
             def ffi_symbol_destructor(ffi_address: Optional[int]) -> None:
                 # noinspection PyBroadException
@@ -3054,7 +3054,7 @@ def export_module(
         module_ffi: _ffi.Pointer[_ffi.FimoModule],
         module_set_ffi: _ffi.Pointer[_ffi.FimoModuleLoadingSet],
         data_ffi: _ffi.Pointer[c.c_void_p],
-    ) -> error.ErrorCode:
+    ) -> _ffi.FimoResult:
         try:
             module = module_type.transfer_from_ffi(module_ffi)
             assert isinstance(module, ModuleBase)
@@ -3069,9 +3069,9 @@ def export_module(
             data_ffi[0] = obj_ptr
             _ffi.c_inc_ref(obj)
 
-            return error.ErrorCode.EOK
+            return error.Result.new(None).transfer_to_ffi()
         except Exception as e:
-            return error.ErrorCode.from_exception(e)
+            return error.Result.new(e).transfer_to_ffi()
 
     def destructor(
         _module_ffi: _ffi.Pointer[_ffi.FimoModule], data_address: Optional[int]
