@@ -147,7 +147,7 @@ impl CommandBufferHandleFFI {
     unsafe extern "C" fn worker_group(
         this: *mut std::ffi::c_void,
         group: *mut bindings::FiTasksWorkerGroup,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Must be ensured by the caller.
             let this = unsafe { Self::borrow_from_ffi(this) };
@@ -159,14 +159,15 @@ impl CommandBufferHandleFFI {
             unsafe { group.write(WorkerGroupFFI(this.worker_group()?).into_ffi()) }
             Ok(())
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     unsafe extern "C" fn wait_on(
         this: *mut std::ffi::c_void,
         aborted: *mut bool,
-    ) -> std_bindings::FimoError {
+    ) -> std_bindings::FimoResult {
         fimo_std::panic::catch_unwind(|| {
             // Safety: Is always in an `Arc`.
             let handle = unsafe { Self(Arc::from_raw(this.cast_const().cast())).0 };
@@ -186,8 +187,9 @@ impl CommandBufferHandleFFI {
                 }
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(|e| e.into_error(), |_| Error::EOK.into_error())
+        .into_ffi()
     }
 }
 

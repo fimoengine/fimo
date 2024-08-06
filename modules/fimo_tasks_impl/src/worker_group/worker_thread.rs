@@ -311,12 +311,9 @@ impl WorkerContextLock {
 }
 
 pub fn with_worker_context_lock<R>(f: impl FnOnce(&mut WorkerContext) -> R) -> Result<R, Error> {
-    let guard = WORKER_THREAD
-        .0
-        .try_borrow_mut()
-        .map_err(|_e| Error::EDEADLK)?;
+    let guard = WORKER_THREAD.0.try_borrow_mut().map_err(Error::new)?;
     let mut worker =
-        RefMut::filter_map(guard, |worker| worker.as_mut()).map_err(|_e| Error::EPERM)?;
+        RefMut::filter_map(guard, |worker| worker.as_mut()).map_err(|_e| <Error>::EPERM)?;
     Ok(f(&mut worker))
 }
 

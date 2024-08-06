@@ -160,7 +160,7 @@ impl EventLoopHandle {
         let mut status = self
             .connection_status
             .write()
-            .map_err(|_e| Error::ECANCELED)?;
+            .map_err(|_e| <Error>::ECANCELED)?;
 
         // If the channel is already closed we can return.
         if *status == ConnectionStatus::Closed {
@@ -171,7 +171,7 @@ impl EventLoopHandle {
         self.outer_requests
             .try_send(OuterRequest::Close)
             .map_err(|e| match e {
-                TrySendError::Full(_) => Error::ECOMM,
+                TrySendError::Full(_) => <Error>::ECOMM,
                 TrySendError::Disconnected(_) => Error::ECONNABORTED,
             })?;
 
@@ -190,11 +190,11 @@ impl EventLoopHandle {
         let status = self
             .connection_status
             .read()
-            .map_err(|_e| Error::ECANCELED)?;
+            .map_err(|_e| <Error>::ECANCELED)?;
 
         // If the channel is already closed we can return.
         if *status == ConnectionStatus::Closed {
-            return Err(Error::ECANCELED);
+            return Err(<Error>::ECANCELED);
         }
 
         // Send the message.
@@ -202,8 +202,8 @@ impl EventLoopHandle {
         self.outer_requests
             .try_send(OuterRequest::EnqueueCommandBuffer(buffer))
             .map_err(|e| match e {
-                TrySendError::Full(_) => Error::ECOMM,
-                TrySendError::Disconnected(_) => Error::ECONNABORTED,
+                TrySendError::Full(_) => <Error>::ECOMM,
+                TrySendError::Disconnected(_) => <Error>::ECONNABORTED,
             })?;
 
         Ok(handle)
@@ -598,8 +598,8 @@ impl EventLoop {
                     .expect("allocator not found");
 
                 let stack = match allocator.acquire_stack() {
-                    Ok(stack) => stack,
-                    Err(Error::EBUSY) => {
+                    Ok(Some(stack)) => stack,
+                    Ok(None) => {
                         // If we aren't successful due to reaching the maximum number of
                         // allowed stacks we block the task.
                         fimo_std::emit_info!(
