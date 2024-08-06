@@ -532,10 +532,7 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_error_code(FimoErrorCode c
     if (code > FIMO_ERROR_CODE_MAX) {
         return FIMO_IMPL_RESULT_INVALID_ERROR;
     }
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4306))
-    return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)code, .vtable = &FIMO_IMPL_RESULT_ERROR_CODE_VTABLE};
-    FIMO_PRAGMA_MSVC(warning(pop))
+    return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)(intptr_t)code, .vtable = &FIMO_IMPL_RESULT_ERROR_CODE_VTABLE};
 }
 
 /**
@@ -547,10 +544,8 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_error_code(FimoErrorCode c
  */
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_system_error_code(FimoSystemErrorCode code) {
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4312))
-    return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)code, .vtable = &FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE};
-    FIMO_PRAGMA_MSVC(warning(pop))
+    return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)(intptr_t)code,
+                                        .vtable = &FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE};
 }
 
 /**
@@ -560,7 +555,6 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_system_error_code(FimoSyst
  *
  * @return Whether the result is an error.
  */
-FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS bool fimo_result_is_error(FimoResult result) { return result.vtable != NULL; }
 
 /**
@@ -570,7 +564,6 @@ static FIMO_INLINE_ALWAYS bool fimo_result_is_error(FimoResult result) { return 
  *
  * @return Whether the result is not an error.
  */
-FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS bool fimo_result_is_ok(FimoResult result) { return result.vtable == NULL; }
 
 /**
@@ -580,7 +573,6 @@ static FIMO_INLINE_ALWAYS bool fimo_result_is_ok(FimoResult result) { return res
  *
  * @param result result to release
  */
-FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS void fimo_result_release(FimoResult result) {
     if (fimo_result_is_error(result) && result.vtable->v0.release) {
         result.vtable->v0.release(result.data);
