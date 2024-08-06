@@ -217,14 +217,14 @@ class CallStack:
 
         stack = c.POINTER(_ffi.FimoTracingCallStack)()
         err = _ffi.fimo_tracing_call_stack_create(ctx.ffi, c.byref(stack))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         self._ctx: Optional[_Context] = ctx.acquire()
         self._stack: Optional[_ffi.Ref[_ffi.FimoTracingCallStack]] = stack
 
     def __del__(self) -> None:
         if self._ctx is not None:
             err = _ffi.fimo_tracing_call_stack_destroy(self._ctx.ffi, self._stack)
-            error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+            error.Result.transfer_from_ffi(err).raise_if_error()
             self._stack = None
             self._ctx = None
 
@@ -243,7 +243,7 @@ class CallStack:
         err = _ffi.fimo_tracing_call_stack_switch(
             self._ctx.ffi, self._stack, c.byref(stack)
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         self._stack = stack
 
     def unblock(self) -> None:
@@ -256,7 +256,7 @@ class CallStack:
             raise ValueError("The call stack has already been destroyed")
 
         err = _ffi.fimo_tracing_call_stack_unblock(self._ctx.ffi, self._stack)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     @staticmethod
     def suspend_current(ctx: _ContextView, block: bool) -> None:
@@ -272,7 +272,7 @@ class CallStack:
             raise TypeError("`block` must be an instance of `bool`")
 
         err = _ffi.fimo_tracing_call_stack_suspend_current(ctx.ffi, c.c_bool(block))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     @staticmethod
     def resume_current(ctx: _ContextView) -> None:
@@ -285,7 +285,7 @@ class CallStack:
             raise TypeError("`ctx` must be an instance of `ContextView`")
 
         err = _ffi.fimo_tracing_call_stack_resume_current(ctx.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
 
 class ThreadAccess:
@@ -303,7 +303,7 @@ class ThreadAccess:
 
         self._ctx: Optional[_Context] = ctx.acquire()
         err = _ffi.fimo_tracing_register_thread(self._ctx.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def __del__(self) -> None:
         if self._ctx is not None:
@@ -324,7 +324,7 @@ class ThreadAccess:
         registered again. The thread can not be unregistered until the call stack is empty.
         """
         err = _ffi.fimo_tracing_unregister_thread(self.context.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         self._ctx = None
 
     def __enter__(self) -> Self:
@@ -347,7 +347,7 @@ def _format_msg(
     buffer_len: _ffi.FimoUSize,
     args: int,
     written: c._Pointer[_ffi.FimoUSize],
-) -> error.ErrorCode:
+) -> _ffi.FimoResult:
     try:
         args = c.cast(args, c.POINTER(c.py_object)).contents.value
         if not isinstance(args, _FormatArgs):
@@ -359,9 +359,9 @@ def _format_msg(
         msg_slice = msg[:msg_len]
         c.memmove(buffer, msg_slice, msg_len * c.sizeof(c.c_char))
         written[0] = msg_len
-        return error.ErrorCode.EOK
+        return error.Result.new(None).transfer_to_ffi()
     except Exception as e:
-        return error.ErrorCode.from_exception(e)
+        return error.Result.new(e).transfer_to_ffi()
 
 
 class Span:
@@ -388,7 +388,7 @@ class Span:
         err = _ffi.fimo_tracing_span_create_custom(
             ctx_ffi, desc_ffi, c.byref(span_ffi), format_ffi, data_ffi
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         self._ctx: Optional[_Context] = ctx.acquire()
         self._span: Optional[c._Pointer[_ffi.FimoTracingSpan]] = span_ffi
@@ -399,7 +399,7 @@ class Span:
 
     def _destroy(self) -> None:
         err = _ffi.fimo_tracing_span_destroy(self.context.ffi, self._span)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         self._span = None
         self._ctx = None
 
@@ -480,16 +480,16 @@ def _subscriber_call_stack_create(
     ptr: int,
     time_ffi: c._Pointer[_ffi.FimoTime],
     call_stack_ffi: c._Pointer[c.c_void_p],
-) -> error.ErrorCode:
+) -> _ffi.FimoResult:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
         call_stack = obj.obj.create_call_stack(time)
 
         call_stack_ffi[0] = call_stack.transfer_to_ffi()
-        return error.ErrorCode.EOK
+        return error.Result.new(None).transfer_to_ffi()
     except Exception as e:
-        return error.ErrorCode.from_exception(e)
+        return error.Result.new(e).transfer_to_ffi()
 
 
 def _subscriber_call_stack_drop(ptr: int, call_stack_ffi: int) -> None:
@@ -563,7 +563,7 @@ def _subscriber_span_push(
     message_ffi: c._Pointer[c.c_char],
     message_len: _ffi.FimoUSize,
     call_stack_ffi: int,
-) -> error.ErrorCode:
+) -> _ffi.FimoResult:
     try:
         obj: _SubscriberWrapper = c.cast(ptr, c.py_object).value
         time = Time.transfer_from_ffi(time_ffi[0])
@@ -573,9 +573,9 @@ def _subscriber_span_push(
         call_stack = c.cast(call_stack_ffi, c.py_object).value
 
         obj.obj.create_span(time, span_descriptor, message, call_stack)
-        return error.ErrorCode.EOK
+        return error.Result.new(None).transfer_to_ffi()
     except Exception as e:
-        return error.ErrorCode.from_exception(e)
+        return error.Result.new(e).transfer_to_ffi()
 
 
 def _subscriber_span_drop(ptr: int, call_stack_ffi: int) -> None:
@@ -645,7 +645,7 @@ class Subscriber(
         vtable = _ffi.FimoTracingSubscriberVTable()
         vtable.destroy = c.CFUNCTYPE(None, c.c_void_p)(_subscriber_destroy)
         vtable.call_stack_create = c.CFUNCTYPE(
-            _ffi.FimoError, c.c_void_p, c.POINTER(_ffi.FimoTime), c.POINTER(c.c_void_p)
+            _ffi.FimoResult, c.c_void_p, c.POINTER(_ffi.FimoTime), c.POINTER(c.c_void_p)
         )(_subscriber_call_stack_create)
         vtable.call_stack_drop = c.CFUNCTYPE(None, c.c_void_p, c.c_void_p)(
             _subscriber_call_stack_drop
@@ -663,7 +663,7 @@ class Subscriber(
             None, c.c_void_p, c.POINTER(_ffi.FimoTime), c.c_void_p
         )(_subscriber_call_stack_resume)
         vtable.span_push = c.CFUNCTYPE(
-            _ffi.FimoError,
+            _ffi.FimoResult,
             c.c_void_p,
             c.POINTER(_ffi.FimoTime),
             c.POINTER(_ffi.FimoTracingSpanDesc),
@@ -856,7 +856,7 @@ class FfiSubscriberView(
         ptr = self._ffi.ptr
         ffi_fn = self._ffi.vtable.contents.call_stack_create
         err = ffi_fn(ptr, c.byref(time_ffi), c.byref(ffi))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return FfiSubscriberCallStack.transfer_from_ffi(ffi)
 
     def drop_call_stack(self, call_stack: FfiSubscriberCallStack) -> None:
@@ -946,7 +946,7 @@ class FfiSubscriberView(
             message_len,
             call_stack_ffi,
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def drop_span(self, call_stack: FfiSubscriberCallStack) -> None:
         if self._ffi is None:
@@ -1071,7 +1071,7 @@ class TracingCtx:
         err = _ffi.fimo_tracing_event_emit_custom(
             self._ctx.ffi, c.byref(event.transfer_to_ffi()), format_func, format_args
         )
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def _emit_event(self, level: Level, msg: str, *args, **kwargs):
         curr_frame = inspect.currentframe()
@@ -1124,7 +1124,7 @@ class TracingCtx:
         If successful, any unwritten data is written out by the individual subscribers.
         """
         err = _ffi.fimo_tracing_flush(self._ctx.ffi)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
 
 class CreationConfig(context.ContextOption):

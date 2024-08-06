@@ -59,7 +59,7 @@ class ContextView(_ffi.FFISharable[_ffi.FimoContext, "ContextView"]):
             raise ValueError("context has been consumed")
 
         err = _ffi.fimo_context_check_version(self._context)
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
     def acquire(self) -> Context:
         """Acquires a reference to the context.
@@ -101,7 +101,7 @@ class Context(ContextView, _ffi.FFITransferable[_ffi.FimoContext]):
 
     def __init__(self, create_key: object, context: _ffi.FimoContext):
         if create_key is not ContextView._create_key:
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
         super().__init__(create_key, context)
 
     def __del__(self):
@@ -126,23 +126,23 @@ class Context(ContextView, _ffi.FFITransferable[_ffi.FimoContext]):
         if options is None:
             ctx = _ffi.FimoContext()
             err = _ffi.fimo_context_init(options_type(), c.byref(ctx))
-            error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+            error.Result.transfer_from_ffi(err).raise_if_error()
             return Context.transfer_from_ffi(ctx)
 
         if not isinstance(options, list):
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
 
         options_array = (c.POINTER(_ffi.FimoBaseStructIn) * (len(options) + 1))()
         for i, opt in enumerate(options):
             if not isinstance(opt, ContextOption):
-                error.ErrorCode.EINVAL.raise_if_error()
+                error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
             ffi_opt = opt.to_context_option()
             if not isinstance(ffi_opt, c.POINTER(_ffi.FimoBaseStructIn)):
-                error.ErrorCode.EINVAL.raise_if_error()
+                error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
             options_array[i] = ffi_opt
         options_array[len(options)] = c.POINTER(_ffi.FimoBaseStructIn)()
 
         ctx = _ffi.FimoContext()
         err = _ffi.fimo_context_init(options_array, c.byref(ctx))
-        error.ErrorCode.transfer_from_ffi(err).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return Context.transfer_from_ffi(ctx)

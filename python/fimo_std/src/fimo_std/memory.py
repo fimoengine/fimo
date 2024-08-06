@@ -28,9 +28,9 @@ class DefaultAllocator:
         :return: Allocated pointer
         :raises Error: Buffer could not be allocated
         """
-        err = _ffi.FimoError(0)
+        err = _ffi.FimoResult()
         result = _ffi.fimo_malloc(c.c_size_t(size), c.byref(err))
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return result
 
     @staticmethod
@@ -47,9 +47,9 @@ class DefaultAllocator:
             - Allocated size
         :raises Error: Buffer could not be allocated
         """
-        err = _ffi.FimoError(0)
+        err = _ffi.FimoResult()
         result = _ffi.fimo_malloc_sized(c.c_size_t(size), c.byref(err))
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         ptr = result.ptr
         buff_size = result.buff_size
@@ -68,9 +68,9 @@ class DefaultAllocator:
         :return: Allocated pointer
         :raises Error: Buffer could not be allocated
         """
-        err = _ffi.FimoError(0)
+        err = _ffi.FimoResult()
         result = _ffi.fimo_calloc(c.c_size_t(size), c.byref(err))
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return result
 
     @staticmethod
@@ -87,9 +87,9 @@ class DefaultAllocator:
             - Allocated size
         :raises Error: Buffer could not be allocated
         """
-        err = _ffi.FimoError(0)
+        err = _ffi.FimoResult()
         result = _ffi.fimo_calloc_sized(c.c_size_t(size), c.byref(err))
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         ptr = result.ptr
         buff_size = result.buff_size
@@ -109,11 +109,11 @@ class DefaultAllocator:
         :return: Allocated pointer
         :raises Error: Buffer could not be allocated
         """
-        err = _ffi.FimoError(0)
+        err = _ffi.FimoResult()
         result = _ffi.fimo_aligned_alloc(
             c.c_size_t(alignment), c.c_size_t(size), c.byref(err)
         )
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
         return result
 
     @staticmethod
@@ -131,11 +131,11 @@ class DefaultAllocator:
             - Allocated size
         :raises Error: Buffer could not be allocated
         """
-        err = _ffi.FimoError(0)
+        err = _ffi.FimoResult()
         result = _ffi.fimo_aligned_alloc_sized(
             c.c_size_t(alignment), c.c_size_t(size), c.byref(err)
         )
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         ptr = result.ptr
         buff_size = result.buff_size

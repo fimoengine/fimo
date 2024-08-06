@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import ctypes as c
 from enum import IntEnum
-from typing import Self
+from typing import Self, Any
 
 from ._enum import ABCEnum
 from . import ffi as _ffi
 
 
-class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum):
+class ErrorCode(_ffi.FFITransferable[_ffi.FimoErrorCode], IntEnum, metaclass=ABCEnum):
     """Error codes."""
 
     EOK = 0
@@ -265,14 +267,12 @@ class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum
     """Invalid cross-device link"""
     EXFULL = 127
     """Exchange full"""
-    EUNKNOWN = 128
-    """Unknown error"""
 
-    def transfer_to_ffi(self) -> _ffi.FimoError:
-        return _ffi.FimoError(self)
+    def transfer_to_ffi(self) -> _ffi.FimoErrorCode:
+        return _ffi.FimoErrorCode(self)
 
     @classmethod
-    def transfer_from_ffi(cls, ffi: _ffi.FimoError) -> Self:
+    def transfer_from_ffi(cls, ffi: _ffi.FimoErrorCode) -> Self:
         return cls(ffi.value)
 
     @classmethod
@@ -282,72 +282,248 @@ class ErrorCode(_ffi.FFITransferable[_ffi.FimoError], IntEnum, metaclass=ABCEnum
     @classmethod
     def from_errno(cls, errnum: int) -> Self:
         """Constructs the `ErrorCode` from an errno value"""
-        error = _ffi.fimo_error_from_errno(c.c_int(errnum))
+        error = _ffi.fimo_error_code_from_errno(c.c_int(errnum))
         return cls.transfer_from_ffi(error)
-
-    @classmethod
-    def from_exception(cls, exception: Exception) -> Self:
-        """Constructs the `ErrorCode` from a python exception."""
-        if isinstance(exception, Error):
-            return cls(exception.error_code())
-        elif isinstance(exception, MemoryError):
-            return cls(ErrorCode.ENOMEM)
-        elif isinstance(exception, MemoryError):
-            return cls(ErrorCode.ENOMEM)
-        elif isinstance(exception, NotImplementedError):
-            return cls(ErrorCode.ENOSYS)
-        elif isinstance(exception, OSError):
-            return cls.from_errno(exception.errno)
-        elif isinstance(exception, TypeError):
-            return cls(ErrorCode.EINVAL)
-        elif isinstance(exception, ValueError):
-            return cls(ErrorCode.EINVAL)
-        else:
-            return cls(ErrorCode.EUNKNOWN)
-
-    def is_valid(self) -> bool:
-        """Checks if an error number is valid."""
-        return ErrorCode.EOK <= self <= ErrorCode.EUNKNOWN
-
-    def is_error(self) -> bool:
-        """Checks if the error code represents an error."""
-        return self.is_valid() and self != ErrorCode.EOK
-
-    def raise_if_error(self) -> None:
-        """Raises an Error if the error code represents an error."""
-        if self.is_error():
-            raise Error(self)
 
     @property
     def name(self) -> str:
         """Returns the name of the error code"""
-        error = _ffi.FimoError(0)
-        name = _ffi.fimo_strerrorname(_ffi.FimoError(self), c.byref(error))
-        error_code = ErrorCode(error.value)
-        error_code.raise_if_error()
+        name = _ffi.fimo_error_code_name(_ffi.FimoErrorCode(self))
         return name.decode()
 
     @property
     def description(self) -> str:
         """Returns the description of the error code"""
-        error = _ffi.FimoError(0)
-        name = _ffi.fimo_strerrordesc(_ffi.FimoError(self), c.byref(error))
-        error_code = ErrorCode(error.value)
-        error_code.raise_if_error()
+        name = _ffi.fimo_error_code_description(_ffi.FimoErrorCode(self))
         return name.decode()
+
+
+class _PyObjWrapper:
+    def __init__(self, vtable: _ffi.FimoResultVTable, obj: Any) -> None:
+        self.vtable = vtable
+        self.obj = obj
+
+    def __repr__(self):
+        return repr(self.obj)
+
+    def __str__(self):
+        return str(self.obj)
+
+
+def _py_obj_result_string_release(ptr: c._Pointer[c.c_char]) -> None:
+    _ffi.fimo_free(c.cast(ptr, c.c_void_p))
+
+
+_py_obj_result_string_release_ref = c.CFUNCTYPE(None, c.POINTER(c.c_char))(
+    _py_obj_result_string_release
+)
+
+
+def _py_obj_result_release(ptr: int) -> None:
+    try:
+        obj = c.cast(ptr, c.py_object)
+        _ffi.c_dec_ref(obj)
+        del obj
+    except Exception:
+        pass
+
+
+def _py_obj_result_error_name(ptr: int) -> _ffi.FimoResultString:
+    try:
+        obj = c.cast(ptr, c.py_object).value
+        name = repr(obj).encode()
+
+        error = _ffi.FimoResult()
+        str_ptr = _ffi.fimo_calloc(c.c_size_t(len(name) + 1), c.byref(error))
+        if _ffi.fimo_result_is_error(error):
+            string = _ffi.fimo_result_error_name(error)
+            _ffi.fimo_result_release(error)
+            return string
+        else:
+            c.memmove(str_ptr, name, len(name))
+            return _ffi.FimoResultString(
+                c.cast(str_ptr, c.POINTER(c.c_char)),
+                _py_obj_result_string_release_ref,
+            )
+    except Exception:
+        error = _ffi.FIMO_IMPL_RESULT_INVALID_ERROR
+        return _ffi.fimo_result_error_name(error)
+
+
+def _py_obj_result_error_description(ptr: int) -> _ffi.FimoResultString:
+    try:
+        obj = c.cast(ptr, c.py_object).value
+        desc = str(obj).encode()
+
+        error = _ffi.FimoResult()
+        str_ptr = _ffi.fimo_calloc(c.c_size_t(len(desc) + 1), c.byref(error))
+        if _ffi.fimo_result_is_error(error):
+            string = _ffi.fimo_result_error_description(error)
+            _ffi.fimo_result_release(error)
+            return string
+        else:
+            c.memmove(str_ptr, desc, len(desc))
+            return _ffi.FimoResultString(
+                c.cast(str_ptr, c.POINTER(c.c_char)),
+                _py_obj_result_string_release_ref,
+            )
+    except Exception:
+        error = _ffi.FIMO_IMPL_RESULT_INVALID_ERROR
+        return _ffi.fimo_result_error_description(error)
+
+
+class Result(_ffi.FFITransferable[_ffi.FimoResult]):
+    """Success status of an operation."""
+
+    _create_key = object()
+
+    def __init__(self, create_key: object, result: _ffi.FimoResult):
+        if create_key is not Result._create_key:
+            raise ValueError("`create_key` must be an instance of `_create_key`")
+        if not isinstance(result, _ffi.FimoResult):
+            raise TypeError("`result` must be an instance of `FimoResult`")
+
+        self._result: _ffi.FimoResult | None = result
+
+    def __del__(self):
+        if self._result is not None:
+            _ffi.fimo_result_release(self._result)
+            self._result = None
+
+    def transfer_to_ffi(self) -> _ffi.FimoResult:
+        if self._result is None:
+            raise ValueError("result has been consumed")
+
+        result = self._result
+        self._result = None
+        return result
+
+    @classmethod
+    def transfer_from_ffi(cls, ffi: _ffi.FimoResult) -> Self:
+        return cls(cls._create_key, ffi)
+
+    @classmethod
+    def new(cls, error: Any) -> Self:
+        """Constructs a new error wrapping the `error` object.
+
+        Passing in `None` will result in the `Ok` value.
+        """
+        if error is None:
+            return cls.from_error_code(ErrorCode.EOK)
+
+        # Fill the vtable
+        vtable = _ffi.FimoResultVTable()
+        vtable.v0.release = c.CFUNCTYPE(None, c.c_void_p)(_py_obj_result_release)
+        vtable.v0.error_name = c.CFUNCTYPE(_ffi.FimoResultString, c.c_void_p)(
+            _py_obj_result_error_name
+        )
+        vtable.v0.error_description = c.CFUNCTYPE(_ffi.FimoResultString, c.c_void_p)(
+            _py_obj_result_error_description
+        )
+
+        wrapper = _PyObjWrapper(vtable, error)
+        wrapper_ffi = c.py_object(wrapper)
+
+        # Create the struct
+        ffi = _ffi.FimoResult(
+            c.c_void_p.from_buffer(wrapper_ffi),
+            c.pointer(vtable),
+        )
+
+        # Take ownership of the object
+        _ffi.c_inc_ref(wrapper)
+        return cls.transfer_from_ffi(ffi)
+
+    @classmethod
+    def from_error(cls, error: "Error") -> Self:
+        if not isinstance(error, Error):
+            raise TypeError("`error` must be an instance of `Error`")
+
+        # consume the result of the error
+        result = error.result().transfer_to_ffi()
+        return cls.transfer_from_ffi(result)
+
+    @classmethod
+    def from_error_code(cls, error_code: ErrorCode) -> Self:
+        if not isinstance(error_code, ErrorCode):
+            raise TypeError("`error_code` must be an instance of `ErrorCode`")
+
+        ffi = _ffi.fimo_result_from_error_code(error_code.transfer_to_ffi())
+        return cls(cls._create_key, ffi)
+
+    @classmethod
+    def from_system_error(cls, system_error: int) -> Self:
+        if not isinstance(system_error, int):
+            raise TypeError("`system_error` must be an instance of `int`")
+
+        ffi = _ffi.fimo_result_from_system_error_code(
+            _ffi.FimoSystemErrorCode(system_error)
+        )
+        return cls(cls._create_key, ffi)
+
+    def is_error(self) -> bool:
+        """Checks whether the result signifies an error."""
+        if self._result is None:
+            raise ValueError("result has been consumed")
+
+        return _ffi.fimo_result_is_error(self._result)
+
+    def is_ok(self) -> bool:
+        """Checks whether the result does not signify an error."""
+        if self._result is None:
+            raise ValueError("result has been consumed")
+
+        return _ffi.fimo_result_is_ok(self._result)
+
+    def raise_if_error(self) -> None:
+        """Raises an Error if the result represents an error."""
+        if self.is_error():
+            raise Error(self)
+
+    @property
+    def name(self) -> str:
+        """Returns the error name of the result"""
+        if self._result is None:
+            raise ValueError("result has been consumed")
+
+        name = _ffi.fimo_result_error_name(self._result)
+        name_bytes = c.cast(name.str, c.c_char_p).value
+        assert isinstance(name_bytes, bytes)
+        _ffi.fimo_result_string_release(name)
+        return name_bytes.decode()
+
+    @property
+    def description(self) -> str:
+        """Returns the error description of the result"""
+        if self._result is None:
+            raise ValueError("result has been consumed")
+
+        desc = _ffi.fimo_result_error_description(self._result)
+        desc_bytes = c.cast(desc.str, c.c_char_p).value
+        assert isinstance(desc_bytes, bytes)
+        _ffi.fimo_result_string_release(desc)
+        return desc_bytes.decode()
+
+    def __repr__(self):
+        return f"Result({self.name})"
+
+    def __str__(self):
+        return self.description
 
 
 class Error(Exception):
     """An error exception"""
 
-    def __init__(self, code: ErrorCode) -> None:
-        """Initializes the Error with an ErrorCode"""
-        if code is None or not isinstance(code, ErrorCode):
-            code = ErrorCode.EUNKNOWN
+    def __init__(self, result: Result) -> None:
+        """Initializes the Error with an error Result"""
+        if not isinstance(result, Result):
+            raise TypeError("`result` must be an instance of `Result`")
+        if result.is_ok():
+            raise ValueError("`result` does not represent an error")
 
-        super().__init__(code.description)
-        self._error_code = code
+        super().__init__(result.description)
+        self._result = result
 
-    def error_code(self) -> ErrorCode:
-        """Returns the contained ErrorCode"""
-        return self._error_code
+    def result(self) -> Result:
+        """Returns the contained Result"""
+        return self._result

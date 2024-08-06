@@ -15,13 +15,13 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
             build = 0
 
         if not isinstance(major, int) or not 0 <= major <= 4_294_967_295:
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
         if not isinstance(minor, int) or not 0 <= minor <= 4_294_967_295:
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
         if not isinstance(patch, int) or not 0 <= patch <= 4_294_967_295:
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
         if not isinstance(build, int) or not 0 <= build <= 18_446_744_073_709_551_615:
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
 
         self._version = _ffi.FimoVersion(major, minor, patch, build)
 
@@ -52,14 +52,14 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         :raises Error: Version could not be parsed
         """
         if not isinstance(string, str):
-            error.ErrorCode.EINVAL.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
 
         string_ = string.encode()
         vers = _ffi.FimoVersion()
         err = _ffi.fimo_version_parse_str(
             c.c_char_p(string_), c.c_size_t(len(string_)), c.byref(vers)
         )
-        error.ErrorCode(err.value).raise_if_error()
+        error.Result.transfer_from_ffi(err).raise_if_error()
 
         major = vers.major.value
         minor = vers.minor.value
@@ -84,7 +84,7 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         err_ffi = _ffi.fimo_version_write_str(
             c.byref(self._version), buffer_str, c.c_size_t(length), None
         )
-        err = error.ErrorCode(err_ffi.value)
+        err = error.Result.transfer_from_ffi(err_ffi)
 
         if err.is_error():
             memory.DefaultAllocator.free(buffer)
@@ -102,7 +102,7 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         err_ffi = _ffi.fimo_version_write_str_long(
             c.byref(self._version), buffer_str, c.c_size_t(length), None
         )
-        err = error.ErrorCode(err_ffi.value)
+        err = error.Result.transfer_from_ffi(err_ffi)
 
         if err.is_error():
             memory.DefaultAllocator.free(buffer)
@@ -122,7 +122,7 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         :raises Error: `other` is not a `Version`
         """
         if not isinstance(other, Version):
-            error.ErrorCode.EINTR.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
 
         return _ffi.fimo_version_cmp(c.byref(self._version), c.byref(other._version))
 
@@ -136,7 +136,7 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         :raises Error: `other` is not a `Version`
         """
         if not isinstance(other, Version):
-            error.ErrorCode.EINTR.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
 
         return _ffi.fimo_version_cmp_long(
             c.byref(self._version), c.byref(other._version)
@@ -160,7 +160,7 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
         :raises Error: `required` is not a `Version`
         """
         if not isinstance(required, Version):
-            error.ErrorCode.EINTR.raise_if_error()
+            error.Result.from_error_code(error.ErrorCode.EINVAL).raise_if_error()
 
         return _ffi.fimo_version_compatible(
             c.byref(self._version), c.byref(required._version)
