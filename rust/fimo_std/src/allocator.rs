@@ -27,9 +27,9 @@ unsafe impl GlobalAlloc for FimoAllocator {
         let align = layout.align();
 
         // Safety: error is a valid pointer.
-        match to_result_indirect(|error| unsafe {
-            bindings::fimo_aligned_alloc(align, size, error)
-        }) {
+        match unsafe {
+            to_result_indirect(|error| bindings::fimo_aligned_alloc(align, size, error))
+        } {
             Ok(ptr) => {
                 debug_assert!(
                     !ptr.is_null(),
@@ -62,9 +62,9 @@ unsafe impl Allocator for FimoAllocator {
         }
 
         // Safety: error is a valid pointer.
-        match to_result_indirect(|error| unsafe {
-            bindings::fimo_aligned_alloc_sized(align, size, error)
-        }) {
+        match unsafe {
+            to_result_indirect(|error| bindings::fimo_aligned_alloc_sized(align, size, error))
+        } {
             Ok(buffer) => {
                 debug_assert!(
                     !buffer.ptr.is_null(),

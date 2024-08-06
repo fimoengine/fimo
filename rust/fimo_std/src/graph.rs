@@ -573,17 +573,17 @@ impl<N, E> Graph<N, E> {
         let mut src = NodeIdx(0);
         let mut dst = NodeIdx(0);
 
-        to_result_indirect(|error| {
-            // Safety: All pointers are valid.
-            *error = unsafe {
-                bindings::fimo_graph_edge_endpoints(
+        // Safety: All pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_edge_endpoints(
                     self.ptr.as_ptr(),
                     edge.0,
                     &mut src.0,
                     &mut dst.0,
-                )
-            };
-        })?;
+                );
+            })?
+        };
 
         Ok((src, dst))
     }
@@ -1271,10 +1271,12 @@ impl<N, E> Graph<N, E> {
     /// assert_eq!(graph.edge_count(), 0);
     /// ```
     pub fn clear(&mut self) -> crate::error::Result {
-        to_result_indirect(|error| {
-            // Safety: The graph pointer is valid.
-            *error = unsafe { bindings::fimo_graph_clear(self.ptr.as_ptr()) };
-        })
+        // Safety: The graph pointer is valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_clear(self.ptr.as_ptr());
+            })
+        }
     }
 
     /// Clears all edges from the graph.
@@ -1302,10 +1304,12 @@ impl<N, E> Graph<N, E> {
     /// assert_eq!(graph.edge_count(), 0);
     /// ```
     pub fn clear_edges(&mut self) -> crate::error::Result {
-        to_result_indirect(|error| {
-            // Safety: The graph pointer is valid.
-            *error = unsafe { bindings::fimo_graph_clear_edges(self.ptr.as_ptr()) };
-        })
+        // Safety: The graph pointer is valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_clear_edges(self.ptr.as_ptr());
+            })
+        }
     }
 
     /// Reverses the direction of all edges.
@@ -1331,10 +1335,12 @@ impl<N, E> Graph<N, E> {
     /// assert_eq!(graph.edge_endpoints(e2).unwrap(), (b, c));
     /// ```
     pub fn reverse(&mut self) -> crate::error::Result {
-        to_result_indirect(|error| {
-            // Safety: The graph pointer is valid.
-            *error = unsafe { bindings::fimo_graph_reverse(self.ptr.as_ptr()) };
-        })
+        // Safety: The graph pointer is valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_reverse(self.ptr.as_ptr());
+            })
+        }
     }
 
     /// Clones the graph.
@@ -1407,7 +1413,7 @@ impl<N, E> Graph<N, E> {
             old: u64,
             new: u64,
             ptr: *mut core::ffi::c_void,
-        ) -> bindings::FimoError
+        ) -> bindings::FimoResult
         where
             T: FnMut(IdxMapping) -> crate::error::Result,
         {
@@ -1416,17 +1422,14 @@ impl<N, E> Graph<N, E> {
 
             // Safety: The function is only called with valid pointers.
             let mapper = unsafe { &mut *ptr.cast::<T>() };
-            (mapper)(IdxMapping::Node { old, new })
-                .err()
-                .unwrap_or(Error::EOK)
-                .into_error()
+            (mapper)(IdxMapping::Node { old, new }).into_ffi()
         }
 
         unsafe extern "C" fn edge_mapper<T>(
             old: u64,
             new: u64,
             ptr: *mut core::ffi::c_void,
-        ) -> bindings::FimoError
+        ) -> bindings::FimoResult
         where
             T: FnMut(IdxMapping) -> crate::error::Result,
         {
@@ -1435,10 +1438,7 @@ impl<N, E> Graph<N, E> {
 
             // Safety: The function is only called with valid pointers.
             let mapper = unsafe { &mut *ptr.cast::<T>() };
-            (mapper)(IdxMapping::Edge { old, new })
-                .err()
-                .unwrap_or(Error::EOK)
-                .into_error()
+            (mapper)(IdxMapping::Edge { old, new }).into_ffi()
         }
 
         let (node, edge, data) = if let Some(mapper) = mapper.as_mut() {
@@ -1448,7 +1448,7 @@ impl<N, E> Graph<N, E> {
                         u64,
                         u64,
                         *mut core::ffi::c_void,
-                    ) -> bindings::FimoError,
+                    ) -> bindings::FimoResult,
             );
             let edge = Some(
                 edge_mapper::<T>
@@ -1456,7 +1456,7 @@ impl<N, E> Graph<N, E> {
                         u64,
                         u64,
                         *mut core::ffi::c_void,
-                    ) -> bindings::FimoError,
+                    ) -> bindings::FimoResult,
             );
             let data = (mapper as *mut T).cast::<core::ffi::c_void>();
             (node, edge, data)
@@ -1571,7 +1571,7 @@ impl<N, E> Graph<N, E> {
             old: u64,
             new: u64,
             ptr: *mut core::ffi::c_void,
-        ) -> bindings::FimoError
+        ) -> bindings::FimoResult
         where
             T: FnMut(IdxMapping) -> crate::error::Result,
         {
@@ -1580,17 +1580,14 @@ impl<N, E> Graph<N, E> {
 
             // Safety: The function is only called with valid pointers.
             let mapper = unsafe { &mut *ptr.cast::<T>() };
-            (mapper)(IdxMapping::Node { old, new })
-                .err()
-                .unwrap_or(Error::EOK)
-                .into_error()
+            (mapper)(IdxMapping::Node { old, new }).into_ffi()
         }
 
         unsafe extern "C" fn edge_mapper<T>(
             old: u64,
             new: u64,
             ptr: *mut core::ffi::c_void,
-        ) -> bindings::FimoError
+        ) -> bindings::FimoResult
         where
             T: FnMut(IdxMapping) -> crate::error::Result,
         {
@@ -1599,10 +1596,7 @@ impl<N, E> Graph<N, E> {
 
             // Safety: The function is only called with valid pointers.
             let mapper = unsafe { &mut *ptr.cast::<T>() };
-            (mapper)(IdxMapping::Edge { old, new })
-                .err()
-                .unwrap_or(Error::EOK)
-                .into_error()
+            (mapper)(IdxMapping::Edge { old, new }).into_ffi()
         }
 
         let (node, edge, data) = if let Some(mapper) = mapper.as_mut() {
@@ -1612,7 +1606,7 @@ impl<N, E> Graph<N, E> {
                         u64,
                         u64,
                         *mut core::ffi::c_void,
-                    ) -> bindings::FimoError,
+                    ) -> bindings::FimoResult,
             );
             let edge = Some(
                 edge_mapper::<T>
@@ -1620,7 +1614,7 @@ impl<N, E> Graph<N, E> {
                         u64,
                         u64,
                         *mut core::ffi::c_void,
-                    ) -> bindings::FimoError,
+                    ) -> bindings::FimoResult,
             );
             let data = (mapper as *mut T).cast::<core::ffi::c_void>();
             (node, edge, data)
@@ -1760,12 +1754,13 @@ impl Iterator for NodesInner {
             .expect("the iterator should be valid")
         };
 
-        to_result_indirect(|error| {
-            *error =
-            // Safety: The pointers are valid.
-                unsafe { bindings::fimo_graph_nodes_next(self.ptr.as_ptr(), &mut self.has_next) };
-        })
-        .expect("the iterator should be valid");
+        // Safety: The pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_nodes_next(self.ptr.as_ptr(), &mut self.has_next);
+            })
+            .expect("the iterator should be valid")
+        };
 
         Some((node, data))
     }
@@ -1868,12 +1863,13 @@ impl Iterator for EdgesInner {
             .expect("the iterator should be valid")
         };
 
-        to_result_indirect(|error| {
-            *error =
-            // Safety: The pointers are valid.
-                unsafe { bindings::fimo_graph_edges_next(self.ptr.as_ptr(), &mut self.has_next) };
-        })
-        .expect("the iterator should be valid");
+        // Safety: The pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_edges_next(self.ptr.as_ptr(), &mut self.has_next);
+            })
+            .expect("the iterator should be valid");
+        }
 
         Some((edge, data))
     }
@@ -1976,11 +1972,13 @@ impl Iterator for ExternalsInner {
             .expect("the iterator should be valid")
         };
 
-        to_result_indirect(|error| {
-            *error =
-            // Safety: The pointers are valid.
-                unsafe { bindings::fimo_graph_externals_next(self.ptr.as_ptr(), &mut self.has_next) };
-        }).expect("the iterator should be valid");
+        // Safety: The pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_externals_next(self.ptr.as_ptr(), &mut self.has_next);
+            })
+            .expect("the iterator should be valid");
+        }
 
         Some((node, data))
     }
@@ -2092,11 +2090,13 @@ impl<N, E> Iterator for Neighbors<'_, N, E> {
         };
         let node = NodeIdx(node);
 
-        to_result_indirect(|error| {
-            *error =
-            // Safety: The pointers are valid.
-                unsafe { bindings::fimo_graph_neighbors_next(self.ptr.as_ptr(), &mut self.has_next) };
-        }).expect("the iterator should be valid");
+        // Safety: The pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_neighbors_next(self.ptr.as_ptr(), &mut self.has_next);
+            })
+            .expect("the iterator should be valid");
+        }
 
         Some(node)
     }
@@ -2143,12 +2143,16 @@ impl<N, E> Iterator for NeighborsEdges<'_, N, E> {
         };
         let edge = EdgeIdx(edge);
 
-        to_result_indirect(|error| {
-            *error =
-            // Safety: The pointers are valid.
-                unsafe { bindings::fimo_graph_neighbors_edges_next(self.ptr.as_ptr(), &mut self.has_next) };
-        }).expect("the iterator should be valid");
-
+        // Safety: The pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_graph_neighbors_edges_next(
+                    self.ptr.as_ptr(),
+                    &mut self.has_next,
+                );
+            })
+            .expect("the iterator should be valid");
+        }
         Some(edge)
     }
 }

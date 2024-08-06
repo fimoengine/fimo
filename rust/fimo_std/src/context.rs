@@ -33,7 +33,8 @@ impl ContextView<'_> {
     pub fn check_version(&self) -> crate::error::Result {
         // Safety: The call is safe, as we own a reference to the context.
         let error = unsafe { bindings::fimo_context_check_version(self.0) };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     /// Promotes the context view to a context, by increasing the reference count.

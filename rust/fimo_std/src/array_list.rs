@@ -169,18 +169,18 @@ impl<T> ArrayList<T> {
     /// assert_eq!(array.len(), 0);
     /// ```
     pub fn reserve(&mut self, additional: usize) -> error::Result {
-        to_result_indirect(|error| {
-            // Safety: All pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_reserve(
+        // Safety: All pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_reserve(
                     &mut self.inner,
                     Self::T_SIZE,
                     Self::T_ALIGN,
                     additional,
                     Self::T_MOVE_FUNC,
-                )
-            };
-        })
+                );
+            })
+        }
     }
 
     /// Reserve capacity for exactly `additional` more elements.
@@ -196,18 +196,18 @@ impl<T> ArrayList<T> {
     /// assert_eq!(array.len(), 0);
     /// ```
     pub fn reserve_exact(&mut self, additional: usize) -> error::Result {
-        to_result_indirect(|error| {
-            // Safety: All pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_reserve_exact(
+        // Safety: All pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_reserve_exact(
                     &mut self.inner,
                     Self::T_SIZE,
                     Self::T_ALIGN,
                     additional,
                     Self::T_MOVE_FUNC,
-                )
-            };
-        })
+                );
+            })
+        }
     }
 
     /// Shrinks the capacity of the array as much as possible.
@@ -613,19 +613,19 @@ impl<T> ArrayList<T> {
     /// ```
     pub fn insert(&mut self, index: usize, element: T) -> Result<(), InsertionErr<T>> {
         let mut element = ManuallyDrop::new(element);
-        match to_result_indirect(|error| {
-            // Safety: The pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_insert(
+        // Safety: The pointers are valid.
+        match unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_insert(
                     &mut self.inner,
                     index,
                     Self::T_SIZE,
                     Self::T_ALIGN,
                     core::ptr::addr_of_mut!(element).cast(),
                     Self::T_MOVE_FUNC,
-                )
-            }
-        }) {
+                );
+            })
+        } {
             Ok(_) => Ok(()),
             Err(e) => Err(InsertionErr {
                 error: e,
@@ -651,18 +651,18 @@ impl<T> ArrayList<T> {
     /// ```
     pub fn try_insert(&mut self, index: usize, element: T) -> Result<(), InsertionErr<T>> {
         let mut element = ManuallyDrop::new(element);
-        match to_result_indirect(|error| {
-            // Safety: The pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_try_insert(
+        // Safety: The pointers are valid.
+        match unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_try_insert(
                     &mut self.inner,
                     index,
                     Self::T_SIZE,
                     core::ptr::addr_of_mut!(element).cast(),
                     Self::T_MOVE_FUNC,
-                )
-            }
-        }) {
+                );
+            })
+        } {
             Ok(_) => Ok(()),
             Err(e) => Err(InsertionErr {
                 error: e,
@@ -782,18 +782,18 @@ impl<T> ArrayList<T> {
     /// ```
     pub fn push(&mut self, element: T) -> Result<(), InsertionErr<T>> {
         let mut element = ManuallyDrop::new(element);
-        if let Err(e) = to_result_indirect(|error| {
-            // Safety: The pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_push(
+        // Safety: The pointers are valid.
+        if let Err(e) = unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_push(
                     &mut self.inner,
                     Self::T_SIZE,
                     Self::T_ALIGN,
                     core::ptr::addr_of_mut!(element).cast(),
                     Self::T_MOVE_FUNC,
-                )
-            };
-        }) {
+                );
+            })
+        } {
             Err(InsertionErr {
                 error: e,
                 element: ManuallyDrop::into_inner(element),
@@ -820,17 +820,17 @@ impl<T> ArrayList<T> {
     /// ```
     pub fn try_push(&mut self, element: T) -> Result<(), InsertionErr<T>> {
         let mut element = ManuallyDrop::new(element);
-        if let Err(e) = to_result_indirect(|error| {
-            // Safety: The pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_try_push(
+        // Safety: The pointers are valid.
+        if let Err(e) = unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_try_push(
                     &mut self.inner,
                     Self::T_SIZE,
                     core::ptr::addr_of_mut!(element).cast(),
                     Self::T_MOVE_FUNC,
-                )
-            };
-        }) {
+                );
+            })
+        } {
             Err(InsertionErr {
                 error: e,
                 element: ManuallyDrop::into_inner(element),
@@ -1110,7 +1110,7 @@ impl<T> ArrayList<T> {
         let additional = new_len - self.len();
         self.reserve(additional)?;
         for _ in 0..additional {
-            self.try_push(f()).map_err(|e| e.error())?;
+            self.try_push(f()).map_err(|e| e.into_error())?;
         }
 
         Ok(())
@@ -1168,7 +1168,7 @@ impl<T> ArrayList<T> {
         let additional = new_len - self.len();
         self.reserve(additional)?;
         for _ in 0..additional {
-            self.try_push(f()).map_err(|e| e.error())?;
+            self.try_push(f()).map_err(|e| e.into_error())?;
         }
 
         Ok(())
@@ -1300,35 +1300,35 @@ impl<T> ArrayList<T> {
     /// If the new capacity of the array is smaller than the length,
     /// this function will truncate the array appropriately.
     pub fn set_capacity(&mut self, capacity: usize) -> error::Result {
-        to_result_indirect(|error| {
-            // Safety: All pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_set_capacity(
+        // Safety: All pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_set_capacity(
                     &mut self.inner,
                     Self::T_SIZE,
                     Self::T_ALIGN,
                     capacity,
                     Self::T_MOVE_FUNC,
                     Self::T_DROP_FUNC,
-                )
-            };
-        })
+                );
+            })
+        }
     }
 
     pub fn set_capacity_exact(&mut self, capacity: usize) -> error::Result {
-        to_result_indirect(|error| {
-            // Safety: All pointers are valid.
-            *error = unsafe {
-                bindings::fimo_array_list_set_capacity_exact(
+        // Safety: All pointers are valid.
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_array_list_set_capacity_exact(
                     &mut self.inner,
                     Self::T_SIZE,
                     Self::T_ALIGN,
                     capacity,
                     Self::T_MOVE_FUNC,
                     Self::T_DROP_FUNC,
-                )
-            };
-        })
+                );
+            })
+        }
     }
 
     /// Returns a slice to the entire allocated memory of the array.
@@ -1971,7 +1971,12 @@ pub struct IntoBoxedSliceErr<T> {
 
 impl<T> IntoBoxedSliceErr<T> {
     /// Returns the contained error value.
-    pub fn error(&self) -> Error {
+    pub fn error(&self) -> &Error {
+        &self.error
+    }
+
+    /// Extracts the contained error value.
+    pub fn into_error(self) -> Error {
         self.error
     }
 
@@ -2008,7 +2013,12 @@ pub struct InsertionErr<T> {
 
 impl<T> InsertionErr<T> {
     /// Returns the contained error value.
-    pub fn error(&self) -> Error {
+    pub fn error(&self) -> &Error {
+        &self.error
+    }
+
+    /// Extracts the contained error value.
+    pub fn into_error(self) -> Error {
         self.error
     }
 
@@ -2084,7 +2094,7 @@ pub fn from_slice<T: Clone>(elems: &[T]) -> Result<ArrayList<T>, Error> {
 pub fn from_box<T, const N: usize>(
     elems: Result<Box<[T; N], FimoAllocator>, AllocError>,
 ) -> Result<ArrayList<T>, Error> {
-    let elems = elems.map_err(|_e| Error::ENOMEM)?;
+    let elems = elems.map_err(|_e| <Error>::ENOMEM)?;
     from_box_slice(elems)
 }
 

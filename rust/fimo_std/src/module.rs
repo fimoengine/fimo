@@ -768,25 +768,26 @@ macro_rules! export_module_private_exports {
         unsafe extern "C" fn construct_dynamic_symbol<T, S>(
             module: *const $crate::bindings::FimoModule,
             symbol: *mut *mut core::ffi::c_void,
-        ) -> $crate::bindings::FimoError
+        ) -> $crate::bindings::FimoResult
         where
             T: $crate::module::Module,
             S: $crate::module::DynamicExport<T>,
         {
             let mut guard = match CURRENT.0.write() {
                 Ok(x) => x,
-                Err(_e) => return $crate::bindings::FimoError::FIMO_EUNKNOWN,
+                Err(e) => return $crate::error::Error::new(e).into_error(),
             };
             if guard.is_null() {
-                return $crate::bindings::FimoError::FIMO_EUNKNOWN;
+                return <$crate::error::Error>::from_string(c"module pointer not set").into_error();
             }
 
             // Safety:
             unsafe {
                 match $crate::module::c_ffi::construct_dynamic_symbol::<T, S>(module, symbol) {
                     Ok(_) => {
+                        use $crate::ffi::FFITransferable;
                         INIT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        $crate::bindings::FimoError::FIMO_EOK
+                        Result::<_, $crate::error::Error>::Ok(()).into_ffi()
                     }
                     Err(e) => e.into_error()
                 }
@@ -895,25 +896,26 @@ macro_rules! export_module_private_data {
             module: *const $crate::bindings::FimoModule,
             set: *mut $crate::bindings::FimoModuleLoadingSet,
             data: *mut *mut core::ffi::c_void,
-        ) -> $crate::bindings::FimoError
+        ) -> $crate::bindings::FimoResult
         where
             T: $crate::module::Module,
             C: $crate::module::ModuleConstructor<T>,
         {
             let mut guard = match CURRENT.0.write() {
                 Ok(x) => x,
-                Err(_e) => return $crate::bindings::FimoError::FIMO_EUNKNOWN,
+                Err(e) => return $crate::error::Error::new(e).into_error(),
             };
             if !guard.is_null() {
-                return $crate::bindings::FimoError::FIMO_EBUSY;
+                return <$crate::error::Error>::EBUSY.into_error();
             }
 
             // Safety:
             unsafe {
                 match $crate::module::c_ffi::construct_module::<T, C>(module, set, data) {
                     Ok(_) => {
+                        use $crate::ffi::FFITransferable;
                         *guard = module;
-                        $crate::bindings::FimoError::FIMO_EOK
+                        Result::<_, $crate::error::Error>::Ok(()).into_ffi()
                     },
                     Err(e) => e.into_error(),
                 }
@@ -972,7 +974,7 @@ pub mod c_ffi {
         type_: *mut bindings::FimoModuleParamType,
         data: *mut bindings::FimoModuleParamData,
         f: F,
-    ) -> bindings::FimoError
+    ) -> bindings::FimoResult
     where
         T: Module,
         F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
@@ -1050,8 +1052,9 @@ pub mod c_ffi {
                 }
             }
         }))
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(Error::into_error, |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     pub unsafe extern "C" fn set_param<T, F>(
@@ -1060,7 +1063,7 @@ pub mod c_ffi {
         type_: bindings::FimoModuleParamType,
         data: *mut bindings::FimoModuleParamData,
         f: F,
-    ) -> bindings::FimoError
+    ) -> bindings::FimoResult
     where
         T: Module,
         F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
@@ -1088,8 +1091,9 @@ pub mod c_ffi {
                 crate::panic::with_panic_context(context, |_| f(module, value, data))
             }
         })
+        .map_err(Into::into)
         .flatten()
-        .map_or_else(Error::into_error, |_| Error::EOK.into_error())
+        .into_ffi()
     }
 
     pub unsafe fn construct_dynamic_symbol<T, S>(
@@ -1115,6 +1119,7 @@ pub mod c_ffi {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
     }
 
@@ -1158,6 +1163,7 @@ pub mod c_ffi {
                 })
             }
         })
+        .map_err(Into::into)
         .flatten()
     }
 

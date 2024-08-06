@@ -94,7 +94,10 @@ impl Version {
                 &mut written,
             )
         };
-        to_result(error)?;
+        // Safety:
+        unsafe {
+            to_result(error)?;
+        }
 
         let (str_buf, _) = buff.split_at_mut(written);
 
@@ -123,7 +126,10 @@ impl Version {
                 &mut written,
             )
         };
-        to_result(error)?;
+        // Safety:
+        unsafe {
+            to_result(error)?;
+        }
 
         let (str_buf, _) = buff.split_at_mut(written);
 

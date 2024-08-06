@@ -181,15 +181,17 @@ impl ParameterValue {
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_get_public(
-                ctx.share_to_ffi(),
-                core::ptr::from_mut(&mut value).cast(),
-                &mut type_,
-                module.as_ptr(),
-                parameter.as_ptr(),
-            );
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_get_public(
+                    ctx.share_to_ffi(),
+                    core::ptr::from_mut(&mut value).cast(),
+                    &mut type_,
+                    module.as_ptr(),
+                    parameter.as_ptr(),
+                );
+            })?;
+        }
         let type_ = ParameterType::try_from(type_)?;
 
         // Safety: We checked the type tag.
@@ -221,15 +223,17 @@ impl ParameterValue {
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_get_dependency(
-                caller.share_to_ffi(),
-                core::ptr::from_mut(&mut value).cast(),
-                &mut type_,
-                module.as_ptr(),
-                parameter.as_ptr(),
-            );
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_get_dependency(
+                    caller.share_to_ffi(),
+                    core::ptr::from_mut(&mut value).cast(),
+                    &mut type_,
+                    module.as_ptr(),
+                    parameter.as_ptr(),
+                );
+            })?;
+        }
         let type_ = ParameterType::try_from(type_)?;
 
         // Safety: We checked the type tag.
@@ -256,14 +260,16 @@ impl ParameterValue {
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_get_private(
-                caller.share_to_ffi(),
-                core::ptr::from_mut(&mut value).cast(),
-                &mut type_,
-                parameter.share_to_ffi(),
-            );
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_get_private(
+                    caller.share_to_ffi(),
+                    core::ptr::from_mut(&mut value).cast(),
+                    &mut type_,
+                    parameter.share_to_ffi(),
+                );
+            })?;
+        }
         let type_ = ParameterType::try_from(type_)?;
 
         // Safety: We checked the type tag.
@@ -290,14 +296,16 @@ impl ParameterValue {
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_get_inner(
-                caller.share_to_ffi(),
-                core::ptr::from_mut(&mut value).cast(),
-                &mut type_,
-                parameter.get(),
-            );
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_get_inner(
+                    caller.share_to_ffi(),
+                    core::ptr::from_mut(&mut value).cast(),
+                    &mut type_,
+                    parameter.get(),
+                );
+            })?;
+        }
         let type_ = ParameterType::try_from(type_)?;
 
         // Safety: We checked the type tag.
@@ -338,15 +346,17 @@ impl ParameterValue {
         };
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_set_public(
-                ctx.share_to_ffi(),
-                core::ptr::from_ref(&value).cast(),
-                type_.into_ffi(),
-                module.as_ptr(),
-                parameter.as_ptr(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_set_public(
+                    ctx.share_to_ffi(),
+                    core::ptr::from_ref(&value).cast(),
+                    type_.into_ffi(),
+                    module.as_ptr(),
+                    parameter.as_ptr(),
+                );
+            })
+        }
     }
 
     /// Writes a module parameter with dependency write access.
@@ -372,15 +382,17 @@ impl ParameterValue {
         };
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_set_dependency(
-                caller.share_to_ffi(),
-                core::ptr::from_ref(&value).cast(),
-                type_.into_ffi(),
-                module.as_ptr(),
-                parameter.as_ptr(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_set_dependency(
+                    caller.share_to_ffi(),
+                    core::ptr::from_ref(&value).cast(),
+                    type_.into_ffi(),
+                    module.as_ptr(),
+                    parameter.as_ptr(),
+                );
+            })
+        }
     }
 
     /// Writes a module parameter.
@@ -401,14 +413,16 @@ impl ParameterValue {
         };
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_set_private(
-                caller.share_to_ffi(),
-                core::ptr::from_ref(&value).cast(),
-                type_.into_ffi(),
-                parameter.share_to_ffi(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_set_private(
+                    caller.share_to_ffi(),
+                    core::ptr::from_ref(&value).cast(),
+                    type_.into_ffi(),
+                    parameter.share_to_ffi(),
+                );
+            })
+        }
     }
 
     /// Writes a module parameter.
@@ -429,14 +443,16 @@ impl ParameterValue {
         };
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_set_inner(
-                caller.share_to_ffi(),
-                core::ptr::from_ref(&value).cast(),
-                type_.into_ffi(),
-                parameter.get(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_set_inner(
+                    caller.share_to_ffi(),
+                    core::ptr::from_ref(&value).cast(),
+                    type_.into_ffi(),
+                    parameter.get(),
+                );
+            })
+        }
     }
 }
 
@@ -475,16 +491,18 @@ impl ParameterInfo {
         let mut write = bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE;
 
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_param_query(
-                ctx.share_to_ffi(),
-                module.as_ptr(),
-                parameter.as_ptr(),
-                &mut type_,
-                &mut read,
-                &mut write,
-            );
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_param_query(
+                    ctx.share_to_ffi(),
+                    module.as_ptr(),
+                    parameter.as_ptr(),
+                    &mut type_,
+                    &mut read,
+                    &mut write,
+                );
+            })?;
+        }
 
         let type_ = TryFrom::try_from(type_)?;
         let read = TryFrom::try_from(read)?;

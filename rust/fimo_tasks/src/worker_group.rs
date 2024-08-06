@@ -31,26 +31,26 @@ impl WorkerGroup<'_> {
     /// Returns the unique id of the worker group.
     pub fn id(&self) -> WorkerGroupId {
         // Safety: FFI call is safe
-        let id = unsafe { (self.vtable().v0.id.unwrap_unchecked())(self.data()) };
+        let id = unsafe { self.vtable().v0.id.unwrap_unchecked()(self.data()) };
         WorkerGroupId(id)
     }
 
     /// Checks whether the worker group is open to receive new commands.
     pub fn is_open(&self) -> bool {
         // Safety: FFI call is safe
-        unsafe { (self.vtable().v0.is_open.unwrap_unchecked())(self.data()) }
+        unsafe { self.vtable().v0.is_open.unwrap_unchecked()(self.data()) }
     }
 
     /// Checks whether the current thread is a worker thread of the group.
     pub fn is_worker(&self) -> bool {
         // Safety: FFI call is safe
-        unsafe { (self.vtable().v0.is_worker.unwrap_unchecked())(self.data()) }
+        unsafe { self.vtable().v0.is_worker.unwrap_unchecked()(self.data()) }
     }
 
     /// Returns the name of the worker.
     pub fn name(&self) -> &CStr {
         // Safety: FFI call is safe
-        let name = unsafe { (self.vtable().v0.name.unwrap_unchecked())(self.data()) };
+        let name = unsafe { self.vtable().v0.name.unwrap_unchecked()(self.data()) };
 
         // Safety: The function is guaranteed to return a null-terminated string.
         unsafe { CStr::from_ptr(name) }
@@ -64,7 +64,7 @@ impl WorkerGroup<'_> {
         // Safety: FFI call is safe
         unsafe {
             to_result_indirect(|err| {
-                *err = (self.vtable().v0.request_close.unwrap_unchecked())(self.data());
+                *err = self.vtable().v0.request_close.unwrap_unchecked()(self.data());
             })
         }
     }
@@ -75,7 +75,7 @@ impl WorkerGroup<'_> {
         // Safety: FFI call is safe
         let workers = unsafe {
             to_result_indirect_in_place(|err, workers| {
-                *err = (self.vtable().v0.workers.unwrap_unchecked())(
+                *err = self.vtable().v0.workers.unwrap_unchecked()(
                     self.data(),
                     workers.as_mut_ptr(),
                     &mut num_workers,
@@ -104,7 +104,7 @@ impl WorkerGroup<'_> {
         // Safety: FFI call is safe
         let sizes = unsafe {
             to_result_indirect_in_place(|err, sizes| {
-                *err = (self.vtable().v0.workers.unwrap_unchecked())(
+                *err = self.vtable().v0.stack_sizes.unwrap_unchecked()(
                     self.data(),
                     sizes.as_mut_ptr(),
                     &mut num_stacks,
@@ -151,7 +151,7 @@ impl std::fmt::Debug for WorkerGroup<'_> {
 impl Clone for WorkerGroup<'_> {
     fn clone(&self) -> Self {
         // Safety: We own the reference therefore we can acquire another one.
-        unsafe { (self.vtable().v0.acquire.unwrap_unchecked())(self.data()) }
+        unsafe { self.vtable().v0.acquire.unwrap_unchecked()(self.data()) }
         Self(self.0, PhantomData)
     }
 }
@@ -159,7 +159,7 @@ impl Clone for WorkerGroup<'_> {
 impl Drop for WorkerGroup<'_> {
     fn drop(&mut self) {
         // Safety: We own the reference therefore we can release it.
-        unsafe { (self.vtable().v0.release.unwrap_unchecked())(self.data()) }
+        unsafe { self.vtable().v0.release.unwrap_unchecked()(self.data()) }
     }
 }
 
@@ -332,7 +332,7 @@ impl<'a> WorkerGroupBuilder<'a> {
         // Safety: FFI call is safe
         let group = unsafe {
             to_result_indirect_in_place(|err, group| {
-                *err = (ctx.vtable().v0.create_worker_group.unwrap_unchecked())(
+                *err = ctx.vtable().v0.create_worker_group.unwrap_unchecked()(
                     ctx.data(),
                     config,
                     group.as_mut_ptr(),
