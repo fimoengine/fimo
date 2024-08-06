@@ -1261,18 +1261,12 @@ const FimoResultVTable FIMO_IMPL_RESULT_DYNAMIC_STRING_VTABLE = {
 };
 
 static FimoResultString error_name_error_code_(void *data) {
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4311))
-    FimoErrorCode error = (int)data;
-    FIMO_PRAGMA_MSVC(warning(pop))
+    FimoErrorCode error = (int)(intptr_t)data;
     return (FimoResultString){.str = fimo_error_code_name(error), .release = NULL};
 }
 
 static FimoResultString error_description_error_code_(void *data) {
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4311))
-    FimoErrorCode error = (int)data;
-    FIMO_PRAGMA_MSVC(warning(pop))
+    FimoErrorCode error = (int)(intptr_t)data;
     return (FimoResultString){.str = fimo_error_code_description(error), .release = NULL};
 }
 
@@ -1290,10 +1284,7 @@ static void free_string_system_(const char *str) { LocalFree((char *)str); }
 #endif
 
 static FimoResultString error_name_system_(void *data) {
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4311))
-    FimoSystemErrorCode error = (FimoSystemErrorCode)data;
-    FIMO_PRAGMA_MSVC(warning(pop))
+    FimoSystemErrorCode error = (FimoSystemErrorCode)(intptr_t)data;
 #ifdef _WIN32
     LPSTR error_name_template = "SystemError(%1!l!)";
     DWORD_PTR error_name_args[] = {(DWORD_PTR)error};
@@ -1305,16 +1296,13 @@ static FimoResultString error_name_system_(void *data) {
     }
     return (FimoResultString){.str = error_name, .release = free_string_system_};
 #else
-    FimoErrorCode code = fimo_error_from_errno(error);
-    return {.str = fimo_error_code_name(code), .release = NULL};
+    FimoErrorCode code = fimo_error_code_from_errno(error);
+    return (FimoResultString){.str = fimo_error_code_name(code), .release = NULL};
 #endif
 }
 
 static FimoResultString error_description_system_(void *data) {
-    FIMO_PRAGMA_MSVC(warning(push))
-    FIMO_PRAGMA_MSVC(warning(disable : 4311))
-    FimoSystemErrorCode error = (FimoSystemErrorCode)data;
-    FIMO_PRAGMA_MSVC(warning(pop))
+    FimoSystemErrorCode error = (FimoSystemErrorCode)(intptr_t)data;
 #ifdef _WIN32
     LPSTR error_description = NULL;
     if (!FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -1323,8 +1311,8 @@ static FimoResultString error_description_system_(void *data) {
     }
     return (FimoResultString){.str = error_description, .release = free_string_system_};
 #else
-    FimoErrorCode code = fimo_error_from_errno(error);
-    return {.str = fimo_error_code_description(code), .release = NULL};
+    FimoErrorCode code = fimo_error_code_from_errno(error);
+    return (FimoResultString){.str = fimo_error_code_description(code), .release = NULL};
 #endif
 }
 
