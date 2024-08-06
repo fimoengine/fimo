@@ -67,7 +67,7 @@
  */
 typedef struct FipyRunString {
     void *data;
-    FimoError (*func)(void *data, const char *code, const char *home);
+    FimoResult (*func)(void *data, const char *code, const char *home);
 } FipyRunString;
 
 /**
@@ -75,7 +75,7 @@ typedef struct FipyRunString {
  */
 typedef struct FipyLoadModule {
     void *data;
-    FimoError (*func)(void *data, FimoModuleLoadingSet *set, const char *filepath);
+    FimoResult (*func)(void *data, FimoModuleLoadingSet *set, const char *filepath);
 } FipyLoadModule;
 
 /**
@@ -93,7 +93,7 @@ typedef struct FipyLoadModule {
  *
  * @return Status code.
  */
-static FIMO_INLINE_ALWAYS FimoError fipy_run_string(const FipyRunString *symbol, const char *code, const char *home) {
+static FIMO_INLINE_ALWAYS FimoResult fipy_run_string(const FipyRunString *symbol, const char *code, const char *home) {
     FIMO_DEBUG_ASSERT(symbol)
     return symbol->func(symbol->data, code, home);
 }
@@ -111,8 +111,8 @@ static FIMO_INLINE_ALWAYS FimoError fipy_run_string(const FipyRunString *symbol,
  *
  * @return Status code.
  */
-static FIMO_INLINE_ALWAYS FimoError fipy_load_module(const FipyLoadModule *symbol, FimoModuleLoadingSet *set,
-                                                     const char *filepath) {
+static FIMO_INLINE_ALWAYS FimoResult fipy_load_module(const FipyLoadModule *symbol, FimoModuleLoadingSet *set,
+                                                      const char *filepath) {
     FIMO_DEBUG_ASSERT(symbol)
     return symbol->func(symbol->data, set, filepath);
 }
