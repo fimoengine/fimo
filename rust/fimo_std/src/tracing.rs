@@ -568,8 +568,8 @@ impl Drop for Span {
             to_result_indirect(|error| {
                 *error = bindings::fimo_tracing_span_destroy(self.0.share_to_ffi(), self.1);
             })
-            .expect("the span should be destroyable")
-        };
+            .expect("the span should be destroyable");
+        }
     }
 }
 

@@ -582,8 +582,8 @@ impl<N, E> Graph<N, E> {
                     &mut src.0,
                     &mut dst.0,
                 );
-            })?
-        };
+            })?;
+        }
 
         Ok((src, dst))
     }
@@ -1759,8 +1759,8 @@ impl Iterator for NodesInner {
             to_result_indirect(|error| {
                 *error = bindings::fimo_graph_nodes_next(self.ptr.as_ptr(), &mut self.has_next);
             })
-            .expect("the iterator should be valid")
-        };
+            .expect("the iterator should be valid");
+        }
 
         Some((node, data))
     }
