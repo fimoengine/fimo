@@ -44,14 +44,16 @@ where
 {
     fn emit_event(&self, event: &Event, arguments: Arguments<'_>) -> error::Result {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_event_emit_custom(
-                self.share_to_ffi(),
-                event.share_to_ffi(),
-                Some(Formatter::format_into_buffer as _),
-                core::ptr::from_ref(&arguments).cast(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_event_emit_custom(
+                    self.share_to_ffi(),
+                    event.share_to_ffi(),
+                    Some(Formatter::format_into_buffer as _),
+                    core::ptr::from_ref(&arguments).cast(),
+                );
+            })
+        }
     }
 
     fn is_enabled(&self) -> bool {
@@ -61,9 +63,11 @@ where
 
     fn flush(&self) -> error::Result {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_flush(self.share_to_ffi());
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_flush(self.share_to_ffi());
+            })
+        }
     }
 }
 
@@ -560,10 +564,12 @@ unsafe impl Sync for Span {}
 impl Drop for Span {
     fn drop(&mut self) {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_span_destroy(self.0.share_to_ffi(), self.1);
-        })
-        .expect("the span should be destroyable");
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_span_destroy(self.0.share_to_ffi(), self.1);
+            })
+            .expect("the span should be destroyable")
+        };
     }
 }
 
@@ -626,9 +632,11 @@ impl CallStack {
     /// marked as blocked.
     pub fn unblock(&mut self) -> error::Result {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_call_stack_unblock(self.0.share_to_ffi(), self.1);
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_call_stack_unblock(self.0.share_to_ffi(), self.1);
+            })
+        }
     }
 
     /// Marks the current call stack as being suspended.
@@ -638,9 +646,12 @@ impl CallStack {
     /// prior to resumption.
     pub fn suspend_current(ctx: &ContextView<'_>, block: bool) -> error::Result {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_call_stack_suspend_current(ctx.share_to_ffi(), block);
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error =
+                    bindings::fimo_tracing_call_stack_suspend_current(ctx.share_to_ffi(), block);
+            })
+        }
     }
 
     /// Marks the current call stack as being resumed.
@@ -649,9 +660,11 @@ impl CallStack {
     /// call stack must be suspended and unblocked.
     pub fn resume_current(ctx: &ContextView<'_>) -> error::Result {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_call_stack_resume_current(ctx.share_to_ffi());
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_call_stack_resume_current(ctx.share_to_ffi());
+            })
+        }
     }
 }
 
@@ -664,10 +677,12 @@ unsafe impl Sync for CallStack {}
 impl Drop for CallStack {
     fn drop(&mut self) {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_call_stack_destroy(self.0.share_to_ffi(), self.1);
-        })
-        .expect("the call stack should be destroyable");
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_call_stack_destroy(self.0.share_to_ffi(), self.1);
+            })
+            .expect("the call stack should be destroyable");
+        }
     }
 }
 
@@ -683,9 +698,11 @@ impl ThreadAccess {
     /// to the tracing subsystem and is assigned a new empty call stack.
     pub fn new(ctx: &ContextView<'_>) -> Result<Self, Error> {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_register_thread(ctx.share_to_ffi());
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_register_thread(ctx.share_to_ffi());
+            })?;
+        }
 
         Ok(Self(ctx.to_context()))
     }
@@ -697,20 +714,24 @@ impl ThreadAccess {
     pub fn unregister(self) -> Result<(), (Self, Error)> {
         let this = ManuallyDrop::new(self);
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_unregister_thread(this.0.share_to_ffi());
-        })
-        .map_err(move |e| (ManuallyDrop::into_inner(this), e))
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_unregister_thread(this.0.share_to_ffi());
+            })
+            .map_err(move |e| (ManuallyDrop::into_inner(this), e))
+        }
     }
 }
 
 impl Drop for ThreadAccess {
     fn drop(&mut self) {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_tracing_unregister_thread(self.0.share_to_ffi());
-        })
-        .expect("should be able to unregister a thread");
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_tracing_unregister_thread(self.0.share_to_ffi());
+            })
+            .expect("should be able to unregister a thread");
+        }
     }
 }
 
@@ -820,7 +841,7 @@ impl OpaqueSubscriber {
             subscriber: *mut core::ffi::c_void,
             time: *const bindings::FimoTime,
             stack: *mut *mut core::ffi::c_void,
-        ) -> bindings::FimoError {
+        ) -> bindings::FimoResult {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
@@ -828,7 +849,7 @@ impl OpaqueSubscriber {
                 match subscriber.create_call_stack(time) {
                     Ok(x) => {
                         core::ptr::write(stack, Box::into_raw(x).cast());
-                        Error::EOK.into_error()
+                        Result::<_, Error>::Ok(()).into_ffi()
                     }
                     Err(e) => e.into_error(),
                 }
@@ -905,7 +926,7 @@ impl OpaqueSubscriber {
             message: *const core::ffi::c_char,
             message_length: usize,
             stack: *mut core::ffi::c_void,
-        ) -> bindings::FimoError {
+        ) -> bindings::FimoResult {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
@@ -913,10 +934,9 @@ impl OpaqueSubscriber {
                 let span_descriptor = SpanDescriptor::borrow_from_ffi(span_descriptor);
                 let message = core::slice::from_raw_parts(message.cast(), message_length);
                 let stack = &mut *stack.cast();
-                match subscriber.create_span(time, span_descriptor, message, stack) {
-                    Ok(_) => Error::EOK.into_error(),
-                    Err(e) => e.into_error(),
-                }
+                subscriber
+                    .create_span(time, span_descriptor, message, stack)
+                    .into_ffi()
             }
         }
         unsafe extern "C" fn span_drop<T: Subscriber>(
@@ -1084,13 +1104,13 @@ impl Formatter<'_> {
         buffer_len: usize,
         data: *const core::ffi::c_void,
         written: *mut usize,
-    ) -> bindings::FimoError {
+    ) -> bindings::FimoResult {
         // Safety: The buffer should be valid.
         unsafe {
             let mut f = Self::new(buffer, buffer_len);
             let _ = f.write_fmt(*data.cast::<core::fmt::Arguments<'_>>());
             core::ptr::write(written, f.pos.min(f.buffer.len()));
-            Error::EOK.into_error()
+            Result::<_, Error>::Ok(()).into_ffi()
         }
     }
 }

@@ -74,7 +74,7 @@ where
                 let context = Context(context);
                 // Safety: FFI call is safe
                 unsafe {
-                    (context.vtable().v0.abort.unwrap_unchecked())(
+                    context.vtable().v0.abort.unwrap_unchecked()(
                         context.data(),
                         std::ptr::null_mut(),
                     )

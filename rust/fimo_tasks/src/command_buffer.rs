@@ -858,7 +858,7 @@ where
     fn block_on(self, group: &WorkerGroup<'ctx>) -> Result<CommandBufferStatus, Error> {
         if group.is_worker() {
             let handle = self.enqueue(group, |_| {})?;
-            handle.join().map_err(|err| err.error())
+            handle.join().map_err(|err| err.into_error())
         } else {
             let sync_arc =
                 Arc::new_in((Mutex::new(None), Condvar::new()), self.allocator().clone());
@@ -1009,8 +1009,13 @@ unsafe impl Sync for CommandBufferHandleInner<'_> {}
 pub struct CommandBufferHandleError<'ctx, A: Allocator>(CommandBufferHandle<'ctx, A>, Error);
 
 impl<'ctx, A: Allocator> CommandBufferHandleError<'ctx, A> {
-    /// Returns the contained error code.
-    pub fn error(&self) -> Error {
+    /// Returns the contained error.
+    pub fn error(&self) -> &Error {
+        &self.1
+    }
+
+    /// Extracts the contained error.
+    pub fn into_error(self) -> Error {
         self.1
     }
 

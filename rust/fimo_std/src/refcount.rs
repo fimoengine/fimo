@@ -88,7 +88,8 @@ impl RefCount {
     pub unsafe fn upgrade(&self) -> crate::error::Result {
         // Safety: The pointer is valid and we own a weak reference.
         let error = unsafe { bindings::fimo_upgrade_refcount(self.0.get()) };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     /// Downgrades a strong reference to a weak reference.
@@ -102,7 +103,8 @@ impl RefCount {
     pub unsafe fn downgrade(&self) -> crate::error::Result {
         // Safety: The pointer is valid and we own a weak reference.
         let error = unsafe { bindings::fimo_downgrade_refcount(self.0.get()) };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     /// Returns whether there is only one strong reference left.
@@ -213,7 +215,8 @@ impl ARefCount {
     pub unsafe fn upgrade(&self) -> crate::error::Result {
         // Safety: The pointer is valid and we own a weak reference.
         let error = unsafe { bindings::fimo_upgrade_refcount_atomic(self.0.get()) };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     /// Downgrades a strong reference to a weak reference.
@@ -227,7 +230,8 @@ impl ARefCount {
     pub unsafe fn downgrade(&self) -> crate::error::Result {
         // Safety: The pointer is valid and we own a weak reference.
         let error = unsafe { bindings::fimo_downgrade_refcount_atomic(self.0.get()) };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     /// Returns whether there is only one strong reference left.

@@ -61,7 +61,10 @@ impl<'a> LoadingSet<'a> {
             let error = unsafe {
                 bindings::fimo_module_set_dismiss(ctx.share_to_ffi(), loading_set.into_ffi())
             };
-            to_result(error)?;
+            // Safety:
+            unsafe {
+                to_result(error)?;
+            }
             request?;
             Ok(())
         } else {
@@ -69,7 +72,8 @@ impl<'a> LoadingSet<'a> {
             let error = unsafe {
                 bindings::fimo_module_set_finish(ctx.share_to_ffi(), loading_set.into_ffi())
             };
-            to_result(error)
+            // Safety:
+            unsafe { to_result(error) }
         }
     }
 
@@ -165,20 +169,22 @@ impl<'a> LoadingSet<'a> {
         let on_success = Some(success_callback::<T> as _);
         let on_error = Some(error_callback::<T> as _);
         let callback = alloc::boxed::Box::try_new_in(callback, crate::allocator::FimoAllocator)
-            .map_err(|_err| Error::ENOMEM)?;
+            .map_err(|_err| <Error>::ENOMEM)?;
         let callback = alloc::boxed::Box::into_raw(callback);
 
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_set_append_callback(
-                ctx.share_to_ffi(),
-                self.share_to_ffi(),
-                module.as_ptr(),
-                on_success,
-                on_error,
-                callback.cast(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_set_append_callback(
+                    ctx.share_to_ffi(),
+                    self.share_to_ffi(),
+                    module.as_ptr(),
+                    on_success,
+                    on_error,
+                    callback.cast(),
+                );
+            })
+        }
     }
 
     /// Adds a freestanding module to the module set.
@@ -202,13 +208,15 @@ impl<'a> LoadingSet<'a> {
         export: impl FFITransferable<*const bindings::FimoModuleExport>,
     ) -> error::Result {
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_set_append_freestanding_module(
-                module.share_to_ffi(),
-                self.share_to_ffi(),
-                export.into_ffi(),
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_set_append_freestanding_module(
+                    module.share_to_ffi(),
+                    self.share_to_ffi(),
+                    export.into_ffi(),
+                );
+            })
+        }
     }
 
     /// Adds modules to the module set.
@@ -221,7 +229,7 @@ impl<'a> LoadingSet<'a> {
     /// function may skip invalid module exports. Trying to include a module with duplicate exports
     /// or duplicate name will result in an error. This function signals an error, if the binary
     /// does not contain the symbols necessary to query the exported modules, but does not return in
-    /// an error, if it does not export any modules. The necessary symbols are setup automatically,
+    /// an error, if it does not export any modules. The necessary symbols are set-up automatically,
     /// if the binary was linked with the fimo library. In case of an error, no modules are appended
     /// to the set.
     pub fn append_modules<T>(
@@ -253,15 +261,17 @@ impl<'a> LoadingSet<'a> {
         let filter = Some(filter_func::<T> as _);
 
         // Safety: FFI call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_set_append_modules(
-                ctx.share_to_ffi(),
-                self.share_to_ffi(),
-                module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
-                filter,
-                filter_data,
-            );
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_set_append_modules(
+                    ctx.share_to_ffi(),
+                    self.share_to_ffi(),
+                    module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
+                    filter,
+                    filter_data,
+                );
+            })
+        }
     }
 }
 

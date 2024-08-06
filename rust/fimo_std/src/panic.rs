@@ -30,8 +30,14 @@ pub fn abort_on_panic<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Invokes a closure, returning an [`Error`] if a panic occurs.
-pub fn catch_unwind<R>(f: impl FnOnce() -> R) -> Result<R, Error> {
-    std::panic::catch_unwind(AssertUnwindSafe(f)).map_err(|_e| Error::EUNKNOWN)
+pub fn catch_unwind<R>(f: impl FnOnce() -> R) -> Result<R, Error<dyn Send>> {
+    std::panic::catch_unwind(AssertUnwindSafe(f)).map_err(|e| match e.downcast::<&'static str>() {
+        Ok(e) => Error::new_send(e),
+        Err(e) => match e.downcast::<String>() {
+            Ok(e) => Error::new_send(e),
+            Err(_e) => Error::from_string(c"unknown error"),
+        },
+    })
 }
 
 #[thread_local]

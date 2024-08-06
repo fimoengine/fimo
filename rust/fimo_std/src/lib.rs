@@ -4,9 +4,11 @@
 #![feature(allocator_api)]
 #![feature(panic_update_hook)]
 #![feature(result_flattening)]
+#![feature(strict_provenance)]
 #![feature(maybe_uninit_slice)]
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
+#![feature(const_refs_to_static)]
 
 extern crate alloc;
 

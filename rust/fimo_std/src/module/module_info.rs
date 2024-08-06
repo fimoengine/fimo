@@ -103,9 +103,11 @@ impl ModuleInfoView<'_> {
     /// except if they are a pseudo module.
     pub fn unload(&self, ctx: &impl ModuleSubsystem) -> error::Result {
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = bindings::fimo_module_unload(ctx.share_to_ffi(), self.share_to_ffi());
-        })
+        unsafe {
+            to_result_indirect(|error| {
+                *error = bindings::fimo_module_unload(ctx.share_to_ffi(), self.share_to_ffi());
+            })
+        }
     }
 
     /// Checks whether the underlying module is still loaded.
@@ -121,9 +123,11 @@ impl ModuleInfoView<'_> {
     pub fn lock_unload(&self) -> Result<ModuleInfoGuard<'_>, Error> {
         let lock_unload = self.0.lock_unload.unwrap();
         // Safety: The ffi call is safe.
-        to_result_indirect(|error| unsafe {
-            *error = lock_unload(self.share_to_ffi());
-        })?;
+        unsafe {
+            to_result_indirect(|error| {
+                *error = lock_unload(self.share_to_ffi());
+            })?;
+        }
         Ok(ModuleInfoGuard(*self))
     }
 
@@ -528,7 +532,10 @@ unsafe impl Module for OpaqueModule<'_> {
                 &mut is_static,
             )
         };
-        to_result(error)?;
+        // Safety:
+        unsafe {
+            to_result(error)?;
+        }
 
         match (has_dependency, is_static) {
             (true, true) => Ok(DependencyType::StaticDependency),
@@ -542,7 +549,8 @@ unsafe impl Module for OpaqueModule<'_> {
         let error = unsafe {
             bindings::fimo_module_namespace_include(self.share_to_ffi(), namespace.as_ptr())
         };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result {
@@ -550,7 +558,8 @@ unsafe impl Module for OpaqueModule<'_> {
         let error = unsafe {
             bindings::fimo_module_namespace_exclude(self.share_to_ffi(), namespace.as_ptr())
         };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
@@ -566,7 +575,10 @@ unsafe impl Module for OpaqueModule<'_> {
                 &mut is_static,
             )
         };
-        to_result(error)?;
+        // Safety:
+        unsafe {
+            to_result(error)?;
+        }
 
         match (has_dependency, is_static) {
             (true, true) => Ok(DependencyType::StaticDependency),
@@ -580,7 +592,8 @@ unsafe impl Module for OpaqueModule<'_> {
         let error = unsafe {
             bindings::fimo_module_acquire_dependency(self.share_to_ffi(), dependency.share_to_ffi())
         };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result {
@@ -588,7 +601,8 @@ unsafe impl Module for OpaqueModule<'_> {
         let error = unsafe {
             bindings::fimo_module_relinquish_dependency(self.share_to_ffi(), dependency.into_ffi())
         };
-        to_result(error)
+        // Safety:
+        unsafe { to_result(error) }
     }
 
     unsafe fn load_symbol_unchecked<T>(
