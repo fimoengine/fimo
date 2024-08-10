@@ -2292,39 +2292,6 @@ class FimoModuleExport(c.Structure):
     ]
 
 
-class FimoModuleRawSymbol(c.Structure):
-    """Type-erased symbol definition."""
-
-    _fields_ = [("data", c.c_void_p), ("lock", FimoUSize)]
-
-
-_fimo_impl_module_symbol_is_used = _lib.fimo_impl_module_symbol_is_used
-_fimo_impl_module_symbol_is_used.argtypes = [c.POINTER(FimoUSize)]
-_fimo_impl_module_symbol_is_used.restype = c.c_bool
-
-
-def fimo_impl_module_symbol_is_used(lock: Ref[FimoUSize]) -> bool:
-    return _fimo_impl_module_symbol_is_used(lock)
-
-
-_fimo_impl_module_symbol_acquire = _lib.fimo_impl_module_symbol_acquire
-_fimo_impl_module_symbol_acquire.argtypes = [c.POINTER(FimoUSize)]
-_fimo_impl_module_symbol_acquire.restype = None
-
-
-def fimo_impl_module_symbol_acquire(lock: Ref[FimoUSize]) -> None:
-    _fimo_impl_module_symbol_acquire(lock)
-
-
-_fimo_impl_module_symbol_release = _lib.fimo_impl_module_symbol_release
-_fimo_impl_module_symbol_release.argtypes = [c.POINTER(FimoUSize)]
-_fimo_impl_module_symbol_release.restype = None
-
-
-def fimo_impl_module_symbol_release(lock: Ref[FimoUSize]) -> None:
-    _fimo_impl_module_symbol_release(lock)
-
-
 class FimoModuleParamTable(c.Structure):
     """Opaque type for a parameter table of a module.
 
@@ -2350,7 +2317,7 @@ class FimoModuleResourceTable(c.Structure):
 class FimoModuleSymbolImportTable(c.Structure):
     """Opaque type for a symbol import table of a module.
 
-    The import table is equivalent to an array of `const FimoModuleRawSymbol*`,
+    The import table is equivalent to an array of `const void*`,
     where each entry represents one symbol of the module symbol
     import list. The symbols are ordered in declaration order.
     """
@@ -2361,7 +2328,7 @@ class FimoModuleSymbolImportTable(c.Structure):
 class FimoModuleSymbolExportTable(c.Structure):
     """Opaque type for a symbol export table of a module.
 
-    The export table is equivalent to an array of `const FimoModuleRawSymbol*`,
+    The export table is equivalent to an array of `const void*`,
     where each entry represents one symbol of the module symbol
     export list, followed by the entries of the dynamic symbol
     export list.
@@ -2648,7 +2615,7 @@ class FimoModuleVTableV0(c.Structure):
                 c.c_char_p,
                 c.c_char_p,
                 FimoVersion,
-                c.POINTER(c.POINTER(FimoModuleRawSymbol)),
+                c.POINTER(c.c_void_p),
             ),
         ),
         ("unload", c.CFUNCTYPE(FimoResult, c.c_void_p, c.POINTER(FimoModuleInfo))),
@@ -3385,7 +3352,7 @@ _fimo_module_load_symbol.argtypes = [
     c.c_char_p,
     c.c_char_p,
     FimoVersion,
-    c.POINTER(c.POINTER(FimoModuleRawSymbol)),
+    c.POINTER(c.c_void_p),
 ]
 _fimo_module_load_symbol.restype = FimoResult
 
@@ -3395,7 +3362,7 @@ def fimo_module_load_symbol(
     name: c.c_char_p,
     ns: c.c_char_p,
     version: FimoVersion,
-    symbol: PtrRef[FimoModuleRawSymbol],
+    symbol: PtrRef[c.c_void_p],
 ) -> FimoResult:
     """Loads a symbol from the module backend.
 

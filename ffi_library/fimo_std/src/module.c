@@ -3,23 +3,6 @@
 
 #if defined(FIMO_STD_BUILD_SHARED) && defined(FIMO_STD_EXPORT_SYMBOLS)
 FIMO_EXPORT
-bool fimo_impl_module_symbol_is_used(_Atomic(FimoUSize) *lock) {
-    return atomic_load_explicit(lock, memory_order_acquire) != 0;
-}
-
-FIMO_EXPORT
-void fimo_impl_module_symbol_acquire(_Atomic(FimoUSize) *lock) {
-    FimoUSize count = atomic_fetch_add_explicit(lock, 1, memory_order_acquire);
-    FIMO_ASSERT(count < (FimoUSize)FIMO_ISIZE_MAX)
-}
-
-FIMO_EXPORT
-void fimo_impl_module_symbol_release(_Atomic(FimoUSize) *lock) {
-    FimoUSize count = atomic_fetch_sub_explicit(lock, 1, memory_order_release);
-    FIMO_ASSERT(count != 0)
-}
-
-FIMO_EXPORT
 void fimo_impl_module_info_acquire(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     info->acquire(info);
@@ -223,7 +206,7 @@ FimoResult fimo_module_has_dependency(const FimoModule *module, const FimoModule
 FIMO_EXPORT
 FIMO_MUST_USE
 FimoResult fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns,
-                                   const FimoVersion version, const FimoModuleRawSymbol **symbol) {
+                                   const FimoVersion version, const void **symbol) {
     if (module == NULL) {
         return FIMO_EINVAL;
     }

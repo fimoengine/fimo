@@ -207,7 +207,7 @@ fn load_modules() -> Result<(), Error> {
     module.acquire_dependency(&c)?;
 
     let a_0 = module.load_symbol::<AExport0>()?;
-    assert_eq!(*a_0.lock(), 5);
+    assert_eq!(*a_0, 5);
 
     assert!(module.load_symbol::<b::BExport0>().is_err());
     module.include_namespace(b::NamespaceItem::NAME)?;

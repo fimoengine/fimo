@@ -699,10 +699,8 @@ macro_rules! export_module_private_imports {
             impl [<$mod_ident Imports>] {
                 $(
                     #[doc = "Fetches the `" $name "` import symbol"]
-                    pub fn $name(&self) -> $crate::module::SymbolGuard<
-                        '_, '_, <$import as $crate::module::SymbolItem>::Type
-                    > {
-                        self.$name.lock()
+                    pub fn $name(&self) -> &'_ <$import as $crate::module::SymbolItem>::Type {
+                        &*self.$name
                     }
                 )*
             }
@@ -857,18 +855,14 @@ macro_rules! export_module_private_exports {
             impl [<$mod_ident Exports>] {
                 $(
                     #[doc = "Fetches the `" $s_name "` import symbol"]
-                    pub fn $s_name(&self) -> $crate::module::SymbolGuard<
-                        '_, '_, <$s_export as $crate::module::SymbolItem>::Type
-                    > {
-                        self.$s_name.lock()
+                    pub fn $s_name(&self) -> &'_ <$s_export as $crate::module::SymbolItem>::Type {
+                        &*self.$s_name
                     }
                 )*
                 $(
                     #[doc = "Fetches the `" $d_name "` import symbol"]
-                    pub fn $d_name(&self) -> $crate::module::SymbolGuard<
-                        '_, '_, <<$d_export as $crate::module::DynamicExport<$mod_ident<'_>>>::Item as $crate::module::SymbolItem>::Type
-                    > {
-                        self.$d_name.lock()
+                    pub fn $d_name(&self) -> &'_ <<$d_export as $crate::module::DynamicExport<$mod_ident<'_>>>::Item as $crate::module::SymbolItem>::Type {
+                        &*self.$d_name
                     }
                 )*
             }

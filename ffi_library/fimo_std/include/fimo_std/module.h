@@ -550,15 +550,14 @@ extern "C" {
  */
 #define FIMO_MODULE_SYMBOL_TABLE(NAME, SYM_COUNT, DECL)                                                                \
     DECL;                                                                                                              \
-    static_assert(alignof(NAME) == alignof(const FimoModuleRawSymbol *), "Unexpected padding in module symbol table"); \
+    static_assert(alignof(NAME) == alignof(const void *), "Unexpected padding in module symbol table");                \
     static_assert(sizeof(NAME) > 0, "Unexpected size of module symbol table");                                         \
-    static_assert(sizeof(NAME) == SYM_COUNT * sizeof(const FimoModuleRawSymbol *), "Unexpected size of module symbol " \
-                                                                                   "table");
+    static_assert(sizeof(NAME) == SYM_COUNT * sizeof(const void *), "Unexpected size of module symbol table");
 
 /**
  * Declares a placeholder symbol.
  */
-#define FIMO_MODULE_SYMBOL_TABLE_EMPTY FimoModuleRawSymbol empty__;
+#define FIMO_MODULE_SYMBOL_TABLE_EMPTY const void *empty__;
 
 /**
  * Declares a new variable symbol for the symbol table.
@@ -567,10 +566,7 @@ extern "C" {
  * @param TYPE type of the symbol
  */
 #define FIMO_MODULE_SYMBOL_TABLE_VAR(NAME, TYPE)                                                                       \
-    const struct {                                                                                                     \
-        const TYPE *data;                                                                                              \
-        _Atomic(FimoUSize) lock;                                                                                       \
-    } *NAME;                                                                                                           \
+    const TYPE *NAME;                                                                                                  \
     static_assert(sizeof(const TYPE *) == sizeof(const void *), "Unexpected symbol size");                             \
     static_assert(alignof(const TYPE *) == alignof(const void *), "Unexpected symbol alignment")
 
@@ -582,34 +578,9 @@ extern "C" {
  * @param ARGS function parameter list
  */
 #define FIMO_MODULE_SYMBOL_TABLE_FUNC(NAME, RET, ...)                                                                  \
-    const struct {                                                                                                     \
-        const RET (*data)(__VA_ARGS__);                                                                                \
-        _Atomic(FimoUSize) lock;                                                                                       \
-    } *NAME;                                                                                                           \
+    const RET (*NAME)(__VA_ARGS__);                                                                                    \
     static_assert(sizeof(RET(*const)(__VA_ARGS__)) == sizeof(const void *), "Unexpected symbol size");                 \
     static_assert(alignof(RET(*const)(__VA_ARGS__)) == alignof(const void *), "Unexpected symbol alignment")
-
-/**
- * Locks a symbol and returns it.
- *
- * @param SYMBOL a symbol
- */
-#define FIMO_MODULE_SYMBOL_LOCK(SYMBOL)                                                                                \
-    (fimo_impl_module_symbol_acquire((_Atomic(FimoUSize) *)&(SYMBOL)->lock), (SYMBOL)->data)
-
-/**
- * Unlocks a symbol.
- *
- * @param SYMBOL a symbol
- */
-#define FIMO_MODULE_SYMBOL_RELEASE(SYMBOL) fimo_impl_module_symbol_release((_Atomic(FimoUSize) *)&(SYMBOL)->lock)
-
-/**
- * Checks whether the symbol is locked.
- *
- * @param SYMBOL a symbol
- */
-#define FIMO_MODULE_SYMBOL_IS_LOCKED(SYMBOL) fimo_impl_module_symbol_is_used((_Atomic(FimoUSize) *)&(SYMBOL)->lock)
 
 /**
  * Acquires a reference to a `FimoModuleInfo`.
@@ -1097,47 +1068,6 @@ typedef struct FimoModuleExport {
 } FimoModuleExport;
 
 /**
- * Type-erased symbol definition.
- */
-typedef struct FimoModuleRawSymbol {
-    /**
-     * Pointer to the symbol.
-     */
-    const void *data;
-    /**
-     * Lock count of the symbol.
-     */
-    _Atomic(FimoUSize) lock;
-} FimoModuleRawSymbol;
-
-// The use of atomics trips up our generation of rust bindings,
-// so we disable them.
-#ifndef FIMO_STD_BINDGEN
-#ifdef FIMO_STD_BUILD_SHARED
-FIMO_EXPORT
-bool fimo_impl_module_symbol_is_used(_Atomic(FimoUSize) *lock);
-FIMO_EXPORT
-void fimo_impl_module_symbol_acquire(_Atomic(FimoUSize) *lock);
-FIMO_EXPORT
-void fimo_impl_module_symbol_release(_Atomic(FimoUSize) *lock);
-#else
-static FIMO_INLINE_ALWAYS bool fimo_impl_module_symbol_is_used(_Atomic(FimoUSize) *lock) {
-    return atomic_load_explicit(lock, memory_order_acquire) != 0;
-}
-
-static FIMO_INLINE_ALWAYS void fimo_impl_module_symbol_acquire(_Atomic(FimoUSize) *lock) {
-    FimoUSize count = atomic_fetch_add_explicit(lock, 1, memory_order_acquire);
-    FIMO_ASSERT(count < (FimoUSize)FIMO_ISIZE_MAX)
-}
-
-static FIMO_INLINE_ALWAYS void fimo_impl_module_symbol_release(_Atomic(FimoUSize) *lock) {
-    FimoUSize count = atomic_fetch_sub_explicit(lock, 1, memory_order_release);
-    FIMO_ASSERT(count != 0)
-}
-#endif
-#endif
-
-/**
  * Opaque type for a parameter table of a module.
  *
  * The layout of a parameter table is equivalent to an array of
@@ -1158,7 +1088,7 @@ typedef void FimoModuleResourceTable;
 /**
  * Opaque type for a symbol import table of a module.
  *
- * The import table is equivalent to an array of `const FimoModuleRawSymbol*`,
+ * The import table is equivalent to an array of `const void*`,
  * where each entry represents one symbol of the module symbol
  * import list. The symbols are ordered in declaration order.
  */
@@ -1167,7 +1097,7 @@ typedef void FimoModuleSymbolImportTable;
 /**
  * Opaque type for a symbol export table of a module.
  *
- * The export table is equivalent to an array of `const FimoModuleRawSymbol*`,
+ * The export table is equivalent to an array of `const void*`,
  * where each entry represents one symbol of the module symbol
  * export list, followed by the entries of the dynamic symbol
  * export list.
@@ -1388,8 +1318,7 @@ typedef struct FimoModuleVTableV0 {
     FimoResult (*acquire_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
     FimoResult (*relinquish_dependency)(void *, const FimoModule *, const FimoModuleInfo *);
     FimoResult (*has_dependency)(void *, const FimoModule *, const FimoModuleInfo *, bool *, bool *);
-    FimoResult (*load_symbol)(void *, const FimoModule *, const char *, const char *, FimoVersion,
-                              const FimoModuleRawSymbol **);
+    FimoResult (*load_symbol)(void *, const FimoModule *, const char *, const char *, FimoVersion, const void **);
     FimoResult (*unload)(void *, const FimoModuleInfo *);
     FimoResult (*param_query)(void *, const char *, const char *, FimoModuleParamType *, FimoModuleParamAccess *,
                               FimoModuleParamAccess *);
@@ -1804,7 +1733,7 @@ FimoResult fimo_module_has_dependency(const FimoModule *module, const FimoModule
 FIMO_EXPORT
 FIMO_MUST_USE
 FimoResult fimo_module_load_symbol(const FimoModule *module, const char *name, const char *ns, FimoVersion version,
-                                   const FimoModuleRawSymbol **symbol);
+                                   const void **symbol);
 
 /**
  * Unloads a module.

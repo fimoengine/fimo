@@ -141,18 +141,10 @@ static FimoResult c_constructor(const FimoModule *module, FimoModuleLoadingSet *
     (void)resources;
 
     const CImportTable *imports = static_cast<const CImportTable *>(module->imports);
-    const int *a_0 = FIMO_MODULE_SYMBOL_LOCK(imports->a_0);
-    const int *a_1 = FIMO_MODULE_SYMBOL_LOCK(imports->a_1);
-    const int *b_0 = FIMO_MODULE_SYMBOL_LOCK(imports->b_0);
-    const int *b_1 = FIMO_MODULE_SYMBOL_LOCK(imports->b_1);
-    REQUIRE(*a_0 == a_export_0);
-    REQUIRE(*a_1 == a_export_1);
-    REQUIRE(*b_0 == b_export_0);
-    REQUIRE(*b_1 == b_export_1);
-    FIMO_MODULE_SYMBOL_RELEASE(imports->a_0);
-    FIMO_MODULE_SYMBOL_RELEASE(imports->a_1);
-    FIMO_MODULE_SYMBOL_RELEASE(imports->b_0);
-    FIMO_MODULE_SYMBOL_RELEASE(imports->b_1);
+    REQUIRE(*imports->a_0 == a_export_0);
+    REQUIRE(*imports->a_1 == a_export_1);
+    REQUIRE(*imports->b_0 == b_export_0);
+    REQUIRE(*imports->b_1 == b_export_1);
 
     *data = nullptr;
     return FIMO_EOK;
@@ -243,12 +235,11 @@ TEST_CASE("Load modules", "[modules]") {
     error = fimo_module_param_set_dependency(pseudo_module, &value, type, "c", "pub_dep");
     REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
-    const FimoModuleRawSymbol *a_export_0_symbol;
+    const void *a_export_0_symbol;
     error = fimo_module_load_symbol(pseudo_module, "a_export_0", "", FIMO_VERSION(0, 1, 0), &a_export_0_symbol);
     REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
-    const int *a_export_0_symbol_ptr = static_cast<const int *>(FIMO_MODULE_SYMBOL_LOCK(a_export_0_symbol));
+    const int *a_export_0_symbol_ptr = static_cast<const int *>(a_export_0_symbol);
     REQUIRE(*a_export_0_symbol_ptr == a_export_0);
-    FIMO_MODULE_SYMBOL_RELEASE(a_export_0_symbol);
 
     error = fimo_module_pseudo_module_destroy(pseudo_module, &context);
     REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));

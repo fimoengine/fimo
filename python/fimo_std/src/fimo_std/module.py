@@ -221,39 +221,12 @@ class DependencyType(IntEnum):
 _T = TypeVar("_T", bound=_ffi.FFITransferable[c.c_void_p])
 
 
-class RawSymbol:
-    """A type-erased symbol from the module subsystem."""
-
-    def __init__(self, ffi: _ffi.Pointer[_ffi.FimoModuleRawSymbol]):
-        if not isinstance(ffi, c.POINTER(_ffi.FimoModuleRawSymbol)):
-            raise TypeError("`ffi` must be an instance of `FimoModuleRawSymbol*`")
-        if not ffi:
-            raise ValueError("`ffi` may not be `null`")
-
-        self._ffi = ffi
-
-    def in_use(self) -> bool:
-        lock = self._ffi.contents.lock
-        return _ffi.fimo_impl_module_symbol_is_used(c.byref(lock))
-
-    def __enter__(self) -> c.c_void_p:
-        lock = self._ffi.contents.lock
-        data = c.c_void_p(self._ffi.contents.data)
-        _ffi.fimo_impl_module_symbol_acquire(c.byref(lock))
-
-        return data
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        lock = self._ffi.contents.lock
-        _ffi.fimo_impl_module_symbol_release(c.byref(lock))
-
-
 class Symbol(Generic[_T], ABC):
     """A symbol from the module subsystem."""
 
-    def __init__(self, sym: RawSymbol) -> None:
-        if not isinstance(sym, RawSymbol):
-            raise TypeError("`symbol` must be an instance of `RawSymbol`")
+    def __init__(self, sym: c.c_void_p) -> None:
+        if not isinstance(sym, c.c_void_p):
+            raise TypeError("`symbol` must be an instance of `c_void_p`")
 
         self._sym = sym
 
@@ -282,13 +255,11 @@ class Symbol(Generic[_T], ABC):
         pass
 
     def __enter__(self) -> _T:
-        """Locks the symbol so that it may be used."""
-        sym = self._sym.__enter__()
-        return self.symbol_type().transfer_from_ffi(sym)
+        """Construct a reference to the symbol."""
+        return self.symbol_type().transfer_from_ffi(self._sym)
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Unlocks the symbol."""
-        self._sym.__exit__(exc_type, exc_val, exc_tb)
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
 
 
 def symbol(
@@ -612,7 +583,9 @@ class ModuleBase(
         symbol = self.load_raw_symbol(name, namespace, version)
         return sym_type(symbol)
 
-    def load_raw_symbol(self, name: str, namespace: str, version: Version) -> RawSymbol:
+    def load_raw_symbol(
+        self, name: str, namespace: str, version: Version
+    ) -> c.c_void_p:
         """Loads a symbol from the module subsystem.
 
         The caller can query the backend for a symbol of a loaded module. This is useful for loading
@@ -631,13 +604,13 @@ class ModuleBase(
         name_ffi = c.c_char_p(name.encode())
         namespace_ffi = c.c_char_p(namespace.encode())
         version_ffi = version.transfer_to_ffi()
-        symbol_ffi = c.POINTER(_ffi.FimoModuleRawSymbol)()
+        symbol_ffi = c.c_void_p()
         err = _ffi.fimo_module_load_symbol(
             self.ffi, name_ffi, namespace_ffi, version_ffi, c.byref(symbol_ffi)
         )
         error.Result.transfer_from_ffi(err).raise_if_error()
 
-        return RawSymbol(symbol_ffi)
+        return symbol_ffi
 
 
 class _OpaqueModule(
@@ -2561,16 +2534,14 @@ def _create_module_import_map(
                 )
             if not ffi:
                 raise ValueError("`ffi` may not be `null`")
-            self._ffi: _ffi.Pointer[_ffi.Pointer[_ffi.FimoModuleRawSymbol]] = c.cast(
-                ffi, c.POINTER(c.POINTER(_ffi.FimoModuleRawSymbol))
-            )
+            self._ffi: _ffi.Pointer[c.c_void_p] = c.cast(ffi, c.POINTER(c.c_void_p))
 
         def __getattr__(self, name: str) -> Symbol:
             nonlocal index_map
             if name in index_map:
                 (idx, cls) = index_map[name]
-                raw_symbol: RawSymbol = RawSymbol(self._ffi[idx])
-                return cls(raw_symbol)
+                raw_symbol: int = self._ffi[idx]
+                return cls(c.c_void_p(raw_symbol))
 
             raise AttributeError(f"invalid attribute name: {name}")
 
@@ -2618,16 +2589,14 @@ def _create_module_export_map(
                 )
             if not ffi:
                 raise ValueError("`ffi` may not be `null`")
-            self._ffi: _ffi.Pointer[_ffi.Pointer[_ffi.FimoModuleRawSymbol]] = c.cast(
-                ffi, c.POINTER(c.POINTER(_ffi.FimoModuleRawSymbol))
-            )
+            self._ffi: _ffi.Pointer[c.c_void_p] = c.cast(ffi, c.POINTER(c.c_void_p))
 
         def __getattr__(self, name: str) -> Symbol:
             nonlocal index_map
             if name in index_map:
                 (idx, cls) = index_map[name]
-                raw_symbol: RawSymbol = RawSymbol(self._ffi[idx])
-                return cls(raw_symbol)
+                raw_symbol: int = self._ffi[idx]
+                return cls(c.c_void_p(raw_symbol))
 
             raise AttributeError(f"invalid attribute name: {name}")
 

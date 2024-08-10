@@ -6,13 +6,3 @@
 #![allow(clippy::undocumented_unsafe_blocks)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
-/// Type-erased symbol definition.
-#[repr(C)]
-#[derive(Debug)]
-pub struct FimoModuleRawSymbol {
-    /// Pointer to the symbol.
-    pub data: core::cell::Cell<*const core::ffi::c_void>,
-    /// Lock count of the symbol.
-    pub lock: core::sync::atomic::AtomicUsize,
-}

@@ -677,7 +677,7 @@ struct ModuleInfoSymbol_ {
     const char *ns;
     FimoVersion version;
     FimoModuleDynamicSymbolDestructor destructor;
-    FimoModuleRawSymbol symbol;
+    const void *symbol;
 };
 
 static FimoResult module_info_symbol_new_(const char *name, const char *ns, const FimoVersion version,
@@ -701,11 +701,7 @@ static FimoResult module_info_symbol_new_(const char *name, const char *ns, cons
             .ns = ns_,
             .version = version,
             .destructor = destructor,
-            .symbol =
-                    {
-                            .data = symbol,
-                            .lock = 0,
-                    },
+            .symbol = symbol,
     };
 
     return FIMO_EOK;
@@ -718,9 +714,8 @@ name_alloc:
 
 static void module_info_symbol_free_(struct ModuleInfoSymbol_ *element) {
     FIMO_DEBUG_ASSERT(element)
-    FIMO_DEBUG_ASSERT_FALSE(fimo_impl_module_symbol_is_used(&element->symbol.lock))
-    if (element->destructor && element->symbol.data) {
-        element->destructor((void *)element->symbol.data);
+    if (element->destructor && element->symbol) {
+        element->destructor((void *)element->symbol);
     }
 
     fimo_free((char *)element->ns);
@@ -2884,17 +2879,6 @@ static bool ctx_can_remove_module_(FimoInternalModuleContext *ctx, struct Module
         return false;
     }
 
-    // Check that no symbols are in use.
-    {
-        FimoUSize it = 0;
-        const struct ModuleInfoSymbol_ *symbol;
-        while (module_info_next_symbol_(info_inner, &it, &symbol)) {
-            if (FIMO_MODULE_SYMBOL_IS_LOCKED(&symbol->symbol)) {
-                return false;
-            }
-        }
-    }
-
     // Check that there are no dependencies left.
     const struct Module_ *module_ = ctx_get_module_(ctx, info->info.name);
     FIMO_DEBUG_ASSERT(module_)
@@ -3448,9 +3432,8 @@ static FimoResult fi_module_new_from_export(FimoInternalModuleContext *ctx, Fimo
         const struct ModuleInfoSymbol_ *module_info_symbol =
                 module_info_get_symbol_(module_info_inner, symbol->name, symbol->ns, symbol->version);
         FIMO_DEBUG_ASSERT(module_info_symbol);
-        const FimoModuleRawSymbol *raw_symbol = &module_info_symbol->symbol;
-        error = fimo_array_list_push(&imports, sizeof(FimoModuleRawSymbol *), _Alignof(FimoModuleRawSymbol *),
-                                     &raw_symbol, NULL);
+        const void *raw_symbol = module_info_symbol->symbol;
+        error = fimo_array_list_push(&imports, sizeof(const void *), _Alignof(const void *), &raw_symbol, NULL);
         if (FIMO_RESULT_IS_ERROR(error)) {
             module_info_unlock_(module_info_inner);
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the import table")
@@ -3497,9 +3480,8 @@ static FimoResult fi_module_new_from_export(FimoInternalModuleContext *ctx, Fimo
             goto release_exports;
         }
         FIMO_DEBUG_ASSERT(info_symbol)
-        const FimoModuleRawSymbol *raw_symbol = &info_symbol->symbol;
-        error = fimo_array_list_push(&exports, sizeof(const FimoModuleRawSymbol *),
-                                     _Alignof(const FimoModuleRawSymbol *), &raw_symbol, NULL);
+        const void *raw_symbol = info_symbol->symbol;
+        error = fimo_array_list_push(&exports, sizeof(const void *), _Alignof(const void *), &raw_symbol, NULL);
         if (FIMO_RESULT_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the export table")
             goto release_exports;
@@ -3524,9 +3506,8 @@ static FimoResult fi_module_new_from_export(FimoInternalModuleContext *ctx, Fimo
             goto release_exports;
         }
         FIMO_DEBUG_ASSERT(info_symbol)
-        const FimoModuleRawSymbol *raw_symbol = &info_symbol->symbol;
-        error = fimo_array_list_push(&exports, sizeof(const FimoModuleRawSymbol *),
-                                     _Alignof(const FimoModuleRawSymbol *), &raw_symbol, NULL);
+        const void *raw_symbol = &info_symbol->symbol;
+        error = fimo_array_list_push(&exports, sizeof(const void *), _Alignof(const void *), &raw_symbol, NULL);
         if (FIMO_RESULT_IS_ERROR(error)) {
             ERROR_SIMPLE_(ctx, error, "could not insert symbol into the export table")
             goto release_exports;
@@ -3540,12 +3521,11 @@ static FimoResult fi_module_new_from_export(FimoInternalModuleContext *ctx, Fimo
 
 release_exports:
     if ((*element)->exports == NULL) {
-        fimo_array_list_free(&exports, sizeof(const FimoModuleRawSymbol *), _Alignof(const FimoModuleRawSymbol *),
-                             NULL);
+        fimo_array_list_free(&exports, sizeof(const void *), _Alignof(const void *), NULL);
     }
 release_imports:
     if ((*element)->imports == NULL) {
-        fimo_array_list_free(&imports, sizeof(FimoModuleRawSymbol *), _Alignof(FimoModuleRawSymbol *), NULL);
+        fimo_array_list_free(&imports, sizeof(void *), _Alignof(void *), NULL);
     }
 release_namespaces:;
 release_resources:;
@@ -4124,8 +4104,7 @@ FimoResult fimo_internal_trampoline_module_param_get_dependency(void *ctx, const
 }
 
 FimoResult fimo_internal_trampoline_module_load_symbol(void *ctx, const FimoModule *module, const char *name,
-                                                       const char *ns, FimoVersion version,
-                                                       const FimoModuleRawSymbol **symbol) {
+                                                       const char *ns, FimoVersion version, const void **symbol) {
     FIMO_DEBUG_ASSERT(ctx)
     return fimo_internal_module_load_symbol(TO_MODULE_CTX_(ctx), module, name, ns, version, symbol);
 }
@@ -5004,7 +4983,7 @@ FimoResult fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, c
 
 FIMO_MUST_USE
 FimoResult fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const FimoModule *module, const char *name,
-                                            const char *ns, FimoVersion version, const FimoModuleRawSymbol **symbol) {
+                                            const char *ns, FimoVersion version, const void **symbol) {
     FIMO_DEBUG_ASSERT(ctx)
     if (module == NULL || name == NULL || ns == NULL || symbol == NULL) {
         ERROR_(ctx, FIMO_EINVAL, "invalid null parameter, module='%p', name='%p', ns='%p', symbol='%p'", (void *)module,
@@ -5057,7 +5036,7 @@ FimoResult fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, cons
     struct ModuleInfoInner_ *symbol_owner_info_inner = module_info_lock_(symbol_owner_info);
     const struct ModuleInfoSymbol_ *info_symbol = module_info_get_symbol_(symbol_owner_info_inner, name, ns, version);
     FIMO_DEBUG_ASSERT(info_symbol);
-    *symbol = &info_symbol->symbol;
+    *symbol = info_symbol->symbol;
 
     module_info_unlock_(symbol_owner_info_inner);
     module_info_unlock_(info_inner);

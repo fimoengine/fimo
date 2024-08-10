@@ -66,7 +66,7 @@ TEST_CASE("Load module", "[python_module_loader]") {
     error = fimo_module_namespace_include(pseudo_module, FIPY_SYMBOL_NAMESPACE);
     REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
-    const FimoModuleRawSymbol *run_string_symbol;
+    const void *run_string_symbol;
     error = fimo_module_load_symbol(pseudo_module, FIPY_SYMBOL_NAME_RUN_STRING, FIPY_SYMBOL_NAMESPACE,
                                     FIMO_VERSION(FIPY_SYMBOL_VERSION_MAJOR_RUN_STRING,
                                                  FIPY_SYMBOL_VERSION_MINOR_RUN_STRING,
@@ -74,10 +74,9 @@ TEST_CASE("Load module", "[python_module_loader]") {
                                     &run_string_symbol);
     REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
 
-    auto run_string = static_cast<const FipyRunString *>(FIMO_MODULE_SYMBOL_LOCK(run_string_symbol));
+    auto run_string = static_cast<const FipyRunString *>(run_string_symbol);
     error = fipy_run_string(run_string, R"(print("Hello Python!"))", nullptr);
     REQUIRE_FALSE(FIMO_RESULT_IS_ERROR(error));
-    FIMO_MODULE_SYMBOL_RELEASE(run_string_symbol);
 
     fimo_context_release(context);
 }

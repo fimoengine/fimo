@@ -444,9 +444,8 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
         let context = module
             .load_symbol::<symbols::fimo_tasks::Context>()
             .expect("could not load context symbol");
-        let guard = context.lock();
 
-        f(&module, &guard);
+        f(&module, &context);
     }
     drop(context);
 }

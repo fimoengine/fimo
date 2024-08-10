@@ -81,8 +81,7 @@ FimoResult fimo_internal_trampoline_module_param_get_dependency(void *ctx, const
                                                                 FimoModuleParamType *type, const char *module_name,
                                                                 const char *param);
 FimoResult fimo_internal_trampoline_module_load_symbol(void *ctx, const FimoModule *module, const char *name,
-                                                       const char *ns, FimoVersion version,
-                                                       const FimoModuleRawSymbol **symbol);
+                                                       const char *ns, FimoVersion version, const void **symbol);
 FimoResult fimo_internal_trampoline_module_unload(void *ctx, const FimoModuleInfo *module);
 FimoResult fimo_internal_trampoline_module_param_set_private(void *ctx, const FimoModule *module, const void *value,
                                                              FimoModuleParamType type, FimoModuleParam *param);
@@ -510,7 +509,7 @@ FimoResult fimo_internal_module_has_dependency(FimoInternalModuleContext *ctx, c
  */
 FIMO_MUST_USE
 FimoResult fimo_internal_module_load_symbol(FimoInternalModuleContext *ctx, const FimoModule *module, const char *name,
-                                            const char *ns, FimoVersion version, const FimoModuleRawSymbol **symbol);
+                                            const char *ns, FimoVersion version, const void **symbol);
 
 /**
  * Unloads a module.
