@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+    <Type Name="FimoUTF8PathBuf">
+        <DisplayString Condition="buffer.elements == 0">empty</DisplayString>
+        <DisplayString>{buffer.elements,[buffer.length]sb}</DisplayString>
+    </Type>
+    <Type Name="FimoOwnedUTF8Path">
+        <DisplayString Condition="path == 0">invalid path</DisplayString>
+        <DisplayString>{path,[length]sb}</DisplayString>
+    </Type>
+    <Type Name="FimoUTF8Path">
+        <DisplayString Condition="path == 0">invalid path</DisplayString>
+        <DisplayString>{path,[length]sb}</DisplayString>
+    </Type>
+    <Type Name="FimoOwnedOSPath">
+        <DisplayString Condition="path == 0">invalid path</DisplayString>
+        <DisplayString>{path,[length]sub}</DisplayString>
+    </Type>
+    <Type Name="FimoOSPath">
+        <DisplayString Condition="path == 0">invalid path</DisplayString>
+        <DisplayString>{path,[length]sub}</DisplayString>
+    </Type>
+    <Type Name="FimoUTF8PathPrefix">
+        <DisplayString Condition="type == FIMO_UTF8_PATH_PREFIX_VERBATIM">{data.verbatim}</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_PREFIX_VERBATIM_UNC">{data.verbatim_unc}</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_PREFIX_VERBATIM_DISK">{data.verbatim_disk}</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_PREFIX_DEVICE_NS">{data.device_ns}</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_PREFIX_UNC">{data.unc}</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_PREFIX_DISK">{data.disk}</DisplayString>
+        <Expand>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_PREFIX_VERBATIM">data.verbatim</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_PREFIX_VERBATIM_UNC">data.verbatim_unc</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_PREFIX_VERBATIM_DISK">data.verbatim_disk</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_PREFIX_DEVICE_NS">data.device_ns</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_PREFIX_UNC">data.unc</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_PREFIX_DISK">data.disk</ExpandedItem>
+        </Expand>
+    </Type>
+    <Type Name="FimoUTF8PathComponent">
+        <DisplayString Condition="type == FIMO_UTF8_PATH_COMPONENT_PREFIX">{data.prefix}</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_COMPONENT_ROOT_DIR">\</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_COMPONENT_CUR_DIR">.</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_COMPONENT_PARENT_DIR">..</DisplayString>
+        <DisplayString Condition="type == FIMO_UTF8_PATH_COMPONENT_NORMAL">{data.normal}</DisplayString>
+        <Expand>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_COMPONENT_PREFIX">data.prefix</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_COMPONENT_ROOT_DIR">data.root_dir</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_COMPONENT_CUR_DIR">data.cur_dir</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_COMPONENT_PARENT_DIR">data.parent_dir</ExpandedItem>
+            <ExpandedItem Condition="type == FIMO_UTF8_PATH_COMPONENT_NORMAL">data.normal</ExpandedItem>
+        </Expand>
+    </Type>
+</AutoVisualizer>

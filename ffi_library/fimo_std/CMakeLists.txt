@@ -21,6 +21,7 @@ set(FIMO_STD_PUBLIC_HEADERS
         include/fimo_std/integers.h
         include/fimo_std/memory.h
         include/fimo_std/module.h
+        include/fimo_std/path.h
         include/fimo_std/refcount.h
         include/fimo_std/time.h
         include/fimo_std/tracing.h
@@ -60,10 +61,9 @@ set(FIMO_STD_PRIVATE_HEADERS
         # Internal headers
         include/fimo_std/internal/context.h
         include/fimo_std/internal/module.h
+        include/fimo_std/internal/path.h
         include/fimo_std/internal/tracing.h
 )
-
-list(APPEND FIMO_STD_HEADERS ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS} ${FIMO_STD_PRIVATE_HEADERS})
 
 set(FIMO_STD_SRC
         # Internal header implementations
@@ -82,16 +82,44 @@ set(FIMO_STD_SRC
         src/graph.c
         src/memory.c
         src/module.c
+        src/path.c
         src/refcount.c
         src/time.c
         src/tracing.c
         src/version.c
 )
 
+# Visualizers
+set(FIMO_STD_NATVIS
+        ${CMAKE_CURRENT_SOURCE_DIR}/visualizers/natvis/path.natvis
+)
+
+set(FIMO_STD_GDB_SCRIPTS
+        ${CMAKE_CURRENT_SOURCE_DIR}/visualizers/gdb/path.py
+)
+
+# Generate source files for the visualizers
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts")
+if (NOT MSVC)
+    foreach (GDB_SCRIPT IN LISTS FIMO_STD_GDB_SCRIPTS)
+        get_filename_component(GDB_SCRIPT_NAME ${GDB_SCRIPT} NAME_WE)
+        add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts/${GDB_SCRIPT_NAME}.h"
+                COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/visualizers/gdb/generate.sh ${GDB_SCRIPT} > "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts/${GDB_SCRIPT_NAME}.h"
+                DEPENDS ${GDB_SCRIPT} "${CMAKE_CURRENT_SOURCE_DIR}/visualizers/gdb/generate.sh"
+                VERBATIM
+        )
+        list(APPEND FIMO_STD_IMPL_HEADERS "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts/${GDB_SCRIPT_NAME}.h")
+    endforeach ()
+endif ()
+
 # Add interface target for PUBLIC configs
 add_library(fimo_std__public_config INTERFACE)
 target_include_directories(fimo_std__public_config INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>  # <prefix>/include
+)
+target_include_directories(fimo_std__public_config INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
         $<INSTALL_INTERFACE:include>  # <prefix>/include
 )
 
@@ -101,6 +129,10 @@ if (MSVC)
     endif ()
 
     target_compile_options(fimo_std__public_config INTERFACE /W4 /WX /utf-8 /Brepro)
+
+    foreach (NATVIS_FILE IN LISTS FIMO_STD_NATVIS)
+        target_link_options(fimo_std__public_config INTERFACE /NATVIS:${NATVIS_FILE})
+    endforeach ()
 else ()
     target_compile_options(fimo_std__public_config INTERFACE -Wno-documentation-unknown-command)
     target_compile_options(fimo_std__public_config INTERFACE -Wno-declaration-after-statement)
@@ -128,6 +160,7 @@ target_link_libraries(fimo_std PRIVATE fimo_std__private_config)
 target_sources(fimo_std PUBLIC
         FILE_SET fimo_std_public_headers
         TYPE HEADERS
+        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
         FILES ${FIMO_STD_PUBLIC_HEADERS} ${FIMO_STD_IMPL_HEADERS}
 )
 target_link_libraries(fimo_std PRIVATE btree hashmap ${CMAKE_THREAD_LIBS_INIT})

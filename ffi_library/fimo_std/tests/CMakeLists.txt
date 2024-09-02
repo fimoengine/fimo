@@ -21,3 +21,9 @@ fimo_add_bindings_test(
         SOURCES module_subsystem.cpp
         LINK_LIBRARIES fimo_std
 )
+
+fimo_add_bindings_test(
+        NAME std_path
+        SOURCES path.cpp
+        LINK_LIBRARIES fimo_std
+)
