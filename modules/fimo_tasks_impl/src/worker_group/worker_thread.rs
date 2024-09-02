@@ -345,6 +345,7 @@ pub unsafe fn complete_task() -> Result<std::convert::Infallible, Error> {
     // Safety: Ensured by the caller.
     let response = unsafe { send_worker_request(TaskRequest::Complete)? };
     match response {
+        #[allow(unreachable_patterns)]
         TaskResponse::Complete(x) => Ok(x),
         _ => unreachable!("should not happen"),
     }
@@ -357,6 +358,7 @@ pub unsafe fn abort_task(error: *mut std::ffi::c_void) -> Result<std::convert::I
     // Safety: Ensured by the caller.
     let response = unsafe { send_worker_request(TaskRequest::Abort(AssertSend(error)))? };
     match response {
+        #[allow(unreachable_patterns)]
         TaskResponse::Abort(x) => Ok(x),
         _ => unreachable!("should not happen"),
     }

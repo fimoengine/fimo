@@ -1,6 +1,5 @@
 //! Bindings to the fimo tasks symbols.
 #![feature(allocator_api)]
-#![feature(new_uninit)]
 
 use std::{marker::PhantomData, time::Duration};
 
