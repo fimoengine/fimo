@@ -19,6 +19,7 @@ embed_gdb_script()
 tabs 4 > /dev/null 2>&1
 
 printf "#pragma GCC diagnostic push\n"
+printf "#pragma GCC diagnostic ignored \"-Wpragmas\"\n"
 printf "#pragma GCC diagnostic ignored \"-Woverlength-strings\"\n"
 printf "#pragma GCC diagnostic ignored \"-Wlanguage-extension-token\"\n"
 printf "\n"
