@@ -99,8 +99,8 @@ set(FIMO_STD_GDB_SCRIPTS
 )
 
 # Generate source files for the visualizers
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts")
-if (NOT MSVC)
+if (UNIX AND NOT APPLE)
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts")
     foreach (GDB_SCRIPT IN LISTS FIMO_STD_GDB_SCRIPTS)
         get_filename_component(GDB_SCRIPT_NAME ${GDB_SCRIPT} NAME_WE)
         add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/include/fimo_std/impl/gdb_scripts/${GDB_SCRIPT_NAME}.h"
@@ -118,10 +118,12 @@ target_include_directories(fimo_std__public_config INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>  # <prefix>/include
 )
-target_include_directories(fimo_std__public_config INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-        $<INSTALL_INTERFACE:include>  # <prefix>/include
-)
+if (UNIX AND NOT APPLE)
+    target_include_directories(fimo_std__public_config INTERFACE
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+            $<INSTALL_INTERFACE:include>  # <prefix>/include
+    )
+endif()
 
 if (MSVC)
     if (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")

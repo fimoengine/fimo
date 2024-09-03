@@ -5,7 +5,7 @@
 #include <fimo_std/error.h>
 #include <fimo_std/utils.h>
 
-#if !_WIN32
+#if defined(__unix__) && !defined(__APPLE__)
 #include <fimo_std/impl/gdb_scripts/path.h>
 #endif
 
