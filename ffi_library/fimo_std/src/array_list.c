@@ -306,8 +306,8 @@ FimoResult fimo_array_list_try_insert(FimoArrayList *array, const FimoUSize inde
 
     const FimoUSize element_begin = index * elem_size;
     // ReSharper disable once CppDFANullDereference
-    void *element_ptr = ((char *)array->elements) + element_begin;
-    void *shift_ptr = ((char *)element_ptr) + elem_size;
+    void *element_ptr = array->elements != NULL ? ((char *)array->elements) + element_begin : NULL;
+    void *shift_ptr = element_ptr != NULL ? ((char *)element_ptr) + elem_size : NULL;
 
     if (move_func) {
         // Shift to the right.
@@ -346,8 +346,9 @@ FimoResult fimo_array_list_remove(FimoArrayList *array, const FimoUSize index, c
     const FimoUSize elements_to_shift = array->size - index;
 
     const FimoUSize element_begin = index * elem_size;
-    void *element_ptr = ((char *)array->elements) + element_begin;
-    void *shift_ptr = ((char *)element_ptr) + elem_size;
+
+    void *element_ptr = array->elements != NULL ? ((char *)array->elements) + element_begin : NULL;
+    void *shift_ptr = element_ptr != NULL ? ((char *)element_ptr) + elem_size : NULL;
 
     if (move_func) {
         move_func(element_ptr, element);

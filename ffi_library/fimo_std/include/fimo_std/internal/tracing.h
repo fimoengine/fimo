@@ -191,11 +191,7 @@ typedef struct FimoInternalTracingContext {
     FimoArrayList subscribers;
     FimoUSize buff_size;
     FimoTracingLevel max_level;
-#if _WIN32
     tss_t tss_data;
-#else
-    pthread_key_t tss_data;
-#endif
     atomic_size_t thread_count;
 } FimoInternalTracingContext;
 

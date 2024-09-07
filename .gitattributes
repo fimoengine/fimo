@@ -6,6 +6,7 @@
 *.c text
 *.h text
 *.rs text
+*.zig text
 *.toml text
 
 # Declare files that will always have CRLF line endings on checkout.
