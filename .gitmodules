@@ -1,0 +1,3 @@
+[submodule "tools/zig-compile-commands"]
+	path = tools/zig-compile-commands
+	url = https://github.com/kassane/zig-compile-commands.git
