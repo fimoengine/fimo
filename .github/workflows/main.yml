@@ -64,7 +64,7 @@ jobs:
         run: zig build
 
       - name: Test project
-        run: zig test
+        run: zig build test
 
   lints:
     name: Lints
