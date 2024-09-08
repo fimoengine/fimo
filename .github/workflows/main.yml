@@ -17,6 +17,8 @@ jobs:
           - nightly
     steps:
       - uses: actions/checkout@v4
+        with:
+            submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
       - uses: actions/setup-python@v5
         with:
@@ -25,8 +27,6 @@ jobs:
           python -m ensurepip --upgrade --default-pip
           python -m pip install -r requirements.txt
       - uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.13.0
 
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
@@ -59,7 +59,13 @@ jobs:
 
       - name: Test project
         run: ctest --output-on-failure --test-dir build
-  
+
+      - name: Build project
+        run: zig build
+
+      - name: Test project
+        run: zig test
+
   lints:
     name: Lints
     runs-on: ${{ matrix.os }}
@@ -69,12 +75,10 @@ jobs:
         rust:
           - nightly
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - uses: goto-bus-stop/setup-zig@v2
+      - uses: actions/checkout@v4
         with:
-          version: 0.13.0
+            submodules: recursive
+      - uses: goto-bus-stop/setup-zig@v2
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
