@@ -3,6 +3,22 @@
 // Example:
 [
   {
+    "label": "Project: Configure",
+    "command": "zig build cdb"
+  },
+  {
+    "label": "Project: Build",
+    "command": "zig build"
+  },
+  {
+    "label": "Project: Clean",
+    "command": "zig build uninstall"
+  },
+  {
+    "label": "Project: Test",
+    "command": "zig build test"
+  },
+  {
     "label": "CMake: Configure (Debug)",
     "command": "rm -rf $ZED_WORKTREE_ROOT/build; cmake -B $ZED_WORKTREE_ROOT/build -S $ZED_WORKTREE_ROOT -DCMAKE_BUILD_TYPE=Debug -DCMAKE_FIND_FRAMEWORK=LAST"
   },

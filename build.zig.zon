@@ -15,7 +15,7 @@
     // This field is optional.
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    //.minimum_zig_version = "0.11.0",
+    .minimum_zig_version = "0.14.0",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
@@ -24,12 +24,13 @@
     // internet connectivity.
     .dependencies = .{
         .compile_commands = .{
-            .url = "https://github.com/the-argus/zig-compile-commands/archive/697abd2d24dc73fe0ead1849f17c43f18c038bc6.tar.gz",
-            .hash = "12204f3f579b3072cddf75f31514c55b0bd30e09c755dd2389a0aa8bba79b7311be9",
-
+            // Use a fork of the repo for zig 0.14.0 support.
+            // .url = "https://github.com/the-argus/zig-compile-commands/archive/697abd2d24dc73fe0ead1849f17c43f18c038bc6.tar.gz",
+            // .hash = "12204f3f579b3072cddf75f31514c55b0bd30e09c755dd2389a0aa8bba79b7311be9",
+            .path = "tools/zig-compile-commands",
         },
         .fimo_std = .{
-            .path = "ffi_library/fimo_std"
+            .path = "ffi_library/fimo_std",
         },
         // See `zig fetch --save <url>` for a command-line interface for adding dependencies.
         //.example = .{

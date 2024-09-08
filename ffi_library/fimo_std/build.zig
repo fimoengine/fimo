@@ -47,6 +47,23 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(hashmap);
 
+    const tinycthread = b.addStaticLibrary(.{
+        .name = "tinycthread",
+        .target = target,
+        .optimize = optimize,
+    });
+    tinycthread.linkLibC();
+    tinycthread.addIncludePath(b.path("third_party/tinycthread/include/"));
+    tinycthread.addCSourceFile(.{
+        .file = b.path("third_party/tinycthread/source/tinycthread.c"),
+        .flags = &.{
+            "-pthread",
+        },
+    });
+    if (tinycthread.rootModuleTarget().isDarwin()) {
+        b.installArtifact(tinycthread);
+    }
+
     // Generate additional build files.
     const wf = b.addWriteFiles();
     generateGDBScripts(b, wf);
@@ -70,6 +87,7 @@ pub fn build(b: *std.Build) void {
         lib,
         btree,
         hashmap,
+        tinycthread,
     );
     b.installArtifact(lib);
 
@@ -85,6 +103,7 @@ pub fn build(b: *std.Build) void {
         dylib,
         btree,
         hashmap,
+        tinycthread,
     );
     b.installArtifact(dylib);
 
@@ -100,6 +119,7 @@ pub fn build(b: *std.Build) void {
         lib_unit_tests,
         btree,
         hashmap,
+        tinycthread,
     );
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
@@ -233,6 +253,7 @@ fn configureFimoCSources(
     compile: *std.Build.Step.Compile,
     btree: *std.Build.Step.Compile,
     hashmap: *std.Build.Step.Compile,
+    tinycthread: *std.Build.Step.Compile,
 ) void {
     const c_files = .{
         // Internal headers
@@ -280,6 +301,10 @@ fn configureFimoCSources(
     compile.linkLibC();
     compile.linkLibrary(btree);
     compile.linkLibrary(hashmap);
+    if (compile.rootModuleTarget().isDarwin()) {
+        compile.linkLibrary(tinycthread);
+        compile.addIncludePath(b.path("third_party/tinycthread/include/"));
+    }
     if (compile.rootModuleTarget().os.tag == .windows) {
         compile.linkSystemLibrary("Pathcch");
     }
