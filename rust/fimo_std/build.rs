@@ -1,14 +1,15 @@
 use std::{env, path::PathBuf};
 
 fn main() {
-    let library = cmake::Config::new("ffi")
-        .configure_arg("-DFIMO_TEST_BINDINGS:BOOL=OFF")
-        .configure_arg("-DFIMO_INSTALL_BINDINGS:BOOL=ON")
-        .build();
-    println!("cargo:rustc-link-search=native={}/lib", library.display());
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let zig_out = zigcli::Build::new("ffi").build();
+    let lib_dir = zig_out.join("lib");
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=fimo_std");
+    println!("cargo:rustc-link-lib=static=btree");
+    println!("cargo:rustc-link-lib=static=hashmap");
     println!("cargo:rerun-if-changed=wrapper.h");
-
+    println!("cargo:rerun-if-changed=ffi");
     #[cfg(windows)]
     println!("cargo:rustc-link-lib=dylib=Pathcch");
 
@@ -35,8 +36,6 @@ fn main() {
         .parse_callbacks(Box::new(DoxygenCallback))
         .generate()
         .expect("Unable to generate bindings");
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
