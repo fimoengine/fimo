@@ -94,6 +94,16 @@ fn add_package(
     install_step.step.dependOn(dep.builder.getInstallStep());
     b.getInstallStep().dependOn(&install_step.step);
 
+    if (dep.builder.top_level_steps.get("doc")) |dep_doc_step| {
+        const install_doc_step = b.addInstallDirectory(.{
+            .source_dir = artifacts_path,
+            .install_dir = .prefix,
+            .install_subdir = name,
+        });
+        install_doc_step.step.dependOn(&dep_doc_step.step);
+        doc_step.dependOn(&install_doc_step.step);
+    }
+
     return dep;
 }
 
