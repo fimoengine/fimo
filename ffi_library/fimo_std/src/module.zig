@@ -38,13 +38,13 @@ const exports_section = switch (builtin.target.os.tag) {
                 .name = c.FIMO_IMPL_MODULE_SECTION ++ @typeName(@This()) ++ "start",
                 .section = "fi_mod$a",
                 .linkage = .strong,
-                .visibility = .hidden,
+                .visibility = .default,
             });
             @export(&z, .{
                 .name = c.FIMO_IMPL_MODULE_SECTION ++ @typeName(@This()) ++ "end",
                 .section = "fi_mod$z",
                 .linkage = .strong,
-                .visibility = .hidden,
+                .visibility = .default,
             });
         }
     },
@@ -77,7 +77,7 @@ fn exportModuleInner(comptime module: ?*const c.FimoModuleExport) void {
                 .name = "__DATA,__fimo_module" ++ @typeName(@This()),
                 .section = c.FIMO_IMPL_MODULE_SECTION,
                 .linkage = .strong,
-                .visibility = .hidden,
+                .visibility = .default,
             });
         }
     };
