@@ -74,12 +74,12 @@ pub fn build(b: *std.Build) void {
 
     const lib = b.addStaticLibrary(.{
         .name = "fimo_std",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .pic = true,
     });
+    lib.bundle_compiler_rt = true;
     configureFimoCSources(
         allocator,
         b,
@@ -93,9 +93,12 @@ pub fn build(b: *std.Build) void {
 
     const dylib = b.addSharedLibrary(.{
         .name = "fimo_std_shared",
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .pic = true,
     });
+    dylib.bundle_compiler_rt = true;
     configureFimoCSources(
         allocator,
         b,
@@ -261,7 +264,6 @@ fn configureFimoCSources(
         "src/internal/module.c",
         "src/internal/tracing.c",
         // Public implementation headers
-        "src/impl/module.c",
         "src/impl/tracing.c",
         // Public headers
         "src/array_list.c",
