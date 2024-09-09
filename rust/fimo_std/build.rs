@@ -12,6 +12,8 @@ fn main() {
     println!("cargo:rerun-if-changed=ffi");
     #[cfg(windows)]
     println!("cargo:rustc-link-lib=dylib=Pathcch");
+    #[cfg(target_vendor = "apple")]
+    println!("cargo:rustc-link-lib=static=tinycthread");
 
     let bindings = bindgen::builder()
         .header("wrapper.h")
