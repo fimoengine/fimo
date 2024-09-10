@@ -13,6 +13,7 @@ const exports_section = switch (builtin.target.os.tag) {
             [*]const ?*const c.FimoModuleExport,
             .{ .name = "_stop_fimo_module" },
         );
+        const export_visibility = .hidden;
         // Make shure that the section is created.
         comptime {
             asm (
@@ -31,17 +32,18 @@ const exports_section = switch (builtin.target.os.tag) {
 
         const start_exports: [*]const ?*const c.FimoModuleExport = @ptrCast(&a);
         const stop_exports: [*]const ?*const c.FimoModuleExport = @ptrCast(&z);
+        const export_visibility = .global;
 
         // Create the section.
         comptime {
             @export(&a, .{
-                .name = c.FIMO_IMPL_MODULE_SECTION ++ @typeName(@This()) ++ "start",
+                .name = "module_export_" ++ @typeName(@This()) ++ "start",
                 .section = "fi_mod$a",
                 .linkage = .strong,
                 .visibility = .default,
             });
             @export(&z, .{
-                .name = c.FIMO_IMPL_MODULE_SECTION ++ @typeName(@This()) ++ "end",
+                .name = "module_export_" ++ @typeName(@This()) ++ "end",
                 .section = "fi_mod$z",
                 .linkage = .strong,
                 .visibility = .default,
@@ -56,12 +58,18 @@ const exports_section = switch (builtin.target.os.tag) {
             &__start_fimo_module,
         );
         const stop_exports: [*]const ?*const c.FimoModuleExport = @ptrCast(
-            &__start_fimo_module,
+            &__stop_fimo_module,
         );
+        const export_visibility = .hidden;
 
         // Make shure that the section is created.
         comptime {
             exportModuleInner(null);
+            asm (
+                \\.pushsection .init_array,"aw",%init_array
+                \\.reloc ., BFD_RELOC_NONE, fimo_module
+                \\.popsection
+            );
         }
     },
 };
@@ -74,10 +82,10 @@ fn exportModuleInner(comptime module: ?*const c.FimoModuleExport) void {
         const data = module;
         comptime {
             @export(&data, .{
-                .name = "__DATA,__fimo_module" ++ @typeName(@This()),
+                .name = "module_export_" ++ @typeName(@This()),
                 .section = c.FIMO_IMPL_MODULE_SECTION,
                 .linkage = .strong,
-                .visibility = .default,
+                .visibility = exports_section.export_visibility,
             });
         }
     };
