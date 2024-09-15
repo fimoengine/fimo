@@ -1,3 +1,4 @@
+const std = @import("std");
 const builtin = @import("builtin");
 
 const c = @import("../c.zig");
@@ -90,8 +91,55 @@ fn exportModuleInner(comptime module: ?*const c.FimoModuleExport) void {
     };
 }
 
+pub const ExportModuleParamAccess = enum {
+    public,
+    dependency,
+    private,
+};
+
+pub const ExportModuleParameterInfo = struct {
+    read: ExportModuleParamAccess = .private,
+    write: ExportModuleParamAccess = .private,
+    value: union(enum) {
+        u8: u8,
+        u16: u16,
+        u32: u32,
+        u64: u64,
+        i8: i8,
+        i16: i16,
+        i32: i32,
+        i64: i64,
+    },
+};
+
+pub fn exportModule(
+    comptime name: [:0]const u8,
+    comptime description: ?[:0]const u8,
+    comptime author: ?[:0]const u8,
+    comptime license: ?[:0]const u8,
+    comptime parameters: anytype,
+    comptime resources: anytype,
+    comptime namespaces: anytype,
+    comptime imports: anytype,
+    comptime exports: anytype,
+) type {
+    _ = name;
+    _ = description;
+    _ = author;
+    _ = license;
+    _ = parameters;
+    _ = resources;
+    _ = namespaces;
+    _ = imports;
+    _ = exports;
+
+    comptime {
+        return extern struct {};
+    }
+}
+
 /// Iterator over all exports of the current binary.
-const ExportIter = struct {
+pub const ExportIter = struct {
     /// Iterator position. Does not necessarily point to a valid export.
     position: [*]const ?*const c.FimoModuleExport,
 

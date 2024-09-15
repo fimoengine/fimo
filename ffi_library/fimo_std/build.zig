@@ -279,7 +279,7 @@ fn configureFimoCSources(
         "src/context.c",
         "src/error.c",
         "src/graph.c",
-        "src/memory.c",
+        // "src/memory.c",
         "src/module.c",
         "src/path.c",
         "src/refcount.c",
@@ -322,6 +322,7 @@ fn configureFimoCSources(
     compile.addIncludePath(b.path("third_party/btree/include/"));
     compile.addIncludePath(b.path("third_party/hashmap/include/"));
     compile.addIncludePath(b.path("include/"));
+    compile.dll_export_fns = true;
     compile.addIncludePath(config_path.path(b, "include"));
     compile.addCSourceFiles(.{
         .files = &c_files,

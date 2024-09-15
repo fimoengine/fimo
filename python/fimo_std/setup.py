@@ -15,42 +15,60 @@ class build(_build):
         cwd = pathlib.Path().absolute()
         ffi_path = pathlib.Path.joinpath(cwd, "ffi")
 
-        # these dirs will be created in build_py, so if you don't have
-        # any python sources to bundle, the dirs will be missing
-        build_temp = pathlib.Path(self.build_temp).joinpath("cmake/fimo_std")
-        build_temp.mkdir(parents=True, exist_ok=True)
-        output_dir = pathlib.Path(self.build_temp).joinpath("cmake/install")
+        # guess the target triple
+        match platform.machine():
+            case "x86_64" | "amd64" | "AMD64":
+                target_machine = "x86_64"
+            case "aarch64" | "arm64":
+                target_machine = "aarch64"
+            case _:
+                raise RuntimeError("Unsupported architecture")
 
-        # example of cmake args
-        config = "Debug" if self.debug else "Release"
-        cmake_args = [
-            "-DCMAKE_INSTALL_PREFIX=" + str(output_dir.absolute()),
-            "-DCMAKE_BUILD_TYPE=" + config,
-            "-DFIMO_INSTALL_BINDINGS:BOOL=ON",
+        match platform.system():
+            case "Windows":
+                target_os = "windows"
+                target_abi = "msvc"
+            case "Linux":
+                target_os = "linux"
+                target_abi = "gnu"
+            case "Darwin":
+                target_os = "macos"
+                target_abi = ""
+            case _:
+                raise RuntimeError("Unsupported platform")
+
+        if len(target_abi) == 0:
+            target_triple = f"{target_machine}-{target_os}"
+        else:
+            target_triple = f"{target_machine}-{target_os}-{target_abi}"
+
+        # configure zig build
+        zig_cache_dir = pathlib.Path(self.build_temp).joinpath(".zig-cache")
+        zig_out_dir = pathlib.Path(self.build_temp).joinpath("zig-out")
+
+        zig_args = [
+            "build",
+            f"-Dtarget={target_triple}",
+            f"-Dcpu={target_machine}",
+            "--prefix",
+            str(zig_out_dir.absolute()),
+            "--cache-dir",
+            str(zig_cache_dir.absolute()),
         ]
+        if not self.debug:
+            zig_args.append("--release=safe")
 
-        # example of build args
-        build_args = [
-            "--target",
-            "install",
-            "--config",
-            config,
-        ]
-
-        os.chdir(str(build_temp))
-        self.spawn(["cmake", str(ffi_path)] + cmake_args)
         if not self.dry_run:
-            self.spawn(["cmake", "--build", "."] + build_args)
-        # Troubleshooting: if fail on line above then delete all possible
-        # temporary CMake files including "CMakeCache.txt" in top level dir.
-        os.chdir(str(cwd))
+            os.chdir(str(ffi_path))
+            self.spawn(["zig"] + zig_args)
+            os.chdir(str(cwd))
 
         if platform.system() == "Windows":
             fimo_lib_dir = "bin"
         else:
             fimo_lib_dir = "lib"
 
-        fimo_std_build_dir = pathlib.Path(output_dir).joinpath(fimo_lib_dir)
+        fimo_std_build_dir = pathlib.Path(zig_out_dir).joinpath(fimo_lib_dir)
         fimo_std_install_dir = pathlib.Path(self.build_lib).joinpath("fimo_std/ffi")
 
         if platform.system() == "Linux":
