@@ -318,11 +318,11 @@ fn configureFimoCSources(
     }
     if (compile.rootModuleTarget().os.tag == .windows) {
         compile.linkSystemLibrary("Pathcch");
+        compile.dll_export_fns = true;
     }
     compile.addIncludePath(b.path("third_party/btree/include/"));
     compile.addIncludePath(b.path("third_party/hashmap/include/"));
     compile.addIncludePath(b.path("include/"));
-    compile.dll_export_fns = true;
     compile.addIncludePath(config_path.path(b, "include"));
     compile.addCSourceFiles(.{
         .files = &c_files,
