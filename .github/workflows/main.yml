@@ -29,6 +29,11 @@ jobs:
       - uses: mlugg/setup-zig@v1
         with:
             version: master
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
+        if: ${{ failure() }}
+        with:
+          wait-timeout-minutes: 5
 
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
@@ -83,6 +88,11 @@ jobs:
       - uses: mlugg/setup-zig@v1
         with:
           version: master
+      - name: Setup upterm session
+        uses: lhotari/action-upterm@v1
+        if: ${{ failure() }}
+        with:
+          wait-timeout-minutes: 5
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
