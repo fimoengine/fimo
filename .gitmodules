@@ -1,3 +1,6 @@
 [submodule "tools/zig-compile-commands"]
 	path = tools/zig-compile-commands
 	url = https://github.com/kassane/zig-compile-commands.git
+[submodule "tools/zigcli-rs"]
+	path = tools/zigcli-rs
+	url = https://github.com/fimoengine/zigcli-rs.git
