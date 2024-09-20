@@ -35,7 +35,7 @@ add_custom_target(fimo_std_zig_build
         COMMAND zig build
         --prefix ${CMAKE_CURRENT_BINARY_DIR}/zig-out
         --cache-dir ${CMAKE_BINARY_DIR}/.zig-cache
-        $<$<NOT:$<CONFIG:Debug>>:--release>
+        $<$<NOT:$<CONFIG:Debug>>:--release=safe>
         BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/zig-out/include
         ${fimo_std_zig_shared_LIBRARY_PATH}
         ${fimo_std_zig_shared_IMP_LIBRARY_PATH}
@@ -113,3 +113,4 @@ endif ()
 if (FIMO_INSTALL_BINDINGS)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/zig-out/" DESTINATION ${CMAKE_INSTALL_PREFIX})
 endif ()
+
