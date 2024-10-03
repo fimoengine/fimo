@@ -22,7 +22,6 @@ pub trait TracingSubsystem: SealedContext {
     /// Emits a new event.
     ///
     /// The message may be cut of, if the length exceeds the internal formatting buffer size.
-
     fn emit_event(&self, event: &Event, arguments: Arguments<'_>) -> error::Result;
 
     /// Checks whether the tracing subsystem is enabled.

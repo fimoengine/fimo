@@ -8,7 +8,6 @@
 #![feature(maybe_uninit_slice)]
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
-#![feature(const_refs_to_static)]
 
 extern crate alloc;
 
