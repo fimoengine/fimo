@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-            submodules: recursive
+          submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
       - uses: actions/setup-python@v5
         with:
@@ -28,7 +28,7 @@ jobs:
           python -m pip install -r requirements.txt
       - uses: mlugg/setup-zig@v1
         with:
-            version: master
+          version: master
       - name: Setup upterm session
         uses: lhotari/action-upterm@v1
         if: ${{ failure() }}
@@ -67,11 +67,13 @@ jobs:
       - name: Test project
         run: ctest --output-on-failure --test-dir build
 
-      - name: Build project
-        run: zig build
-
-      - name: Test project
+      - name: Build and test project
+        if: matrix.build-type == 'Debug'
         run: zig build test
+
+      - name: Build and test project
+        if: matrix.build-type == 'Release'
+        run: zig build test --release=safe
 
   lints:
     name: Lints
@@ -84,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-            submodules: recursive
+          submodules: recursive
       - uses: mlugg/setup-zig@v1
         with:
           version: master
