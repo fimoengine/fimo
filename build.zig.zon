@@ -32,6 +32,9 @@
         .fimo_std = .{
             .path = "ffi_library/fimo_std",
         },
+        .fimo_python = .{
+            .path = "modules/python_module_loader",
+        },
         // See `zig fetch --save <url>` for a command-line interface for adding dependencies.
         //.example = .{
         //    // When updating this field to a new URL, be sure to delete the corresponding
