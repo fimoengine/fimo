@@ -1382,7 +1382,7 @@ static FimoResult module_handle_new_local_(void (*export_iterator)(bool (*)(cons
     FimoUSize path_len_w = MAX_PATH;
     wchar_t *module_bin_path_w;
     while (true) {
-        module_bin_path_w = fimo_malloc(sizeof(char) * MAX_PATH, &error);
+        module_bin_path_w = fimo_malloc(sizeof(wchar_t) * path_len_w, &error);
         if (FIMO_RESULT_IS_ERROR(error)) {
             goto get_module_path_w;
         }
