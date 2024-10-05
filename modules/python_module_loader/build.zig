@@ -252,8 +252,6 @@ fn buildCPythonUnix(
     optimize: std.builtin.OptimizeMode,
     cpython: *std.Build.Dependency,
 ) CPythonBuild {
-    _ = target;
-
     const configure_path = cpython.builder.pathResolve(
         &.{ cpython.builder.build_root.path orelse ".", "configure" },
     );
@@ -301,14 +299,21 @@ fn buildCPythonUnix(
     );
     switch (optimize) {
         .Debug => {
-            _ = python_bin.addCopyFile(
-                install_dir.path(b, "lib/libpython3.13d.so"),
-                "libpython3.13d.so",
-            );
-            _ = python_bin.addCopyFile(
-                install_dir.path(b, "lib/libpython3.13d.so.1.0"),
-                "libpython3.13d.so.1.0",
-            );
+            if (target.result.isDarwin()) {
+                _ = python_bin.addCopyFile(
+                    install_dir.path(b, "lib/libpython3.13d.dylib"),
+                    "libpython3.13d.so",
+                );
+            } else {
+                _ = python_bin.addCopyFile(
+                    install_dir.path(b, "lib/libpython3.13d.so"),
+                    "libpython3.13d.so",
+                );
+                _ = python_bin.addCopyFile(
+                    install_dir.path(b, "lib/libpython3.13d.so.1.0"),
+                    "libpython3.13d.so.1.0",
+                );
+            }
             _ = python_include.addCopyDirectory(
                 install_dir.path(b, "include/python3.13d"),
                 ".",
@@ -316,16 +321,23 @@ fn buildCPythonUnix(
             );
         },
         else => {
-            _ = python_bin.addCopyFile(
-                install_dir.path(b, "lib/libpython3.13.so"),
-                "libpython3.13.so",
-            );
-            _ = python_bin.addCopyFile(
-                install_dir.path(b, "lib/libpython3.13.so.1.0"),
-                "libpython3.13.so.1.0",
-            );
+            if (target.result.isDarwin()) {
+                _ = python_bin.addCopyFile(
+                    install_dir.path(b, "lib/libpython3.13.dylib"),
+                    "libpython3.13.so",
+                );
+            } else {
+                _ = python_bin.addCopyFile(
+                    install_dir.path(b, "lib/libpython3.13.so"),
+                    "libpython3.13.so",
+                );
+                _ = python_bin.addCopyFile(
+                    install_dir.path(b, "lib/libpython3.13.so.1.0"),
+                    "libpython3.13.so.1.0",
+                );
+            }
             _ = python_include.addCopyDirectory(
-                install_dir.path(b, "include/python3.13"),
+                install_dir.path(b, "include/python3.13d"),
                 ".",
                 .{},
             );
