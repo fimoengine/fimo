@@ -27,7 +27,7 @@ pub struct CommandBuffer<'ctx, A: Allocator = FimoAllocator> {
     inner: RawCommandBuffer<'static, 'ctx, A>,
 }
 
-impl<'ctx> CommandBuffer<'ctx> {
+impl CommandBuffer<'_> {
     /// Builds a new empty command buffer.
     pub fn new() -> Self {
         Self::new_in(FimoAllocator)
