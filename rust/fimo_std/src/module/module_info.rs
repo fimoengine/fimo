@@ -673,7 +673,7 @@ where
     _data: PhantomData<&'a Data>,
 }
 
-impl<'a, Par, Res, Imp, Exp, Data> GenericModule<'a, Par, Res, Imp, Exp, Data>
+impl<Par, Res, Imp, Exp, Data> GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
     Par: Send + Sync + 'static,
     Res: Send + Sync + 'static,

@@ -35,7 +35,7 @@ pub enum LoadingSetRequest {
 #[derive(Debug, Clone, Copy)]
 pub struct LoadingSet<'a>(*mut bindings::FimoModuleLoadingSet, PhantomData<&'a mut ()>);
 
-impl<'a> LoadingSet<'a> {
+impl LoadingSet<'_> {
     /// Constructs a new loading set.
     ///
     /// If the closure `f` return [`LoadingSetRequest::Load`] then the module backend will start
