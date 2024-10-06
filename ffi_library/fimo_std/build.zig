@@ -277,9 +277,7 @@ fn configureFimoCSources(
         // Public headers
         "src/array_list.c",
         "src/context.c",
-        "src/error.c",
         "src/graph.c",
-        // "src/memory.c",
         "src/module.c",
         "src/path.c",
         "src/refcount.c",

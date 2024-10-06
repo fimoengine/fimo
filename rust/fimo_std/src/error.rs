@@ -381,13 +381,6 @@ impl<T: ?Sized> Error<T> {
         this.0
     }
 
-    /// Constructs an [`Error`] from an errno value.
-    pub fn from_errno(errnum: core::ffi::c_int) -> Self {
-        // Safety: The function is safe to be called.
-        let errnum = unsafe { bindings::fimo_error_code_from_errno(errnum) };
-        Self::from_error_code(errnum).expect("unknown error code")
-    }
-
     /// Returns a string representing the error.
     pub fn name(&self) -> ErrorString {
         let vtable = self.vtable();

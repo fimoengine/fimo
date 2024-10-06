@@ -454,19 +454,6 @@ FIMO_MUST_USE
 const char *fimo_error_code_description(FimoErrorCode errnum);
 
 /**
- * Constructs an error code from an errno error code.
- *
- * Unknown errno codes translate to an invalid error code.
- *
- * @param errnum: errno error code
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoErrorCode fimo_error_code_from_errno(int errnum);
-
-/**
  * Releases a `FimoResultString`.
  *
  * @param str string to release
