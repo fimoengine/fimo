@@ -281,7 +281,6 @@ fn configureFimoCSources(
         "src/module.c",
         "src/path.c",
         "src/refcount.c",
-        "src/time.c",
         "src/tracing.c",
         "src/version.c",
     };
