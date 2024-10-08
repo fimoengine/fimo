@@ -170,7 +170,7 @@ fn getCpythonWin(
         .aarch64 => "arm64",
         else => @panic(@errorName(error.UnsupportedWinCpuArch)),
     };
-    const python_name = b.fmt("python{s}.3.13.0-rc3.zip", .{python_arch});
+    const python_name = b.fmt("python{s}.3.13.0.zip", .{python_arch});
     defer b.allocator.free(python_name);
     const python_path = b.pathResolve(&.{ b.build_root.path orelse ".", "ext", python_name });
     defer b.allocator.free(python_path);

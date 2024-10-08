@@ -30,8 +30,8 @@
             .path = "../../ffi_library/python_module_loader",
         },
         .cpython_src = .{
-            .url = "https://github.com/python/cpython/archive/b87aea6b0d299afcc03fc73c55e7b1dda78b9f35.tar.gz",
-            .hash = "1220b319adabcf424e980d25a989653572616f8994a3bc037823e593ff5c16346430",
+            .url = "https://github.com/python/cpython/archive/refs/tags/v3.13.0.tar.gz",
+            .hash = "12207537aac0d94da64394dcd66c216c314ec4d6bbacb634553d60d747527223c211",
             .lazy = true,
         },
     },
