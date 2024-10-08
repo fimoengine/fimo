@@ -452,7 +452,8 @@ pub const Error = struct {
                 };
             },
             else => {
-                return ErrorString.init(@tagName(std.posix.errno(code))).str;
+                const errno: std.posix.E = @enumFromInt(code);
+                return ErrorString.init(@tagName(errno)).str;
             },
         }
     }
@@ -537,7 +538,7 @@ pub const Error = struct {
         }
         if (code == 0) return null;
         return Error{ .err = .{
-            .data = @ptrFromInt(code),
+            .data = @ptrFromInt(@as(usize, @intCast(code))),
             .vtable = &FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE,
         } };
     }
