@@ -12,58 +12,6 @@ pub fn build(b: *std.Build) void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    // Declare the library dependencies.
-    const btree = b.addStaticLibrary(.{
-        .name = "btree",
-        .target = target,
-        .optimize = optimize,
-    });
-    btree.linkLibC();
-    btree.addIncludePath(b.path("third_party/btree/include/"));
-    btree.addCSourceFile(.{
-        .file = b.path("third_party/btree/btree.c"),
-        .flags = &.{
-            "-std=c17",
-        },
-    });
-    b.installArtifact(btree);
-
-    const hashmap = b.addStaticLibrary(.{
-        .name = "hashmap",
-        .target = target,
-        .optimize = optimize,
-    });
-    hashmap.linkLibC();
-    hashmap.addIncludePath(b.path("third_party/hashmap/include/"));
-    hashmap.addCSourceFile(.{
-        .file = b.path("third_party/hashmap/hashmap.c"),
-        .flags = &.{
-            "-std=c17",
-        },
-    });
-    b.installArtifact(hashmap);
-
-    const tinycthread = b.addStaticLibrary(.{
-        .name = "tinycthread",
-        .target = target,
-        .optimize = optimize,
-    });
-    tinycthread.linkLibC();
-    tinycthread.addIncludePath(b.path("third_party/tinycthread/include/"));
-    tinycthread.addCSourceFile(.{
-        .file = b.path("third_party/tinycthread/source/tinycthread.c"),
-        .flags = &.{
-            "-pthread",
-        },
-    });
-    if (tinycthread.rootModuleTarget().isDarwin()) {
-        b.installArtifact(tinycthread);
-    }
-
     // Generate additional build files.
     const wf = b.addWriteFiles();
     generateGDBScripts(b, wf);
@@ -81,13 +29,9 @@ pub fn build(b: *std.Build) void {
     });
     lib.bundle_compiler_rt = true;
     configureFimoCSources(
-        allocator,
         b,
         wf.getDirectory(),
         lib,
-        btree,
-        hashmap,
-        tinycthread,
     );
     b.installArtifact(lib);
 
@@ -100,13 +44,9 @@ pub fn build(b: *std.Build) void {
     });
     dylib.bundle_compiler_rt = true;
     configureFimoCSources(
-        allocator,
         b,
         wf.getDirectory(),
         dylib,
-        btree,
-        hashmap,
-        tinycthread,
     );
     b.installArtifact(dylib);
 
@@ -116,13 +56,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     configureFimoCSources(
-        allocator,
         b,
         wf.getDirectory(),
         lib_unit_tests,
-        btree,
-        hashmap,
-        tinycthread,
     );
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
@@ -259,13 +195,9 @@ fn installResources(
 }
 
 fn configureFimoCSources(
-    allocator: std.mem.Allocator,
     b: *std.Build,
     config_path: std.Build.LazyPath,
     compile: *std.Build.Step.Compile,
-    btree: *std.Build.Step.Compile,
-    hashmap: *std.Build.Step.Compile,
-    tinycthread: *std.Build.Step.Compile,
 ) void {
     const c_files = .{
         // Internal headers
@@ -285,7 +217,7 @@ fn configureFimoCSources(
         "src/version.c",
     };
 
-    var flags = StringArrayList.init(allocator);
+    var flags = StringArrayList.init(b.allocator);
     defer flags.deinit();
     flags.append("-std=c17");
     flags.append("-Wall");
@@ -307,23 +239,40 @@ fn configureFimoCSources(
     }
 
     compile.linkLibC();
-    compile.linkLibrary(btree);
-    compile.linkLibrary(hashmap);
-    if (compile.rootModuleTarget().isDarwin()) {
-        compile.linkLibrary(tinycthread);
-        compile.addIncludePath(b.path("third_party/tinycthread/include/"));
-    }
     if (compile.rootModuleTarget().os.tag == .windows) {
         compile.linkSystemLibrary("Pathcch");
         compile.dll_export_fns = true;
     }
-    compile.addIncludePath(b.path("third_party/btree/include/"));
-    compile.addIncludePath(b.path("third_party/hashmap/include/"));
     compile.addIncludePath(b.path("include/"));
     compile.addIncludePath(config_path.path(b, "include"));
     compile.addCSourceFiles(.{
         .files = &c_files,
         .flags = flags.items(),
+    });
+
+    // Dependencies.
+    if (compile.rootModuleTarget().isDarwin()) {
+        compile.addIncludePath(b.path("third_party/tinycthread/include/"));
+        compile.addCSourceFile(.{
+            .file = b.path("third_party/tinycthread/source/tinycthread.c"),
+            .flags = &.{
+                "-pthread",
+            },
+        });
+    }
+    compile.addIncludePath(b.path("third_party/btree/include/"));
+    compile.addCSourceFile(.{
+        .file = b.path("third_party/btree/btree.c"),
+        .flags = &.{
+            "-std=c17",
+        },
+    });
+    compile.addIncludePath(b.path("third_party/hashmap/include/"));
+    compile.addCSourceFile(.{
+        .file = b.path("third_party/hashmap/hashmap.c"),
+        .flags = &.{
+            "-std=c17",
+        },
     });
 }
 

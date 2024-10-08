@@ -6,14 +6,10 @@ fn main() {
     let lib_dir = zig_out.join("lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=fimo_std");
-    println!("cargo:rustc-link-lib=static=btree");
-    println!("cargo:rustc-link-lib=static=hashmap");
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=ffi");
     #[cfg(windows)]
     println!("cargo:rustc-link-lib=dylib=Pathcch");
-    #[cfg(target_vendor = "apple")]
-    println!("cargo:rustc-link-lib=static=tinycthread");
 
     let bindings = bindgen::builder()
         .header("wrapper.h")

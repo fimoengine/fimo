@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const modules_dir = b.option(
+        []const u8,
+        "modules_dir",
+        "Path to the built modules",
+    );
+
     // We don't support cross compilation.
     if (!isSupported(target.result, b.host.result)) {
         return;
@@ -97,15 +103,7 @@ pub fn build(b: *std.Build) void {
     // ----------------------------------------------------
 
     const test_options = b.addOptions();
-    test_options.addOption(
-        ?[]const u8,
-        "modules_path",
-        b.option(
-            []const u8,
-            "modules_dir",
-            "Path to the built modules",
-        ),
-    );
+    test_options.addOption(?[]const u8, "modules_path", modules_dir);
 
     const test_module = b.addTest(.{
         .target = target,
