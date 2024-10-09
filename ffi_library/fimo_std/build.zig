@@ -214,7 +214,6 @@ fn configureFimoCSources(
         "src/path.c",
         "src/refcount.c",
         "src/tracing.c",
-        "src/version.c",
     };
 
     var flags = StringArrayList.init(b.allocator);
