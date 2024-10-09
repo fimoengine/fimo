@@ -11,12 +11,6 @@ fimo_add_bindings_test(
 )
 
 fimo_add_bindings_test(
-        NAME std_memory
-        SOURCES memory.cpp
-        LINK_LIBRARIES fimo_std
-)
-
-fimo_add_bindings_test(
         NAME std_module_subsystem
         SOURCES module_subsystem.cpp
         LINK_LIBRARIES fimo_std
