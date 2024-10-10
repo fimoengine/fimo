@@ -58,15 +58,6 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Configure project
-        run: cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-
-      - name: Build project
-        run: cmake --build build
-
-      - name: Test project
-        run: ctest --output-on-failure --test-dir build
-
       - name: Build and test project
         if: matrix.build-type == 'Debug'
         run: zig build test
