@@ -80,6 +80,22 @@ pub const Duration = struct {
         .sub_sec_nanos = nanos_per_sec - 1,
     };
 
+    /// Initializes the object from a ffi duration.
+    pub fn initC(duration: c.FimoDuration) Duration {
+        return Duration{
+            .secs = @intCast(duration.secs),
+            .sub_sec_nanos = @intCast(duration.nanos),
+        };
+    }
+
+    /// Casts the object to a ffi duration.
+    pub fn intoC(self: Duration) c.FimoDuration {
+        return c.FimoDuration{
+            .secs = @intCast(self.secs),
+            .nanos = @intCast(self.sub_sec_nanos),
+        };
+    }
+
     /// Constructs a duration from a number of seconds.
     pub fn initSeconds(seconds: Seconds) Duration {
         return .{
@@ -209,6 +225,22 @@ pub const Time = struct {
         .sub_sec_nanos = nanos_per_sec - 1,
     };
 
+    /// Initializes the object from a ffi time.
+    pub fn initC(time: c.FimoTime) Time {
+        return Time{
+            .secs = @intCast(time.secs),
+            .sub_sec_nanos = @intCast(time.nanos),
+        };
+    }
+
+    /// Casts the object to a ffi time.
+    pub fn intoC(self: Time) c.FimoTime {
+        return c.FimoTime{
+            .secs = @intCast(self.secs),
+            .nanos = @intCast(self.sub_sec_nanos),
+        };
+    }
+
     /// Returns the current time.
     pub fn now() Time {
         switch (builtin.os.tag) {
@@ -294,41 +326,28 @@ pub const Time = struct {
 // ----------------------------------------------------
 
 const ffi = struct {
-    fn cTimeToZig(t: c.FimoTime) Time {
-        return Time{ .secs = @intCast(t.secs), .sub_sec_nanos = @intCast(t.nanos) };
-    }
-    fn zigTimeToC(t: Time) c.FimoTime {
-        return c.FimoTime{ .secs = @intCast(t.secs), .nanos = @intCast(t.sub_sec_nanos) };
-    }
-    fn cDurationToZig(d: c.FimoDuration) Duration {
-        return Duration{ .secs = @intCast(d.secs), .sub_sec_nanos = @intCast(d.nanos) };
-    }
-    fn zigDurationToC(d: Duration) c.FimoDuration {
-        return c.FimoDuration{ .secs = @intCast(d.secs), .nanos = @intCast(d.sub_sec_nanos) };
-    }
-
     export fn fimo_duration_zero() c.FimoDuration {
-        return zigDurationToC(Duration.Zero);
+        return Duration.Zero.intoC();
     }
 
     export fn fimo_duration_max() c.FimoDuration {
-        return zigDurationToC(Duration.Max);
+        return Duration.Max.intoC();
     }
 
     export fn fimo_duration_from_seconds(seconds: u64) c.FimoDuration {
-        return zigDurationToC(Duration.initSeconds(seconds));
+        return Duration.initSeconds(seconds).intoC();
     }
 
     export fn fimo_duration_from_millis(millis: u64) c.FimoDuration {
-        return zigDurationToC(Duration.initMillis(millis));
+        return Duration.initMillis(millis).intoC();
     }
 
     export fn fimo_duration_from_nanos(nanos: u64) c.FimoDuration {
-        return zigDurationToC(Duration.initNanos(nanos));
+        return Duration.initNanos(nanos).intoC();
     }
 
     export fn fimo_duration_is_zero(duration: *const c.FimoDuration) bool {
-        const d = cDurationToZig(duration.*);
+        const d = Duration.initC(duration.*);
         return d.isZero();
     }
 
@@ -337,12 +356,12 @@ const ffi = struct {
     }
 
     export fn fimo_duration_subsec_millis(duration: *const c.FimoDuration) u32 {
-        const d = cDurationToZig(duration.*);
+        const d = Duration.initC(duration.*);
         return d.subSecMillis();
     }
 
     export fn fimo_duration_subsec_micros(duration: *const c.FimoDuration) u32 {
-        const d = cDurationToZig(duration.*);
+        const d = Duration.initC(duration.*);
         return d.subSecMicros();
     }
 
@@ -354,7 +373,7 @@ const ffi = struct {
         duration: *const c.FimoDuration,
         high: ?*u32,
     ) u64 {
-        const d = cDurationToZig(duration.*);
+        const d = Duration.initC(duration.*);
         const millis = d.millis();
 
         if (high) |h| {
@@ -367,7 +386,7 @@ const ffi = struct {
         duration: *const c.FimoDuration,
         high: ?*u32,
     ) u64 {
-        const d = cDurationToZig(duration.*);
+        const d = Duration.initC(duration.*);
         const micros = d.micros();
 
         if (high) |h| {
@@ -380,7 +399,7 @@ const ffi = struct {
         duration: *const c.FimoDuration,
         high: ?*u32,
     ) u64 {
-        const d = cDurationToZig(duration.*);
+        const d = Duration.initC(duration.*);
         const nanos = d.nanos();
 
         if (high) |h| {
@@ -394,10 +413,10 @@ const ffi = struct {
         rhs: *const c.FimoDuration,
         out: *c.FimoDuration,
     ) c.FimoResult {
-        const d1 = cDurationToZig(lhs.*);
-        const d2 = cDurationToZig(rhs.*);
+        const d1 = Duration.initC(lhs.*);
+        const d2 = Duration.initC(rhs.*);
         if (d1.add(d2)) |d| {
-            out.* = zigDurationToC(d);
+            out.* = d.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -406,9 +425,9 @@ const ffi = struct {
         lhs: *const c.FimoDuration,
         rhs: *const c.FimoDuration,
     ) c.FimoDuration {
-        const d1 = cDurationToZig(lhs.*);
-        const d2 = cDurationToZig(rhs.*);
-        return zigDurationToC(d1.addSaturating(d2));
+        const d1 = Duration.initC(lhs.*);
+        const d2 = Duration.initC(rhs.*);
+        return d1.addSaturating(d2).intoC();
     }
 
     export fn fimo_duration_sub(
@@ -416,10 +435,10 @@ const ffi = struct {
         rhs: *const c.FimoDuration,
         out: *c.FimoDuration,
     ) c.FimoResult {
-        const d1 = cDurationToZig(lhs.*);
-        const d2 = cDurationToZig(rhs.*);
+        const d1 = Duration.initC(lhs.*);
+        const d2 = Duration.initC(rhs.*);
         if (d1.sub(d2)) |d| {
-            out.* = zigDurationToC(d);
+            out.* = d.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -428,22 +447,22 @@ const ffi = struct {
         lhs: *const c.FimoDuration,
         rhs: *const c.FimoDuration,
     ) c.FimoDuration {
-        const d1 = cDurationToZig(lhs.*);
-        const d2 = cDurationToZig(rhs.*);
-        return zigDurationToC(d1.subSaturating(d2));
+        const d1 = Duration.initC(lhs.*);
+        const d2 = Duration.initC(rhs.*);
+        return d1.subSaturating(d2).intoC();
     }
 
     export fn fimo_time_now() c.FimoTime {
-        return zigTimeToC(Time.now());
+        return Time.now().intoC();
     }
 
     export fn fimo_time_elapsed(
         time_point: *const c.FimoTime,
         out: *c.FimoDuration,
     ) c.FimoResult {
-        const t = cTimeToZig(time_point.*);
+        const t = Time.initC(time_point.*);
         if (t.elapsed()) |dur| {
-            out.* = zigDurationToC(dur);
+            out.* = dur.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -453,10 +472,10 @@ const ffi = struct {
         earlier_time_point: *const c.FimoTime,
         out: *c.FimoDuration,
     ) c.FimoResult {
-        const t1 = cTimeToZig(time_point.*);
-        const t2 = cTimeToZig(earlier_time_point.*);
+        const t1 = Time.initC(time_point.*);
+        const t2 = Time.initC(earlier_time_point.*);
         if (t1.durationSince(t2)) |dur| {
-            out.* = zigDurationToC(dur);
+            out.* = dur.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -466,10 +485,10 @@ const ffi = struct {
         duration: *const c.FimoDuration,
         out: *c.FimoTime,
     ) c.FimoResult {
-        const t = cTimeToZig(time_point.*);
-        const d = cDurationToZig(duration.*);
+        const t = Time.initC(time_point.*);
+        const d = Duration.initC(duration.*);
         if (t.add(d)) |shifted| {
-            out.* = zigTimeToC(shifted);
+            out.* = shifted.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -478,9 +497,9 @@ const ffi = struct {
         time_point: *const c.FimoTime,
         duration: *const c.FimoDuration,
     ) c.FimoTime {
-        const t = cTimeToZig(time_point.*);
-        const d = cDurationToZig(duration.*);
-        return zigTimeToC(t.addSaturating(d));
+        const t = Time.initC(time_point.*);
+        const d = Duration.initC(duration.*);
+        return t.addSaturating(d).intoC();
     }
 
     export fn fimo_time_sub(
@@ -488,10 +507,10 @@ const ffi = struct {
         duration: *const c.FimoDuration,
         out: *c.FimoTime,
     ) c.FimoResult {
-        const t = cTimeToZig(time_point.*);
-        const d = cDurationToZig(duration.*);
+        const t = Time.initC(time_point.*);
+        const d = Duration.initC(duration.*);
         if (t.sub(d)) |shifted| {
-            out.* = zigTimeToC(shifted);
+            out.* = shifted.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -500,9 +519,9 @@ const ffi = struct {
         time_point: *const c.FimoTime,
         duration: *const c.FimoDuration,
     ) c.FimoTime {
-        const t = cTimeToZig(time_point.*);
-        const d = cDurationToZig(duration.*);
-        return zigTimeToC(t.subSaturating(d));
+        const t = Time.initC(time_point.*);
+        const d = Duration.initC(duration.*);
+        return t.subSaturating(d).intoC();
     }
 };
 

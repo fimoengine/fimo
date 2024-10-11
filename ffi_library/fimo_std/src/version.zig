@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const Version = @This();
+const c = @import("c.zig");
 
 major: u32,
 minor: u32,
@@ -13,6 +14,26 @@ pub const max_str_length = 32;
 
 /// Maximum number of characters required to represent a version with the build number.
 pub const max_long_str_length = 53;
+
+/// Initializes the object from a ffi version.
+pub fn initC(version: c.FimoVersion) Version {
+    return Version{
+        .major = version.major,
+        .minor = version.minor,
+        .patch = version.patch,
+        .build = version.build,
+    };
+}
+
+/// Casts the object to a ffi version.
+pub fn intoC(self: Version) c.FimoVersion {
+    return c.FimoVersion{
+        .major = self.major,
+        .minor = self.minor,
+        .patch = self.patch,
+        .build = self.build,
+    };
+}
 
 /// Returns the order of two versions without considering the build number.
 pub fn order(lhs: Version, rhs: Version) std.math.Order {
@@ -198,25 +219,7 @@ test format {
 // ----------------------------------------------------
 
 const ffi = struct {
-    const c = @import("c.zig");
     const errors = @import("errors.zig");
-
-    fn cVersionToZig(v: c.FimoVersion) Version {
-        return Version{
-            .major = v.major,
-            .minor = v.minor,
-            .patch = v.patch,
-            .build = v.build,
-        };
-    }
-    fn zigVersionToC(v: Version) c.FimoVersion {
-        return c.FimoVersion{
-            .major = v.major,
-            .minor = v.minor,
-            .patch = v.patch,
-            .build = v.build,
-        };
-    }
 
     export fn fimo_version_parse_str(
         str: [*]const u8,
@@ -225,7 +228,7 @@ const ffi = struct {
     ) c.FimoResult {
         const text = str[0..str_len];
         if (Version.parse(text)) |v| {
-            version.* = zigVersionToC(v);
+            version.* = v.intoC();
             return errors.Error.intoCResult(null);
         } else |err| return errors.Error.initError(err).err;
     }
@@ -233,7 +236,7 @@ const ffi = struct {
     export fn fimo_version_str_len(
         version: *const c.FimoVersion,
     ) usize {
-        const v = cVersionToZig(version.*);
+        const v = Version.initC(version.*);
         var buffer: [max_str_length]u8 = undefined;
         const print = std.fmt.bufPrint(
             buffer[0..buffer.len],
@@ -246,7 +249,7 @@ const ffi = struct {
     export fn fimo_version_str_len_full(
         version: *const c.FimoVersion,
     ) usize {
-        const v = cVersionToZig(version.*);
+        const v = Version.initC(version.*);
         var buffer: [max_long_str_length]u8 = undefined;
         const print = std.fmt.bufPrint(
             buffer[0..buffer.len],
@@ -262,7 +265,7 @@ const ffi = struct {
         str_len: usize,
         written: ?*usize,
     ) c.FimoResult {
-        const v = cVersionToZig(version.*);
+        const v = Version.initC(version.*);
         const buffer = str[0..str_len];
         if (std.fmt.bufPrint(buffer, "{}", .{v})) |b| {
             if (written) |w| w.* = b.len;
@@ -277,7 +280,7 @@ const ffi = struct {
         str_len: usize,
         written: ?*usize,
     ) c.FimoResult {
-        const v = cVersionToZig(version.*);
+        const v = Version.initC(version.*);
         const buffer = str[0..str_len];
         if (std.fmt.bufPrint(buffer, "{long}", .{v})) |b| {
             if (written) |w| w.* = b.len;
@@ -290,8 +293,8 @@ const ffi = struct {
         lhs: *const c.FimoVersion,
         rhs: *const c.FimoVersion,
     ) c_int {
-        const l = cVersionToZig(lhs.*);
-        const r = cVersionToZig(rhs.*);
+        const l = Version.initC(lhs.*);
+        const r = Version.initC(rhs.*);
         return switch (l.order(r)) {
             .lt => -1,
             .eq => 0,
@@ -303,8 +306,8 @@ const ffi = struct {
         lhs: *const c.FimoVersion,
         rhs: *const c.FimoVersion,
     ) c_int {
-        const l = cVersionToZig(lhs.*);
-        const r = cVersionToZig(rhs.*);
+        const l = Version.initC(lhs.*);
+        const r = Version.initC(rhs.*);
         return switch (l.orderLong(r)) {
             .lt => -1,
             .eq => 0,
@@ -316,8 +319,8 @@ const ffi = struct {
         got: *const c.FimoVersion,
         required: *const c.FimoVersion,
     ) bool {
-        const g = cVersionToZig(got.*);
-        const r = cVersionToZig(required.*);
+        const g = Version.initC(got.*);
+        const r = Version.initC(required.*);
         return g.isCompatibleWith(r);
     }
 };
