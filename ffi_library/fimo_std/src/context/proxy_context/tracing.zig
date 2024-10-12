@@ -1385,25 +1385,6 @@ comptime {
 // ----------------------------------------------------
 
 const ffi = struct {
-    extern "c" fn vsnprintf(
-        buffer: [*:0]u8,
-        bufsz: usize,
-        format: [*:0]const u8,
-        vlist: c.va_list,
-    ) c_int;
-
-    export fn fimo_impl_tracing_fmt(
-        buffer: [*]u8,
-        buffer_len: usize,
-        args: ?*const anyopaque,
-        written: *usize,
-    ) c.FimoResult {
-        const a: *const c.FimoImplTracingFmtArgs = @alignCast(@ptrCast(args));
-        const w = vsnprintf(@ptrCast(buffer), buffer_len, a.format, a.vlist.*);
-        written.* = @intCast(w);
-        return Error.intoCResult(null);
-    }
-
     export fn fimo_tracing_call_stack_create(context: c.FimoContext, call_stack: **CallStack) c.FimoResult {
         const ctx = Context.initC(context);
         var err: ?Error = null;
