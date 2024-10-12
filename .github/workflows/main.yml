@@ -38,15 +38,20 @@ jobs:
       - name: Install (Ubuntu)
         if: runner.os == 'Linux'
         run: |
+          echo "deb-src http://archive.ubuntu.com/ubuntu/ $(lsb_release -cs) main" | sudo tee -a /etc/apt/sources.list
           sudo apt-get update
-          sudo apt-get install ninja-build
+          sudo apt-get build-dep python3
+          sudo apt-get install pkg-config
+          sudo apt-get install build-essential gdb lcov pkg-config \
+                libbz2-dev libffi-dev libgdbm-dev libgdbm-compat-dev liblzma-dev \
+                libncurses5-dev libreadline6-dev libsqlite3-dev libssl-dev \
+                lzma lzma-dev tk-dev uuid-dev zlib1g-dev
       - name: Install (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install mpdecimal
       - name: Install (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install ninja
           echo "CC=cl" >> $GITHUB_ENV
           echo "CXX=cl" >> $GITHUB_ENV
 
