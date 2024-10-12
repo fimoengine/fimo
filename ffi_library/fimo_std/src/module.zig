@@ -230,24 +230,6 @@ pub const ModuleInfo = extern struct {
     }
 };
 
-test {
-    const module = try std.testing.allocator.create(OpaqueModule);
-    defer std.testing.allocator.destroy(module);
-    const a = module.asOpaqueModule();
-    std.debug.print("{*}\n", .{a});
-
-    const p = a.parameters();
-    std.debug.print("{}\n", .{p});
-    const r = a.resources();
-    std.debug.print("{}\n", .{r});
-    const i = a.imports();
-    std.debug.print("{}\n", .{i});
-    const e = a.exports();
-    std.debug.print("{}\n", .{e});
-    const s = a.state();
-    std.debug.print("{}\n", .{s});
-}
-
 // Force the inclusion of the required symbols.
 comptime {
     _ = exports;

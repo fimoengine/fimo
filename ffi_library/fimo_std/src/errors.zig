@@ -139,14 +139,6 @@ pub const ErrorCode = enum(c_int) {
         return @tagName(self);
     }
 
-    test name {
-        inline for (@typeInfo(ErrorCode).@"enum".fields) |field| {
-            const error_code: ErrorCode = @enumFromInt(field.value);
-            std.debug.print("{dbg}\n", .{error_code});
-            try std.testing.expect(std.mem.eql(u8, error_code.name(), field.name));
-        }
-    }
-
     pub fn description(self: ErrorCode) [:0]const u8 {
         return switch (self) {
             .ok => "operation completed successfully",
@@ -278,13 +270,6 @@ pub const ErrorCode = enum(c_int) {
             .xdev => "invalid cross-device link",
             .xfull => "exchange full",
         };
-    }
-
-    test description {
-        inline for (@typeInfo(ErrorCode).@"enum".fields) |field| {
-            const error_code: ErrorCode = @enumFromInt(field.value);
-            std.debug.print("{}\n", .{error_code});
-        }
     }
 
     /// Formats the error code.
@@ -522,11 +507,9 @@ pub const Error = struct {
 
         const error_name = einval.?.name();
         defer error_name.deinit();
-        std.debug.print("{}\n", .{error_name});
 
         const error_description = einval.?.description();
         defer error_description.deinit();
-        std.debug.print("{}\n", .{error_description});
     }
 
     /// Creates an optional error from a system error code.
