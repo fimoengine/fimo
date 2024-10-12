@@ -2,6 +2,7 @@
 #define FIMO_TRACING_H
 
 #include <stddef.h>
+#include <stdarg.h>
 
 #include <fimo_std/context.h>
 #include <fimo_std/error.h>
@@ -701,9 +702,9 @@ FimoResult fimo_tracing_span_create_custom(FimoContext context, const FimoTracin
 static
 FIMO_MUST_USE
 FIMO_INLINE_ALWAYS
+FIMO_PRINT_F_FORMAT_ATTR(4, 5)
 FimoResult fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
-        FIMO_PRINT_F_FORMAT_ATTR(4, 5) {
+                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
     FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
@@ -767,8 +768,9 @@ FimoResult fimo_tracing_event_emit_custom(FimoContext context, const FimoTracing
 static
 FIMO_MUST_USE
 FIMO_INLINE_ALWAYS
+FIMO_PRINT_F_FORMAT_ATTR(3, 4)
 FimoResult fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
-                                       FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4) {
+                                       FIMO_PRINT_F_FORMAT const char *format, ...) {
     va_list vlist;
     va_start(vlist, format);
     FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
