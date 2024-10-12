@@ -246,7 +246,7 @@ const ffi = struct {
         return print.len;
     }
 
-    export fn fimo_version_str_len_full(
+    export fn fimo_version_str_len_long(
         version: *const c.FimoVersion,
     ) usize {
         const v = Version.initC(version.*);

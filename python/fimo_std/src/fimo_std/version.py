@@ -74,7 +74,7 @@ class Version(_ffi.FFITransferable[_ffi.FimoVersion]):
 
     def string_length_long(self) -> int:
         """Calculates the string length required to represent the version as a string."""
-        return _ffi.fimo_version_str_len_full(c.byref(self._version)).value
+        return _ffi.fimo_version_str_len_long(c.byref(self._version)).value
 
     def as_str(self) -> str:
         """Returns the string representation of the version."""

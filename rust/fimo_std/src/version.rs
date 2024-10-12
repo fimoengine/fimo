@@ -71,7 +71,7 @@ impl Version {
     /// the `Version` using [`Self::write_str_long`].
     pub fn str_len_long(&self) -> usize {
         // Safety: The pointer is valid.
-        unsafe { bindings::fimo_version_str_len_full(&self.0) }
+        unsafe { bindings::fimo_version_str_len_long(&self.0) }
     }
 
     /// Formats the `Version` into a buffer.

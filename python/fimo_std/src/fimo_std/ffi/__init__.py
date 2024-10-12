@@ -653,12 +653,12 @@ def fimo_version_str_len(version: Ref[FimoVersion]) -> FimoUSize:
     return _fimo_version_str_len(version)
 
 
-_fimo_version_str_len_full = _lib.fimo_version_str_len_full
-_fimo_version_str_len_full.argtypes = [c.POINTER(FimoVersion)]
-_fimo_version_str_len_full.restype = FimoUSize
+_fimo_version_str_len_long = _lib.fimo_version_str_len_long
+_fimo_version_str_len_long.argtypes = [c.POINTER(FimoVersion)]
+_fimo_version_str_len_long.restype = FimoUSize
 
 
-def fimo_version_str_len_full(version: Ref[FimoVersion]) -> FimoUSize:
+def fimo_version_str_len_long(version: Ref[FimoVersion]) -> FimoUSize:
     """Calculates the string length required to represent the version as a string.
 
     If `version` is `NULL`, this function returns `0`. The returned length is
@@ -669,7 +669,7 @@ def fimo_version_str_len_full(version: Ref[FimoVersion]) -> FimoUSize:
 
     :return: Required string length
     """
-    return _fimo_version_str_len_full(version)
+    return _fimo_version_str_len_long(version)
 
 
 _fimo_version_write_str = _lib.fimo_version_write_str

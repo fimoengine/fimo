@@ -106,7 +106,7 @@ size_t fimo_version_str_len(const FimoVersion *version);
  */
 FIMO_EXPORT
 FIMO_MUST_USE
-size_t fimo_version_str_len_full(const FimoVersion *version);
+size_t fimo_version_str_len_long(const FimoVersion *version);
 
 /**
  * Represents the version as a string.
