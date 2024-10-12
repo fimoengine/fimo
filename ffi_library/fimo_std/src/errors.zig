@@ -574,6 +574,18 @@ pub const Error = struct {
         return Error{ .err = err };
     }
 
+    /// Checks whether the pointed to value contains an error.
+    pub fn checkError(err: *?Error) error{FfiError}!void {
+        if (err.* != null) return error.FfiError;
+    }
+
+    /// Initializes the error and checks whether it contains an error.
+    pub fn initChecked(err: *?Error, c_result: c.FimoResult) error{FfiError}!void {
+        std.debug.assert(err.* == null);
+        err.* = Error.initC(c_result);
+        return checkError(err);
+    }
+
     /// Cleans up the error.
     pub fn deinit(self: Error) void {
         c.fimo_result_release(self.err);

@@ -204,8 +204,6 @@ fn configureFimoCSources(
         "src/internal/context.c",
         "src/internal/module.c",
         "src/internal/tracing.c",
-        // Public implementation headers
-        "src/impl/tracing.c",
         // Public headers
         "src/array_list.c",
         "src/context.c",
@@ -213,7 +211,6 @@ fn configureFimoCSources(
         "src/module.c",
         "src/path.c",
         "src/refcount.c",
-        "src/tracing.c",
     };
 
     var flags = StringArrayList.init(b.allocator);

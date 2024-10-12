@@ -1778,45 +1778,6 @@ def fimo_tracing_call_stack_resume_current(context: FimoContext) -> FimoResult:
     return _fimo_tracing_call_stack_resume_current(context)
 
 
-_fimo_tracing_span_create_fmt = _lib.fimo_tracing_span_create_fmt
-_fimo_tracing_span_create_fmt.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingSpanDesc),
-    c.POINTER(c.POINTER(FimoTracingSpan)),
-    c.c_char_p,
-]
-_fimo_tracing_span_create_fmt.restype = FimoResult
-
-
-def fimo_tracing_span_create_fmt(
-    context: FimoContext,
-    span_desc: Ref[FimoTracingSpanDesc],
-    span: PtrRef[FimoTracingSpan],
-    format: c.c_char_p,
-    *args,
-) -> FimoResult:
-    """Creates a new span with the standard formatter and enters it.
-
-    If successful, the newly created span is used as the context for
-    succeeding events. The message is formatted as if it were
-    formatted by a call to `snprintf`. The message may be cut of,
-    if the length exceeds the internal formatting buffer size.  The
-    contents of `span_desc` must remain valid until the span is destroyed.
-
-    This function may return `FIMO_ENOTSUP`, if the current thread is not
-    registered with the subsystem.
-
-    :param context: the context
-    :param span_desc: descriptor of the new span
-    :param span: pointer to the resulting span
-    :param format: formatting string
-    :param args: format args
-
-    :return: Status code.
-    """
-    return _fimo_tracing_span_create_fmt(context, span_desc, span, format, *args)
-
-
 _fimo_tracing_span_create_custom = _lib.fimo_tracing_span_create_custom
 _fimo_tracing_span_create_custom.argtypes = [
     FimoContext,
@@ -1881,34 +1842,6 @@ def fimo_tracing_span_destroy(
     :return: Status code.
     """
     return _fimo_tracing_span_destroy(context, span)
-
-
-_fimo_tracing_event_emit_fmt = _lib.fimo_tracing_event_emit_fmt
-_fimo_tracing_event_emit_fmt.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingEvent),
-    c.c_char_p,
-]
-_fimo_tracing_event_emit_fmt.restype = FimoResult
-
-
-def fimo_tracing_event_emit_fmt(
-    context: FimoContext, event: Ref[FimoTracingEvent], format: c.c_char_p, *args
-) -> FimoResult:
-    """Emits a new event with the standard formatter.
-
-    The message is formatted as if it were formatted by a call to `snprintf`.
-    The message may be cut of, if the length exceeds the internal formatting
-    buffer size.
-
-    :param context: the context
-    :param event: the event to emit
-    :param format: formatting string
-    :param args: format args
-
-    :return: Status code.
-    """
-    return _fimo_tracing_event_emit_fmt(context, event, format, *args)
 
 
 _fimo_tracing_event_emit_custom = _lib.fimo_tracing_event_emit_custom

@@ -446,7 +446,7 @@ typedef struct FimoTracingSubscriberVTable {
 /**
  * A subscriber for tracing events.
  *
- * The main function of the tracing backend is managing and routing
+ * The main function of the tracing subsystem is managing and routing
  * tracing events to subscribers. Therefore it does not consume any
  * events on its own, which is the task of the subscribers. Subscribers
  * may utilize the events in any way they deem fit.
@@ -481,7 +481,7 @@ FIMO_EXPORT
 extern const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER;
 
 /**
- * Configuration for the tracing backend.
+ * Configuration for the tracing subsystem.
  *
  * Can be passed when creating the context.
  */
@@ -507,14 +507,14 @@ typedef struct FimoTracingCreationConfig {
      */
     FimoTracingLevel maximum_level;
     /**
-     * Array of subscribers to register with the tracing backend.
+     * Array of subscribers to register with the tracing subsystem.
      *
      * Must be `NULL` when there are no subscribers. The ownership
      * of the subscribers is transferred to the context.
      */
     FimoTracingSubscriber *subscribers;
     /**
-     * Number of subscribers to register with the tracing backend.
+     * Number of subscribers to register with the tracing subsystem.
      *
      * Must match the number of subscribers present in `subscribers`.
      */
@@ -587,7 +587,7 @@ FimoResult fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallS
  * active. The active call stack must also be in a suspended state, but may
  * also be blocked.
  *
- * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * This function may return an error, if the current thread is not
  * registered with the subsystem.
  *
  * @param context the context
@@ -624,7 +624,7 @@ FimoResult fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallS
  * blocked. In that case, the call stack must be unblocked prior
  * to resumption.
  *
- * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * This function may return an error, if the current thread is not
  * registered with the subsystem.
  *
  * @param context the context
@@ -642,7 +642,7 @@ FimoResult fimo_tracing_call_stack_suspend_current(FimoContext context, bool blo
  * Once resumed, the context can be used to trace messages. To be
  * successful, the current call stack must be suspended and unblocked.
  *
- * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * This function may return an error, if the current thread is not
  * registered with the subsystem.
  *
  * @param context the context.
@@ -654,41 +654,15 @@ FIMO_MUST_USE
 FimoResult fimo_tracing_call_stack_resume_current(FimoContext context);
 
 /**
- * Creates a new span with the standard formatter and enters it.
- *
- * If successful, the newly created span is used as the context for
- * succeeding events. The message is formatted as if it were
- * formatted by a call to `snprintf`. The message may be cut of,
- * if the length exceeds the internal formatting buffer size.  The
- * contents of `span_desc` must remain valid until the span is destroyed.
- *
- * This function may return `FIMO_ENOTSUP`, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context
- * @param span_desc descriptor of the new span
- * @param span pointer to the resulting span
- * @param format formatting string
- * @param ... format args
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
-        FIMO_PRINT_F_FORMAT_ATTR(4, 5);
-
-/**
  * Creates a new span with a custom formatter and enters it.
  *
  * If successful, the newly created span is used as the context for
- * succeeding events. The backend may use a formatting buffer of a
+ * succeeding events. The subsystem may use a formatting buffer of a
  * fixed size. The formatter is expected to cut-of the message after
  * reaching that specified size. The contents of `span_desc` must
  * remain valid until the span is destroyed.
  *
- * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * This function may return an error, if the current thread is not
  * registered with the subsystem.
  *
  * @param context the context
@@ -705,6 +679,40 @@ FimoResult fimo_tracing_span_create_custom(FimoContext context, const FimoTracin
                                            FimoTracingSpan **span, FimoTracingFormat format, const void *data);
 
 /**
+ * Creates a new span with the standard formatter and enters it.
+ *
+ * If successful, the newly created span is used as the context for
+ * succeeding events. The message is formatted as if it were
+ * formatted by a call to `snprintf`. The message may be cut of,
+ * if the length exceeds the internal formatting buffer size.  The
+ * contents of `span_desc` must remain valid until the span is destroyed.
+ *
+ * This function may return an error, if the current thread is not
+ * registered with the subsystem.
+ *
+ * @param context the context
+ * @param span_desc descriptor of the new span
+ * @param span pointer to the resulting span
+ * @param format formatting string
+ * @param ... format args
+ *
+ * @return Status code.
+ */
+static
+FIMO_MUST_USE
+FIMO_INLINE_ALWAYS
+FimoResult fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
+                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...)
+        FIMO_PRINT_F_FORMAT_ATTR(4, 5) {
+    va_list vlist;
+    va_start(vlist, format);
+    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
+    FimoResult result = fimo_tracing_span_create_custom(context, span_desc, span, fimo_impl_tracing_fmt, &args);
+    va_end(vlist);
+    return result;
+}
+
+/**
  * Exits and destroys a span.
  *
  * If successful, succeeding events won't occur inside the context of the
@@ -712,7 +720,7 @@ FimoResult fimo_tracing_span_create_custom(FimoContext context, const FimoTracin
  * call stack. The span may not be in use prior to a call to this function,
  * and may not be used afterwards.
  *
- * This function may return `FIMO_ENOTSUP`, if the current thread is not
+ * This function may return an error, if the current thread is not
  * registered with the subsystem.
  *
  * @param context the context
@@ -725,28 +733,9 @@ FIMO_MUST_USE
 FimoResult fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
 
 /**
- * Emits a new event with the standard formatter.
- *
- * The message is formatted as if it were formatted by a call to `snprintf`.
- * The message may be cut of, if the length exceeds the internal formatting
- * buffer size.
- *
- * @param context the context
- * @param event the event to emit
- * @param format formatting string
- * @param ... format args
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
-                                       FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4);
-
-/**
  * Emits a new event with a custom formatter.
  *
- * The backend may use a formatting buffer of a fixed size. The formatter is
+ * The subsystem may use a formatting buffer of a fixed size. The formatter is
  * expected to cut-of the message after reaching that specified size.
  *
  * @param context the context
@@ -762,29 +751,56 @@ FimoResult fimo_tracing_event_emit_custom(FimoContext context, const FimoTracing
                                           const void *data);
 
 /**
- * Checks whether the tracing backend is enabled.
+ * Emits a new event with the standard formatter.
  *
- * This function can be used to check whether to call into the backend at all.
+ * The message is formatted as if it were formatted by a call to `snprintf`.
+ * The message may be cut of, if the length exceeds the internal formatting
+ * buffer size.
+ *
+ * @param context the context
+ * @param event the event to emit
+ * @param format formatting string
+ * @param ... format args
+ *
+ * @return Status code.
+ */
+static
+FIMO_MUST_USE
+FIMO_INLINE_ALWAYS
+FimoResult fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
+                                       FIMO_PRINT_F_FORMAT const char *format, ...) FIMO_PRINT_F_FORMAT_ATTR(3, 4) {
+    va_list vlist;
+    va_start(vlist, format);
+    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
+    FimoResult result = fimo_tracing_event_emit_custom(context, event, fimo_impl_tracing_fmt, &args);
+    va_end(vlist);
+    return result;
+}
+
+/**
+ * Checks whether the tracing subsystem is enabled.
+ *
+ * This function can be used to check whether to call into the subsystem at all.
  * Calling this function is not necessary, as the remaining functions of the
- * backend are guaranteed to return default values, in case the backend is
+ * subsystem are guaranteed to return default values, in case the subsystem is
  * disabled.
  *
  * @param context the context.
  *
- * @return `true` if the backend is enabled.
+ * @return `true` if the subsystem is enabled.
  */
 FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_tracing_is_enabled(FimoContext context);
 
 /**
- * Registers the calling thread with the tracing backend.
+ * Registers the calling thread with the tracing subsystem.
  *
- * The tracing of the backend is opt-in on a per thread basis, where
- * unregistered threads will behave as if the backend was disabled.
+ * The tracing of the subsystem is opt-in on a per thread basis, where
+ * unregistered threads will behave as if the subsystem was disabled.
  * Once registered, the calling thread gains access to the tracing
- * backend and is assigned a new empty call stack. A registered
- * thread must be unregistered from the tracing backend before the
+ * subsystem and is assigned a new empty call stack. A registered
+ * thread must be unregistered from the tracing subsystem before the
  * context is destroyed, by terminating the tread, or by manually
  * calling `fimo_tracing_unregister_thread()`.
  *
@@ -797,10 +813,10 @@ FIMO_MUST_USE
 FimoResult fimo_tracing_register_thread(FimoContext context);
 
 /**
- * Unregisters the calling thread from the tracing backend.
+ * Unregisters the calling thread from the tracing subsystem.
  *
  * Once unregistered, the calling thread looses access to the tracing
- * backend until it is registered again. The thread can not be unregistered
+ * subsystem until it is registered again. The thread can not be unregistered
  * until the call stack is empty.
  *
  * @param context the context.
