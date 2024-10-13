@@ -641,14 +641,14 @@ typedef FimoResult (*FimoModuleDynamicSymbolConstructor)(const FimoModule *arg0,
  *
  * The destructor is safe to assume, that the symbol is no longer
  * used by any other module. During its destruction, a symbol is
- * not allowed to access the module backend.
+ * not allowed to access the module subsystem.
  *
  * @param arg0 symbol to destroy
  */
 typedef void (*FimoModuleDynamicSymbolDestructor)(void *arg0);
 
 /**
- * Type-erased set of modules to load by the backend.
+ * Type-erased set of modules to load by the subsystem.
  */
 typedef struct FimoModuleLoadingSet FimoModuleLoadingSet;
 
@@ -674,7 +674,7 @@ typedef FimoResult (*FimoModuleConstructor)(const FimoModule *arg0, FimoModuleLo
  * Destructor function for a module.
  *
  * During its destruction, a module is not allowed to access the
- * module backend.
+ * module subsystem.
  *
  * @param arg0 pointer to the module
  * @param arg1 module data to destroy
@@ -1254,11 +1254,11 @@ typedef struct FimoModule {
 } FimoModule;
 
 /**
- * A filter for selection modules to load by the module backend.
+ * A filter for selection modules to load by the module subsystem.
  *
  * The filter function is passed the module export declaration
  * and can then decide whether the module should be loaded by
- * the backend.
+ * the subsystem.
  *
  * @param arg0 module export to inspect
  * @param arg1 filter data
@@ -1270,7 +1270,7 @@ typedef bool (*FimoModuleLoadingFilter)(const FimoModuleExport *arg0, void *arg1
 /**
  * A callback for successfully loading a module.
  *
- * The callback function is called when the backend was successful
+ * The callback function is called when the subsystem was successful
  * in loading the requested module, making it then possible to
  * request symbols.
  *
@@ -1282,7 +1282,7 @@ typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo *arg0, voi
 /**
  * A callback for a module loading error.
  *
- * The callback function is called when the backend was not
+ * The callback function is called when the subsystem was not
  * successful in loading the requested module.
  *
  * @param arg0 module that caused the error
@@ -1338,7 +1338,7 @@ typedef struct FimoModuleVTableV0 {
 /**
  * Constructs a new pseudo module.
  *
- * The functions of the module backend require that the caller owns
+ * The functions of the module subsystem require that the caller owns
  * a reference to their own module. This is a problem, as the constructor
  * of the context won't be assigned a module instance during bootstrapping.
  * As a workaround, we allow for the creation of pseudo modules, i.e.,
@@ -1357,7 +1357,7 @@ FimoResult fimo_module_pseudo_module_new(FimoContext context, const FimoModule *
  * Destroys an existing pseudo module.
  *
  * By destroying the pseudo module, the caller ensures that they
- * relinquished all access to handles derived by the module backend.
+ * relinquished all access to handles derived by the module subsystem.
  *
  * @param module pseudo module to destroy
  * @param module_context extracted context from the module
@@ -1422,11 +1422,11 @@ FimoResult fimo_module_set_has_symbol(FimoContext context, FimoModuleLoadingSet 
  * Adds a status callback to the module set.
  *
  * Adds a set of callbacks to report a successful or failed loading of
- * a module. The `on_success` callback wil be called if the set has
- * was able to load all requested modules, whereas the `on_error` callback
+ * a module. The `on_success` callback wil be called if the set was
+ * able to load all requested modules, whereas the `on_error` callback
  * will be called immediately after the failed loading of the module. Since
  * the module set can be in a partially loaded state at the time of calling
- * this function, the `on_errro` callback may be invoked immediately. The
+ * this function, the `on_error` callback may be invoked immediately. The
  * callbacks will be provided with a user-specified data pointer, which they
  * are in charge of cleaning up. If the requested module `module_name` does
  * not exist, this function will return an error.
@@ -1455,10 +1455,8 @@ FimoResult fimo_module_set_append_callback(FimoContext context, FimoModuleLoadin
  * name will result in an error. Unlike `fimo_module_set_append_modules`,
  * this function allows for the loading of dynamic modules, i.e.
  * modules that are created at runtime, like non-native modules,
- * which may require a runtime to be executed in. To ensure that
- * the binary of the module calling this function is not unloaded
- * while the new module is instantiated, the new module inherits
- * a strong reference to the same binary as the caller's module.
+ * which may require a runtime to be executed in. The new module
+ * inherits a strong reference to the same binary as the caller's module.
  * Note that the new module is not setup to automatically depend
  * on `module`, but may prevent it from being unloaded while
  * the set exists.
@@ -1488,7 +1486,7 @@ FimoResult fimo_module_set_append_freestanding_module(const FimoModule *module, 
  * exports or duplicate name will result in an error. This function
  * signals an error, if the binary does not contain the symbols
  * necessary to query the exported modules, but does not return
- * in an error, if it does not export any modules. The necessary
+ * an error, if it does not export any modules. The necessary
  * symbols are setup automatically, if the binary was linked with
  * the fimo library. In case of an error, no modules are appended
  * to the set.
@@ -1577,7 +1575,7 @@ FimoResult fimo_module_find_by_symbol(FimoContext context, const char *name, con
                                       const FimoModuleInfo **module);
 
 /**
- * Checks for the presence of a namespace in the module backend.
+ * Checks for the presence of a namespace in the module subsystem.
  *
  * A namespace exists, if at least one loaded module exports
  * one symbol in said namespace.
@@ -1695,7 +1693,7 @@ FimoResult fimo_module_relinquish_dependency(const FimoModule *module, const Fim
  * by `other`. The result of the query is stored in
  * `has_dependency`. Additionally, this function also
  * queries whether the dependency is static, i.e., the
- * dependency was set by the module backend at load time.
+ * dependency was set by the module subsystem at load time.
  * The dependency type is stored in `is_static`.
  *
  * @param module module of the caller
@@ -1711,9 +1709,9 @@ FimoResult fimo_module_has_dependency(const FimoModule *module, const FimoModule
                                       bool *is_static);
 
 /**
- * Loads a symbol from the module backend.
+ * Loads a symbol from the module subsystem.
  *
- * The caller can query the backend for a symbol of a loaded
+ * The caller can query the subsystem for a symbol of a loaded
  * module. This is useful for loading optional symbols, or
  * for loading symbols after the creation of a module. The
  * symbol, if it exists, is written into `symbol`, and can

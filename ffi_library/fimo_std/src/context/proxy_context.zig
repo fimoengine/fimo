@@ -10,9 +10,11 @@ vtable: *const VTable,
 
 const Context = @This();
 pub const Tracing = @import("proxy_context/tracing.zig");
+pub const Module = @import("proxy_context/module.zig");
 
 comptime {
     _ = Tracing;
+    _ = Module;
 }
 
 /// Interface version compiled against.
@@ -53,6 +55,7 @@ pub const VTable = extern struct {
     header: CompatibilityContext.VTable,
     core_v0: CoreVTable,
     tracing_v0: Tracing.VTable,
+    module_v0: Module.VTable,
 };
 
 /// Initial VTable of the context.
@@ -168,6 +171,11 @@ pub fn release(self: Context) void {
 /// Returns the interface to the tracing subsystem.
 pub fn tracing(self: Context) Tracing {
     return Tracing{ .context = self };
+}
+
+/// Returns the interface to the module subsystem.
+pub fn module(self: Context) Module {
+    return Module{ .context = self };
 }
 
 // ----------------------------------------------------

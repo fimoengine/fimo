@@ -208,7 +208,6 @@ fn configureFimoCSources(
         "src/array_list.c",
         "src/context.c",
         "src/graph.c",
-        "src/module.c",
         "src/path.c",
         "src/refcount.c",
     };
@@ -233,6 +232,10 @@ fn configureFimoCSources(
             flags.append("-fPIC");
         }
     }
+
+    const options = b.addOptions();
+    options.addOption(bool, "export_dll", compile.isDynamicLibrary());
+    compile.root_module.addImport("export_settings", options.createModule());
 
     compile.linkLibC();
     if (compile.rootModuleTarget().os.tag == .windows) {
