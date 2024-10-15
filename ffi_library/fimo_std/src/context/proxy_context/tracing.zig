@@ -455,6 +455,7 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
             if (std.fmt.bufPrint(b, fmt, args.*)) |out| {
                 written.* = out.len;
             } else |_| written.* = buffer_len;
+            return Error.intoCResult(null);
         }
     }.format;
 }
@@ -619,7 +620,7 @@ pub const Subscriber = extern struct {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 destroy_fn(self);
             }
-            fn call_stack_create(
+            fn callStackCreate(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: **anyopaque,
@@ -633,7 +634,7 @@ pub const Subscriber = extern struct {
                     return Error.initError(err).err;
                 }
             }
-            fn call_stack_drop(
+            fn callStackDrop(
                 ptr: ?*anyopaque,
                 call_stack: *anyopaque,
             ) callconv(.C) void {
@@ -641,7 +642,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 call_stack_drop_fn(self, cs);
             }
-            fn call_stack_destroy(
+            fn callStackDestroy(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
@@ -651,7 +652,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 call_stack_destroy_fn(self, t, cs);
             }
-            fn call_stack_unblock(
+            fn callStackUnblock(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
@@ -661,7 +662,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 call_stack_unblock_fn(self, t, cs);
             }
-            fn call_stack_suspend(
+            fn callStackSuspend(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
@@ -672,7 +673,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 call_stack_suspend_fn(self, t, cs, mark_blocked);
             }
-            fn call_stack_resume(
+            fn callStackResume(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
@@ -682,7 +683,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 call_stack_resume_fn(self, t, cs);
             }
-            fn span_push(
+            fn spanPush(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 span_desc: *const SpanDesc,
@@ -703,7 +704,7 @@ pub const Subscriber = extern struct {
                 ) catch |err| return Error.initError(err).err;
                 return Error.intoCResult(null);
             }
-            fn span_drop(
+            fn spanDrop(
                 ptr: ?*anyopaque,
                 call_stack: *anyopaque,
             ) callconv(.C) void {
@@ -711,7 +712,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 span_drop_fn(self, cs);
             }
-            fn span_pop(
+            fn spanPop(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
@@ -721,7 +722,7 @@ pub const Subscriber = extern struct {
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 span_pop_fn(self, t, cs);
             }
-            fn event_emit(
+            fn eventEmit(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
@@ -745,16 +746,16 @@ pub const Subscriber = extern struct {
             .data = @constCast(obj),
             .vtable = &.{
                 .destroy = impl.destroy,
-                .call_stack_create = impl.call_stack_create,
-                .call_stack_drop = impl.call_stack_drop,
-                .call_stack_destroy = impl.call_stack_destroy,
-                .call_stack_unblock = impl.call_stack_unblock,
-                .call_stack_suspend = impl.call_stack_suspend,
-                .call_stack_resume = impl.call_stack_resume,
-                .span_push = impl.span_push,
-                .span_drop = impl.span_drop,
-                .span_pop = impl.span_pop,
-                .event_emit = impl.event_emit,
+                .call_stack_create = impl.callStackCreate,
+                .call_stack_drop = impl.callStackDrop,
+                .call_stack_destroy = impl.callStackDestroy,
+                .call_stack_unblock = impl.callStackUnblock,
+                .call_stack_suspend = impl.callStackSuspend,
+                .call_stack_resume = impl.callStackResume,
+                .span_push = impl.spanPush,
+                .span_drop = impl.spanDrop,
+                .span_pop = impl.spanPop,
+                .event_emit = impl.eventEmit,
                 .flush = impl.flush,
             },
         };
@@ -764,7 +765,7 @@ pub const Subscriber = extern struct {
         self.vtable.destroy(self.data);
     }
 
-    pub fn create_call_stack(
+    pub fn createCallStack(
         self: Subscriber,
         timepoint: Time,
         err: *?Error,
@@ -779,14 +780,14 @@ pub const Subscriber = extern struct {
         return call_stack;
     }
 
-    pub fn drop_call_stack(self: Subscriber, call_stack: *anyopaque) void {
+    pub fn dropCallStack(self: Subscriber, call_stack: *anyopaque) void {
         self.vtable.call_stack_drop(
             self.data,
             call_stack,
         );
     }
 
-    pub fn destroy_call_stack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
+    pub fn destroyCallStack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
         self.vtable.call_stack_destroy(
             self.data,
             &timepoint.intoC(),
@@ -794,7 +795,7 @@ pub const Subscriber = extern struct {
         );
     }
 
-    pub fn unblock_call_stack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
+    pub fn unblockCallStack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
         self.vtable.call_stack_unblock(
             self.data,
             &timepoint.intoC(),
@@ -802,7 +803,7 @@ pub const Subscriber = extern struct {
         );
     }
 
-    pub fn suspend_call_stack(
+    pub fn suspendCallStack(
         self: Subscriber,
         timepoint: Time,
         call_stack: *anyopaque,
@@ -816,11 +817,11 @@ pub const Subscriber = extern struct {
         );
     }
 
-    pub fn resume_call_stack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
+    pub fn resumeCallStack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
         self.vtable.call_stack_resume(self.data, &timepoint.intoC(), call_stack);
     }
 
-    pub fn create_span(
+    pub fn createSpan(
         self: Subscriber,
         timepoint: Time,
         span_desc: *const SpanDesc,
@@ -839,15 +840,15 @@ pub const Subscriber = extern struct {
         try Error.initChecked(err, result);
     }
 
-    pub fn drop_span(self: Subscriber, call_stack: *anyopaque) void {
+    pub fn dropSpan(self: Subscriber, call_stack: *anyopaque) void {
         self.vtable.span_drop(self.data, call_stack);
     }
 
-    pub fn destroy_span(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
+    pub fn destroySpan(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
         self.vtable.span_pop(self.data, &timepoint.intoC(), call_stack);
     }
 
-    pub fn emit_event(
+    pub fn emitEvent(
         self: Subscriber,
         timepoint: Time,
         call_stack: *anyopaque,

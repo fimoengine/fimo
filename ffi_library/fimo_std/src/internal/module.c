@@ -287,7 +287,7 @@ static FimoResult path_join(const char *path1, const char *path2, char **joined)
 
 #define TO_CTX_(CTX) FIMO_CONTAINER_OF(CTX, FimoInternalContext, module)
 
-#define TO_TRACING_CTX_(CTX) &(TO_CTX_(CTX))->tracing
+#define TO_TRACING_CTX_(CTX) (TO_CTX_(CTX))->tracing
 
 #define TO_MODULE_CTX_(CTX) &((FimoInternalContext *)CTX)->module
 

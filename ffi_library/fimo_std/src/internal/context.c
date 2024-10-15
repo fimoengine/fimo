@@ -106,7 +106,8 @@ FimoResult fimo_internal_context_init(const FimoBaseStructIn **options, FimoCont
 
     ctx->ref_count = (FimoAtomicRefCount)FIMO_REFCOUNT_INIT;
 
-    error = fimo_internal_tracing_init(&ctx->tracing, tracing_config);
+    ctx->tracing = fimo_internal_tracing_alloc();
+    error = fimo_internal_tracing_init(ctx->tracing, tracing_config);
     if (FIMO_RESULT_IS_ERROR(error)) {
         goto cleanup;
     }
@@ -121,7 +122,8 @@ FimoResult fimo_internal_context_init(const FimoBaseStructIn **options, FimoCont
     return FIMO_EOK;
 
 deinit_tracing:
-    fimo_internal_tracing_destroy(&ctx->tracing);
+    fimo_internal_tracing_destroy(ctx->tracing);
+    fimo_internal_tracing_dealloc(ctx->tracing);
 cleanup:
     fimo_free_aligned_sized(ctx, _Alignof(FimoInternalContext), sizeof(FimoInternalContext));
 cleanup_options:
@@ -171,7 +173,8 @@ void fimo_internal_context_release(void *ptr) {
 
     // Destroy all submodules.
     fimo_internal_module_destroy(&context->module);
-    fimo_internal_tracing_destroy(&context->tracing);
+    fimo_internal_tracing_destroy(context->tracing);
+    fimo_internal_tracing_dealloc(context->tracing);
 
     // Finally deallocate the context.
     fimo_free_aligned_sized(context, _Alignof(FimoInternalContext), sizeof(FimoInternalContext));

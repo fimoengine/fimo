@@ -22,7 +22,7 @@ extern "C" {
  */
 typedef struct FimoInternalContext {
     FimoAtomicRefCount ref_count;
-    FimoInternalTracingContext tracing;
+    FimoInternalTracingContext *tracing;
     FimoInternalModuleContext module;
 } FimoInternalContext;
 

@@ -203,7 +203,6 @@ fn configureFimoCSources(
         // Internal headers
         "src/internal/context.c",
         "src/internal/module.c",
-        "src/internal/tracing.c",
         // Public headers
         "src/array_list.c",
         "src/context.c",
