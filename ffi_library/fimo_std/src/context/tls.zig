@@ -218,3 +218,59 @@ pub fn Tls(comptime T: type) type {
         }
     };
 }
+
+test "per thread data" {
+    const tls = try Tls(usize).init(&struct {
+        fn f(ptr: *usize) callconv(.C) void {
+            std.testing.allocator.destroy(ptr);
+        }
+    }.f);
+    defer tls.deinit();
+
+    const thread_func = struct {
+        fn f(t: *const Tls(usize), n: usize) !void {
+            try std.testing.expect(t.get() == null);
+            const v = try std.testing.allocator.create(usize);
+            errdefer std.testing.allocator.destroy(v);
+            v.* = n;
+            try t.set(v);
+            try std.testing.expect(t.get().?.* == n);
+        }
+    }.f;
+
+    const t1 = try std.Thread.spawn(.{}, thread_func, .{ &tls, 1 });
+    const t2 = try std.Thread.spawn(.{}, thread_func, .{ &tls, 2 });
+    const t3 = try std.Thread.spawn(.{}, thread_func, .{ &tls, 3 });
+
+    t1.join();
+    t2.join();
+    t3.join();
+}
+
+test "tls destructor on thread exit" {
+    const destructor = struct {
+        fn f(ptr: *std.atomic.Value(usize)) callconv(.C) void {
+            _ = ptr.fetchAdd(1, .monotonic);
+        }
+    }.f;
+    const tls = try Tls(std.atomic.Value(usize)).init(&destructor);
+    defer tls.deinit();
+
+    var counter = std.atomic.Value(usize).init(0);
+
+    const thread_func = struct {
+        fn f(t: *const Tls(std.atomic.Value(usize)), cnt: *std.atomic.Value(usize)) !void {
+            try t.set(cnt);
+        }
+    }.f;
+
+    const t1 = try std.Thread.spawn(.{}, thread_func, .{ &tls, &counter });
+    const t2 = try std.Thread.spawn(.{}, thread_func, .{ &tls, &counter });
+    const t3 = try std.Thread.spawn(.{}, thread_func, .{ &tls, &counter });
+
+    t1.join();
+    t2.join();
+    t3.join();
+
+    try std.testing.expect(counter.load(.acquire) == 3);
+}
