@@ -15,3 +15,10 @@ pub const Context = extern struct {
 comptime {
     _ = Context;
 }
+
+test {
+    _ = @import("context/graph.zig");
+    _ = @import("context/proxy_context.zig");
+    _ = @import("context/tls.zig");
+    _ = @import("context/tracing.zig");
+}
