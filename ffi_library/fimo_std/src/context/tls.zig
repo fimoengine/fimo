@@ -34,7 +34,7 @@ const PosixTlsImpl = struct {
         switch (c.pthread_key_delete(self.key)) {
             .SUCCESS => return,
             else => |err| {
-                posix.unexpectedErrno(err);
+                posix.unexpectedErrno(err) catch {};
                 std.process.abort();
             },
 
@@ -47,7 +47,8 @@ const PosixTlsImpl = struct {
     }
 
     fn set(self: Self, value: ?*anyopaque) TlsError!void {
-        switch (c.pthread_setspecific(self.key, value)) {
+        const status: c.E = @enumFromInt(c.pthread_setspecific(self.key, value));
+        switch (status) {
             .SUCCESS => return,
             else => |err| return posix.unexpectedErrno(err),
 
