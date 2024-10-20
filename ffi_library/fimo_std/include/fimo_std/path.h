@@ -1,13 +1,8 @@
 #ifndef FIMO_PATH_H
 #define FIMO_PATH_H
 
-#include <fimo_std/array_list.h>
 #include <fimo_std/error.h>
 #include <fimo_std/utils.h>
-
-#if defined(__unix__) && !defined(__APPLE__)
-#include <fimo_std/impl/gdb_scripts/path.h>
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,7 +12,9 @@ extern "C" {
  * A growable filesystem path encoded as UTF-8.
  */
 typedef struct FimoUTF8PathBuf {
-    FimoArrayList buffer;
+    char *buffer;
+    FimoUSize length;
+    FimoUSize capacity;
 } FimoUTF8PathBuf;
 
 /**
@@ -387,7 +384,7 @@ FIMO_MUST_USE
 bool fimo_utf8_path_parent(FimoUTF8Path path, FimoUTF8Path *parent);
 
 /**
- * Returns the path without its final component, if there is one.
+ * Returns the final component of the path, if there is one.
  *
  * @param path path
  * @param file_name resulting file name

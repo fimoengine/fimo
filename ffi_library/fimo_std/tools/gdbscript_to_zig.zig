@@ -13,11 +13,7 @@ pub fn main() !void {
     var file_contents = std.ArrayList(u8).init(arena);
     defer file_contents.deinit();
 
-    try file_contents.appendSlice("#pragma GCC diagnostic push\n");
-    try file_contents.appendSlice("#pragma GCC diagnostic ignored \"-Wpragmas\"\n");
-    try file_contents.appendSlice("#pragma GCC diagnostic ignored \"-Woverlength-strings\"\n");
-    try file_contents.appendSlice("#pragma GCC diagnostic ignored \"-Wlanguage-extension-token\"\n");
-    try file_contents.appendSlice("\n");
+    try file_contents.appendSlice("comptime {\n");
 
     for (args[2..]) |input_file_path| {
         var input_file = std.fs.cwd().openFile(input_file_path, .{}) catch |err| {
@@ -25,12 +21,13 @@ pub fn main() !void {
         };
         defer input_file.close();
 
-        try file_contents.appendSlice("// ");
+        try file_contents.appendSlice("\t// ");
         try file_contents.appendSlice(input_file_path);
         try file_contents.appendSlice("\n");
-        try file_contents.appendSlice("__asm__(\".pushsection \\\".debug_gdb_scripts\\\", \\\"MS\\\",@progbits,1\\n\"\n");
-        try file_contents.appendSlice("\t\".byte 4\\n\"\n");
-        try file_contents.appendSlice("\t\".ascii \\\"gdb.inlined-script\\\\n\\\"\\n\"\n");
+        try file_contents.appendSlice("\tasm (\n");
+        try file_contents.appendSlice("\t\t\\\\.pushsection \".debug_gdb_scripts\", \"MS\",@progbits,1\n");
+        try file_contents.appendSlice("\t\t\\\\.byte 4\n");
+        try file_contents.appendSlice("\t\t\\\\.ascii \"gdb.inlined-script\\n\"\n");
 
         var buf_reader = std.io.bufferedReader(input_file.reader());
         var in_stream = buf_reader.reader();
@@ -41,26 +38,24 @@ pub fn main() !void {
             for (line) |c| {
                 if (c == '\"') {
                     escaped[escaped_len] = '\\';
-                    escaped[escaped_len + 1] = '\\';
-                    escaped[escaped_len + 2] = '\\';
-                    escaped_len += 3;
+                    escaped_len += 1;
                 }
 
                 escaped[escaped_len] = c;
                 escaped_len += 1;
             }
 
-            try file_contents.appendSlice("\t\".ascii \\\"");
+            try file_contents.appendSlice("\t\t\\\\.ascii \"");
             try file_contents.appendSlice(escaped[0..escaped_len]);
-            try file_contents.appendSlice("\\\\n\\\"\\n\"\n");
+            try file_contents.appendSlice("\\n\"\n");
         }
 
-        try file_contents.appendSlice("\t\".byte 0\\n\"\n");
-        try file_contents.appendSlice("\t\".popsection\\n\");\n");
+        try file_contents.appendSlice("\t\t\\\\.byte 0\n");
+        try file_contents.appendSlice("\t\t\\\\.popsection\n");
+        try file_contents.appendSlice("\t);\n");
     }
 
-    try file_contents.appendSlice("\n");
-    try file_contents.appendSlice("#pragma GCC diagnostic pop\n");
+    try file_contents.appendSlice("}\n");
 
     var output_file = std.fs.cwd().createFile(output_file_path, .{}) catch |err| {
         fatal("unable to open output '{s}': {s}", .{ output_file_path, @errorName(err) });

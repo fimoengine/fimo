@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
 
     // Generate additional build files.
     const wf = b.addWriteFiles();
-    generateGDBScripts(b, wf);
+    const visualizers = generateGDBScripts(b, wf);
     generateLicenseFile(b, wf);
 
     // Install all resources.
@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) void {
     configureFimoCSources(
         b,
         wf.getDirectory(),
+        visualizers,
         lib,
     );
     b.installArtifact(lib);
@@ -46,6 +47,7 @@ pub fn build(b: *std.Build) void {
     configureFimoCSources(
         b,
         wf.getDirectory(),
+        visualizers,
         dylib,
     );
     b.installArtifact(dylib);
@@ -58,6 +60,7 @@ pub fn build(b: *std.Build) void {
     configureFimoCSources(
         b,
         wf.getDirectory(),
+        visualizers,
         lib_unit_tests,
     );
 
@@ -79,10 +82,10 @@ pub fn build(b: *std.Build) void {
 fn generateGDBScripts(
     b: *std.Build,
     wf: *std.Build.Step.WriteFile,
-) void {
-    const gdbscript_to_c_exe = b.addExecutable(.{
-        .name = "gdbscript_to_c",
-        .root_source_file = b.path("tools/gdbscript_to_c.zig"),
+) *std.Build.Module {
+    const gdbscript_to_zig_exe = b.addExecutable(.{
+        .name = "gdbscript_to_zig",
+        .root_source_file = b.path("tools/gdbscript_to_zig.zig"),
         .target = b.graph.host,
         .optimize = .Debug,
     });
@@ -95,19 +98,35 @@ fn generateGDBScripts(
     };
     defer dir.close();
 
+    var root_file_bytes = std.ArrayList(u8).init(b.allocator);
+    defer root_file_bytes.deinit();
+    root_file_bytes.appendSlice("const builtin = @import(\"builtin\");\n\n") catch unreachable;
+    root_file_bytes.appendSlice("comptime {\n") catch unreachable;
+    root_file_bytes.appendSlice("\tif (builtin.os.tag != .windows and !builtin.target.isDarwin()) {\n") catch unreachable;
+
     var it = dir.iterateAssumeFirstIteration();
     while (it.next() catch @panic("failed to read dir")) |entry| {
         if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".py")) {
             continue;
         }
 
-        const out_basename = b.fmt("{s}.h", .{std.fs.path.stem(entry.name)});
-        const out_path = b.fmt("include/fimo_std/impl/gdb_scripts/{s}", .{out_basename});
-        const cmd = b.addRunArtifact(gdbscript_to_c_exe);
+        const out_basename = b.fmt("{s}.zig", .{std.fs.path.stem(entry.name)});
+        const out_path = b.fmt("zig_visualizers/{s}", .{out_basename});
+        const cmd = b.addRunArtifact(gdbscript_to_zig_exe);
+
+        root_file_bytes.appendSlice(b.fmt(
+            "\t\t_ = @import(\"{s}\");\n",
+            .{out_basename},
+        )) catch unreachable;
 
         _ = wf.addCopyFile(cmd.addOutputFileArg(out_basename), out_path);
         cmd.addFileArg(b.path(b.fmt("visualizers/gdb/{s}", .{entry.name})));
     }
+
+    root_file_bytes.appendSlice("\t}\n") catch unreachable;
+    root_file_bytes.appendSlice("}\n") catch unreachable;
+    const root_file = wf.add("zig_visualizers/root.zig", root_file_bytes.items);
+    return b.createModule(.{ .root_source_file = root_file });
 }
 
 fn generateLicenseFile(
@@ -179,11 +198,11 @@ fn installResources(
     });
 
     // Install the generated headers.
-    b.installDirectory(.{
-        .source_dir = config_path.path(b, "include/fimo_std"),
-        .install_dir = .header,
-        .install_subdir = "fimo_std",
-    });
+    // b.installDirectory(.{
+    //     .source_dir = config_path.path(b, "include/fimo_std"),
+    //     .install_dir = .header,
+    //     .install_subdir = "fimo_std",
+    // });
 
     // Install the generated license.
     b.getInstallStep().dependOn(
@@ -197,8 +216,10 @@ fn installResources(
 fn configureFimoCSources(
     b: *std.Build,
     config_path: std.Build.LazyPath,
+    visualizers: *std.Build.Module,
     compile: *std.Build.Step.Compile,
 ) void {
+    _ = config_path;
     const c_files = .{
         // Internal headers
         "src/internal/context.c",
@@ -207,34 +228,34 @@ fn configureFimoCSources(
         "src/array_list.c",
         "src/context.c",
         "src/graph.c",
-        "src/path.c",
         "src/refcount.c",
     };
 
-    var flags = StringArrayList.init(b.allocator);
-    defer flags.deinit();
-    flags.append("-std=c17");
-    flags.append("-Wall");
-    flags.append("-Wextra");
-    flags.append("-pedantic");
-    flags.append("-Werror");
-    flags.append("-fexec-charset=UTF-8");
-    flags.append("-finput-charset=UTF-8");
+    var buffer: [15][]const u8 = undefined;
+    var flags = std.ArrayListUnmanaged([]const u8).initBuffer(&buffer);
+    flags.appendAssumeCapacity("-std=c17");
+    flags.appendAssumeCapacity("-Wall");
+    flags.appendAssumeCapacity("-Wextra");
+    flags.appendAssumeCapacity("-pedantic");
+    flags.appendAssumeCapacity("-Werror");
+    flags.appendAssumeCapacity("-fexec-charset=UTF-8");
+    flags.appendAssumeCapacity("-finput-charset=UTF-8");
     if (compile.rootModuleTarget().os.tag != .windows) {
-        flags.append("-pthread");
+        flags.appendAssumeCapacity("-pthread");
     }
 
     if (compile.isDynamicLibrary()) {
-        flags.append("-D FIMO_STD_BUILD_SHARED");
-        flags.append("-D FIMO_STD_EXPORT_SYMBOLS");
+        flags.appendAssumeCapacity("-D FIMO_STD_BUILD_SHARED");
+        flags.appendAssumeCapacity("-D FIMO_STD_EXPORT_SYMBOLS");
         if (compile.rootModuleTarget().os.tag != .windows) {
-            flags.append("-fPIC");
+            flags.appendAssumeCapacity("-fPIC");
         }
     }
 
     const options = b.addOptions();
     options.addOption(bool, "export_dll", compile.isDynamicLibrary());
     compile.root_module.addImport("export_settings", options.createModule());
+    compile.root_module.addImport("visualizers", visualizers);
 
     compile.linkLibC();
     if (compile.rootModuleTarget().os.tag == .windows) {
@@ -242,10 +263,10 @@ fn configureFimoCSources(
         compile.dll_export_fns = true;
     }
     compile.addIncludePath(b.path("include/"));
-    compile.addIncludePath(config_path.path(b, "include"));
+    // compile.addIncludePath(config_path.path(b, "include"));
     compile.addCSourceFiles(.{
         .files = &c_files,
-        .flags = flags.items(),
+        .flags = flags.items,
     });
 
     // Dependencies.
@@ -273,30 +294,3 @@ fn configureFimoCSources(
         },
     });
 }
-
-const StringArrayList = struct {
-    const Self = @This();
-    flags: std.ArrayList([]const u8),
-
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return Self{
-            .flags = std.ArrayList([]const u8).init(allocator),
-        };
-    }
-
-    pub fn deinit(self: *Self) void {
-        for (self.items()) |flag| {
-            self.flags.allocator.free(flag);
-        }
-        self.flags.deinit();
-    }
-
-    pub fn append(self: *Self, flag: []const u8) void {
-        const duplicate = self.flags.allocator.dupe(u8, flag) catch @panic("OOM");
-        self.flags.append(duplicate) catch @panic("OOM");
-    }
-
-    pub fn items(self: *const Self) []const []const u8 {
-        return self.flags.items;
-    }
-};

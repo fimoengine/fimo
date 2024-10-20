@@ -9,22 +9,18 @@ class FimoUTF8PathBufPrinter(gdb.ValuePrinter):
 
     def children(self):
         return [
-            ("path", self.__val["buffer"]["elements"].cast(gdb.lookup_type("char*"))),
-            ("length", self.__val["buffer"]["size"]),
-            ("capacity", self.__val["buffer"]["capacity"]),
+            ("path", self.__val["buffer"]),
+            ("length", self.__val["length"]),
+            ("capacity", self.__val["capacity"]),
         ]
 
     def to_string(self):
-        if int(self.__val["buffer"]["elements"]) == 0:
+        if int(self.__val["buffer"]) == 0:
             return ""
 
         try:
-            length = int(self.__val["buffer"]["size"])
-            path = (
-                self.__val["buffer"]["elements"]
-                .cast(gdb.lookup_type("char*"))
-                .string(encoding="utf-8", length=length)
-            )
+            length = int(self.__val["length"])
+            path = self.__val["buffer"].string(encoding="utf-8", length=length)
             return f'"{path}"'
         except:
             return "invalid path"

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
     <Type Name="FimoUTF8PathBuf">
-        <DisplayString Condition="buffer.elements == 0">empty</DisplayString>
-        <DisplayString>{buffer.elements,[buffer.length]sb}</DisplayString>
+        <DisplayString Condition="buffer == 0">empty</DisplayString>
+        <DisplayString>{buffer,[length]sb}</DisplayString>
     </Type>
     <Type Name="FimoOwnedUTF8Path">
         <DisplayString Condition="path == 0">invalid path</DisplayString>
