@@ -206,12 +206,12 @@ pub fn resumeCurrentCallStack(self: *const Tracing) TracingError!void {
 /// registered with the subsystem.
 pub inline fn pushSpan(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     level: ProxyTracing.Level,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
     err: *?Error,
 ) (TracingError || error{FfiError})!*ProxyTracing.Span {
     const desc = &struct {
@@ -244,20 +244,20 @@ pub inline fn pushSpan(
 /// registered with the subsystem.
 pub inline fn pushSpanErr(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
     err: *?Error,
 ) (TracingError || error{FfiError})!*ProxyTracing.Span {
     return self.pushSpan(
+        fmt,
+        args,
         name,
         target,
         .err,
         location,
-        fmt,
-        args,
         err,
     );
 }
@@ -273,20 +273,20 @@ pub inline fn pushSpanErr(
 /// registered with the subsystem.
 pub inline fn pushSpanWarn(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
     err: *?Error,
 ) (TracingError || error{FfiError})!*ProxyTracing.Span {
     return self.pushSpan(
+        fmt,
+        args,
         name,
         target,
         .warn,
         location,
-        fmt,
-        args,
         err,
     );
 }
@@ -302,20 +302,20 @@ pub inline fn pushSpanWarn(
 /// registered with the subsystem.
 pub inline fn pushSpanInfo(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
     err: *?Error,
 ) (TracingError || error{FfiError})!*ProxyTracing.Span {
     return self.pushSpan(
+        fmt,
+        args,
         name,
         target,
         .info,
         location,
-        fmt,
-        args,
         err,
     );
 }
@@ -331,20 +331,20 @@ pub inline fn pushSpanInfo(
 /// registered with the subsystem.
 pub inline fn pushSpanDebug(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
     err: *?Error,
 ) (TracingError || error{FfiError})!*ProxyTracing.Span {
     return self.pushSpan(
+        fmt,
+        args,
         name,
         target,
         .debug,
         location,
-        fmt,
-        args,
         err,
     );
 }
@@ -360,20 +360,150 @@ pub inline fn pushSpanDebug(
 /// registered with the subsystem.
 pub inline fn pushSpanTrace(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
     err: *?Error,
 ) (TracingError || error{FfiError})!*ProxyTracing.Span {
     return self.pushSpan(
+        fmt,
+        args,
         name,
         target,
         .trace,
         location,
+        err,
+    );
+}
+
+/// Creates a new error span with the default formatter and enters it.
+///
+/// If successful, the newly created span is used as the context for
+/// succeeding events. The message is formatted with the default
+/// formatter of the zig standard library. The message may be cut of,
+/// if the length exceeds the internal formatting buffer size.
+///
+/// This function may return an error, if the current thread is not
+/// registered with the subsystem.
+pub inline fn pushSpanErrSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+    err: *?Error,
+) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    return self.pushSpanErr(
         fmt,
         args,
+        null,
+        null,
+        location,
+        err,
+    );
+}
+
+/// Creates a new warn span with the default formatter and enters it.
+///
+/// If successful, the newly created span is used as the context for
+/// succeeding events. The message is formatted with the default
+/// formatter of the zig standard library. The message may be cut of,
+/// if the length exceeds the internal formatting buffer size.
+///
+/// This function may return an error, if the current thread is not
+/// registered with the subsystem.
+pub inline fn pushSpanWarnSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+    err: *?Error,
+) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    return self.pushSpanWarn(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+        err,
+    );
+}
+
+/// Creates a new info span with the default formatter and enters it.
+///
+/// If successful, the newly created span is used as the context for
+/// succeeding events. The message is formatted with the default
+/// formatter of the zig standard library. The message may be cut of,
+/// if the length exceeds the internal formatting buffer size.
+///
+/// This function may return an error, if the current thread is not
+/// registered with the subsystem.
+pub inline fn pushSpanInfoSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+    err: *?Error,
+) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    return self.pushSpanInfo(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+        err,
+    );
+}
+
+/// Creates a new debug span with the default formatter and enters it.
+///
+/// If successful, the newly created span is used as the context for
+/// succeeding events. The message is formatted with the default
+/// formatter of the zig standard library. The message may be cut of,
+/// if the length exceeds the internal formatting buffer size.
+///
+/// This function may return an error, if the current thread is not
+/// registered with the subsystem.
+pub inline fn pushSpanDebugSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+    err: *?Error,
+) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    return self.pushSpanDebug(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+        err,
+    );
+}
+
+/// Creates a new trace span with the default formatter and enters it.
+///
+/// If successful, the newly created span is used as the context for
+/// succeeding events. The message is formatted with the default
+/// formatter of the zig standard library. The message may be cut of,
+/// if the length exceeds the internal formatting buffer size.
+///
+/// This function may return an error, if the current thread is not
+/// registered with the subsystem.
+pub inline fn pushSpanTraceSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+    err: *?Error,
+) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    return self.pushSpanTrace(
+        fmt,
+        args,
+        null,
+        null,
+        location,
         err,
     );
 }
@@ -427,12 +557,12 @@ pub fn popSpan(self: *const Tracing, span: *ProxyTracing.Span) TracingError!void
 /// the internal formatting buffer size.
 pub fn emitEvent(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     level: ProxyTracing.Level,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
 ) TracingError!void {
     const event = ProxyTracing.Event{
         .metadata = &.{
@@ -460,19 +590,19 @@ pub fn emitEvent(
 /// the internal formatting buffer size.
 pub fn emitErr(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
 ) TracingError!void {
     return self.emitEvent(
+        fmt,
+        args,
         name,
         target,
         .err,
         location,
-        fmt,
-        args,
     );
 }
 
@@ -483,19 +613,19 @@ pub fn emitErr(
 /// the internal formatting buffer size.
 pub fn emitWarn(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
 ) TracingError!void {
     return self.emitEvent(
+        fmt,
+        args,
         name,
         target,
         .warn,
         location,
-        fmt,
-        args,
     );
 }
 
@@ -506,19 +636,19 @@ pub fn emitWarn(
 /// the internal formatting buffer size.
 pub fn emitInfo(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
 ) TracingError!void {
     return self.emitEvent(
+        fmt,
+        args,
         name,
         target,
         .info,
         location,
-        fmt,
-        args,
     );
 }
 
@@ -529,19 +659,19 @@ pub fn emitInfo(
 /// the internal formatting buffer size.
 pub fn emitDebug(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
 ) TracingError!void {
     return self.emitEvent(
+        fmt,
+        args,
         name,
         target,
         .debug,
         location,
-        fmt,
-        args,
     );
 }
 
@@ -552,20 +682,120 @@ pub fn emitDebug(
 /// the internal formatting buffer size.
 pub fn emitTrace(
     self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
 ) TracingError!void {
     return self.emitEvent(
+        fmt,
+        args,
         name,
         target,
         .trace,
         location,
+    );
+}
+
+/// Emits a new error event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitErrSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    return self.emitErr(
         fmt,
         args,
-    );
+        null,
+        null,
+        location,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new warn event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitWarnSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    return self.emitWarn(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new info event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitInfoSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    return self.emitInfo(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new debug event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitDebugSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    return self.emitDebug(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new trace event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitTraceSimple(
+    self: *const Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    return self.emitTrace(
+        fmt,
+        args,
+        null,
+        null,
+        location,
+    ) catch @panic("Trace failed");
 }
 
 /// Emits a new event with a custom formatter.
