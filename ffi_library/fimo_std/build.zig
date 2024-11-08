@@ -263,7 +263,6 @@ fn configureFimoCSources(
         compile.dll_export_fns = true;
     }
     compile.addIncludePath(b.path("include/"));
-    // compile.addIncludePath(config_path.path(b, "include"));
     compile.addCSourceFiles(.{
         .files = &c_files,
         .flags = flags.items,
