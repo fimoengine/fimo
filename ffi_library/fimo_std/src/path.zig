@@ -33,6 +33,11 @@ fn indexOfSeparatorVerbatim(raw: []const u8) ?usize {
     return std.mem.indexOfScalar(u8, raw, separator);
 }
 
+pub const PathError = error{
+    /// Expected an UTF-8 encoded string.
+    InvalidUtf8,
+};
+
 /// A growable filesystem path encoded as UTF-8.
 pub const PathBuffer = struct {
     buffer: PathBufferUnmanaged = .{},
@@ -105,7 +110,7 @@ pub const PathBuffer = struct {
     pub fn pushString(
         self: *Self,
         path: []const u8,
-    ) (Allocator.Error || error{InvalidUtf8})!void {
+    ) (Allocator.Error || PathError)!void {
         return self.buffer.pushString(self.allocator, path);
     }
 
@@ -295,7 +300,7 @@ pub const PathBufferUnmanaged = struct {
         self: *Self,
         allocator: Allocator,
         path: []const u8,
-    ) (Allocator.Error || error{InvalidUtf8})!void {
+    ) (Allocator.Error || PathError)!void {
         const p = try Path.init(path);
         try self.pushPath(allocator, p);
     }
@@ -337,7 +342,7 @@ pub const OwnedPath = struct {
     pub fn initString(
         allocator: Allocator,
         path: []const u8,
-    ) (Allocator.Error || error{InvalidUtf8})!Self {
+    ) (Allocator.Error || PathError)!Self {
         const p = try OwnedPathUnmanaged.initString(allocator, path);
         return p.toManaged(allocator);
     }
@@ -377,7 +382,7 @@ pub const OwnedPath = struct {
     pub fn initOsPath(
         allocator: Allocator,
         path: OsPath,
-    ) (unicode.Utf16LeToUtf8AllocError || error{InvalidUtf8})!Self {
+    ) (unicode.Utf16LeToUtf8AllocError || PathError)!Self {
         const p = OwnedPathUnmanaged.initOsPath(allocator, path);
         return p.toManaged(allocator);
     }
@@ -429,7 +434,7 @@ pub const OwnedPathUnmanaged = struct {
     pub fn initString(
         allocator: Allocator,
         path: []const u8,
-    ) (Allocator.Error || error{InvalidUtf8})!Self {
+    ) (Allocator.Error || PathError)!Self {
         const p = try Path.init(path);
         return initPath(allocator, p);
     }
@@ -447,7 +452,7 @@ pub const OwnedPathUnmanaged = struct {
     pub fn initOsPath(
         allocator: Allocator,
         path: OsPath,
-    ) (unicode.Utf16LeToUtf8AllocError || error{InvalidUtf8})!Self {
+    ) (unicode.Utf16LeToUtf8AllocError || PathError)!Self {
         switch (comptime builtin.os.tag) {
             .windows => {
                 const p = try unicode.utf16LeToUtf8Alloc(allocator, path.raw);
@@ -513,7 +518,7 @@ pub const OwnedOsPath = struct {
     /// Constructs a new owned os from a UTF-8 path.
     ///
     /// On Windows the path will be re-encoded to UTF-16.
-    pub fn initPath(allocator: Allocator, path: Path) error{ InvalidUtf8, OutOfMemory }!Self {
+    pub fn initPath(allocator: Allocator, path: Path) (PathError || Allocator.Error)!Self {
         const p = try OwnedOsPathUnmanaged.initPath(allocator, path);
         return p.toManaged(allocator);
     }
@@ -556,7 +561,7 @@ pub const OwnedOsPathUnmanaged = struct {
     /// Constructs a new owned os from a UTF-8 path.
     ///
     /// On Windows the path will be re-encoded to UTF-16.
-    pub fn initPath(allocator: Allocator, path: Path) error{ InvalidUtf8, OutOfMemory }!Self {
+    pub fn initPath(allocator: Allocator, path: Path) (PathError || Allocator.Error)!Self {
         switch (comptime builtin.os.tag) {
             .windows => {
                 const raw = try unicode.utf8ToUtf16LeAllocZ(allocator, path.raw);
@@ -1161,7 +1166,7 @@ pub const Path = struct {
     }
 
     /// Initializes a new path, validating that it is valid UTF-8.
-    pub fn init(path: []const u8) error{InvalidUtf8}!Path {
+    pub fn init(path: []const u8) PathError!Path {
         if (!unicode.utf8ValidateSlice(path)) return error.InvalidUtf8;
         return Path{ .raw = path };
     }
