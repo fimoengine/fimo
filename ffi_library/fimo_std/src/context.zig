@@ -21,5 +21,6 @@ test {
     _ = @import("context/proxy_context.zig");
     _ = @import("context/RefCount.zig");
     _ = @import("context/tls.zig");
+    _ = @import("context/tmp_path.zig");
     _ = @import("context/tracing.zig");
 }
