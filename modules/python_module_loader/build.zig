@@ -60,15 +60,15 @@ pub fn build(b: *std.Build) void {
 
     lib.linkLibC();
     lib.linkLibrary(fimo_std);
-    lib.addLibraryPath(cpython.binary_dir);
-    lib.addLibraryPath(cpython.library_dir);
     if (target.result.os.tag != .windows) {
+        lib.addLibraryPath(cpython.binary_dir);
         if (optimize == .Debug) {
             lib.linkSystemLibrary("python3.13d");
         } else {
             lib.linkSystemLibrary("python3.13");
         }
     } else {
+        lib.addLibraryPath(cpython.library_dir);
         lib.linkSystemLibrary("python313");
     }
 
