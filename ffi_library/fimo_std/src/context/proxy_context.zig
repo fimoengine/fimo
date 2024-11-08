@@ -109,7 +109,7 @@ pub const CompatibilityContext = struct {
 
     /// Checks whether the context is compatible with the specified interface version.
     pub fn isCompatibleWithVersion(self: CompatibilityContext, version: Version) bool {
-        const v = .{
+        const v = c.FimoVersion{
             .major = version.major,
             .minor = version.minor,
             .patch = version.patch,
