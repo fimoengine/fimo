@@ -1,4 +1,5 @@
 //! Public interface to the fimo std context.
+const std = @import("std");
 
 const c = @import("../c.zig");
 const errors = @import("../errors.zig");
@@ -11,6 +12,7 @@ vtable: *const VTable,
 const Context = @This();
 pub const Tracing = @import("proxy_context/tracing.zig");
 pub const Module = @import("proxy_context/module.zig");
+const Self = @This();
 
 comptime {
     _ = Tracing;
@@ -97,7 +99,7 @@ pub const CompatibilityContext = struct {
 
     /// Casts the minimal interface to the full interface,
     /// making shure that the implementation supports the required version.
-    pub fn castToContext(self: CompatibilityContext) error{VersionNotSupported}!Context {
+    pub fn castToContext(self: CompatibilityContext) error{VersionNotSupported}!Self {
         return if (self.isCompatibleWithVersion(context_version))
             .{
                 .data = self.data,
@@ -122,15 +124,15 @@ pub const CompatibilityContext = struct {
 };
 
 /// Initializes the object from a ffi object.
-pub fn initC(obj: c.FimoContext) @This() {
-    return @This(){
+pub fn initC(obj: c.FimoContext) Self {
+    return Self{
         .data = obj.data.?,
         .vtable = @alignCast(@ptrCast(obj.vtable)),
     };
 }
 
 /// Casts the object to a ffi object.
-pub fn intoC(self: @This()) c.FimoContext {
+pub fn intoC(self: Self) c.FimoContext {
     return c.FimoContext{
         .data = self.data,
         .vtable = @ptrCast(self.vtable),
@@ -138,7 +140,7 @@ pub fn intoC(self: @This()) c.FimoContext {
 }
 
 /// Checks whether the context is compatible with the specified interface version.
-pub fn isCompatibleWithVersion(self: Context, version: Version) bool {
+pub fn isCompatibleWithVersion(self: Self, version: Version) bool {
     const v = .{
         .major = version.major,
         .minor = version.minor,
@@ -155,7 +157,7 @@ pub fn isCompatibleWithVersion(self: Context, version: Version) bool {
 /// Increases the reference count of the context. May abort the program,
 /// if doing so is not possible. May only be called with a valid reference
 /// to the context.
-pub fn acquire(self: Context) void {
+pub fn acquire(self: Self) void {
     self.vtable.core_v0.acquire(self.data);
 }
 
@@ -164,17 +166,17 @@ pub fn acquire(self: Context) void {
 /// Decrements the reference count of the context. When the reference count
 /// reaches zero, this function also destroys the reference. May only be
 /// called with a valid reference to the context.
-pub fn release(self: Context) void {
+pub fn release(self: Self) void {
     self.vtable.core_v0.release(self.data);
 }
 
 /// Returns the interface to the tracing subsystem.
-pub fn tracing(self: Context) Tracing {
+pub fn tracing(self: Self) Tracing {
     return Tracing{ .context = self };
 }
 
 /// Returns the interface to the module subsystem.
-pub fn module(self: Context) Module {
+pub fn module(self: Self) Module {
     return Module{ .context = self };
 }
 
@@ -192,12 +194,12 @@ const ffi = struct {
     }
 
     export fn fimo_context_acquire(context: c.FimoContext) void {
-        const ctx = Context.initC(context);
+        const ctx = Self.initC(context);
         ctx.acquire();
     }
 
     export fn fimo_context_release(context: c.FimoContext) void {
-        const ctx = Context.initC(context);
+        const ctx = Self.initC(context);
         ctx.release();
     }
 };
