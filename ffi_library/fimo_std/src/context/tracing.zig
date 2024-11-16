@@ -579,8 +579,10 @@ pub fn emitEvent(
         ProxyTracing.stdFormatter(fmt, @TypeOf(args)),
         &args,
         &err,
-    );
-    std.debug.assert(err == null);
+    ) catch |e| switch (e) {
+        error.FfiError => err.?.deinit(),
+        else => return @as(TracingError, @errorCast(e)),
+    };
 }
 
 /// Emits a new error event with the standard formatter.
@@ -1091,7 +1093,7 @@ const CallStack = struct {
         if (self.state.blocked) return error.CallStackBlocked;
         if (self.state.suspended) return error.CallStackSuspended;
 
-        if (@intFromEnum(event.metadata.level) < @intFromEnum(self.max_level)) {
+        if (@intFromEnum(event.metadata.level) > @intFromEnum(self.max_level)) {
             return;
         }
 
