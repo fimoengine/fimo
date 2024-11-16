@@ -4,14 +4,14 @@ const testing = std.testing;
 
 const path = @import("../path.zig");
 
-const TmpDirError = error{
+pub const TmpDirError = error{
     TmpDirNotFound,
 } || Allocator.Error || std.posix.MakeDirError || path.PathError;
 
 pub const TmpDirUnmanaged = struct {
     path: path.OwnedPathUnmanaged,
 
-    fn init(allocator: Allocator, prefix: []const u8) TmpDirError!TmpDirUnmanaged {
+    pub fn init(allocator: Allocator, prefix: []const u8) TmpDirError!TmpDirUnmanaged {
         const keys = [_][]const u8{
             "TMPDIR",
             "TEMPDIR",
@@ -65,7 +65,7 @@ pub const TmpDirUnmanaged = struct {
         return TmpDirUnmanaged{ .path = p };
     }
 
-    fn deinit(self: *TmpDirUnmanaged, allocator: Allocator) void {
+    pub fn deinit(self: *TmpDirUnmanaged, allocator: Allocator) void {
         std.fs.deleteDirAbsolute(self.path.raw) catch |err| @panic(@errorName(err));
         self.path.deinit(allocator);
     }
