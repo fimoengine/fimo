@@ -150,6 +150,18 @@ pub const PathBuffer = struct {
         try testing.expect(buf.pop());
         try testing.expectEqualStrings("/", buf.asPath().raw);
     }
+
+    /// Formats the path.
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{}", .{self.buffer});
+    }
 };
 
 /// A growable filesystem path encoded as UTF-8.
@@ -315,6 +327,18 @@ pub const PathBufferUnmanaged = struct {
             return true;
         } else return false;
     }
+
+    /// Formats the path.
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{s}", .{self.buffer.items});
+    }
 };
 
 /// An owned filesystem path encoded as UTF-8.
@@ -410,6 +434,18 @@ pub const OwnedPath = struct {
         const buffer = self.path.toPathBuffer();
         return buffer.toManaged(self.allocator);
     }
+
+    /// Formats the path.
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{}", .{self.path});
+    }
 };
 
 /// An owned filesystem path encoded as UTF-8.
@@ -483,6 +519,18 @@ pub const OwnedPathUnmanaged = struct {
         const buffer = std.ArrayListUnmanaged(u8).fromOwnedSlice(self.raw);
         return PathBufferUnmanaged{ .buffer = buffer };
     }
+
+    /// Formats the path.
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{s}", .{self.raw});
+    }
 };
 
 /// Character type of the native os filesystem path.
@@ -531,6 +579,18 @@ pub const OwnedOsPath = struct {
     /// Extracts the os path from the owned os path.
     pub fn asOsPath(self: Self) OsPath {
         return self.path.asOsPath();
+    }
+
+    /// Formats the path.
+    pub fn format(
+        self: OwnedOsPath,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{}", .{self.path});
     }
 };
 
@@ -589,6 +649,18 @@ pub const OwnedOsPathUnmanaged = struct {
     pub fn toManaged(self: Self, allocator: Allocator) OwnedOsPath {
         return OwnedOsPath{ .path = self, .allocator = allocator };
     }
+
+    /// Formats the path.
+    pub fn format(
+        self: OwnedOsPathUnmanaged,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{s}", .{self.raw});
+    }
 };
 
 /// A reference to a native filesystem path.
@@ -603,6 +675,18 @@ pub const OsPath = struct {
     /// Casts the object to a ffi object.
     pub fn intoC(self: OsPath) c.FimoOSPath {
         return c.FimoOSPath{ .path = self.raw.ptr, .length = self.raw.len };
+    }
+
+    /// Formats the path.
+    pub fn format(
+        self: OsPath,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{s}", .{self.raw});
     }
 };
 
@@ -1361,6 +1445,18 @@ pub const Path = struct {
         component = it.nextBack().?;
         try std.testing.expect(component == .root_dir);
         try std.testing.expect(it.nextBack() == null);
+    }
+
+    /// Formats the path.
+    pub fn format(
+        self: Path,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+        try std.fmt.format(out_stream, "{s}", .{self.raw});
     }
 };
 
