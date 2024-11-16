@@ -1,0 +1,214 @@
+const std = @import("std");
+const builtin = @import("builtin");
+const windows = std.os.windows;
+const Allocator = std.mem.Allocator;
+
+const heap = @import("../../heap.zig");
+const RefCount = @import("../RefCount.zig");
+const Path = @import("../../path.zig").Path;
+const PathError = @import("../../path.zig").PathError;
+const OsPath = @import("../../path.zig").OsPath;
+const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
+const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
+const OwnedOsPathUnmanaged = @import("../../path.zig").OwnedOsPathUnmanaged;
+
+const Self = @This();
+const ProxyModule = @import("../proxy_context/module.zig");
+
+const allocator = heap.fimo_allocator;
+
+iterator: IteratorFn,
+ref_count: RefCount = .{},
+path: OwnedPathUnmanaged,
+
+pub const ModuleHandleError = error{
+    InvalidModule,
+    InvalidPath,
+} || PathError || Allocator.Error;
+
+pub const IteratorFn = *const fn (
+    f: *const fn (
+        @"export": *const ProxyModule.Export,
+        data: ?*anyopaque,
+    ) callconv(.C) bool,
+    data: ?*anyopaque,
+) callconv(.C) void;
+
+const Inner = if (builtin.os.tag == .windows)
+    struct {
+        const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS = 0x04;
+        extern "kernel32" fn GetModuleHandleExW(
+            dwFlags: windows.DWORD,
+            lpModuleName: ?windows.LPCWSTR,
+            phModule: *windows.HMODULE,
+        ) callconv(windows.WINAPI) windows.BOOL;
+    }
+else
+    struct {
+        const Dl_info = struct {
+            dli_fname: [*:0]const u8,
+            dli_fbase: *anyopaque,
+            dli_sname: ?[*:0]const u8,
+            dli_saddr: ?*anyopaque,
+        };
+        extern "c" fn dladdr(addr: *anyopaque, info: *Dl_info) callconv(.C) c_int;
+    };
+
+pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
+    if (comptime builtin.os.tag == .windows) {
+        var handle: windows.HMODULE = undefined;
+        const found_handle = Inner.GetModuleHandleExW(
+            Inner.GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            @alignCast(@ptrCast(bin_ptr)),
+            &handle,
+        );
+        if (found_handle == 0) return error.InvalidModule;
+
+        var path_len: usize = windows.MAX_PATH;
+        var os_path = OwnedOsPathUnmanaged{
+            .raw = undefined,
+        };
+        while (true) {
+            const p = try allocator.alloc(u16, path_len);
+            defer allocator.free(p);
+
+            const raw = windows.GetModuleFileNameW(
+                handle,
+                p.ptr,
+                @intCast(p.len),
+            ) catch {
+                const e = windows.GetLastError();
+                if (e == .INSUFFICIENT_BUFFER) {
+                    path_len *= 2;
+                    continue;
+                } else return error.InvalidModule;
+            };
+            os_path.raw = try allocator.dupeZ(u16, raw);
+            break;
+        }
+        defer os_path.deinit(allocator);
+
+        const p = try OwnedPathUnmanaged.initOsPath(
+            allocator,
+            os_path.asOsPath(),
+        );
+        defer p.deinit(allocator);
+        const module_dir = p.asPath().parent() orelse return error.InvalidPath;
+        const owned_module_dir = try OwnedPathUnmanaged.initPath(
+            allocator,
+            module_dir,
+        );
+        errdefer owned_module_dir.deinit(allocator);
+
+        const module_handle = try allocator.create(Self);
+        module_handle.* = Self{
+            .iterator = iterator,
+            .path = owned_module_dir,
+        };
+        return module_handle;
+    } else {
+        var info: Inner.Dl_info = undefined;
+        if (Inner.dladdr(bin_ptr, &info) == 0) return error.InvalidModule;
+
+        const os_path = OsPath{ .raw = info.dli_fname };
+        const p = try OwnedPathUnmanaged.initOsPath(allocator, os_path);
+        defer p.deinit(allocator);
+        const module_dir = p.asPath().parent() orelse return error.InvalidPath;
+        const owned_module_dir = try OwnedPathUnmanaged.initPath(
+            allocator,
+            module_dir,
+        );
+        errdefer owned_module_dir.deinit(allocator);
+
+        const is_current_module = iterator == &ProxyModule.Export.ExportIter.fimo_impl_module_export_iterator;
+        const module_path: ?[*:0]const u8 = if (is_current_module)
+            null
+        else
+            info.dli_fname;
+        std.c.dlopen(
+            module_path,
+            .{ .NOW = true, .LOCAL = true, .NOLOAD = true },
+        ) orelse return error.InvalidModule;
+
+        const module_handle = try allocator.create(Self);
+        module_handle.* = Self{
+            .iterator = iterator,
+            .path = owned_module_dir,
+        };
+        return module_handle;
+    }
+}
+
+pub fn initPath(p: Path) ModuleHandleError!*Self {
+    var buffer = PathBufferUnmanaged{};
+    errdefer buffer.deinit(allocator);
+
+    const stat = std.fs.cwd().statFile(p.raw) catch return error.InvalidPath;
+    switch (stat.kind) {
+        .file => try buffer.pushPath(allocator, p),
+        .directory => {
+            const default_module_name = Path.init("module.fimo_module") catch unreachable;
+            try buffer.pushPath(allocator, default_module_name);
+        },
+        .sym_link => {
+            const link_buffer = try allocator.alloc(u8, std.fs.max_path_bytes);
+            defer allocator.free(link_buffer);
+            const resolved = std.fs.cwd().readLink(
+                p.raw,
+                link_buffer,
+            ) catch return error.InvalidPath;
+            const res_p = Path.init(resolved) catch return error.InvalidPath;
+            return Self.initPath(res_p);
+        },
+        else => return error.InvalidPath,
+    }
+
+    const native_path = try OwnedOsPathUnmanaged.initPath(
+        allocator,
+        buffer.asPath(),
+    );
+    defer native_path.deinit(allocator);
+
+    var handle = try allocator.create(Self);
+    errdefer allocator.destroy(handle);
+
+    _ = buffer.pop();
+    handle.path = try buffer.toOwnedPath(allocator);
+    errdefer handle.path.deinit(allocator);
+
+    const raw_handle = if (comptime builtin.os.tag == .windows)
+        windows.kernel32.LoadLibraryExW(
+            native_path.raw.ptr,
+            null,
+            @intFromEnum(windows.LoadLibraryFlags.load_library_search_dll_load_dir) |
+                @intFromEnum(windows.LoadLibraryFlags.load_library_search_default_dirs),
+        ) orelse return error.InvalidPath
+    else
+        std.c.dlopen(
+            &native_path.raw,
+            .{ .NOW = true, .LOCAL = true, .NODELETE = true },
+        ) orelse return error.InvalidPath;
+
+    const iterator = if (comptime builtin.os.tag == .windows)
+        windows.kernel32.GetProcAddress(
+            raw_handle,
+            "fimo_impl_module_export_iterator",
+        ) orelse return error.InvalidModule
+    else
+        std.c.dlsym(
+            raw_handle,
+            "fimo_impl_module_export_iterator",
+        ) orelse return error.InvalidModule;
+    handle.iterator = @alignCast(@ptrCast(iterator));
+
+    return handle;
+}
+
+pub fn ref(self: *Self) void {
+    self.ref_count.ref();
+}
+
+pub fn unref(self: *Self) void {
+    if (self.ref_count.unref() == .noop) return;
+    self.path.deinit(allocator);
+}

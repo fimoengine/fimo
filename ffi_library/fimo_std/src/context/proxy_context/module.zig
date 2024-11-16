@@ -22,6 +22,7 @@ pub const ParameterType = enum(c.FimoModuleParamType) {
     i16,
     i32,
     i64,
+    _,
 };
 
 /// Access group for a module parameter.
@@ -526,6 +527,7 @@ pub const OpaqueParameterData = opaque {
                 .i16 => .{ .i16 = untagged.i16 },
                 .i32 => .{ .i32 = untagged.i32 },
                 .i64 => .{ .i64 = untagged.i64 },
+                else => @panic("unknown parameter type"),
             };
         }
 
@@ -1565,8 +1567,8 @@ pub const LoadingSet = opaque {
             path,
             filter,
             data,
-            ffi.fimo_impl_module_export_iterator,
-            @ptrCast(@constCast(&ffi.fimo_impl_module_export_iterator)),
+            Export.ExportIter.fimo_impl_module_export_iterator,
+            @ptrCast(@constCast(&Export.ExportIter.fimo_impl_module_export_iterator)),
         );
         try Error.initChecked(err, result);
     }
@@ -1667,6 +1669,9 @@ pub const Export = extern struct {
             symbol: **anyopaque,
         ) callconv(.C) c.FimoResult,
         destructor: *const fn (symbol: *anyopaque) callconv(.C) void,
+        version: c.FimoVersion,
+        name: [*:0]const u8,
+        namespace: [*:0]const u8 = "",
     };
 
     /// A modifier declaration for a module export.
@@ -1674,6 +1679,7 @@ pub const Export = extern struct {
         tag: enum(c.FimoModuleExportModifierKey) {
             destructor = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR,
             dependency = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY,
+            _,
         },
         value: extern union {
             destructor: *const extern struct {
@@ -1779,6 +1785,18 @@ pub const Export = extern struct {
                 const element = element_ptr[0];
                 if (element != null) {
                     return element;
+                }
+            }
+        }
+
+        pub export fn fimo_impl_module_export_iterator(
+            inspector: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) bool,
+            data: ?*anyopaque,
+        ) void {
+            var it = Export.ExportIter.init();
+            while (it.next()) |exp| {
+                if (!inspector(exp, data)) {
+                    return;
                 }
             }
         }
@@ -1969,6 +1987,81 @@ pub const Export = extern struct {
             };
             exportModuleInner(exp);
         }
+    }
+
+    /// Runs the registered cleanup routines.
+    pub fn deinit(self: *const Export) void {
+        for (self.getModifiers()) |modifier| {
+            switch (modifier.tag) {
+                .destructor => {
+                    const destructor = modifier.value.destructor;
+                    destructor.destructor(destructor.data);
+                },
+                .dependency => {
+                    const dependency = modifier.value.dependency;
+                    dependency.release();
+                },
+                else => @panic("Unknown modifier"),
+            }
+        }
+    }
+
+    /// Returns the name of the export.
+    pub fn getName(self: *const Export) []const u8 {
+        return std.mem.span(self.name);
+    }
+
+    /// Returns the description of the export.
+    pub fn getDescription(self: *const Export) ?[]const u8 {
+        return if (self.description) |x| std.mem.span(x) else null;
+    }
+
+    /// Returns the author of the export.
+    pub fn getAuthor(self: *const Export) ?[]const u8 {
+        return if (self.author) |x| std.mem.span(x) else null;
+    }
+
+    /// Returns the license of the export.
+    pub fn getLicense(self: *const Export) ?[]const u8 {
+        return if (self.license) |x| std.mem.span(x) else null;
+    }
+
+    /// Returns the parameters.
+    pub fn getParameters(self: *const Export) []const Export.Parameter {
+        return if (self.parameters) |x| x[0..self.parameters_count] else &.{};
+    }
+
+    /// Returns the resources.
+    pub fn getResources(self: *const Export) []const Export.Resource {
+        return if (self.resources) |x| x[0..self.resources_count] else &.{};
+    }
+
+    /// Returns the namespace imports.
+    pub fn getNamespaceImports(self: *const Export) []const Export.Namespace {
+        return if (self.namespace_imports) |x| x[0..self.namespace_imports_count] else &.{};
+    }
+
+    /// Returns the symbol imports.
+    pub fn getSymbolImports(self: *const Export) []const Export.SymbolImport {
+        return if (self.symbol_imports) |x| x[0..self.symbol_imports_count] else &.{};
+    }
+
+    /// Returns the static symbol exports.
+    pub fn getSymbolExports(self: *const Export) []const Export.SymbolExport {
+        return if (self.symbol_exports) |x| x[0..self.symbol_exports_count] else &.{};
+    }
+
+    /// Returns the dynamic symbol exports.
+    pub fn getDynamicSymbolExports(self: *const Export) []const Export.DynamicSymbolExport {
+        return if (self.dynamic_symbol_exports) |x|
+            x[0..self.dynamic_symbol_exports_count]
+        else
+            &.{};
+    }
+
+    /// Returns the modifiers.
+    pub fn getModifiers(self: *const Export) []const Export.Modifier {
+        return if (self.modifiers) |x| x[0..self.modifiers_count] else &.{};
     }
 };
 
@@ -2442,18 +2535,6 @@ test "Export modules" {
 // ----------------------------------------------------
 
 const ffi = struct {
-    export fn fimo_impl_module_export_iterator(
-        inspector: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) bool,
-        data: ?*anyopaque,
-    ) void {
-        var it = Export.ExportIter.init();
-        while (it.next()) |exp| {
-            if (!inspector(exp, data)) {
-                return;
-            }
-        }
-    }
-
     const dll_only = struct {
         fn fimo_impl_module_info_acquire(info: *const Info) callconv(.C) void {
             info.acquire();

@@ -9,7 +9,8 @@ const Version = @import("../version.zig");
 data: *anyopaque,
 vtable: *const VTable,
 
-const Context = @This();
+const Inner = @import("../context.zig");
+
 pub const Tracing = @import("proxy_context/tracing.zig");
 pub const Module = @import("proxy_context/module.zig");
 const Self = @This();
@@ -123,6 +124,14 @@ pub const CompatibilityContext = struct {
     }
 };
 
+/// Initializes a new context with the given options.
+///
+/// In case of an error, this function cleans up the configuration options.
+pub fn init(options: [:null]const ?*const TaggedInStruct) !Self {
+    const inner = try Inner.init(options);
+    return inner.asProxy();
+}
+
 /// Initializes the object from a ffi object.
 pub fn initC(obj: c.FimoContext) Self {
     return Self{
@@ -185,6 +194,11 @@ pub fn module(self: Self) Module {
 // ----------------------------------------------------
 
 const ffi = struct {
+    export fn fimo_context_init(options: [*:null]const ?*const TaggedInStruct, context: *c.FimoContext) c.FimoResult {
+        const ctx = Self.init(std.mem.span(options)) catch |err| return Error.initError(err).err;
+        context.* = ctx.intoC();
+        return Error.intoCResult(null);
+    }
     export fn fimo_context_check_version(context: c.FimoContext) c.FimoResult {
         const ctx = CompatibilityContext.initC(context);
         return if (!ctx.isCompatibleWithVersion(context_version))
