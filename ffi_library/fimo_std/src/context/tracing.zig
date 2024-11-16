@@ -1259,57 +1259,14 @@ const CallStack = struct {
 };
 
 // ----------------------------------------------------
-// FFI
-// ----------------------------------------------------
-
-// Remove once the c sources have been removed.
-const ffi = struct {
-    export fn fimo_internal_tracing_alloc() *Tracing {
-        return allocator.create(Tracing) catch @panic("OOM");
-    }
-    export fn fimo_internal_tracing_dealloc(tracing: *Tracing) void {
-        allocator.destroy(tracing);
-    }
-    export fn fimo_internal_tracing_init(tracing: *Tracing, cfg: ?*const ProxyTracing.Config) c.FimoResult {
-        tracing.* = Tracing.init(cfg) catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
-    }
-    export fn fimo_internal_tracing_destroy(tracing: *Tracing) void {
-        tracing.deinit();
-    }
-    export fn fimo_internal_tracing_event_emit_custom(
-        tracing: *Tracing,
-        event: *const ProxyTracing.Event,
-        formatter: *const ProxyTracing.Formatter,
-        data: ?*const anyopaque,
-    ) callconv(.C) c.FimoResult {
-        var err: ?Error = null;
-        if (tracing.emitEventCustom(event, formatter, data, &err)) |_| {
-            return Error.intoCResult(null);
-        } else |e| switch (e) {
-            error.FfiError => return err.?.err,
-            else => return Error.initError(e).err,
-        }
-    }
-    export fn fimo_internal_tracing_cleanup_options(cfg: *const ProxyTracing.Config) void {
-        if (cfg.subscribers) |subscribers| {
-            for (subscribers[0..cfg.subscriber_count]) |s| s.deinit();
-        }
-    }
-};
-
-comptime {
-    _ = ffi;
-}
-
-// ----------------------------------------------------
 // VTable
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    const Context = @import("../context.zig").Context;
+    const Context = @import("../context.zig");
 
-    fn createCallStack(ctx: *Context, call_stack: **ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+    fn createCallStack(ptr: *anyopaque, call_stack: **ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?Error = null;
         if (ctx.tracing.createCallStack(&err)) |cs| {
             call_stack.* = cs;
@@ -1319,45 +1276,51 @@ const VTableImpl = struct {
             else => return Error.initError(e).err,
         }
     }
-    fn destroyCallStack(ctx: *Context, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+    fn destroyCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.destroyCallStack(
             call_stack,
         ) catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
     fn replaceCurrentCallStack(
-        ctx: *Context,
+        ptr: *anyopaque,
         call_stack: *ProxyTracing.CallStack,
         old: **ProxyTracing.CallStack,
     ) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         old.* = ctx.tracing.replaceCurrentCallStack(
             call_stack,
         ) catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
-    fn unblockCallStack(ctx: *Context, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+    fn unblockCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.unblockCallStack(
             call_stack,
         ) catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
-    fn suspendCurrentCallStack(ctx: *Context, mark_blocked: bool) callconv(.C) c.FimoResult {
+    fn suspendCurrentCallStack(ptr: *anyopaque, mark_blocked: bool) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.suspendCurrentCallStack(
             mark_blocked,
         ) catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
-    fn resumeCurrentCallStack(ctx: *Context) callconv(.C) c.FimoResult {
+    fn resumeCurrentCallStack(ptr: *anyopaque) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.resumeCurrentCallStack() catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
     fn pushSpan(
-        ctx: *Context,
+        ptr: *anyopaque,
         desc: *const ProxyTracing.SpanDesc,
         span: **ProxyTracing.Span,
         formatter: *const ProxyTracing.Formatter,
-        data: ?*anyopaque,
+        data: ?*const anyopaque,
     ) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?Error = null;
         if (ctx.tracing.pushSpanCustom(desc, formatter, data, &err)) |sp| {
             span.* = sp;
@@ -1368,18 +1331,20 @@ const VTableImpl = struct {
         }
     }
     fn popSpan(
-        ctx: *Context,
+        ptr: *anyopaque,
         span: *ProxyTracing.Span,
     ) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.popSpan(span) catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
     fn emitEvent(
-        ctx: *Context,
+        ptr: *anyopaque,
         event: *const ProxyTracing.Event,
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
     ) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?Error = null;
         if (ctx.tracing.emitEventCustom(event, formatter, data, &err)) |_| {
             return Error.intoCResult(null);
@@ -1388,10 +1353,12 @@ const VTableImpl = struct {
             else => return Error.initError(e).err,
         }
     }
-    fn isEnabled(ctx: *Context) callconv(.C) bool {
+    fn isEnabled(ptr: *anyopaque) callconv(.C) bool {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         return ctx.tracing.isEnabled();
     }
-    fn registerThread(ctx: *Context) callconv(.C) c.FimoResult {
+    fn registerThread(ptr: *anyopaque) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?Error = null;
         if (ctx.tracing.registerThread(&err)) |_| {
             return Error.intoCResult(null);
@@ -1400,54 +1367,30 @@ const VTableImpl = struct {
             else => return Error.initError(e).err,
         }
     }
-    fn unregisterThread(ctx: *Context) callconv(.C) c.FimoResult {
+    fn unregisterThread(ptr: *anyopaque) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.unregisterThread() catch |err| return Error.initError(err).err;
         return Error.intoCResult(null);
     }
-    fn flush(ctx: *Context) callconv(.C) c.FimoResult {
+    fn flush(ptr: *anyopaque) callconv(.C) c.FimoResult {
+        const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.flush();
         return Error.intoCResult(null);
     }
 };
 
-comptime {
-    @export(&VTableImpl.createCallStack, .{
-        .name = "fimo_internal_trampoline_tracing_call_stack_create",
-    });
-    @export(&VTableImpl.destroyCallStack, .{
-        .name = "fimo_internal_trampoline_tracing_call_stack_destroy",
-    });
-    @export(&VTableImpl.replaceCurrentCallStack, .{
-        .name = "fimo_internal_trampoline_tracing_call_stack_switch",
-    });
-    @export(&VTableImpl.unblockCallStack, .{
-        .name = "fimo_internal_trampoline_tracing_call_stack_unblock",
-    });
-    @export(&VTableImpl.suspendCurrentCallStack, .{
-        .name = "fimo_internal_trampoline_tracing_call_stack_suspend_current",
-    });
-    @export(&VTableImpl.resumeCurrentCallStack, .{
-        .name = "fimo_internal_trampoline_tracing_call_stack_resume_current",
-    });
-    @export(&VTableImpl.pushSpan, .{
-        .name = "fimo_internal_trampoline_tracing_span_create",
-    });
-    @export(&VTableImpl.popSpan, .{
-        .name = "fimo_internal_trampoline_tracing_span_destroy",
-    });
-    @export(&VTableImpl.emitEvent, .{
-        .name = "fimo_internal_trampoline_tracing_event_emit",
-    });
-    @export(&VTableImpl.isEnabled, .{
-        .name = "fimo_internal_trampoline_tracing_is_enabled",
-    });
-    @export(&VTableImpl.registerThread, .{
-        .name = "fimo_internal_trampoline_tracing_register_thread",
-    });
-    @export(&VTableImpl.unregisterThread, .{
-        .name = "fimo_internal_trampoline_tracing_unregister_thread",
-    });
-    @export(&VTableImpl.flush, .{
-        .name = "fimo_internal_trampoline_tracing_flush",
-    });
-}
+pub const vtable = ProxyTracing.VTable{
+    .call_stack_create = &VTableImpl.createCallStack,
+    .call_stack_destroy = &VTableImpl.destroyCallStack,
+    .call_stack_switch = &VTableImpl.replaceCurrentCallStack,
+    .call_stack_unblock = &VTableImpl.unblockCallStack,
+    .call_stack_suspend_current = &VTableImpl.suspendCurrentCallStack,
+    .call_stack_resume_current = &VTableImpl.resumeCurrentCallStack,
+    .span_create = &VTableImpl.pushSpan,
+    .span_destroy = &VTableImpl.popSpan,
+    .event_emit = &VTableImpl.emitEvent,
+    .is_enabled = &VTableImpl.isEnabled,
+    .register_thread = &VTableImpl.registerThread,
+    .unregister_thread = &VTableImpl.unregisterThread,
+    .flush = &VTableImpl.flush,
+};
