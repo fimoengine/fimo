@@ -460,6 +460,54 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
     }.format;
 }
 
+/// Formatter for a zig stack trace.
+pub fn stackTraceFormatter(
+    buffer: [*]u8,
+    buffer_len: usize,
+    data: ?*const anyopaque,
+    written: *usize,
+) callconv(.C) c.FimoResult {
+    const buf = buffer[0..buffer_len];
+    const stack_trace: *const std.builtin.StackTrace = @alignCast(@ptrCast(data));
+    if (builtin.strip_debug_info) {
+        if (std.fmt.bufPrint(buf, "Unable to dump stack trace: debug info stripped", .{})) |out| {
+            written.* = out.len;
+        } else |_| written.* = buffer_len;
+    }
+
+    const debug_info = std.debug.getSelfDebugInfo() catch |err| {
+        if (std.fmt.bufPrint(
+            buf,
+            "Unable to dump stack trace: Unable to open debug info: {s}",
+            .{@errorName(err)},
+        )) |out| {
+            written.* = out.len;
+        } else |_| written.* = buffer_len;
+        return Error.intoCResult(null);
+    };
+    var stream = std.io.fixedBufferStream(buf);
+    var writer = std.io.countingWriter(stream.writer());
+    std.debug.writeStackTrace(
+        stack_trace.*,
+        writer.writer(),
+        debug_info,
+        .no_color,
+    ) catch |err| switch (err) {
+        error.NoSpaceLeft => {},
+        else => {
+            if (std.fmt.bufPrint(
+                buf,
+                "Unable to dump stack trace: {s}",
+                .{@errorName(err)},
+            )) |out| {
+                written.* = out.len;
+            } else |_| written.* = buffer_len;
+        },
+    };
+    written.* = @intCast(writer.bytes_written);
+    return Error.intoCResult(null);
+}
+
 /// A subscriber for tracing events.
 ///
 /// The main function of the tracing subsystem is managing and routing
@@ -959,6 +1007,35 @@ pub fn emitEvent(
         &event,
         stdFormatter(fmt, @TypeOf(args)),
         &args,
+        err,
+    );
+}
+
+/// Emits a new error event dumping the stack trace.
+///
+/// The stack trace may be cut of, if the length exceeds the internal
+/// formatting buffer size.
+pub fn emitStackTrace(
+    self: Tracing,
+    name: ?[:0]const u8,
+    target: ?[:0]const u8,
+    stack_trace: std.builtin.StackTrace,
+    location: std.builtin.SourceLocation,
+    err: *?Error,
+) error{FfiError}!void {
+    const event = Event{
+        .metadata = &.{
+            .name = name orelse location.fn_name,
+            .target = target orelse location.module,
+            .level = .err,
+            .file_name = location.file,
+            .line_number = @intCast(location.line),
+        },
+    };
+    self.emitEventCustom(
+        &event,
+        stackTraceFormatter,
+        &stack_trace,
         err,
     );
 }

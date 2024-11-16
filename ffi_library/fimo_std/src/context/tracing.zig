@@ -800,6 +800,55 @@ pub fn emitTraceSimple(
     ) catch @panic("Trace failed");
 }
 
+/// Emits a new error event dumping the stack trace.
+///
+/// The stack trace may be cut of, if the length exceeds the internal
+/// formatting buffer size.
+pub fn emitStackTrace(
+    self: *const Tracing,
+    name: ?[:0]const u8,
+    target: ?[:0]const u8,
+    stack_trace: std.builtin.StackTrace,
+    location: std.builtin.SourceLocation,
+) (TracingError || error{FfiError})!void {
+    const event = ProxyTracing.Event{
+        .metadata = &.{
+            .name = name orelse location.fn_name,
+            .target = target orelse location.module,
+            .level = .err,
+            .file_name = location.file,
+            .line_number = @intCast(location.line),
+        },
+    };
+    var err: ?Error = null;
+    self.emitEventCustom(
+        &event,
+        ProxyTracing.stackTraceFormatter,
+        &stack_trace,
+        &err,
+    ) catch |e| switch (e) {
+        error.FfiError => err.?.deinit(),
+        else => return e,
+    };
+}
+
+/// Emits a new error event dumping the stack trace.
+///
+/// The stack trace may be cut of, if the length exceeds the internal
+/// formatting buffer size.
+pub fn emitStackTraceSimple(
+    self: *const Tracing,
+    stack_trace: std.builtin.StackTrace,
+    location: std.builtin.SourceLocation,
+) void {
+    return self.emitStackTrace(
+        null,
+        null,
+        stack_trace,
+        location,
+    ) catch @panic("Trace failed");
+}
+
 /// Emits a new event with a custom formatter.
 ///
 /// The subsystem may use a formatting buffer of a fixed size. The formatter is
