@@ -197,7 +197,8 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
                         .outgoing => &node.value_ptr.outgoing,
                     };
                     if (edges.count() == 0) return .{
-                        .id = .{ .id = node.key_ptr.*, .data_ptr = &node.value_ptr.data },
+                        .id = .{ .id = node.key_ptr.* },
+                        .data_ptr = &node.value_ptr.data,
                     };
                 }
                 return null;
@@ -301,7 +302,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
             edge: E,
             from: NodeId,
             to: NodeId,
-        ) !struct { id: EdgeId, old: ?E } {
+        ) (Allocator.Error || error{NodeNotFound})!struct { id: EdgeId, old: ?E } {
             const from_n = self.nodes.get(from.id) orelse return error.NodeNotFound;
             const to_n = self.nodes.get(to.id) orelse return error.NodeNotFound;
 
@@ -360,18 +361,18 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
 
         /// Removes a node and all its edges from the graph.
         pub fn removeNode(self: *Self, allocator: Allocator, node: NodeId) !N {
-            const n = self.nodes.fetchRemove(allocator, node.id) catch return error.NodeNotFound;
+            var n = self.nodes.fetchRemove(allocator, node.id) catch return error.NodeNotFound;
             var incoming = n.incoming.iterator();
             while (incoming.next()) |edge| {
                 if (!self.edges.remove(allocator, edge.value_ptr.id)) @panic("Unrecoverable error");
                 const start = self.nodes.get(edge.key_ptr.id) orelse unreachable;
-                start.outgoing.orderedRemove(node.id);
+                _ = start.outgoing.orderedRemove(node);
             }
             var outgoing = n.outgoing.iterator();
             while (outgoing.next()) |edge| {
                 if (!self.edges.remove(allocator, edge.value_ptr.id)) @panic("Unrecoverable error");
                 const end = self.nodes.get(edge.key_ptr.id) orelse unreachable;
-                end.incoming.orderedRemove(node.id);
+                _ = end.incoming.orderedRemove(node);
             }
             n.incoming.deinit(allocator);
             n.outgoing.deinit(allocator);
@@ -383,8 +384,8 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
             const e = self.edges.fetchRemove(allocator, edge.id) catch return error.EdgeNotFound;
             const from = self.nodes.get(e.from.id) orelse unreachable;
             const to = self.nodes.get(e.to.id) orelse unreachable;
-            from.outgoing.orderedRemove(e.to);
-            to.incoming.orderedRemove(e.from);
+            _ = from.outgoing.orderedRemove(e.to);
+            _ = to.incoming.orderedRemove(e.from);
             return e.data;
         }
 
@@ -524,7 +525,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
             allocator: Allocator,
             from: NodeId,
             to: NodeId,
-        ) !bool {
+        ) (Allocator.Error || error{NodeNotFound})!bool {
             const start = self.nodes.get(from.id) orelse return error.NodeNotFound;
             if (!self.nodes.contains(to.id)) return error.NodeNotFound;
 
@@ -576,7 +577,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
 
                     var neighbors = node.outgoing.iterator();
                     while (neighbors.next()) |neighbor| {
-                        const neighbor_id = NodeId{ .id = neighbor.key_ptr.* };
+                        const neighbor_id = neighbor.key_ptr.*;
                         const neighbor_state = visited_.get(neighbor_id);
                         if (neighbor_state) |st| {
                             if (st == .discovered) return true;
@@ -593,6 +594,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
                     }
 
                     try visited_.put(allocator_, node_id, .finished);
+                    return false;
                 }
             }.f;
 
@@ -604,7 +606,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
                     allocator,
                     &visited,
                     node_id,
-                    node,
+                    node.value_ptr,
                 );
                 if (node_cyclic) return true;
             }
@@ -614,7 +616,11 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
 
         /// Performs a topological sort of the graph, i.e., all nodes of
         /// the output slice appear before their neighbor nodes.
-        pub fn sortTopological(self: *const Self, allocator: Allocator, direction: EdgeDirection) ![]NodeId {
+        pub fn sortTopological(
+            self: *const Self,
+            allocator: Allocator,
+            direction: EdgeDirection,
+        ) (Allocator.Error || error{GraphIsCyclic})![]NodeId {
             const Marker = enum { temp, perm };
             const Inner = struct {
                 fn f(
@@ -637,8 +643,8 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
                     };
                     var iterator = neighbors.iterator();
                     while (iterator.next()) |neighbor| {
-                        const neigh_id = NodeId{ .id = neighbor.key_ptr.* };
-                        const neigh = self_.nodes.get(neigh_id) orelse unreachable;
+                        const neigh_id = neighbor.key_ptr.*;
+                        const neigh = self_.nodes.get(neigh_id.id) orelse unreachable;
                         try f(
                             self_,
                             allocator_,
@@ -654,10 +660,10 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
                 }
             };
 
-            const markers = std.AutoArrayHashMapUnmanaged(NodeId, Marker){};
+            var markers = std.AutoArrayHashMapUnmanaged(NodeId, Marker){};
             defer markers.deinit(allocator);
 
-            const nodes = try std.ArrayListUnmanaged(NodeId).initCapacity(
+            var nodes = try std.ArrayListUnmanaged(NodeId).initCapacity(
                 allocator,
                 self.nodeCount(),
             );
