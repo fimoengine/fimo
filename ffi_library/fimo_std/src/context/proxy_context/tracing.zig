@@ -937,6 +937,12 @@ pub const Config = extern struct {
     subscribers: ?[*]Subscriber = null,
     /// Number of subscribers to register with the tracing subsystem.
     subscriber_count: usize = 0,
+
+    pub fn deinit(self: *const Config) void {
+        if (self.subscribers) |subscribers| {
+            for (subscribers[0..self.subscriber_count]) |s| s.deinit();
+        }
+    }
 };
 
 /// VTable of the tracing subsystem.
