@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const c = @import("../../c.zig");
 const Context = @import("../proxy_context.zig");
 const Error = @import("../../errors.zig").Error;
-const Version = @import("../../version.zig");
+const Version = @import("../../Version.zig");
 
 context: Context,
 

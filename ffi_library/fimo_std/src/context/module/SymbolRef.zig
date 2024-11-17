@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const heap = @import("../../heap.zig");
-const Version = @import("../../version.zig");
+const Version = @import("../../Version.zig");
 
 const allocator = heap.fimo_allocator;
 const Self = @This();

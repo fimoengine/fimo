@@ -4,7 +4,7 @@ const std = @import("std");
 const c = @import("../c.zig");
 const errors = @import("../errors.zig");
 const Error = errors.Error;
-const Version = @import("../version.zig");
+const Version = @import("../Version.zig");
 
 data: *anyopaque,
 vtable: *const VTable,

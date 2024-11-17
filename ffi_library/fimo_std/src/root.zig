@@ -7,7 +7,7 @@ pub const errors = @import("errors.zig");
 pub const heap = @import("heap.zig");
 pub const path = @import("path.zig");
 pub const time = @import("time.zig");
-pub const Version = @import("version.zig");
+pub const Version = @import("Version.zig");
 const visualizers = @import("visualizers");
 
 comptime {

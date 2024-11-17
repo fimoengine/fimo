@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const c = @import("c.zig");
 const heap = @import("heap.zig");
 const Error = @import("errors.zig").Error;
-const Version = @import("version.zig");
+const Version = @import("Version.zig");
 
 const RefCount = @import("context/RefCount.zig");
 const Tracing = @import("context/tracing.zig");

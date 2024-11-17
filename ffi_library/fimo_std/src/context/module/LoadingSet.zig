@@ -4,7 +4,7 @@ const Mutex = std.Thread.Mutex;
 
 const heap = @import("../../heap.zig");
 const Path = @import("../../path.zig").Path;
-const Version = @import("../../version.zig");
+const Version = @import("../../Version.zig");
 
 const graph = @import("../graph.zig");
 

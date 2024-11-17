@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const c = @import("../c.zig");
 const Error = @import("../errors.zig").Error;
 const Path = @import("../path.zig").Path;
-const Version = @import("../version.zig");
+const Version = @import("../Version.zig");
 
 const InstanceHandle = @import("module/InstanceHandle.zig");
 const LoadingSet = @import("module/LoadingSet.zig");
