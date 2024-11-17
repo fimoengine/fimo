@@ -197,13 +197,6 @@ fn installResources(
         .include_extensions = &.{".natvis"},
     });
 
-    // Install the generated headers.
-    // b.installDirectory(.{
-    //     .source_dir = config_path.path(b, "include/fimo_std"),
-    //     .install_dir = .header,
-    //     .install_subdir = "fimo_std",
-    // });
-
     // Install the generated license.
     b.getInstallStep().dependOn(
         &b.addInstallFile(
@@ -220,76 +213,15 @@ fn configureFimoCSources(
     compile: *std.Build.Step.Compile,
 ) void {
     _ = config_path;
-    const c_files = .{
-        // Internal headers
-        "src/internal/context.c",
-        "src/internal/module.c",
-        // Public headers
-        "src/array_list.c",
-        "src/context.c",
-        "src/graph.c",
-        "src/refcount.c",
-    };
-
-    var buffer: [15][]const u8 = undefined;
-    var flags = std.ArrayListUnmanaged([]const u8).initBuffer(&buffer);
-    flags.appendAssumeCapacity("-std=c17");
-    flags.appendAssumeCapacity("-Wall");
-    flags.appendAssumeCapacity("-Wextra");
-    flags.appendAssumeCapacity("-pedantic");
-    flags.appendAssumeCapacity("-Werror");
-    flags.appendAssumeCapacity("-fexec-charset=UTF-8");
-    flags.appendAssumeCapacity("-finput-charset=UTF-8");
-    if (compile.rootModuleTarget().os.tag != .windows) {
-        flags.appendAssumeCapacity("-pthread");
-    }
-
-    if (compile.isDynamicLibrary()) {
-        flags.appendAssumeCapacity("-D FIMO_STD_BUILD_SHARED");
-        flags.appendAssumeCapacity("-D FIMO_STD_EXPORT_SYMBOLS");
-        if (compile.rootModuleTarget().os.tag != .windows) {
-            flags.appendAssumeCapacity("-fPIC");
-        }
-    }
-
     const options = b.addOptions();
     options.addOption(bool, "export_dll", compile.isDynamicLibrary());
     compile.root_module.addImport("export_settings", options.createModule());
     compile.root_module.addImport("visualizers", visualizers);
 
     compile.linkLibC();
+    compile.addIncludePath(b.path("include/"));
     if (compile.rootModuleTarget().os.tag == .windows) {
-        compile.linkSystemLibrary("Pathcch");
+        compile.linkSystemLibrary("advapi32");
         compile.dll_export_fns = true;
     }
-    compile.addIncludePath(b.path("include/"));
-    compile.addCSourceFiles(.{
-        .files = &c_files,
-        .flags = flags.items,
-    });
-
-    // Dependencies.
-    if (compile.rootModuleTarget().isDarwin()) {
-        compile.addIncludePath(b.path("third_party/tinycthread/include/"));
-        compile.addCSourceFile(.{
-            .file = b.path("third_party/tinycthread/source/tinycthread.c"),
-            .flags = &.{
-                "-pthread",
-            },
-        });
-    }
-    compile.addIncludePath(b.path("third_party/btree/include/"));
-    compile.addCSourceFile(.{
-        .file = b.path("third_party/btree/btree.c"),
-        .flags = &.{
-            "-std=c17",
-        },
-    });
-    compile.addIncludePath(b.path("third_party/hashmap/include/"));
-    compile.addCSourceFile(.{
-        .file = b.path("third_party/hashmap/hashmap.c"),
-        .flags = &.{
-            "-std=c17",
-        },
-    });
 }
