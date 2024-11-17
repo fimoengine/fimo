@@ -51,7 +51,7 @@ else
             dli_sname: ?[*:0]const u8,
             dli_saddr: ?*anyopaque,
         };
-        extern "c" fn dladdr(addr: *anyopaque, info: *Dl_info) callconv(.C) c_int;
+        extern "c" fn dladdr(addr: *const anyopaque, info: *Dl_info) callconv(.C) c_int;
     };
 
 pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
@@ -110,7 +110,7 @@ pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
         var info: Inner.Dl_info = undefined;
         if (Inner.dladdr(bin_ptr, &info) == 0) return error.InvalidModule;
 
-        const os_path = OsPath{ .raw = info.dli_fname };
+        const os_path = OsPath{ .raw = std.mem.span(info.dli_fname) };
         const p = try OwnedPathUnmanaged.initOsPath(allocator, os_path);
         defer p.deinit(allocator);
         const module_dir = p.asPath().parent() orelse return error.InvalidPath;
@@ -125,10 +125,16 @@ pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
             null
         else
             info.dli_fname;
-        std.c.dlopen(
-            module_path,
-            .{ .NOW = true, .LOCAL = true, .NOLOAD = true },
-        ) orelse return error.InvalidModule;
+        if (comptime builtin.target.isDarwin())
+            _ = std.c.dlopen(
+                module_path,
+                .{ .NOW = true, .LOCAL = true, .NOLOAD = true },
+            ) orelse return error.InvalidModule
+        else
+            _ = std.c.dlopen(
+                module_path,
+                .{ .NOW = true, .NOLOAD = true },
+            ) orelse return error.InvalidModule;
 
         const module_handle = try allocator.create(Self);
         module_handle.* = Self{
@@ -183,10 +189,15 @@ pub fn initPath(p: Path) ModuleHandleError!*Self {
             @intFromEnum(windows.LoadLibraryFlags.load_library_search_dll_load_dir) |
                 @intFromEnum(windows.LoadLibraryFlags.load_library_search_default_dirs),
         ) orelse return error.InvalidPath
+    else if (comptime builtin.target.isDarwin())
+        std.c.dlopen(
+            native_path.raw.ptr,
+            .{ .NOW = true, .LOCAL = true, .NODELETE = true },
+        ) orelse return error.InvalidPath
     else
         std.c.dlopen(
-            &native_path.raw,
-            .{ .NOW = true, .LOCAL = true, .NODELETE = true },
+            native_path.raw.ptr,
+            .{ .NOW = true, .NODELETE = true },
         ) orelse return error.InvalidPath;
 
     const iterator = if (comptime builtin.os.tag == .windows)
