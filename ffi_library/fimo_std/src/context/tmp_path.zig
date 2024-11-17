@@ -20,7 +20,7 @@ pub const TmpDirUnmanaged = struct {
             "USERPROFILE",
         };
         var tmp_dir: ?[]u8 = null;
-        defer allocator.free(tmp_dir.?);
+        defer if (tmp_dir) |d| allocator.free(d);
         for (keys) |key| {
             tmp_dir = std.process.getEnvVarOwned(
                 allocator,
@@ -32,7 +32,11 @@ pub const TmpDirUnmanaged = struct {
             };
             break;
         }
-        if (tmp_dir == null) return error.TmpDirNotFound;
+        if (tmp_dir == null) {
+            var dir = std.fs.openDirAbsolute("/tmp", .{}) catch return error.TmpDirNotFound;
+            dir.close();
+            tmp_dir = try allocator.dupe(u8, "/tmp");
+        }
 
         var buf = path.PathBufferUnmanaged{};
         errdefer buf.deinit(allocator);
