@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const c = @import("c.zig");
-const errors = @import("errors.zig");
+const AnyError = @import("AnyError.zig");
 
 extern fn _aligned_malloc(size: usize, alignment: usize) ?*anyopaque;
 extern fn _aligned_free(ptr: ?*anyopaque) void;
@@ -174,9 +174,9 @@ export fn fimo_calloc_sized(size: usize, err: ?*c.FimoResult) c.FimoMallocBuffer
 /// `fimo_aligned_alloc_sized()` writes the success status into the memory pointed to
 /// by `error`.
 export fn fimo_aligned_alloc_sized(alignment: usize, size: usize, err: ?*c.FimoResult) c.FimoMallocBuffer {
-    const ok_error = errors.Error.intoCResult(null);
-    const inval_error = errors.Error.initErrorCode(errors.ErrorCode.inval).?.err;
-    const nomem_error = errors.Error.initErrorCode(errors.ErrorCode.nomem).?.err;
+    const ok_error = AnyError.intoCResult(null);
+    const inval_error = AnyError.initErrorCode(AnyError.ErrorCode.inval).?.err;
+    const nomem_error = AnyError.initErrorCode(AnyError.ErrorCode.nomem).?.err;
 
     if (size == 0 or alignment == 0 or ((alignment & (alignment - 1)) != 0)) {
         if (err) |e| {
@@ -241,34 +241,34 @@ test "std Allocator tests" {
 }
 
 test "Allocate memory: zero size results in a null pointer" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_malloc(0, &err);
     defer fimo_free(buffer);
     try std.testing.expect(buffer == null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
 }
 
 test "Allocate memory: allocation is properly aligned" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_malloc(@sizeOf(c_longlong), &err);
     defer fimo_free(buffer);
     try std.testing.expect(buffer != null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
     try std.testing.expect(std.mem.isAligned(@intFromPtr(buffer), fimo_allocator_alignment));
 }
 
 test "Allocate memory: allocation is properly aligned and sized" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_malloc_sized(1339, &err);
     defer fimo_free(buffer.ptr);
     try std.testing.expect(buffer.ptr != null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
     try std.testing.expect(buffer.buff_size >= 1339);
     try std.testing.expect(
         std.mem.isAligned(@intFromPtr(buffer.ptr), fimo_allocator_alignment),
@@ -276,23 +276,23 @@ test "Allocate memory: allocation is properly aligned and sized" {
 }
 
 test "Allocate zeroed memory: zero size results in a null pointer" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_calloc(0, &err);
     defer fimo_free_sized(buffer, 0);
     try std.testing.expect(buffer == null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
 }
 
 test "Allocate zeroed memory: allocation is properly aligned" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer: ?[*]c_longlong = @ptrCast(@alignCast(fimo_calloc(10 * @sizeOf(c_longlong), &err)));
     defer fimo_free_sized(buffer, 10 * @sizeOf(c_longlong));
     try std.testing.expect(buffer != null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
     try std.testing.expect(std.mem.isAligned(@intFromPtr(buffer), fimo_allocator_alignment));
     for (buffer.?[0..10]) |e| {
         try std.testing.expect(e == 0);
@@ -300,13 +300,13 @@ test "Allocate zeroed memory: allocation is properly aligned" {
 }
 
 test "Allocate zeroed memory: allocation is properly aligned and sized" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_calloc_sized(1339, &err);
     defer fimo_free_sized(buffer.ptr, buffer.buff_size);
     try std.testing.expect(buffer.ptr != null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
     try std.testing.expect(buffer.buff_size >= 1339);
     try std.testing.expect(std.mem.isAligned(@intFromPtr(buffer.ptr), fimo_allocator_alignment));
     for (@as([*]u8, @ptrCast(buffer.ptr.?))[0..1339]) |e| {
@@ -315,52 +315,52 @@ test "Allocate zeroed memory: allocation is properly aligned and sized" {
 }
 
 test "Allocate aligned memory: alignment must not be zero" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_aligned_alloc(0, 10, &err);
     try std.testing.expect(buffer == null);
-    try std.testing.expect(errors.Error.initC(err) != null);
+    try std.testing.expect(AnyError.initC(err) != null);
 }
 
 test "Allocate aligned memory: alignment must be a power of two" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_aligned_alloc(17, 10, &err);
     try std.testing.expect(buffer == null);
-    try std.testing.expect(errors.Error.initC(err) != null);
+    try std.testing.expect(AnyError.initC(err) != null);
 }
 
 test "Allocate aligned memory: zero size results in a null pointer" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_aligned_alloc(256, 0, &err);
     defer fimo_free_aligned_sized(buffer, 256, 0);
     try std.testing.expect(buffer == null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
 }
 
 test "Allocate aligned memory: allocation is properly aligned" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_aligned_alloc(256, @sizeOf(c_longlong), &err);
     defer fimo_free_aligned_sized(buffer, 256, @sizeOf(c_longlong));
     try std.testing.expect(buffer != null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
     try std.testing.expect(std.mem.isAligned(@intFromPtr(buffer), 256));
 }
 
 test "Allocate aligned memory: allocation is properly aligned and sized" {
-    var err: c.FimoResult = errors.Error.intoCResult(errors.Error.initErrorCode(errors.ErrorCode.ok));
+    var err: c.FimoResult = AnyError.intoCResult(AnyError.initErrorCode(AnyError.ErrorCode.ok));
     defer c.fimo_result_release(err);
 
     const buffer = fimo_aligned_alloc_sized(256, 1339, &err);
     defer fimo_free_aligned_sized(buffer.ptr, 256, buffer.buff_size);
     try std.testing.expect(buffer.ptr != null);
-    try std.testing.expect(errors.Error.initC(err) == null);
+    try std.testing.expect(AnyError.initC(err) == null);
     try std.testing.expect(buffer.buff_size >= 1339);
     try std.testing.expect(std.mem.isAligned(@intFromPtr(buffer.ptr), 256));
 }

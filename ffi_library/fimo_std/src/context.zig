@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 
 const c = @import("c.zig");
 const heap = @import("heap.zig");
-const Error = @import("errors.zig").Error;
+const AnyError = @import("AnyError.zig");
 const Version = @import("Version.zig");
 
 const RefCount = @import("context/RefCount.zig");
@@ -98,8 +98,8 @@ const VTableImpl = struct {
     fn isCompatible(ctx: *anyopaque, version: *const c.FimoVersion) callconv(.C) c.FimoResult {
         _ = ctx;
         const v = Version.initC(version.*);
-        if (ProxyContext.context_version.isCompatibleWith(v)) return Error.intoCResult(null);
-        return Error.initError(error.NotCompatible).err;
+        if (ProxyContext.context_version.isCompatibleWith(v)) return AnyError.intoCResult(null);
+        return AnyError.initError(error.NotCompatible).err;
     }
     fn ref(ctx: *anyopaque) callconv(.C) void {
         const self = Self.fromProxyPtr(ctx);

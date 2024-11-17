@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const c = @import("../c.zig");
-const Error = @import("../errors.zig").Error;
+const AnyError = @import("../AnyError.zig");
 const Path = @import("../path.zig").Path;
 const Version = @import("../Version.zig");
 
@@ -598,7 +598,7 @@ pub fn readPublicParameterTo(
     @"type": *ProxyModule.ParameterType,
     owner: []const u8,
     parameter: []const u8,
-    err: *?Error,
+    err: *?AnyError,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
     self.logTrace(
         "reading public parameter, value='{*}', type='{*}', owner='{s}', parameter='{s}'",
@@ -625,7 +625,7 @@ pub fn writePublicParameterFrom(
     @"type": ProxyModule.ParameterType,
     owner: []const u8,
     parameter: []const u8,
-    err: *?Error,
+    err: *?AnyError,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
     self.logTrace(
         "write public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
@@ -653,7 +653,7 @@ pub fn readDependencyParameterTo(
     @"type": *ProxyModule.ParameterType,
     owner: []const u8,
     parameter: []const u8,
-    err: *?Error,
+    err: *?AnyError,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
     self.logTrace(
         "reading dependency parameter, reader='{s}', value='{*}', type='{*}', owner='{s}', parameter='{s}'",
@@ -681,7 +681,7 @@ pub fn writeDependencyParameterFrom(
     @"type": ProxyModule.ParameterType,
     owner: []const u8,
     parameter: []const u8,
-    err: *?Error,
+    err: *?AnyError,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
     self.logTrace(
         "writing dependency parameter, reader='{s}', value='{*}', type='{s}', owner='{s}', parameter='{s}'",
@@ -708,8 +708,8 @@ pub fn readPrivateParameterTo(
     value: *anyopaque,
     @"type": *ProxyModule.ParameterType,
     o_param: *const ProxyModule.OpaqueParameter,
-    err: *?Error,
-) (InstanceHandle.ParameterError || error{FfiError})!void {
+    err: *?AnyError,
+) (InstanceHandle.ParameterError || AnyError.Error)!void {
     self.logTrace(
         "reading private parameter, reader='{s}', value='{*}', type='{*}', parameter='{*}'",
         .{ reader.info.name, value, @"type", o_param },
@@ -731,8 +731,8 @@ pub fn writePrivateParameterFrom(
     value: *const anyopaque,
     @"type": ProxyModule.ParameterType,
     o_param: *ProxyModule.OpaqueParameter,
-    err: *?Error,
-) (InstanceHandle.ParameterError || error{FfiError})!void {
+    err: *?AnyError,
+) (InstanceHandle.ParameterError || AnyError.Error)!void {
     self.logTrace(
         "writing private parameter, writer='{s}', value='{*}', type='{s}', parameter='{*}'",
         .{ writer.info.name, value, @tagName(@"type"), o_param },
@@ -796,9 +796,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         instance.* = ctx.module.addPseudoInstance() catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn removePseudoInstance(
         ptr: *anyopaque,
@@ -808,10 +808,10 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         const ctx_ = ctx.module.removePseudoInstance(instance) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
         context.* = ctx_.intoC();
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn addLoadingSet(
         ptr: *anyopaque,
@@ -820,10 +820,10 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         const s = ctx.module.addLoadingSet() catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
         set.* = @ptrCast(s);
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn queryLoadingSetModule(
         ptr: *anyopaque,
@@ -833,7 +833,7 @@ const VTableImpl = struct {
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
         exists.* = ctx.module.queryLoadingSetModule(set, std.mem.span(name));
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn queryLoadingSetSymbol(
         ptr: *anyopaque,
@@ -850,7 +850,7 @@ const VTableImpl = struct {
             std.mem.span(namespace),
             Version.initC(version),
         );
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn addLoadingSetCallback(
         ptr: *anyopaque,
@@ -871,9 +871,9 @@ const VTableImpl = struct {
             },
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn addLoadingSetModuleDynamic(
         ptr: *anyopaque,
@@ -888,9 +888,9 @@ const VTableImpl = struct {
             @"export",
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn addLoadingSetModulesFromPath(
         ptr: *anyopaque,
@@ -905,7 +905,7 @@ const VTableImpl = struct {
         const p = if (module_path) |p|
             Path.init(std.mem.span(p)) catch |e| {
                 if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-                return Error.initError(e).err;
+                return AnyError.initError(e).err;
             }
         else
             null;
@@ -918,9 +918,9 @@ const VTableImpl = struct {
             bin_ptr,
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn dismissLoadingSet(
         ptr: *anyopaque,
@@ -929,9 +929,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.dismissLoadingSet(set) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn loadLoadingSet(
         ptr: *anyopaque,
@@ -940,9 +940,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.loadLoadingSet(set) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn findInstanceByName(
         ptr: *anyopaque,
@@ -952,9 +952,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         info.* = ctx.module.findInstanceByName(std.mem.span(name)) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn findInstanceBySymbol(
         ptr: *anyopaque,
@@ -970,9 +970,9 @@ const VTableImpl = struct {
             Version.initC(version),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn queryNamespace(
         ptr: *anyopaque,
@@ -981,7 +981,7 @@ const VTableImpl = struct {
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
         exists.* = ctx.module.queryNamespace(std.mem.span(namespace));
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn addInstanceNamespace(
         ptr: *anyopaque,
@@ -991,9 +991,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.addInstanceNamespace(instance, std.mem.span(namespace)) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn removeInstanceNamespace(
         ptr: *anyopaque,
@@ -1003,9 +1003,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.removeInstanceNamespace(instance, std.mem.span(namespace)) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn queryInstanceNamespace(
         ptr: *anyopaque,
@@ -1022,7 +1022,7 @@ const VTableImpl = struct {
             has_dependency.* = false;
             is_static.* = false;
         }
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn addInstanceDependency(
         ptr: *anyopaque,
@@ -1032,9 +1032,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.addInstanceDependency(instance, other_info) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn removeInstanceDependency(
         ptr: *anyopaque,
@@ -1044,9 +1044,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.removeInstanceDependency(instance, other_info) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn queryInstanceDependency(
         ptr: *anyopaque,
@@ -1063,7 +1063,7 @@ const VTableImpl = struct {
             has_dependency.* = false;
             is_static.* = false;
         }
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn loadSymbol(
         ptr: *anyopaque,
@@ -1081,23 +1081,23 @@ const VTableImpl = struct {
             Version.initC(version),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn unloadInstance(ptr: *anyopaque, instance_info: ?*const ProxyModule.Info) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
         if (instance_info) |info|
             ctx.module.unloadInstance(info) catch |e| {
                 if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-                return Error.initError(e).err;
+                return AnyError.initError(e).err;
             }
         else
             ctx.module.unloadUnusedInstances() catch |e| {
                 if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-                return Error.initError(e).err;
+                return AnyError.initError(e).err;
             };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn queryParameterInfo(
         ptr: *anyopaque,
@@ -1113,12 +1113,12 @@ const VTableImpl = struct {
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
         @"type".* = info.type;
         read_group.* = info.read_group;
         write_group.* = info.write_group;
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn readPublicParameterTo(
         ptr: *anyopaque,
@@ -1128,7 +1128,7 @@ const VTableImpl = struct {
         parameter: [*:0]const u8,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         ctx.module.readPublicParameterTo(
             value,
             @"type",
@@ -1138,9 +1138,9 @@ const VTableImpl = struct {
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             if (err) |x| return x.err;
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn writePublicParameterFrom(
         ptr: *anyopaque,
@@ -1150,7 +1150,7 @@ const VTableImpl = struct {
         parameter: [*:0]const u8,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         ctx.module.writePublicParameterFrom(
             value,
             @"type",
@@ -1160,9 +1160,9 @@ const VTableImpl = struct {
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             if (err) |x| return x.err;
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn readDependencyParameterTo(
         ptr: *anyopaque,
@@ -1173,7 +1173,7 @@ const VTableImpl = struct {
         parameter: [*:0]const u8,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         ctx.module.readDependencyParameterTo(
             instance,
             value,
@@ -1184,9 +1184,9 @@ const VTableImpl = struct {
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             if (err) |x| return x.err;
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn writeDependencyParameterFrom(
         ptr: *anyopaque,
@@ -1197,7 +1197,7 @@ const VTableImpl = struct {
         parameter: [*:0]const u8,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         ctx.module.writeDependencyParameterFrom(
             instance,
             value,
@@ -1208,9 +1208,9 @@ const VTableImpl = struct {
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             if (err) |x| return x.err;
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn readPrivateParameterTo(
         ptr: *anyopaque,
@@ -1220,13 +1220,13 @@ const VTableImpl = struct {
         param: *const ProxyModule.OpaqueParameter,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         ctx.module.readPrivateParameterTo(instance, value, @"type", param, &err) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             if (err) |x| return x.err;
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn writePrivateParameterFrom(
         ptr: *anyopaque,
@@ -1236,13 +1236,13 @@ const VTableImpl = struct {
         param: *ProxyModule.OpaqueParameter,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         ctx.module.writePrivateParameterFrom(instance, value, @"type", param, &err) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             if (err) |x| return x.err;
-            return Error.initError(e).err;
+            return AnyError.initError(e).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn readParameterDataTo(
         ptr: *anyopaque,
@@ -1254,9 +1254,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.readParameterDataTo(instance, value, @"type", param) catch |err| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(err).err;
+            return AnyError.initError(err).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     fn writeParameterDataFrom(
         ptr: *anyopaque,
@@ -1268,9 +1268,9 @@ const VTableImpl = struct {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.writeParameterDataFrom(instance, value, @"type", param) catch |err| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return Error.initError(err).err;
+            return AnyError.initError(err).err;
         };
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
 };
 

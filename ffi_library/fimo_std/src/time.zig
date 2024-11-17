@@ -1,8 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const AnyError = @import("AnyError.zig");
 const c = @import("c.zig");
-const errors = @import("errors.zig");
 
 const os_ext = switch (builtin.target.os.tag) {
     .windows => struct {
@@ -417,8 +417,8 @@ const ffi = struct {
         const d2 = Duration.initC(rhs.*);
         if (d1.add(d2)) |d| {
             out.* = d.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_duration_saturating_add(
@@ -439,8 +439,8 @@ const ffi = struct {
         const d2 = Duration.initC(rhs.*);
         if (d1.sub(d2)) |d| {
             out.* = d.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_duration_saturating_sub(
@@ -463,8 +463,8 @@ const ffi = struct {
         const t = Time.initC(time_point.*);
         if (t.elapsed()) |dur| {
             out.* = dur.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_time_duration_since(
@@ -476,8 +476,8 @@ const ffi = struct {
         const t2 = Time.initC(earlier_time_point.*);
         if (t1.durationSince(t2)) |dur| {
             out.* = dur.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_time_add(
@@ -489,8 +489,8 @@ const ffi = struct {
         const d = Duration.initC(duration.*);
         if (t.add(d)) |shifted| {
             out.* = shifted.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_time_saturating_add(
@@ -511,8 +511,8 @@ const ffi = struct {
         const d = Duration.initC(duration.*);
         if (t.sub(d)) |shifted| {
             out.* = shifted.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_time_saturating_sub(

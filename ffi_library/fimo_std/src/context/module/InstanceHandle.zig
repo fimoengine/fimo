@@ -4,7 +4,7 @@ const Mutex = std.Thread.Mutex;
 
 const c = @import("../../c.zig");
 const heap = @import("../../heap.zig");
-const Error = @import("../../errors.zig").Error;
+const AnyError = @import("../../AnyError.zig");
 const Version = @import("../../Version.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
@@ -237,30 +237,30 @@ pub const Parameter = struct {
         self: *const Parameter,
         value: *anyopaque,
         @"type": *ProxyModule.ParameterType,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const result = self.getter(
             self.data.owner,
             value,
             @"type",
             @ptrCast(&self.data),
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     pub fn writeFrom(
         self: *Parameter,
         value: *const anyopaque,
         @"type": ProxyModule.ParameterType,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const result = self.setter(
             self.data.owner,
             value,
             @"type",
             @ptrCast(&self.data),
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 };
 
@@ -482,8 +482,8 @@ fn init(
             const x = Self.fromInfoPtr(info);
             const inner = x.lock();
             defer inner.unlock();
-            inner.preventUnload() catch |err| return Error.initError(err).err;
-            return Error.intoCResult(null);
+            inner.preventUnload() catch |err| return AnyError.initError(err).err;
+            return AnyError.intoCResult(null);
         }
         fn allowUnload(info: *const ProxyModule.Info) callconv(.C) void {
             const x = Self.fromInfoPtr(info);
@@ -570,8 +570,8 @@ pub fn initExportedInstance(
     set: *LoadingSet,
     @"export": *const ProxyModule.Export,
     handle: *ModuleHandle,
-    err: *?Error,
-) (InstanceHandleError || error{FfiError})!*ProxyModule.OpaqueInstance {
+    err: *?AnyError,
+) (InstanceHandleError || AnyError.Error)!*ProxyModule.OpaqueInstance {
     const instance_handle = try Self.init(
         @"export".getName(),
         @"export".getDescription(),
@@ -705,7 +705,7 @@ pub fn initExportedInstance(
         set.lock();
         _ = instance_handle.lock();
         instance.data = @ptrCast(data);
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     // Init exports.
@@ -730,7 +730,7 @@ pub fn initExportedInstance(
         const result = exp.constructor(instance, &sym);
         sys.mutex.lock();
         _ = instance_handle.lock();
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         var skip_dtor = false;
         errdefer if (!skip_dtor) exp.destructor(sym);
 

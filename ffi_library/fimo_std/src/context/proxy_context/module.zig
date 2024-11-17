@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 
 const c = @import("../../c.zig");
 const Context = @import("../proxy_context.zig");
-const Error = @import("../../errors.zig").Error;
+const AnyError = @import("../../AnyError.zig");
 const Version = @import("../../Version.zig");
 
 context: Context,
@@ -69,8 +69,8 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
             ctx: Module,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!T {
+            err: *?AnyError,
+        ) AnyError.Error!T {
             const value = try OpaqueParameter.readPublic(
                 ctx,
                 module,
@@ -90,8 +90,8 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
             instance: *const InstanceT,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!T {
+            err: *?AnyError,
+        ) AnyError.Error!T {
             const value = try OpaqueParameter.readDependency(
                 instance.castOpaque(),
                 module,
@@ -107,8 +107,8 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
         pub fn read(
             self: *const Self,
             instance: *const InstanceT,
-            err: *?Error,
-        ) error{FfiError}!OpaqueParameter.Value {
+            err: *?AnyError,
+        ) AnyError.Error!OpaqueParameter.Value {
             const value = try self.castOpaqueConst().read(instance.castOpaque(), err);
             return Self.unwrapValue(value);
         }
@@ -123,8 +123,8 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
             value: T,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const v = Self.wrapValue(value);
             try OpaqueParameter.writePublic(ctx, v, module, parameter, err);
         }
@@ -140,8 +140,8 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
             value: T,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const v = Self.wrapValue(value);
             try OpaqueParameter.writeDependency(
                 instance.castOpaque(),
@@ -159,8 +159,8 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
             self: *Self,
             instance: *const InstanceT,
             value: T,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const v = Self.wrapValue(value);
             try self.castOpaque().write(instance.castOpaque(), v, err);
         }
@@ -294,8 +294,8 @@ pub const OpaqueParameter = opaque {
         ctx: Module,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!OpaqueParameter.Info {
+        err: *?AnyError,
+    ) AnyError.Error!OpaqueParameter.Info {
         var tag: ParameterType = undefined;
         var read_group: ParameterAccessGroup = undefined;
         var write_group: ParameterAccessGroup = undefined;
@@ -307,7 +307,7 @@ pub const OpaqueParameter = opaque {
             &read_group,
             &write_group,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return .{
             .tag = tag,
             .read_group = read_group,
@@ -324,8 +324,8 @@ pub const OpaqueParameter = opaque {
         ctx: Module,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!OpaqueParameter.Value {
+        err: *?AnyError,
+    ) AnyError.Error!OpaqueParameter.Value {
         var value: OpaqueParameter.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         const result = OpaqueParameter.readPublicFfi(
@@ -335,7 +335,7 @@ pub const OpaqueParameter = opaque {
             module.ptr,
             parameter.ptr,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return OpaqueParameter.Value.fromUntagged(value, value_type);
     }
 
@@ -349,8 +349,8 @@ pub const OpaqueParameter = opaque {
         instance: *const OpaqueInstance,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!OpaqueParameter.Value {
+        err: *?AnyError,
+    ) AnyError.Error!OpaqueParameter.Value {
         var value: OpaqueParameter.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         const result = OpaqueParameter.readDependencyFfi(
@@ -360,7 +360,7 @@ pub const OpaqueParameter = opaque {
             module.ptr,
             parameter.ptr,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return OpaqueParameter.Value.fromUntagged(value, value_type);
     }
 
@@ -370,8 +370,8 @@ pub const OpaqueParameter = opaque {
     pub fn read(
         self: *const OpaqueParameter,
         instance: *const OpaqueInstance,
-        err: *?Error,
-    ) error{FfiError}!OpaqueParameter.Value {
+        err: *?AnyError,
+    ) AnyError.Error!OpaqueParameter.Value {
         var value: OpaqueParameter.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         const result = self.readPrivateFfi(
@@ -379,7 +379,7 @@ pub const OpaqueParameter = opaque {
             &value,
             &value_type,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return OpaqueParameter.Value.fromUntagged(value, value_type);
     }
 
@@ -393,8 +393,8 @@ pub const OpaqueParameter = opaque {
         value: OpaqueParameter.Value,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         var val: OpaqueParameter.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         value.toUntagged(&val, &value_type);
@@ -405,7 +405,7 @@ pub const OpaqueParameter = opaque {
             module.ptr,
             parameter.ptr,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Sets a module parameter with dependency write access.
@@ -419,8 +419,8 @@ pub const OpaqueParameter = opaque {
         value: OpaqueParameter.Value,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         var val: OpaqueParameter.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         value.toUntagged(&val, &value_type);
@@ -431,7 +431,7 @@ pub const OpaqueParameter = opaque {
             module.ptr,
             parameter.ptr,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Setter for a module parameter.
@@ -441,8 +441,8 @@ pub const OpaqueParameter = opaque {
         self: *OpaqueParameter,
         instance: *const OpaqueInstance,
         value: OpaqueParameter.Value,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         var val: OpaqueParameter.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         value.toUntagged(&val, &value_type);
@@ -451,7 +451,7 @@ pub const OpaqueParameter = opaque {
             &val,
             value_type,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 };
 
@@ -465,8 +465,8 @@ pub fn ParameterData(comptime T: type, comptime InstanceT: type) type {
         pub fn read(
             self: *const @This(),
             instance: *const InstanceT,
-            err: *?Error,
-        ) error{FfiError}!T {
+            err: *?AnyError,
+        ) AnyError.Error!T {
             const value = try self.castOpaque().read(instance.castOpaque(), err);
             return switch (@typeInfo(T).int.bits) {
                 8 => if (@typeInfo(T).int.signedness == .signed) value.i8 else value.u8,
@@ -481,8 +481,8 @@ pub fn ParameterData(comptime T: type, comptime InstanceT: type) type {
             self: *@This(),
             instance: *const InstanceT,
             value: T,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const v: OpaqueParameterData.Value = switch (@typeInfo(T).int.bits) {
                 8 => if (@typeInfo(T).int.signedness == .signed) .{ .i8 = value } else .{ .u8 = value },
                 16 => if (@typeInfo(T).int.signedness == .signed) .{ .i16 = value } else .{ .u16 = value },
@@ -614,8 +614,8 @@ pub const OpaqueParameterData = opaque {
     pub fn read(
         self: *const OpaqueParameterData,
         instance: *const OpaqueInstance,
-        err: *?Error,
-    ) error{FfiError}!OpaqueParameterData.Value {
+        err: *?AnyError,
+    ) AnyError.Error!OpaqueParameterData.Value {
         var value: OpaqueParameterData.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         const result = OpaqueParameterData.readFfi(
@@ -624,7 +624,7 @@ pub const OpaqueParameterData = opaque {
             &value_type,
             self,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return OpaqueParameterData.Value.fromUntagged(value, value_type);
     }
 
@@ -633,8 +633,8 @@ pub const OpaqueParameterData = opaque {
         self: *const OpaqueParameterData,
         instance: *const OpaqueInstance,
         value: OpaqueParameterData.Value,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         var val: OpaqueParameterData.ValueUntagged = undefined;
         var value_type: ParameterType = undefined;
         value.toUntagged(&val, &value_type);
@@ -644,7 +644,7 @@ pub const OpaqueParameterData = opaque {
             value_type,
             self,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 };
 
@@ -687,9 +687,9 @@ pub const Info = extern struct {
     }
 
     /// Prevents the module from being unloaded.
-    pub fn lockUnload(self: *const Info, err: *?Error) error{FfiError}!void {
+    pub fn lockUnload(self: *const Info, err: *?AnyError) AnyError.Error!void {
         const result = self.lock_unload_fn(self);
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Unlocks a previously locked module, allowing it to be unloaded.
@@ -701,14 +701,14 @@ pub const Info = extern struct {
     ///
     /// Queries a module by its unique name. The returned `Info` instance
     /// will have its reference count increased.
-    pub fn findByName(ctx: Module, module: [:0]const u8, err: *?Error) error{FfiError}!*const Info {
+    pub fn findByName(ctx: Module, module: [:0]const u8, err: *?AnyError) AnyError.Error!*const Info {
         var info: *const Info = undefined;
         const result = ctx.context.vtable.module_v0.find_by_name(
             ctx.context.data,
             module.ptr,
             &info,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return info;
     }
 
@@ -721,8 +721,8 @@ pub const Info = extern struct {
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
-        err: *?Error,
-    ) error{FfiError}!*const Info {
+        err: *?AnyError,
+    ) AnyError.Error!*const Info {
         var info: *const Info = undefined;
         const result = ctx.context.vtable.module_v0.find_by_symbol(
             ctx.context.data,
@@ -731,7 +731,7 @@ pub const Info = extern struct {
             version.intoC(),
             &info,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return info;
     }
 };
@@ -835,15 +835,15 @@ pub fn Instance(
         pub fn addNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const ctx = Context.initC(self.ctx);
             const result = ctx.vtable.module_v0.namespace_include(
                 ctx.data,
                 self.castOpaque(),
                 namespace.ptr,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
         }
 
         /// Removes a namespace include from the module.
@@ -856,15 +856,15 @@ pub fn Instance(
         pub fn removeNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const ctx = Context.initC(self.ctx);
             const result = ctx.vtable.module_v0.namespace_exclude(
                 ctx.data,
                 self.castOpaque(),
                 namespace.ptr,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
         }
 
         /// Checks the status of a namespace from the view of the module.
@@ -877,8 +877,8 @@ pub fn Instance(
         pub fn hasNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!enum { removed, added, static } {
+            err: *?AnyError,
+        ) AnyError.Error!enum { removed, added, static } {
             var is_included: bool = undefined;
             var is_static: bool = undefined;
             const ctx = Context.initC(self.ctx);
@@ -889,7 +889,7 @@ pub fn Instance(
                 &is_included,
                 &is_static,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
             if (!is_included) return .removed;
             if (!is_static) return .added;
             return .static;
@@ -906,15 +906,15 @@ pub fn Instance(
         pub fn addDependency(
             self: *const @This(),
             info: *const Info,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const ctx = Context.initC(self.ctx);
             const result = ctx.vtable.module_v0.acquire_dependency(
                 ctx.data,
                 self.castOpaque(),
                 info,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
         }
 
         /// Removes a module as a dependency.
@@ -929,15 +929,15 @@ pub fn Instance(
         pub fn removeDependency(
             self: *const @This(),
             info: *const Info,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             const ctx = Context.initC(self.ctx);
             const result = ctx.vtable.module_v0.relinquish_dependency(
                 ctx.data,
                 self.castOpaque(),
                 info,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
         }
 
         /// Checks if a module depends on another module.
@@ -950,8 +950,8 @@ pub fn Instance(
         pub fn hasDependency(
             self: *const @This(),
             info: *const Info,
-            err: *?Error,
-        ) error{FfiError}!enum { removed, added, static } {
+            err: *?AnyError,
+        ) AnyError.Error!enum { removed, added, static } {
             var is_dependency: bool = undefined;
             var is_static: bool = undefined;
             const ctx = Context.initC(self.ctx);
@@ -962,7 +962,7 @@ pub fn Instance(
                 &is_dependency,
                 &is_static,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
             if (!is_dependency) return .removed;
             if (!is_static) return .added;
             return .static;
@@ -980,8 +980,8 @@ pub fn Instance(
         pub fn loadSymbol(
             self: *const @This(),
             comptime symbol: Symbol,
-            err: *?Error,
-        ) error{FfiError}!*const symbol.symbol {
+            err: *?AnyError,
+        ) AnyError.Error!*const symbol.symbol {
             const s = try self.loadSymbolRaw(
                 symbol.name.ptr,
                 symbol.namespace.ptr,
@@ -1005,8 +1005,8 @@ pub fn Instance(
             name: [:0]const u8,
             namespace: [:0]const u8,
             version: Version,
-            err: *?Error,
-        ) error{FfiError}!*const anyopaque {
+            err: *?AnyError,
+        ) AnyError.Error!*const anyopaque {
             var symbol: *const anyopaque = undefined;
             const ctx = Context.initC(self.ctx);
             const result = ctx.vtable.module_v0.load_symbol(
@@ -1017,7 +1017,7 @@ pub fn Instance(
                 version.intoC(),
                 &symbol,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
             return symbol;
         }
 
@@ -1031,8 +1031,8 @@ pub fn Instance(
             self: *const @This(),
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!OpaqueParameter.Value {
+            err: *?AnyError,
+        ) AnyError.Error!OpaqueParameter.Value {
             return OpaqueParameter.readDependency(
                 self.castOpaque(),
                 module,
@@ -1052,8 +1052,8 @@ pub fn Instance(
             value: OpaqueParameter.Value,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?Error,
-        ) error{FfiError}!void {
+            err: *?AnyError,
+        ) AnyError.Error!void {
             return OpaqueParameter.writeDependency(
                 self.castOpaque(),
                 value,
@@ -1096,13 +1096,13 @@ pub const PseudoInstance = extern struct {
     /// of the context won't be assigned a module instance during bootstrapping.
     /// As a workaround, we allow for the creation of pseudo modules, i.e.,
     /// module handles without an associated module.
-    pub fn init(ctx: Module, err: *?Error) error{FfiError}!*const PseudoInstance {
+    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!*const PseudoInstance {
         var instance: *const PseudoInstance = undefined;
         const result = ctx.context.vtable.module_v0.pseudo_module_new(
             ctx.context.data,
             &instance,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return instance;
     }
 
@@ -1110,7 +1110,7 @@ pub const PseudoInstance = extern struct {
     ///
     /// By destroying the pseudo module, the caller ensures that they
     /// relinquished all access to handles derived by the module subsystem.
-    pub fn deinit(self: *const PseudoInstance, err: *?Error) error{FfiError}!Context {
+    pub fn deinit(self: *const PseudoInstance, err: *?AnyError) AnyError.Error!Context {
         var out_ctx: c.FimoContext = undefined;
         const ctx = Context.initC(self.instance.ctx);
         const result = ctx.vtable.module_v0.pseudo_module_destroy(
@@ -1118,7 +1118,7 @@ pub const PseudoInstance = extern struct {
             self,
             &out_ctx,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return Context.initC(out_ctx);
     }
 
@@ -1130,8 +1130,8 @@ pub const PseudoInstance = extern struct {
     pub fn addNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         return self.castOpaque().addNamespace(
             namespace,
             err,
@@ -1148,8 +1148,8 @@ pub const PseudoInstance = extern struct {
     pub fn removeNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         return self.castOpaque().removeNamespace(
             namespace,
             err,
@@ -1166,8 +1166,8 @@ pub const PseudoInstance = extern struct {
     pub fn queryNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!enum { removed, added, static } {
+        err: *?AnyError,
+    ) AnyError.Error!enum { removed, added, static } {
         return self.castOpaque().hasNamespace(
             namespace,
             err,
@@ -1185,8 +1185,8 @@ pub const PseudoInstance = extern struct {
     pub fn addDependency(
         self: *const @This(),
         info: *const Info,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         return self.castOpaque().addDependency(
             info,
             err,
@@ -1205,8 +1205,8 @@ pub const PseudoInstance = extern struct {
     pub fn removeDependency(
         self: *const @This(),
         info: *const Info,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         return self.castOpaque().removeDependency(
             info,
             err,
@@ -1223,8 +1223,8 @@ pub const PseudoInstance = extern struct {
     pub fn hasDependency(
         self: *const @This(),
         info: *const Info,
-        err: *?Error,
-    ) error{FfiError}!enum { removed, added, static } {
+        err: *?AnyError,
+    ) AnyError.Error!enum { removed, added, static } {
         return self.castOpaque().hasDependency(
             info,
             err,
@@ -1243,8 +1243,8 @@ pub const PseudoInstance = extern struct {
     pub fn loadSymbol(
         self: *const @This(),
         comptime symbol: Symbol,
-        err: *?Error,
-    ) error{FfiError}!*const symbol.symbol {
+        err: *?AnyError,
+    ) AnyError.Error!*const symbol.symbol {
         return self.castOpaque().loadSymbol(symbol, err);
     }
 
@@ -1262,8 +1262,8 @@ pub const PseudoInstance = extern struct {
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
-        err: *?Error,
-    ) error{FfiError}!*const anyopaque {
+        err: *?AnyError,
+    ) AnyError.Error!*const anyopaque {
         return self.castOpaque().loadSymbolRaw(
             name,
             namespace,
@@ -1282,8 +1282,8 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!OpaqueParameter.Value {
+        err: *?AnyError,
+    ) AnyError.Error!OpaqueParameter.Value {
         return self.castOpaque().readParameter(
             module,
             parameter,
@@ -1302,8 +1302,8 @@ pub const PseudoInstance = extern struct {
         value: OpaqueParameter.Value,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         return self.castOpaque().writeParameter(
             value,
             module,
@@ -1327,19 +1327,19 @@ pub const LoadingSet = opaque {
     /// suitable loading order. To facilitate the loading, we load
     /// multiple modules together, and automatically determine an
     /// appropriate load order for all modules inside the module set.
-    pub fn init(ctx: Module, err: *?Error) error{FfiError}!*LoadingSet {
+    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!*LoadingSet {
         var set: *LoadingSet = undefined;
         const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &set);
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return set;
     }
 
     /// Destroys the module set without loading any modules.
     ///
     /// It is not possible to dismiss a module set that is currently being loaded.
-    pub fn dismiss(self: *LoadingSet, ctx: Module, err: *?Error) error{FfiError}!void {
+    pub fn dismiss(self: *LoadingSet, ctx: Module, err: *?AnyError) AnyError.Error!void {
         const result = ctx.context.vtable.module_v0.set_dismiss(ctx.context.data, self);
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Destroys the module set and loads the modules contained in it.
@@ -1351,13 +1351,13 @@ pub const LoadingSet = opaque {
     /// rolls back the loading of all modules contained in the set
     /// and returns an error. It is not possible to load a module set,
     /// while another set is being loaded.
-    pub fn commit(self: *LoadingSet, ctx: Module, err: *?Error) error{FfiError}!void {
+    pub fn commit(self: *LoadingSet, ctx: Module, err: *?AnyError) AnyError.Error!void {
         const result = ctx.context.vtable.module_v0.set_finish(ctx.context.data, self);
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Checks whether the module set contains a module.
-    pub fn hasModule(self: *LoadingSet, ctx: Module, module: [:0]const u8, err: *?Error) error{FfiError}!bool {
+    pub fn hasModule(self: *LoadingSet, ctx: Module, module: [:0]const u8, err: *?AnyError) AnyError.Error!bool {
         var exists: bool = undefined;
         const result = ctx.context.vtable.module_v0.set_has_module(
             ctx.context.data,
@@ -1365,7 +1365,7 @@ pub const LoadingSet = opaque {
             module.ptr,
             &exists,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return exists;
     }
 
@@ -1376,8 +1376,8 @@ pub const LoadingSet = opaque {
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
-        err: *?Error,
-    ) error{FfiError}!bool {
+        err: *?AnyError,
+    ) AnyError.Error!bool {
         var exists: bool = undefined;
         const result = ctx.context.vtable.module_v0.set_has_symbol(
             ctx.context.data,
@@ -1387,7 +1387,7 @@ pub const LoadingSet = opaque {
             version.intoC(),
             &exists,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         return exists;
     }
 
@@ -1410,8 +1410,8 @@ pub const LoadingSet = opaque {
             status: union(enum) { ok: *const Info, err: *const Export },
             data: @TypeOf(obj),
         ) void,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
@@ -1452,8 +1452,8 @@ pub const LoadingSet = opaque {
         data: ?*anyopaque,
         on_success: *const fn (info: *const Info, data: ?*anyopaque) callconv(.C) void,
         on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) void,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const result = ctx.context.vtable.module_v0.set_append_callback(
             ctx.context.data,
             self,
@@ -1462,7 +1462,7 @@ pub const LoadingSet = opaque {
             on_error,
             data,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Adds a freestanding module to the module set.
@@ -1482,8 +1482,8 @@ pub const LoadingSet = opaque {
         self: *LoadingSet,
         owner: *const OpaqueInstance,
         module: *const Export,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const ctx = Context.initC(owner.ctx);
         const result = ctx.vtable.module_v0.set_append_freestanding_module(
             ctx.data,
@@ -1491,7 +1491,7 @@ pub const LoadingSet = opaque {
             self,
             module,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 
     /// Adds modules to the module set.
@@ -1516,8 +1516,8 @@ pub const LoadingSet = opaque {
         path: ?[:0]const u8,
         obj: anytype,
         comptime filter: fn (module: *const Export, data: @TypeOf(obj)) bool,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
@@ -1559,8 +1559,8 @@ pub const LoadingSet = opaque {
         path: ?[*:0]const u8,
         data: ?*anyopaque,
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) bool,
-        err: *?Error,
-    ) error{FfiError}!void {
+        err: *?AnyError,
+    ) AnyError.Error!void {
         const result = ctx.context.vtable.module_v0.set_append_modules(
             ctx.context.data,
             self,
@@ -1570,7 +1570,7 @@ pub const LoadingSet = opaque {
             Export.ExportIter.fimo_impl_module_export_iterator,
             @ptrCast(@constCast(&Export.ExportIter.fimo_impl_module_export_iterator)),
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
     }
 };
 
@@ -1938,8 +1938,8 @@ pub const Export = extern struct {
                             sym: **anyopaque,
                         ) callconv(.C) c.FimoResult {
                             const self: *const InstanceT = @alignCast(@ptrCast(ctx));
-                            sym.* = cons(self) catch |err| return Error.initError(err).err;
-                            return Error.intoCResult(null);
+                            sym.* = cons(self) catch |err| return AnyError.initError(err).err;
+                            return AnyError.intoCResult(null);
                         }
                         fn deinit(sym: *anyopaque) callconv(.C) void {
                             const s: *symbol.symbol = @alignCast(@ptrCast(sym));
@@ -2265,15 +2265,15 @@ pub const VTable = extern struct {
 pub fn namespaceExists(
     self: Module,
     namespace: [:0]const u8,
-    err: *?Error,
-) error{FfiError}!bool {
+    err: *?AnyError,
+) AnyError.Error!bool {
     var exists: bool = undefined;
     const result = self.context.vtable.module_v0.namespace_exists(
         self.context.data,
         namespace.ptr,
         &exists,
     );
-    try Error.initChecked(err, result);
+    try AnyError.initChecked(err, result);
     return exists;
 }
 
@@ -2288,13 +2288,13 @@ pub fn namespaceExists(
 pub fn unloadModule(
     self: Module,
     info: ?*const Info,
-    err: *?Error,
-) error{FfiError}!void {
+    err: *?AnyError,
+) AnyError.Error!void {
     const result = self.context.vtable.module_v0.unload(
         self.context.data,
         info,
     );
-    try Error.initChecked(err, result);
+    try AnyError.initChecked(err, result);
 }
 
 /// Queries the info of a module parameter.
@@ -2306,8 +2306,8 @@ pub fn queryParameter(
     self: Module,
     module: [:0]const u8,
     parameter: [:0]const u8,
-    err: *?Error,
-) error{FfiError}!OpaqueParameter.Info {
+    err: *?AnyError,
+) AnyError.Error!OpaqueParameter.Info {
     return OpaqueParameter.query(self, module, parameter, err);
 }
 
@@ -2320,8 +2320,8 @@ pub fn readParameter(
     self: Module,
     module: [:0]const u8,
     parameter: [:0]const u8,
-    err: *?Error,
-) error{FfiError}!OpaqueParameter.Value {
+    err: *?AnyError,
+) AnyError.Error!OpaqueParameter.Value {
     return OpaqueParameter.readPublic(self, module, parameter, err);
 }
 
@@ -2335,8 +2335,8 @@ pub fn writeParameter(
     value: OpaqueParameter.Value,
     module: [:0]const u8,
     parameter: [:0]const u8,
-    err: *?Error,
-) error{FfiError}!void {
+    err: *?AnyError,
+) AnyError.Error!void {
     return OpaqueParameter.writePublic(self, value, module, parameter, err);
 }
 
@@ -2582,36 +2582,36 @@ const ffi = struct {
         context: c.FimoContext,
         module: **const PseudoInstance,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         module.* = PseudoInstance.init(
             ctx.module(),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_pseudo_module_destroy(
         module: *const PseudoInstance,
         module_context: *c.FimoContext,
     ) c.FimoResult {
-        var err: ?Error = null;
-        const ctx = module.deinit(&err) catch return Error.intoCResult(err);
+        var err: ?AnyError = null;
+        const ctx = module.deinit(&err) catch return AnyError.intoCResult(err);
         module_context.* = ctx.intoC();
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
 
     export fn fimo_module_set_new(
         context: c.FimoContext,
         module_set: **LoadingSet,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         module_set.* = LoadingSet.init(
             ctx.module(),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_has_module(
@@ -2620,14 +2620,14 @@ const ffi = struct {
         name: [*:0]const u8,
         has_module: *bool,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         has_module.* = module_set.hasModule(
             ctx.module(),
             std.mem.span(name),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_has_symbol(
@@ -2638,7 +2638,7 @@ const ffi = struct {
         version: c.FimoVersion,
         has_symbol: *bool,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         has_symbol.* = module_set.hasSymbol(
             ctx.module(),
@@ -2647,7 +2647,7 @@ const ffi = struct {
             Version.initC(version),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_append_callback(
@@ -2658,7 +2658,7 @@ const ffi = struct {
         on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) void,
         data: ?*anyopaque,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         _ = module_set.addCallbackCustom(
             ctx.module(),
@@ -2668,7 +2668,7 @@ const ffi = struct {
             on_error,
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_append_freestanding_module(
@@ -2676,13 +2676,13 @@ const ffi = struct {
         module_set: *LoadingSet,
         module_export: *const Export,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         _ = module_set.addModuleFreestanding(
             module,
             module_export,
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_append_modules(
@@ -2692,7 +2692,7 @@ const ffi = struct {
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) bool,
         filter_data: ?*anyopaque,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         _ = module_set.addModulesFromPathCustom(
             ctx.module(),
@@ -2701,33 +2701,33 @@ const ffi = struct {
             filter,
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_dismiss(
         context: c.FimoContext,
         module_set: *LoadingSet,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         _ = module_set.dismiss(
             ctx.module(),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_set_finish(
         context: c.FimoContext,
         module_set: *LoadingSet,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         _ = module_set.commit(
             ctx.module(),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_find_by_name(
@@ -2735,14 +2735,14 @@ const ffi = struct {
         name: [*:0]const u8,
         module: **const Info,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         module.* = Info.findByName(
             ctx.module(),
             std.mem.span(name),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_find_by_symbol(
@@ -2752,7 +2752,7 @@ const ffi = struct {
         version: c.FimoVersion,
         module: **const Info,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         module.* = Info.findBySymbol(
             ctx.module(),
@@ -2761,7 +2761,7 @@ const ffi = struct {
             Version.initC(version),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_namespace_exists(
@@ -2769,28 +2769,28 @@ const ffi = struct {
         ns: [*:0]const u8,
         exists: *bool,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         exists.* = ctx.module().namespaceExists(std.mem.span(ns), &err) catch false;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_namespace_include(
         module: *const OpaqueInstance,
         ns: [*:0]const u8,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         _ = module.addNamespace(std.mem.span(ns), &err) catch {};
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_namespace_exclude(
         module: *const OpaqueInstance,
         ns: [*:0]const u8,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         _ = module.removeNamespace(std.mem.span(ns), &err) catch {};
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_namespace_included(
@@ -2799,11 +2799,11 @@ const ffi = struct {
         is_included: *bool,
         is_static: *bool,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const info = module.hasNamespace(
             std.mem.span(ns),
             &err,
-        ) catch return Error.intoCResult(err);
+        ) catch return AnyError.intoCResult(err);
         switch (info) {
             .removed => {
                 is_included.* = false;
@@ -2818,25 +2818,25 @@ const ffi = struct {
                 is_static.* = true;
             },
         }
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
 
     export fn fimo_module_acquire_dependency(
         module: *const OpaqueInstance,
         dependency: *const Info,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         _ = module.addDependency(dependency, &err) catch {};
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_relinquish_dependency(
         module: *const OpaqueInstance,
         dependency: *const Info,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         _ = module.removeDependency(dependency, &err) catch {};
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_has_dependency(
@@ -2845,11 +2845,11 @@ const ffi = struct {
         has_dependency: *bool,
         is_static: *bool,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const info = module.hasDependency(
             other,
             &err,
-        ) catch return Error.intoCResult(err);
+        ) catch return AnyError.intoCResult(err);
         switch (info) {
             .removed => {
                 has_dependency.* = false;
@@ -2864,7 +2864,7 @@ const ffi = struct {
                 is_static.* = true;
             },
         }
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
 
     export fn fimo_module_load_symbol(
@@ -2874,27 +2874,27 @@ const ffi = struct {
         version: c.FimoVersion,
         symbol: **const anyopaque,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         symbol.* = module.loadSymbolRaw(
             std.mem.span(name),
             std.mem.span(ns),
             Version.initC(version),
             &err,
         ) catch undefined;
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_unload(
         context: c.FimoContext,
         module: ?*const Info,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         _ = ctx.module().unloadModule(
             module,
             &err,
         ) catch {};
-        return Error.intoCResult(err);
+        return AnyError.intoCResult(err);
     }
 
     export fn fimo_module_param_query(
@@ -2905,17 +2905,17 @@ const ffi = struct {
         read: *ParameterAccessGroup,
         write: *ParameterAccessGroup,
     ) c.FimoResult {
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         const ctx = Context.initC(context);
         const info = ctx.module().queryParameter(
             std.mem.span(module_name),
             std.mem.span(param),
             &err,
-        ) catch return Error.intoCResult(err);
+        ) catch return AnyError.intoCResult(err);
         param_type.* = info.tag;
         read.* = info.read_group;
         write.* = info.write_group;
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
 
     export fn fimo_module_param_set_public(

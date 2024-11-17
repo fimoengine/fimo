@@ -2,8 +2,7 @@
 const std = @import("std");
 
 const c = @import("../c.zig");
-const errors = @import("../errors.zig");
-const Error = errors.Error;
+const AnyError = @import("../AnyError.zig");
 const Version = @import("../Version.zig");
 
 data: *anyopaque,
@@ -118,7 +117,7 @@ pub const CompatibilityContext = struct {
             .patch = version.patch,
             .build = version.build,
         };
-        const err = Error.initC(self.vtable.check_version(self.data, &v));
+        const err = AnyError.initC(self.vtable.check_version(self.data, &v));
         defer if (err) |e| e.deinit();
         return err == null;
     }
@@ -156,7 +155,7 @@ pub fn isCompatibleWithVersion(self: Self, version: Version) bool {
         .patch = version.patch,
         .build = version.build,
     };
-    const err = Error.initC(self.vtable.check_version(self.data, &v));
+    const err = AnyError.initC(self.vtable.check_version(self.data, &v));
     defer if (err) |e| e.deinit();
     return err == null;
 }
@@ -195,16 +194,16 @@ pub fn module(self: Self) Module {
 
 const ffi = struct {
     export fn fimo_context_init(options: [*:null]const ?*const TaggedInStruct, context: *c.FimoContext) c.FimoResult {
-        const ctx = Self.init(std.mem.span(options)) catch |err| return Error.initError(err).err;
+        const ctx = Self.init(std.mem.span(options)) catch |err| return AnyError.initError(err).err;
         context.* = ctx.intoC();
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
     export fn fimo_context_check_version(context: c.FimoContext) c.FimoResult {
         const ctx = CompatibilityContext.initC(context);
         return if (!ctx.isCompatibleWithVersion(context_version))
-            Error.initError(error.InvalidVersion).err
+            AnyError.initError(error.InvalidVersion).err
         else
-            Error.intoCResult(null);
+            AnyError.intoCResult(null);
     }
 
     export fn fimo_context_acquire(context: c.FimoContext) void {

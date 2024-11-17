@@ -219,7 +219,7 @@ test format {
 // ----------------------------------------------------
 
 const ffi = struct {
-    const errors = @import("errors.zig");
+    const AnyError = @import("AnyError.zig");
 
     export fn fimo_version_parse_str(
         str: [*]const u8,
@@ -229,8 +229,8 @@ const ffi = struct {
         const text = str[0..str_len];
         if (Version.parse(text)) |v| {
             version.* = v.intoC();
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_version_str_len(
@@ -270,8 +270,8 @@ const ffi = struct {
         if (std.fmt.bufPrint(buffer, "{}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_version_write_str_long(
@@ -285,8 +285,8 @@ const ffi = struct {
         if (std.fmt.bufPrint(buffer, "{long}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
-            return errors.Error.intoCResult(null);
-        } else |err| return errors.Error.initError(err).err;
+            return AnyError.intoCResult(null);
+        } else |err| return AnyError.initError(err).err;
     }
 
     export fn fimo_version_cmp(

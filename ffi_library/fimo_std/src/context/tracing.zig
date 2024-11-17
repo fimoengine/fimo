@@ -2,7 +2,7 @@ const std = @import("std");
 
 const c = @import("../c.zig");
 const heap = @import("../heap.zig");
-const Error = @import("../errors.zig").Error;
+const AnyError = @import("../AnyError.zig");
 const time = @import("../time.zig");
 const tls = @import("tls.zig");
 
@@ -98,8 +98,8 @@ pub fn deinit(self: *Tracing) void {
 /// new call stack is not set to be the active call stack.
 pub fn createCallStack(
     self: *const Tracing,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.CallStack {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.CallStack {
     if (!self.isEnabled()) return dummy_call_stack_ptr;
     const call_stack = try CallStack.init(self, err);
     return @ptrCast(call_stack);
@@ -212,8 +212,8 @@ pub inline fn pushSpan(
     target: ?[:0]const u8,
     level: ProxyTracing.Level,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     const desc = &struct {
         var desc = ProxyTracing.SpanDesc{
             .metadata = &.{
@@ -249,8 +249,8 @@ pub inline fn pushSpanErr(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -278,8 +278,8 @@ pub inline fn pushSpanWarn(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -307,8 +307,8 @@ pub inline fn pushSpanInfo(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -336,8 +336,8 @@ pub inline fn pushSpanDebug(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -365,8 +365,8 @@ pub inline fn pushSpanTrace(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -392,8 +392,8 @@ pub inline fn pushSpanErrSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpanErr(
         fmt,
         args,
@@ -418,8 +418,8 @@ pub inline fn pushSpanWarnSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpanWarn(
         fmt,
         args,
@@ -444,8 +444,8 @@ pub inline fn pushSpanInfoSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpanInfo(
         fmt,
         args,
@@ -470,8 +470,8 @@ pub inline fn pushSpanDebugSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpanDebug(
         fmt,
         args,
@@ -496,8 +496,8 @@ pub inline fn pushSpanTraceSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     return self.pushSpanTrace(
         fmt,
         args,
@@ -523,8 +523,8 @@ pub fn pushSpanCustom(
     desc: *const ProxyTracing.SpanDesc,
     formatter: *const ProxyTracing.Formatter,
     data: ?*const anyopaque,
-    err: *?Error,
-) (TracingError || error{FfiError})!*ProxyTracing.Span {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!*ProxyTracing.Span {
     if (!self.isEnabled()) return @constCast(&dummy_span);
     if (!self.isEnabledForCurrentThread()) return error.ThreadNotRegistered;
     const d = self.thread_data.get().?;
@@ -573,7 +573,7 @@ pub fn emitEvent(
             .line_number = @intCast(location.line),
         },
     };
-    var err: ?Error = null;
+    var err: ?AnyError = null;
     self.emitEventCustom(
         &event,
         ProxyTracing.stdFormatter(fmt, @TypeOf(args)),
@@ -810,7 +810,7 @@ pub fn emitStackTrace(
     target: ?[:0]const u8,
     stack_trace: std.builtin.StackTrace,
     location: std.builtin.SourceLocation,
-) (TracingError || error{FfiError})!void {
+) (TracingError || AnyError.Error)!void {
     const event = ProxyTracing.Event{
         .metadata = &.{
             .name = name orelse location.fn_name,
@@ -820,7 +820,7 @@ pub fn emitStackTrace(
             .line_number = @intCast(location.line),
         },
     };
-    var err: ?Error = null;
+    var err: ?AnyError = null;
     self.emitEventCustom(
         &event,
         ProxyTracing.stackTraceFormatter,
@@ -858,8 +858,8 @@ pub fn emitEventCustom(
     event: *const ProxyTracing.Event,
     formatter: *const ProxyTracing.Formatter,
     data: ?*const anyopaque,
-    err: *?Error,
-) (TracingError || error{FfiError})!void {
+    err: *?AnyError,
+) (TracingError || AnyError.Error)!void {
     if (!self.wouldTrace(event.metadata)) return;
     const d = self.thread_data.get().?;
     try d.call_stack.emitEvent(event, formatter, data, err);
@@ -889,7 +889,7 @@ pub fn wouldTrace(self: *const Tracing, metadata: *const ProxyTracing.Metadata) 
 /// Tries to register the current thread with the subsystem.
 ///
 /// Upon registration, the current thread is assigned a new tracing call stack.
-pub fn registerThread(self: *Tracing, err: *?Error) (TracingError || tls.TlsError || error{FfiError})!void {
+pub fn registerThread(self: *Tracing, err: *?AnyError) (TracingError || tls.TlsError || AnyError.Error)!void {
     if (!self.isEnabled()) return;
     if (self.thread_data.get() != null) return error.ThreadRegistered;
 
@@ -925,8 +925,8 @@ const ThreadData = struct {
 
     fn init(
         owner: *Tracing,
-        err: *?Error,
-    ) (TracingError || tls.TlsError || error{FfiError})!*ThreadData {
+        err: *?AnyError,
+    ) (TracingError || tls.TlsError || AnyError.Error)!*ThreadData {
         const data = try allocator.create(ThreadData);
         errdefer allocator.destroy(data);
 
@@ -975,8 +975,8 @@ const CallStack = struct {
 
     fn init(
         owner: *const Tracing,
-        err: *?Error,
-    ) (TracingError || error{FfiError})!*CallStack {
+        err: *?AnyError,
+    ) (TracingError || AnyError.Error)!*CallStack {
         const call_stack = try allocator.create(CallStack);
         errdefer allocator.destroy(call_stack);
         call_stack.* = CallStack{
@@ -1095,8 +1095,8 @@ const CallStack = struct {
         desc: *const ProxyTracing.SpanDesc,
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
-        err: *?Error,
-    ) (TracingError || error{FfiError})!*ProxyTracing.Span {
+        err: *?AnyError,
+    ) (TracingError || AnyError.Error)!*ProxyTracing.Span {
         if (!self.mutex.tryLock()) return error.CallStackInUse;
         defer self.mutex.unlock();
         if (self.mutex.lock_count == 1) return error.CallStackNotBound;
@@ -1134,8 +1134,8 @@ const CallStack = struct {
         event: *const ProxyTracing.Event,
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
-        err: *?Error,
-    ) (TracingError || error{FfiError})!void {
+        err: *?AnyError,
+    ) (TracingError || AnyError.Error)!void {
         if (!self.mutex.tryLock()) return error.CallStackInUse;
         defer self.mutex.unlock();
         if (self.mutex.lock_count == 1) return error.CallStackNotBound;
@@ -1154,7 +1154,7 @@ const CallStack = struct {
             data,
             &written_characters,
         );
-        try Error.initChecked(err, result);
+        try AnyError.initChecked(err, result);
         const message = format_buffer[0..written_characters];
 
         const now = time.Time.now();
@@ -1177,8 +1177,8 @@ const CallStack = struct {
             desc: *const ProxyTracing.SpanDesc,
             formatter: *const ProxyTracing.Formatter,
             data: ?*const anyopaque,
-            err: *?Error,
-        ) (TracingError || error{FfiError})!*StackFrame {
+            err: *?AnyError,
+        ) (TracingError || AnyError.Error)!*StackFrame {
             const rest_buffer = owner.buffer[owner.cursor..];
 
             var written_characters: usize = undefined;
@@ -1188,7 +1188,7 @@ const CallStack = struct {
                 data,
                 &written_characters,
             );
-            try Error.initChecked(err, result);
+            try AnyError.initChecked(err, result);
             const message = rest_buffer[0..written_characters];
 
             var num_created_spans: usize = 0;
@@ -1267,21 +1267,21 @@ const VTableImpl = struct {
 
     fn createCallStack(ptr: *anyopaque, call_stack: **ProxyTracing.CallStack) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         if (ctx.tracing.createCallStack(&err)) |cs| {
             call_stack.* = cs;
-            return Error.intoCResult(null);
+            return AnyError.intoCResult(null);
         } else |e| switch (e) {
             error.FfiError => return err.?.err,
-            else => return Error.initError(e).err,
+            else => return AnyError.initError(e).err,
         }
     }
     fn destroyCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.destroyCallStack(
             call_stack,
-        ) catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ) catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn replaceCurrentCallStack(
         ptr: *anyopaque,
@@ -1291,27 +1291,27 @@ const VTableImpl = struct {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         old.* = ctx.tracing.replaceCurrentCallStack(
             call_stack,
-        ) catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ) catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn unblockCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.unblockCallStack(
             call_stack,
-        ) catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ) catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn suspendCurrentCallStack(ptr: *anyopaque, mark_blocked: bool) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.suspendCurrentCallStack(
             mark_blocked,
-        ) catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ) catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn resumeCurrentCallStack(ptr: *anyopaque) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.resumeCurrentCallStack() catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ctx.tracing.resumeCurrentCallStack() catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn pushSpan(
         ptr: *anyopaque,
@@ -1321,13 +1321,13 @@ const VTableImpl = struct {
         data: ?*const anyopaque,
     ) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         if (ctx.tracing.pushSpanCustom(desc, formatter, data, &err)) |sp| {
             span.* = sp;
-            return Error.intoCResult(null);
+            return AnyError.intoCResult(null);
         } else |e| switch (e) {
             error.FfiError => return err.?.err,
-            else => return Error.initError(e).err,
+            else => return AnyError.initError(e).err,
         }
     }
     fn popSpan(
@@ -1335,8 +1335,8 @@ const VTableImpl = struct {
         span: *ProxyTracing.Span,
     ) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.popSpan(span) catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ctx.tracing.popSpan(span) catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn emitEvent(
         ptr: *anyopaque,
@@ -1345,12 +1345,12 @@ const VTableImpl = struct {
         data: ?*const anyopaque,
     ) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         if (ctx.tracing.emitEventCustom(event, formatter, data, &err)) |_| {
-            return Error.intoCResult(null);
+            return AnyError.intoCResult(null);
         } else |e| switch (e) {
             error.FfiError => return err.?.err,
-            else => return Error.initError(e).err,
+            else => return AnyError.initError(e).err,
         }
     }
     fn isEnabled(ptr: *anyopaque) callconv(.C) bool {
@@ -1359,23 +1359,23 @@ const VTableImpl = struct {
     }
     fn registerThread(ptr: *anyopaque) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         if (ctx.tracing.registerThread(&err)) |_| {
-            return Error.intoCResult(null);
+            return AnyError.intoCResult(null);
         } else |e| switch (e) {
             error.FfiError => return err.?.err,
-            else => return Error.initError(e).err,
+            else => return AnyError.initError(e).err,
         }
     }
     fn unregisterThread(ptr: *anyopaque) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.unregisterThread() catch |err| return Error.initError(err).err;
-        return Error.intoCResult(null);
+        ctx.tracing.unregisterThread() catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
     }
     fn flush(ptr: *anyopaque) callconv(.C) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.flush();
-        return Error.intoCResult(null);
+        return AnyError.intoCResult(null);
     }
 };
 

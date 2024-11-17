@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 
 const heap = @import("../../heap.zig");
-const Error = @import("../../errors.zig").Error;
+const AnyError = @import("../../AnyError.zig");
 const Version = @import("../../Version.zig");
 
 const graph = @import("../graph.zig");
@@ -462,7 +462,7 @@ pub fn loadSet(
         }
 
         // Construct the instance.
-        var err: ?Error = null;
+        var err: ?AnyError = null;
         errdefer if (err) |e| e.deinit();
         const instance = InstanceHandle.initExportedInstance(
             self,
