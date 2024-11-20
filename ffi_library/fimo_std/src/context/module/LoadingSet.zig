@@ -4,6 +4,7 @@ const Mutex = std.Thread.Mutex;
 
 const heap = @import("../../heap.zig");
 const Path = @import("../../path.zig").Path;
+const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
 const Version = @import("../../Version.zig");
 
 const graph = @import("../graph.zig");
@@ -13,14 +14,17 @@ const ModuleHandle = @import("ModuleHandle.zig");
 const SymbolRef = @import("SymbolRef.zig");
 const System = @import("System.zig");
 
+const Context = @import("../../context.zig");
 const ProxyModule = @import("../proxy_context/module.zig");
 
 const allocator = heap.fimo_allocator;
 const Self = @This();
 
 mutex: Mutex = .{},
+context: *Context,
 is_loading: bool = false,
 should_recreate_map: bool = false,
+module_load_path: OwnedPathUnmanaged,
 modules: std.StringArrayHashMapUnmanaged(ModuleInfo) = .{},
 symbols: std.ArrayHashMapUnmanaged(
     SymbolRef.Id,
@@ -113,9 +117,23 @@ const ModuleInfo = struct {
 
 const Queue = std.ArrayListUnmanaged(*ModuleInfo);
 
-pub fn init() Allocator.Error!*Self {
+pub fn init(context: *Context) Allocator.Error!*Self {
+    context.ref();
+    errdefer context.unref();
+
+    context.module.sys.lock();
+    defer context.module.sys.unlock();
+    const module_load_path = try OwnedPathUnmanaged.initPath(
+        allocator,
+        context.module.sys.tmp_dir.path.asPath(),
+    );
+    errdefer module_load_path.deinit(allocator);
+
     const set = try allocator.create(Self);
-    set.* = .{};
+    set.* = .{
+        .context = context,
+        .module_load_path = module_load_path,
+    };
     return set;
 }
 
@@ -132,6 +150,8 @@ pub fn deinit(self: *Self) void {
         entry.value.deinit();
     }
     self.symbols.clearAndFree(allocator);
+    self.module_load_path.deinit(allocator);
+    self.context.unref();
     allocator.destroy(self);
 }
 
@@ -193,7 +213,6 @@ pub fn getSymbol(self: *const Self, name: []const u8, ns: []const u8, version: V
 
 fn addModuleFromExport(
     self: *Self,
-    sys: *System,
     module_handle: *ModuleHandle,
     @"export": *const ProxyModule.Export,
     owner: ?*const ProxyModule.OpaqueInstance,
@@ -203,7 +222,7 @@ fn addModuleFromExport(
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
-            sys.logError(
+            self.context.module.sys.logError(
                 "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{long}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
@@ -215,7 +234,7 @@ fn addModuleFromExport(
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
-            sys.logError(
+            self.context.module.sys.logError(
                 "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{long}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
@@ -290,23 +309,16 @@ fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) call
 
 pub fn addModuleDynamic(
     self: *Self,
-    sys: *System,
     owner_inner: *InstanceHandle.Inner,
     @"export": *const ProxyModule.Export,
 ) !void {
     // TODO: Validate export.
 
-    try self.addModuleFromExport(
-        sys,
-        owner_inner.handle.?,
-        @"export",
-        owner_inner.instance.?,
-    );
+    try self.addModuleFromExport(owner_inner.handle.?, @"export", owner_inner.instance.?);
 }
 
 pub fn addModulesFromPath(
     self: *Self,
-    sys: *System,
     module_path: ?Path,
     iterator_fn: ModuleHandle.IteratorFn,
     filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
@@ -314,13 +326,13 @@ pub fn addModulesFromPath(
     bin_ptr: *const anyopaque,
 ) !void {
     const module_handle = if (module_path) |p|
-        try ModuleHandle.initPath(p)
+        try ModuleHandle.initPath(p, self.module_load_path.asPath())
     else
         try ModuleHandle.initLocal(iterator_fn, bin_ptr);
     defer module_handle.unref();
 
     var append_data = AppendModulesData{
-        .sys = sys,
+        .sys = &self.context.module.sys,
         .filter_fn = filter_fn,
         .filter_data = filter_data,
     };
@@ -330,7 +342,7 @@ pub fn addModulesFromPath(
     if (append_data.err) |err| return err;
 
     for (append_data.exports.items) |exp| {
-        try self.addModuleFromExport(sys, module_handle, exp, null);
+        try self.addModuleFromExport(module_handle, exp, null);
     }
 }
 

@@ -96,7 +96,7 @@ pub fn removePseudoInstance(
 /// Initializes a new empty loading set.
 pub fn addLoadingSet(self: *Self) Allocator.Error!*LoadingSet {
     self.logTrace("creating new loading set", .{}, @src());
-    return LoadingSet.init();
+    return LoadingSet.init(self.asContext());
 }
 
 /// Queries the loading set for a module.
@@ -180,7 +180,7 @@ pub fn addLoadingSetModuleDynamic(
     const owner_inner = owner_handle.lock();
     defer owner_inner.unlock();
 
-    try set.addModuleDynamic(&self.sys, owner_inner, @"export");
+    try set.addModuleDynamic(owner_inner, @"export");
 }
 
 /// Adds the modules at a path to the loading set.
@@ -209,7 +209,6 @@ pub fn addLoadingSetModulesFromPath(
     defer set.unlock();
 
     try set.addModulesFromPath(
-        &self.sys,
         module_path,
         iterator_fn,
         filter_fn,

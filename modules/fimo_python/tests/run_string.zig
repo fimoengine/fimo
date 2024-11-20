@@ -28,10 +28,6 @@ pub fn main() !void {
     try ctx.tracing().registerThread(&err);
     defer ctx.tracing().unregisterThread(&err) catch unreachable;
 
-    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch unreachable;
-    defer allocator.free(cwd);
-    ctx.tracing().emitTraceSimple("{s}", .{cwd}, @src());
-
     var module_path = fimo_std.path.PathBuffer.init(allocator);
     defer module_path.deinit();
     try module_path.pushString("fimo_python");

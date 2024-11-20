@@ -146,9 +146,9 @@ pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
     }
 }
 
-pub fn initPath(p: Path) ModuleHandleError!*Self {
+pub fn initPath(p: Path, tmp_dir: Path) ModuleHandleError!*Self {
     var buffer = PathBufferUnmanaged{};
-    errdefer buffer.deinit(allocator);
+    defer buffer.deinit(allocator);
 
     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return error.InvalidPath;
     defer allocator.free(cwd);
@@ -169,22 +169,51 @@ pub fn initPath(p: Path) ModuleHandleError!*Self {
                 link_buffer,
             ) catch return error.InvalidPath;
             const res_p = Path.init(resolved) catch return error.InvalidPath;
-            return Self.initPath(res_p);
+            return Self.initPath(res_p, tmp_dir);
         },
         else => return error.InvalidPath,
     }
 
+    const module_binary = buffer.asPath().fileName() orelse return error.InvalidPath;
+    const module_dir = buffer.asPath().parent() orelse return error.InvalidPath;
+
+    var symlink_path = PathBufferUnmanaged{};
+    errdefer symlink_path.deinit(allocator);
+    try symlink_path.pushPath(allocator, tmp_dir);
+    while (true) {
+        var random_bytes: [8]u8 = undefined;
+        std.crypto.random.bytes(&random_bytes);
+        var suffix: [std.fs.base64_encoder.calcSize(8)]u8 = undefined;
+        _ = std.fs.base64_encoder.encode(&suffix, &random_bytes);
+        const sub_path = try std.fmt.allocPrint(
+            allocator,
+            "module_{s}",
+            .{suffix},
+        );
+        defer allocator.free(sub_path);
+        try symlink_path.pushString(allocator, sub_path);
+
+        std.fs.cwd().symLink(module_dir.raw, symlink_path.asPath().raw, .{
+            .is_directory = true,
+        }) catch |err| switch (err) {
+            error.PathAlreadyExists => _ = symlink_path.pop(),
+            else => return error.InvalidPath,
+        };
+        break;
+    }
+    try symlink_path.pushPath(allocator, module_binary);
+
     const native_path = try OwnedOsPathUnmanaged.initPath(
         allocator,
-        buffer.asPath(),
+        symlink_path.asPath(),
     );
     defer native_path.deinit(allocator);
 
     var handle = try allocator.create(Self);
     errdefer allocator.destroy(handle);
 
-    _ = buffer.pop();
-    handle.path = try buffer.toOwnedPath(allocator);
+    _ = symlink_path.pop();
+    handle.path = try symlink_path.toOwnedPath(allocator);
     errdefer handle.path.deinit(allocator);
 
     const raw_handle = if (comptime builtin.os.tag == .windows)

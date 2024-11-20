@@ -70,7 +70,7 @@ pub const TmpDirUnmanaged = struct {
     }
 
     pub fn deinit(self: *TmpDirUnmanaged, allocator: Allocator) void {
-        std.fs.deleteDirAbsolute(self.path.raw) catch |err| @panic(@errorName(err));
+        std.fs.deleteTreeAbsolute(self.path.raw) catch |err| @panic(@errorName(err));
         self.path.deinit(allocator);
     }
 };
