@@ -24,9 +24,7 @@
 //! - [`fimo_tasks::Context`](fimo_tasks::symbols::fimo_tasks::Context)
 
 #![feature(arbitrary_self_types)]
-#![feature(exposed_provenance)]
 #![feature(result_flattening)]
-#![feature(strict_provenance)]
 #![feature(thread_local)]
 
 use crate::{

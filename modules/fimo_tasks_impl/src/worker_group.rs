@@ -85,7 +85,7 @@ impl WorkerGroupImpl {
             .event_loop
             .read()
             .expect("failed to lock event loop handle");
-        guard.as_ref().map_or(false, |h| h.is_open())
+        guard.as_ref().is_some_and(|h| h.is_open())
     }
 
     pub fn is_worker(&self) -> bool {
