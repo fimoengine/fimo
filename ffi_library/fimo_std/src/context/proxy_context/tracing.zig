@@ -934,7 +934,7 @@ pub const Config = extern struct {
     /// Array of subscribers to register with the tracing subsystem.
     ///
     /// The ownership of the subscribers is transferred to the context.
-    subscribers: ?[*]Subscriber = null,
+    subscribers: ?[*]const Subscriber = null,
     /// Number of subscribers to register with the tracing subsystem.
     subscriber_count: usize = 0,
 
@@ -1038,12 +1038,31 @@ pub fn emitStackTrace(
             .line_number = @intCast(location.line),
         },
     };
-    self.emitEventCustom(
+    try self.emitEventCustom(
         &event,
         stackTraceFormatter,
         &stack_trace,
         err,
     );
+}
+
+/// Emits a new error event dumping the stack trace.
+///
+/// The stack trace may be cut of, if the length exceeds the internal
+/// formatting buffer size.
+pub fn emitStackTraceSimple(
+    self: Tracing,
+    stack_trace: std.builtin.StackTrace,
+    location: std.builtin.SourceLocation,
+) void {
+    var err: ?AnyError = null;
+    return self.emitStackTrace(
+        null,
+        null,
+        stack_trace,
+        location,
+        &err,
+    ) catch @panic("Trace failed");
 }
 
 /// Emits a new event with a custom formatter.
@@ -1189,6 +1208,116 @@ pub fn emitTrace(
         args,
         err,
     );
+}
+
+/// Emits a new error event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitErrSimple(
+    self: Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    var err: ?AnyError = null;
+    return self.emitErr(
+        null,
+        null,
+        location,
+        fmt,
+        args,
+        &err,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new warn event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitWarnSimple(
+    self: Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    var err: ?AnyError = null;
+    return self.emitWarn(
+        null,
+        null,
+        location,
+        fmt,
+        args,
+        &err,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new info event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitInfoSimple(
+    self: Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    var err: ?AnyError = null;
+    return self.emitInfo(
+        null,
+        null,
+        location,
+        fmt,
+        args,
+        &err,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new debug event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitDebugSimple(
+    self: Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    var err: ?AnyError = null;
+    return self.emitDebug(
+        null,
+        null,
+        location,
+        fmt,
+        args,
+        &err,
+    ) catch @panic("Trace failed");
+}
+
+/// Emits a new trace event with the standard formatter.
+///
+/// The message is formatted using the default formatter of the zig
+/// standard library. The message may be cut of, if the length exceeds
+/// the internal formatting buffer size.
+pub fn emitTraceSimple(
+    self: Tracing,
+    comptime fmt: []const u8,
+    args: anytype,
+    location: std.builtin.SourceLocation,
+) void {
+    var err: ?AnyError = null;
+    return self.emitTrace(
+        null,
+        null,
+        location,
+        fmt,
+        args,
+        &err,
+    ) catch @panic("Trace failed");
 }
 
 /// Checks whether the tracing subsystem is enabled.
@@ -1372,28 +1501,13 @@ const DefaultSubscriber = struct {
 
         // Write the event message.
         var cursor: usize = 0;
-        const is_error = switch (event.metadata.level) {
-            .off => false,
-            .err => blk: {
-                cursor += format(cursor, error_fmt, .{ event.metadata.name, message });
-                break :blk true;
-            },
-            .warn => blk: {
-                cursor += format(cursor, warn_fmt, .{ event.metadata.name, message });
-                break :blk false;
-            },
-            .info => blk: {
-                cursor += format(cursor, info_fmt, .{ event.metadata.name, message });
-                break :blk false;
-            },
-            .debug => blk: {
-                cursor += format(cursor, debug_fmt, .{ event.metadata.name, message });
-                break :blk false;
-            },
-            .trace => blk: {
-                cursor += format(cursor, trace_fmt, .{ event.metadata.name, message });
-                break :blk false;
-            },
+        cursor += switch (event.metadata.level) {
+            .off => 0,
+            .err => format(cursor, error_fmt, .{ event.metadata.name, message }),
+            .warn => format(cursor, warn_fmt, .{ event.metadata.name, message }),
+            .info => format(cursor, info_fmt, .{ event.metadata.name, message }),
+            .debug => format(cursor, debug_fmt, .{ event.metadata.name, message }),
+            .trace => format(cursor, trace_fmt, .{ event.metadata.name, message }),
         };
 
         // Write out the file location.
@@ -1433,7 +1547,7 @@ const DefaultSubscriber = struct {
         Self.mutex.lock();
         defer Self.mutex.unlock();
 
-        const writer = if (is_error) std.io.getStdErr().writer() else std.io.getStdOut().writer();
+        const writer = std.io.getStdErr().writer();
         writer.print("{s}", .{Self.print_buffer[0..cursor]}) catch {};
     }
 

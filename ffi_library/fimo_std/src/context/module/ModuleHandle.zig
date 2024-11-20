@@ -24,6 +24,7 @@ path: OwnedPathUnmanaged,
 pub const ModuleHandleError = error{
     InvalidModule,
     InvalidPath,
+    DlOpenError,
 } || PathError || Allocator.Error;
 
 pub const IteratorFn = *const fn (
@@ -149,6 +150,10 @@ pub fn initPath(p: Path) ModuleHandleError!*Self {
     var buffer = PathBufferUnmanaged{};
     errdefer buffer.deinit(allocator);
 
+    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return error.InvalidPath;
+    defer allocator.free(cwd);
+    try buffer.pushString(allocator, cwd);
+
     const stat = std.fs.cwd().statFile(p.raw) catch return error.InvalidPath;
     switch (stat.kind) {
         .file => try buffer.pushPath(allocator, p),
@@ -188,17 +193,17 @@ pub fn initPath(p: Path) ModuleHandleError!*Self {
             null,
             @intFromEnum(windows.LoadLibraryFlags.load_library_search_dll_load_dir) |
                 @intFromEnum(windows.LoadLibraryFlags.load_library_search_default_dirs),
-        ) orelse return error.InvalidPath
+        ) orelse return error.DlOpenError
     else if (comptime builtin.target.isDarwin())
         std.c.dlopen(
             native_path.raw.ptr,
             .{ .NOW = true, .LOCAL = true, .NODELETE = true },
-        ) orelse return error.InvalidPath
+        ) orelse return error.DlOpenError
     else
         std.c.dlopen(
             native_path.raw.ptr,
             .{ .NOW = true, .NODELETE = true },
-        ) orelse return error.InvalidPath;
+        ) orelse return error.DlOpenError;
 
     const iterator = if (comptime builtin.os.tag == .windows)
         windows.kernel32.GetProcAddress(

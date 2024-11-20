@@ -1,5 +1,5 @@
-#ifndef FIPY_LOADER_H
-#define FIPY_LOADER_H
+#ifndef FIPY_META_LOADER_H
+#define FIPY_META_LOADER_H
 
 #include <fimo_std/module.h>
 
@@ -117,4 +117,4 @@ static FIMO_INLINE_ALWAYS FimoResult fipy_load_module(const FipyLoadModule *symb
     return symbol->func(symbol->data, set, filepath);
 }
 
-#endif // FIPY_LOADER_H
+#endif // FIPY_META_LOADER_H

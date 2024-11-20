@@ -827,6 +827,91 @@ pub fn Instance(
         pub const Exports = ExportsT;
         pub const Data = DataT;
 
+        const Self = @This();
+        const requires_state_init = @sizeOf(DataT) != 0;
+        const InitFn = if (@sizeOf(DataT) == 0)
+            fn (ctx: *const @This(), set: *LoadingSet) anyerror!void
+        else
+            fn (ctx: *const @This(), set: *LoadingSet) anyerror!*DataT;
+        const DeinitFn = if (@sizeOf(DataT) == 0)
+            fn (ctx: *const @This()) void
+        else
+            fn (ctx: *const @This(), state: *DataT) void;
+
+        fn InitFnWrapper(comptime f: InitFn) fn (
+            ctx: *const OpaqueInstance,
+            set: *LoadingSet,
+            data: *?*anyopaque,
+        ) callconv(.C) c.FimoResult {
+            return if (@sizeOf(DataT) == 0)
+                struct {
+                    fn wrapper(
+                        ctx: *const OpaqueInstance,
+                        set: *LoadingSet,
+                        data: *?*anyopaque,
+                    ) callconv(.C) c.FimoResult {
+                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
+                        f(ctx_, set) catch |err| {
+                            if (@errorReturnTrace()) |tr|
+                                ctx_.context().tracing().emitStackTraceSimple(tr.*, @src());
+                            return AnyError.initError(err).err;
+                        };
+                        data.* = null;
+                        return AnyError.intoCResult(null);
+                    }
+                }.wrapper
+            else
+                struct {
+                    fn wrapper(
+                        ctx: *const OpaqueInstance,
+                        set: *LoadingSet,
+                        data: *?*anyopaque,
+                    ) callconv(.C) c.FimoResult {
+                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
+                        data.* = f(ctx_, set) catch |err| {
+                            if (@errorReturnTrace()) |tr|
+                                ctx_.context().tracing().emitStackTraceSimple(tr.*, @src());
+                            return AnyError.initError(err).err;
+                        };
+                        return AnyError.intoCResult(null);
+                    }
+                }.wrapper;
+        }
+
+        fn DeinitFnWrapper(comptime f: DeinitFn) fn (
+            ctx: *const OpaqueInstance,
+            data: ?*anyopaque,
+        ) callconv(.C) void {
+            return if (@sizeOf(DataT) == 0)
+                struct {
+                    fn wrapper(
+                        ctx: *const OpaqueInstance,
+                        data: ?*anyopaque,
+                    ) callconv(.C) void {
+                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
+                        std.debug.assert(data == null);
+                        f(ctx_);
+                    }
+                }.wrapper
+            else
+                struct {
+                    fn wrapper(
+                        ctx: *const OpaqueInstance,
+                        data: ?*anyopaque,
+                    ) callconv(.C) void {
+                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
+                        const data_: ?*DataT = @alignCast(@ptrCast(data));
+                        f(ctx_, data_.?);
+                    }
+                }.wrapper;
+        }
+
+        /// Returns the contained context without increasing the
+        /// reference count.
+        pub fn context(self: *const @This()) Context {
+            return Context.initC(self.ctx);
+        }
+
         /// Includes a namespace by the module.
         ///
         /// Once included, the module gains access to the symbols
@@ -983,8 +1068,8 @@ pub fn Instance(
             err: *?AnyError,
         ) AnyError.Error!*const symbol.symbol {
             const s = try self.loadSymbolRaw(
-                symbol.name.ptr,
-                symbol.namespace.ptr,
+                symbol.name,
+                symbol.namespace,
                 symbol.version,
                 err,
             );
@@ -1522,7 +1607,7 @@ pub const LoadingSet = opaque {
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
         const Callbacks = struct {
-            fn f(module: *const Export, data: ?*anyopaque) callconv(.C) void {
+            fn f(module: *const Export, data: ?*anyopaque) callconv(.C) bool {
                 const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
                 return filter(module, o);
             }
@@ -1532,7 +1617,6 @@ pub const LoadingSet = opaque {
             if (path) |p| p.ptr else null,
             @constCast(obj),
             Callbacks.f,
-            Callbacks.onErr,
             err,
         );
     }
@@ -1832,6 +1916,8 @@ pub const Export = extern struct {
         comptime imports: anytype,
         comptime exports: anytype,
         comptime modifiers: []const Export.Modifier,
+        comptime init_fn: ?InstanceT.InitFn,
+        comptime deinit_fn: ?InstanceT.DeinitFn,
     ) void {
         comptime {
             const ParametersT = InstanceT.Parameters;
@@ -1891,12 +1977,12 @@ pub const Export = extern struct {
                     static_exp_count += 1;
                     max_static_exp_pos = @max(max_static_exp_pos, std.meta.fieldIndex(ExportsT, p.name).?);
                 } else {
-                    const cons = @field(e, "constructor");
-                    std.debug.assert(@typeInfo(cons).@"fn".params.len == 1);
-                    std.debug.assert(@typeInfo(cons).@"fn".params[0].type == *const InstanceT);
-                    std.debug.assert(@typeInfo(cons).@"fn".return_type == anyerror!*symbol.symbol);
+                    const cons = @typeInfo(@TypeOf(@field(e, "init")));
+                    std.debug.assert(cons.@"fn".params.len == 1);
+                    std.debug.assert(cons.@"fn".params[0].type == *const InstanceT);
+                    std.debug.assert(@typeInfo(cons.@"fn".return_type.?).error_union.payload == *symbol.symbol);
 
-                    const dest = @field(e, "destructor");
+                    const dest = @TypeOf(@field(e, "deinit"));
                     std.debug.assert(@typeInfo(dest).@"fn".params.len == 1);
                     std.debug.assert(@typeInfo(dest).@"fn".params[0].type == *symbol.symbol);
                     std.debug.assert(@typeInfo(dest).@"fn".return_type == void);
@@ -1929,8 +2015,8 @@ pub const Export = extern struct {
                 const e = @field(exports, p.name);
                 const symbol: Symbol = @field(e, "id");
                 if (!@hasField(@TypeOf(e), "symbol")) {
-                    const cons = @field(e, "constructor");
-                    const dest = @field(e, "destructor");
+                    const cons = @field(e, "init");
+                    const dest = @field(e, "deinit");
 
                     const Wrapper = struct {
                         fn init(
@@ -1958,6 +2044,9 @@ pub const Export = extern struct {
                 }
             }
 
+            if (init_fn == null and deinit_fn != null or init_fn != null and deinit_fn == null)
+                @compileError("The init and deinit functions must both be specified or left unspecified");
+
             const c_params = params;
             const c_res = res;
             const c_ns = ns;
@@ -1984,6 +2073,14 @@ pub const Export = extern struct {
                 .dynamic_symbol_exports_count = dynamic_exp_count,
                 .modifiers = if (c_modifiers.len > 0) c_modifiers.ptr else null,
                 .modifiers_count = c_modifiers.len,
+                .module_constructor = if (init_fn) |f|
+                    &InstanceT.InitFnWrapper(f)
+                else
+                    null,
+                .module_destructor = if (deinit_fn) |f|
+                    &InstanceT.DeinitFnWrapper(f)
+                else
+                    null,
             };
             exportModuleInner(exp);
         }
@@ -2391,6 +2488,8 @@ test "Export modules" {
             .a1 = .{ .id = A1, .symbol = &@as(i32, 10) },
         },
         &.{},
+        null,
+        null,
     );
 
     const B = Instance(
@@ -2418,6 +2517,8 @@ test "Export modules" {
             .b1 = .{ .id = B1, .symbol = &@as(i32, 77) },
         },
         &.{},
+        null,
+        null,
     );
 
     const C = Instance(
@@ -2527,6 +2628,8 @@ test "Export modules" {
         },
         .{},
         &.{},
+        null,
+        null,
     );
 }
 

@@ -252,7 +252,7 @@ pub fn checkError(err: *?Self) Error!void {
 
 /// Initializes the error and checks whether it contains an error.
 pub fn initChecked(err: *?Self, c_result: c.FimoResult) Error!void {
-    std.debug.assert(err.* == null);
+    if (err.*) |e| e.deinit();
     err.* = Self.initC(c_result);
     return checkError(err);
 }

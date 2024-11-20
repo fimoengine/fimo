@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["modules/*", "rust/*", "src/*"]
-exclude = ["modules/python_module_loader"]
+exclude = ["modules/fimo_python"]
 
 [workspace.package]
 version = "0.1.0"

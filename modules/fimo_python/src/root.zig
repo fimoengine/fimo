@@ -1,0 +1,244 @@
+const std = @import("std");
+const builtin = @import("builtin");
+const testing = std.testing;
+
+const fimo_std = @import("fimo_std");
+const fimo_python_meta = @import("fimo_python_meta");
+
+const heap = fimo_std.heap;
+
+const Context = fimo_std.Context;
+const Tracing = Context.Tracing;
+const Module = Context.Module;
+
+const Python = @cImport({
+    @cInclude("Python.h");
+});
+
+const Instance = Module.Instance(
+    void,
+    extern struct {
+        home: [*:0]const u8,
+        module_path: [*:0]const u8,
+        lib_path: [*:0]const u8,
+        dynload_path: [*:0]const u8,
+    },
+    void,
+    extern struct {
+        run_string: *const fimo_python_meta.RunString,
+    },
+    State,
+);
+comptime {
+    Module.Export.addExport(
+        Instance,
+        "fimo_python",
+        "Embedded Python interpreter",
+        "Gabriel Borrelli",
+        "MIT + APACHE 2.0",
+        .{},
+        .{
+            .home = Module.Export.Resource{ .path = "" },
+            .module_path = Module.Export.Resource{ .path = "module.fimo_module" },
+            .lib_path = Module.Export.Resource{ .path = "Lib" },
+            .dynload_path = Module.Export.Resource{ .path = "DLLs" },
+        },
+        &.{},
+        .{},
+        .{
+            .run_string = .{
+                .id = fimo_python_meta.symbols.RunString,
+                .init = State.initRunString,
+                .deinit = State.deinitRunString,
+            },
+        },
+        &.{},
+        State.init,
+        State.deinit,
+    );
+}
+
+const State = struct {
+    thread_state: *PyThreadState,
+
+    const PyConfig = Python.PyConfig;
+    const PyConfig_Clear = Python.PyConfig_Clear;
+    const PyConfig_InitIsolatedConfig = Python.PyConfig_InitIsolatedConfig;
+    const PyConfig_SetBytesString = Python.PyConfig_SetBytesString;
+
+    const PyStatus = Python.PyStatus;
+    const PyStatus_Exception = Python.PyStatus_Exception;
+
+    const PyMem_RawFree = Python.PyMem_RawFree;
+    const Py_DecodeLocale = Python.Py_DecodeLocale;
+    const PyWideStringList_Append = Python.PyWideStringList_Append;
+
+    const Py_InitializeFromConfig = Python.Py_InitializeFromConfig;
+    const Py_FinalizeEx = Python.Py_FinalizeEx;
+
+    const PyThreadState = opaque {};
+    extern fn PyEval_SaveThread() ?*PyThreadState;
+    extern fn PyEval_RestoreThread(?*PyThreadState) void;
+    extern fn PyThreadState_Clear(?*PyThreadState) void;
+    extern fn PyThreadState_New(?*PyInterpreterState) ?*PyThreadState;
+    extern fn PyThreadState_DeleteCurrent() void;
+
+    extern fn Py_EndInterpreter(?*PyThreadState) void;
+    extern fn Py_NewInterpreterFromConfig(tstate_p: [*c]?*PyThreadState, config: [*c]const PyInterpreterConfig) PyStatus;
+
+    const PyInterpreterState = Python.PyInterpreterState;
+    const PyInterpreterConfig = Python.PyInterpreterConfig;
+    const PyInterpreterState_Main = Python.PyInterpreterState_Main;
+
+    fn init(ctx: *const Instance, set: *Module.LoadingSet) !*State {
+        ctx.context().tracing().emitTraceSimple("initializing fimo_python", .{}, @src());
+        _ = set;
+
+        const self = try heap.fimo_allocator.create(State);
+        errdefer heap.fimo_allocator.destroy(self);
+
+        var cfg: PyConfig = undefined;
+        PyConfig_InitIsolatedConfig(&cfg);
+        defer PyConfig_Clear(&cfg);
+
+        var status = PyConfig_SetBytesString(&cfg, &cfg.home, ctx.resources.home);
+        if (PyStatus_Exception(status) != 0) return error.HomeConfig;
+
+        status = PyConfig_SetBytesString(&cfg, &cfg.program_name, ctx.resources.module_path);
+        if (PyStatus_Exception(status) != 0) return error.ProgramNameConfig;
+
+        cfg.module_search_paths_set = 1;
+        const lib_path = Py_DecodeLocale(ctx.resources.lib_path, null);
+        defer if (lib_path != null) PyMem_RawFree(lib_path);
+        if (lib_path == null) return error.DecodeLibPath;
+        status = PyWideStringList_Append(&cfg.module_search_paths, lib_path);
+        if (PyStatus_Exception(status) != 0) return error.AppendLibPath;
+
+        if (builtin.target.os.tag == .windows) {
+            const dynload_path = Py_DecodeLocale(ctx.resources.dynload_path, null);
+            defer if (dynload_path != null) PyMem_RawFree(dynload_path);
+            if (dynload_path == null) return error.DecodeDynloadPath;
+            status = PyWideStringList_Append(&cfg.module_search_paths, dynload_path);
+            if (PyStatus_Exception(status) != 0) return error.AppendDynloadPath;
+        }
+
+        status = Py_InitializeFromConfig(&cfg);
+        if (PyStatus_Exception(status) != 0) {
+            ctx.context().tracing().emitErrSimple(
+                "{s}",
+                .{@as([*:0]const u8, status.err_msg)},
+                @src(),
+            );
+            return error.PythonInit;
+        }
+
+        self.* = .{ .thread_state = PyEval_SaveThread().? };
+        return self;
+    }
+
+    fn deinit(ctx: *const Instance, self: *State) void {
+        PyEval_RestoreThread(self.thread_state);
+        const result = Py_FinalizeEx();
+        if (result != 0) ctx.context().tracing().emitErrSimple(
+            "Python interpreter could not be finalized",
+            .{},
+            @src(),
+        );
+        heap.fimo_allocator.destroy(self);
+    }
+
+    fn initRunString(ctx: *const Instance) !*fimo_python_meta.RunString {
+        const sym = try heap.fimo_allocator.create(fimo_python_meta.RunString);
+        errdefer heap.fimo_allocator.destroy(sym);
+
+        sym.* = fimo_python_meta.RunString{
+            .data = @constCast(ctx),
+            .call_f = &struct {
+                fn f(data: ?*anyopaque, code: [*:0]const u8, home: ?[*:0]const u8) callconv(.C) fimo_std.c.FimoResult {
+                    const ctx_: *const Instance = @alignCast(@ptrCast(data));
+                    const code_ = std.mem.span(code);
+                    const home_ = if (home) |h| std.mem.span(h) else null;
+                    State.runString(ctx_, code_, home_) catch |err| {
+                        if (@errorReturnTrace()) |tr|
+                            ctx_.context().tracing().emitStackTraceSimple(tr.*, @src());
+                        return fimo_std.AnyError.initError(err).err;
+                    };
+                    return fimo_std.AnyError.intoCResult(null);
+                }
+            }.f,
+        };
+
+        return sym;
+    }
+
+    fn deinitRunString(sym: *fimo_python_meta.RunString) void {
+        heap.fimo_allocator.destroy(sym);
+    }
+
+    fn runString(ctx: *const Instance, code: [:0]const u8, home: ?[:0]const u8) !void {
+        _ = ctx;
+
+        const main_interpreter = PyInterpreterState_Main();
+        const state = PyThreadState_New(main_interpreter);
+        defer {
+            PyEval_RestoreThread(state);
+            PyThreadState_Clear(state);
+            PyThreadState_DeleteCurrent();
+        }
+
+        const cfg = PyInterpreterConfig{
+            .use_main_obmalloc = 0,
+            .allow_fork = 0,
+            .allow_exec = 0,
+            .allow_threads = 1,
+            .allow_daemon_threads = 0,
+            .check_multi_interp_extensions = 1,
+            .gil = Python.PyInterpreterConfig_OWN_GIL,
+        };
+
+        var sub_state: *PyThreadState = undefined;
+        const status = Py_NewInterpreterFromConfig(@ptrCast(&sub_state), &cfg);
+        if (PyStatus_Exception(status) != 0) return error.SubInterpreterInit;
+        defer Py_EndInterpreter(sub_state);
+
+        if (home) |h| {
+            const path = Python.PySys_GetObject("path");
+            defer Python.Py_DecRef(path);
+
+            const home_object = Python.PyUnicode_FromString(h);
+            if (home_object == null) {
+                const ex = Python.PyErr_Occurred();
+                Python.PyErr_DisplayException(ex);
+                Python.PyErr_Clear();
+                return error.SetHomePath;
+            }
+            defer Python.Py_DecRef(home_object);
+
+            const result = Python.PyList_Append(path, home_object);
+            if (result != 0) {
+                const ex = Python.PyErr_Occurred();
+                Python.PyErr_DisplayException(ex);
+                Python.PyErr_Clear();
+                return error.AppendHomePath;
+            }
+        }
+
+        const compiled_code = Python.Py_CompileString(code, "<string_eval>", Python.Py_file_input);
+        if (compiled_code == null) {
+            const ex = Python.PyErr_Occurred();
+            Python.PyErr_DisplayException(ex);
+            Python.PyErr_Clear();
+            return error.CompileCode;
+        }
+        defer Python.Py_DecRef(compiled_code);
+
+        const code_module = Python.PyImport_ExecCodeModule("__main__", compiled_code);
+        if (code_module == null) {
+            const ex = Python.PyErr_Occurred();
+            Python.PyErr_DisplayException(ex);
+            Python.PyErr_Clear();
+            return error.ExecudeCode;
+        }
+        defer Python.Py_DecRef(code_module);
+    }
+};

@@ -414,7 +414,7 @@ pub fn loadSet(
     set.should_recreate_map = false;
     var queue = try set.createQueue(self);
     defer queue.deinit(allocator);
-    outer: while (queue.items.len > 0) {
+    outer: while (queue.items.len > 0 or set.should_recreate_map) {
         if (set.should_recreate_map) {
             set.should_recreate_map = false;
             queue.deinit(allocator);
@@ -463,7 +463,6 @@ pub fn loadSet(
 
         // Construct the instance.
         var err: ?AnyError = null;
-        errdefer if (err) |e| e.deinit();
         const instance = InstanceHandle.initExportedInstance(
             self,
             set,
@@ -478,6 +477,7 @@ pub fn loadSet(
                     .{ instance_name, err.?, err.? },
                     @src(),
                 );
+                err.?.deinit();
                 instance_info.signalError();
                 continue :outer;
             },
@@ -487,8 +487,8 @@ pub fn loadSet(
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
         errdefer inner.deinit().release();
-        defer inner.unlock();
         try self.addInstance(inner);
+        defer inner.unlock();
         instance_info.signalSuccess(instance.info);
     }
 }

@@ -13,13 +13,17 @@ pub fn build(b: *std.Build) void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
+    const modules = b.addWriteFiles();
+    b.installDirectory(.{
+        .source_dir = modules.getDirectory(),
+        .install_dir = .{ .custom = "modules" },
+        .install_subdir = ".",
+    });
+
     const test_step = b.step("test", "Run unit tests");
     const doc_step = b.step("doc", "Generate documentation");
     const ci_step = b.step("ci", "Run ci checks");
     var packages = std.StringArrayHashMap(*std.Build.Dependency).init(b.allocator);
-
-    const modules_dir = b.pathJoin(&.{ b.install_path, "modules/" });
-    defer b.allocator.free(modules_dir);
 
     const enable_bindings = b.option(
         bool,
@@ -33,9 +37,23 @@ pub fn build(b: *std.Build) void {
             .{
                 .target = target,
                 .optimize = optimize,
+                .@"build-static" = true,
+                .@"build-dynamic" = true,
             },
+            modules,
             test_step,
             doc_step,
+            ci_step,
+            &packages,
+        );
+        _ = add_package(
+            b,
+            "fimo_python_meta",
+            .{ .target = target, .optimize = optimize },
+            modules,
+            test_step,
+            doc_step,
+            ci_step,
             &packages,
         );
     }
@@ -46,13 +64,14 @@ pub fn build(b: *std.Build) void {
         "Enable Rust bindings",
     ) orelse true;
     if (enable_rust_bindings) {
-        _ = add_package2(
+        _ = add_package(
             b,
             "fimo_std_rs",
             .{
                 .target = target,
                 .optimize = optimize,
             },
+            modules,
             test_step,
             doc_step,
             ci_step,
@@ -66,16 +85,18 @@ pub fn build(b: *std.Build) void {
         "Enable modules",
     ) orelse true;
     if (enable_modules) {
-        _ = add_module(
+        _ = add_package(
             b,
             "fimo_python",
             .{
                 .target = target,
                 .optimize = optimize,
-                .modules_dir = @as([]const u8, @constCast(modules_dir)),
+                .modules = modules.getDirectory(),
             },
+            modules,
             test_step,
             doc_step,
+            ci_step,
             &packages,
         );
     }
@@ -94,135 +115,11 @@ pub fn build(b: *std.Build) void {
     }
 }
 
-fn add_module(
-    b: *std.Build,
-    name: []const u8,
-    args: anytype,
-    test_step: *std.Build.Step,
-    doc_step: *std.Build.Step,
-    packages: *std.StringArrayHashMap(*std.Build.Dependency),
-) ?*std.Build.Dependency {
-    if (packages.contains(name)) {
-        @panic(b.fmt("package `{s}` added multiple times", .{name}));
-    }
-
-    // Expose an option to disable the inclusion of the package.
-    if (!(b.option(
-        bool,
-        b.fmt("{s}", .{name}),
-        b.fmt("Enable the `{s}` module", .{name}),
-    ) orelse true)) {
-        return null;
-    }
-
-    // Add the package.
-    const dep = b.dependency(name, args);
-    packages.put(name, dep) catch @panic("OOM");
-    b.getUninstallStep().dependOn(dep.builder.getUninstallStep());
-
-    // Wire up test and doc steps.
-    if (dep.builder.top_level_steps.get("test")) |dep_test_step| {
-        test_step.dependOn(&dep_test_step.step);
-    }
-    if (dep.builder.top_level_steps.get("doc")) |dep_doc_step| {
-        doc_step.dependOn(&dep_doc_step.step);
-    }
-
-    // Install all artifacts.
-    const module_path = b.pathJoin(&.{ dep.builder.install_path, "module" });
-    defer b.allocator.free(module_path);
-    const artifacts_path = b.path(std.fs.path.relative(
-        b.allocator,
-        b.build_root.path orelse ".",
-        module_path,
-    ) catch @panic("OOM"));
-    const install_dir = b.fmt("modules/{s}", .{name});
-    const install_step = b.addInstallDirectory(.{
-        .source_dir = artifacts_path,
-        .install_dir = .prefix,
-        .install_subdir = install_dir,
-    });
-    install_step.step.dependOn(dep.builder.getInstallStep());
-    b.getInstallStep().dependOn(&install_step.step);
-
-    if (dep.builder.top_level_steps.get("doc")) |dep_doc_step| {
-        const install_doc_step = b.addInstallDirectory(.{
-            .source_dir = artifacts_path,
-            .install_dir = .prefix,
-            .install_subdir = install_dir,
-        });
-        install_doc_step.step.dependOn(&dep_doc_step.step);
-        doc_step.dependOn(&install_doc_step.step);
-    }
-
-    return dep;
-}
-
 fn add_package(
     b: *std.Build,
     name: []const u8,
     args: anytype,
-    test_step: *std.Build.Step,
-    doc_step: *std.Build.Step,
-    packages: *std.StringArrayHashMap(*std.Build.Dependency),
-) ?*std.Build.Dependency {
-    if (packages.contains(name)) {
-        @panic(b.fmt("package `{s}` added multiple times", .{name}));
-    }
-
-    // Expose an option to disable the inclusion of the package.
-    if (!(b.option(
-        bool,
-        b.fmt("{s}", .{name}),
-        b.fmt("Enable the `{s}` package", .{name}),
-    ) orelse true)) {
-        return null;
-    }
-
-    // Add the package.
-    const dep = b.dependency(name, args);
-    packages.put(name, dep) catch @panic("OOM");
-    b.getUninstallStep().dependOn(dep.builder.getUninstallStep());
-
-    // Wire up test and doc steps.
-    if (dep.builder.top_level_steps.get("test")) |dep_test_step| {
-        test_step.dependOn(&dep_test_step.step);
-    }
-    if (dep.builder.top_level_steps.get("doc")) |dep_doc_step| {
-        doc_step.dependOn(&dep_doc_step.step);
-    }
-
-    // Install all artifacts.
-    const artifacts_path = b.path(std.fs.path.relative(
-        b.allocator,
-        b.build_root.path orelse ".",
-        dep.builder.install_path,
-    ) catch @panic("OOM"));
-    const install_step = b.addInstallDirectory(.{
-        .source_dir = artifacts_path,
-        .install_dir = .prefix,
-        .install_subdir = name,
-    });
-    install_step.step.dependOn(dep.builder.getInstallStep());
-    b.getInstallStep().dependOn(&install_step.step);
-
-    if (dep.builder.top_level_steps.get("doc")) |dep_doc_step| {
-        const install_doc_step = b.addInstallDirectory(.{
-            .source_dir = artifacts_path,
-            .install_dir = .prefix,
-            .install_subdir = name,
-        });
-        install_doc_step.step.dependOn(&dep_doc_step.step);
-        doc_step.dependOn(&install_doc_step.step);
-    }
-
-    return dep;
-}
-
-fn add_package2(
-    b: *std.Build,
-    name: []const u8,
-    args: anytype,
+    modules: *std.Build.Step.WriteFile,
     test_step: *std.Build.Step,
     doc_step: *std.Build.Step,
     ci_step: *std.Build.Step,
@@ -244,8 +141,6 @@ fn add_package2(
     // Add the package.
     const dep = b.dependency(name, args);
     packages.put(name, dep) catch @panic("OOM");
-    b.getInstallStep().dependOn(dep.builder.getInstallStep());
-    b.getUninstallStep().dependOn(dep.builder.getUninstallStep());
 
     // Wire up test and ci tests.
     if (dep.builder.top_level_steps.get("test")) |step| {
@@ -284,11 +179,7 @@ fn add_package2(
         }).step);
     }
     if (dep.builder.named_lazy_paths.get("module")) |path| {
-        b.installDirectory(.{
-            .source_dir = path,
-            .install_dir = .{ .custom = "modules" },
-            .install_subdir = name,
-        });
+        _ = modules.addCopyDirectory(path, name, .{});
     }
 
     return dep;

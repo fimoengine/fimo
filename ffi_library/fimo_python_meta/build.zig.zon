@@ -6,16 +6,16 @@
     //
     // It is redundant to include "zig" in this name because it is already
     // within the Zig package namespace.
-    .name = "fimo",
+    .name = "fimo_python_meta",
 
     // This is a [Semantic Version](https://semver.org/).
     // In a future version of Zig it will be used for package deduplication.
-    .version = "0.1.0",
+    .version = "0.0.0",
 
     // This field is optional.
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    .minimum_zig_version = "0.14.0",
+    //.minimum_zig_version = "0.11.0",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
@@ -23,23 +23,8 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .compile_commands = .{
-            // Use a fork of the repo for zig 0.14.0 support.
-            // .url = "https://github.com/the-argus/zig-compile-commands/archive/697abd2d24dc73fe0ead1849f17c43f18c038bc6.tar.gz",
-            // .hash = "12204f3f579b3072cddf75f31514c55b0bd30e09c755dd2389a0aa8bba79b7311be9",
-            .path = "tools/zig-compile-commands",
-        },
         .fimo_std = .{
-            .path = "ffi_library/fimo_std",
-        },
-        .fimo_python_meta = .{
-            .path = "ffi_library/fimo_python_meta",
-        },
-        .fimo_python = .{
-            .path = "modules/fimo_python",
-        },
-        .fimo_std_rs = .{
-            .path = "rust/fimo_std",
+            .path = "../fimo_std",
         },
     },
 
@@ -52,25 +37,12 @@
     // the build root itself.
     // A directory listed here means that all files within, recursively, are included.
     .paths = .{
-        ".cargo",
-        "cmake",
-        "ffi_library",
-        "modules",
-        "python",
-        "rust",
-        "src",
-        ".clang-tidy",
-        ".gitattributes",
-        ".gitignore",
-        ".gitmodules",
         "build.zig",
         "build.zig.zon",
-        "Cargo.toml",
-        "CMakeLists.txt",
-        "COPYRIGHT.md",
-        "LICENSE-APACHE",
-        "LICENSE-MIT",
-        "requirements.txt",
-        "tsan",
+        "include",
+        "src",
+        // For example...
+        //"LICENSE",
+        //"README.md",
     },
 }

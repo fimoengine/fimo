@@ -1,15 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const default_target: std.Target.Query = switch (builtin.target.os.tag) {
-    .windows => .{ .os_tag = .windows, .abi = .msvc },
-    else => .{},
-};
-
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{
-        .default_target = default_target,
-    });
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     // Generate additional build files.
@@ -17,66 +10,141 @@ pub fn build(b: *std.Build) void {
     const visualizers = generateGDBScripts(b, wf);
     generateLicenseFile(b, wf);
 
-    // Install all resources.
-    installResources(b, wf.getDirectory());
+    // ----------------------------------------------------
+    // Declare resources.
+    // ----------------------------------------------------
 
-    const lib = b.addStaticLibrary(.{
-        .name = "fimo_std",
+    const libs = b.addWriteFiles();
+    const bins = b.addWriteFiles();
+    const headers = b.addWriteFiles();
+    const docs = b.addWriteFiles();
+
+    b.addNamedLazyPath("lib", libs.getDirectory());
+    b.addNamedLazyPath("bin", bins.getDirectory());
+    b.addNamedLazyPath("header", headers.getDirectory());
+    b.addNamedLazyPath("doc", docs.getDirectory());
+
+    // Install the headers.
+    _ = headers.addCopyDirectory(b.path("include/"), ".", .{});
+    // Install the natvis files.
+    _ = headers.addCopyDirectory(b.path("visualizers/natvis"), "fimo_std/impl/natvis", .{});
+    // Install the generated license.
+    _ = headers.addCopyFile(wf.getDirectory().path(b, "LICENSE.txt"), "fimo_std/LICENSE.txt");
+
+    b.installDirectory(.{
+        .source_dir = headers.getDirectory(),
+        .install_dir = .header,
+        .install_subdir = ".",
+    });
+
+    // ----------------------------------------------------
+    // Export settings
+    // ----------------------------------------------------
+
+    const min_export_cfg = b.addOptions();
+    min_export_cfg.addOption(bool, "export_dll", false);
+
+    const full_export_cfg = b.addOptions();
+    full_export_cfg.addOption(bool, "export_dll", true);
+
+    // ----------------------------------------------------
+    // Module
+    // ----------------------------------------------------
+
+    const module = b.addModule("fimo_std", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
         .pic = true,
     });
-    lib.bundle_compiler_rt = true;
-    configureFimoCSources(
-        b,
-        wf.getDirectory(),
-        visualizers,
-        lib,
-    );
-    b.installArtifact(lib);
+    module.addImport("export_settings", min_export_cfg.createModule());
+    module.addImport("visualizers", visualizers);
+    module.addIncludePath(b.path("include/"));
+    if (target.result.os.tag == .windows) {
+        module.linkSystemLibrary("advapi32", .{});
+    }
 
-    const dylib = b.addSharedLibrary(.{
-        .name = "fimo_std_shared",
+    // ----------------------------------------------------
+    // Module tests
+    // ----------------------------------------------------
+
+    const module_tests = b.addTest(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
         .pic = true,
     });
-    dylib.bundle_compiler_rt = true;
-    configureFimoCSources(
-        b,
-        wf.getDirectory(),
-        visualizers,
-        dylib,
-    );
-    b.installArtifact(dylib);
+    module_tests.root_module.addImport("export_settings", min_export_cfg.createModule());
+    module_tests.root_module.addImport("visualizers", visualizers);
+    module_tests.addIncludePath(b.path("include/"));
+    if (target.result.os.tag == .windows) module_tests.linkSystemLibrary("advapi32");
 
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    configureFimoCSources(
-        b,
-        wf.getDirectory(),
-        visualizers,
-        lib_unit_tests,
-    );
-
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const run_lib_unit_tests = b.addRunArtifact(module_tests);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
 
-    const docs = b.addInstallDirectory(.{
-        .source_dir = lib.getEmittedDocs(),
-        .install_dir = .prefix,
-        .install_subdir = "docs",
-    });
+    // ----------------------------------------------------
+    // Static library
+    // ----------------------------------------------------
 
-    const docs_step = b.step("doc", "Generate docs");
-    docs_step.dependOn(&docs.step);
+    const static_lib = b.addStaticLibrary(.{
+        .name = "fimo_std",
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .pic = true,
+    });
+    static_lib.bundle_compiler_rt = true;
+    static_lib.root_module.addImport("export_settings", min_export_cfg.createModule());
+    static_lib.root_module.addImport("visualizers", visualizers);
+    static_lib.addIncludePath(b.path("include/"));
+    if (target.result.os.tag == .windows) {
+        static_lib.dll_export_fns = true;
+        static_lib.linkSystemLibrary("advapi32");
+    }
+    if (b.option(bool, "build-static", "Build static library") orelse false) {
+        installArtifact(b, libs, bins, static_lib);
+        b.installArtifact(static_lib);
+    }
+
+    // ----------------------------------------------------
+    // Dynamic library
+    // ----------------------------------------------------
+
+    const dynamic_lib = b.addSharedLibrary(.{
+        .name = "fimo_std_shared",
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .pic = true,
+    });
+    dynamic_lib.bundle_compiler_rt = true;
+    dynamic_lib.root_module.addImport("export_settings", min_export_cfg.createModule());
+    dynamic_lib.root_module.addImport("visualizers", visualizers);
+    dynamic_lib.addIncludePath(b.path("include/"));
+    if (target.result.os.tag == .windows) dynamic_lib.linkSystemLibrary("advapi32");
+    if (b.option(bool, "build-dynamic", "Build dynamic library") orelse false) {
+        installArtifact(b, libs, bins, dynamic_lib);
+        b.installArtifact(dynamic_lib);
+    }
+
+    // ----------------------------------------------------
+    // Documentation
+    // ----------------------------------------------------
+
+    _ = docs.addCopyDirectory(static_lib.getEmittedDocs(), ".", .{});
+    const install_doc = b.addInstallDirectory(.{
+        .source_dir = static_lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "doc",
+    });
+    const doc_step = b.step("doc", "Generate documentation");
+    doc_step.dependOn(&install_doc.step);
 }
 
 fn generateGDBScripts(
@@ -150,78 +218,27 @@ fn generateLicenseFile(
     cmd.addPrefixedDirectoryArg("-ND", b.path("third_party/tinycthread"));
 }
 
-fn installResources(
+fn installArtifact(
     b: *std.Build,
-    config_path: std.Build.LazyPath,
-) void {
-    // Install the public headers.
-    var dir = b.build_root.handle.openDir("include/fimo_std", .{
-        .iterate = true,
-        .access_sub_paths = false,
-    }) catch |err| {
-        std.debug.panic("unable to open '{}include/fimo_std' directory: {s}", .{
-            b.build_root,
-            @errorName(err),
-        });
-    };
-    defer dir.close();
-
-    var it = dir.iterateAssumeFirstIteration();
-    while (it.next() catch @panic("failed to read dir")) |entry| {
-        // Skip the private headers.
-        if (std.mem.eql(u8, entry.name, "internal")) {
-            continue;
-        }
-
-        switch (entry.kind) {
-            .file => {
-                const path = b.fmt("include/fimo_std/{s}", .{entry.name});
-                b.installFile(path, path);
-            },
-            .directory => {
-                b.installDirectory(.{
-                    .source_dir = b.path(b.fmt("include/fimo_std/{s}", .{entry.name})),
-                    .install_dir = .header,
-                    .install_subdir = b.fmt("fimo_std/{s}", .{entry.name}),
-                });
-            },
-            else => {},
-        }
-    }
-
-    // Install the natvis files.
-    b.installDirectory(.{
-        .source_dir = b.path("visualizers/natvis"),
-        .install_dir = .header,
-        .install_subdir = "fimo_std/impl/natvis",
-        .include_extensions = &.{".natvis"},
-    });
-
-    // Install the generated license.
-    b.getInstallStep().dependOn(
-        &b.addInstallFile(
-            config_path.path(b, "LICENSE.txt"),
-            "include/fimo_std/LICENSE.txt",
-        ).step,
-    );
-}
-
-fn configureFimoCSources(
-    b: *std.Build,
-    config_path: std.Build.LazyPath,
-    visualizers: *std.Build.Module,
+    libs: *std.Build.Step.WriteFile,
+    bins: *std.Build.Step.WriteFile,
     compile: *std.Build.Step.Compile,
 ) void {
-    _ = config_path;
-    const options = b.addOptions();
-    options.addOption(bool, "export_dll", compile.isDynamicLibrary());
-    compile.root_module.addImport("export_settings", options.createModule());
-    compile.root_module.addImport("visualizers", visualizers);
-
-    compile.linkLibC();
-    compile.addIncludePath(b.path("include/"));
-    if (compile.rootModuleTarget().os.tag == .windows) {
-        compile.linkSystemLibrary("advapi32");
-        compile.dll_export_fns = true;
+    if (compile.isDynamicLibrary()) {
+        _ = bins.addCopyFile(compile.getEmittedBin(), compile.out_filename);
+        if (compile.producesImplib()) _ = libs.addCopyFile(
+            compile.getEmittedImplib(),
+            compile.out_lib_filename,
+        );
+        if (compile.producesPdbFile()) _ = bins.addCopyFile(
+            compile.getEmittedPdb(),
+            b.fmt("{s}.pdb", .{compile.name}),
+        );
+    } else if (compile.isStaticLibrary()) {
+        _ = libs.addCopyFile(compile.getEmittedBin(), compile.out_filename);
+        if (compile.producesPdbFile()) _ = libs.addCopyFile(
+            compile.getEmittedPdb(),
+            b.fmt("{s}.pdb", .{compile.name}),
+        );
     }
 }

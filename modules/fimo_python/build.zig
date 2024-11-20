@@ -4,12 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const modules_dir = b.option(
-        []const u8,
-        "modules_dir",
-        "Path to the built modules",
-    );
-
     // We don't support cross compilation.
     if (!isSupported(target.result, b.host.result)) {
         return;
@@ -25,8 +19,12 @@ pub fn build(b: *std.Build) void {
     // fimo_std
     // ----------------------------------------------------
 
-    const fimo_std_dep = b.dependency("fimo_std", .{ .target = target, .optimize = optimize });
-    const fimo_std = fimo_std_dep.artifact("fimo_std");
+    const fimo_std_dep = b.dependency("fimo_std", .{
+        .target = target,
+        .optimize = optimize,
+        .@"build-static" = true,
+    });
+    const fimo_std = fimo_std_dep.module("fimo_std");
 
     // ----------------------------------------------------
     // fimo_python_meta
@@ -36,88 +34,70 @@ pub fn build(b: *std.Build) void {
         "fimo_python_meta",
         .{ .target = target, .optimize = optimize },
     );
+    const fimo_python_meta = fimo_python_meta_dep.module("fimo_python_meta");
 
     // ----------------------------------------------------
     // fimo_python
     // ----------------------------------------------------
 
-    const lib = b.addSharedLibrary(.{
+    const fimo_python = b.addSharedLibrary(.{
         .name = "fimo_python",
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("src/root.zig"),
     });
+    fimo_python.root_module.addImport("fimo_std", fimo_std);
+    fimo_python.root_module.addImport("fimo_python_meta", fimo_python_meta);
+    fimo_python.addIncludePath(cpython.include_dir);
 
-    lib.addCSourceFiles(.{
-        .files = &.{
-            "main.c",
-        },
-        .flags = &.{
-            "-DFIMO_CURRENT_MODULE_NAME=\"fimo_python\"",
-        },
-        .root = b.path("src/"),
-    });
-
-    lib.linkLibC();
-    lib.linkLibrary(fimo_std);
     if (target.result.os.tag != .windows) {
-        lib.addLibraryPath(cpython.binary_dir);
+        fimo_python.addLibraryPath(cpython.binary_dir);
         if (optimize == .Debug) {
-            lib.linkSystemLibrary("python3.13d");
+            fimo_python.linkSystemLibrary("python3.13d");
         } else {
-            lib.linkSystemLibrary("python3.13");
+            fimo_python.linkSystemLibrary("python3.13");
         }
     } else {
-        lib.addLibraryPath(cpython.library_dir);
-        lib.linkSystemLibrary("python313");
+        fimo_python.addLibraryPath(cpython.library_dir);
+        fimo_python.linkSystemLibrary("python313");
     }
 
-    lib.addIncludePath(fimo_std_dep.path("include"));
-    lib.addIncludePath(fimo_python_meta_dep.path("include"));
-    lib.addIncludePath(cpython.include_dir);
+    const module = b.addWriteFiles();
+    b.addNamedLazyPath("module", module.getDirectory());
 
-    // ----------------------------------------------------
-    // Module
-    // ----------------------------------------------------
-
-    b.getInstallStep().dependOn(&b.addInstallFile(
-        lib.getEmittedBin(),
-        "module/module.fimo_module",
-    ).step);
-    if (lib.producesPdbFile()) {
-        b.getInstallStep().dependOn(&b.addInstallArtifact(lib, .{
-            .dest_dir = .disabled,
-            .pdb_dir = .{ .override = .{ .custom = "module" } },
-            .h_dir = .disabled,
-            .implib_dir = .disabled,
-        }).step);
+    _ = module.addCopyFile(fimo_python.getEmittedBin(), "module.fimo_module");
+    if (fimo_python.producesPdbFile()) {
+        _ = module.addCopyFile(fimo_python.getEmittedPdb(), "fimo_python.pdb");
     }
-    b.getInstallStep().dependOn(&b.addInstallDirectory(.{
-        .source_dir = cpython.binary_dir,
-        .install_dir = .{ .custom = "module" },
-        .install_subdir = ".",
-    }).step);
+    _ = module.addCopyDirectory(cpython.binary_dir, ".", .{});
 
     // ----------------------------------------------------
-    // Test
+    // Tests
     // ----------------------------------------------------
 
-    const test_options = b.addOptions();
-    test_options.addOption(?[]const u8, "modules_path", modules_dir);
+    const modules = b.option(
+        std.Build.LazyPath,
+        "modules",
+        "Path to the modules for testing",
+    );
+    if (modules) |mod| {
+        const test_run_string = b.addExecutable(.{
+            .name = "run-string",
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("tests/run_string.zig"),
+        });
+        test_run_string.root_module.addImport("fimo_std", fimo_std);
+        test_run_string.root_module.addImport("fimo_python_meta", fimo_python_meta);
+        test_run_string.addIncludePath(cpython.include_dir);
 
-    const test_module = b.addTest(.{
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = b.path("src/root.zig"),
-    });
-    test_module.linkLibrary(fimo_std);
-    test_module.root_module.addImport("test_metadata", test_options.createModule());
-    test_module.addIncludePath(fimo_std_dep.path("include"));
-    test_module.addIncludePath(fimo_python_meta_dep.path("include"));
-    test_module.addIncludePath(cpython.include_dir);
+        const run_test_run_string = b.addRunArtifact(test_run_string);
+        run_test_run_string.setCwd(mod);
+        run_test_run_string.expectExitCode(0);
 
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&test_module.step);
+        const test_step = b.step("test", "Run tests");
+        test_step.dependOn(&run_test_run_string.step);
+    }
 }
 
 fn isSupported(
@@ -194,7 +174,7 @@ fn getCpythonWin(
         .{},
     );
     _ = python_bin.addCopyDirectory(
-        python_zip.getDirectory().join(b.allocator, "tools/DLLs") catch @panic("OOM"),
+        python_zip.getDirectory().join(b.allocator, "tools/Lib") catch @panic("OOM"),
         "Lib",
         .{},
     );
@@ -263,7 +243,12 @@ fn buildCPythonUnix(
         "--prefix=",
         "install",
     );
-    configure_cpython.addArgs(&.{ "--enable-shared", "--without-static-libpython", "--disable-test-modules", "--with-ensurepip=no" });
+    configure_cpython.addArgs(&.{
+        "--enable-shared",
+        "--without-static-libpython",
+        "--disable-test-modules",
+        "--with-ensurepip=no",
+    });
     switch (optimize) {
         .Debug => {
             configure_cpython.addArg("--with-pydebug");
@@ -274,7 +259,7 @@ fn buildCPythonUnix(
         },
     }
 
-    const build_cpython = b.addSystemCommand(&.{ "make", "install" });
+    const build_cpython = b.addSystemCommand(&.{ "make", "install", "--silent" });
     const cpu_count = std.Thread.getCpuCount() catch 1;
     const jobs_count = @max(cpu_count - 1, 1);
     build_cpython.addArg("-j");

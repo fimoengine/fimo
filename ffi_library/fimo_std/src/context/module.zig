@@ -245,11 +245,11 @@ pub fn loadLoadingSet(
     defer self.sys.unlock();
 
     const set = LoadingSet.fromProxySet(o_set);
-    errdefer set.deinit();
     set.lock();
-    defer set.unlock();
-
+    errdefer set.unlock();
     try self.sys.loadSet(set);
+    set.unlock();
+    set.deinit();
 }
 
 /// Searches for an instance by its name.

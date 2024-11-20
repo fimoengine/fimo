@@ -2,7 +2,7 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let zig_out = zigcli::Build::new("ffi").build();
+    let zig_out = zigcli::Build::new("ffi").option("-Dbuild-static=true").build();
     let lib_dir = zig_out.join("lib");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=fimo_std");

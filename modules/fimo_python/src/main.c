@@ -1,4 +1,4 @@
-#include <fimo_python_module_loader/loader.h>
+#include <fimo_python_meta/loader.h>
 
 #include <fimo_std/memory.h>
 #include <fimo_std/tracing.h>
