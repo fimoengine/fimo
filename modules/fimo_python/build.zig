@@ -237,7 +237,7 @@ fn buildCPythonUnix(
 
     const configure_dir = b.addWriteFiles();
 
-    const configure_cpython = b.addSystemCommand(&.{configure_path});
+    const configure_cpython = b.addSystemCommand(&.{ configure_path, "--silent" });
     configure_cpython.setCwd(configure_dir.getDirectory());
     const install_dir = configure_cpython.addPrefixedOutputDirectoryArg(
         "--prefix=",
@@ -259,21 +259,29 @@ fn buildCPythonUnix(
         },
     }
 
-    const build_cpython = b.addSystemCommand(&.{ "make", "install", "--silent" });
     const cpu_count = std.Thread.getCpuCount() catch 1;
     const jobs_count = @max(cpu_count - 1, 1);
+    const jobs_string = b.fmt("{}", .{jobs_count});
+
+    const build_cpython = b.addSystemCommand(&.{ "make", "--silent" });
     build_cpython.addArg("-j");
-    build_cpython.addArg(b.fmt("{}", .{jobs_count}));
+    build_cpython.addArg(jobs_string);
     build_cpython.setCwd(configure_dir.getDirectory());
     build_cpython.step.dependOn(&configure_cpython.step);
+
+    const install_cpython = b.addSystemCommand(&.{ "make", "install", "--silent" });
+    install_cpython.addArg("-j");
+    install_cpython.addArg(b.fmt("{}", .{jobs_count}));
+    install_cpython.setCwd(configure_dir.getDirectory());
+    install_cpython.step.dependOn(&build_cpython.step);
 
     const python_bin = b.addWriteFiles();
     const python_include = b.addWriteFiles();
     const python_lib = b.addWriteFiles();
 
-    python_bin.step.dependOn(&build_cpython.step);
-    python_include.step.dependOn(&build_cpython.step);
-    python_lib.step.dependOn(&build_cpython.step);
+    python_bin.step.dependOn(&install_cpython.step);
+    python_include.step.dependOn(&install_cpython.step);
+    python_lib.step.dependOn(&install_cpython.step);
 
     _ = python_bin.addCopyDirectory(
         install_dir.path(b, "lib/python3.13"),
@@ -320,7 +328,7 @@ fn buildCPythonUnix(
                 );
             }
             _ = python_include.addCopyDirectory(
-                install_dir.path(b, "include/python3.13d"),
+                install_dir.path(b, "include/python3.13"),
                 ".",
                 .{},
             );
