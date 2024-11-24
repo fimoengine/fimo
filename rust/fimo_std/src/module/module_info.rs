@@ -290,7 +290,7 @@ impl Clone for ModuleInfo {
 
 impl Drop for ModuleInfo {
     fn drop(&mut self) {
-        let release = self.0 .0.acquire.unwrap();
+        let release = self.0 .0.release.unwrap();
         // Safety: The ffi call is safe.
         unsafe { (release)(self.share_to_ffi()) }
     }

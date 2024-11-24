@@ -15,8 +15,7 @@ const OwnedOsPathUnmanaged = @import("../../path.zig").OwnedOsPathUnmanaged;
 const Self = @This();
 const ProxyModule = @import("../proxy_context/module.zig");
 
-const allocator = heap.fimo_allocator;
-
+allocator: Allocator,
 iterator: IteratorFn,
 ref_count: RefCount = .{},
 path: OwnedPathUnmanaged,
@@ -55,7 +54,7 @@ else
         extern "c" fn dladdr(addr: *const anyopaque, info: *Dl_info) callconv(.C) c_int;
     };
 
-pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
+pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
     if (comptime builtin.os.tag == .windows) {
         var handle: windows.HMODULE = undefined;
         const found_handle = Inner.GetModuleHandleExW(
@@ -103,6 +102,7 @@ pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
 
         const module_handle = try allocator.create(Self);
         module_handle.* = Self{
+            .allocator = allocator,
             .iterator = iterator,
             .path = owned_module_dir,
         };
@@ -146,7 +146,7 @@ pub fn initLocal(iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {
     }
 }
 
-pub fn initPath(p: Path, tmp_dir: Path) ModuleHandleError!*Self {
+pub fn initPath(allocator: Allocator, p: Path, tmp_dir: Path) ModuleHandleError!*Self {
     var buffer = PathBufferUnmanaged{};
     defer buffer.deinit(allocator);
 
@@ -169,7 +169,7 @@ pub fn initPath(p: Path, tmp_dir: Path) ModuleHandleError!*Self {
                 link_buffer,
             ) catch return error.InvalidPath;
             const res_p = Path.init(resolved) catch return error.InvalidPath;
-            return Self.initPath(res_p, tmp_dir);
+            return Self.initPath(allocator, res_p, tmp_dir);
         },
         else => return error.InvalidPath,
     }
@@ -211,6 +211,11 @@ pub fn initPath(p: Path, tmp_dir: Path) ModuleHandleError!*Self {
 
     var handle = try allocator.create(Self);
     errdefer allocator.destroy(handle);
+    handle.* = .{
+        .allocator = allocator,
+        .path = undefined,
+        .iterator = undefined,
+    };
 
     _ = symlink_path.pop();
     handle.path = try symlink_path.toOwnedPath(allocator);
@@ -255,5 +260,8 @@ pub fn ref(self: *Self) void {
 
 pub fn unref(self: *Self) void {
     if (self.ref_count.unref() == .noop) return;
+
+    const allocator = self.allocator;
     self.path.deinit(allocator);
+    allocator.destroy(self);
 }

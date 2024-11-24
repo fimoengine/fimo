@@ -2,7 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 
-const heap = @import("../../heap.zig");
 const AnyError = @import("../../AnyError.zig");
 const Version = @import("../../Version.zig");
 
@@ -17,11 +16,11 @@ const InstanceHandle = @import("InstanceHandle.zig");
 const LoadingSet = @import("LoadingSet.zig");
 const SymbolRef = @import("SymbolRef.zig");
 
-const allocator = heap.fimo_allocator;
 pub const global_namespace = "";
 const Self = @This();
 
 mutex: Mutex = .{},
+allocator: Allocator,
 tmp_dir: tmp_path.TmpDirUnmanaged,
 state: enum { idle, loading_set } = .idle,
 dep_graph: graph.GraphUnmanaged(*const ProxyModule.OpaqueInstance, void),
@@ -56,6 +55,7 @@ const NamespaceInfo = struct {
 
 pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
     var module = Self{
+        .allocator = ctx.allocator,
         .tmp_dir = undefined,
         .dep_graph = graph.GraphUnmanaged(
             *const ProxyModule.OpaqueInstance,
@@ -63,7 +63,7 @@ pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
         ).init(null, null),
     };
 
-    module.tmp_dir = try tmp_path.TmpDirUnmanaged.init(allocator, "fimo_modules_");
+    module.tmp_dir = try tmp_path.TmpDirUnmanaged.init(module.allocator, "fimo_modules_");
     ctx.tracing.emitTraceSimple(
         "module subsystem tmp dir: {s}",
         .{module.tmp_dir.path.raw},
@@ -74,14 +74,18 @@ pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
 }
 
 pub fn deinit(self: *Self) void {
-    self.tmp_dir.deinit(allocator);
-    self.dep_graph.deinit(allocator);
-    while (self.instances.popOrNull()) |entry| allocator.free(entry.key);
-    while (self.namespaces.popOrNull()) |entry| allocator.free(entry.key);
+    self.tmp_dir.deinit(self.allocator);
+    self.dep_graph.deinit(self.allocator);
+    while (self.instances.popOrNull()) |entry| self.allocator.free(entry.key);
+    while (self.namespaces.popOrNull()) |entry| self.allocator.free(entry.key);
     while (self.symbols.popOrNull()) |*entry| {
-        entry.key.deinit();
-        entry.value.deinit();
+        entry.key.deinit(self.allocator);
+        entry.value.deinit(self.allocator);
     }
+
+    self.instances.clearAndFree(self.allocator);
+    self.namespaces.clearAndFree(self.allocator);
+    self.symbols.clearAndFree(self.allocator);
 }
 
 pub fn lock(self: *Self) void {
@@ -127,8 +131,8 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
     if (self.instances.contains(std.mem.span(handle.info.name))) return error.Duplicate;
 
     const instance = inner.instance.?;
-    const node = try self.dep_graph.addNode(allocator, instance);
-    errdefer _ = self.dep_graph.removeNode(allocator, node) catch unreachable;
+    const node = try self.dep_graph.addNode(self.allocator, instance);
+    errdefer _ = self.dep_graph.removeNode(self.allocator, node) catch unreachable;
 
     // Validate symbols and namespaces.
     for (inner.symbols.keys()) |key| {
@@ -146,7 +150,7 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
         const data = self.getInstance(entry.key_ptr.*) orelse return error.NotFound;
         if (&entry.value_ptr.instance.info != data.instance.info) @panic("unexpected instance info");
         _ = self.dep_graph.addEdge(
-            allocator,
+            self.allocator,
             {},
             node,
             data.id,
@@ -164,7 +168,7 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
             ) orelse return error.NotFound;
             if (dep_instance.instance.info != dependency) @panic("unexpected instance info");
             _ = self.dep_graph.addEdge(
-                allocator,
+                self.allocator,
                 {},
                 node,
                 dep_instance.id,
@@ -174,7 +178,7 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
             };
         }
     }
-    if (try self.dep_graph.isCyclic(allocator)) return error.CyclicDependency;
+    if (try self.dep_graph.isCyclic(self.allocator)) return error.CyclicDependency;
 
     // Allocate all exported namespaces.
     errdefer for (inner.symbols.keys()) |key| self.cleanupUnusedNamespace(key.namespace);
@@ -196,9 +200,9 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
     }
 
     const data = InstanceRef{ .id = node, .instance = instance };
-    const key = try allocator.dupe(u8, std.mem.span(instance.info.name));
-    errdefer allocator.free(key);
-    try self.instances.put(allocator, key, data);
+    const key = try self.allocator.dupe(u8, std.mem.span(instance.info.name));
+    errdefer self.allocator.free(key);
+    try self.instances.put(self.allocator, key, data);
 }
 
 pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
@@ -229,8 +233,8 @@ pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!voi
     }
 
     const instance = self.instances.fetchSwapRemove(std.mem.span(handle.info.name)).?;
-    allocator.free(instance.key);
-    _ = self.dep_graph.removeNode(allocator, instance.value.id) catch |err|
+    self.allocator.free(instance.key);
+    _ = self.dep_graph.removeNode(self.allocator, instance.value.id) catch |err|
         @panic(@errorName(err));
 }
 
@@ -249,7 +253,7 @@ pub fn linkInstances(
     const other_instance_ref = self.getInstance(std.mem.span(other_handle.info.name)).?;
 
     const would_cycle = self.dep_graph.pathExists(
-        allocator,
+        self.allocator,
         other_instance_ref.id,
         instance_ref.id,
     ) catch |err| switch (err) {
@@ -259,7 +263,7 @@ pub fn linkInstances(
     if (would_cycle) return error.CyclicDependency;
 
     const edge = self.dep_graph.addEdge(
-        allocator,
+        self.allocator,
         {},
         instance_ref.id,
         other_instance_ref.id,
@@ -267,7 +271,7 @@ pub fn linkInstances(
         Allocator.Error.OutOfMemory => return Allocator.Error.OutOfMemory,
         else => unreachable,
     };
-    errdefer _ = self.dep_graph.removeEdge(allocator, edge.id) catch unreachable;
+    errdefer _ = self.dep_graph.removeEdge(self.allocator, edge.id) catch unreachable;
     try inner.addDependency(
         std.mem.span(other_handle.info.name),
         .{ .instance = other_handle, .type = .dynamic },
@@ -290,7 +294,7 @@ pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *Instan
         instance_ref.id,
         other_instance_ref.id,
     ) catch unreachable).?;
-    _ = self.dep_graph.removeEdge(allocator, edge) catch unreachable;
+    _ = self.dep_graph.removeEdge(self.allocator, edge) catch unreachable;
     inner.removeDependency(std.mem.span(other_handle.info.name)) catch unreachable;
 }
 
@@ -328,9 +332,9 @@ fn ensureInitNamespace(self: *Self, name: []const u8) SystemError!void {
     if (std.mem.eql(u8, name, global_namespace)) return;
     if (self.namespaces.contains(name)) return;
 
-    const key = try allocator.dupe(u8, name);
+    const key = try self.allocator.dupe(u8, name);
     const ns = NamespaceInfo{ .num_symbols = 0, .num_references = 0 };
-    try self.namespaces.put(allocator, key, ns);
+    try self.namespaces.put(self.allocator, key, ns);
 }
 
 fn cleanupUnusedNamespace(self: *Self, namespace: []const u8) void {
@@ -338,7 +342,7 @@ fn cleanupUnusedNamespace(self: *Self, namespace: []const u8) void {
     if (self.getNamespace(namespace)) |ns| {
         if (ns.num_symbols == 0 and ns.num_references == 0) {
             const kv = self.namespaces.fetchSwapRemove(namespace).?;
-            allocator.free(kv.key);
+            self.allocator.free(kv.key);
         }
     }
 }
@@ -374,11 +378,11 @@ fn addSymbol(
     owner: []const u8,
 ) SystemError!void {
     if (self.getSymbol(name, namespace) != null) return error.Duplicate;
-    const key = try SymbolRef.Id.init(name, namespace);
-    errdefer key.deinit();
-    const symbol = try SymbolRef.init(owner, version);
-    errdefer symbol.deinit();
-    try self.symbols.put(allocator, key, symbol);
+    const key = try SymbolRef.Id.init(self.allocator, name, namespace);
+    errdefer key.deinit(self.allocator);
+    const symbol = try SymbolRef.init(self.allocator, owner, version);
+    errdefer symbol.deinit(self.allocator);
+    try self.symbols.put(self.allocator, key, symbol);
     errdefer _ = self.symbols.swapRemove(key);
 
     if (std.mem.eql(u8, namespace, global_namespace)) return;
@@ -391,8 +395,8 @@ fn removeSymbol(self: *Self, name: []const u8, namespace: []const u8) void {
         .name = @constCast(name),
         .namespace = @constCast(namespace),
     }).?;
-    entry.key.deinit();
-    entry.value.deinit();
+    entry.key.deinit(self.allocator);
+    entry.value.deinit(self.allocator);
 
     if (std.mem.eql(u8, namespace, global_namespace)) return;
     const ns = self.getNamespace(namespace) orelse unreachable;
@@ -413,11 +417,11 @@ pub fn loadSet(
 
     set.should_recreate_map = false;
     var queue = try set.createQueue(self);
-    defer queue.deinit(allocator);
+    defer queue.deinit(self.allocator);
     outer: while (queue.items.len > 0 or set.should_recreate_map) {
         if (set.should_recreate_map) {
             set.should_recreate_map = false;
-            queue.deinit(allocator);
+            queue.deinit(self.allocator);
             queue = .{};
             queue = try set.createQueue(self);
             continue;

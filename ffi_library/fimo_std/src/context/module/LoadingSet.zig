@@ -17,7 +17,6 @@ const System = @import("System.zig");
 const Context = @import("../../context.zig");
 const ProxyModule = @import("../proxy_context/module.zig");
 
-const allocator = heap.fimo_allocator;
 const Self = @This();
 
 mutex: Mutex = .{},
@@ -41,6 +40,7 @@ pub const Callback = struct {
 
 const ModuleInfo = struct {
     status: Status,
+    allocator: Allocator,
     handle: *ModuleHandle,
     info: ?*const ProxyModule.Info,
     @"export": *const ProxyModule.Export,
@@ -50,6 +50,7 @@ const ModuleInfo = struct {
     const Status = enum { unloaded, loaded, err };
 
     fn init(
+        allocator: Allocator,
         @"export": *const ProxyModule.Export,
         handle: *ModuleHandle,
         owner: ?*const ProxyModule.OpaqueInstance,
@@ -64,6 +65,7 @@ const ModuleInfo = struct {
 
         return .{
             .status = .unloaded,
+            .allocator = allocator,
             .handle = handle,
             .info = null,
             .@"export" = @"export",
@@ -76,7 +78,7 @@ const ModuleInfo = struct {
             std.debug.assert(self.status != .loaded);
             callback.on_error(self.@"export", callback.data);
         }
-        self.callbacks.clearAndFree(allocator);
+        self.callbacks.clearAndFree(self.allocator);
         if (self.status != .loaded) self.@"export".deinit();
         if (self.owner) |owner| {
             const handle = InstanceHandle.fromInstancePtr(owner);
@@ -89,7 +91,7 @@ const ModuleInfo = struct {
 
     pub fn appendCallback(self: *ModuleInfo, callback: Callback) Allocator.Error!void {
         switch (self.status) {
-            .unloaded => try self.callbacks.append(allocator, callback),
+            .unloaded => try self.callbacks.append(self.allocator, callback),
             .loaded => callback.on_success(self.info.?, callback.data),
             .err => {
                 std.debug.assert(self.info == null);
@@ -124,12 +126,12 @@ pub fn init(context: *Context) Allocator.Error!*Self {
     context.module.sys.lock();
     defer context.module.sys.unlock();
     const module_load_path = try OwnedPathUnmanaged.initPath(
-        allocator,
+        context.allocator,
         context.module.sys.tmp_dir.path.asPath(),
     );
-    errdefer module_load_path.deinit(allocator);
+    errdefer module_load_path.deinit(context.allocator);
 
-    const set = try allocator.create(Self);
+    const set = try context.allocator.create(Self);
     set.* = .{
         .context = context,
         .module_load_path = module_load_path,
@@ -141,18 +143,19 @@ pub fn deinit(self: *Self) void {
     std.debug.assert(!self.is_loading);
     while (self.modules.popOrNull()) |*entry| {
         var value = entry.value;
-        allocator.free(entry.key);
+        self.context.allocator.free(entry.key);
         value.deinit();
     }
-    self.modules.clearAndFree(allocator);
+    self.modules.clearAndFree(self.context.allocator);
     while (self.symbols.popOrNull()) |*entry| {
-        entry.key.deinit();
-        entry.value.deinit();
+        entry.key.deinit(self.context.allocator);
+        entry.value.deinit(self.context.allocator);
     }
-    self.symbols.clearAndFree(allocator);
-    self.module_load_path.deinit(allocator);
-    self.context.unref();
-    allocator.destroy(self);
+    self.symbols.clearAndFree(self.context.allocator);
+    self.module_load_path.deinit(self.context.allocator);
+    const context = self.context;
+    self.context.allocator.destroy(self);
+    context.unref();
 }
 
 pub fn fromProxySet(set: *ProxyModule.LoadingSet) *Self {
@@ -168,9 +171,9 @@ pub fn unlock(self: *Self) void {
 }
 
 fn addModule(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
-    const name = try allocator.dupe(u8, module_info.@"export".getName());
-    errdefer allocator.free(name);
-    try self.modules.put(allocator, name, module_info);
+    const name = try self.context.allocator.dupe(u8, module_info.@"export".getName());
+    errdefer self.context.allocator.free(name);
+    try self.modules.put(self.context.allocator, name, module_info);
 }
 
 pub fn getModule(self: *const Self, name: []const u8) ?*ModuleInfo {
@@ -184,11 +187,11 @@ fn addSymbol(
     version: Version,
     owner: []const u8,
 ) Allocator.Error!void {
-    const key = try SymbolRef.Id.init(name, namespace);
-    errdefer key.deinit();
-    const symbol = try SymbolRef.init(owner, version);
-    errdefer symbol.deinit();
-    try self.symbols.put(allocator, key, symbol);
+    const key = try SymbolRef.Id.init(self.context.allocator, name, namespace);
+    errdefer key.deinit(self.context.allocator);
+    const symbol = try SymbolRef.init(self.context.allocator, owner, version);
+    errdefer symbol.deinit(self.context.allocator);
+    try self.symbols.put(self.context.allocator, key, symbol);
     errdefer _ = self.symbols.swapRemove(key);
 }
 
@@ -197,8 +200,8 @@ fn removeSymbol(self: *Self, name: []const u8, namespace: []const u8) void {
         .name = @constCast(name),
         .namespace = @constCast(namespace),
     }).?;
-    entry.key.deinit();
-    entry.value.deinit();
+    entry.key.deinit(self.context.allocator);
+    entry.value.deinit(self.context.allocator);
 }
 
 pub fn getSymbolAny(self: *const Self, name: []const u8, ns: []const u8) ?*SymbolRef {
@@ -278,7 +281,12 @@ fn addModuleFromExport(
         );
     }
 
-    var module_info = try ModuleInfo.init(@"export", module_handle, owner);
+    var module_info = try ModuleInfo.init(
+        self.context.allocator,
+        @"export",
+        module_handle,
+        owner,
+    );
     errdefer module_info.deinit();
     try self.addModule(module_info);
     self.should_recreate_map = true;
@@ -297,7 +305,7 @@ fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) call
 
     const data: *AppendModulesData = @alignCast(@ptrCast(o_data));
     if (data.filter_fn == null or data.filter_fn.?(@"export", data.filter_data)) {
-        data.exports.append(allocator, @"export") catch |err| {
+        data.exports.append(data.sys.allocator, @"export") catch |err| {
             @"export".deinit();
             data.err = err;
             return false;
@@ -326,9 +334,9 @@ pub fn addModulesFromPath(
     bin_ptr: *const anyopaque,
 ) !void {
     const module_handle = if (module_path) |p|
-        try ModuleHandle.initPath(p, self.module_load_path.asPath())
+        try ModuleHandle.initPath(self.context.allocator, p, self.module_load_path.asPath())
     else
-        try ModuleHandle.initLocal(iterator_fn, bin_ptr);
+        try ModuleHandle.initLocal(self.context.allocator, iterator_fn, bin_ptr);
     defer module_handle.unref();
 
     var append_data = AppendModulesData{
@@ -336,7 +344,7 @@ pub fn addModulesFromPath(
         .filter_fn = filter_fn,
         .filter_data = filter_data,
     };
-    defer append_data.exports.deinit(allocator);
+    defer append_data.exports.deinit(self.context.allocator);
     errdefer for (append_data.exports.items) |exp| exp.deinit();
     module_handle.iterator(&appendModules, &append_data);
     if (append_data.err) |err| return err;
@@ -348,9 +356,9 @@ pub fn addModulesFromPath(
 
 pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
     var instances = graph.GraphUnmanaged(*ModuleInfo, void).init(null, null);
-    defer instances.deinit(allocator);
+    defer instances.deinit(self.context.allocator);
     var instance_map = std.StringArrayHashMapUnmanaged(graph.NodeId){};
-    defer instance_map.deinit(allocator);
+    defer instance_map.deinit(self.context.allocator);
 
     // Allocate a node for each loadable module.
     var module_it = self.modules.iterator();
@@ -431,8 +439,8 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
         }
 
         // Create a new node and insert it into the hashmap.
-        const node = try instances.addNode(allocator, instance);
-        try instance_map.put(allocator, name.*, node);
+        const node = try instances.addNode(self.context.allocator, instance);
+        try instance_map.put(self.context.allocator, name.*, node);
     }
 
     // Connect all nodes in the graph.
@@ -462,7 +470,7 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
 
                 const to_node = owner_entry.?;
                 _ = instances.addEdge(
-                    allocator,
+                    self.context.allocator,
                     {},
                     node,
                     to_node,
@@ -474,18 +482,19 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
         }
     }
 
-    if (try instances.isCyclic(allocator)) return error.CyclicDependency;
-    const order = instances.sortTopological(allocator, .outgoing) catch |err| switch (err) {
+    if (try instances.isCyclic(self.context.allocator)) return error.CyclicDependency;
+    const order = instances.sortTopological(self.context.allocator, .outgoing) catch |err|
+        switch (err) {
         Allocator.Error.OutOfMemory => return Allocator.Error.OutOfMemory,
         else => unreachable,
     };
-    defer allocator.free(order);
+    defer self.context.allocator.free(order);
 
     var queue = Queue{};
-    errdefer queue.deinit(allocator);
+    errdefer queue.deinit(self.context.allocator);
     for (order) |node| {
         const instance = instances.nodePtr(node).?.*;
-        try queue.append(allocator, instance);
+        try queue.append(self.context.allocator, instance);
     }
 
     return queue;

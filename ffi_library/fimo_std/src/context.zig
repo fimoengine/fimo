@@ -3,7 +3,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const c = @import("c.zig");
-const heap = @import("heap.zig");
 const AnyError = @import("AnyError.zig");
 const Version = @import("Version.zig");
 
@@ -15,9 +14,11 @@ pub const ProxyTracing = @import("context/proxy_context/tracing.zig");
 pub const ProxyModule = @import("context/proxy_context/module.zig");
 pub const ProxyContext = @import("context/proxy_context.zig");
 
-const allocator = heap.fimo_allocator;
+const GPA = std.heap.GeneralPurposeAllocator(.{});
 const Self = @This();
 
+gpa: GPA,
+allocator: Allocator,
 refcount: RefCount = .{},
 tracing: Tracing,
 module: Module,
@@ -49,14 +50,23 @@ pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
     cleanup_options = false;
     errdefer if (tracing_cfg) |cfg| cfg.deinit();
 
-    const self = try allocator.create(Self);
-    errdefer allocator.destroy(self);
+    var gpa = GPA.init;
+    errdefer if (gpa.deinit() == .leak) @panic("memory leak");
+
+    const self = try gpa.allocator().create(Self);
+    errdefer {
+        gpa = self.gpa;
+        gpa.allocator().destroy(self);
+    }
     self.* = Self{
+        .gpa = gpa,
+        .allocator = undefined,
         .tracing = undefined,
         .module = undefined,
     };
+    self.allocator = self.gpa.allocator();
 
-    self.tracing = try Tracing.init(tracing_cfg);
+    self.tracing = try Tracing.init(self.allocator, tracing_cfg);
     errdefer self.tracing.deinit();
     tracing_cfg = null;
 
@@ -72,9 +82,17 @@ pub fn ref(self: *Self) void {
 
 pub fn unref(self: *Self) void {
     if (self.refcount.unref() == .noop) return;
+
+    // Might not actually trace anything, since all threads may be unregistered.
+    // It's for just in case, that the calling thread did not unregister itself.
+    self.tracing.emitTraceSimple("cleaning up context, context='{*}'", .{self}, @src());
+
     self.module.deinit();
     self.tracing.deinit();
-    allocator.destroy(self);
+
+    var gpa = self.gpa;
+    gpa.allocator().destroy(self);
+    if (gpa.deinit() == .leak) @panic("memory leak");
 }
 
 pub fn asProxy(self: *Self) ProxyContext {

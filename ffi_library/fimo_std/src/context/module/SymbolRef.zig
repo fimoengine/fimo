@@ -1,10 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const heap = @import("../../heap.zig");
 const Version = @import("../../Version.zig");
 
-const allocator = heap.fimo_allocator;
 const Self = @This();
 
 owner: []u8,
@@ -29,24 +27,24 @@ pub const Id = struct {
         }
     };
 
-    pub fn init(name: []const u8, namespace: []const u8) Allocator.Error!Id {
+    pub fn init(allocator: Allocator, name: []const u8, namespace: []const u8) Allocator.Error!Id {
         const n = try allocator.dupe(u8, name);
         errdefer allocator.free(n);
         const ns = try allocator.dupe(u8, namespace);
         return Id{ .name = n, .namespace = ns };
     }
 
-    pub fn deinit(self: Id) void {
+    pub fn deinit(self: Id, allocator: Allocator) void {
         allocator.free(self.name);
         allocator.free(self.namespace);
     }
 };
 
-pub fn init(owner: []const u8, version: Version) Allocator.Error!Self {
+pub fn init(allocator: Allocator, owner: []const u8, version: Version) Allocator.Error!Self {
     const o = try allocator.dupe(u8, owner);
     return Self{ .owner = o, .version = version };
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: Self, allocator: Allocator) void {
     allocator.free(self.owner);
 }

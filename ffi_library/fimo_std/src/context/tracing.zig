@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const c = @import("../c.zig");
-const heap = @import("../heap.zig");
 const AnyError = @import("../AnyError.zig");
 const time = @import("../time.zig");
 const tls = @import("tls.zig");
@@ -10,8 +9,8 @@ const ProxyTracing = @import("proxy_context/tracing.zig");
 const Tracing = @This();
 
 const Allocator = std.mem.Allocator;
-const allocator = heap.fimo_allocator;
 
+allocator: Allocator,
 subscribers: []ProxyTracing.Subscriber,
 buffer_size: usize,
 max_level: ProxyTracing.Level,
@@ -38,7 +37,7 @@ pub const TracingError = error{
 } || Allocator.Error;
 
 /// Initializes the tracing subsystem.
-pub fn init(config: ?*const ProxyTracing.Config) (TracingError || tls.TlsError)!Tracing {
+pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (TracingError || tls.TlsError)!Tracing {
     errdefer {
         if (config) |cfg| {
             if (cfg.subscribers) |sl| for (sl[0..cfg.subscriber_count]) |s| s.deinit();
@@ -46,6 +45,7 @@ pub fn init(config: ?*const ProxyTracing.Config) (TracingError || tls.TlsError)!
     }
 
     var self = Tracing{
+        .allocator = allocator,
         .subscribers = undefined,
         .buffer_size = undefined,
         .max_level = undefined,
@@ -89,7 +89,7 @@ pub fn deinit(self: *Tracing) void {
 
     self.thread_data.deinit();
     for (self.subscribers) |subs| subs.deinit();
-    allocator.free(self.subscribers);
+    self.allocator.free(self.subscribers);
 }
 
 /// Creates a new empty call stack.
@@ -927,8 +927,8 @@ const ThreadData = struct {
         owner: *Tracing,
         err: *?AnyError,
     ) (TracingError || tls.TlsError || AnyError.Error)!*ThreadData {
-        const data = try allocator.create(ThreadData);
-        errdefer allocator.destroy(data);
+        const data = try owner.allocator.create(ThreadData);
+        errdefer owner.allocator.destroy(data);
 
         data.* = ThreadData{
             .call_stack = try CallStack.init(owner, err),
@@ -947,7 +947,7 @@ const ThreadData = struct {
     fn deinit(self: *ThreadData) TracingError!void {
         const owner = self.owner;
         try self.call_stack.deinit();
-        allocator.destroy(self);
+        owner.allocator.destroy(self);
 
         // Synchronizes with the acquire on deinit of the context.
         _ = owner.thread_count.fetchSub(1, .release);
@@ -977,8 +977,8 @@ const CallStack = struct {
         owner: *const Tracing,
         err: *?AnyError,
     ) (TracingError || AnyError.Error)!*CallStack {
-        const call_stack = try allocator.create(CallStack);
-        errdefer allocator.destroy(call_stack);
+        const call_stack = try owner.allocator.create(CallStack);
+        errdefer owner.allocator.destroy(call_stack);
         call_stack.* = CallStack{
             .buffer = undefined,
             .max_level = owner.max_level,
@@ -986,15 +986,15 @@ const CallStack = struct {
             .owner = owner,
         };
 
-        call_stack.buffer = try allocator.alloc(u8, owner.buffer_size);
-        errdefer allocator.free(call_stack.buffer);
+        call_stack.buffer = try owner.allocator.alloc(u8, owner.buffer_size);
+        errdefer owner.allocator.free(call_stack.buffer);
 
         call_stack.call_stacks = try std.ArrayListUnmanaged(*anyopaque).initCapacity(
-            allocator,
+            owner.allocator,
             owner.subscribers.len,
         );
         errdefer {
-            call_stack.call_stacks.deinit(allocator);
+            call_stack.call_stacks.deinit(owner.allocator);
             for (call_stack.call_stacks.items, owner.subscribers) |cs, subscriber| {
                 subscriber.dropCallStack(cs);
             }
@@ -1020,9 +1020,9 @@ const CallStack = struct {
             subscriber.destroyCallStack(now, call_stack);
         }
 
-        self.call_stacks.deinit(allocator);
-        allocator.free(self.buffer);
-        allocator.destroy(self);
+        self.call_stacks.deinit(self.owner.allocator);
+        self.owner.allocator.free(self.buffer);
+        self.owner.allocator.destroy(self);
     }
 
     fn deinitUnbound(self: *CallStack) TracingError!void {
@@ -1212,8 +1212,8 @@ const CallStack = struct {
                 num_created_spans += 1;
             }
 
-            const frame = try allocator.create(StackFrame);
-            errdefer allocator.destroy(frame);
+            const frame = try owner.owner.allocator.create(StackFrame);
+            errdefer owner.owner.allocator.destroy(frame);
             frame.* = .{
                 .span = .{},
                 .metadata = desc.metadata,
@@ -1253,7 +1253,7 @@ const CallStack = struct {
                 self.owner.end_frame = null;
             }
 
-            allocator.destroy(self);
+            self.owner.owner.allocator.destroy(self);
         }
     };
 };
