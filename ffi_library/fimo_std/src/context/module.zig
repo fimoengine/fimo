@@ -58,7 +58,7 @@ pub fn addPseudoInstance(self: *Self) !*const ProxyModule.PseudoInstance {
     const instance = try InstanceHandle.initPseudoInstance(&self.sys, name);
     const handle = InstanceHandle.fromInstancePtr(&instance.instance);
     const inner = handle.lock();
-    errdefer inner.deinit().release();
+    errdefer inner.deinit().unref();
 
     try self.sys.addInstance(inner);
     inner.unlock();
@@ -86,7 +86,7 @@ pub fn removePseudoInstance(
 
     try self.sys.removeInstance(inner);
     const context = inner.deinit();
-    errdefer context.release();
+    errdefer context.unref();
     inner_destroyed = true;
 
     try self.sys.cleanupLooseInstances();
@@ -546,7 +546,7 @@ pub fn unloadInstance(self: *Self, instance_info: *const ProxyModule.Info) Syste
     var inner_destroyed = false;
     errdefer if (!inner_destroyed) inner.unlock();
     try self.sys.removeInstance(inner);
-    inner.deinit().release();
+    inner.deinit().unref();
     inner_destroyed = true;
     try self.sys.cleanupLooseInstances();
 }

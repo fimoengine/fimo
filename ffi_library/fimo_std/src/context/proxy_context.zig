@@ -165,7 +165,7 @@ pub fn isCompatibleWithVersion(self: Self, version: Version) bool {
 /// Increases the reference count of the context. May abort the program,
 /// if doing so is not possible. May only be called with a valid reference
 /// to the context.
-pub fn acquire(self: Self) void {
+pub fn ref(self: Self) void {
     self.vtable.core_v0.acquire(self.data);
 }
 
@@ -174,7 +174,7 @@ pub fn acquire(self: Self) void {
 /// Decrements the reference count of the context. When the reference count
 /// reaches zero, this function also destroys the reference. May only be
 /// called with a valid reference to the context.
-pub fn release(self: Self) void {
+pub fn unref(self: Self) void {
     self.vtable.core_v0.release(self.data);
 }
 
@@ -208,12 +208,12 @@ const ffi = struct {
 
     export fn fimo_context_acquire(context: c.FimoContext) void {
         const ctx = Self.initC(context);
-        ctx.acquire();
+        ctx.ref();
     }
 
     export fn fimo_context_release(context: c.FimoContext) void {
         const ctx = Self.initC(context);
-        ctx.release();
+        ctx.unref();
     }
 };
 

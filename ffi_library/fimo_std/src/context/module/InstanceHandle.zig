@@ -787,7 +787,7 @@ fn unref(self: *const Self, cleanup: bool) void {
     if (this.ref_count.unref() == .noop) return;
 
     const inner = this.lock();
-    if (!inner.isDetached()) inner.detach(cleanup).release();
+    if (!inner.isDetached()) inner.detach(cleanup).unref();
 
     const allocator = this.allocator;
 

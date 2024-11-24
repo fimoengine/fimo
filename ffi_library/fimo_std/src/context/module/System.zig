@@ -316,7 +316,7 @@ pub fn cleanupLooseInstances(self: *Self) SystemError!void {
             @src(),
         );
         try self.removeInstance(inner);
-        inner.deinit().release();
+        inner.deinit().unref();
         unlock_inner = false;
 
         // Rebuild the iterator.
@@ -490,7 +490,7 @@ pub fn loadSet(
 
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
-        errdefer inner.deinit().release();
+        errdefer inner.deinit().unref();
         try self.addInstance(inner);
         defer inner.unlock();
         instance_info.signalSuccess(instance.info);

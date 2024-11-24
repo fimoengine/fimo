@@ -20,7 +20,7 @@ pub fn main() !void {
     const init_options: [:null]const ?*const Context.TaggedInStruct = &.{@ptrCast(&tracing_cfg)};
 
     const ctx = try Context.init(init_options);
-    defer ctx.release();
+    defer ctx.unref();
 
     var err: ?fimo_std.AnyError = null;
     defer if (err) |e| e.deinit();
@@ -53,7 +53,7 @@ pub fn main() !void {
     try set.commit(ctx.module(), &err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
-    defer (instance.deinit(&err) catch unreachable).release();
+    defer (instance.deinit(&err) catch unreachable).unref();
 
     const info = try Module.Info.findByName(ctx.module(), "fimo_python", &err);
     defer info.release();
