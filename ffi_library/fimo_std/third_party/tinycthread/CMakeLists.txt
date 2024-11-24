@@ -1,6 +1,0 @@
-if (APPLE)
-    find_package(Threads REQUIRED)
-    add_library(tinycthread OBJECT source/tinycthread.c)
-    target_link_libraries(tinycthread ${CMAKE_THREAD_LIBS_INIT})
-    target_include_directories(tinycthread PUBLIC include)
-endif ()

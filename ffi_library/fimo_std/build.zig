@@ -212,10 +212,6 @@ fn generateLicenseFile(
     _ = wf.addCopyFile(cmd.addOutputFileArg("LICENSE.txt"), "LICENSE.txt");
     cmd.addPrefixedFileArg("-L", b.path("LICENSE-MIT"));
     cmd.addPrefixedFileArg("-L", b.path("LICENSE-APACHE"));
-    cmd.addPrefixedDirectoryArg("-ND", b.path("third_party"));
-    cmd.addPrefixedDirectoryArg("-ND", b.path("third_party/btree"));
-    cmd.addPrefixedDirectoryArg("-ND", b.path("third_party/hashmap"));
-    cmd.addPrefixedDirectoryArg("-ND", b.path("third_party/tinycthread"));
 }
 
 fn installArtifact(

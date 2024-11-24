@@ -1,3 +1,0 @@
-add_subdirectory(btree)
-add_subdirectory(hashmap)
-add_subdirectory(tinycthread)

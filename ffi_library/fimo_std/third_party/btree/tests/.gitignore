@@ -1,8 +1,0 @@
-*.dSYM
-a.out
-*.test
-*.o
-*.svg
-*.profraw
-*.profdata
-*.cov.html
