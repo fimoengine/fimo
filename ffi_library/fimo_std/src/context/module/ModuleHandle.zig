@@ -139,6 +139,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
 
         const module_handle = try allocator.create(Self);
         module_handle.* = Self{
+            .allocator = allocator,
             .iterator = iterator,
             .path = owned_module_dir,
         };
