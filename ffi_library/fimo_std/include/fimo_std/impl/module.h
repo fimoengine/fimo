@@ -32,7 +32,7 @@ extern "C" {
 /**
  * Name of the section where the modules will be stored to.
  */
-#define FIMO_IMPL_MODULE_SECTION "__DATA,__fimo_module"
+#define FIMO_IMPL_MODULE_SECTION "__DATA,fimo_module"
 #else
 /**
  * Name of the section where the modules will be stored to.

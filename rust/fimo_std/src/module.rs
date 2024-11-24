@@ -337,7 +337,7 @@ macro_rules! export_module {
             #[cfg_attr(windows, link_section = "fi_mod$u")]
             #[cfg_attr(
                 all(unix, target_vendor = "apple"),
-                link_section = "__DATA,__fimo_module"
+                link_section = "__DATA,fimo_module"
             )]
             #[cfg_attr(all(unix, not(target_vendor = "apple")), link_section = "fimo_module")]
             static EXPORT: Wrapper = Wrapper(&build_export());

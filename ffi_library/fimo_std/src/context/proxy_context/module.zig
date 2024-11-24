@@ -1789,10 +1789,10 @@ pub const Export = extern struct {
             comptime {
                 asm (
                     \\.global __start_fimo_module
-                    \\__start_fimo_module = section$start$__DATA$__fimo_module
+                    \\__start_fimo_module = section$start$__DATA$fimo_module
                     \\
                     \\.global __stop_fimo_module
-                    \\__stop_fimo_module = section$end$__DATA$__fimo_module
+                    \\__stop_fimo_module = section$end$__DATA$fimo_module
                 );
                 exportModuleInner(null);
             }
