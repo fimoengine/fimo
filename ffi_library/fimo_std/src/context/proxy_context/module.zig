@@ -49,6 +49,7 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
                 16 => if (@typeInfo(T).int.signedness == .signed) value.i16 else value.u16,
                 32 => if (@typeInfo(T).int.signedness == .signed) value.i32 else value.u32,
                 64 => if (@typeInfo(T).int.signedness == .signed) value.i64 else value.u64,
+                else => @compileError("Invalid parameter bit size"),
             };
         }
         fn wrapValue(value: T) OpaqueParameter.Value {
@@ -57,6 +58,7 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
                 16 => if (@typeInfo(T).int.signedness == .signed) .{ .i16 = value } else .{ .u16 = value },
                 32 => if (@typeInfo(T).int.signedness == .signed) .{ .i32 = value } else .{ .u32 = value },
                 64 => if (@typeInfo(T).int.signedness == .signed) .{ .i64 = value } else .{ .u64 = value },
+                else => @compileError("Invalid parameter bit size"),
             };
         }
 
@@ -108,7 +110,7 @@ pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
             self: *const Self,
             instance: *const InstanceT,
             err: *?AnyError,
-        ) AnyError.Error!OpaqueParameter.Value {
+        ) AnyError.Error!T {
             const value = try self.castOpaqueConst().read(instance.castOpaque(), err);
             return Self.unwrapValue(value);
         }
@@ -568,7 +570,7 @@ pub const OpaqueParameterData = opaque {
             }
         }
     };
-    const ValueUntagged = union {
+    const ValueUntagged = extern union {
         u8: u8,
         u16: u16,
         u32: u32,
@@ -783,7 +785,7 @@ pub fn Instance(
             std.debug.assert(@alignOf(ImportsT) <= @alignOf(*const anyopaque));
             std.debug.assert(@sizeOf(ImportsT) % @sizeOf(*const anyopaque) == 0);
             for (@typeInfo(ImportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size == .One);
+                std.debug.assert(@typeInfo(field.type).pointer.size != .Slice);
                 std.debug.assert(@typeInfo(field.type).pointer.is_const);
                 std.debug.assert(field.alignment == @alignOf([*:0]const u8));
             }
@@ -797,7 +799,7 @@ pub fn Instance(
             std.debug.assert(@alignOf(ExportsT) <= @alignOf(*const anyopaque));
             std.debug.assert(@sizeOf(ExportsT) % @sizeOf(*const anyopaque) == 0);
             for (@typeInfo(ExportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size == .One);
+                std.debug.assert(@typeInfo(field.type).pointer.size != .Slice);
                 std.debug.assert(@typeInfo(field.type).pointer.is_const);
                 std.debug.assert(field.alignment == @alignOf([*:0]const u8));
             }
@@ -2435,202 +2437,6 @@ pub fn writeParameter(
     err: *?AnyError,
 ) AnyError.Error!void {
     return OpaqueParameter.writePublic(self, value, module, parameter, err);
-}
-
-// ----------------------------------------------------
-// Test
-// ----------------------------------------------------
-
-test "Export modules" {
-    const A0 = Symbol{
-        .name = "a_export_0",
-        .version = comptime Version.parse("0.1.0") catch unreachable,
-        .symbol = i32,
-    };
-    const A1 = Symbol{
-        .name = "a_export_1",
-        .version = comptime Version.parse("0.1.0") catch unreachable,
-        .symbol = i32,
-    };
-    const B0 = Symbol{
-        .name = "b_export_0",
-        .version = comptime Version.parse("0.1.0") catch unreachable,
-        .symbol = i32,
-    };
-    const B1 = Symbol{
-        .name = "b_export_1",
-        .version = comptime Version.parse("0.1.0") catch unreachable,
-        .symbol = i32,
-    };
-
-    const A = Instance(
-        void,
-        void,
-        void,
-        extern struct {
-            a0: *const i32,
-            a1: *const i32,
-        },
-        void,
-    );
-    Export.addExport(
-        A,
-        "a",
-        null,
-        null,
-        null,
-        .{},
-        .{},
-        &.{},
-        .{},
-        .{
-            .a0 = .{ .id = A0, .symbol = &@as(i32, 5) },
-            .a1 = .{ .id = A1, .symbol = &@as(i32, 10) },
-        },
-        &.{},
-        null,
-        null,
-    );
-
-    const B = Instance(
-        void,
-        void,
-        void,
-        extern struct {
-            b0: *const i32,
-            b1: *const i32,
-        },
-        void,
-    );
-    Export.addExport(
-        B,
-        "b",
-        null,
-        null,
-        null,
-        .{},
-        .{},
-        &.{},
-        .{},
-        .{
-            .b0 = .{ .id = B0, .symbol = &@as(i32, -2) },
-            .b1 = .{ .id = B1, .symbol = &@as(i32, 77) },
-        },
-        &.{},
-        null,
-        null,
-    );
-
-    const C = Instance(
-        extern struct {
-            pub_pub: *Parameter(u32, OpaqueInstance),
-            pub_dep: *Parameter(u32, OpaqueInstance),
-            pub_pri: *Parameter(u32, OpaqueInstance),
-            dep_pub: *Parameter(u32, OpaqueInstance),
-            dep_dep: *Parameter(u32, OpaqueInstance),
-            dep_pri: *Parameter(u32, OpaqueInstance),
-            pri_pub: *Parameter(u32, OpaqueInstance),
-            pri_dep: *Parameter(u32, OpaqueInstance),
-            pri_pri: *Parameter(u32, OpaqueInstance),
-        },
-        extern struct {
-            empty: [*:0]const u8,
-            a: [*:0]const u8,
-            b: [*:0]const u8,
-            img: [*:0]const u8,
-        },
-        extern struct {
-            a0: *const i32,
-            a1: *const i32,
-            b0: *const i32,
-            b1: *const i32,
-        },
-        void,
-        void,
-    );
-    Export.addExport(
-        C,
-        "c",
-        null,
-        null,
-        null,
-        .{
-            .pub_pub = Export.Parameter{
-                .type = .u32,
-                .name = "pub_pub",
-                .read_group = .public,
-                .write_group = .public,
-                .default_value = .{ .u32 = 0 },
-            },
-            .pub_dep = Export.Parameter{
-                .type = .u32,
-                .name = "pub_dep",
-                .read_group = .public,
-                .write_group = .dependency,
-                .default_value = .{ .u32 = 1 },
-            },
-            .pub_pri = Export.Parameter{
-                .type = .u32,
-                .name = "pub_pri",
-                .read_group = .public,
-                .default_value = .{ .u32 = 2 },
-            },
-            .dep_pub = Export.Parameter{
-                .type = .u32,
-                .name = "dep_pub",
-                .read_group = .dependency,
-                .write_group = .public,
-                .default_value = .{ .u32 = 3 },
-            },
-            .dep_dep = Export.Parameter{
-                .type = .u32,
-                .name = "dep_dep",
-                .read_group = .dependency,
-                .write_group = .dependency,
-                .default_value = .{ .u32 = 4 },
-            },
-            .dep_pri = Export.Parameter{
-                .type = .u32,
-                .name = "dep_pri",
-                .read_group = .dependency,
-                .default_value = .{ .u32 = 5 },
-            },
-            .pri_pub = Export.Parameter{
-                .type = .u32,
-                .name = "pri_pub",
-                .write_group = .public,
-                .default_value = .{ .u32 = 6 },
-            },
-            .pri_dep = Export.Parameter{
-                .type = .u32,
-                .name = "pri_dep",
-                .write_group = .dependency,
-                .default_value = .{ .u32 = 7 },
-            },
-            .pri_pri = Export.Parameter{
-                .type = .u32,
-                .name = "pri_pri",
-                .default_value = .{ .u32 = 8 },
-            },
-        },
-        .{
-            .empty = Export.Resource{ .path = "" },
-            .a = Export.Resource{ .path = "a.bin" },
-            .b = Export.Resource{ .path = "b.txt" },
-            .img = Export.Resource{ .path = "c/d.img" },
-        },
-        &.{},
-        .{
-            .a0 = A0,
-            .a1 = A1,
-            .b0 = B0,
-            .b1 = B1,
-        },
-        .{},
-        &.{},
-        null,
-        null,
-    );
 }
 
 // ----------------------------------------------------

@@ -61,13 +61,13 @@ pub fn build(b: *std.Build) void {
     module.addImport("export_settings", min_export_cfg.createModule());
     module.addImport("visualizers", visualizers);
     module.addIncludePath(b.path("include/"));
-    if (target.result.os.tag == .windows) {
-        module.linkSystemLibrary("advapi32", .{});
-    }
+    if (target.result.os.tag == .windows) module.linkSystemLibrary("advapi32", .{});
 
     // ----------------------------------------------------
     // Module tests
     // ----------------------------------------------------
+
+    const test_step = b.step("test", "Run unit tests");
 
     const module_tests = b.addTest(.{
         .root_source_file = b.path("src/root.zig"),
@@ -82,9 +82,34 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .windows) module_tests.linkSystemLibrary("advapi32");
 
     const run_lib_unit_tests = b.addRunArtifact(module_tests);
-
-    const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+
+    var dir = b.build_root.handle.openDir("tests/", .{ .iterate = true }) catch |err| {
+        std.debug.panic("unable to open '{}tests: {s}", .{
+            b.build_root,
+            @errorName(err),
+        });
+    };
+    defer dir.close();
+
+    var it = dir.iterateAssumeFirstIteration();
+    while (it.next() catch @panic("failed to read dir")) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".zig")) {
+            continue;
+        }
+
+        const test_exe = b.addExecutable(.{
+            .name = b.fmt("{s}_test", .{std.fs.path.stem(entry.name)}),
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("tests/").path(b, entry.name),
+        });
+        test_exe.root_module.addImport("fimo_std", module);
+
+        const run_test_exe = b.addRunArtifact(test_exe);
+        run_test_exe.expectExitCode(0);
+        test_step.dependOn(&run_test_exe.step);
+    }
 
     // ----------------------------------------------------
     // Static library
