@@ -293,11 +293,11 @@ pub fn main() !void {
     errdefer (instance.deinit(&err) catch unreachable).unref();
 
     const a = try Module.Info.findByName(ctx.module(), "a", &err);
-    defer a.release();
+    defer a.unref();
     const b = try Module.Info.findByName(ctx.module(), "b", &err);
-    defer b.release();
+    defer b.unref();
     const c = try Module.Info.findByName(ctx.module(), "c", &err);
-    defer c.release();
+    defer c.unref();
 
     try testing.expect(a.isLoaded());
     try testing.expect(b.isLoaded());

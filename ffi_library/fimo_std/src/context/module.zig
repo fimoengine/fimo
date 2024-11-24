@@ -258,7 +258,7 @@ pub fn findInstanceByName(self: *Self, name: []const u8) System.SystemError!*con
     defer self.sys.unlock();
 
     const instance_ref = self.sys.getInstance(name) orelse return error.NotFound;
-    instance_ref.instance.info.acquire();
+    instance_ref.instance.info.ref();
     return instance_ref.instance.info;
 }
 
@@ -283,7 +283,7 @@ pub fn findInstanceBySymbol(
         version,
     ) orelse return error.NotFound;
     const instance_ref = self.sys.getInstance(symbol_ref.owner) orelse unreachable;
-    instance_ref.instance.info.acquire();
+    instance_ref.instance.info.ref();
     return instance_ref.instance.info;
 }
 

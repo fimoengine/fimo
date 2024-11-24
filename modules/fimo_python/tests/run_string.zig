@@ -56,7 +56,7 @@ pub fn main() !void {
     defer (instance.deinit(&err) catch unreachable).unref();
 
     const info = try Module.Info.findByName(ctx.module(), "fimo_python", &err);
-    defer info.release();
+    defer info.unref();
 
     try instance.addDependency(info, &err);
     try instance.addNamespace(fimo_python_meta.symbols.RunString.namespace, &err);

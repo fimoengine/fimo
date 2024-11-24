@@ -674,12 +674,12 @@ pub const Info = extern struct {
     unlock_unload_fn: *const fn (ctx: *const Info) callconv(.C) void,
 
     /// Increases the reference count of the instance.
-    pub fn acquire(self: *const Info) void {
+    pub fn ref(self: *const Info) void {
         self.acquire_fn(self);
     }
 
     /// Decreases the reference count of the instance.
-    pub fn release(self: *const Info) void {
+    pub fn unref(self: *const Info) void {
         self.release_fn(self);
     }
 
@@ -2098,7 +2098,7 @@ pub const Export = extern struct {
                 },
                 .dependency => {
                     const dependency = modifier.value.dependency;
-                    dependency.release();
+                    dependency.unref();
                 },
                 else => @panic("Unknown modifier"),
             }
@@ -2446,10 +2446,10 @@ pub fn writeParameter(
 const ffi = struct {
     const dll_only = struct {
         fn fimo_impl_module_info_acquire(info: *const Info) callconv(.C) void {
-            info.acquire();
+            info.ref();
         }
         fn fimo_impl_module_info_release(info: *const Info) callconv(.C) void {
-            info.release();
+            info.unref();
         }
         fn fimo_impl_module_info_is_loaded(info: *const Info) callconv(.C) bool {
             return info.isLoaded();
