@@ -1790,9 +1790,16 @@ pub const Export = extern struct {
             // Make shure that the section is created.
             comptime {
                 asm (
+                    \\.pushsection __DATA,fimo_module,regular,no_dead_strip
+                    \\.align 8
+                    \\.quad 0
+                    \\.popsection
+                    \\
+                    \\.no_dead_strip __start_fimo_module
                     \\.global __start_fimo_module
                     \\__start_fimo_module = section$start$__DATA$fimo_module
                     \\
+                    \\.no_dead_strip __stop_fimo_module
                     \\.global __stop_fimo_module
                     \\__stop_fimo_module = section$end$__DATA$fimo_module
                 );
