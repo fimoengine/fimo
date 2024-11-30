@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
         b,
         target.result,
         optimize,
-        b.path("Cargo.toml"),
+        b.option(std.Build.LazyPath, "manifest", "Manifest Path") orelse b.path("Cargo.toml"),
         target_dir.getDirectory(),
         "fimo_std",
         .{},

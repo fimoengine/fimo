@@ -70,6 +70,7 @@ pub fn build(b: *std.Build) void {
             .{
                 .target = target,
                 .optimize = optimize,
+                .manifest = b.path("Cargo.toml"),
             },
             modules,
             test_step,
