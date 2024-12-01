@@ -15,171 +15,6 @@
 extern "C" {
 #endif // __cplusplus
 
-#define FIMO_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT, META_VAR, EVENT_VAR, ERROR_VAR, ...)                           \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-zero-length")                                                     \
-    static const FimoTracingMetadata META_VAR = {                                                                      \
-            .type = FIMO_STRUCT_TYPE_TRACING_METADATA,                                                                 \
-            .next = NULL,                                                                                              \
-            .name = (NAME),                                                                                            \
-            .target = (TARGET),                                                                                        \
-            .level = (LVL),                                                                                            \
-            .file_name = __FILE__,                                                                                     \
-            .line_number = __LINE__,                                                                                   \
-    };                                                                                                                 \
-    static const FimoTracingEvent EVENT_VAR = {                                                                        \
-            .type = FIMO_STRUCT_TYPE_TRACING_EVENT,                                                                    \
-            .next = NULL,                                                                                              \
-            .metadata = &META_VAR,                                                                                     \
-    };                                                                                                                 \
-    FimoResult ERROR_VAR = fimo_tracing_event_emit_fmt(CTX, &EVENT_VAR, FMT, __VA_ARGS__);                             \
-    FIMO_ASSERT_FALSE(FIMO_RESULT_IS_ERROR(ERROR_VAR))                                                                 \
-    FIMO_PRAGMA_GCC(GCC diagnostic pop)
-
-/**
- * Emits a new event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param LVL event level
- * @param FMT printf format string
- * @param args printf format args
- */
-#define FIMO_TRACING_EMIT(CTX, NAME, TARGET, LVL, FMT, ...)                                                            \
-    FIMO_TRACING_EMIT_(CTX, NAME, TARGET, LVL, FMT, FIMO_VAR(_fimo_private_metadata_), FIMO_VAR(_fimo_private_event_), \
-                       FIMO_VAR(_fimo_private_error_), __VA_ARGS__)
-
-/**
- * Emits an error event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- * @param ARGS printf format args
- */
-#define FIMO_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, ...)                                                           \
-    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_ERROR, FMT, __VA_ARGS__)
-
-/**
- * Emits an error event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- */
-#define FIMO_TRACING_EMIT_ERROR_SIMPLE(CTX, NAME, TARGET, FMT)                                                         \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
-    FIMO_TRACING_EMIT_ERROR(CTX, NAME, TARGET, FMT, 0)                                                                 \
-    FIMO_PRAGMA_GCC(GCC diagnostic pop)
-
-/**
- * Emits a warning event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- * @param ARGS printf format args
- */
-#define FIMO_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, ...)                                                            \
-    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_WARN, FMT, __VA_ARGS__)
-
-/**
- * Emits a warning event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- */
-#define FIMO_TRACING_EMIT_WARN_SIMPLE(CTX, NAME, TARGET, FMT)                                                          \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
-    FIMO_TRACING_EMIT_WARN(CTX, NAME, TARGET, FMT, 0)                                                                  \
-    FIMO_PRAGMA_GCC(GCC diagnostic pop)
-
-/**
- * Emits an info event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- * @param ARGS printf format args
- */
-#define FIMO_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, ...)                                                            \
-    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_INFO, FMT, __VA_ARGS__)
-
-/**
- * Emits an info event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- */
-#define FIMO_TRACING_EMIT_INFO_SIMPLE(CTX, NAME, TARGET, FMT)                                                          \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
-    FIMO_TRACING_EMIT_INFO(CTX, NAME, TARGET, FMT, 0)                                                                  \
-    FIMO_PRAGMA_GCC(GCC diagnostic pop)
-
-/**
- * Emits a debug event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- * @param ARGS printf format args
- */
-#define FIMO_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, ...)                                                           \
-    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_DEBUG, FMT, __VA_ARGS__)
-
-/**
- * Emits a debug event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- */
-#define FIMO_TRACING_EMIT_DEBUG_SIMPLE(CTX, NAME, TARGET, FMT)                                                         \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
-    FIMO_TRACING_EMIT_DEBUG(CTX, NAME, TARGET, FMT, 0)                                                                 \
-    FIMO_PRAGMA_GCC(GCC diagnostic pop)
-
-/**
- * Emits a trace event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- * @param ARGS printf format args
- */
-#define FIMO_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, ...)                                                           \
-    FIMO_TRACING_EMIT(CTX, NAME, TARGET, FIMO_TRACING_LEVEL_TRACE, FMT, __VA_ARGS__)
-
-/**
- * Emits a trace event using the default formatter.
- *
- * @param CTX the context
- * @param NAME event name
- * @param TARGET event target
- * @param FMT printf format string
- */
-#define FIMO_TRACING_EMIT_TRACE_SIMPLE(CTX, NAME, TARGET, FMT)                                                         \
-    FIMO_PRAGMA_GCC(GCC diagnostic push)                                                                               \
-    FIMO_PRAGMA_GCC(GCC diagnostic ignored "-Wformat-extra-args")                                                      \
-    FIMO_TRACING_EMIT_TRACE(CTX, NAME, TARGET, FMT, 0)                                                                 \
-    FIMO_PRAGMA_GCC(GCC diagnostic pop)
-
 /**
  * A call stack.
  *
@@ -528,319 +363,204 @@ typedef struct FimoTracingCreationConfig {
  * Changing the VTable is a breaking change.
  */
 typedef struct FimoTracingVTableV0 {
-    FimoResult (*call_stack_create)(void *, FimoTracingCallStack **);
-    FimoResult (*call_stack_destroy)(void *, FimoTracingCallStack *);
-    FimoResult (*call_stack_switch)(void *, FimoTracingCallStack *, FimoTracingCallStack **);
-    FimoResult (*call_stack_unblock)(void *, FimoTracingCallStack *);
-    FimoResult (*call_stack_suspend_current)(void *, bool);
-    FimoResult (*call_stack_resume_current)(void *);
-    FimoResult (*span_create)(void *, const FimoTracingSpanDesc *, FimoTracingSpan **, FimoTracingFormat, const void *);
-    FimoResult (*span_destroy)(void *, FimoTracingSpan *);
-    FimoResult (*event_emit)(void *, const FimoTracingEvent *, FimoTracingFormat, const void *);
-    bool (*is_enabled)(void *);
-    FimoResult (*register_thread)(void *);
-    FimoResult (*unregister_thread)(void *);
-    FimoResult (*flush)(void *);
+    /**
+     * Creates a new empty call stack.
+     *
+     * If successful, the new call stack is marked as suspended, and written
+     * into `call_stack`. The new call stack is not set to be the active call
+     * stack.
+     *
+     * @param ctx the context
+     * @param call_stack pointer to the resulting call stack
+     *
+     * @return Status code.
+     */
+    FimoResult (*call_stack_create)(void *ctx, FimoTracingCallStack **call_stack);
+    /**
+     * Destroys an empty call stack.
+     *
+     * Marks the completion of a task. Before calling this function, the
+     * call stack must be empty, i.e., there must be no active spans on
+     * the stack, and must not be active. If successful, the call stack
+     * may not be used afterwards. The active call stack of the thread
+     * is destroyed automatically, on thread exit or during destruction
+     * of `context`. The caller must own the call stack uniquely.
+     *
+     * @param ctx the context
+     * @param call_stack the call stack to destroy
+     *
+     * @return Status code.
+     */
+    FimoResult (*call_stack_destroy)(void *ctx, FimoTracingCallStack *call_stack);
+    /**
+     * Switches the call stack of the current thread.
+     *
+     * If successful, `new_call_stack` will be used as the active call
+     * stack of the calling thread. The old call stack is written into
+     * `old_call_stack`, enabling the caller to switch back to it afterwards.
+     * `new_call_stack` must be in a suspended, but unblocked, state and not be
+     * active. The active call stack must also be in a suspended state, but may
+     * also be blocked.
+     *
+     * This function may return an error, if the current thread is not
+     * registered with the subsystem.
+     *
+     * @param ctx the context
+     * @param call_stack new call stack
+     * @param old location to store the old call stack into
+     *
+     * @return Status code.
+     */
+    FimoResult (*call_stack_switch)(void *ctx, FimoTracingCallStack *call_stack, FimoTracingCallStack **old);
+    /**
+     * Unblocks a blocked call stack.
+     *
+     * Once unblocked, the call stack may be resumed. The call stack
+     * may not be active and must be marked as blocked.
+     *
+     * @param ctx the context
+     * @param call_stack the call stack to unblock
+     *
+     * @return Status code.
+     */
+    FimoResult (*call_stack_unblock)(void *ctx, FimoTracingCallStack *call_stack);
+    /**
+     * Marks the current call stack as being suspended.
+     *
+     * While suspended, the call stack can not be utilized for tracing
+     * messages. The call stack optionally also be marked as being
+     * blocked. In that case, the call stack must be unblocked prior
+     * to resumption.
+     *
+     * This function may return an error, if the current thread is not
+     * registered with the subsystem.
+     *
+     * @param ctx the context
+     * @param block whether to mark the call stack as blocked
+     *
+     * @return Status code.
+     */
+    FimoResult (*call_stack_suspend_current)(void *ctx, bool block);
+    /**
+     * Marks the current call stack as being resumed.
+     *
+     * Once resumed, the context can be used to trace messages. To be
+     * successful, the current call stack must be suspended and unblocked.
+     *
+     * This function may return an error, if the current thread is not
+     * registered with the subsystem.
+     *
+     * @param ctx the context.
+     *
+     * @return Status code.
+     */
+    FimoResult (*call_stack_resume_current)(void *ctx);
+    /**
+     * Creates a new span with a custom formatter and enters it.
+     *
+     * If successful, the newly created span is used as the context for
+     * succeeding events. The subsystem may use a formatting buffer of a
+     * fixed size. The formatter is expected to cut-of the message after
+     * reaching that specified size. The contents of `span_desc` must
+     * remain valid until the span is destroyed.
+     *
+     * This function may return an error, if the current thread is not
+     * registered with the subsystem.
+     *
+     * @param ctx the context
+     * @param span_desc descriptor of the new span
+     * @param span pointer to the resulting span
+     * @param format custom formatting function
+     * @param data custom formatting data
+     *
+     * @return Status code.
+     */
+    FimoResult (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc,
+                              FimoTracingSpan **span, FimoTracingFormat format, const void *data);
+    /**
+     * Exits and destroys a span.
+     *
+     * If successful, succeeding events won't occur inside the context of the
+     * exited span anymore. `span` must be the span at the top of the current
+     * call stack. The span may not be in use prior to a call to this function,
+     * and may not be used afterwards.
+     *
+     * This function may return an error, if the current thread is not
+     * registered with the subsystem.
+     *
+     * @param ctx the context
+     * @param span the span to destroy
+     *
+     * @return Status code.
+     */
+    FimoResult (*span_destroy)(void *ctx, FimoTracingSpan *span);
+    /**
+     * Emits a new event with a custom formatter.
+     *
+     * The subsystem may use a formatting buffer of a fixed size. The formatter is
+     * expected to cut-of the message after reaching that specified size.
+     *
+     * @param ctx the context
+     * @param event the event to emit
+     * @param format custom formatting function
+     * @param data custom data to format
+     *
+     * @return Status code.
+     */
+    FimoResult (*event_emit)(void *ctx, const FimoTracingEvent *event, FimoTracingFormat format,
+                             const void * data);
+    /**
+     * Checks whether the tracing subsystem is enabled.
+     *
+     * This function can be used to check whether to call into the subsystem at all.
+     * Calling this function is not necessary, as the remaining functions of the
+     * subsystem are guaranteed to return default values, in case the subsystem is
+     * disabled.
+     *
+     * @param ctx the context.
+     *
+     * @return `true` if the subsystem is enabled.
+     */
+    bool (*is_enabled)(void *ctx);
+    /**
+     * Registers the calling thread with the tracing subsystem.
+     *
+     * The tracing of the subsystem is opt-in on a per thread basis, where
+     * unregistered threads will behave as if the subsystem was disabled.
+     * Once registered, the calling thread gains access to the tracing
+     * subsystem and is assigned a new empty call stack. A registered
+     * thread must be unregistered from the tracing subsystem before the
+     * context is destroyed, by terminating the tread, or by manually
+     * calling `fimo_tracing_unregister_thread()`.
+     *
+     * @param ctx the context
+     *
+     * @return Status code.
+     */
+    FimoResult (*register_thread)(void *ctx);
+    /**
+     * Unregisters the calling thread from the tracing subsystem.
+     *
+     * Once unregistered, the calling thread looses access to the tracing
+     * subsystem until it is registered again. The thread can not be unregistered
+     * until the call stack is empty.
+     *
+     * @param ctx the context.
+     *
+     * @return Status code.
+     */
+    FimoResult (*unregister_thread)(void *ctx);
+    /**
+     * Flushes the streams used for tracing.
+     *
+     * If successful, any unwritten data is written out by the individual subscribers.
+     *
+     * @param ctx the context
+     *
+     * @return Status code.
+     */
+    FimoResult (*flush)(void *ctx);
 } FimoTracingVTableV0;
-
-/**
- * Creates a new empty call stack.
- *
- * If successful, the new call stack is marked as suspended, and written
- * into `call_stack`. The new call stack is not set to be the active call
- * stack.
- *
- * @param context the context
- * @param call_stack pointer to the resulting call stack
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_call_stack_create(FimoContext context, FimoTracingCallStack **call_stack);
-
-/**
- * Destroys an empty call stack.
- *
- * Marks the completion of a task. Before calling this function, the
- * call stack must be empty, i.e., there must be no active spans on
- * the stack, and must not be active. If successful, the call stack
- * may not be used afterwards. The active call stack of the thread
- * is destroyed automatically, on thread exit or during destruction
- * of `context`. The caller must own the call stack uniquely.
- *
- * @param context the context
- * @param call_stack the call stack to destroy
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_call_stack_destroy(FimoContext context, FimoTracingCallStack *call_stack);
-
-/**
- * Switches the call stack of the current thread.
- *
- * If successful, `new_call_stack` will be used as the active call
- * stack of the calling thread. The old call stack is written into
- * `old_call_stack`, enabling the caller to switch back to it afterwards.
- * `new_call_stack` must be in a suspended, but unblocked, state and not be
- * active. The active call stack must also be in a suspended state, but may
- * also be blocked.
- *
- * This function may return an error, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context
- * @param call_stack new call stack
- * @param old location to store the old call stack into
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_call_stack_switch(FimoContext context, FimoTracingCallStack *call_stack,
-                                          FimoTracingCallStack **old);
-
-/**
- * Unblocks a blocked call stack.
- *
- * Once unblocked, the call stack may be resumed. The call stack
- * may not be active and must be marked as blocked.
- *
- * @param context the context
- * @param call_stack the call stack to unblock
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_call_stack_unblock(FimoContext context, FimoTracingCallStack *call_stack);
-
-/**
- * Marks the current call stack as being suspended.
- *
- * While suspended, the call stack can not be utilized for tracing
- * messages. The call stack optionally also be marked as being
- * blocked. In that case, the call stack must be unblocked prior
- * to resumption.
- *
- * This function may return an error, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context
- * @param block whether to mark the call stack as blocked
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_call_stack_suspend_current(FimoContext context, bool block);
-
-/**
- * Marks the current call stack as being resumed.
- *
- * Once resumed, the context can be used to trace messages. To be
- * successful, the current call stack must be suspended and unblocked.
- *
- * This function may return an error, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context.
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_call_stack_resume_current(FimoContext context);
-
-/**
- * Creates a new span with a custom formatter and enters it.
- *
- * If successful, the newly created span is used as the context for
- * succeeding events. The subsystem may use a formatting buffer of a
- * fixed size. The formatter is expected to cut-of the message after
- * reaching that specified size. The contents of `span_desc` must
- * remain valid until the span is destroyed.
- *
- * This function may return an error, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context
- * @param span_desc descriptor of the new span
- * @param span pointer to the resulting span
- * @param format custom formatting function
- * @param data custom formatting data
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_span_create_custom(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                           FimoTracingSpan **span, FimoTracingFormat format, const void *data);
-
-/**
- * Creates a new span with the standard formatter and enters it.
- *
- * If successful, the newly created span is used as the context for
- * succeeding events. The message is formatted as if it were
- * formatted by a call to `snprintf`. The message may be cut of,
- * if the length exceeds the internal formatting buffer size.  The
- * contents of `span_desc` must remain valid until the span is destroyed.
- *
- * This function may return an error, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context
- * @param span_desc descriptor of the new span
- * @param span pointer to the resulting span
- * @param format formatting string
- * @param ... format args
- *
- * @return Status code.
- */
-static
-FIMO_MUST_USE
-FIMO_INLINE_ALWAYS
-FIMO_PRINT_F_FORMAT_ATTR(4, 5)
-FimoResult fimo_tracing_span_create_fmt(FimoContext context, const FimoTracingSpanDesc *span_desc,
-                                        FimoTracingSpan **span, FIMO_PRINT_F_FORMAT const char *format, ...) {
-    va_list vlist;
-    va_start(vlist, format);
-    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    FimoResult result = fimo_tracing_span_create_custom(context, span_desc, span, fimo_impl_tracing_fmt, &args);
-    va_end(vlist);
-    return result;
-}
-
-/**
- * Exits and destroys a span.
- *
- * If successful, succeeding events won't occur inside the context of the
- * exited span anymore. `span` must be the span at the top of the current
- * call stack. The span may not be in use prior to a call to this function,
- * and may not be used afterwards.
- *
- * This function may return an error, if the current thread is not
- * registered with the subsystem.
- *
- * @param context the context
- * @param span the span to destroy
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_span_destroy(FimoContext context, FimoTracingSpan *span);
-
-/**
- * Emits a new event with a custom formatter.
- *
- * The subsystem may use a formatting buffer of a fixed size. The formatter is
- * expected to cut-of the message after reaching that specified size.
- *
- * @param context the context
- * @param event the event to emit
- * @param format custom formatting function
- * @param data custom data to format
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_event_emit_custom(FimoContext context, const FimoTracingEvent *event, FimoTracingFormat format,
-                                          const void *data);
-
-/**
- * Emits a new event with the standard formatter.
- *
- * The message is formatted as if it were formatted by a call to `snprintf`.
- * The message may be cut of, if the length exceeds the internal formatting
- * buffer size.
- *
- * @param context the context
- * @param event the event to emit
- * @param format formatting string
- * @param ... format args
- *
- * @return Status code.
- */
-static
-FIMO_MUST_USE
-FIMO_INLINE_ALWAYS
-FIMO_PRINT_F_FORMAT_ATTR(3, 4)
-FimoResult fimo_tracing_event_emit_fmt(FimoContext context, const FimoTracingEvent *event,
-                                       FIMO_PRINT_F_FORMAT const char *format, ...) {
-    va_list vlist;
-    va_start(vlist, format);
-    FimoImplTracingFmtArgs args = {.format = format, .vlist = &vlist};
-    FimoResult result = fimo_tracing_event_emit_custom(context, event, fimo_impl_tracing_fmt, &args);
-    va_end(vlist);
-    return result;
-}
-
-/**
- * Checks whether the tracing subsystem is enabled.
- *
- * This function can be used to check whether to call into the subsystem at all.
- * Calling this function is not necessary, as the remaining functions of the
- * subsystem are guaranteed to return default values, in case the subsystem is
- * disabled.
- *
- * @param context the context.
- *
- * @return `true` if the subsystem is enabled.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-bool fimo_tracing_is_enabled(FimoContext context);
-
-/**
- * Registers the calling thread with the tracing subsystem.
- *
- * The tracing of the subsystem is opt-in on a per thread basis, where
- * unregistered threads will behave as if the subsystem was disabled.
- * Once registered, the calling thread gains access to the tracing
- * subsystem and is assigned a new empty call stack. A registered
- * thread must be unregistered from the tracing subsystem before the
- * context is destroyed, by terminating the tread, or by manually
- * calling `fimo_tracing_unregister_thread()`.
- *
- * @param context the context
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_register_thread(FimoContext context);
-
-/**
- * Unregisters the calling thread from the tracing subsystem.
- *
- * Once unregistered, the calling thread looses access to the tracing
- * subsystem until it is registered again. The thread can not be unregistered
- * until the call stack is empty.
- *
- * @param context the context.
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_unregister_thread(FimoContext context);
-
-/**
- * Flushes the streams used for tracing.
- *
- * If successful, any unwritten data is written out by the individual subscribers.
- *
- * @param context the context
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_tracing_flush(FimoContext context);
 
 #ifdef __cplusplus
 }

@@ -1285,6 +1285,8 @@ class FimoContextCoreVTableV0(c.Structure):
     ]
 
 
+_CURRENT_VERSION = FimoVersion(0, 1, 0)
+
 _fimo_context_init = _lib.fimo_context_init
 _fimo_context_init.argtypes = [
     c.POINTER(c.POINTER(FimoBaseStructIn)),
@@ -1311,11 +1313,6 @@ def fimo_context_init(
     return _fimo_context_init(options, context)
 
 
-_fimo_context_check_version = _lib.fimo_context_check_version
-_fimo_context_check_version.argtypes = [FimoContext]
-_fimo_context_check_version.restype = FimoResult
-
-
 def fimo_context_check_version(context: FimoContext) -> FimoResult:
     """Checks the compatibility of the context version.
 
@@ -1328,12 +1325,10 @@ def fimo_context_check_version(context: FimoContext) -> FimoResult:
 
     :return: Status code.
     """
-    return _fimo_context_check_version(context)
-
-
-_fimo_context_acquire = _lib.fimo_context_acquire
-_fimo_context_acquire.argtypes = [FimoContext]
-_fimo_context_acquire.restype = None
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    check_version = vtable.header.check_version
+    return check_version(context, c.byref(_CURRENT_VERSION))
 
 
 def fimo_context_acquire(context: FimoContext) -> None:
@@ -1345,12 +1340,10 @@ def fimo_context_acquire(context: FimoContext) -> None:
 
     :param context: the context
     """
-    _fimo_context_acquire(context)
-
-
-_fimo_context_release = _lib.fimo_context_release
-_fimo_context_release.argtypes = [FimoContext]
-_fimo_context_release.restype = None
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    acquire = vtable.core_v0.acquire
+    acquire(context)
 
 
 def fimo_context_release(context: FimoContext) -> None:
@@ -1362,7 +1355,10 @@ def fimo_context_release(context: FimoContext) -> None:
 
     :param context: the context
     """
-    _fimo_context_release(context)
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    release = vtable.core_v0.release
+    release(context)
 
 
 # Header: fimo_std/tracing.h
@@ -1619,14 +1615,6 @@ class FimoTracingVTableV0(c.Structure):
     ]
 
 
-_fimo_tracing_call_stack_create = _lib.fimo_tracing_call_stack_create
-_fimo_tracing_call_stack_create.argtypes = [
-    FimoContext,
-    c.POINTER(c.POINTER(FimoTracingCallStack)),
-]
-_fimo_tracing_call_stack_create.restype = FimoResult
-
-
 def fimo_tracing_call_stack_create(
     context: FimoContext, call_stack: PtrRef[FimoTracingCallStack]
 ) -> FimoResult:
@@ -1641,15 +1629,10 @@ def fimo_tracing_call_stack_create(
 
     :return: Status code.
     """
-    return _fimo_tracing_call_stack_create(context, call_stack)
-
-
-_fimo_tracing_call_stack_destroy = _lib.fimo_tracing_call_stack_destroy
-_fimo_tracing_call_stack_destroy.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingCallStack),
-]
-_fimo_tracing_call_stack_destroy.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    call_stack_create = vtable.tracing_v0.call_stack_create
+    return call_stack_create(c.c_void_p(context.data), call_stack)
 
 
 def fimo_tracing_call_stack_destroy(
@@ -1669,16 +1652,10 @@ def fimo_tracing_call_stack_destroy(
 
     :return: Status code.
     """
-    return _fimo_tracing_call_stack_destroy(context, call_stack)
-
-
-_fimo_tracing_call_stack_switch = _lib.fimo_tracing_call_stack_switch
-_fimo_tracing_call_stack_switch.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingCallStack),
-    c.POINTER(c.POINTER(FimoTracingCallStack)),
-]
-_fimo_tracing_call_stack_switch.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    call_stack_destroy = vtable.tracing_v0.call_stack_destroy
+    return call_stack_destroy(c.c_void_p(context.data), call_stack)
 
 
 def fimo_tracing_call_stack_switch(
@@ -1704,15 +1681,10 @@ def fimo_tracing_call_stack_switch(
 
     :return: Status code.
     """
-    return _fimo_tracing_call_stack_switch(context, call_stack, old)
-
-
-_fimo_tracing_call_stack_unblock = _lib.fimo_tracing_call_stack_unblock
-_fimo_tracing_call_stack_unblock.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingCallStack),
-]
-_fimo_tracing_call_stack_unblock.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    call_stack_switch = vtable.tracing_v0.call_stack_switch
+    return call_stack_switch(c.c_void_p(context.data), call_stack, old)
 
 
 def fimo_tracing_call_stack_unblock(
@@ -1728,12 +1700,10 @@ def fimo_tracing_call_stack_unblock(
 
     :return: Status code.
     """
-    return _fimo_tracing_call_stack_unblock(context, call_stack)
-
-
-_fimo_tracing_call_stack_suspend_current = _lib.fimo_tracing_call_stack_suspend_current
-_fimo_tracing_call_stack_suspend_current.argtypes = [FimoContext, c.c_bool]
-_fimo_tracing_call_stack_suspend_current.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    call_stack_unblock = vtable.tracing_v0.call_stack_unblock
+    return call_stack_unblock(c.c_void_p(context.data), call_stack)
 
 
 def fimo_tracing_call_stack_suspend_current(
@@ -1754,12 +1724,10 @@ def fimo_tracing_call_stack_suspend_current(
 
     :return: Status code.
     """
-    return _fimo_tracing_call_stack_suspend_current(context, block)
-
-
-_fimo_tracing_call_stack_resume_current = _lib.fimo_tracing_call_stack_resume_current
-_fimo_tracing_call_stack_resume_current.argtypes = [FimoContext]
-_fimo_tracing_call_stack_resume_current.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    call_stack_suspend_current = vtable.tracing_v0.call_stack_suspend_current
+    return call_stack_suspend_current(c.c_void_p(context.data), block)
 
 
 def fimo_tracing_call_stack_resume_current(context: FimoContext) -> FimoResult:
@@ -1775,18 +1743,10 @@ def fimo_tracing_call_stack_resume_current(context: FimoContext) -> FimoResult:
 
     :return: Status code.
     """
-    return _fimo_tracing_call_stack_resume_current(context)
-
-
-_fimo_tracing_span_create_custom = _lib.fimo_tracing_span_create_custom
-_fimo_tracing_span_create_custom.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingSpanDesc),
-    c.POINTER(c.POINTER(FimoTracingSpan)),
-    FimoTracingFormat,
-    c.c_void_p,
-]
-_fimo_tracing_span_create_custom.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    call_stack_resume_current = vtable.tracing_v0.call_stack_resume_current
+    return call_stack_resume_current(c.c_void_p(context.data))
 
 
 def fimo_tracing_span_create_custom(
@@ -1815,12 +1775,10 @@ def fimo_tracing_span_create_custom(
 
     :return: Status code.
     """
-    return _fimo_tracing_span_create_custom(context, span_desc, span, format, data)
-
-
-_fimo_tracing_span_destroy = _lib.fimo_tracing_span_destroy
-_fimo_tracing_span_destroy.argtypes = [FimoContext, c.POINTER(FimoTracingSpan)]
-_fimo_tracing_span_destroy.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    span_create = vtable.tracing_v0.span_create
+    return span_create(c.c_void_p(context.data), span_desc, span, format, data)
 
 
 def fimo_tracing_span_destroy(
@@ -1841,17 +1799,10 @@ def fimo_tracing_span_destroy(
 
     :return: Status code.
     """
-    return _fimo_tracing_span_destroy(context, span)
-
-
-_fimo_tracing_event_emit_custom = _lib.fimo_tracing_event_emit_custom
-_fimo_tracing_event_emit_custom.argtypes = [
-    FimoContext,
-    c.POINTER(FimoTracingEvent),
-    FimoTracingFormat,
-    c.c_void_p,
-]
-_fimo_tracing_event_emit_custom.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    span_destroy = vtable.tracing_v0.span_destroy
+    return span_destroy(c.c_void_p(context.data), span)
 
 
 def fimo_tracing_event_emit_custom(
@@ -1872,12 +1823,10 @@ def fimo_tracing_event_emit_custom(
 
     :return: Status code.
     """
-    return _fimo_tracing_event_emit_custom(context, event, format, data)
-
-
-_fimo_tracing_is_enabled = _lib.fimo_tracing_is_enabled
-_fimo_tracing_is_enabled.argtypes = [FimoContext]
-_fimo_tracing_is_enabled.restype = c.c_bool
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    event_emit = vtable.tracing_v0.event_emit
+    return event_emit(c.c_void_p(context.data), event, format, data)
 
 
 def fimo_tracing_is_enabled(context: FimoContext) -> bool:
@@ -1892,12 +1841,10 @@ def fimo_tracing_is_enabled(context: FimoContext) -> bool:
 
     :return: `True` if the subsystem is enabled.
     """
-    return _fimo_tracing_is_enabled(context)
-
-
-_fimo_tracing_register_thread = _lib.fimo_tracing_register_thread
-_fimo_tracing_register_thread.argtypes = [FimoContext]
-_fimo_tracing_register_thread.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    is_enabled = vtable.tracing_v0.is_enabled
+    return is_enabled(c.c_void_p(context.data))
 
 
 def fimo_tracing_register_thread(context: FimoContext) -> FimoResult:
@@ -1915,12 +1862,10 @@ def fimo_tracing_register_thread(context: FimoContext) -> FimoResult:
 
     :return: Status code.
     """
-    return _fimo_tracing_register_thread(context)
-
-
-_fimo_tracing_unregister_thread = _lib.fimo_tracing_unregister_thread
-_fimo_tracing_unregister_thread.argtypes = [FimoContext]
-_fimo_tracing_unregister_thread.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    register_thread = vtable.tracing_v0.register_thread
+    return register_thread(c.c_void_p(context.data))
 
 
 def fimo_tracing_unregister_thread(context: FimoContext) -> FimoResult:
@@ -1934,12 +1879,10 @@ def fimo_tracing_unregister_thread(context: FimoContext) -> FimoResult:
 
     :return: Status code.
     """
-    return _fimo_tracing_unregister_thread(context)
-
-
-_fimo_tracing_flush = _lib.fimo_tracing_flush
-_fimo_tracing_flush.argtypes = [FimoContext]
-_fimo_tracing_flush.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    unregister_thread = vtable.tracing_v0.unregister_thread
+    return unregister_thread(c.c_void_p(context.data))
 
 
 def fimo_tracing_flush(context: FimoContext) -> FimoResult:
@@ -1951,7 +1894,10 @@ def fimo_tracing_flush(context: FimoContext) -> FimoResult:
 
     :return: Status code.
     """
-    return _fimo_tracing_flush(context)
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    flush = vtable.tracing_v0.flush
+    return flush(c.c_void_p(context.data))
 
 
 # Header: fimo_std/module.h
@@ -3643,7 +3589,7 @@ class FimoContextVTable(c.Structure):
 
     _fields_ = [
         ("header", FimoContextVTableHeader),
-        ("core", FimoContextCoreVTableV0),
+        ("core_v0", FimoContextCoreVTableV0),
         ("tracing_v0", FimoTracingVTableV0),
         ("module_v0", FimoModuleVTableV0),
     ]

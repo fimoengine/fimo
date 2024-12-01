@@ -198,23 +198,6 @@ const ffi = struct {
         context.* = ctx.intoC();
         return AnyError.intoCResult(null);
     }
-    export fn fimo_context_check_version(context: c.FimoContext) c.FimoResult {
-        const ctx = CompatibilityContext.initC(context);
-        return if (!ctx.isCompatibleWithVersion(context_version))
-            AnyError.initError(error.InvalidVersion).err
-        else
-            AnyError.intoCResult(null);
-    }
-
-    export fn fimo_context_acquire(context: c.FimoContext) void {
-        const ctx = Self.initC(context);
-        ctx.ref();
-    }
-
-    export fn fimo_context_release(context: c.FimoContext) void {
-        const ctx = Self.initC(context);
-        ctx.unref();
-    }
 };
 
 comptime {

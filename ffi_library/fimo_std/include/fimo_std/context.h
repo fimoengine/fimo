@@ -9,6 +9,8 @@
 extern "C" {
 #endif
 
+typedef struct FimoContextVTable FimoContextVTable;
+
 /**
  * Context of the fimo std.
  *
@@ -17,7 +19,7 @@ extern "C" {
  */
 typedef struct FimoContext {
     void *data;
-    const void *vtable;
+    const FimoContextVTable *vtable;
 } FimoContext;
 
 /**
@@ -59,7 +61,20 @@ typedef struct FimoBaseStructOut {
  * available to us.
  */
 typedef struct FimoContextVTableHeader {
-    FimoResult (*check_version)(void *, const FimoVersion *);
+    /**
+     * Checks the compatibility of the context version.
+     *
+     * This function must be called upon the acquisition of a context, that
+     * was not created locally, e.g., when being passed a context from
+     * another shared library. Failure of doing so, may cause undefined
+     * behavior, if the context is later utilized.
+     *
+     * @param ctx the context
+     * @param requried version
+     *
+     * @return Status code.
+     */
+    FimoResult (*check_version)(void *ctx, const FimoVersion *requried);
 } FimoContextVTableHeader;
 
 /**
@@ -68,8 +83,26 @@ typedef struct FimoContextVTableHeader {
  * Changing the VTable is a breaking change.
  */
 typedef struct FimoContextVTableV0 {
-    void (*acquire)(void *);
-    void (*release)(void *);
+    /**
+     * Acquires a reference to the context.
+     *
+     * Increases the reference count of the context. May abort the program,
+     * if doing so is not possible. May only be called with a valid reference
+     * to the context.
+     *
+     * @param ctx the context
+    */
+    void (*acquire)(void *ctx);
+    /**
+     * Releases a reference to the context.
+     *
+     * Decrements the reference count of the context. When the reference count
+     * reaches zero, this function also destroys the reference. May only be
+     * called with a valid reference to the context.
+     *
+     * @param ctx the context
+    */
+    void (*release)(void *ctx);
 } FimoContextCoreVTableV0;
 
 /**
@@ -88,46 +121,6 @@ typedef struct FimoContextVTableV0 {
 FIMO_EXPORT
 FIMO_MUST_USE
 FimoResult fimo_context_init(const FimoBaseStructIn **options, FimoContext *context);
-
-/**
- * Checks the compatibility of the context version.
- *
- * This function must be called upon the acquisition of a context, that
- * was not created locally, e.g., when being passed a context from
- * another shared library. Failure of doing so, may cause undefined
- * behavior, if the context is later utilized.
- *
- * @param context the context
- *
- * @return Status code.
- */
-FIMO_EXPORT
-FIMO_MUST_USE
-FimoResult fimo_context_check_version(FimoContext context);
-
-/**
- * Acquires a reference to the context.
- *
- * Increases the reference count of the context. May abort the program,
- * if doing so is not possible. May only be called with a valid reference
- * to the context.
- *
- * @param context the context
- */
-FIMO_EXPORT
-void fimo_context_acquire(FimoContext context);
-
-/**
- * Releases a reference to the context.
- *
- * Decrements the reference count of the context. When the reference count
- * reaches zero, this function also destroys the reference. May only be
- * called with a valid reference to the context.
- *
- * @param context the context
- */
-FIMO_EXPORT
-void fimo_context_release(FimoContext context);
 
 #ifdef __cplusplus
 }

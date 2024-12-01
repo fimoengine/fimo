@@ -29,18 +29,31 @@ impl ContextView<'_> {
         bindings::FIMO_VERSION_BUILD_NUMBER as u64,
     );
 
+    pub(crate) fn data(&self) -> *mut std::ffi::c_void {
+        self.0.data
+    }
+
+    pub(crate) fn vtable(&self) -> &bindings::FimoContextVTable {
+        // Safety: Is always valid.
+        unsafe { &*self.0.vtable.cast() }
+    }
+
     /// Checks that the version of the `Context` is compatible.
     pub fn check_version(&self) -> crate::error::Result {
+        // Safety: Is always set.
+        let f = unsafe { self.vtable().header.check_version.unwrap_unchecked() };
+
         // Safety: The call is safe, as we own a reference to the context.
-        let error = unsafe { bindings::fimo_context_check_version(self.0) };
-        // Safety:
-        unsafe { to_result(error) }
+        unsafe { to_result(f(self.data(), &Self::CURRENT_VERSION.into_ffi())) }
     }
 
     /// Promotes the context view to a context, by increasing the reference count.
     pub fn to_context(&self) -> Context {
+        // Safety: Is always set.
+        let f = unsafe { self.vtable().core.acquire.unwrap_unchecked() };
+
         // Safety: We own a valid reference to the context.
-        unsafe { bindings::fimo_context_acquire(self.into_ffi()) }
+        unsafe { f(self.data()) }
         Context(ContextView(self.0, PhantomData))
     }
 }
@@ -121,8 +134,11 @@ impl Deref for Context {
 
 impl Drop for Context {
     fn drop(&mut self) {
+        // Safety: Is always set.
+        let f = unsafe { self.vtable().core.release.unwrap_unchecked() };
+
         // Safety: We own the reference to the context.
-        unsafe { bindings::fimo_context_release(self.share_to_ffi()) }
+        unsafe { f(self.data()) }
     }
 }
 
@@ -207,6 +223,11 @@ pub(crate) mod private {
     pub trait SealedContext:
         FFISharable<bindings::FimoContext> + FFITransferable<bindings::FimoContext>
     {
+        fn view(&self) -> ContextView<'_>;
     }
-    impl SealedContext for ContextView<'_> {}
+    impl SealedContext for ContextView<'_> {
+        fn view(&self) -> ContextView<'_> {
+            *self
+        }
+    }
 }

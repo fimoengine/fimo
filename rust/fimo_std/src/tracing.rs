@@ -42,11 +42,20 @@ where
     T: SealedContext,
 {
     fn emit_event(&self, event: &Event, arguments: Arguments<'_>) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.view()
+                .vtable()
+                .tracing_v0
+                .event_emit
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_event_emit_custom(
-                    self.share_to_ffi(),
+                *error = f(
+                    self.view().data(),
                     event.share_to_ffi(),
                     Some(Formatter::format_into_buffer as _),
                     core::ptr::from_ref(&arguments).cast(),
@@ -56,15 +65,25 @@ where
     }
 
     fn is_enabled(&self) -> bool {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.view()
+                .vtable()
+                .tracing_v0
+                .is_enabled
+                .unwrap_unchecked()
+        };
         // Safety: FFI call is safe.
-        unsafe { bindings::fimo_tracing_is_enabled(self.share_to_ffi()) }
+        unsafe { f(self.view().data()) }
     }
 
     fn flush(&self) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe { self.view().vtable().tracing_v0.flush.unwrap_unchecked() };
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_flush(self.share_to_ffi());
+                *error = f(self.view().data());
             })
         }
     }
@@ -537,11 +556,14 @@ impl Span {
         span_descriptor: &'static SpanDescriptor,
         arguments: Arguments<'_>,
     ) -> Result<Self, Error> {
+        // Safety: Is always set.
+        let f = unsafe { ctx.vtable().tracing_v0.span_create.unwrap_unchecked() };
+
         // Safety: FFI call is safe.
         let span = unsafe {
             to_result_indirect_in_place(|error, span| {
-                *error = bindings::fimo_tracing_span_create_custom(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.data(),
                     span_descriptor.share_to_ffi(),
                     span.as_mut_ptr(),
                     Some(Formatter::format_into_buffer),
@@ -562,10 +584,13 @@ unsafe impl Sync for Span {}
 
 impl Drop for Span {
     fn drop(&mut self) {
+        // Safety: Is always set.
+        let f = unsafe { self.0.vtable().tracing_v0.span_destroy.unwrap_unchecked() };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_span_destroy(self.0.share_to_ffi(), self.1);
+                *error = f(self.0.data(), self.1);
             })
             .expect("the span should be destroyable");
         }
@@ -582,13 +607,13 @@ impl CallStack {
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
     pub fn new(ctx: &ContextView<'_>) -> Result<Self, Error> {
+        // Safety: Is always set.
+        let f = unsafe { ctx.vtable().tracing_v0.call_stack_create.unwrap_unchecked() };
+
         // Safety: FFI call is safe.
         let stack = unsafe {
             to_result_indirect_in_place(|error, stack| {
-                *error = bindings::fimo_tracing_call_stack_create(
-                    ctx.share_to_ffi(),
-                    stack.as_mut_ptr(),
-                );
+                *error = f(ctx.data(), stack.as_mut_ptr());
             })?
         };
 
@@ -605,14 +630,19 @@ impl CallStack {
     pub fn switch(self) -> Result<Self, (Self, Error)> {
         let this = ManuallyDrop::new(self);
 
+        // Safety: Is always set.
+        let f = unsafe {
+            this.0
+                .vtable()
+                .tracing_v0
+                .call_stack_switch
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let stack = unsafe {
             to_result_indirect_in_place(|error, stack| {
-                *error = bindings::fimo_tracing_call_stack_switch(
-                    this.0.share_to_ffi(),
-                    this.1,
-                    stack.as_mut_ptr(),
-                );
+                *error = f(this.0.data(), this.1, stack.as_mut_ptr());
             })
         };
         let stack = match stack {
@@ -630,10 +660,19 @@ impl CallStack {
     /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
     /// marked as blocked.
     pub fn unblock(&mut self) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.0
+                .vtable()
+                .tracing_v0
+                .call_stack_unblock
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_call_stack_unblock(self.0.share_to_ffi(), self.1);
+                *error = f(self.0.data(), self.1);
             })
         }
     }
@@ -644,11 +683,18 @@ impl CallStack {
     /// can optionally also be marked as blocked. In that case, the call stack must be unblocked
     /// prior to resumption.
     pub fn suspend_current(ctx: &ContextView<'_>, block: bool) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.vtable()
+                .tracing_v0
+                .call_stack_suspend_current
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error =
-                    bindings::fimo_tracing_call_stack_suspend_current(ctx.share_to_ffi(), block);
+                *error = f(ctx.data(), block);
             })
         }
     }
@@ -658,10 +704,18 @@ impl CallStack {
     /// Once resumed, the call stack can be used to trace messages. To be successful, the current
     /// call stack must be suspended and unblocked.
     pub fn resume_current(ctx: &ContextView<'_>) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.vtable()
+                .tracing_v0
+                .call_stack_resume_current
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_call_stack_resume_current(ctx.share_to_ffi());
+                *error = f(ctx.data());
             })
         }
     }
@@ -675,10 +729,19 @@ unsafe impl Sync for CallStack {}
 
 impl Drop for CallStack {
     fn drop(&mut self) {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.0
+                .vtable()
+                .tracing_v0
+                .call_stack_destroy
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_call_stack_destroy(self.0.share_to_ffi(), self.1);
+                *error = f(self.0.data(), self.1);
             })
             .expect("the call stack should be destroyable");
         }
@@ -696,10 +759,13 @@ impl ThreadAccess {
     /// will behave as if the backend was disabled. Once registered, the calling thread gains access
     /// to the tracing subsystem and is assigned a new empty call stack.
     pub fn new(ctx: &ContextView<'_>) -> Result<Self, Error> {
+        // Safety: Is always set.
+        let f = unsafe { ctx.vtable().tracing_v0.register_thread.unwrap_unchecked() };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_register_thread(ctx.share_to_ffi());
+                *error = f(ctx.data());
             })?;
         }
 
@@ -712,10 +778,18 @@ impl ThreadAccess {
     /// registered again. The thread can not be unregistered until the call stack is empty.
     pub fn unregister(self) -> Result<(), (Self, Error)> {
         let this = ManuallyDrop::new(self);
+        // Safety: Is always set.
+        let f = unsafe {
+            this.0
+                .vtable()
+                .tracing_v0
+                .unregister_thread
+                .unwrap_unchecked()
+        };
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_unregister_thread(this.0.share_to_ffi());
+                *error = f(this.0.data());
             })
             .map_err(move |e| (ManuallyDrop::into_inner(this), e))
         }
@@ -724,10 +798,18 @@ impl ThreadAccess {
 
 impl Drop for ThreadAccess {
     fn drop(&mut self) {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.0
+                .vtable()
+                .tracing_v0
+                .unregister_thread
+                .unwrap_unchecked()
+        };
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_tracing_unregister_thread(self.0.share_to_ffi());
+                *error = f(self.0.data());
             })
             .expect("should be able to unregister a thread");
         }
@@ -1025,7 +1107,7 @@ impl Drop for OpaqueSubscriber {
 
 /// Returns the default subscriber.
 pub fn default_subscriber() -> OpaqueSubscriber {
-    // Safety: Is safe, as it is write only.
+    // Safety: Is safe, as it is write-only.
     unsafe { OpaqueSubscriber(bindings::FIMO_TRACING_DEFAULT_SUBSCRIBER) }
 }
 
