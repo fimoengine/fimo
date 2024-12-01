@@ -15,7 +15,7 @@ version = "0.1"
 path = "../fimo_std"
 
 [build-dependencies.bindgen]
-version = "0.69.1"
+version = "0.70.1"
 
 [build-dependencies.doxygen-rs]
 version = "0.4.2"

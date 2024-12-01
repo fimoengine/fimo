@@ -20,9 +20,6 @@ version = "0.2.151"
 [build-dependencies.zigcli]
 version = "0.1.0"
 
-[build-dependencies.cmake]
-version = "0.1.5"
-
 [build-dependencies.bindgen]
 version = "0.70.1"
 

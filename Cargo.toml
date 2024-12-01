@@ -6,7 +6,7 @@ exclude = ["modules/fimo_python"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.83.0"
+rust-version = "1.84.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/fimoengine/fimo"
 
