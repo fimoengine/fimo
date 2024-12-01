@@ -117,15 +117,16 @@ impl ModuleInfoView<'_> {
         unsafe { (is_loaded)(self.share_to_ffi()) }
     }
 
-    /// Locks the underlying module from being unloaded.
+    /// Increases the strong reference count of the module instance.
     ///
-    /// The module may be locked multiple times.
-    pub fn lock_unload(&self) -> Result<ModuleInfoGuard<'_>, Error> {
-        let lock_unload = self.0.lock_unload.unwrap();
+    /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
+    /// between modules, without registering the dependency with the subsystem.
+    pub fn acquire_module_strong(&self) -> Result<ModuleInfoGuard<'_>, Error> {
+        let acquire_module_strong = self.0.acquire_module_strong.unwrap();
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = lock_unload(self.share_to_ffi());
+                *error = acquire_module_strong(self.share_to_ffi());
             })?;
         }
         Ok(ModuleInfoGuard(*self))
@@ -136,10 +137,10 @@ impl ModuleInfoView<'_> {
     /// # Safety
     ///
     /// The module must have been locked.
-    pub unsafe fn unlock_unload(&self) {
-        let unlock_unload = self.0.unlock_unload.unwrap();
+    pub unsafe fn release_module_strong(&self) {
+        let release_module_strong = self.0.release_module_strong.unwrap();
         // Safety: The ffi call is safe.
-        unsafe { (unlock_unload)(self.share_to_ffi()) }
+        unsafe { (release_module_strong)(self.share_to_ffi()) }
     }
 
     /// Acquires the module info by increasing the reference count.
@@ -242,7 +243,7 @@ impl<'a> Deref for ModuleInfoGuard<'a> {
 impl Drop for ModuleInfoGuard<'_> {
     fn drop(&mut self) {
         // Safety: We own the lock.
-        unsafe { self.0.unlock_unload() }
+        unsafe { self.0.release_module_strong() }
     }
 }
 
@@ -681,9 +682,11 @@ where
     Exp: Send + Sync + 'static,
     Data: Send + Sync + 'static,
 {
-    pub fn lock_module(&self) -> Result<GenericLockedModule<Par, Res, Imp, Exp, Data>, Error> {
+    pub fn lock_module_strong(
+        &self,
+    ) -> Result<GenericLockedModule<Par, Res, Imp, Exp, Data>, Error> {
         let info = self.module_info();
-        let guard = info.lock_unload()?;
+        let guard = info.acquire_module_strong()?;
         #[allow(clippy::mem_forget)]
         std::mem::forget(guard);
 
@@ -924,7 +927,7 @@ where
     Data: Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
-        self.lock_module()
+        self.lock_module_strong()
             .expect("should be able to lock a module multiple times")
     }
 }
@@ -939,7 +942,7 @@ where
 {
     fn drop(&mut self) {
         // Safety: The module is locked.
-        unsafe { self.module_info().unlock_unload() }
+        unsafe { self.module_info().release_module_strong() }
     }
 }
 

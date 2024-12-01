@@ -2287,53 +2287,34 @@ FimoModuleInfo._fields_ = [
     ("acquire", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo))),
     ("release", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo))),
     ("is_loaded", c.CFUNCTYPE(c.c_bool, c.POINTER(FimoModuleInfo))),
-    ("lock_unload", c.CFUNCTYPE(FimoResult, c.POINTER(FimoModuleInfo))),
-    ("unlock_unload", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo))),
+    ("acquire_module_strong", c.CFUNCTYPE(FimoResult, c.POINTER(FimoModuleInfo))),
+    ("release_module_strong", c.CFUNCTYPE(None, c.POINTER(FimoModuleInfo))),
 ]
 
-_fimo_impl_module_info_acquire = _lib.fimo_impl_module_info_acquire
-_fimo_impl_module_info_acquire.argtypes = [c.POINTER(FimoModuleInfo)]
-_fimo_impl_module_info_acquire.restype = None
+
+def fimo_module_info_acquire(info: Ref[FimoModuleInfo]) -> None:
+    acquire = info.acquire
+    acquire(info)
 
 
-def fimo_impl_module_info_acquire(info: Ref[FimoModuleInfo]) -> None:
-    _fimo_impl_module_info_acquire(info)
+def fimo_module_info_release(info: Ref[FimoModuleInfo]) -> None:
+    release = info.release
+    release(info)
 
 
-_fimo_impl_module_info_release = _lib.fimo_impl_module_info_release
-_fimo_impl_module_info_release.argtypes = [c.POINTER(FimoModuleInfo)]
-_fimo_impl_module_info_release.restype = None
+def fimo_module_info_is_loaded(info: Ref[FimoModuleInfo]) -> bool:
+    is_loaded = info.is_loaded
+    return is_loaded(info)
 
 
-def fimo_impl_module_info_release(info: Ref[FimoModuleInfo]) -> None:
-    _fimo_impl_module_info_release(info)
+def fimo_module_info_acquire_module_strong(info: Ref[FimoModuleInfo]) -> FimoResult:
+    acquire_module_strong = info.acquire_module_strong
+    return acquire_module_strong(info)
 
 
-_fimo_impl_module_info_is_loaded = _lib.fimo_impl_module_info_is_loaded
-_fimo_impl_module_info_is_loaded.argtypes = [c.POINTER(FimoModuleInfo)]
-_fimo_impl_module_info_is_loaded.restype = c.c_bool
-
-
-def fimo_impl_module_info_is_loaded(info: Ref[FimoModuleInfo]) -> bool:
-    return _fimo_impl_module_info_is_loaded(info)
-
-
-_fimo_impl_module_info_lock_unload = _lib.fimo_impl_module_info_lock_unload
-_fimo_impl_module_info_lock_unload.argtypes = [c.POINTER(FimoModuleInfo)]
-_fimo_impl_module_info_lock_unload.restype = FimoResult
-
-
-def fimo_impl_module_info_lock_unload(info: Ref[FimoModuleInfo]) -> FimoResult:
-    return _fimo_impl_module_info_lock_unload(info)
-
-
-_fimo_impl_module_info_unlock_unload = _lib.fimo_impl_module_info_unlock_unload
-_fimo_impl_module_info_unlock_unload.argtypes = [c.POINTER(FimoModuleInfo)]
-_fimo_impl_module_info_unlock_unload.restype = None
-
-
-def fimo_impl_module_info_unlock_unload(info: Ref[FimoModuleInfo]) -> None:
-    _fimo_impl_module_info_unlock_unload(info)
+def fimo_module_info_release_module_strong(info: Ref[FimoModuleInfo]) -> None:
+    release_module_strong = info.release_module_strong
+    release_module_strong(info)
 
 
 FimoModule._fields_ = [

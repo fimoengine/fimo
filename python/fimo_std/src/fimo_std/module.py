@@ -114,24 +114,24 @@ class ModuleInfoView(
 
     def is_loaded(self) -> bool:
         """Checks whether the underlying module is still loaded."""
-        return _ffi.fimo_impl_module_info_is_loaded(self.ffi)
+        return _ffi.fimo_module_info_is_loaded(self.ffi)
 
     def __enter__(self) -> Self:
         """Locks the underlying module from being unloaded.
 
         The module may be locked multiple times.
         """
-        err = _ffi.fimo_impl_module_info_lock_unload(self.ffi)
+        err = _ffi.fimo_module_info_acquire_module_strong(self.ffi)
         error.Result.transfer_from_ffi(err).raise_if_error()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Unlocks the underlying module, allowing it to be unloaded again."""
-        _ffi.fimo_impl_module_info_unlock_unload(self.ffi)
+        _ffi.fimo_module_info_release_module_strong(self.ffi)
 
     def acquire(self) -> ModuleInfo:
         """Acquires the module info by increasing the reference count."""
-        _ffi.fimo_impl_module_info_acquire(self.ffi)
+        _ffi.fimo_module_info_acquire(self.ffi)
         return ModuleInfo.transfer_from_ffi(self.ffi)
 
     def _consume(self) -> None:
@@ -158,7 +158,7 @@ class ModuleInfo(
 
     def __del__(self):
         if self._ffi is not None:
-            _ffi.fimo_impl_module_info_release(self.ffi)
+            _ffi.fimo_module_info_release(self.ffi)
             self._consume()
 
     def transfer_to_ffi(self) -> _ffi.Pointer[_ffi.FimoModuleInfo]:

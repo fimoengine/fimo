@@ -60,7 +60,7 @@ const ModuleInfo = struct {
             const i_handle = InstanceHandle.fromInstancePtr(o);
             const inner = i_handle.lock();
             defer inner.unlock();
-            try inner.preventUnload();
+            try inner.refStrong();
         }
 
         return .{
@@ -84,7 +84,7 @@ const ModuleInfo = struct {
             const handle = InstanceHandle.fromInstancePtr(owner);
             const inner = handle.lock();
             defer inner.unlock();
-            inner.allowUnload();
+            inner.unrefStrong();
         }
         self.handle.unref();
     }

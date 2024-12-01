@@ -213,7 +213,7 @@ macro_rules! export_module {
                     {
                         use $crate::module::Module;
                         let module = Self::with_lock(|module| {
-                            module.lock_module()
+                            module.lock_module_strong()
                         }).expect("could not lock the module");
 
                         let context = module.context();

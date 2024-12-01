@@ -1143,76 +1143,83 @@ typedef struct FimoModuleInfo {
      */
     const char *module_path;
     /**
-     * Increases the reference count of the instance.
-     *
-     * Not `NULL`.
+     * See `fimo_module_info_acquire`.
      */
     void (*acquire)(const struct FimoModuleInfo *);
     /**
-     * Decreases the reference count of the instance.
-     *
-     * Not `NULL`.
+     * See `fimo_module_info_release`.
      */
     void (*release)(const struct FimoModuleInfo *);
     /**
-     * Returns whether the owning module is still loaded.
-     *
-     * Not `NULL`.
+     * See `fimo_module_info_is_loaded`.
      */
     bool (*is_loaded)(const struct FimoModuleInfo *);
     /**
-     * Prevents the module from being unloaded.
-     *
-     * Not `NULL`.
+     * See `fimo_module_info_acquire_module_strong`.
      */
-    FimoResult (*lock_unload)(const struct FimoModuleInfo *);
+    FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *);
     /**
-     * Unlocks a previously locked module, allowing it to be unloaded.
-     *
-     * Not `NULL`.
+     * See `fimo_module_release_module_strong`.
      */
-    void (*unlock_unload)(const struct FimoModuleInfo *);
+    void (*release_module_strong)(const struct FimoModuleInfo *);
 } FimoModuleInfo;
 
-#ifndef FIMO_STD_BINDGEN
-#ifdef FIMO_STD_BUILD_SHARED
-FIMO_EXPORT
-void fimo_impl_module_info_acquire(const FimoModuleInfo *info);
-FIMO_EXPORT
-void fimo_impl_module_info_release(const FimoModuleInfo *info);
-FIMO_EXPORT
-bool fimo_impl_module_info_is_loaded(const FimoModuleInfo *info);
-FIMO_EXPORT
-FimoResult fimo_impl_module_info_lock_unload(const FimoModuleInfo *info);
-FIMO_EXPORT
-void fimo_impl_module_info_unlock_unload(const FimoModuleInfo *info);
-#else
-static FIMO_INLINE_ALWAYS void fimo_impl_module_info_acquire(const FimoModuleInfo *info) {
+/**
+ * Increases the reference count of the info instance.
+ */
+static
+FIMO_INLINE_ALWAYS
+void fimo_module_info_acquire(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     info->acquire(info);
 }
 
-static FIMO_INLINE_ALWAYS void fimo_impl_module_info_release(const FimoModuleInfo *info) {
+/**
+ * Decreases the reference count of the info instance.
+ */
+static
+FIMO_INLINE_ALWAYS
+void fimo_module_info_release(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     info->release(info);
 }
 
-static FIMO_INLINE_ALWAYS bool fimo_impl_module_info_is_loaded(const FimoModuleInfo *info) {
+/**
+ * Returns whether the owning module is still loaded.
+ */
+static
+FIMO_INLINE_ALWAYS
+bool fimo_module_info_is_loaded(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
     return info->is_loaded(info);
 }
 
-static FIMO_INLINE_ALWAYS FimoResult fimo_impl_module_info_lock_unload(const FimoModuleInfo *info) {
+/**
+ * Increases the strong reference count of the module instance.
+ *
+ * Will prevent the module from being unloaded. This may be used to pass
+ * data, like callbacks, between modules, without registering the dependency
+ * with the subsystem.
+ */
+static
+FIMO_INLINE_ALWAYS
+FimoResult fimo_module_info_acquire_module_strong(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
-    return info->lock_unload(info);
+    return info->acquire_module_strong(info);
 }
 
-static FIMO_INLINE_ALWAYS void fimo_impl_module_info_unlock_unload(const FimoModuleInfo *info) {
+/**
+ * Decreases the strong reference count of the module instance.
+ *
+ * Should only be called after `acquire_module_strong`, when the dependency
+ * is no longer required.
+ */
+static
+FIMO_INLINE_ALWAYS
+void fimo_module_release_module_strong(const FimoModuleInfo *info) {
     FIMO_DEBUG_ASSERT(info)
-    info->unlock_unload(info);
+    info->release_module_strong(info);
 }
-#endif
-#endif
 
 /**
  * State of a loaded module.

@@ -269,7 +269,7 @@ pub const Parameter = struct {
 
 pub const Inner = struct {
     mutex: Mutex = .{},
-    lock_count: usize = 0,
+    strong_count: usize = 0,
     handle: ?*ModuleHandle = null,
     @"export": ?*const ProxyModule.Export = null,
     instance: ?*const ProxyModule.OpaqueInstance = null,
@@ -301,25 +301,17 @@ pub const Inner = struct {
     }
 
     pub fn canUnload(self: *const Inner) bool {
-        return self.lock_count == 0;
+        return self.strong_count == 0;
     }
 
-    pub fn preventUnload(self: *Inner) InstanceHandleError!void {
+    pub fn refStrong(self: *Inner) InstanceHandleError!void {
         if (self.isDetached()) return error.Detached;
-        self.lock_count += 1;
+        self.strong_count += 1;
     }
 
-    pub fn allowUnload(self: *Inner) void {
+    pub fn unrefStrong(self: *Inner) void {
         std.debug.assert(!self.isDetached());
-        self.lock_count -= 1;
-    }
-
-    fn ref(self: *Inner) void {
-        self.lock_count += 1;
-    }
-
-    fn unref(self: *Inner) void {
-        self.lock_count -= 1;
+        self.strong_count -= 1;
     }
 
     fn allocator(self: *Inner) Allocator {
@@ -486,18 +478,18 @@ fn init(
             defer inner.unlock();
             return !inner.isDetached();
         }
-        fn preventUnload(info: *const ProxyModule.Info) callconv(.C) c.FimoResult {
+        fn refInstanceStrong(info: *const ProxyModule.Info) callconv(.C) c.FimoResult {
             const x = Self.fromInfoPtr(info);
             const inner = x.lock();
             defer inner.unlock();
-            inner.preventUnload() catch |err| return AnyError.initError(err).err;
+            inner.refStrong() catch |err| return AnyError.initError(err).err;
             return AnyError.intoCResult(null);
         }
-        fn allowUnload(info: *const ProxyModule.Info) callconv(.C) void {
+        fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) void {
             const x = Self.fromInfoPtr(info);
             const inner = x.lock();
             defer inner.unlock();
-            inner.allowUnload();
+            inner.unrefStrong();
         }
     };
 
@@ -517,8 +509,8 @@ fn init(
             .acquire_fn = &FfiInfo.ref,
             .release_fn = &FfiInfo.unref,
             .is_loaded_fn = &FfiInfo.isLoaded,
-            .lock_unload_fn = &FfiInfo.preventUnload,
-            .unlock_unload_fn = &FfiInfo.allowUnload,
+            .acquire_module_strong_fn = &FfiInfo.refInstanceStrong,
+            .release_module_strong_fn = &FfiInfo.unrefInstanceStrong,
         },
     };
 

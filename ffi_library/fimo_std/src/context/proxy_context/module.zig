@@ -670,33 +670,40 @@ pub const Info = extern struct {
     acquire_fn: *const fn (ctx: *const Info) callconv(.C) void,
     release_fn: *const fn (ctx: *const Info) callconv(.C) void,
     is_loaded_fn: *const fn (ctx: *const Info) callconv(.C) bool,
-    lock_unload_fn: *const fn (ctx: *const Info) callconv(.C) c.FimoResult,
-    unlock_unload_fn: *const fn (ctx: *const Info) callconv(.C) void,
+    acquire_module_strong_fn: *const fn (ctx: *const Info) callconv(.C) c.FimoResult,
+    release_module_strong_fn: *const fn (ctx: *const Info) callconv(.C) void,
 
-    /// Increases the reference count of the instance.
+    /// Increases the reference count of the info instance.
     pub fn ref(self: *const Info) void {
         self.acquire_fn(self);
     }
 
-    /// Decreases the reference count of the instance.
+    /// Decreases the reference count of the info instance.
     pub fn unref(self: *const Info) void {
         self.release_fn(self);
     }
 
-    /// Returns whether the owning module is still loaded.
+    /// Returns whether the owning module instance is still loaded.
     pub fn isLoaded(self: *const Info) bool {
         return self.is_loaded_fn(self);
     }
 
-    /// Prevents the module from being unloaded.
-    pub fn lockUnload(self: *const Info, err: *?AnyError) AnyError.Error!void {
-        const result = self.lock_unload_fn(self);
+    /// Increases the strong reference count of the module instance.
+    ///
+    /// Will prevent the module from being unloaded. This may be used to pass
+    /// data, like callbacks, between modules, without registering the dependency
+    /// with the subsystem.
+    pub fn refInstanceStrong(self: *const Info, err: *?AnyError) AnyError.Error!void {
+        const result = self.acquire_module_strong_fn(self);
         try AnyError.initChecked(err, result);
     }
 
-    /// Unlocks a previously locked module, allowing it to be unloaded.
-    pub fn unlockUnload(self: *const Info) void {
-        self.unlock_unload_fn(self);
+    /// Decreases the strong reference count of the module instance.
+    ///
+    /// Should only be called after `acquire_module_strong`, when the dependency
+    /// is no longer required.
+    pub fn unrefInstanceStrong(self: *const Info) void {
+        self.release_module_strong_fn(self);
     }
 
     /// Searches for a module by it's name.
@@ -2451,49 +2458,6 @@ pub fn writeParameter(
 // ----------------------------------------------------
 
 const ffi = struct {
-    const dll_only = struct {
-        fn fimo_impl_module_info_acquire(info: *const Info) callconv(.C) void {
-            info.ref();
-        }
-        fn fimo_impl_module_info_release(info: *const Info) callconv(.C) void {
-            info.unref();
-        }
-        fn fimo_impl_module_info_is_loaded(info: *const Info) callconv(.C) bool {
-            return info.isLoaded();
-        }
-        fn fimo_impl_module_info_lock_unload(info: *const Info) callconv(.C) c.FimoResult {
-            return info.lock_unload_fn(info);
-        }
-        fn fimo_impl_module_info_unlock_unload(info: *const Info) callconv(.C) void {
-            info.unlockUnload();
-        }
-    };
-
-    comptime {
-        if (@import("export_settings").export_dll) {
-            @export(
-                &dll_only.fimo_impl_module_info_acquire,
-                .{ .name = "fimo_impl_module_info_acquire" },
-            );
-            @export(
-                &dll_only.fimo_impl_module_info_release,
-                .{ .name = "fimo_impl_module_info_release" },
-            );
-            @export(
-                &dll_only.fimo_impl_module_info_is_loaded,
-                .{ .name = "fimo_impl_module_info_is_loaded" },
-            );
-            @export(
-                &dll_only.fimo_impl_module_info_lock_unload,
-                .{ .name = "fimo_impl_module_info_lock_unload" },
-            );
-            @export(
-                &dll_only.fimo_impl_module_info_unlock_unload,
-                .{ .name = "fimo_impl_module_info_unlock_unload" },
-            );
-        }
-    }
-
     export fn fimo_module_pseudo_module_new(
         context: c.FimoContext,
         module: **const PseudoInstance,

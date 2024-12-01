@@ -38,16 +38,6 @@ pub fn build(b: *std.Build) void {
     });
 
     // ----------------------------------------------------
-    // Export settings
-    // ----------------------------------------------------
-
-    const min_export_cfg = b.addOptions();
-    min_export_cfg.addOption(bool, "export_dll", false);
-
-    const full_export_cfg = b.addOptions();
-    full_export_cfg.addOption(bool, "export_dll", true);
-
-    // ----------------------------------------------------
     // Module
     // ----------------------------------------------------
 
@@ -58,7 +48,6 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .pic = true,
     });
-    module.addImport("export_settings", min_export_cfg.createModule());
     module.addImport("visualizers", visualizers);
     module.addIncludePath(b.path("include/"));
     if (target.result.os.tag == .windows) module.linkSystemLibrary("advapi32", .{});
@@ -76,7 +65,6 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .pic = true,
     });
-    module_tests.root_module.addImport("export_settings", min_export_cfg.createModule());
     module_tests.root_module.addImport("visualizers", visualizers);
     module_tests.addIncludePath(b.path("include/"));
     if (target.result.os.tag == .windows) module_tests.linkSystemLibrary("advapi32");
@@ -124,7 +112,6 @@ pub fn build(b: *std.Build) void {
         .pic = true,
     });
     static_lib.bundle_compiler_rt = true;
-    static_lib.root_module.addImport("export_settings", min_export_cfg.createModule());
     static_lib.root_module.addImport("visualizers", visualizers);
     static_lib.addIncludePath(b.path("include/"));
     if (target.result.os.tag == .windows) {
@@ -149,7 +136,6 @@ pub fn build(b: *std.Build) void {
         .pic = true,
     });
     dynamic_lib.bundle_compiler_rt = true;
-    dynamic_lib.root_module.addImport("export_settings", min_export_cfg.createModule());
     dynamic_lib.root_module.addImport("visualizers", visualizers);
     dynamic_lib.addIncludePath(b.path("include/"));
     if (target.result.os.tag == .windows) dynamic_lib.linkSystemLibrary("advapi32");
