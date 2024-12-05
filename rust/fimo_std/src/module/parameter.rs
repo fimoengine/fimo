@@ -1,12 +1,11 @@
 use core::{cell::UnsafeCell, ffi::CStr, marker::PhantomData, ops::Deref};
 
+use super::{Module, ModuleSubsystem};
 use crate::{
     bindings,
     error::{self, to_result_indirect, Error},
     ffi::{FFISharable, FFITransferable},
 };
-
-use super::{Module, ModuleSubsystem};
 
 /// Type of module parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -97,18 +96,18 @@ impl core::fmt::Display for ParameterAccess {
     }
 }
 
-impl TryFrom<bindings::FimoModuleParamAccess> for ParameterAccess {
+impl TryFrom<bindings::FimoModuleParamAccessGroup> for ParameterAccess {
     type Error = Error;
 
-    fn try_from(value: bindings::FimoModuleParamAccess) -> Result<Self, Self::Error> {
+    fn try_from(value: bindings::FimoModuleParamAccessGroup) -> Result<Self, Self::Error> {
         match value {
-            bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PUBLIC => {
+            bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC => {
                 Ok(ParameterAccess::Public)
             }
-            bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_DEPENDENCY => {
+            bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY => {
                 Ok(ParameterAccess::Dependency)
             }
-            bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE => {
+            bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE => {
                 Ok(ParameterAccess::Private)
             }
             _ => Err(Error::EINVAL),
@@ -116,28 +115,28 @@ impl TryFrom<bindings::FimoModuleParamAccess> for ParameterAccess {
     }
 }
 
-impl From<ParameterAccess> for bindings::FimoModuleParamAccess {
+impl From<ParameterAccess> for bindings::FimoModuleParamAccessGroup {
     fn from(value: ParameterAccess) -> Self {
         match value {
             ParameterAccess::Public => {
-                bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PUBLIC
+                bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC
             }
             ParameterAccess::Dependency => {
-                bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_DEPENDENCY
+                bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY
             }
             ParameterAccess::Private => {
-                bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE
+                bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE
             }
         }
     }
 }
 
-impl FFITransferable<bindings::FimoModuleParamAccess> for ParameterAccess {
-    fn into_ffi(self) -> bindings::FimoModuleParamAccess {
+impl FFITransferable<bindings::FimoModuleParamAccessGroup> for ParameterAccess {
+    fn into_ffi(self) -> bindings::FimoModuleParamAccessGroup {
         self.into()
     }
 
-    unsafe fn from_ffi(ffi: bindings::FimoModuleParamAccess) -> Self {
+    unsafe fn from_ffi(ffi: bindings::FimoModuleParamAccessGroup) -> Self {
         ffi.try_into().expect("expected known enum value")
     }
 }
@@ -180,11 +179,20 @@ impl ParameterValue {
         let mut value = ValueTypes { u8_: 0 };
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .param_get_public
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_get_public(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     core::ptr::from_mut(&mut value).cast(),
                     &mut type_,
                     module.as_ptr(),
@@ -222,10 +230,21 @@ impl ParameterValue {
         let mut value = ValueTypes { u8_: 0 };
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
+        // Safety: Is always set.
+        let f = unsafe {
+            caller
+                .context()
+                .vtable()
+                .module_v0
+                .param_get_dependency
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_get_dependency(
+                *error = f(
+                    caller.context().data(),
                     caller.share_to_ffi(),
                     core::ptr::from_mut(&mut value).cast(),
                     &mut type_,
@@ -259,10 +278,21 @@ impl ParameterValue {
         let mut value = ValueTypes { u8_: 0 };
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
+        // Safety: Is always set.
+        let f = unsafe {
+            caller
+                .context()
+                .vtable()
+                .module_v0
+                .param_get_private
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_get_private(
+                *error = f(
+                    caller.context().data(),
                     caller.share_to_ffi(),
                     core::ptr::from_mut(&mut value).cast(),
                     &mut type_,
@@ -295,10 +325,21 @@ impl ParameterValue {
         let mut value = ValueTypes { u8_: 0 };
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
 
+        // Safety: Is always set.
+        let f = unsafe {
+            caller
+                .context()
+                .vtable()
+                .module_v0
+                .param_get_inner
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_get_inner(
+                *error = f(
+                    caller.context().data(),
                     caller.share_to_ffi(),
                     core::ptr::from_mut(&mut value).cast(),
                     &mut type_,
@@ -345,11 +386,20 @@ impl ParameterValue {
             ParameterValue::I64(x) => (ValueTypes { i64_: x }, ParameterType::I64),
         };
 
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .param_set_public
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_set_public(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     core::ptr::from_ref(&value).cast(),
                     type_.into_ffi(),
                     module.as_ptr(),
@@ -381,10 +431,21 @@ impl ParameterValue {
             ParameterValue::I64(x) => (ValueTypes { i64_: x }, ParameterType::I64),
         };
 
+        // Safety: Is always set.
+        let f = unsafe {
+            caller
+                .context()
+                .vtable()
+                .module_v0
+                .param_set_dependency
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_set_dependency(
+                *error = f(
+                    caller.context().data(),
                     caller.share_to_ffi(),
                     core::ptr::from_ref(&value).cast(),
                     type_.into_ffi(),
@@ -412,10 +473,21 @@ impl ParameterValue {
             ParameterValue::I64(x) => (ValueTypes { i64_: x }, ParameterType::I64),
         };
 
+        // Safety: Is always set.
+        let f = unsafe {
+            caller
+                .context()
+                .vtable()
+                .module_v0
+                .param_set_private
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_set_private(
+                *error = f(
+                    caller.context().data(),
                     caller.share_to_ffi(),
                     core::ptr::from_ref(&value).cast(),
                     type_.into_ffi(),
@@ -442,10 +514,21 @@ impl ParameterValue {
             ParameterValue::I64(x) => (ValueTypes { i64_: x }, ParameterType::I64),
         };
 
+        // Safety: Is always set.
+        let f = unsafe {
+            caller
+                .context()
+                .vtable()
+                .module_v0
+                .param_set_inner
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_set_inner(
+                *error = f(
+                    caller.context().data(),
                     caller.share_to_ffi(),
                     core::ptr::from_ref(&value).cast(),
                     type_.into_ffi(),
@@ -487,14 +570,18 @@ impl ParameterInfo {
         parameter: &CStr,
     ) -> Result<Self, Error> {
         let mut type_ = bindings::FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8;
-        let mut read = bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE;
-        let mut write = bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE;
+        let mut read = bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE;
+        let mut write =
+            bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE;
+
+        // Safety: Is always set.
+        let f = unsafe { ctx.view().vtable().module_v0.param_query.unwrap_unchecked() };
 
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_param_query(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     module.as_ptr(),
                     parameter.as_ptr(),
                     &mut type_,

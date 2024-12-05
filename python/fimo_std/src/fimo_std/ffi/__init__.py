@@ -1994,12 +1994,12 @@ class FimoModuleParamType(c.c_int):
     pass
 
 
-class FimoModuleParamAccess(c.c_int):
+class FimoModuleParamAccessGroup(c.c_int):
     """Access group for a module parameter."""
 
-    FIMO_MODULE_PARAM_ACCESS_PUBLIC = c.c_int(0)
-    FIMO_MODULE_PARAM_ACCESS_DEPENDENCY = c.c_int(1)
-    FIMO_MODULE_PARAM_ACCESS_PRIVATE = c.c_int(2)
+    FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC = c.c_int(0)
+    FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY = c.c_int(1)
+    FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE = c.c_int(2)
     pass
 
 
@@ -2071,8 +2071,8 @@ class FimoModuleParamDecl(c.Structure):
 
     _fields_ = [
         ("type", FimoModuleParamType),
-        ("read_access", FimoModuleParamAccess),
-        ("write_access", FimoModuleParamAccess),
+        ("read_group", FimoModuleParamAccessGroup),
+        ("write_group", FimoModuleParamAccessGroup),
         ("setter", FimoModuleParamSet),
         ("getter", FimoModuleParamGet),
         ("name", c.c_char_p),
@@ -2166,8 +2166,8 @@ class FimoModuleExport(c.Structure):
         ("dynamic_symbol_exports_count", FimoU32),
         ("modifiers", c.POINTER(FimoModuleExportModifier)),
         ("modifiers_count", FimoU32),
-        ("module_constructor", FimoModuleConstructor),
-        ("module_destructor", FimoModuleDestructor),
+        ("constructor", FimoModuleConstructor),
+        ("destructor", FimoModuleDestructor),
     ]
 
 
@@ -2487,8 +2487,8 @@ class FimoModuleVTableV0(c.Structure):
                 c.c_char_p,
                 c.c_char_p,
                 c.POINTER(FimoModuleParamType),
-                c.POINTER(FimoModuleParamAccess),
-                c.POINTER(FimoModuleParamAccess),
+                c.POINTER(FimoModuleParamAccessGroup),
+                c.POINTER(FimoModuleParamAccessGroup),
             ),
         ),
         (
@@ -2595,6 +2595,7 @@ FimoImplModuleInspector = c.CFUNCTYPE(c.c_bool, c.POINTER(FimoModuleExport), c.c
 
 
 _fimo_impl_modules_export_list: list[Pointer[FimoModuleExport]] = []
+_fimo_impl_module_export_iterator = _lib.fimo_impl_module_export_iterator
 
 
 @c.CFUNCTYPE(None, FimoImplModuleInspector, c.c_void_p)
@@ -2623,14 +2624,6 @@ def fimo_impl_module_export_iterator(inspector: FuncPointer, data: int) -> None:
         pass
 
 
-_fimo_module_pseudo_module_new = _lib.fimo_module_pseudo_module_new
-_fimo_module_pseudo_module_new.argtypes = [
-    FimoContext,
-    c.POINTER(c.POINTER(FimoModule)),
-]
-_fimo_module_pseudo_module_new.restype = FimoResult
-
-
 def fimo_module_pseudo_module_new(
     context: FimoContext, module: PtrRef[FimoModule]
 ) -> FimoResult:
@@ -2647,15 +2640,10 @@ def fimo_module_pseudo_module_new(
 
     :return: Status code.
     """
-    return _fimo_module_pseudo_module_new(context, module)
-
-
-_fimo_module_pseudo_module_destroy = _lib.fimo_module_pseudo_module_destroy
-_fimo_module_pseudo_module_destroy.argtypes = [
-    c.POINTER(FimoModule),
-    c.POINTER(FimoContext),
-]
-_fimo_module_pseudo_module_destroy.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    pseudo_module_new = vtable.module_v0.pseudo_module_new
+    return pseudo_module_new(c.c_void_p(context.data), module)
 
 
 def fimo_module_pseudo_module_destroy(
@@ -2671,15 +2659,11 @@ def fimo_module_pseudo_module_destroy(
 
     :return: Status code.
     """
-    return _fimo_module_pseudo_module_destroy(module, context)
-
-
-_fimo_module_set_new = _lib.fimo_module_set_new
-_fimo_module_set_new.argtypes = [
-    FimoContext,
-    c.POINTER(c.POINTER(FimoModuleLoadingSet)),
-]
-_fimo_module_set_new.restype = FimoResult
+    ctx = module.contents.context
+    vtable_ptr = c.c_void_p(ctx.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    pseudo_module_destroy = vtable.module_v0.pseudo_module_destroy
+    return pseudo_module_destroy(c.c_void_p(ctx.data), module, context)
 
 
 def fimo_module_set_new(
@@ -2698,17 +2682,10 @@ def fimo_module_set_new(
 
     :return: Status code.
     """
-    return _fimo_module_set_new(context, module_set)
-
-
-_fimo_module_set_has_module = _lib.fimo_module_set_has_module
-_fimo_module_set_has_module.argtypes = [
-    FimoContext,
-    c.POINTER(FimoModuleLoadingSet),
-    c.c_char_p,
-    c.POINTER(c.c_bool),
-]
-_fimo_module_set_has_module.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_new = vtable.module_v0.set_new
+    return set_new(c.c_void_p(context.data), module_set)
 
 
 def fimo_module_set_has_module(
@@ -2726,19 +2703,10 @@ def fimo_module_set_has_module(
 
     :return: Status code.
     """
-    return _fimo_module_set_has_module(context, module_set, name, has_module)
-
-
-_fimo_module_set_has_symbol = _lib.fimo_module_set_has_symbol
-_fimo_module_set_has_symbol.argtypes = [
-    FimoContext,
-    c.POINTER(FimoModuleLoadingSet),
-    c.c_char_p,
-    c.c_char_p,
-    FimoVersion,
-    c.POINTER(c.c_bool),
-]
-_fimo_module_set_has_symbol.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_has_module = vtable.module_v0.set_has_module
+    return set_has_module(c.c_void_p(context.data), module_set, name, has_module)
 
 
 def fimo_module_set_has_symbol(
@@ -2760,21 +2728,12 @@ def fimo_module_set_has_symbol(
 
     :return: Status code.
     """
-    return _fimo_module_set_has_symbol(
-        context, module_set, name, ns, version, has_symbol
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_has_symbol = vtable.module_v0.set_has_symbol
+    return set_has_symbol(
+        c.c_void_p(context.data), module_set, name, ns, version, has_symbol
     )
-
-
-_fimo_module_set_append_callback = _lib.fimo_module_set_append_callback
-_fimo_module_set_append_callback.argtypes = [
-    FimoContext,
-    c.POINTER(FimoModuleLoadingSet),
-    c.c_char_p,
-    FimoModuleLoadingSuccessCallback,
-    FimoModuleLoadingErrorCallback,
-    c.c_void_p,
-]
-_fimo_module_set_append_callback.restype = FimoResult
 
 
 def fimo_module_set_append_callback(
@@ -2806,20 +2765,17 @@ def fimo_module_set_append_callback(
 
     :return: Status code.
     """
-    return _fimo_module_set_append_callback(
-        context, module_set, module_name, on_success, on_error, user_data
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_append_callback = vtable.module_v0.set_append_callback
+    return set_append_callback(
+        c.c_void_p(context.data),
+        module_set,
+        module_name,
+        on_success,
+        on_error,
+        user_data,
     )
-
-
-_fimo_module_set_append_freestanding_module = (
-    _lib.fimo_module_set_append_freestanding_module
-)
-_fimo_module_set_append_freestanding_module.argtypes = [
-    c.POINTER(FimoModule),
-    c.POINTER(FimoModuleLoadingSet),
-    c.POINTER(FimoModuleExport),
-]
-_fimo_module_set_append_freestanding_module.restype = FimoResult
 
 
 def fimo_module_set_append_freestanding_module(
@@ -2849,8 +2805,12 @@ def fimo_module_set_append_freestanding_module(
 
     :return: Status code.
     """
-    return _fimo_module_set_append_freestanding_module(
-        module, module_set, module_export
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_append_freestanding_module = vtable.module_v0.set_append_freestanding_module
+    return set_append_freestanding_module(
+        c.c_void_p(context.data), module, module_set, module_export
     )
 
 
@@ -2898,13 +2858,8 @@ def fimo_module_set_append_modules(
         filter,
         filter_data,
         fimo_impl_module_export_iterator,
-        c.cast(_fimo_module_set_append_freestanding_module, c.c_void_p),
+        c.cast(_fimo_impl_module_export_iterator, c.c_void_p),
     )
-
-
-_fimo_module_set_dismiss = _lib.fimo_module_set_dismiss
-_fimo_module_set_dismiss.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet)]
-_fimo_module_set_dismiss.restype = FimoResult
 
 
 def fimo_module_set_dismiss(
@@ -2920,12 +2875,10 @@ def fimo_module_set_dismiss(
 
     :return: Status code.
     """
-    return _fimo_module_set_dismiss(context, module_set)
-
-
-_fimo_module_set_finish = _lib.fimo_module_set_finish
-_fimo_module_set_finish.argtypes = [FimoContext, c.POINTER(FimoModuleLoadingSet)]
-_fimo_module_set_finish.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_dismiss = vtable.module_v0.set_dismiss
+    return set_dismiss(c.c_void_p(context.data), module_set)
 
 
 def fimo_module_set_finish(
@@ -2946,16 +2899,10 @@ def fimo_module_set_finish(
 
     :return: Status code.
     """
-    return _fimo_module_set_finish(context, module_set)
-
-
-_fimo_module_find_by_name = _lib.fimo_module_find_by_name
-_fimo_module_find_by_name.argtypes = [
-    FimoContext,
-    c.c_char_p,
-    c.POINTER(c.POINTER(FimoModuleInfo)),
-]
-_fimo_module_find_by_name.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    set_finish = vtable.module_v0.set_finish
+    return set_finish(c.c_void_p(context.data), module_set)
 
 
 def fimo_module_find_by_name(
@@ -2972,18 +2919,10 @@ def fimo_module_find_by_name(
 
     :return: Status code.
     """
-    return _fimo_module_find_by_name(context, name, module)
-
-
-_fimo_module_find_by_symbol = _lib.fimo_module_find_by_symbol
-_fimo_module_find_by_symbol.argtypes = [
-    FimoContext,
-    c.c_char_p,
-    c.c_char_p,
-    FimoVersion,
-    c.POINTER(c.POINTER(FimoModuleInfo)),
-]
-_fimo_module_find_by_symbol.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    find_by_name = vtable.module_v0.find_by_name
+    return find_by_name(c.c_void_p(context.data), name, module)
 
 
 def fimo_module_find_by_symbol(
@@ -3006,12 +2945,10 @@ def fimo_module_find_by_symbol(
 
     :return: Status code.
     """
-    return _fimo_module_find_by_symbol(context, name, ns, version, module)
-
-
-_fimo_module_namespace_exists = _lib.fimo_module_namespace_exists
-_fimo_module_namespace_exists.argtypes = [FimoContext, c.c_char_p, c.POINTER(c.c_bool)]
-_fimo_module_namespace_exists.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    find_by_symbol = vtable.module_v0.find_by_symbol
+    return find_by_symbol(c.c_void_p(context.data), name, ns, version, module)
 
 
 def fimo_module_namespace_exists(
@@ -3028,12 +2965,10 @@ def fimo_module_namespace_exists(
 
     :return: Status code.
     """
-    return _fimo_module_namespace_exists(context, ns, exists)
-
-
-_fimo_module_namespace_include = _lib.fimo_module_namespace_include
-_fimo_module_namespace_include.argtypes = [c.POINTER(FimoModule), c.c_char_p]
-_fimo_module_namespace_include.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    namespace_exists = vtable.module_v0.namespace_exists
+    return namespace_exists(c.c_void_p(context.data), ns, exists)
 
 
 def fimo_module_namespace_include(
@@ -3050,12 +2985,11 @@ def fimo_module_namespace_include(
 
     :return: Status code.
     """
-    return _fimo_module_namespace_include(module, ns)
-
-
-_fimo_module_namespace_exclude = _lib.fimo_module_namespace_exclude
-_fimo_module_namespace_exclude.argtypes = [c.POINTER(FimoModule), c.c_char_p]
-_fimo_module_namespace_exclude.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    namespace_include = vtable.module_v0.namespace_include
+    return namespace_include(c.c_void_p(context.data), module, ns)
 
 
 def fimo_module_namespace_exclude(
@@ -3074,17 +3008,11 @@ def fimo_module_namespace_exclude(
 
     :return: Status code.
     """
-    return _fimo_module_namespace_exclude(module, ns)
-
-
-_fimo_module_namespace_included = _lib.fimo_module_namespace_included
-_fimo_module_namespace_included.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_char_p,
-    c.POINTER(c.c_bool),
-    c.POINTER(c.c_bool),
-]
-_fimo_module_namespace_included.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    namespace_exclude = vtable.module_v0.namespace_exclude
+    return namespace_exclude(c.c_void_p(context.data), module, ns)
 
 
 def fimo_module_namespace_included(
@@ -3110,15 +3038,13 @@ def fimo_module_namespace_included(
 
     :return: Status code.
     """
-    return _fimo_module_namespace_included(module, ns, is_included, is_static)
-
-
-_fimo_module_acquire_dependency = _lib.fimo_module_acquire_dependency
-_fimo_module_acquire_dependency.argtypes = [
-    c.POINTER(FimoModule),
-    c.POINTER(FimoModuleInfo),
-]
-_fimo_module_acquire_dependency.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    namespace_included = vtable.module_v0.namespace_included
+    return namespace_included(
+        c.c_void_p(context.data), module, ns, is_included, is_static
+    )
 
 
 def fimo_module_acquire_dependency(
@@ -3138,15 +3064,11 @@ def fimo_module_acquire_dependency(
 
     :return: Status code.
     """
-    return _fimo_module_acquire_dependency(module, dependency)
-
-
-_fimo_module_relinquish_dependency = _lib.fimo_module_relinquish_dependency
-_fimo_module_relinquish_dependency.argtypes = [
-    c.POINTER(FimoModule),
-    c.POINTER(FimoModuleInfo),
-]
-_fimo_module_relinquish_dependency.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    acquire_dependency = vtable.module_v0.acquire_dependency
+    return acquire_dependency(c.c_void_p(context.data), module, dependency)
 
 
 def fimo_module_relinquish_dependency(
@@ -3167,17 +3089,11 @@ def fimo_module_relinquish_dependency(
 
     :return: Status code.
     """
-    return _fimo_module_relinquish_dependency(module, dependency)
-
-
-_fimo_module_has_dependency = _lib.fimo_module_has_dependency
-_fimo_module_has_dependency.argtypes = [
-    c.POINTER(FimoModule),
-    c.POINTER(FimoModuleInfo),
-    c.POINTER(c.c_bool),
-    c.POINTER(c.c_bool),
-]
-_fimo_module_has_dependency.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    relinquish_dependency = vtable.module_v0.relinquish_dependency
+    return relinquish_dependency(c.c_void_p(context.data), module, dependency)
 
 
 def fimo_module_has_dependency(
@@ -3203,18 +3119,13 @@ def fimo_module_has_dependency(
 
     :return: Status code.
     """
-    return _fimo_module_has_dependency(module, other, has_dependency, is_static)
-
-
-_fimo_module_load_symbol = _lib.fimo_module_load_symbol
-_fimo_module_load_symbol.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_char_p,
-    c.c_char_p,
-    FimoVersion,
-    c.POINTER(c.c_void_p),
-]
-_fimo_module_load_symbol.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    has_dependency = vtable.module_v0.has_dependency
+    return has_dependency(
+        c.c_void_p(context.data), module, other, has_dependency, is_static
+    )
 
 
 def fimo_module_load_symbol(
@@ -3243,12 +3154,11 @@ def fimo_module_load_symbol(
 
     :return: Status code.
     """
-    return _fimo_module_load_symbol(module, name, ns, version, symbol)
-
-
-_fimo_module_unload = _lib.fimo_module_unload
-_fimo_module_unload.argtypes = [FimoContext, c.POINTER(FimoModuleInfo)]
-_fimo_module_unload.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    load_symbol = vtable.module_v0.load_symbol
+    return load_symbol(c.c_void_p(context.data), module, name, ns, version, symbol)
 
 
 def fimo_module_unload(context: FimoContext, module: Ref[FimoModuleInfo]) -> FimoResult:
@@ -3266,19 +3176,10 @@ def fimo_module_unload(context: FimoContext, module: Ref[FimoModuleInfo]) -> Fim
 
     :return: Status code.
     """
-    return _fimo_module_unload(context, module)
-
-
-_fimo_module_param_query = _lib.fimo_module_param_query
-_fimo_module_param_query.argtypes = [
-    FimoContext,
-    c.c_char_p,
-    c.c_char_p,
-    c.POINTER(FimoModuleParamType),
-    c.POINTER(FimoModuleParamAccess),
-    c.POINTER(FimoModuleParamAccess),
-]
-_fimo_module_param_query.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    unload = vtable.module_v0.unload
+    return unload(c.c_void_p(context.data), module)
 
 
 def fimo_module_param_query(
@@ -3286,8 +3187,8 @@ def fimo_module_param_query(
     module_name: c.c_char_p,
     param: c.c_char_p,
     type: Ref[FimoModuleParamType],
-    read: Ref[FimoModuleParamAccess],
-    write: Ref[FimoModuleParamAccess],
+    read: Ref[FimoModuleParamAccessGroup],
+    write: Ref[FimoModuleParamAccessGroup],
 ) -> FimoResult:
     """Queries the info of a module parameter.
 
@@ -3304,18 +3205,10 @@ def fimo_module_param_query(
 
     :return: Status code.
     """
-    return _fimo_module_param_query(context, module_name, param, type, read, write)
-
-
-_fimo_module_param_set_public = _lib.fimo_module_param_set_public
-_fimo_module_param_set_public.argtypes = [
-    FimoContext,
-    c.c_void_p,
-    FimoModuleParamType,
-    c.c_char_p,
-    c.c_char_p,
-]
-_fimo_module_param_set_public.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_query = vtable.module_v0.param_query
+    return param_query(c.c_void_p(context.data), module_name, param, type, read, write)
 
 
 def fimo_module_param_set_public(
@@ -3341,18 +3234,10 @@ def fimo_module_param_set_public(
 
     :return: Status code.
     """
-    return _fimo_module_param_set_public(context, value, type, module_name, param)
-
-
-_fimo_module_param_get_public = _lib.fimo_module_param_get_public
-_fimo_module_param_get_public.argtypes = [
-    FimoContext,
-    c.c_void_p,
-    c.POINTER(FimoModuleParamType),
-    c.c_char_p,
-    c.c_char_p,
-]
-_fimo_module_param_get_public.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_set_public = vtable.module_v0.param_set_public
+    return param_set_public(c.c_void_p(context.data), value, type, module_name, param)
 
 
 def fimo_module_param_get_public(
@@ -3378,18 +3263,10 @@ def fimo_module_param_get_public(
 
     :return: Status code.
     """
-    return _fimo_module_param_get_public(context, value, type, module_name, param)
-
-
-_fimo_module_param_set_dependency = _lib.fimo_module_param_set_dependency
-_fimo_module_param_set_dependency.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_void_p,
-    FimoModuleParamType,
-    c.c_char_p,
-    c.c_char_p,
-]
-_fimo_module_param_set_dependency.restype = FimoResult
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_get_public = vtable.module_v0.param_get_public
+    return param_get_public(c.c_void_p(context.data), value, type, module_name, param)
 
 
 def fimo_module_param_set_dependency(
@@ -3415,18 +3292,13 @@ def fimo_module_param_set_dependency(
 
     :return: Status code.
     """
-    return _fimo_module_param_set_dependency(module, value, type, module_name, param)
-
-
-_fimo_module_param_get_dependency = _lib.fimo_module_param_get_dependency
-_fimo_module_param_get_dependency.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_void_p,
-    c.POINTER(FimoModuleParamType),
-    c.c_char_p,
-    c.c_char_p,
-]
-_fimo_module_param_get_dependency.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_set_dependency = vtable.module_v0.param_set_dependency
+    return param_set_dependency(
+        c.c_void_p(context.data), module, value, type, module_name, param
+    )
 
 
 def fimo_module_param_get_dependency(
@@ -3452,17 +3324,13 @@ def fimo_module_param_get_dependency(
 
     :return: Status code.
     """
-    return _fimo_module_param_get_dependency(module, value, type, module_name, param)
-
-
-_fimo_module_param_set_private = _lib.fimo_module_param_set_private
-_fimo_module_param_set_private.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_void_p,
-    FimoModuleParamType,
-    c.POINTER(FimoModuleParam),
-]
-_fimo_module_param_set_private.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_get_dependency = vtable.module_v0.param_get_dependency
+    return param_get_dependency(
+        c.c_void_p(context.data), module, value, type, module_name, param
+    )
 
 
 def fimo_module_param_set_private(
@@ -3482,17 +3350,11 @@ def fimo_module_param_set_private(
 
     :return: Status code.
     """
-    return _fimo_module_param_set_private(module, value, type, param)
-
-
-_fimo_module_param_get_private = _lib.fimo_module_param_get_private
-_fimo_module_param_get_private.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_void_p,
-    c.POINTER(FimoModuleParamType),
-    c.POINTER(FimoModuleParam),
-]
-_fimo_module_param_get_private.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_set_private = vtable.module_v0.param_set_private
+    return param_set_private(c.c_void_p(context.data), module, value, type, param)
 
 
 def fimo_module_param_get_private(
@@ -3510,17 +3372,11 @@ def fimo_module_param_get_private(
 
     :return: Status code.
     """
-    return _fimo_module_param_get_private(module, value, type, param)
-
-
-_fimo_module_param_set_inner = _lib.fimo_module_param_set_inner
-_fimo_module_param_set_inner.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_void_p,
-    FimoModuleParamType,
-    c.POINTER(FimoModuleParamData),
-]
-_fimo_module_param_set_inner.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_get_private = vtable.module_v0.param_get_private
+    return param_get_private(c.c_void_p(context.data), module, value, type, param)
 
 
 def fimo_module_param_set_inner(
@@ -3540,17 +3396,11 @@ def fimo_module_param_set_inner(
 
     :return: Status code.
     """
-    return _fimo_module_param_set_inner(module, value, type, param)
-
-
-_fimo_module_param_get_inner = _lib.fimo_module_param_get_inner
-_fimo_module_param_get_inner.argtypes = [
-    c.POINTER(FimoModule),
-    c.c_void_p,
-    c.POINTER(FimoModuleParamType),
-    c.POINTER(FimoModuleParamData),
-]
-_fimo_module_param_get_inner.restype = FimoResult
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_set_inner = vtable.module_v0.param_set_inner
+    return param_set_inner(c.c_void_p(context.data), module, value, type, param)
 
 
 def fimo_module_param_get_inner(
@@ -3568,7 +3418,11 @@ def fimo_module_param_get_inner(
 
     :return: Status code.
     """
-    return _fimo_module_param_get_inner(module, value, type, param)
+    context = module.contents.context
+    vtable_ptr = c.c_void_p(context.vtable)
+    vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
+    param_get_inner = vtable.module_v0.param_get_inner
+    return param_get_inner(c.c_void_p(context.data), module, value, type, param)
 
 
 # Header: fimo_std/vtable.h

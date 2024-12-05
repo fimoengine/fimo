@@ -55,14 +55,19 @@ impl ModuleInfoView<'_> {
 impl ModuleInfoView<'_> {
     /// Searches for a module by its name.
     pub fn find_by_name(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<ModuleInfo, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .find_by_name
+                .unwrap_unchecked()
+        };
+
         // Safety: Either we get an error, or we initialize the module.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
-                *error = bindings::fimo_module_find_by_name(
-                    ctx.share_to_ffi(),
-                    name.as_ptr(),
-                    module.as_mut_ptr(),
-                );
+                *error = f(ctx.view().data(), name.as_ptr(), module.as_mut_ptr());
             })
         }?;
 
@@ -78,11 +83,20 @@ impl ModuleInfoView<'_> {
         namespace: &CStr,
         version: Version,
     ) -> Result<ModuleInfo, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .find_by_symbol
+                .unwrap_unchecked()
+        };
+
         // Safety: Either we get an error, or we initialize the module.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
-                *error = bindings::fimo_module_find_by_symbol(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     name.as_ptr(),
                     namespace.as_ptr(),
                     version.into_ffi(),
@@ -102,10 +116,13 @@ impl ModuleInfoView<'_> {
     /// depend on the module. This function automatically unloads cleans up unreferenced modules,
     /// except if they are a pseudo module.
     pub fn unload(&self, ctx: &impl ModuleSubsystem) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe { ctx.view().vtable().module_v0.unload.unwrap_unchecked() };
+
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_unload(ctx.share_to_ffi(), self.share_to_ffi());
+                *error = f(ctx.view().data(), self.share_to_ffi());
             })
         }
     }
@@ -524,9 +541,19 @@ unsafe impl Module for OpaqueModule<'_> {
         let mut has_dependency = false;
         let mut is_static = false;
 
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .namespace_included
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let error = unsafe {
-            bindings::fimo_module_namespace_included(
+            f(
+                self.context().data(),
                 self.share_to_ffi(),
                 namespace.as_ptr(),
                 &mut has_dependency,
@@ -546,18 +573,44 @@ unsafe impl Module for OpaqueModule<'_> {
     }
 
     fn include_namespace(&self, namespace: &CStr) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .namespace_include
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let error = unsafe {
-            bindings::fimo_module_namespace_include(self.share_to_ffi(), namespace.as_ptr())
+            f(
+                self.context().data(),
+                self.share_to_ffi(),
+                namespace.as_ptr(),
+            )
         };
         // Safety:
         unsafe { to_result(error) }
     }
 
     unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .namespace_exclude
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let error = unsafe {
-            bindings::fimo_module_namespace_exclude(self.share_to_ffi(), namespace.as_ptr())
+            f(
+                self.context().data(),
+                self.share_to_ffi(),
+                namespace.as_ptr(),
+            )
         };
         // Safety:
         unsafe { to_result(error) }
@@ -567,9 +620,19 @@ unsafe impl Module for OpaqueModule<'_> {
         let mut has_dependency = false;
         let mut is_static = false;
 
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .has_dependency
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let error = unsafe {
-            bindings::fimo_module_has_dependency(
+            f(
+                self.context().data(),
                 self.share_to_ffi(),
                 module.share_to_ffi(),
                 &mut has_dependency,
@@ -589,18 +652,44 @@ unsafe impl Module for OpaqueModule<'_> {
     }
 
     fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .acquire_dependency
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let error = unsafe {
-            bindings::fimo_module_acquire_dependency(self.share_to_ffi(), dependency.share_to_ffi())
+            f(
+                self.context().data(),
+                self.share_to_ffi(),
+                dependency.share_to_ffi(),
+            )
         };
         // Safety:
         unsafe { to_result(error) }
     }
 
     unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .relinquish_dependency
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         let error = unsafe {
-            bindings::fimo_module_relinquish_dependency(self.share_to_ffi(), dependency.into_ffi())
+            f(
+                self.context().data(),
+                self.share_to_ffi(),
+                dependency.into_ffi(),
+            )
         };
         // Safety:
         unsafe { to_result(error) }
@@ -612,10 +701,20 @@ unsafe impl Module for OpaqueModule<'_> {
         namespace: &CStr,
         version: Version,
     ) -> Result<Symbol<'_, T>, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .load_symbol
+                .unwrap_unchecked()
+        };
+
         // Safety: We either initialize `symbol` or write an error.
         let symbol = unsafe {
             to_result_indirect_in_place(|error, symbol| {
-                *error = bindings::fimo_module_load_symbol(
+                *error = f(
+                    self.context().data(),
                     self.share_to_ffi(),
                     name.as_ptr(),
                     namespace.as_ptr(),
@@ -1004,13 +1103,19 @@ pub struct PseudoModule(OpaqueModule<'static>);
 impl PseudoModule {
     /// Constructs a new `PseudoModule`.
     pub fn new(ctx: &impl ModuleSubsystem) -> Result<Self, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .pseudo_module_new
+                .unwrap_unchecked()
+        };
+
         // Safety: We either initialize `module` or write an error.
         let module = unsafe {
             to_result_indirect_in_place(|error, module| {
-                *error = bindings::fimo_module_pseudo_module_new(
-                    ctx.share_to_ffi(),
-                    module.as_mut_ptr(),
-                );
+                *error = f(ctx.view().data(), module.as_mut_ptr());
             })
         }?;
 
@@ -1019,12 +1124,23 @@ impl PseudoModule {
     }
 
     unsafe fn destroy_by_ref(&mut self) -> Result<Context, Error> {
-        let module = self.share_to_ffi();
+        // Safety: Is always set.
+        let f = unsafe {
+            self.context()
+                .vtable()
+                .module_v0
+                .pseudo_module_destroy
+                .unwrap_unchecked()
+        };
 
         // Safety: The ffi call is safe.
         let context = unsafe {
             to_result_indirect_in_place(|error, context| {
-                *error = bindings::fimo_module_pseudo_module_destroy(module, context.as_mut_ptr());
+                *error = f(
+                    self.context().data(),
+                    self.share_to_ffi(),
+                    context.as_mut_ptr(),
+                );
             })
         }?;
 

@@ -45,11 +45,13 @@ impl LoadingSet<'_> {
         ctx: &T,
         f: impl FnOnce(&T, &Self) -> Result<LoadingSetRequest, Error>,
     ) -> error::Result {
+        // Safety: Is always set.
+        let f_ = unsafe { ctx.view().vtable().module_v0.set_new.unwrap_unchecked() };
+
         // Safety: The ffi call is safe, as we own all pointers.
         let loading_set = unsafe {
             let x = to_result_indirect_in_place(|error, loading_set| {
-                *error =
-                    bindings::fimo_module_set_new(ctx.share_to_ffi(), loading_set.as_mut_ptr());
+                *error = f_(ctx.view().data(), loading_set.as_mut_ptr());
             })?;
 
             LoadingSet::from_ffi(x)
@@ -57,10 +59,11 @@ impl LoadingSet<'_> {
 
         let request = f(ctx, &loading_set);
         if matches!(request, Ok(LoadingSetRequest::Dismiss) | Err(_)) {
+            // Safety: Is always set.
+            let f_ = unsafe { ctx.view().vtable().module_v0.set_dismiss.unwrap_unchecked() };
+
             // Safety: The ffi call is safe.
-            let error = unsafe {
-                bindings::fimo_module_set_dismiss(ctx.share_to_ffi(), loading_set.into_ffi())
-            };
+            let error = unsafe { f_(ctx.view().data(), loading_set.into_ffi()) };
             // Safety:
             unsafe {
                 to_result(error)?;
@@ -68,10 +71,11 @@ impl LoadingSet<'_> {
             request?;
             Ok(())
         } else {
+            // Safety: Is always set.
+            let f_ = unsafe { ctx.view().vtable().module_v0.set_finish.unwrap_unchecked() };
+
             // Safety: The ffi call is safe.
-            let error = unsafe {
-                bindings::fimo_module_set_finish(ctx.share_to_ffi(), loading_set.into_ffi())
-            };
+            let error = unsafe { f_(ctx.view().data(), loading_set.into_ffi()) };
             // Safety:
             unsafe { to_result(error) }
         }
@@ -79,11 +83,20 @@ impl LoadingSet<'_> {
 
     /// Checks if the `LoadingSet` contains the module.
     pub fn has_module(&self, ctx: &impl ModuleSubsystem, name: &CStr) -> Result<bool, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .set_has_module
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe, as we own all pointers.
         unsafe {
             to_result_indirect_in_place(|error, has_module| {
-                *error = bindings::fimo_module_set_has_module(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     self.share_to_ffi(),
                     name.as_ptr(),
                     has_module.as_mut_ptr(),
@@ -100,11 +113,20 @@ impl LoadingSet<'_> {
         ns: &CStr,
         version: Version,
     ) -> Result<bool, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .set_has_symbol
+                .unwrap_unchecked()
+        };
+
         // Safety: The ffi call is safe, as we own all pointers.
         unsafe {
             to_result_indirect_in_place(|error, has_module| {
-                *error = bindings::fimo_module_set_has_symbol(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     self.share_to_ffi(),
                     name.as_ptr(),
                     ns.as_ptr(),
@@ -172,11 +194,20 @@ impl LoadingSet<'_> {
             .map_err(|_err| <Error>::ENOMEM)?;
         let callback = alloc::boxed::Box::into_raw(callback);
 
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .set_append_callback
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_set_append_callback(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     self.share_to_ffi(),
                     module.as_ptr(),
                     on_success,
@@ -207,10 +238,21 @@ impl LoadingSet<'_> {
         module: &impl Module,
         export: impl FFITransferable<*const bindings::FimoModuleExport>,
     ) -> error::Result {
+        // Safety: Is always set.
+        let f = unsafe {
+            module
+                .context()
+                .vtable()
+                .module_v0
+                .set_append_freestanding_module
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_set_append_freestanding_module(
+                *error = f(
+                    module.context().data(),
                     module.share_to_ffi(),
                     self.share_to_ffi(),
                     export.into_ffi(),
@@ -260,15 +302,28 @@ impl LoadingSet<'_> {
         let filter_data = core::ptr::from_mut(&mut filter).cast::<core::ffi::c_void>();
         let filter = Some(filter_func::<T> as _);
 
+        let iterator = super::fimo_impl_module_export_iterator;
+
+        // Safety: Is always set.
+        let f = unsafe {
+            ctx.view()
+                .vtable()
+                .module_v0
+                .set_append_modules
+                .unwrap_unchecked()
+        };
+
         // Safety: FFI call is safe.
         unsafe {
             to_result_indirect(|error| {
-                *error = bindings::fimo_module_set_append_modules(
-                    ctx.share_to_ffi(),
+                *error = f(
+                    ctx.view().data(),
                     self.share_to_ffi(),
                     module_path.map_or(core::ptr::null(), |x| x.as_ptr()),
                     filter,
                     filter_data,
+                    Some(iterator),
+                    iterator as _,
                 );
             })
         }

@@ -1,12 +1,11 @@
 use core::{ffi::CStr, marker::PhantomData};
 
+use super::{ParameterAccess, ParameterType, ParameterValue};
 use crate::{
     bindings,
     ffi::{FFISharable, FFITransferable},
     version::Version,
 };
-
-use super::{ParameterAccess, ParameterType, ParameterValue};
 
 /// Declaration of a module parameter.
 #[repr(transparent)]
@@ -19,17 +18,17 @@ impl ParameterDeclaration {
     }
 
     /// Fetches the access group specifier for the read permission.
-    pub fn read_access(&self) -> ParameterAccess {
+    pub fn read_group(&self) -> ParameterAccess {
         self.0
-            .read_access
+            .read_group
             .try_into()
             .expect("expected known enum value")
     }
 
     /// Fetches the access group specifier for the write permission.
-    pub fn write_access(&self) -> ParameterAccess {
+    pub fn write_group(&self) -> ParameterAccess {
         self.0
-            .write_access
+            .write_group
             .try_into()
             .expect("expected known enum value")
     }
@@ -67,8 +66,8 @@ unsafe impl Sync for ParameterDeclaration {}
 impl core::fmt::Debug for ParameterDeclaration {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ParameterDeclaration")
-            .field("read_access", &self.read_access())
-            .field("write_access", &self.write_access())
+            .field("read_access", &self.read_group())
+            .field("write_access", &self.write_group())
             .field("name", &self.name())
             .field("default_value", &self.default_value())
             .finish()
@@ -81,8 +80,8 @@ impl core::fmt::Display for ParameterDeclaration {
             f,
             "{} ({}/{}), Default={}",
             self.name().to_string_lossy(),
-            self.read_access(),
-            self.write_access(),
+            self.read_group(),
+            self.write_group(),
             self.default_value()
         )
     }
@@ -312,19 +311,30 @@ impl FFITransferable<bindings::FimoModuleSymbolExport> for SymbolExport {
     }
 }
 
+/// Module symbol constructor.
+pub type ModuleSymbolConstructor = unsafe extern "C" fn(
+    module: *const bindings::FimoModule,
+    symbol: *mut *mut std::ffi::c_void,
+) -> bindings::FimoResult;
+
+/// Module symbol destructor.
+pub type ModuleSymbolDestructor = unsafe extern "C" fn(symbol: *mut std::ffi::c_void);
+
 /// Declaration of a dynamic module symbol export.
 #[repr(transparent)]
 pub struct DynamicSymbolExport(bindings::FimoModuleDynamicSymbolExport);
 
 impl DynamicSymbolExport {
     /// Fetches the symbol constructor.
-    pub fn constructor(&self) -> bindings::FimoModuleDynamicSymbolConstructor {
-        self.0.constructor
+    pub fn constructor(&self) -> ModuleSymbolConstructor {
+        // Safety: Must be set.
+        unsafe { self.0.constructor.unwrap_unchecked() }
     }
 
     /// Fetches the symbol destructor.
-    pub fn destructor(&self) -> bindings::FimoModuleDynamicSymbolDestructor {
-        self.0.destructor
+    pub fn destructor(&self) -> ModuleSymbolDestructor {
+        // Safety: Must be set.
+        unsafe { self.0.destructor.unwrap_unchecked() }
     }
 
     /// Fetches the version of the symbol.
@@ -446,6 +456,17 @@ impl core::fmt::Display for ModifierValue<'_> {
     }
 }
 
+/// Module constructor.
+pub type ModuleConstructor = unsafe extern "C" fn(
+    module: *const bindings::FimoModule,
+    set: *mut bindings::FimoModuleLoadingSet,
+    state: *mut *mut std::ffi::c_void,
+) -> bindings::FimoResult;
+
+/// Module destructor.
+pub type ModuleDestructor =
+    unsafe extern "C" fn(module: *const bindings::FimoModule, state: *mut std::ffi::c_void);
+
 /// Declaration of an exported module.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
@@ -453,7 +474,7 @@ pub struct ModuleExport<'a>(&'a bindings::FimoModuleExport);
 
 impl ModuleExport<'_> {
     /// Export abi of the module.
-    pub const EXPORT_ABI: i32 = bindings::FIMO_MODULE_EXPORT_ABI as i32;
+    pub const EXPORT_ABI: i32 = 0;
 
     /// Fetches the name of the module declaration.
     pub fn name(&self) -> &CStr {
@@ -571,13 +592,13 @@ impl ModuleExport<'_> {
     }
 
     /// Fetches the module constructor.
-    pub fn module_constructor(&self) -> bindings::FimoModuleConstructor {
-        self.0.module_constructor
+    pub fn constructor(&self) -> Option<ModuleConstructor> {
+        self.0.constructor
     }
 
     /// Fetches the module destructor.
-    pub fn module_destructor(&self) -> bindings::FimoModuleDestructor {
-        self.0.module_destructor
+    pub fn destructor(&self) -> Option<ModuleDestructor> {
+        self.0.destructor
     }
 }
 
@@ -601,8 +622,8 @@ impl core::fmt::Debug for ModuleExport<'_> {
             .field("imported_symbols", &self.imported_symbols())
             .field("exported_symbols", &self.exported_symbols())
             .field("exported_dynamic_symbols", &self.exported_dynamic_symbols())
-            .field("module_constructor", &self.module_constructor())
-            .field("module_destructor", &self.module_destructor())
+            .field("module_constructor", &self.constructor())
+            .field("module_destructor", &self.destructor())
             .finish_non_exhaustive()
     }
 }

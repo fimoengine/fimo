@@ -710,7 +710,7 @@ class ParameterType(
 
 
 class ParameterAccess(
-    _ffi.FFITransferable[_ffi.FimoModuleParamAccess], IntEnum, metaclass=ABCEnum
+    _ffi.FFITransferable[_ffi.FimoModuleParamAccessGroup], IntEnum, metaclass=ABCEnum
 ):
     """Access group of a module parameter."""
 
@@ -718,11 +718,11 @@ class ParameterAccess(
     Dependency = 1
     Private = 2
 
-    def transfer_to_ffi(self) -> _ffi.FimoModuleParamAccess:
-        return _ffi.FimoModuleParamAccess(self)
+    def transfer_to_ffi(self) -> _ffi.FimoModuleParamAccessGroup:
+        return _ffi.FimoModuleParamAccessGroup(self)
 
     @classmethod
-    def transfer_from_ffi(cls, ffi: _ffi.FimoModuleParamAccess) -> Self:
+    def transfer_from_ffi(cls, ffi: _ffi.FimoModuleParamAccessGroup) -> Self:
         return cls(ffi.value)
 
     @classmethod
@@ -1223,16 +1223,16 @@ class ParameterDeclaration(
         assert isinstance(value, _ffi.FimoModuleParamType)
         return ParameterType.transfer_from_ffi(value)
 
-    def read_access(self) -> ParameterAccess:
+    def read_group(self) -> ParameterAccess:
         """Fetches the access group specifier for the read permission."""
-        value = self._ffi.contents.read_access
-        assert isinstance(value, _ffi.FimoModuleParamAccess)
+        value = self._ffi.contents.read_group
+        assert isinstance(value, _ffi.FimoModuleParamAccessGroup)
         return ParameterAccess.transfer_from_ffi(value)
 
-    def write_access(self) -> ParameterAccess:
+    def write_group(self) -> ParameterAccess:
         """Fetches the access group specifier for the write permission."""
-        value = self._ffi.contents.write_access
-        assert isinstance(value, _ffi.FimoModuleParamAccess)
+        value = self._ffi.contents.write_group
+        assert isinstance(value, _ffi.FimoModuleParamAccessGroup)
         return ParameterAccess.transfer_from_ffi(value)
 
     def name(self) -> str:
@@ -1268,14 +1268,14 @@ class ParameterDeclaration(
                 raise ValueError("unknown parameter type")
 
     def __repr__(self) -> str:
-        read_access = self.read_access()
-        write_access = self.write_access()
+        read_group = self.read_group()
+        write_group = self.write_group()
         name = self.name()
         default_value = self.default_value()
-        return f"ParameterDeclaration({read_access=!r}, {write_access=!r}, {name=!r}, {default_value=!r})"
+        return f"ParameterDeclaration({read_group=!r}, {write_group=!r}, {name=!r}, {default_value=!r})"
 
     def __str__(self) -> str:
-        return f"{self.name()!r} ({self.read_access()}/{self.write_access()}), Default={self.default_value()}"
+        return f"{self.name()!r} ({self.read_group()}/{self.write_group()}), Default={self.default_value()}"
 
 
 class ResourceDeclaration(
@@ -1802,15 +1802,15 @@ class ModuleExport(
             lst.append(ExportModifier.transfer_from_ffi(value[i]))
         return lst
 
-    def module_constructor(self) -> _ffi.FuncPointer:
+    def constructor(self) -> _ffi.FuncPointer:
         """Fetches the module constructor."""
-        value = self.ffi.contents.module_constructor
+        value = self.ffi.contents.constructor
         assert isinstance(value, _ffi.FimoModuleConstructor)
         return value
 
-    def module_destructor(self) -> _ffi.FuncPointer:
+    def destructor(self) -> _ffi.FuncPointer:
         """Fetches the module destructor."""
-        value = self.ffi.contents.contents.module_destructor
+        value = self.ffi.contents.contents.destructor
         assert isinstance(value, _ffi.FimoModuleDestructor)
         return value
 
@@ -1826,13 +1826,13 @@ class ModuleExport(
         imported_symbols = self.imported_symbols()
         exported_symbols = self.exported_symbols()
         exported_dynamic_symbols = self.exported_dynamic_symbols()
-        module_constructor = self.module_constructor()
-        module_destructor = self.module_destructor()
+        constructor = self.constructor()
+        destructor = self.destructor()
         return (
             f"ModuleExport({export_abi=!r}, {name=!r}, {description=!r}, "
             f"{author=!r}, {license=!r}, {parameters=!r}, {resources=!r}, {imported_namespaces=!r}, "
             f"{imported_symbols=!r}, {exported_symbols=!r}, {exported_dynamic_symbols=!r}, "
-            f"{module_constructor=!r}, {module_destructor=!r}, ...)"
+            f"{constructor=!r}, {destructor=!r}, ...)"
         )
 
     def __str__(self) -> str:
@@ -2906,8 +2906,8 @@ def export_module(
 
             param_ffi = _ffi.FimoModuleParamDecl()
             param_ffi.type = param.type.transfer_to_ffi()
-            param_ffi.read_access = param.read.transfer_to_ffi()
-            param_ffi.write_access = param.write.transfer_to_ffi()
+            param_ffi.read_group = param.read.transfer_to_ffi()
+            param_ffi.write_group = param.write.transfer_to_ffi()
             param_ffi.setter = _ffi.FimoModuleParamSet(setter_wrapper)
             param_ffi.getter = _ffi.FimoModuleParamGet(getter_wrapper)
             param_ffi.name = c.c_char_p(param_name.encode())
@@ -3051,7 +3051,7 @@ def export_module(
         except Exception:
             assert False
 
-    export.module_constructor = _ffi.FimoModuleConstructor(constructor)
-    export.module_destructor = _ffi.FimoModuleDestructor(destructor)
+    export.constructor = _ffi.FimoModuleConstructor(constructor)
+    export.destructor = _ffi.FimoModuleDestructor(destructor)
 
     _ffi._fimo_impl_modules_export_list.append(c.POINTER(_ffi.FimoModuleExport)(export))

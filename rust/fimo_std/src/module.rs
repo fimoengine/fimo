@@ -34,14 +34,19 @@ where
     T: SealedContext,
 {
     fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error> {
+        // Safety: Is always set.
+        let f = unsafe {
+            self.view()
+                .vtable()
+                .module_v0
+                .namespace_exists
+                .unwrap_unchecked()
+        };
+
         // Safety: Either we get an error, or we initialize the module.
         unsafe {
             to_result_indirect_in_place(|error, exists| {
-                *error = bindings::fimo_module_namespace_exists(
-                    self.share_to_ffi(),
-                    namespace.as_ptr(),
-                    exists.as_mut_ptr(),
-                );
+                *error = f(self.view().data(), namespace.as_ptr(), exists.as_mut_ptr());
             })
         }
     }
@@ -290,18 +295,17 @@ macro_rules! export_module {
                 let (dynamic_symbol_exports, dynamic_symbol_exports_count) = $crate::export_module_private_exports!(
                     dynamic_ptr $mod_ident; { $($($dyn_exports_block)*)? }
                 );
-                let module_constructor = $crate::export_module_private_data!(
+                let constructor = $crate::export_module_private_data!(
                     constructor $mod_ident $($constructor)?
                 );
-                let module_destructor = $crate::export_module_private_data!(
+                let destructor = $crate::export_module_private_data!(
                     destructor $mod_ident $($constructor)?
                 );
 
                 $crate::bindings::FimoModuleExport {
                     type_: $crate::bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT,
                     next: core::ptr::null(),
-                    export_abi: $crate::bindings::FIMO_MODULE_EXPORT_ABI
-                        as $crate::bindings::FimoI32,
+                    export_abi: 0,
                     name,
                     description,
                     author,
@@ -320,8 +324,8 @@ macro_rules! export_module {
                     dynamic_symbol_exports_count,
                     modifiers: core::ptr::null(),
                     modifiers_count: 0,
-                    module_constructor,
-                    module_destructor,
+                    constructor,
+                    destructor,
                 }
             }
 
@@ -457,19 +461,19 @@ macro_rules! export_module_private_parameter {
         $ty
     };
     (group) => {
-        $crate::bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE
+        $crate::bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE
     };
     (group public) => {
-        $crate::bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PUBLIC
+        $crate::bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC
     };
     (group dependency) => {
-        $crate::bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_DEPENDENCY
+        $crate::bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY
     };
     (group private) => {
-        $crate::bindings::FimoModuleParamAccess::FIMO_MODULE_PARAM_ACCESS_PRIVATE
+        $crate::bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE
     };
     (getter $mod_ident:ident;) => {
-        Some($crate::bindings::fimo_module_param_get_inner as _)
+        Some($crate::module::c_ffi::get_param_default as _)
     };
     (getter $mod_ident:ident; $x:ident) => {{
         extern "C" fn getter(
@@ -487,7 +491,7 @@ macro_rules! export_module_private_parameter {
         Some(getter as _)
     }};
     (setter $mod_ident:ident;) => {
-        Some($crate::bindings::fimo_module_param_set_inner as _)
+        Some($crate::module::c_ffi::set_param_default as _)
     };
     (setter $mod_ident:ident; $x:ident) => {{
         extern "C" fn setter(
@@ -516,8 +520,8 @@ macro_rules! export_module_private_parameter {
             $(
                 $crate::bindings::FimoModuleParamDecl {
                     type_: $crate::export_module_private_parameter!(default_type $default_ty),
-                    read_access: $crate::export_module_private_parameter!(group $($read)?),
-                    write_access: $crate::export_module_private_parameter!(group $($write)?),
+                    read_group: $crate::export_module_private_parameter!(group $($read)?),
+                    write_group: $crate::export_module_private_parameter!(group $($write)?),
                     setter: $crate::export_module_private_parameter!(setter $mod_ident; $($setter)?),
                     getter: $crate::export_module_private_parameter!(getter $mod_ident; $($getter)?),
                     name: {
@@ -960,6 +964,38 @@ pub mod c_ffi {
 
     pub const fn extract_version(version: Version) -> bindings::FimoVersion {
         version.0
+    }
+
+    pub unsafe extern "C" fn get_param_default(
+        module: *const bindings::FimoModule,
+        value: *mut core::ffi::c_void,
+        type_: *mut bindings::FimoModuleParamType,
+        data: *const bindings::FimoModuleParamData,
+    ) -> bindings::FimoResult {
+        // Safety:
+        unsafe {
+            let f = (*(*module).context.vtable)
+                .module_v0
+                .param_get_inner
+                .unwrap_unchecked();
+            f((*module).context.data, module, value, type_, data)
+        }
+    }
+
+    pub unsafe extern "C" fn set_param_default(
+        module: *const bindings::FimoModule,
+        value: *const core::ffi::c_void,
+        type_: bindings::FimoModuleParamType,
+        data: *mut bindings::FimoModuleParamData,
+    ) -> bindings::FimoResult {
+        // Safety:
+        unsafe {
+            let f = (*(*module).context.vtable)
+                .module_v0
+                .param_set_inner
+                .unwrap_unchecked();
+            f((*module).context.data, module, value, type_, data)
+        }
     }
 
     pub unsafe extern "C" fn get_param<T, F>(
