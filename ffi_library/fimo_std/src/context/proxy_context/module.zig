@@ -1594,7 +1594,7 @@ pub const LoadingSet = opaque {
 pub const Export = extern struct {
     id: Context.TypeId = .module_export,
     next: ?*Context.TaggedInStruct = null,
-    export_abi: i32 = 0,
+    version: c.FimoVersion = Context.context_version.intoC(),
     name: [*:0]const u8,
     description: ?[*:0]const u8 = null,
     author: ?[*:0]const u8 = null,

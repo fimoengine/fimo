@@ -305,7 +305,12 @@ macro_rules! export_module {
                 $crate::bindings::FimoModuleExport {
                     type_: $crate::bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT,
                     next: core::ptr::null(),
-                    export_abi: 0,
+                    version: $crate::bindings::FimoVersion {
+                        major: $crate::bindings::FIMO_VERSION_MAJOR,
+                        minor: $crate::bindings::FIMO_VERSION_MINOR,
+                        patch: $crate::bindings::FIMO_VERSION_PATCH,
+                        build: $crate::bindings::FIMO_VERSION_BUILD_NUMBER as u64,
+                    },
                     name,
                     description,
                     author,

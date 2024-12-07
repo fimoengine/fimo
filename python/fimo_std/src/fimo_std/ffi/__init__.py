@@ -1285,7 +1285,7 @@ class FimoContextCoreVTableV0(c.Structure):
     ]
 
 
-_CURRENT_VERSION = FimoVersion(0, 1, 0)
+CURRENT_VERSION = FimoVersion(0, 1, 0)
 
 _fimo_context_init = _lib.fimo_context_init
 _fimo_context_init.argtypes = [
@@ -1328,7 +1328,7 @@ def fimo_context_check_version(context: FimoContext) -> FimoResult:
     vtable_ptr = c.c_void_p(context.vtable)
     vtable = c.cast(vtable_ptr, c.POINTER(FimoContextVTable))
     check_version = vtable.header.check_version
-    return check_version(context, c.byref(_CURRENT_VERSION))
+    return check_version(context, c.byref(CURRENT_VERSION))
 
 
 def fimo_context_acquire(context: FimoContext) -> None:
@@ -2147,7 +2147,7 @@ class FimoModuleExport(c.Structure):
     _fields_ = [
         ("type", FimoStructType),
         ("next", c.POINTER(FimoBaseStructIn)),
-        ("export_abi", FimoI32),
+        ("version", FimoVersion),
         ("name", c.c_char_p),
         ("description", c.c_char_p),
         ("author", c.c_char_p),

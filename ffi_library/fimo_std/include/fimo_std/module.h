@@ -301,11 +301,9 @@ typedef struct FimoModuleExport {
      */
     const FimoBaseStructIn *next;
     /**
-     * ABI version of the module export.
-     *
-     * Must be `FIMO_MODULE_EXPORT_ABI`.
+     * Version of the context compiled against.
      */
-    FimoI32 export_abi;
+    FimoVersion version;
     /**
      * Module name.
      *

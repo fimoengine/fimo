@@ -3,6 +3,7 @@ use core::{ffi::CStr, marker::PhantomData};
 use super::{ParameterAccess, ParameterType, ParameterValue};
 use crate::{
     bindings,
+    context::ContextView,
     ffi::{FFISharable, FFITransferable},
     version::Version,
 };
@@ -473,8 +474,10 @@ pub type ModuleDestructor =
 pub struct ModuleExport<'a>(&'a bindings::FimoModuleExport);
 
 impl ModuleExport<'_> {
-    /// Export abi of the module.
-    pub const EXPORT_ABI: i32 = 0;
+    /// Fetches the version of the context compiled against.
+    pub fn version(&self) -> Version {
+        Version(self.0.version)
+    }
 
     /// Fetches the name of the module declaration.
     pub fn name(&self) -> &CStr {
@@ -611,7 +614,7 @@ unsafe impl Sync for ModuleExport<'_> {}
 impl core::fmt::Debug for ModuleExport<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ModuleExport")
-            .field("export_abi", &Self::EXPORT_ABI)
+            .field("version", &self.version())
             .field("name", &self.name())
             .field("description", &self.description())
             .field("author", &self.author())
@@ -653,11 +656,11 @@ impl FFISharable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
     ) -> Self::BorrowedView<'a> {
         // Safety: `ffi` can not be null.
         unsafe {
-            debug_assert_eq!((*ffi).export_abi, Self::EXPORT_ABI);
             debug_assert_eq!(
                 (*ffi).type_,
                 bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT
             );
+            debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.0.major);
             ModuleExport(&*ffi)
         }
     }
@@ -671,11 +674,11 @@ impl FFITransferable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
     unsafe fn from_ffi(ffi: *const bindings::FimoModuleExport) -> Self {
         // Safety: `ffi` can not be null.
         unsafe {
-            debug_assert_eq!((*ffi).export_abi, Self::EXPORT_ABI);
             debug_assert_eq!(
                 (*ffi).type_,
                 bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT
             );
+            debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.0.major);
             Self(&*ffi)
         }
     }

@@ -1682,11 +1682,11 @@ class ModuleExport(
     def _consume(self) -> None:
         self._ffi = None
 
-    def export_abi(self) -> int:
-        """Fetches the abi of the module declaration."""
-        value = self.ffi.contents.export_abi
-        assert isinstance(value, int)
-        return value
+    def version(self) -> Version:
+        """Fetches the version of the context compiled against."""
+        value = self.ffi.contents.version
+        assert isinstance(value, _ffi.FimoVersion)
+        return Version.transfer_from_ffi(value)
 
     def name(self) -> str:
         """Fetches the name of the module declaration."""
@@ -1815,7 +1815,7 @@ class ModuleExport(
         return value
 
     def __repr__(self) -> str:
-        export_abi = self.export_abi()
+        version = self.version()
         name = self.name()
         description = self.description()
         author = self.author()
@@ -1829,7 +1829,7 @@ class ModuleExport(
         constructor = self.constructor()
         destructor = self.destructor()
         return (
-            f"ModuleExport({export_abi=!r}, {name=!r}, {description=!r}, "
+            f"ModuleExport({version=!r}, {name=!r}, {description=!r}, "
             f"{author=!r}, {license=!r}, {parameters=!r}, {resources=!r}, {imported_namespaces=!r}, "
             f"{imported_symbols=!r}, {exported_symbols=!r}, {exported_dynamic_symbols=!r}, "
             f"{constructor=!r}, {destructor=!r}, ...)"
@@ -2759,7 +2759,7 @@ def export_module(
     export = _ffi.FimoModuleExport()
     export.type = _ffi.FimoStructType.FIMO_STRUCT_TYPE_MODULE_EXPORT
     export.next = c.POINTER(_ffi.FimoBaseStructIn)()
-    export.export_abi = _ffi.FimoI32(0)
+    export.version = _ffi.CURRENT_VERSION
     export.name = name_ffi
     export.description = description_ffi
     export.author = author_ffi
