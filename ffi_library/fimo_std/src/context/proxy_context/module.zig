@@ -3,11 +3,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const c = @import("../../c.zig");
-const Context = @import("../proxy_context.zig");
 const AnyError = @import("../../AnyError.zig");
-const Version = @import("../../Version.zig");
+const c = @import("../../c.zig");
 const Path = @import("../../path.zig").Path;
+const Version = @import("../../Version.zig");
+const Context = @import("../proxy_context.zig");
 
 context: Context,
 
@@ -831,90 +831,12 @@ pub fn Instance(
         ctx: c.FimoContext,
         data: DataPtr,
 
+        const Self = @This();
         pub const Parameters = ParametersT;
         pub const Resources = ResourcesT;
         pub const Imports = ImportsT;
         pub const Exports = ExportsT;
         pub const Data = DataT;
-
-        const Self = @This();
-        const requires_state_init = @sizeOf(DataT) != 0;
-        const InitFn = if (@sizeOf(DataT) == 0)
-            fn (ctx: *const @This(), set: *LoadingSet) anyerror!void
-        else
-            fn (ctx: *const @This(), set: *LoadingSet) anyerror!*DataT;
-        const DeinitFn = if (@sizeOf(DataT) == 0)
-            fn (ctx: *const @This()) void
-        else
-            fn (ctx: *const @This(), state: *DataT) void;
-
-        fn InitFnWrapper(comptime f: InitFn) fn (
-            ctx: *const OpaqueInstance,
-            set: *LoadingSet,
-            data: *?*anyopaque,
-        ) callconv(.C) c.FimoResult {
-            return if (@sizeOf(DataT) == 0)
-                struct {
-                    fn wrapper(
-                        ctx: *const OpaqueInstance,
-                        set: *LoadingSet,
-                        data: *?*anyopaque,
-                    ) callconv(.C) c.FimoResult {
-                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
-                        f(ctx_, set) catch |err| {
-                            if (@errorReturnTrace()) |tr|
-                                ctx_.context().tracing().emitStackTraceSimple(tr.*, @src());
-                            return AnyError.initError(err).err;
-                        };
-                        data.* = null;
-                        return AnyError.intoCResult(null);
-                    }
-                }.wrapper
-            else
-                struct {
-                    fn wrapper(
-                        ctx: *const OpaqueInstance,
-                        set: *LoadingSet,
-                        data: *?*anyopaque,
-                    ) callconv(.C) c.FimoResult {
-                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
-                        data.* = f(ctx_, set) catch |err| {
-                            if (@errorReturnTrace()) |tr|
-                                ctx_.context().tracing().emitStackTraceSimple(tr.*, @src());
-                            return AnyError.initError(err).err;
-                        };
-                        return AnyError.intoCResult(null);
-                    }
-                }.wrapper;
-        }
-
-        fn DeinitFnWrapper(comptime f: DeinitFn) fn (
-            ctx: *const OpaqueInstance,
-            data: ?*anyopaque,
-        ) callconv(.C) void {
-            return if (@sizeOf(DataT) == 0)
-                struct {
-                    fn wrapper(
-                        ctx: *const OpaqueInstance,
-                        data: ?*anyopaque,
-                    ) callconv(.C) void {
-                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
-                        std.debug.assert(data == null);
-                        f(ctx_);
-                    }
-                }.wrapper
-            else
-                struct {
-                    fn wrapper(
-                        ctx: *const OpaqueInstance,
-                        data: ?*anyopaque,
-                    ) callconv(.C) void {
-                        const ctx_: *const Self = @alignCast(@ptrCast(ctx));
-                        const data_: ?*DataT = @alignCast(@ptrCast(data));
-                        f(ctx_, data_.?);
-                    }
-                }.wrapper;
-        }
 
         /// Returns the contained context without increasing the
         /// reference count.
@@ -1979,18 +1901,16 @@ pub const Export = extern struct {
             value: union(enum) {
                 static: *const anyopaque,
                 dynamic: struct {
-                    initFn: fn (ctx: *const OpaqueInstance) anyerror!*anyopaque,
-                    deinitFn: fn (symbol: *anyopaque) void,
+                    initFn: *const fn (
+                        ctx: *const OpaqueInstance,
+                        symbol: **anyopaque,
+                    ) callconv(.C) c.FimoResult,
+                    deinitFn: *const fn (symbol: *anyopaque) callconv(.C) void,
                 },
             },
         };
 
         const Modifier = union(enum) {
-            destructor: struct {
-                data: ?*anyopaque,
-                destructor: fn (ptr: ?*anyopaque) void,
-            },
-            dependency: *const Info,
             _,
         };
 
@@ -2247,12 +2167,13 @@ pub const Export = extern struct {
             comptime deinitFn: fn (symbol: *T.symbol) void,
         ) Builder {
             const initWrapped = struct {
-                fn f(ctx: *const OpaqueInstance) anyerror!*anyopaque {
-                    return initFn(ctx);
+                fn f(ctx: *const OpaqueInstance, out: **anyopaque) callconv(.C) c.FimoResult {
+                    out.* = initFn(ctx) catch |err| return AnyError.initError(err).err;
+                    return AnyError.intoCResult(null);
                 }
             }.f;
             const deinitWrapped = struct {
-                fn f(symbol: *anyopaque) void {
+                fn f(symbol: *anyopaque) callconv(.C) void {
                     return deinitFn(@alignCast(@ptrCast(symbol)));
                 }
             }.f;
@@ -2261,8 +2182,8 @@ pub const Export = extern struct {
                 .symbol = T,
                 .value = .{
                     .dynamic = .{
-                        .initFn = initWrapped,
-                        .deinitFn = deinitWrapped,
+                        .initFn = &initWrapped,
+                        .deinitFn = &deinitWrapped,
                     },
                 },
             };
@@ -2489,15 +2410,41 @@ pub const Export = extern struct {
                 count += 1;
             }
 
+            var i: usize = 0;
             var exports: [count]Export.SymbolExport = undefined;
-            for (self.exports, &exports) |src, *dst| {
+            for (self.exports) |src| {
                 if (src.value != .static) continue;
-                dst.* = Export.SymbolExport{
+                exports[i] = Export.SymbolExport{
                     .symbol = src.value.static,
                     .name = src.symbol.name,
                     .namespace = src.symbol.namespace,
                     .version = src.symbol.version.intoC(),
                 };
+                i += 1;
+            }
+            const exports_c = exports;
+            return &exports_c;
+        }
+
+        fn ffiDynamicExports(comptime self: Builder) []const Export.DynamicSymbolExport {
+            var count: usize = 0;
+            for (self.exports) |exp| {
+                if (exp.value != .dynamic) continue;
+                count += 1;
+            }
+
+            var i: usize = 0;
+            var exports: [count]Export.DynamicSymbolExport = undefined;
+            for (self.exports) |src| {
+                if (src.value != .dynamic) continue;
+                exports[i] = Export.DynamicSymbolExport{
+                    .name = src.symbol.name,
+                    .namespace = src.symbol.namespace,
+                    .version = src.symbol.version.intoC(),
+                    .constructor = src.value.dynamic.initFn,
+                    .destructor = src.value.dynamic.deinitFn,
+                };
+                i += 1;
             }
             const exports_c = exports;
             return &exports_c;
@@ -2510,6 +2457,7 @@ pub const Export = extern struct {
             const namespaces = self.ffiNamespaces();
             const imports = self.ffiImports();
             const exports = self.ffiExports();
+            const dynamic_exports = self.ffiDynamicExports();
             const exp = &Export{
                 .name = self.name,
                 .description = self.description orelse null,
@@ -2525,8 +2473,8 @@ pub const Export = extern struct {
                 .symbol_imports_count = imports.len,
                 .symbol_exports = if (exports.len > 0) exports.ptr else null,
                 .symbol_exports_count = exports.len,
-                .dynamic_symbol_exports = null,
-                .dynamic_symbol_exports_count = 0,
+                .dynamic_symbol_exports = if (dynamic_exports.len > 0) dynamic_exports.ptr else null,
+                .dynamic_symbol_exports_count = dynamic_exports.len,
                 .modifiers = null,
                 .modifiers_count = 0,
                 .module_constructor = self.constructor,
@@ -2543,189 +2491,6 @@ pub const Export = extern struct {
             );
         }
     };
-
-    /// Exports a module from the current binary.
-    pub fn addExport(
-        comptime InstanceT: type,
-        comptime name: [*:0]const u8,
-        comptime description: ?[*:0]const u8,
-        comptime author: ?[*:0]const u8,
-        comptime license: ?[*:0]const u8,
-        comptime parameters: anytype,
-        comptime resources: anytype,
-        comptime namespaces: []const [:0]const u8,
-        comptime imports: anytype,
-        comptime exports: anytype,
-        comptime modifiers: []const Export.Modifier,
-        comptime init_fn: ?InstanceT.InitFn,
-        comptime deinit_fn: ?InstanceT.DeinitFn,
-    ) void {
-        comptime {
-            const ParametersT = InstanceT.Parameters;
-            const ResourcesT = InstanceT.Resources;
-            const ImportsT = InstanceT.Imports;
-            const ExportsT = InstanceT.Exports;
-
-            const params_count = if (ParametersT == void) 0 else std.meta.fields(ParametersT).len;
-            std.debug.assert(std.meta.fields(@TypeOf(parameters)).len == params_count);
-            var params: [params_count]Export.Parameter = undefined;
-            for (std.meta.fields(@TypeOf(parameters))) |p| {
-                std.debug.assert(p.type == Export.Parameter);
-                const position = std.meta.fieldIndex(ParametersT, p.name).?;
-                params[position] = @field(parameters, p.name);
-            }
-
-            const res_count = if (ResourcesT == void) 0 else std.meta.fields(ResourcesT).len;
-            std.debug.assert(std.meta.fields(@TypeOf(resources)).len == res_count);
-            var res: [res_count]Export.Resource = undefined;
-            for (std.meta.fields(@TypeOf(resources))) |p| {
-                std.debug.assert(p.type == Export.Resource);
-                const position = std.meta.fieldIndex(ResourcesT, p.name).?;
-                res[position] = @field(resources, p.name);
-            }
-
-            var ns: [namespaces.len]Export.Namespace = undefined;
-            for (namespaces, &ns) |n, *dst| {
-                dst.* = Export.Namespace{ .name = n };
-            }
-
-            const imp_count = if (ImportsT == void) 0 else std.meta.fields(ImportsT).len;
-            std.debug.assert(std.meta.fields(@TypeOf(imports)).len == imp_count);
-            var imp: [imp_count]Export.SymbolImport = undefined;
-            for (std.meta.fields(@TypeOf(imports))) |p| {
-                std.debug.assert(p.type == Symbol);
-                const position = std.meta.fieldIndex(ImportsT, p.name).?;
-                const i: Symbol = @field(imports, p.name);
-                imp[position] = Export.SymbolImport{
-                    .version = i.version.intoC(),
-                    .name = i.name.ptr,
-                    .namespace = i.namespace.ptr,
-                };
-            }
-
-            const exp_count = if (ExportsT == void) 0 else std.meta.fields(ExportsT).len;
-            std.debug.assert(std.meta.fields(@TypeOf(exports)).len == exp_count);
-            var static_exp_count = 0;
-            var dynamic_exp_count = 0;
-            var max_static_exp_pos = 0;
-            var min_dynamic_exp_pos = exp_count;
-            for (std.meta.fields(@TypeOf(exports))) |p| {
-                const e = @field(exports, p.name);
-                const symbol: Symbol = @field(e, "id");
-                if (@hasField(@TypeOf(e), "symbol")) {
-                    const symbol_t = @field(e, "symbol");
-                    std.debug.assert(@TypeOf(symbol_t) == *const symbol.symbol);
-                    static_exp_count += 1;
-                    max_static_exp_pos = @max(max_static_exp_pos, std.meta.fieldIndex(ExportsT, p.name).?);
-                } else {
-                    const cons = @typeInfo(@TypeOf(@field(e, "init")));
-                    std.debug.assert(cons.@"fn".params.len == 1);
-                    std.debug.assert(cons.@"fn".params[0].type == *const InstanceT);
-                    std.debug.assert(@typeInfo(cons.@"fn".return_type.?).error_union.payload == *symbol.symbol);
-
-                    const dest = @TypeOf(@field(e, "deinit"));
-                    std.debug.assert(@typeInfo(dest).@"fn".params.len == 1);
-                    std.debug.assert(@typeInfo(dest).@"fn".params[0].type == *symbol.symbol);
-                    std.debug.assert(@typeInfo(dest).@"fn".return_type == void);
-                    dynamic_exp_count += 1;
-                    min_dynamic_exp_pos = @min(min_dynamic_exp_pos, std.meta.fieldIndex(ExportsT, p.name).?);
-                }
-            }
-            if (max_static_exp_pos > min_dynamic_exp_pos) {
-                @compileError("Dynamic symbol exports can not appear before static symbol exports");
-            }
-
-            var static_exp: [static_exp_count]Export.SymbolExport = undefined;
-            for (std.meta.fields(@TypeOf(exports))) |p| {
-                const e = @field(exports, p.name);
-                const symbol: Symbol = @field(e, "id");
-                if (@hasField(@TypeOf(e), "symbol")) {
-                    const symbol_ptr = @field(e, "symbol");
-                    const position = std.meta.fieldIndex(ExportsT, p.name).?;
-                    static_exp[position] = Export.SymbolExport{
-                        .symbol = symbol_ptr,
-                        .version = symbol.version.intoC(),
-                        .name = symbol.name.ptr,
-                        .namespace = symbol.namespace.ptr,
-                    };
-                }
-            }
-
-            var dynamic_exp: [dynamic_exp_count]Export.DynamicSymbolExport = undefined;
-            for (std.meta.fields(@TypeOf(exports))) |p| {
-                const e = @field(exports, p.name);
-                const symbol: Symbol = @field(e, "id");
-                if (!@hasField(@TypeOf(e), "symbol")) {
-                    const cons = @field(e, "init");
-                    const dest = @field(e, "deinit");
-
-                    const Wrapper = struct {
-                        fn init(
-                            ctx: *const OpaqueInstance,
-                            sym: **anyopaque,
-                        ) callconv(.C) c.FimoResult {
-                            const self: *const InstanceT = @alignCast(@ptrCast(ctx));
-                            sym.* = cons(self) catch |err| return AnyError.initError(err).err;
-                            return AnyError.intoCResult(null);
-                        }
-                        fn deinit(sym: *anyopaque) callconv(.C) void {
-                            const s: *symbol.symbol = @alignCast(@ptrCast(sym));
-                            dest(s);
-                        }
-                    };
-
-                    const position = std.meta.fieldIndex(ExportsT, p.name).?;
-                    dynamic_exp[position] = Export.DynamicSymbolExport{
-                        .constructor = Wrapper.init,
-                        .destructor = Wrapper.deinit,
-                        .version = symbol.version.intoC(),
-                        .name = symbol.name.ptr,
-                        .namespace = symbol.namespace.ptr,
-                    };
-                }
-            }
-
-            if (init_fn == null and deinit_fn != null or init_fn != null and deinit_fn == null)
-                @compileError("The init and deinit functions must both be specified or left unspecified");
-
-            const c_params = params;
-            const c_res = res;
-            const c_ns = ns;
-            const c_imp = imp;
-            const c_static_exp = static_exp;
-            const c_dynamic_exp = dynamic_exp;
-            const c_modifiers = modifiers;
-            const exp = &Export{
-                .name = name,
-                .description = description,
-                .author = author,
-                .license = license,
-                .parameters = if (params_count > 0) &c_params else null,
-                .parameters_count = params_count,
-                .resources = if (res_count > 0) &c_res else null,
-                .resources_count = res_count,
-                .namespace_imports = if (namespaces.len > 0) &c_ns else null,
-                .namespace_imports_count = namespaces.len,
-                .symbol_imports = if (imp_count > 0) &c_imp else null,
-                .symbol_imports_count = imp_count,
-                .symbol_exports = if (static_exp_count > 0) &c_static_exp else null,
-                .symbol_exports_count = static_exp_count,
-                .dynamic_symbol_exports = if (dynamic_exp_count > 0) &c_dynamic_exp else null,
-                .dynamic_symbol_exports_count = dynamic_exp_count,
-                .modifiers = if (c_modifiers.len > 0) c_modifiers.ptr else null,
-                .modifiers_count = c_modifiers.len,
-                .module_constructor = if (init_fn) |f|
-                    &InstanceT.InitFnWrapper(f)
-                else
-                    null,
-                .module_destructor = if (deinit_fn) |f|
-                    &InstanceT.DeinitFnWrapper(f)
-                else
-                    null,
-            };
-            exportModuleInner(exp);
-        }
-    }
 
     /// Runs the registered cleanup routines.
     pub fn deinit(self: *const Export) void {

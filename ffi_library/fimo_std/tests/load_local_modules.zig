@@ -2,7 +2,6 @@ const std = @import("std");
 const testing = std.testing;
 
 const fimo_std = @import("fimo_std");
-
 const Version = fimo_std.Version;
 const Path = fimo_std.path.Path;
 const Context = fimo_std.Context;

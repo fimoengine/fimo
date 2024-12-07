@@ -1,12 +1,11 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const testing = std.testing;
+const builtin = @import("builtin");
 
-const fimo_std = @import("fimo_std");
 const fimo_python_meta = @import("fimo_python_meta");
-
+const fimo_std = @import("fimo_std");
 const heap = fimo_std.heap;
-
+const Path = fimo_std.path.Path;
 const Context = fimo_std.Context;
 const Tracing = Context.Tracing;
 const Module = Context.Module;
@@ -15,48 +14,70 @@ const Python = @cImport({
     @cInclude("Python.h");
 });
 
-const Instance = Module.Instance(
-    void,
-    extern struct {
-        home: [*:0]const u8,
-        module_path: [*:0]const u8,
-        lib_path: [*:0]const u8,
-        dynload_path: [*:0]const u8,
-    },
-    void,
-    extern struct {
-        run_string: *const fimo_python_meta.RunString,
-    },
-    State,
-);
+const Instance = Module.Export.Builder
+    .init("fimo_python")
+    .withDescription("Embedded Python interpreter")
+    .withAuthor("Gabriel Borrelli")
+    .withLicense("MIT + APACHE 2.0")
+    .withResource(.{ .name = "home", .path = Path.init("") catch unreachable })
+    .withResource(.{ .name = "module_path", .path = Path.init("module.fimo_module") catch unreachable })
+    .withResource(.{ .name = "lib_path", .path = Path.init("Lib") catch unreachable })
+    .withResource(.{ .name = "dynload_path", .path = Path.init("DLLs") catch unreachable })
+    .withDynamicExport(
+    fimo_python_meta.symbols.RunString,
+    "run_string",
+    State.initRunString,
+    State.deinitRunString,
+)
+    .withState(State, State.init, State.deinit)
+    .exportModule();
+
 comptime {
-    Module.Export.addExport(
-        Instance,
-        "fimo_python",
-        "Embedded Python interpreter",
-        "Gabriel Borrelli",
-        "MIT + APACHE 2.0",
-        .{},
-        .{
-            .home = Module.Export.Resource{ .path = "" },
-            .module_path = Module.Export.Resource{ .path = "module.fimo_module" },
-            .lib_path = Module.Export.Resource{ .path = "Lib" },
-            .dynload_path = Module.Export.Resource{ .path = "DLLs" },
-        },
-        &.{},
-        .{},
-        .{
-            .run_string = .{
-                .id = fimo_python_meta.symbols.RunString,
-                .init = State.initRunString,
-                .deinit = State.deinitRunString,
-            },
-        },
-        &.{},
-        State.init,
-        State.deinit,
-    );
+    _ = Instance;
 }
+
+// const Instance = Module.Instance(
+//     void,
+//     extern struct {
+//         home: [*:0]const u8,
+//         module_path: [*:0]const u8,
+//         lib_path: [*:0]const u8,
+//         dynload_path: [*:0]const u8,
+//     },
+//     void,
+//     extern struct {
+//         run_string: *const fimo_python_meta.RunString,
+//     },
+//     State,
+// );
+// comptime {
+//     Module.Export.addExport(
+//         Instance,
+//         "fimo_python",
+//         "Embedded Python interpreter",
+//         "Gabriel Borrelli",
+//         "MIT + APACHE 2.0",
+//         .{},
+//         .{
+//             .home = Module.Export.Resource{ .path = "" },
+//             .module_path = Module.Export.Resource{ .path = "module.fimo_module" },
+//             .lib_path = Module.Export.Resource{ .path = "Lib" },
+//             .dynload_path = Module.Export.Resource{ .path = "DLLs" },
+//         },
+//         &.{},
+//         .{},
+//         .{
+//             .run_string = .{
+//                 .id = fimo_python_meta.symbols.RunString,
+//                 .init = State.initRunString,
+//                 .deinit = State.deinitRunString,
+//             },
+//         },
+//         &.{},
+//         State.init,
+//         State.deinit,
+//     );
+// }
 
 const State = struct {
     thread_state: *PyThreadState,
@@ -90,7 +111,8 @@ const State = struct {
     const PyInterpreterConfig = Python.PyInterpreterConfig;
     const PyInterpreterState_Main = Python.PyInterpreterState_Main;
 
-    fn init(ctx: *const Instance, set: *Module.LoadingSet) !*State {
+    fn init(octx: *const Module.OpaqueInstance, set: *Module.LoadingSet) !*State {
+        const ctx: *const Instance = @alignCast(@ptrCast(octx));
         ctx.context().tracing().emitTraceSimple("initializing fimo_python", .{}, @src());
         _ = set;
 
@@ -136,7 +158,8 @@ const State = struct {
         return self;
     }
 
-    fn deinit(ctx: *const Instance, self: *State) void {
+    fn deinit(octx: *const Module.OpaqueInstance, self: *State) void {
+        const ctx: *const Instance = @alignCast(@ptrCast(octx));
         PyEval_RestoreThread(self.thread_state);
         const result = Py_FinalizeEx();
         if (result != 0) ctx.context().tracing().emitErrSimple(
@@ -147,7 +170,8 @@ const State = struct {
         heap.fimo_allocator.destroy(self);
     }
 
-    fn initRunString(ctx: *const Instance) !*fimo_python_meta.RunString {
+    fn initRunString(octx: *const Module.OpaqueInstance) !*fimo_python_meta.RunString {
+        const ctx: *const Instance = @alignCast(@ptrCast(octx));
         const sym = try heap.fimo_allocator.create(fimo_python_meta.RunString);
         errdefer heap.fimo_allocator.destroy(sym);
 
