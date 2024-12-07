@@ -292,6 +292,161 @@ fn addModuleFromExport(
     self.should_recreate_map = true;
 }
 
+fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{InvalidExport}!void {
+    if (@"export".id != .module_export) {
+        sys.logWarn("invalid struct id, id='{}'", .{@"export".id}, @src());
+        return error.InvalidExport;
+    }
+    if (@"export".next != null) {
+        sys.logWarn("the next field is reserved for future use", .{}, @src());
+        return error.InvalidExport;
+    }
+    if (!Context.ProxyContext.context_version.isCompatibleWith(@"export".getVersion())) {
+        sys.logWarn(
+            "incompatible context version, got='{long}', required='{long}'",
+            .{ Context.ProxyContext.context_version, @"export".getVersion() },
+            @src(),
+        );
+        return error.InvalidExport;
+    }
+
+    var has_error = false;
+    if (std.mem.startsWith(u8, @"export".getName(), "__")) {
+        sys.logWarn(
+            "export uses reserved name, export='{s}'",
+            .{@"export".name},
+            @src(),
+        );
+        return error.InvalidExport;
+    }
+
+    const namespaces = @"export".getNamespaceImports();
+    for (namespaces, 0..) |ns, i| {
+        if (std.mem.eql(u8, std.mem.span(ns.name), "")) {
+            sys.logWarn(
+                "can not import global namespace, export='{s}', ns='{s}', index='{}'",
+                .{ @"export".getName(), ns.name, i },
+                @src(),
+            );
+            has_error = true;
+        }
+
+        var count: usize = 0;
+        for (namespaces[0..i]) |x| {
+            if (std.mem.eql(u8, std.mem.span(ns.name), std.mem.span(x.name))) count += 1;
+        }
+        if (count > 1) {
+            sys.logWarn(
+                "duplicate namespace, export='{s}', ns='{s}', index='{}'",
+                .{ @"export".getName(), ns.name, i },
+                @src(),
+            );
+            has_error = true;
+        }
+    }
+
+    const imports = @"export".getSymbolImports();
+    for (imports, 0..) |imp, i| {
+        var ns_found = std.mem.eql(u8, std.mem.span(imp.namespace), "");
+        for (namespaces) |ns| {
+            if (ns_found) break;
+            if (std.mem.eql(u8, std.mem.span(imp.namespace), std.mem.span(ns.name))) {
+                ns_found = true;
+            }
+        }
+        if (!ns_found) {
+            sys.logWarn(
+                "required namespace not imported, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                .{ @"export".getName(), imp.name, imp.namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+    }
+
+    const exports = @"export".getSymbolExports();
+    for (exports, 0..) |exp, i| {
+        const name = std.mem.span(exp.name);
+        const namespace = std.mem.span(exp.namespace);
+        for (imports) |imp| {
+            const imp_name = std.mem.span(imp.name);
+            const imp_namespace = std.mem.span(imp.namespace);
+            if (std.mem.eql(u8, name, imp_name) and
+                std.mem.eql(u8, namespace, imp_namespace))
+            {
+                sys.logWarn(
+                    "can not import and export the same symbol, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                    .{ @"export".getName(), name, namespace, i },
+                    @src(),
+                );
+                has_error = true;
+                break;
+            }
+        }
+
+        var count: usize = 0;
+        for (exports[0..i]) |x| {
+            const exp_name = std.mem.span(x.name);
+            const exp_namespace = std.mem.span(x.namespace);
+            if (std.mem.eql(u8, name, exp_name) and
+                std.mem.eql(u8, namespace, exp_namespace)) count += 1;
+        }
+        if (count > 1) {
+            sys.logWarn(
+                "duplicate export, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+    }
+
+    const dynamic_exports = @"export".getDynamicSymbolExports();
+    for (dynamic_exports, 0..) |exp, i| {
+        const name = std.mem.span(exp.name);
+        const namespace = std.mem.span(exp.namespace);
+        for (imports) |imp| {
+            const imp_name = std.mem.span(imp.name);
+            const imp_namespace = std.mem.span(imp.namespace);
+            if (std.mem.eql(u8, name, imp_name) and
+                std.mem.eql(u8, namespace, imp_namespace))
+            {
+                sys.logWarn(
+                    "can not import and export the same symbol, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                    .{ @"export".getName(), name, namespace, i },
+                    @src(),
+                );
+                has_error = true;
+                break;
+            }
+        }
+
+        var count: usize = 0;
+        for (exports) |x| {
+            const exp_name = std.mem.span(x.name);
+            const exp_namespace = std.mem.span(x.namespace);
+            if (std.mem.eql(u8, name, exp_name) and
+                std.mem.eql(u8, namespace, exp_namespace)) count += 1;
+        }
+        for (dynamic_exports[0..i]) |x| {
+            const exp_name = std.mem.span(x.name);
+            const exp_namespace = std.mem.span(x.namespace);
+            if (std.mem.eql(u8, name, exp_name) and
+                std.mem.eql(u8, namespace, exp_namespace)) count += 1;
+        }
+        if (count > 1) {
+            sys.logWarn(
+                "duplicate export, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+    }
+
+    if (has_error) return error.InvalidExport;
+}
+
 const AppendModulesData = struct {
     sys: *System,
     err: ?Allocator.Error = null,
@@ -301,9 +456,12 @@ const AppendModulesData = struct {
 };
 
 fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) callconv(.C) bool {
-    // TODO: Validate export.
-
     const data: *AppendModulesData = @alignCast(@ptrCast(o_data));
+    validate_export(data.sys, @"export") catch {
+        data.sys.logWarn("skipping export", .{}, @src());
+        return true;
+    };
+
     if (data.filter_fn == null or data.filter_fn.?(@"export", data.filter_data)) {
         data.exports.append(data.sys.allocator, @"export") catch |err| {
             @"export".deinit();
@@ -320,8 +478,7 @@ pub fn addModuleDynamic(
     owner_inner: *InstanceHandle.Inner,
     @"export": *const ProxyModule.Export,
 ) !void {
-    // TODO: Validate export.
-
+    try validate_export(&self.context.module.sys, @"export");
     try self.addModuleFromExport(owner_inner.handle.?, @"export", owner_inner.instance.?);
 }
 

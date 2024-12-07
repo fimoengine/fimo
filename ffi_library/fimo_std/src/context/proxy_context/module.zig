@@ -2509,6 +2509,11 @@ pub const Export = extern struct {
         }
     }
 
+    /// Returns the version of the context compiled agains.
+    pub fn getVersion(self: *const Export) Version {
+        return Version.initC(self.version);
+    }
+
     /// Returns the name of the export.
     pub fn getName(self: *const Export) []const u8 {
         return std.mem.span(self.name);
