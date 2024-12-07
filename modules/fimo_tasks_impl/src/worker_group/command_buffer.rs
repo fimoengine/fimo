@@ -10,7 +10,7 @@ use fimo_std::{
     ffi::{FFISharable, FFITransferable},
     module::Module,
 };
-use fimo_tasks::{
+use fimo_tasks_meta::{
     bindings::{self, FiTasksCommandBufferEntryType},
     TaskId, WorkerId,
 };

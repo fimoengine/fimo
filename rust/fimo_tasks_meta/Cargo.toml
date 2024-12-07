@@ -1,5 +1,5 @@
 [package]
-name = "fimo_tasks"
+name = "fimo_tasks_meta"
 version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
@@ -15,7 +15,7 @@ version = "0.1"
 path = "../fimo_std"
 
 [build-dependencies.bindgen]
-version = "0.70.1"
+version = "0.71.0"
 
 [build-dependencies.doxygen-rs]
 version = "0.4.2"

@@ -8,7 +8,7 @@ use crate::{
 use crossbeam_channel::{Receiver, Sender};
 use crossbeam_deque::{Injector, Stealer, Worker};
 use fimo_std::{error::Error, module::Module, tracing, tracing::ThreadAccess};
-use fimo_tasks::WorkerId;
+use fimo_tasks_meta::WorkerId;
 use std::{
     cell::{RefCell, RefMut},
     fmt::Debug,

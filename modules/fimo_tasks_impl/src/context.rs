@@ -8,7 +8,7 @@ use crate::{
     WorkerGroupQuery,
 };
 use fimo_std::{bindings as std_bindings, error::Error, ffi::FFITransferable, module::Module};
-use fimo_tasks::{bindings, TaskId, WorkerGroupId, WorkerId};
+use fimo_tasks_meta::{bindings, TaskId, WorkerGroupId, WorkerId};
 
 #[derive(Debug)]
 pub struct ContextImpl;
@@ -196,7 +196,7 @@ impl ContextImpl {
 }
 
 impl ContextImpl {
-    pub(crate) const fn ffi_context() -> fimo_tasks::Context {
+    pub(crate) const fn ffi_context() -> fimo_tasks_meta::Context {
         const VTABLE: &bindings::FiTasksVTable = &bindings::FiTasksVTable {
             v0: bindings::FiTasksVTableV0 {
                 is_worker: Some(ContextImpl::is_worker_ffi),

@@ -5,7 +5,7 @@ use fimo_std::{
     error::Error,
     ffi::{FFISharable, FFITransferable},
 };
-use fimo_tasks::{bindings, WorkerGroupId};
+use fimo_tasks_meta::{bindings, WorkerGroupId};
 use std::{
     ffi::{CStr, CString},
     fmt::Debug,
@@ -149,9 +149,9 @@ impl Debug for WorkerGroupImpl {
 pub struct WorkerGroupFFI(pub Arc<WorkerGroupImpl>);
 
 impl WorkerGroupFFI {
-    const VTABLE: &'static fimo_tasks::bindings::FiTasksWorkerGroupVTable =
-        &fimo_tasks::bindings::FiTasksWorkerGroupVTable {
-            v0: fimo_tasks::bindings::FiTasksWorkerGroupVTableV0 {
+    const VTABLE: &'static bindings::FiTasksWorkerGroupVTable =
+        &bindings::FiTasksWorkerGroupVTable {
+            v0: bindings::FiTasksWorkerGroupVTableV0 {
                 id: Some(Self::id),
                 acquire: Some(Self::acquire),
                 release: Some(Self::release),

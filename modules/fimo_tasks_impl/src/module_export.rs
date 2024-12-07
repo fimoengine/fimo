@@ -22,7 +22,7 @@ export_module! {
         namespaces: [],
         imports: {},
         exports: {
-            context: fimo_tasks::symbols::fimo_tasks::Context = &ContextImpl::ffi_context(),
+            context: fimo_tasks_meta::symbols::fimo_tasks::Context = &ContextImpl::ffi_context(),
         },
         dyn_exports: {},
         state: Runtime,

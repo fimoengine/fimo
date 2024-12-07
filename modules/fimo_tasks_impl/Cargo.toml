@@ -17,9 +17,9 @@ workspace = true
 version = "0.1"
 path = "../../rust/fimo_std"
 
-[dependencies.fimo_tasks]
+[dependencies.fimo_tasks_meta]
 version = "0.1"
-path = "../../rust/fimo_tasks"
+path = "../../rust/fimo_tasks_meta"
 
 [dependencies.context]
 version = "3.0.0"

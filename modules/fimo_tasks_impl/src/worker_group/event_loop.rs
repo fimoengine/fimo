@@ -16,7 +16,7 @@ use crate::{
 };
 use crossbeam_channel::{select, Receiver, Sender, TrySendError};
 use fimo_std::{error::Error, module::Module};
-use fimo_tasks::{TaskId, WorkerId};
+use fimo_tasks_meta::{TaskId, WorkerId};
 use rustc_hash::FxHashMap;
 use std::{
     fmt::{Debug, Formatter},

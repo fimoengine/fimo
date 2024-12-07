@@ -40,7 +40,7 @@ use fimo_std::{
     module::{Module, PreModule},
     tracing::ThreadAccess,
 };
-use fimo_tasks::{bindings, WorkerGroupId};
+use fimo_tasks_meta::{bindings, WorkerGroupId};
 use module_export::TasksModuleToken;
 use rustc_hash::FxHashMap;
 use std::{

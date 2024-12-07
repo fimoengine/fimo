@@ -3,7 +3,7 @@ use crate::worker_group::{
     task::{AcquiredStack, StackMemory},
 };
 use fimo_std::error::Error;
-use fimo_tasks::TaskId;
+use fimo_tasks_meta::TaskId;
 use std::{collections::VecDeque, sync::Arc};
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]

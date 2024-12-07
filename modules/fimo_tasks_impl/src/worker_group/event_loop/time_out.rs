@@ -1,4 +1,4 @@
-use fimo_tasks::TaskId;
+use fimo_tasks_meta::TaskId;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},

@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use fimo_std::{error::Error, ffi::FFISharable, module::Module, tracing::CallStack};
-use fimo_tasks::{TaskId, WorkerId};
+use fimo_tasks_meta::{TaskId, WorkerId};
 use rustc_hash::FxHashMap;
 use std::{mem::ManuallyDrop, ops::Deref};
 
@@ -156,9 +156,9 @@ impl EnqueuedTask {
     /// May only be called in the thread that owns the task.
     pub unsafe fn write_tss_value(
         &mut self,
-        key: fimo_tasks::bindings::FiTasksTssKey,
+        key: fimo_tasks_meta::bindings::FiTasksTssKey,
         value: *mut std::ffi::c_void,
-        dtor: fimo_tasks::bindings::FiTasksTssDtor,
+        dtor: fimo_tasks_meta::bindings::FiTasksTssDtor,
     ) {
         let local_data = self
             .local_data
@@ -179,7 +179,7 @@ impl EnqueuedTask {
     /// May only be called in the thread that owns the task.
     pub unsafe fn read_tss_value(
         &mut self,
-        key: fimo_tasks::bindings::FiTasksTssKey,
+        key: fimo_tasks_meta::bindings::FiTasksTssKey,
     ) -> Option<*mut std::ffi::c_void> {
         let local_data = self
             .local_data
@@ -194,7 +194,7 @@ impl EnqueuedTask {
     /// May only be called in the thread that owns the task.
     pub unsafe fn clear_tss_value(
         &mut self,
-        key: fimo_tasks::bindings::FiTasksTssKey,
+        key: fimo_tasks_meta::bindings::FiTasksTssKey,
     ) -> Result<(), Error> {
         let local_data = self
             .local_data
@@ -377,7 +377,7 @@ impl Drop for LocalData {
 #[derive(Debug)]
 struct LocalDataValue {
     value: *mut std::ffi::c_void,
-    on_cleanup: fimo_tasks::bindings::FiTasksTssDtor,
+    on_cleanup: fimo_tasks_meta::bindings::FiTasksTssDtor,
 }
 
 impl LocalDataValue {
@@ -399,13 +399,13 @@ impl LocalDataValue {
 unsafe impl Send for LocalDataValue {}
 
 #[derive(Debug, Copy, Clone)]
-pub struct RawTask(*mut fimo_tasks::bindings::FiTasksTask);
+pub struct RawTask(*mut fimo_tasks_meta::bindings::FiTasksTask);
 
 impl RawTask {
     /// # Safety
     ///
     /// The pointer must be valid and unaliased.
-    pub unsafe fn new(raw: *mut fimo_tasks::bindings::FiTasksTask) -> Self {
+    pub unsafe fn new(raw: *mut fimo_tasks_meta::bindings::FiTasksTask) -> Self {
         debug_assert!(!raw.is_null());
         Self(raw)
     }
@@ -415,7 +415,7 @@ impl RawTask {
         TaskId(self.0.addr())
     }
 
-    fn task_mut(&mut self) -> &mut fimo_tasks::bindings::FiTasksTask {
+    fn task_mut(&mut self) -> &mut fimo_tasks_meta::bindings::FiTasksTask {
         // Safety: A `RawTask` works like a `Box`. We own the buffer.
         unsafe { &mut *self.0 }
     }
@@ -424,7 +424,7 @@ impl RawTask {
     ///
     /// The task must be bound.
     /// May only be called once.
-    unsafe fn start_task(&mut self, context: fimo_tasks::bindings::FiTasksContext) {
+    unsafe fn start_task(&mut self, context: fimo_tasks_meta::bindings::FiTasksContext) {
         let task = self.task_mut();
         let start = task.start.unwrap();
 

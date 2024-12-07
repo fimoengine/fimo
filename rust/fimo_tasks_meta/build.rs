@@ -4,7 +4,7 @@ fn main() {
     let bindings = bindgen::builder()
         .header("wrapper.h")
         .clang_arg("-Iffi/fimo_std/include")
-        .clang_arg("-Iffi/fimo_tasks/include")
+        .clang_arg("-Iffi/fimo_tasks_meta/include")
         .clang_arg("-std=c17")
         .clang_arg("-DFIMO_STD_BINDGEN")
         .use_core()
