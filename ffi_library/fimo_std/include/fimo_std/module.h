@@ -422,10 +422,29 @@ typedef struct FimoModuleExport {
      * module subsystem. Must be specified, if the module specifies a
      * constructor, and must be `NULL` otherwise.
      *
-     * @param arg0 pointer to the module
-     * @param arg1 module state to destroy
+     * @param module pointer to the module
+     * @param state module state to destroy
      */
     void (*destructor)(const FimoModule *module, void *state);
+    /**
+     * Optional function to call once the module has been loaded.
+     *
+     * Implementors of a module can utilize this event to perform
+     * arbitrary an arbitrary action once the module has been loaded.
+     * If the call returns an error, the module will be unloaded.
+     *
+     * @param module pointer to the partially initialized module
+     */
+    FimoResult (*on_start_event)(const FimoModule *module);
+    /**
+     * Optional function to call before the module is unloaded.
+     *
+     * May be used to finalize the module, before any symbols or
+     * state is unloaded.
+     *
+     * @param module pointer to the module
+     */
+    void (*on_stop_event)(const FimoModule *module);
 } FimoModuleExport;
 
 /**

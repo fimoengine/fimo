@@ -316,6 +316,7 @@ pub fn cleanupLooseInstances(self: *Self) SystemError!void {
             @src(),
         );
         try self.removeInstance(inner);
+        inner.stop(self);
         inner.deinit().unref();
         unlock_inner = false;
 
@@ -491,6 +492,20 @@ pub fn loadSet(
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
         errdefer inner.deinit().unref();
+
+        inner.start(self, &err) catch {
+            self.logWarn(
+                "instance `on_start` error...skipping," ++
+                    " instance='{s}', error='{dbg}:{}'",
+                .{ instance_name, err.?, err.? },
+                @src(),
+            );
+            err.?.deinit();
+            instance_info.signalError();
+            continue :outer;
+        };
+        errdefer inner.stop(self);
+
         try self.addInstance(inner);
         defer inner.unlock();
         instance_info.signalSuccess(instance.info);

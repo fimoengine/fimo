@@ -1613,15 +1613,17 @@ pub const Export = extern struct {
     dynamic_symbol_exports_count: u32 = 0,
     modifiers: ?[*]const Export.Modifier = null,
     modifiers_count: u32 = 0,
-    module_constructor: ?*const fn (
+    constructor: ?*const fn (
         ctx: *const OpaqueInstance,
         set: *LoadingSet,
         data: *?*anyopaque,
     ) callconv(.C) c.FimoResult = null,
-    module_destructor: ?*const fn (
+    destructor: ?*const fn (
         ctx: *const OpaqueInstance,
         data: ?*anyopaque,
     ) callconv(.C) void = null,
+    on_start_event: ?*const fn (ctx: *const OpaqueInstance) callconv(.C) c.FimoResult = null,
+    on_stop_event: ?*const fn (ctx: *const OpaqueInstance) callconv(.C) void = null,
 
     /// Declaration of a module parameter.
     pub const Parameter = extern struct {
@@ -1864,6 +1866,8 @@ pub const Export = extern struct {
             ctx: *const OpaqueInstance,
             data: ?*anyopaque,
         ) callconv(.C) void = null,
+        on_start_event: ?*const fn (ctx: *const OpaqueInstance) callconv(.C) c.FimoResult = null,
+        on_stop_event: ?*const fn (ctx: *const OpaqueInstance) callconv(.C) void = null,
 
         const Parameter = struct {
             name: []const u8,
@@ -2217,6 +2221,49 @@ pub const Export = extern struct {
             return x;
         }
 
+        /// Adds an `on_start` event to the module.
+        pub fn withOnStartEvent(
+            comptime self: Builder,
+            comptime f: fn (ctx: *const OpaqueInstance) anyerror!void,
+        ) Builder {
+            if (self.on_start_event != null)
+                @compileError("the `on_start` event is already defined");
+
+            const wrapped = struct {
+                fn wrapper(ctx: *const OpaqueInstance) callconv(.C) c.FimoResult {
+                    f(ctx) catch |err| {
+                        if (@errorReturnTrace()) |tr|
+                            ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
+                        return AnyError.initError(err).err;
+                    };
+                    return AnyError.intoCResult(null);
+                }
+            }.wrapper;
+
+            var x = self;
+            x.on_start_event = &wrapped;
+            return x;
+        }
+
+        /// Adds an `on_stop` event to the module.
+        pub fn withOnStopEvent(
+            comptime self: Builder,
+            comptime f: fn (ctx: *const OpaqueInstance) void,
+        ) Builder {
+            if (self.on_stop_event != null)
+                @compileError("the `on_stop` event is already defined");
+
+            const wrapped = struct {
+                fn wrapper(ctx: *const OpaqueInstance) callconv(.C) void {
+                    f(ctx);
+                }
+            }.wrapper;
+
+            var x = self;
+            x.on_stop_event = &wrapped;
+            return x;
+        }
+
         fn ParameterTable(comptime self: Builder) type {
             if (self.parameters.len == 0) return void;
             var fields: [self.parameters.len]std.builtin.Type.StructField = undefined;
@@ -2477,8 +2524,8 @@ pub const Export = extern struct {
                 .dynamic_symbol_exports_count = dynamic_exports.len,
                 .modifiers = null,
                 .modifiers_count = 0,
-                .module_constructor = self.constructor,
-                .module_destructor = self.destructor,
+                .constructor = self.constructor,
+                .destructor = self.destructor,
             };
             exportModuleInner(exp);
 

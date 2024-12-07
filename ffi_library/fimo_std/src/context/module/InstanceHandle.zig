@@ -269,7 +269,9 @@ pub const Parameter = struct {
 
 pub const Inner = struct {
     mutex: Mutex = .{},
+    state: State = .uninit,
     strong_count: usize = 0,
+    is_detached: bool = false,
     handle: ?*ModuleHandle = null,
     @"export": ?*const ProxyModule.Export = null,
     instance: ?*const ProxyModule.OpaqueInstance = null,
@@ -283,8 +285,14 @@ pub const Inner = struct {
     namespaces: std.StringArrayHashMapUnmanaged(DependencyType) = .{},
     dependencies: std.StringArrayHashMapUnmanaged(InstanceDependency) = .{},
 
+    const State = enum {
+        uninit,
+        init,
+        started,
+    };
+
     pub fn deinit(self: *Inner) ProxyContext {
-        std.debug.assert(!self.isDetached());
+        std.debug.assert(self.handle != null);
         const handle = Self.fromInnerPtr(self);
         const ctx = self.detach(true);
         self.unlock();
@@ -297,7 +305,7 @@ pub const Inner = struct {
     }
 
     pub fn isDetached(self: *const Inner) bool {
-        return self.handle == null;
+        return self.is_detached;
     }
 
     pub fn canUnload(self: *const Inner) bool {
@@ -383,19 +391,51 @@ pub const Inner = struct {
         self.allocator().free(@constCast(dependency.key));
     }
 
+    pub fn start(self: *Inner, sys: *System, err: *?AnyError) AnyError.Error!void {
+        std.debug.assert(!self.isDetached());
+        std.debug.assert(self.state == .init);
+
+        if (self.@"export") |@"export"| {
+            if (@"export".on_start_event) |event| {
+                self.unlock();
+                sys.mutex.unlock();
+                const result = event(self.instance.?);
+                sys.mutex.lock();
+                self.mutex.lock();
+                try AnyError.initChecked(err, result);
+            }
+        }
+        self.state = .started;
+    }
+
+    pub fn stop(self: *Inner, sys: *System) void {
+        std.debug.assert(!self.isDetached());
+        std.debug.assert(self.state == .started);
+        self.is_detached = true;
+        if (self.@"export") |@"export"| {
+            if (@"export".on_stop_event) |event| {
+                self.unlock();
+                sys.mutex.unlock();
+                event(self.instance.?);
+                sys.mutex.lock();
+                self.mutex.lock();
+            }
+        }
+        self.is_detached = false;
+        self.state = .init;
+    }
+
     fn detach(self: *Inner, cleanup: bool) ProxyContext {
         std.debug.assert(!self.isDetached());
         std.debug.assert(self.canUnload());
+        std.debug.assert(self.state != .started);
         const instance = self.instance.?;
         const context = ProxyContext.initC(instance.ctx);
 
-        // Set the handle to null, thereby hindering the modules ability to lock the handle.
-        const handle = self.handle.?;
-        self.handle = null;
-
+        self.is_detached = true;
         if (self.@"export") |exp| {
-            if (exp.module_destructor) |dtor|
-                dtor(instance, @constCast(instance.data));
+            if (exp.destructor) |dtor|
+                if (self.state == .init) dtor(instance, @constCast(instance.data));
             if (cleanup) exp.deinit();
         }
 
@@ -441,7 +481,9 @@ pub const Inner = struct {
         }
         self.symbols.clearAndFree(self.allocator());
 
-        handle.unref();
+        self.handle.?.unref();
+
+        self.handle = null;
         self.instance = null;
         self.@"export" = null;
 
@@ -566,6 +608,7 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
             .data = null,
         },
     };
+    instance_handle.inner.state = .init;
     instance_handle.inner.instance = &instance.instance;
     return instance;
 }
@@ -702,7 +745,7 @@ pub fn initExportedInstance(
     instance.imports = @ptrCast((try imports.toOwnedSlice(sys.allocator)).ptr);
 
     // Init instance data.
-    if (@"export".module_constructor) |constructor| {
+    if (@"export".constructor) |constructor| {
         inner.unlock();
         set.unlock();
         sys.mutex.unlock();
@@ -714,6 +757,7 @@ pub fn initExportedInstance(
         instance.data = @ptrCast(data);
         try AnyError.initChecked(err, result);
     }
+    inner.state = .init;
 
     // Init exports.
     var exports = std.ArrayListUnmanaged(?*const anyopaque){};
@@ -754,6 +798,7 @@ pub fn initExportedInstance(
     }
     try exports.append(sys.allocator, null);
     instance.exports = @ptrCast((try exports.toOwnedSlice(sys.allocator)).ptr);
+
     return instance;
 }
 

@@ -331,6 +331,8 @@ macro_rules! export_module {
                     modifiers_count: 0,
                     constructor,
                     destructor,
+                    on_start_event: None,
+                    on_stop_event: None,
                 }
             }
 

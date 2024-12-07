@@ -1980,6 +1980,28 @@ module backend.
 """
 
 
+FimoModuleOnStartEvent = c.CFUNCTYPE(FimoResult, c.POINTER(FimoModule))
+"""Module initialization function.
+
+Implementors of a module can utilize this event to perform arbitrary
+an arbitrary action once the module has been loaded. If the call
+returns an error, the module will be unloaded.
+
+:param arg0: pointer to the partially initialized module
+:param arg1: module set that contained the module
+
+:return: Status code.
+"""
+
+FimoModuleOnStopEvent = c.CFUNCTYPE(None, c.POINTER(FimoModule))
+"""Module finalization function.
+
+May be used to finalize the module, before any symbols or state is unloaded.
+
+:param arg0: pointer to the module
+"""
+
+
 class FimoModuleParamType(c.c_int):
     """Data type of module parameter."""
 
@@ -2168,6 +2190,8 @@ class FimoModuleExport(c.Structure):
         ("modifiers_count", FimoU32),
         ("constructor", FimoModuleConstructor),
         ("destructor", FimoModuleDestructor),
+        ("on_start_event", FimoModuleOnStartEvent),
+        ("on_stop_event", FimoModuleOnStopEvent),
     ]
 
 
