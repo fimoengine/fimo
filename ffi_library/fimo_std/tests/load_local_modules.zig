@@ -85,7 +85,7 @@ fn deinitCModule(inst: *const Module.OpaqueInstance) void {
     );
 }
 
-const A = Module.Export.Builder
+const A = Module.exports.Builder
     .init("a")
     .withDescription("Test module a")
     .withAuthor("fimo")
@@ -94,7 +94,7 @@ const A = Module.Export.Builder
     .withExport(A1, "a1", &10)
     .exportModule();
 
-const B = Module.Export.Builder
+const B = Module.exports.Builder
     .init("b")
     .withDescription("Test module b")
     .withAuthor("fimo")
@@ -103,7 +103,7 @@ const B = Module.Export.Builder
     .withExport(B1, "b1", &77)
     .exportModule();
 
-const C = Module.Export.Builder
+const C = Module.exports.Builder
     .init("c")
     .withDescription("Test module c")
     .withAuthor("fimo")

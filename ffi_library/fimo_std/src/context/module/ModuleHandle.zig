@@ -121,7 +121,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         );
         errdefer owned_module_dir.deinit(allocator);
 
-        const is_current_module = iterator == &ProxyModule.Export.ExportIter.fimo_impl_module_export_iterator;
+        const is_current_module = iterator == &ProxyModule.exports.ExportIter.fimo_impl_module_export_iterator;
         const module_path: ?[*:0]const u8 = if (is_current_module)
             null
         else

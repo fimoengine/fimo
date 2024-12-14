@@ -14,7 +14,7 @@ const Python = @cImport({
     @cInclude("Python.h");
 });
 
-const Instance = Module.Export.Builder
+const Instance = Module.exports.Builder
     .init("fimo_python")
     .withDescription("Embedded Python interpreter")
     .withAuthor("Gabriel Borrelli")
@@ -35,49 +35,6 @@ const Instance = Module.Export.Builder
 comptime {
     _ = Instance;
 }
-
-// const Instance = Module.Instance(
-//     void,
-//     extern struct {
-//         home: [*:0]const u8,
-//         module_path: [*:0]const u8,
-//         lib_path: [*:0]const u8,
-//         dynload_path: [*:0]const u8,
-//     },
-//     void,
-//     extern struct {
-//         run_string: *const fimo_python_meta.RunString,
-//     },
-//     State,
-// );
-// comptime {
-//     Module.Export.addExport(
-//         Instance,
-//         "fimo_python",
-//         "Embedded Python interpreter",
-//         "Gabriel Borrelli",
-//         "MIT + APACHE 2.0",
-//         .{},
-//         .{
-//             .home = Module.Export.Resource{ .path = "" },
-//             .module_path = Module.Export.Resource{ .path = "module.fimo_module" },
-//             .lib_path = Module.Export.Resource{ .path = "Lib" },
-//             .dynload_path = Module.Export.Resource{ .path = "DLLs" },
-//         },
-//         &.{},
-//         .{},
-//         .{
-//             .run_string = .{
-//                 .id = fimo_python_meta.symbols.RunString,
-//                 .init = State.initRunString,
-//                 .deinit = State.deinitRunString,
-//             },
-//         },
-//         &.{},
-//         State.init,
-//         State.deinit,
-//     );
-// }
 
 const State = struct {
     thread_state: *PyThreadState,

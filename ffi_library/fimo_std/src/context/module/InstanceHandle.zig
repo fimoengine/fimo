@@ -571,7 +571,7 @@ fn init(
 }
 
 pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoInstance {
-    const iterator = &ProxyModule.Export.ExportIter.fimo_impl_module_export_iterator;
+    const iterator = &ProxyModule.exports.ExportIter.fimo_impl_module_export_iterator;
     const handle = try ModuleHandle.initLocal(sys.allocator, iterator, iterator);
     errdefer handle.unref();
 
