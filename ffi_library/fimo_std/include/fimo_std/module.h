@@ -24,6 +24,622 @@ typedef struct FimoModule FimoModule;
 typedef struct FimoModuleLoadingSet FimoModuleLoadingSet;
 
 /**
+ * Tag of a debug info type.
+ */
+typedef enum FimoModuleDebugInfoTypeTag {
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_VOID,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_BOOL,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_INT,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_FLOAT,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_POINTER,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_ARRAY,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_STRUCT,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_ENUM,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_UNION,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_FN,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_OPAQUE,
+    FIMO_MODULE_DEBUG_INFO_TYPE_TAG_FORCE32 = 0x7FFFFFFF
+} FimoModuleDebugInfoTypeTag;
+
+/**
+ * Recognized calling conventions.
+ */
+typedef enum FimoModuleDebugInfoCallingConvention {
+    FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_X86_64_SYSV,
+    FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_X86_64_WIN,
+    FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_AARCH64_AAPCS,
+    FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_AARCH64_AAPCS_DARWIN,
+    FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_AARCH64_AAPCS_WIN,
+} FimoModuleDebugInfoCallingConvention;
+
+/**
+ * VTable of a `FimoModuleDebugInfoSymbol`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoSymbolVTable {
+    /**
+     * Increases the reference count of the instance.
+     */
+    void (*acquire)(void* data);
+    /**
+     * Decreases the reference count of the instance.
+     */
+    void (*release)(void* data);
+    /**
+     * Fetches the unique id of the symbol.
+     */
+    FimoUSize (*get_symbol_id)(void* data);
+    /**
+     * Fetches the unique id of the symbol type.
+     */
+    bool (*get_type_id)(void* data, FimoUSize* id);
+    /**
+     * Fetches the index of the symbol in the module import or export table.
+     */
+    FimoUSize (*get_table_index)(void* data);
+    /**
+     * Fetches the index in the respective `FimoModuleExport` array.
+     */
+    FimoUSize (*get_declaration_index)(void* data);
+    /**
+     * Checks whether the symbol is an import.
+     */
+    bool (*is_import)(void* data);
+    /**
+     * Checks whether the symbol is an export.
+     */
+    bool (*is_export)(void* data);
+    /**
+     * Checks whether the symbol is a static export.
+     */
+    bool (*is_static_export)(void* data);
+    /**
+     * Checks whether the symbol is a dynamic export.
+     */
+    bool (*is_dynamic_export)(void* data);
+} FimoModuleDebugInfoSymbolVTable;
+
+/**
+ * Accessor for the debug info of a symbol.
+ */
+typedef struct FimoModuleDebugInfoSymbol {
+    void *data;
+    const FimoModuleDebugInfoSymbolVTable *vtable;
+} FimoModuleDebugInfoSymbol;
+
+/**
+ * VTable of a `FimoModuleDebugInfoType`.
+ *
+ * Adding fields to the structure **is** considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoTypeVTable {
+    /**
+     * Increases the reference count of the instance.
+     */
+    void (*acquire)(void* data);
+    /**
+     * Decreases the reference count of the instance.
+     */
+    void (*release)(void* data);
+    /**
+     * Fetches the tag of the type.
+     */
+    FimoModuleDebugInfoTypeTag (*get_type_tag)(void* data);
+    /**
+     * Fetches the name of the type.
+     */
+    const char* (*get_name)(void* data);
+    /**
+     * Reserved for future extensions.
+     *
+     * Must be `NULL`.
+     */
+    const void* next;
+} FimoModuleDebugInfoTypeVTable;
+
+/**
+ * Accessor for the debug info of an opaque type.
+ */
+typedef struct FimoModuleDebugInfoType {
+    void *data;
+    const FimoModuleDebugInfoTypeVTable *vtable;
+} FimoModuleDebugInfoType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoVoidType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoVoidTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+} FimoModuleDebugInfoVoidTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoVoidType {
+    void *data;
+    const FimoModuleDebugInfoVoidTypeVTable *vtable;
+} FimoModuleDebugInfoVoidType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoBoolType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoBoolTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+} FimoModuleDebugInfoBoolTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoBoolType {
+    void *data;
+    const FimoModuleDebugInfoBoolTypeVTable *vtable;
+} FimoModuleDebugInfoBoolType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoIntType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoIntTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Fetches whether the integer type is unsigned.
+     */
+    bool (*is_unsigned)(void* data);
+    /**
+     * Fetches whether the integer type is signed.
+     */
+    bool (*is_signed)(void* data);
+    /**
+     * Fetches the width of the integer in bits.
+     */
+    FimoU16 (*get_bitwidth)(void* data);
+} FimoModuleDebugInfoIntTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoIntType {
+    void *data;
+    const FimoModuleDebugInfoIntTypeVTable *vtable;
+} FimoModuleDebugInfoIntType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoFloatType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoBoolFloatVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Fetches the width of the float in bits.
+     */
+    FimoU16 (*get_bitwidth)(void* data);
+} FimoModuleDebugInfoBoolFloatVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoFloatType {
+    void *data;
+    const FimoModuleDebugInfoBoolFloatVTable *vtable;
+} FimoModuleDebugInfoFloatType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoPointerType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoPointerTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Fetches the log of the alignment of the pointee.
+     */
+    FimoU8 (*get_pointee_alignment)(void* data);
+    /**
+     * Fetches whether the pointee is constant.
+     */
+    bool (*is_const)(void* data);
+    /**
+     * Fetches whether the pointee is volatile.
+     */
+    bool (*is_volatile)(void* data);
+    /**
+     * Fetches whether the pointer may not be null.
+     */
+    bool (*is_nonzero)(void* data);
+    /**
+     * Fetches the type of the pointee.
+     */
+    FimoUSize (*get_child_id)(void* data);
+} FimoModuleDebugInfoPointerTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoPointerType {
+    void *data;
+    const FimoModuleDebugInfoPointerTypeVTable *vtable;
+} FimoModuleDebugInfoPointerType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoArrayType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoArrayTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Fetches the length of the array.
+     */
+    FimoUSize (*get_length)(void* data);
+    /**
+     * Fetches the type of the pointee.
+     */
+    FimoUSize (*get_child_id)(void* data);
+} FimoModuleDebugInfoArrayTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoArrayType {
+    void *data;
+    const FimoModuleDebugInfoArrayTypeVTable *vtable;
+} FimoModuleDebugInfoArrayType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoStructType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoStructTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Checks whether the structure includes any padding bytes.
+     */
+    bool (*is_packed_layout)(void* data);
+    /**
+     * Fetches the number of fields in the structure.
+     */
+    FimoUSize (*get_field_count)(void* data);
+    /**
+     * Fetches the name of the field at the index.
+     */
+    bool (*get_field_name)(void* data, FimoUSize index, const char **name);
+    /**
+     * Fetches the type of the field at the index.
+     */
+    bool (*get_field_type_id)(void* data, FimoUSize index, FimoUSize *id);
+    /**
+     * Fetches the byte offset to the field.
+     */
+    bool (*get_field_offset)(void* data, FimoUSize index, FimoUSize *offset);
+    /**
+     * Fetches the sub-byte offset to the field.
+     */
+    bool (*get_field_bit_offset)(void* data, FimoUSize index, FimoU8 *offset);
+    /**
+     * Fetches the log alignment of the field at the index.
+     */
+    bool (*get_field_alignment)(void* data, FimoUSize index, FimoU8 *alignment);
+} FimoModuleDebugInfoStructTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoStructType {
+    void *data;
+    const FimoModuleDebugInfoStructTypeVTable *vtable;
+} FimoModuleDebugInfoStructType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoEnumType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoEnumTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Fetches the type of the tag.
+     */
+    FimoUSize (*get_tag_id)(void* data);
+} FimoModuleDebugInfoEnumTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoEnumType {
+    void *data;
+    const FimoModuleDebugInfoEnumTypeVTable *vtable;
+} FimoModuleDebugInfoEnumType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoUnionType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoUnionTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Fetches the size of the type in full bytes.
+     */
+    FimoUSize (*get_size)(void* data);
+    /**
+     * Fetches the sub-byte size of the type.
+     */
+    FimoU8 (*get_bit_size)(void* data);
+    /**
+     * Fetches the log of the type alignment.
+     */
+    FimoU8 (*get_alignment)(void* data);
+    /**
+     * Checks whether the union includes any padding bytes.
+     */
+    bool (*is_packed_layout)(void* data);
+    /**
+     * Fetches the number of fields in the union.
+     */
+    FimoUSize (*get_field_count)(void* data);
+    /**
+     * Fetches the name of the field at the index.
+     */
+    bool (*get_field_name)(void* data, FimoUSize index, const char **name);
+    /**
+     * Fetches the type of the field at the index.
+     */
+    bool (*get_field_type_id)(void* data, FimoUSize index, FimoUSize *id);
+    /**
+     * Fetches the log alignment of the field at the index.
+     */
+    bool (*get_field_alignment)(void* data, FimoUSize index, FimoU8 *alignment);
+} FimoModuleDebugInfoUnionTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoUnionType {
+    void *data;
+    const FimoModuleDebugInfoUnionTypeVTable *vtable;
+} FimoModuleDebugInfoUnionType;
+
+/**
+ * VTable of a `FimoModuleDebugInfoFnType`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoFnTypeVTable {
+    /**
+     * Base VTable.
+     */
+    FimoModuleDebugInfoTypeVTable base;
+    /**
+     * Checks whether the calling convention of the function is the
+     * default for the C Abi of the target.
+     */
+    bool (*is_default_calling_convention)(void* data);
+    /**
+     * Fetches the calling convention of the function.
+     */
+    bool (*get_calling_convention)(void* data, FimoModuleDebugInfoCallingConvention *cc);
+    /**
+     * Fetches the alignment of the stack.
+     */
+    bool (*get_stack_alignment)(void* data, FimoU8 *alignment);
+    /**
+     * Checks whether the function supports a variable number of arguments.
+     */
+    bool (*is_var_args)(void* data);
+    /**
+     * Fetches the type id of the return value.
+     */
+    FimoUSize (*get_return_type_id)(void* data);
+    /**
+     * Fetches the number of parameters.
+     */
+    FimoUSize (*get_parameter_count)(void* data);
+    /**
+     * Fetches the type id of the parameter.
+     */
+    bool (*get_parameter_type_id)(void* data, FimoUSize index, FimoUSize *id);
+} FimoModuleDebugInfoFnTypeVTable;
+
+/**
+ * Accessor for the debug info of a `void` type.
+ */
+typedef struct FimoModuleDebugInfoFnType {
+    void *data;
+    const FimoModuleDebugInfoFnTypeVTable *vtable;
+} FimoModuleDebugInfoFnType;
+
+/**
+ * VTable of a `FimoModuleDebugInfo`.
+ *
+ * Adding fields to the structure is not considered a breaking change.
+ */
+typedef struct FimoModuleDebugInfoVTable {
+    /**
+     * Increases the reference count of the instance.
+     */
+    void (*acquire)(void* data);
+    /**
+     * Decreases the reference count of the instance.
+     */
+    void (*release)(void* data);
+    /**
+     * Fetches the number of symbols.
+     */
+    FimoUSize (*get_symbol_count)(void* data);
+    /**
+     * Fetches the number of imported symbols.
+     */
+    FimoUSize (*get_import_symbol_count)(void* data);
+    /**
+     * Fetches the number of exported symbols.
+     */
+    FimoUSize (*get_export_symbol_count)(void* data);
+    /**
+     * Fetches the number of exported static symbols.
+     */
+    FimoUSize (*get_static_export_symbol_count)(void* data);
+    /**
+     * Fetches the number of exported dynamic symbols.
+     */
+    FimoUSize (*get_dynamic_export_symbol_count)(void* data);
+    /**
+     * Fetches the symbol id for the symbol at the index of the import table.
+     */
+    bool (*get_symbol_id_by_import_index)(void* data, FimoUSize index, FimoUSize *id);
+    /**
+     * Fetches the symbol id for the symbol at the index of the export table.
+     */
+    bool (*get_symbol_id_by_export_index)(void* data, FimoUSize index, FimoUSize *id);
+    /**
+     * Fetches the symbol id for the symbol at the index of the static export list.
+     */
+    bool (*get_symbol_id_by_static_export_index)(void* data, FimoUSize index, FimoUSize *id);
+    /**
+     * Fetches the symbol id for the symbol at the index of the dynamic export list.
+     */
+    bool (*get_symbol_id_by_dynamic_export_index)(void* data, FimoUSize index, FimoUSize *id);
+    /**
+     * Fetches the symbol with the given id.
+     */
+    bool (*get_symbol_by_id)(void* data, FimoUSize id, FimoModuleDebugInfoSymbol *symbol);
+    /**
+     * Fetches the number of contained types.
+     */
+    FimoUSize (*get_type_count)(void* data);
+    /**
+     * Fetches the type with the given id.
+     */
+    bool (*get_type_by_id)(void* data, FimoUSize id, FimoModuleDebugInfoType *type);
+} FimoModuleDebugInfoVTable;
+
+/**
+ * Accessor for the debug info of a module.
+ */
+typedef struct FimoModuleDebugInfo {
+    void *data;
+    const FimoModuleDebugInfoVTable *vtable;
+} FimoModuleDebugInfo;
+
+/**
  * Data type of a module parameter.
  */
 typedef enum FimoModuleParamType {
@@ -35,6 +651,7 @@ typedef enum FimoModuleParamType {
     FIMO_MODULE_PARAM_TYPE_I16,
     FIMO_MODULE_PARAM_TYPE_I32,
     FIMO_MODULE_PARAM_TYPE_I64,
+    FIMO_MODULE_PARAM_TYPE_FORCE32 = 0x7FFFFFFF
 } FimoModuleParamType;
 
 /**
@@ -44,6 +661,7 @@ typedef enum FimoModuleParamAccessGroup {
     FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC,
     FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY,
     FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE,
+    FIMO_MODULE_PARAM_ACCESS_GROUP_FORCE32 = 0x7FFFFFFF
 } FimoModuleParamAccessGroup;
 
 /**
@@ -258,6 +876,13 @@ typedef enum FimoModuleExportModifierKey {
      * a `FimoModuleInfo`.
      */
     FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY,
+    /**
+     * Specifies that the module has its debug info embedded.
+     * The key may only be specified once per module.
+     * Adds an entry of the type `const FimoModuleDebugInfo*` to
+     * the modifiers table of the module.
+     */
+    FIMO_MODULE_EXPORT_MODIFIER_DEBUG_INFO,
     FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST,
     FIMO_MODULE_EXPORT_MODIFIER_KEY_FORCE32 = 0x7FFFFFFF
 } FimoModuleExportModifierKey;
@@ -281,8 +906,19 @@ typedef struct FimoModuleExportModifierDestructor {
     /**
      * Destructor function.
      */
-    void (*destructor)(void *);
+    void (*destructor)(void *data);
 } FimoModuleExportModifierDestructor;
+
+typedef struct FimoModuleExportModifierDebugInfo {
+    /**
+     * Type-erased data to pass to the constructor.
+     */
+    void *data;
+    /**
+     * Constructor function for the debug info.
+     */
+    FimoResult (*construct)(void *data, FimoModuleDebugInfo *info);
+} FimoModuleExportModifierDebugInfo;
 
 /**
  * Declaration of a module export.

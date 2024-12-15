@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 
+const c = @import("../../c.zig");
 const heap = @import("../../heap.zig");
 const Path = @import("../../path.zig").Path;
 const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
@@ -356,7 +357,7 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
         }
         if (!ns_found) {
             sys.logWarn(
-                "required namespace not imported, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                "required namespace not imported, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), imp.name, imp.namespace, i },
                 @src(),
             );
@@ -375,7 +376,7 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
                 std.mem.eql(u8, namespace, imp_namespace))
             {
                 sys.logWarn(
-                    "can not import and export the same symbol, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                    "can not import and export the same symbol, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                     .{ @"export".getName(), name, namespace, i },
                     @src(),
                 );
@@ -393,7 +394,7 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
         }
         if (count > 1) {
             sys.logWarn(
-                "duplicate export, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                "duplicate export, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
             );
@@ -412,7 +413,7 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
                 std.mem.eql(u8, namespace, imp_namespace))
             {
                 sys.logWarn(
-                    "can not import and export the same symbol, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                    "can not import and export the same symbol, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                     .{ @"export".getName(), name, namespace, i },
                     @src(),
                 );
@@ -436,11 +437,39 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
         }
         if (count > 1) {
             sys.logWarn(
-                "duplicate export, export='{s}', symbol='{s}, 'ns='{s}', index='{}'",
+                "duplicate export, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
             );
             has_error = true;
+        }
+    }
+
+    const modifiers = @"export".getModifiers();
+    for (modifiers, 0..) |mod, i| {
+        if (@intFromEnum(mod.tag) >= c.FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST) {
+            sys.logWarn(
+                "unknown modifier, export='{s}', modifier='{}', index='{}'",
+                .{ @"export".getName(), @intFromEnum(mod.tag), i },
+                @src(),
+            );
+            has_error = true;
+        }
+
+        switch (mod.tag) {
+            .debug_info => {
+                for (modifiers[0..i]) |x| {
+                    if (x.tag == .debug_info) {
+                        sys.logWarn(
+                            "debug info modifier may only appear once, export='{s}', index='{}'",
+                            .{ @"export".getName(), i },
+                            @src(),
+                        );
+                        has_error = true;
+                    }
+                }
+            },
+            else => {},
         }
     }
 

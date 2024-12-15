@@ -84,6 +84,7 @@ pub const Modifier = extern struct {
     tag: enum(c.FimoModuleExportModifierKey) {
         destructor = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR,
         dependency = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY,
+        debug_info = c.FIMO_MODULE_EXPORT_MODIFIER_DEBUG_INFO,
         _,
     },
     value: extern union {
@@ -92,6 +93,13 @@ pub const Modifier = extern struct {
             destructor: *const fn (ptr: ?*anyopaque) callconv(.C) void,
         },
         dependency: *const Module.Info,
+        debug_info: *const extern struct {
+            data: ?*anyopaque,
+            construct: *const fn (
+                ptr: ?*anyopaque,
+                info: *Module.DebugInfo,
+            ) callconv(.c) c.FimoResult,
+        },
     },
 };
 
@@ -142,6 +150,7 @@ pub const Export = extern struct {
                     const dependency = modifier.value.dependency;
                     dependency.unref();
                 },
+                .debug_info => {},
                 else => @panic("Unknown modifier"),
             }
         }
@@ -222,7 +231,10 @@ pub const Builder = struct {
     namespaces: []const Namespace = &.{},
     imports: []const Builder.SymbolImport = &.{},
     exports: []const Builder.SymbolExport = &.{},
-    modifiers: []const Builder.Modifier = &.{},
+    modifiers: []const Builder.Modifier = if (!builtin.strip_debug_info)
+        &.{.{ .debug_info = {} }}
+    else
+        &.{},
     stateType: type = void,
     constructor: ?*const fn (
         ctx: *const Module.OpaqueInstance,
@@ -235,6 +247,7 @@ pub const Builder = struct {
     ) callconv(.C) void = null,
     on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.C) c.FimoResult = null,
     on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.C) void = null,
+    debug_info: ?Module.DebugInfo.Builder = if (!builtin.strip_debug_info) .{} else null,
 
     const Parameter = struct {
         name: []const u8,
@@ -282,6 +295,7 @@ pub const Builder = struct {
     };
 
     const Modifier = union(enum) {
+        debug_info: void,
         _,
     };
 
@@ -494,6 +508,7 @@ pub const Builder = struct {
 
         var x = self.withNamespace(import.symbol.namespace);
         x.imports = &imports;
+        if (x.debug_info) |*info| info.addImport(import.symbol.symbol);
         return x;
     }
 
@@ -517,6 +532,12 @@ pub const Builder = struct {
 
         var x = self;
         x.exports = &exports;
+        if (x.debug_info) |*info| {
+            switch (@"export".value) {
+                .static => info.addExport(@"export".symbol.symbol),
+                .dynamic => info.addDynamicExport(@"export".symbol.symbol),
+            }
+        }
         return x;
     }
 
@@ -580,6 +601,27 @@ pub const Builder = struct {
         return x;
     }
 
+    /// Ensures that the module embeds the debug info.
+    ///
+    /// The debug info is embedded automatically, whenever the plugin is built with debug info.
+    pub fn withDebugInfo(comptime self: Builder) Builder {
+        if (self.debug_info != null) return self;
+
+        var debug_info = Module.DebugInfo.Builder{};
+        for (self.imports) |sym| debug_info.addImport(sym.symbol.symbol);
+        for (self.exports) |sym| {
+            if (sym.value == .static)
+                debug_info.addExport(sym.symbol.symbol)
+            else
+                debug_info.addDynamicExport(sym.symbol.symbol);
+        }
+        debug_info.addType(self.stateType);
+
+        var x = self;
+        x.debug_info = debug_info;
+        return x.withModifierInner(.{ .debug_info = {} });
+    }
+
     /// Adds a state to the module.
     pub fn withState(
         comptime self: Builder,
@@ -591,6 +633,7 @@ pub const Builder = struct {
         x.stateType = T;
         x.constructor = &State(T).wrapInit(initFn);
         x.destructor = &State(T).wrapDeinit(deinitFn);
+        if (x.debug_info) |*info| _ = info.addType(T);
         return x;
     }
 
@@ -870,6 +913,38 @@ pub const Builder = struct {
         return &exports_c;
     }
 
+    fn ffiModifiers(comptime self: Builder) []const Self.Modifier {
+        var modifiers: [self.modifiers.len]Self.Modifier = undefined;
+        for (self.modifiers, &modifiers) |src, *dst| {
+            switch (src) {
+                .debug_info => {
+                    const debug_info = self.debug_info.?.build();
+                    const construct = struct {
+                        fn f(data: ?*anyopaque, info: *Module.DebugInfo) callconv(.c) c.FimoResult {
+                            _ = data;
+                            info.* = debug_info.asFfi();
+                            return AnyError.intoCResult(null);
+                        }
+                    }.f;
+
+                    dst.* = .{
+                        .tag = .debug_info,
+                        .value = .{
+                            .debug_info = &.{
+                                .data = null,
+                                .construct = construct,
+                            },
+                        },
+                    };
+                },
+                else => @compileError("unknown modifier"),
+            }
+        }
+
+        const modifiers_c: [self.modifiers.len]Self.Modifier = modifiers;
+        return &modifiers_c;
+    }
+
     /// Exports the module with the specified configuration.
     pub fn exportModule(comptime self: Builder) type {
         const parameters = self.ffiParameters();
@@ -878,6 +953,7 @@ pub const Builder = struct {
         const imports = self.ffiImports();
         const exports = self.ffiExports();
         const dynamic_exports = self.ffiDynamicExports();
+        const modifiers = self.ffiModifiers();
         const exp = &Export{
             .name = self.name,
             .description = self.description orelse null,
@@ -895,8 +971,8 @@ pub const Builder = struct {
             .symbol_exports_count = exports.len,
             .dynamic_symbol_exports = if (dynamic_exports.len > 0) dynamic_exports.ptr else null,
             .dynamic_symbol_exports_count = dynamic_exports.len,
-            .modifiers = null,
-            .modifiers_count = 0,
+            .modifiers = if (modifiers.len > 0) modifiers.ptr else null,
+            .modifiers_count = modifiers.len,
             .constructor = self.constructor,
             .destructor = self.destructor,
         };

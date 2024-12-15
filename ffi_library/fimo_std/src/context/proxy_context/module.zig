@@ -13,6 +13,7 @@ context: Context,
 
 const Module = @This();
 
+pub const DebugInfo = @import("module/DebugInfo.zig");
 pub const exports = @import("module/exports.zig");
 pub const Export = exports.Export;
 
