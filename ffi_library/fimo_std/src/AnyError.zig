@@ -808,9 +808,7 @@ pub const ErrorString = struct {
     /// Releases the error string.
     pub fn deinit(self: ErrorString) void {
         if (self.str.release) |release| {
-            const str = @constCast(self.str.str);
-            const rel: *fn ([*:0]u8) callconv(.C) void = @constCast(release);
-            rel(str);
+            release(self.str.str);
         }
     }
 
