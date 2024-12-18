@@ -204,8 +204,8 @@ fn extractDependencyCompileCommandsTargets(
 
             if (std.mem.indexOfScalar(*std.Build.Step.Compile, targets.items, compile) == null) {
                 targets.append(compile) catch @panic("OOM");
-                extractModuleIncludesSteps(&compile.root_module, steps);
-                extractModuleLinkObjectsSteps(&compile.root_module, steps);
+                extractModuleIncludesSteps(compile.root_module, steps);
+                extractModuleLinkObjectsSteps(compile.root_module, steps);
             }
         }
     }

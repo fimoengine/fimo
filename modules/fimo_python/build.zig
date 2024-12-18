@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // We don't support cross compilation.
-    if (!isSupported(target.result, b.host.result)) {
+    if (!isSupported(target.result, b.graph.host.result)) {
         return;
     }
 
