@@ -7,6 +7,8 @@ const AnyError = @import("AnyError.zig");
 const Version = @import("Version.zig");
 
 const RefCount = @import("context/RefCount.zig");
+
+const Async = @import("context/async.zig");
 const Tracing = @import("context/tracing.zig");
 const Module = @import("context/module.zig");
 
@@ -22,6 +24,7 @@ allocator: Allocator,
 refcount: RefCount = .{},
 tracing: Tracing,
 module: Module,
+@"async": Async = undefined,
 
 pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
     var cleanup_options: bool = true;
@@ -73,6 +76,9 @@ pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
     self.module = try Module.init(self);
     errdefer self.module.deinit();
 
+    self.@"async" = try Async.init(self);
+    errdefer self.@"async".deinit();
+
     return self;
 }
 
@@ -87,6 +93,7 @@ pub fn unref(self: *Self) void {
     // It's for just in case, that the calling thread did not unregister itself.
     self.tracing.emitTraceSimple("cleaning up context, context='{*}'", .{self}, @src());
 
+    self.@"async".deinit();
     self.module.deinit();
     self.tracing.deinit();
 
@@ -139,6 +146,7 @@ const vtable = ProxyContext.VTable{
     },
     .tracing_v0 = Tracing.vtable,
     .module_v0 = Module.vtable,
+    .async_v0 = Async.vtable,
 };
 
 test {

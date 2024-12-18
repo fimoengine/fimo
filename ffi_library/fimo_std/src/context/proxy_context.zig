@@ -10,11 +10,13 @@ vtable: *const VTable,
 
 const Inner = @import("../context.zig");
 
+pub const Async = @import("proxy_context/async.zig");
 pub const Tracing = @import("proxy_context/tracing.zig");
 pub const Module = @import("proxy_context/module.zig");
 const Self = @This();
 
 comptime {
+    _ = Async;
     _ = Tracing;
     _ = Module;
 }
@@ -58,6 +60,7 @@ pub const VTable = extern struct {
     core_v0: CoreVTable,
     tracing_v0: Tracing.VTable,
     module_v0: Module.VTable,
+    async_v0: Async.VTable,
 };
 
 /// Initial VTable of the context.
@@ -186,6 +189,11 @@ pub fn tracing(self: Self) Tracing {
 /// Returns the interface to the module subsystem.
 pub fn module(self: Self) Module {
     return Module{ .context = self };
+}
+
+/// Returns the interface to the async subsystem.
+pub fn @"async"(self: Self) Async {
+    return Async{ .context = self };
 }
 
 // ----------------------------------------------------
