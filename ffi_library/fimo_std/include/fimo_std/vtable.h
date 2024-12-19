@@ -1,6 +1,7 @@
 #ifndef FIMO_VTABLE_H
 #define FIMO_VTABLE_H
 
+#include <fimo_std/async.h>
 #include <fimo_std/context.h>
 #include <fimo_std/module.h>
 #include <fimo_std/tracing.h>
@@ -22,6 +23,7 @@ typedef struct FimoContextVTable {
     FimoContextCoreVTableV0 core;
     FimoTracingVTableV0 tracing_v0;
     FimoModuleVTableV0 module_v0;
+    FimoAsyncVTableV0 async_v0;
 } FimoContextVTable;
 
 #endif // FIMO_VTABLE_H

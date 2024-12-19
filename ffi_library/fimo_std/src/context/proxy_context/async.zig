@@ -81,7 +81,7 @@ pub const Waker = extern struct {
         unref: *const fn (data: ?*anyopaque) callconv(.c) void,
         wake_unref: *const fn (data: ?*anyopaque) callconv(.c) void,
         wake: *const fn (data: ?*anyopaque) callconv(.c) void,
-        next: ?*anyopaque,
+        next: ?*const anyopaque,
     };
 
     /// Increases the reference count of the waker.
@@ -121,7 +121,7 @@ pub const BlockingContext = extern struct {
         block_until_notified: *const fn (data: ?*anyopaque) callconv(.c) void,
     };
 
-    /// Initializes a new waker.
+    /// Initializes a new blocking context.
     pub fn init(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!BlockingContext {
         var context: BlockingContext = undefined;
         const result = ctx.context.vtable.async_v0.context_new_blocking(
