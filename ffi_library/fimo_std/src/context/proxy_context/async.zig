@@ -77,7 +77,7 @@ pub const Waker = extern struct {
     ///
     /// Changing the VTable is a breaking change.
     pub const VTable = extern struct {
-        ref: *const fn (data: ?*anyopaque) callconv(.c) void,
+        ref: *const fn (data: ?*anyopaque) callconv(.c) Waker,
         unref: *const fn (data: ?*anyopaque) callconv(.c) void,
         wake_unref: *const fn (data: ?*anyopaque) callconv(.c) void,
         wake: *const fn (data: ?*anyopaque) callconv(.c) void,
@@ -85,8 +85,8 @@ pub const Waker = extern struct {
     };
 
     /// Increases the reference count of the waker.
-    pub fn ref(self: Waker) void {
-        self.vtable.ref(self.data);
+    pub fn ref(self: Waker) Waker {
+        return self.vtable.ref(self.data);
     }
 
     /// Decreases the reference count of the waker.
@@ -250,7 +250,7 @@ pub fn Future(comptime T: type, comptime U: type) type {
             ctx: AsyncExecutor,
             comptime deinit_result_fn: ?fn (*U) void,
             err: *?AnyError,
-        ) AnyError.Error!*EnqueuedFuture(U) {
+        ) AnyError.Error!EnqueuedFuture(U) {
             const This = @This();
             const Wrapper = struct {
                 fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
@@ -268,7 +268,7 @@ pub fn Future(comptime T: type, comptime U: type) type {
                 }
             };
 
-            var enqueued: *OpaqueFuture = undefined;
+            var enqueued: OpaqueFuture = undefined;
             const result = ctx.context.vtable.async_v0.future_enqueue(
                 ctx.context.data,
                 std.mem.asBytes(&self),
@@ -282,7 +282,7 @@ pub fn Future(comptime T: type, comptime U: type) type {
                 &enqueued,
             );
             try AnyError.initChecked(err, result);
-            return @alignCast(@ptrCast(enqueued));
+            return @bitCast(enqueued);
         }
     };
 }
@@ -358,7 +358,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
             ctx: AsyncExecutor,
             comptime deinit_result_fn: ?fn (*U) void,
             err: *?AnyError,
-        ) AnyError.Error!*EnqueuedFuture(U) {
+        ) AnyError.Error!EnqueuedFuture(U) {
             const This = @This();
             const Wrapper = struct {
                 fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
@@ -376,7 +376,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
                 }
             };
 
-            var enqueued: *OpaqueFuture = undefined;
+            var enqueued: OpaqueFuture = undefined;
             const result = ctx.context.vtable.async_v0.future_enqueue(
                 ctx.context.data,
                 std.mem.asBytes(&self),
@@ -390,7 +390,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
                 &enqueued,
             );
             try AnyError.initChecked(err, result);
-            return @alignCast(@ptrCast(enqueued));
+            return @bitCast(enqueued);
         }
     };
 }
@@ -420,6 +420,6 @@ pub const VTable = extern struct {
         poll: *const fn (data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool,
         cleanup_data: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-        future: **OpaqueFuture,
+        future: *OpaqueFuture,
     ) callconv(.c) c.FimoResult,
 };

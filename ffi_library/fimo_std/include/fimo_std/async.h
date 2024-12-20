@@ -51,11 +51,26 @@ typedef struct FimoAsyncEventLoop {
  *
  * Changing the VTable is a breaking change.
  */
-typedef struct FimoAsyncWakerVTableV0 {
+typedef struct FimoAsyncWakerVTableV0 FimoAsyncWakerVTableV0;
+
+/**
+ * A waker for asynchronous tasks.
+ *
+ * Wakers are the main building block of the async runtime, where
+ * their main job is signaling that a task may make progress and may
+ * therefore be polled again. A task is allowed to assume, that no
+ * progress can be made, if its waker is not signaled.
+ */
+typedef struct FimoAsyncWaker {
+    void *data;
+    const FimoAsyncWakerVTableV0 *vtable;
+} FimoAsyncWaker;
+
+struct FimoAsyncWakerVTableV0 {
     /**
      * Increases the reference count of the waker.
      */
-    void (*acquire)(void *data);
+    FimoAsyncWaker (*acquire)(void *data);
     /**
      * Decreases the reference count of the waker.
      */
@@ -72,20 +87,7 @@ typedef struct FimoAsyncWakerVTableV0 {
      * Reserved for future extensions.
      */
     const void *next;
-} FimoAsyncWakerVTableV0;
-
-/**
- * A waker for asynchronous tasks.
- *
- * Wakers are the main building block of the async runtime, where
- * their main job is signaling that a task may make progress and may
- * therefore be polled again. A task is allowed to assume, that no
- * progress can be made, if its waker is not signaled.
- */
-typedef struct FimoAsyncWaker {
-    void *data;
-    const FimoAsyncWakerVTableV0 *vtable;
-} FimoAsyncWaker;
+};
 
 /**
  * VTable of a FimoAsyncBlockingContext.
@@ -236,7 +238,7 @@ typedef struct FimoAsyncVTableV0 {
                                  FimoUSize result_size, FimoUSize result_alignment,
                                  bool (*poll)(void *data, FimoAsyncWaker waker, void *result),
                                  void (*release_data)(void *data), void (*release_result)(void *data),
-                                 FimoAsyncOpaqueFuture **enqueued_future);
+                                 FimoAsyncOpaqueFuture *enqueued_future);
 } FimoAsyncVTableV0;
 
 #ifdef __cplusplus

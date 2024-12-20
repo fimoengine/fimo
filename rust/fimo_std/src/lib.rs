@@ -13,13 +13,16 @@ extern crate alloc;
 #[doc(hidden)]
 pub use paste;
 
-pub mod allocator;
 pub mod bindings;
+
+pub mod allocator;
 pub mod context;
 pub mod error;
 pub mod ffi;
-pub mod module;
 pub mod panic;
 pub mod time;
-pub mod tracing;
 pub mod version;
+
+pub mod r#async;
+pub mod module;
+pub mod tracing;

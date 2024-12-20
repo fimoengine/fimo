@@ -216,9 +216,10 @@ const BlockingContext = struct {
 
     fn waker_ref(self: *BlockingContext) ProxyAsync.Waker {
         const Wrapper = struct {
-            fn ref(data: ?*anyopaque) callconv(.c) void {
+            fn ref(data: ?*anyopaque) callconv(.c) ProxyAsync.Waker {
                 const this: *BlockingContext = @alignCast(@ptrCast(data));
                 this.ref();
+                return this.waker_ref();
             }
             fn unref(data: ?*anyopaque) callconv(.c) void {
                 const this: *BlockingContext = @alignCast(@ptrCast(data));
@@ -291,7 +292,6 @@ const Task = struct {
     data: ?*anyopaque,
     result: ?*anyopaque,
     buffer: []u8,
-    future: ProxyAsync.ExternFuture(*@This(), anyopaque),
 
     poll_fn: *const fn (
         data: ?*anyopaque,
@@ -316,13 +316,14 @@ const Task = struct {
         cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
-    ) !*ProxyAsync.OpaqueFuture {
+    ) !ProxyAsync.OpaqueFuture {
         sys.asContext().ref();
         errdefer sys.asContext().unref();
         const allocator = sys.allocator;
 
         const buffer_align: usize = @max(data_alignment, result_alignment);
-        const buffer_size = data_size + result_size + (data_size % result_alignment) + (buffer_align - 1);
+        const buffer_size = std.mem.alignForward(usize, data_size, result_alignment) +
+            result_size + (buffer_align - 1);
         const buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(buffer);
 
@@ -332,7 +333,10 @@ const Task = struct {
             0;
 
         const result_offset: usize = if (result_size != 0)
-            std.mem.alignPointerOffset(buffer[data_offset + data_size ..].ptr, result_alignment).?
+            data_offset + data_size + std.mem.alignPointerOffset(
+                buffer[data_offset + data_size ..].ptr,
+                result_alignment,
+            ).?
         else
             0;
 
@@ -365,11 +369,6 @@ const Task = struct {
                 .data = buffer_data,
                 .result = result_data,
                 .buffer = buffer,
-                .future = .{
-                    .data = &node.data,
-                    .poll_fn = &pollPublic,
-                    .cleanup_fn = &deinitPublic,
-                },
 
                 .poll_fn = poll_fn,
                 .cleanup_data_fn = cleanup_data_fn,
@@ -380,7 +379,14 @@ const Task = struct {
         // Increase the ref count for the public future.
         node.data.ref();
         node.data.tryEnqueue();
-        return @ptrCast(&node.data.future);
+
+        const future = ProxyAsync.ExternFuture(*@This(), anyopaque){
+            .data = &node.data,
+            .poll_fn = &pollPublic,
+            .cleanup_fn = &deinitPublic,
+        };
+
+        return @bitCast(future);
     }
 
     fn ref(self: *Task) void {
@@ -408,9 +414,10 @@ const Task = struct {
 
     fn asWaker(self: *Task) ProxyAsync.Waker {
         const Wrapper = struct {
-            fn ref(data: ?*anyopaque) callconv(.c) void {
+            fn ref(data: ?*anyopaque) callconv(.c) ProxyAsync.Waker {
                 const this: *Task = @alignCast(@ptrCast(data));
                 this.ref();
+                return this.asWaker();
             }
             fn unref(data: ?*anyopaque) callconv(.c) void {
                 const this: *Task = @alignCast(@ptrCast(data));
@@ -466,8 +473,7 @@ const Task = struct {
             std.debug.assert(self.waiter == null);
 
             if (!self.state.completed) {
-                waker.ref();
-                self.waiter = waker;
+                self.waiter = waker.ref();
                 return false;
             }
 
@@ -607,7 +613,7 @@ const VTableImpl = struct {
         ) callconv(.c) bool,
         cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-        future: **ProxyAsync.OpaqueFuture,
+        future: *ProxyAsync.OpaqueFuture,
     ) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?AnyError = null;

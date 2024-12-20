@@ -45,13 +45,13 @@ pub fn main() !void {
 
 const NestedFuture = union(enum) {
     start: struct {
-        a: *Async.EnqueuedFuture(usize),
-        b: *Async.EnqueuedFuture(usize),
+        a: Async.EnqueuedFuture(usize),
+        b: Async.EnqueuedFuture(usize),
         ctx: Context,
     },
     stage_0: struct {
         a: usize,
-        b: *Async.EnqueuedFuture(usize),
+        b: Async.EnqueuedFuture(usize),
         ctx: Context,
     },
     stage_1: struct {
@@ -67,14 +67,14 @@ const NestedFuture = union(enum) {
     const b_iter = 10;
 
     fn init(ctx: Context, err: *?AnyError) !Async.Future(@This(), Result) {
-        const a_fut = try LoopFuture(a_iter).init(ctx).enqueue(
+        var a_fut = try LoopFuture(a_iter).init(ctx).enqueue(
             ctx.@"async"(),
             null,
             err,
         );
         errdefer a_fut.deinit();
 
-        const b_fut = try LoopFuture(b_iter).init(ctx).enqueue(
+        var b_fut = try LoopFuture(b_iter).init(ctx).enqueue(
             ctx.@"async"(),
             null,
             err,
