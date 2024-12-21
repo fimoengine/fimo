@@ -56,18 +56,9 @@ pub fn build(b: *std.Build) void {
     // Module tests
     // ----------------------------------------------------
 
-    const test_step = b.step("test", "Run unit tests");
+    const module_tests = b.addTest(.{ .root_module = module });
 
-    const module_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-        .pic = true,
-    });
-    module_tests.root_module.addImport("visualizers", visualizers);
-    module_tests.addIncludePath(b.path("include/"));
-    if (target.result.os.tag == .windows) module_tests.linkSystemLibrary("advapi32");
+    const test_step = b.step("test", "Run unit tests");
 
     const run_lib_unit_tests = b.addRunArtifact(module_tests);
     test_step.dependOn(&run_lib_unit_tests.step);
@@ -105,19 +96,11 @@ pub fn build(b: *std.Build) void {
 
     const static_lib = b.addStaticLibrary(.{
         .name = "fimo_std",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-        .pic = true,
+        .root_module = module,
     });
     static_lib.bundle_compiler_rt = true;
-    static_lib.root_module.addImport("visualizers", visualizers);
-    static_lib.addIncludePath(b.path("include/"));
-    if (target.result.os.tag == .windows) {
-        static_lib.dll_export_fns = true;
-        static_lib.linkSystemLibrary("advapi32");
-    }
+    if (target.result.os.tag == .windows) static_lib.dll_export_fns = true;
+
     if (b.option(bool, "build-static", "Build static library") orelse false) {
         installArtifact(b, libs, bins, static_lib);
         b.installArtifact(static_lib);
@@ -129,16 +112,9 @@ pub fn build(b: *std.Build) void {
 
     const dynamic_lib = b.addSharedLibrary(.{
         .name = "fimo_std_shared",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-        .pic = true,
+        .root_module = module,
     });
-    dynamic_lib.bundle_compiler_rt = true;
-    dynamic_lib.root_module.addImport("visualizers", visualizers);
-    dynamic_lib.addIncludePath(b.path("include/"));
-    if (target.result.os.tag == .windows) dynamic_lib.linkSystemLibrary("advapi32");
+
     if (b.option(bool, "build-dynamic", "Build dynamic library") orelse false) {
         installArtifact(b, libs, bins, dynamic_lib);
         b.installArtifact(dynamic_lib);
@@ -150,15 +126,8 @@ pub fn build(b: *std.Build) void {
 
     const static_lib_check = b.addStaticLibrary(.{
         .name = "fimo_std",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-        .pic = true,
+        .root_module = module,
     });
-    static_lib_check.bundle_compiler_rt = true;
-    static_lib_check.root_module.addImport("visualizers", visualizers);
-    static_lib_check.addIncludePath(b.path("include/"));
 
     const check = b.step("check", "Check if fimo_std compiles");
     check.dependOn(&static_lib_check.step);
