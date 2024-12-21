@@ -61,11 +61,11 @@ jobs:
           command: |
             if ${{ matrix.build-type == 'Release' }}; then
               zig build --release=safe
-              zig build ci --release=safe
+              zig build check --release=safe
               zig build test --release=safe
             else
               zig build
-              zig build ci
+              zig build check
               zig build test
             fi
 
@@ -78,11 +78,11 @@ jobs:
           command: |
             if (${{ matrix.build-type == 'Release' }}) {
               zig build --release=safe
-              zig build ci --release=safe
+              zig build check --release=safe
               zig build test --release=safe
             } else {
               zig build
-              zig build ci
+              zig build check
               zig build test
             }
 

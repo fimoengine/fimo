@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     const doc_step = b.step("doc", "Generate documentation");
-    const ci_step = b.step("ci", "Run ci checks");
+    const check_step = b.step("check", "Check if the project compiles");
     var packages = std.StringArrayHashMap(*std.Build.Dependency).init(b.allocator);
 
     const enable_bindings = b.option(
@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) void {
             modules,
             test_step,
             doc_step,
-            ci_step,
+            check_step,
             &packages,
         );
         _ = add_package(
@@ -53,7 +53,7 @@ pub fn build(b: *std.Build) void {
             modules,
             test_step,
             doc_step,
-            ci_step,
+            check_step,
             &packages,
         );
     }
@@ -75,7 +75,7 @@ pub fn build(b: *std.Build) void {
             modules,
             test_step,
             doc_step,
-            ci_step,
+            check_step,
             &packages,
         );
     }
@@ -97,7 +97,7 @@ pub fn build(b: *std.Build) void {
             modules,
             test_step,
             doc_step,
-            ci_step,
+            check_step,
             &packages,
         );
     }
@@ -123,7 +123,7 @@ fn add_package(
     modules: *std.Build.Step.WriteFile,
     test_step: *std.Build.Step,
     doc_step: *std.Build.Step,
-    ci_step: *std.Build.Step,
+    check_step: *std.Build.Step,
     packages: *std.StringArrayHashMap(*std.Build.Dependency),
 ) ?*std.Build.Dependency {
     if (packages.contains(name)) {
@@ -147,8 +147,8 @@ fn add_package(
     if (dep.builder.top_level_steps.get("test")) |step| {
         test_step.dependOn(&step.step);
     }
-    if (dep.builder.top_level_steps.get("ci")) |step| {
-        ci_step.dependOn(&step.step);
+    if (dep.builder.top_level_steps.get("check")) |step| {
+        check_step.dependOn(&step.step);
     }
 
     if (dep.builder.named_lazy_paths.get("lib")) |path| {

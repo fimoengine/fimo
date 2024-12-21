@@ -145,6 +145,25 @@ pub fn build(b: *std.Build) void {
     }
 
     // ----------------------------------------------------
+    // Check
+    // ----------------------------------------------------
+
+    const static_lib_check = b.addStaticLibrary(.{
+        .name = "fimo_std",
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .pic = true,
+    });
+    static_lib_check.bundle_compiler_rt = true;
+    static_lib_check.root_module.addImport("visualizers", visualizers);
+    static_lib_check.addIncludePath(b.path("include/"));
+
+    const check = b.step("check", "Check if fimo_std compiles");
+    check.dependOn(&static_lib_check.step);
+
+    // ----------------------------------------------------
     // Documentation
     // ----------------------------------------------------
 

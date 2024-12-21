@@ -72,6 +72,23 @@ pub fn build(b: *std.Build) void {
     _ = module.addCopyDirectory(cpython.binary_dir, ".", .{});
 
     // ----------------------------------------------------
+    // Check
+    // ----------------------------------------------------
+
+    const fimo_python_check = b.addSharedLibrary(.{
+        .name = "fimo_python",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("src/root.zig"),
+    });
+    fimo_python_check.root_module.addImport("fimo_std", fimo_std);
+    fimo_python_check.root_module.addImport("fimo_python_meta", fimo_python_meta);
+    fimo_python_check.addIncludePath(cpython.include_dir);
+
+    const check = b.step("check", "Check if fimo_python compiles");
+    check.dependOn(&fimo_python_check.step);
+
+    // ----------------------------------------------------
     // Tests
     // ----------------------------------------------------
 

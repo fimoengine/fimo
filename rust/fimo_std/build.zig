@@ -30,8 +30,8 @@ pub fn build(b: *std.Build) void {
     install_doc.step.dependOn(cargo_commands.doc_step);
     doc_step.dependOn(&install_doc.step);
 
-    const ci_step = b.step("ci", "Run ci checks");
-    ci_step.dependOn(cargo_commands.clippy_step);
+    const check_step = b.step("check", "Check if the crate compiles");
+    check_step.dependOn(cargo_commands.clippy_step);
 
     const docs = b.addWriteFiles().addCopyDirectory(
         cargo_commands.out_dir.path(b, "doc"),

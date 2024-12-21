@@ -39,6 +39,23 @@ pub fn build(b: *std.Build) void {
     module.addImport("fimo_std", fimo_std);
 
     // ----------------------------------------------------
+    // Check
+    // ----------------------------------------------------
+
+    const module_check = b.addStaticLibrary(.{
+        .name = "fimo_python_meta",
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    module_check.root_module.addIncludePath(b.path("include/"));
+    module_check.root_module.addIncludePath(fimo_std_dep.path("include/"));
+    module_check.root_module.addImport("fimo_std", fimo_std);
+
+    const check = b.step("check", "Check if fimo_python_meta compiles");
+    check.dependOn(&module_check.step);
+
+    // ----------------------------------------------------
     // Test
     // ----------------------------------------------------
 
