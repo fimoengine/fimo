@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const AtomicValue = std.atomic.Value;
 const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const Condition = Thread.Condition;
@@ -279,13 +280,7 @@ const Task = struct {
     call_stack: *ProxyTracing.CallStack,
 
     mutex: Mutex = .{},
-    state: packed struct {
-        notified: bool = true,
-        enqueued: bool = false,
-        consumed: bool = false,
-        detached: bool = false,
-        completed: bool = false,
-    } = .{},
+    state: State = .{},
     waiter: ?ProxyAsync.Waker = null,
 
     result_size: usize,
@@ -300,6 +295,216 @@ const Task = struct {
     ) callconv(.c) bool,
     cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
     cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
+
+    const State = struct {
+        state: AtomicValue(u8) = AtomicValue(u8).init(@bitCast(Bits{})),
+        waiter: ProxyAsync.Waker = undefined,
+
+        // W(X): Written by X
+        // WO(X): Written once by X
+        //
+        // S(X): Synchronizes with X
+        //
+        // EL: Event loop
+        // EX: External Task
+        // * : EL + EX
+        //
+        // `notified`: Resume notification reveiced
+        //      W(*)
+        //
+        // `enqueued`: Task is inserted in the queue
+        //      W(*)
+        //      enqueued => !completed
+        //
+        // `completed`: Internal task has run to completion.
+        //      WO(EL)
+        //      S(data)
+        //      completed => !enqueued
+        //
+        // `consumed`: Result has been consumed
+        //      WO(*)
+        //      S(result)
+        //      consumed => !enqueued
+        //      consumed => completed
+        //      consumed => !waiting
+        //      consumed => !waiter_locked
+        //
+        // `detached`: Task abort requested
+        //      WO(EX)
+        //      detached => !waiting
+        //      detached => !waiter_locked
+        //
+        // `waiting`: Waiter is registered
+        //      W(*)
+        //      waiting: !consumed
+        //      waiting: !detached
+        //
+        // `waiter_locked`
+        //      W(EX)
+        //      S(waiter)
+        //      waiter_locked: !consumed
+        //      waiter_locked: !detached
+        const Bits = packed struct(u8) {
+            notified: bool = false,
+            enqueued: bool = false,
+            completed: bool = false,
+            consumed: bool = false,
+            detached: bool = false,
+            waiting: bool = false,
+            waiter_locked: bool = false,
+            padding: u1 = undefined,
+        };
+
+        const EnqueueOp = enum { noop, enqueue };
+
+        fn notify(self: *@This()) EnqueueOp {
+            _ = self.state.bitSet(
+                @bitOffsetOf(Bits, "notified"),
+                .monotonic,
+            );
+
+            const state: Bits = @bitCast(self.state.load(.monotonic));
+            if (state.completed or state.enqueued) return .noop;
+            return self.enqueue();
+        }
+
+        fn enqueue(self: *@This()) EnqueueOp {
+            var expected: Bits = @bitCast(self.state.load(.monotonic));
+            while (true) {
+                std.debug.assert(!expected.completed);
+                if (!expected.notified) return .noop;
+                if (expected.enqueued) return .noop;
+
+                var next = expected;
+                next.enqueued = true;
+                next.notified = false;
+                if (self.state.cmpxchgWeak(
+                    @bitCast(expected),
+                    @bitCast(next),
+                    .monotonic,
+                    .monotonic,
+                )) |v| expected = @bitCast(v) else return .enqueue;
+            }
+        }
+
+        fn dequeue(self: *@This(), completed: bool) union(enum) { noop, cleanup: bool, enqueue } {
+            if (completed) {
+                // Use a release store to force the result being written before the atomic op.
+                const mask = Bits{ .enqueued = true, .completed = true };
+                const state: Bits = @bitCast(self.state.fetchXor(@bitCast(mask), .release));
+                std.debug.assert(state.enqueued);
+                std.debug.assert(!state.completed);
+                std.debug.assert(!state.consumed);
+
+                if (!state.detached) return .{ .cleanup = false };
+                std.debug.assert(!state.waiting);
+                std.debug.assert(!state.waiter_locked);
+
+                // Prevent the cleanup from being reordered before the atomic operation.
+                _ = self.state.bitSet(
+                    @bitOffsetOf(Bits, "consumed"),
+                    .acquire,
+                );
+                return .{ .cleanup = true };
+            } else {
+                const mask = Bits{ .enqueued = true };
+                const state: Bits = @bitCast(self.state.fetchXor(@bitCast(mask), .monotonic));
+                std.debug.assert(state.enqueued);
+                std.debug.assert(!state.completed);
+                std.debug.assert(!state.consumed);
+
+                if (state.notified and self.enqueue() == .enqueue) return .enqueue;
+                return .noop;
+            }
+        }
+
+        fn detach(self: *@This()) enum { noop, cleanup } {
+            var state: Bits = @bitCast(self.state.load(.monotonic));
+            std.debug.assert(!state.detached);
+            if (state.consumed) return .noop;
+
+            const locked = self.state.bitSet(
+                @bitOffsetOf(Bits, "waiter_locked"),
+                .acquire,
+            );
+            if (locked != 0) @panic("A future may only be polled by one task");
+            if (state.waiting) self.waiter.unref();
+
+            // Set `waiter_locked = 0`, `waiting = 0` and `detached = 1`.
+            const mask = Bits{
+                .detached = true,
+                .waiting = state.waiting,
+                .waiter_locked = true,
+            };
+            state = @bitCast(self.state.fetchXor(@bitCast(mask), .release));
+            std.debug.assert(!state.detached);
+            if (!state.completed) return .noop;
+
+            // Prevent the cleanup from being reordered before the atomic operation.
+            const consumed = self.state.bitSet(
+                @bitOffsetOf(Bits, "consumed"),
+                .acquire,
+            );
+            if (consumed == 0) return .noop;
+            return .cleanup;
+        }
+
+        fn lock_waiter(self: *@This()) Bits {
+            var locked = self.state.bitSet(
+                @bitOffsetOf(Bits, "waiter_locked"),
+                .acquire,
+            );
+            while (locked == 1) {
+                std.atomic.spinLoopHint();
+                locked = self.state.bitSet(
+                    @bitOffsetOf(Bits, "waiter_locked"),
+                    .acquire,
+                );
+            }
+            return @bitCast(self.state.load(.acquire));
+        }
+
+        fn unlock_waiter(self: *@This(), toggle_waiting: bool) void {
+            const mask = Bits{
+                .waiting = toggle_waiting,
+                .waiter_locked = true,
+            };
+            _ = self.state.fetchXor(@bitCast(mask), .release);
+        }
+
+        fn wake(self: *@This()) void {
+            const state = self.lock_waiter();
+            std.debug.assert(state.completed);
+            if (!state.waiting) {
+                self.unlock_waiter(false);
+                return;
+            }
+            self.waiter.wakeUnref();
+            self.unlock_waiter(true);
+        }
+
+        fn wait(self: *@This(), waiter: ProxyAsync.Waker) enum { noop, consume } {
+            const state: Bits = self.lock_waiter();
+            std.debug.assert(!state.consumed);
+            std.debug.assert(!state.detached);
+
+            if (state.waiting) self.waiter.unref();
+            if (!state.completed) {
+                self.waiter = waiter.ref();
+                self.unlock_waiter(!state.waiting);
+                return .noop;
+            }
+            self.unlock_waiter(state.waiting);
+
+            // Prevent the read of the result from being reordered before the atomic operation.
+            const consumed = self.state.bitSet(
+                @bitOffsetOf(Bits, "consumed"),
+                .acquire,
+            );
+            std.debug.assert(consumed == 0);
+            return .consume;
+        }
+    };
 
     pub fn init(
         sys: *Self,
@@ -378,7 +583,10 @@ const Task = struct {
 
         // Increase the ref count for the public future.
         node.data.ref();
-        node.data.tryEnqueue();
+
+        const op = node.data.state.notify();
+        std.debug.assert(op == .enqueue);
+        node.data.enqueue();
 
         const future = ProxyAsync.ExternFuture(*@This(), anyopaque){
             .data = &node.data,
@@ -395,10 +603,12 @@ const Task = struct {
 
     fn unref(self: *Task) void {
         if (self.refcount.unref() == .noop) return;
-        std.debug.assert(!self.state.enqueued);
-        std.debug.assert(self.state.completed);
-        std.debug.assert(self.state.consumed or self.state.detached);
-        std.debug.assert(!(self.state.consumed and self.state.detached));
+        const state: State.Bits = @bitCast(self.state.state.load(.monotonic));
+        std.debug.assert(!state.enqueued);
+        std.debug.assert(state.completed);
+        std.debug.assert(state.consumed);
+        std.debug.assert(!state.waiting);
+        std.debug.assert(!state.waiter_locked);
         const ctx = self.sys.asContext();
         ctx.tracing.destroyCallStack(self.call_stack) catch unreachable;
         const allocator = self.sys.allocator;
@@ -449,14 +659,10 @@ const Task = struct {
     }
 
     fn notify(self: *Task) void {
-        const state = blk: {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.state.notified = true;
-            break :blk self.state;
-        };
-        if (state.completed or state.enqueued) return;
-        self.tryEnqueue();
+        switch (self.state.notify()) {
+            .noop => {},
+            .enqueue => self.enqueue(),
+        }
     }
 
     fn pollPublic(
@@ -465,20 +671,7 @@ const Task = struct {
         result: ?*anyopaque,
     ) callconv(.c) bool {
         const self = self_ptr.*;
-        {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            std.debug.assert(!self.state.consumed);
-            std.debug.assert(!self.state.detached);
-            std.debug.assert(self.waiter == null);
-
-            if (!self.state.completed) {
-                self.waiter = waker.ref();
-                return false;
-            }
-
-            self.state.consumed = true;
-        }
+        if (self.state.wait(waker) == .noop) return false;
 
         if (result) |res| {
             std.debug.assert(self.result_size != 0);
@@ -494,37 +687,12 @@ const Task = struct {
 
     fn deinitPublic(self_ptr: **Task) callconv(.c) void {
         const self = self_ptr.*;
-        const state = blk: {
-            self.mutex.lock();
-            std.debug.assert(self.waiter == null);
-            if (self.state.consumed) {
-                self.mutex.unlock();
-                self.unref();
-                return;
-            }
-            defer self.mutex.unlock();
-
-            self.state.detached = true;
-            break :blk self.state;
-        };
-
-        if (state.completed) {
+        if (self.state.detach() == .cleanup)
             if (self.cleanup_result_fn) |f| f(self.result);
-        }
         self.unref();
     }
 
-    fn tryEnqueue(self: *Task) void {
-        {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            if (self.state.enqueued) return;
-            std.debug.assert(self.state.notified);
-            std.debug.assert(!self.state.completed);
-            self.state.enqueued = true;
-            self.state.notified = false;
-        }
-
+    fn enqueue(self: *Task) void {
         self.sys.mutex.lock();
         defer self.sys.mutex.unlock();
         self.sys.queue.append(self.asNode());
@@ -542,34 +710,16 @@ const Task = struct {
         self.call_stack = ctx.tracing.replaceCurrentCallStack(main_stack) catch unreachable;
         ctx.tracing.resumeCurrentCallStack() catch unreachable;
 
-        const state = blk: {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.state.enqueued = false;
-            self.state.completed = completed;
-            break :blk self.state;
-        };
-
-        if (completed) {
-            if (self.cleanup_data_fn) |f| f(self.data);
-            if (state.detached) {
-                std.debug.assert(!state.consumed);
-                if (self.cleanup_result_fn) |f| f(self.result);
-            }
-
-            {
-                self.mutex.lock();
-                defer self.mutex.unlock();
-
-                if (self.waiter) |w| w.wake_unref();
-                self.waiter = null;
-            }
-
-            self.unref();
-            return;
+        switch (self.state.dequeue(completed)) {
+            .noop => {},
+            .cleanup => |detached| {
+                if (self.cleanup_data_fn) |f| f(self.data);
+                if (detached) if (self.cleanup_result_fn) |f| f(self.result);
+                self.state.wake();
+                self.unref();
+            },
+            .enqueue => self.enqueue(),
         }
-        if (!state.notified) return;
-        self.tryEnqueue();
     }
 };
 

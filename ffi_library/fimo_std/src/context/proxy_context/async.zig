@@ -91,12 +91,12 @@ pub const Waker = extern struct {
 
     /// Decreases the reference count of the waker.
     pub fn unref(self: Waker) void {
-        self.vtable.ref(self.data);
+        self.vtable.unref(self.data);
     }
 
     /// Wakes the task associated with the current waker and
     /// decreases the wakers reference count.
-    pub fn wake_unref(self: Waker) void {
+    pub fn wakeUnref(self: Waker) void {
         self.vtable.wake_unref(self.data);
     }
 
@@ -147,7 +147,7 @@ pub const BlockingContext = extern struct {
     /// Blocks the current thread until it has been notified.
     ///
     /// The thread can be notified through the waker of the context.
-    pub fn block_until_notified(self: BlockingContext) void {
+    pub fn blockUntilNotified(self: BlockingContext) void {
         self.vtable.block_until_notified(self.data);
     }
 
@@ -165,7 +165,7 @@ pub const BlockingContext = extern struct {
         while (true) {
             switch (future.poll(waker_ref)) {
                 .ready => |v| return v,
-                .pending => self.block_until_notified(),
+                .pending => self.blockUntilNotified(),
             }
         }
     }
