@@ -248,6 +248,54 @@ const State = struct {
     }
 };
 
+pub fn initFuture(
+    comptime T: type,
+    sys: *System,
+    future: *const T,
+    err: *?AnyError,
+) !ProxyAsync.EnqueuedFuture(T.Result) {
+    const Wrapper = struct {
+        fn poll(
+            data: ?*anyopaque,
+            waker: ProxyAsync.Waker,
+            result: ?*anyopaque,
+        ) callconv(.c) bool {
+            const this: *T = @alignCast(@ptrCast(data));
+            const res: *T.Result = if (@sizeOf(T.Result) != 0) @alignCast(@ptrCast(result)) else &.{};
+            return switch (this.poll(waker)) {
+                .ready => |v| {
+                    res.* = v;
+                    return true;
+                },
+                .pending => false,
+            };
+        }
+        fn deinit_data(data: ?*anyopaque) callconv(.c) void {
+            const this: *T = @alignCast(@ptrCast(data));
+            this.deinit();
+        }
+        fn deinit_result(result: ?*anyopaque) callconv(.c) void {
+            if (@hasField(T.Result, "deinit")) {
+                const res: *T.Result = if (@sizeOf(T.Result) != 0) @alignCast(@ptrCast(result)) else &.{};
+                res.deinit();
+            }
+        }
+    };
+    const f = try init(
+        sys,
+        std.mem.asBytes(future),
+        @sizeOf(T),
+        @alignOf(T),
+        @sizeOf(T.Result),
+        @alignOf(T.Result),
+        Wrapper.poll,
+        Wrapper.deinit_data,
+        Wrapper.deinit_result,
+        err,
+    );
+    return @bitCast(f);
+}
+
 pub fn init(
     sys: *System,
     data: ?[*]const u8,
@@ -438,6 +486,7 @@ fn enqueue(self: *Self) void {
     self.sys.mutex.lock();
     defer self.sys.mutex.unlock();
     self.sys.queue.append(self.asNode());
+    self.sys.cvar.signal();
 }
 
 pub fn poll(self: *Self) void {

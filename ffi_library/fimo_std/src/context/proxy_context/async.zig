@@ -197,6 +197,8 @@ pub fn Future(comptime T: type, comptime U: type) type {
         poll_fn: *const fn (data: OptT, waker: Waker, result: OptU) bool,
         cleanup_fn: ?*const fn (data: OptT) void,
 
+        pub const Result = U;
+
         /// Initializes a new future.
         pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
             const Wrapper = struct {
@@ -240,6 +242,11 @@ pub fn Future(comptime T: type, comptime U: type) type {
             var result: U = undefined;
             if (self.poll_fn(&self.data, waker, &result)) return .{ .ready = result };
             return .pending;
+        }
+
+        /// Maps the result of the future to another type.
+        pub fn map(self: @This(), comptime V: type, map_fn: fn (U) V) MapFuture(@This(), V, map_fn) {
+            return MapFuture(@This(), V, map_fn).init(self);
         }
 
         /// Moves the future on the async executor.
@@ -305,6 +312,8 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
         poll_fn: *const fn (data: OptT, waker: Waker, result: OptU) callconv(.c) bool,
         cleanup_fn: ?*const fn (data: OptT) callconv(.c) void,
 
+        pub const Result = U;
+
         /// Initializes a new future.
         pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
             const Wrapper = struct {
@@ -348,6 +357,11 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
             var result: U = undefined;
             if (self.poll_fn(&self.data, waker, &result)) return .{ .ready = result };
             return .pending;
+        }
+
+        /// Maps the result of the future to another type.
+        pub fn map(self: @This(), comptime V: type, map_fn: fn (U) V) MapFuture(@This(), V, map_fn) {
+            return MapFuture(@This(), V, map_fn).init(self);
         }
 
         /// Moves the future on the async executor.
@@ -402,6 +416,342 @@ pub fn EnqueuedFuture(comptime T: type) type {
 
 /// An enqueued future with an unknown result type.
 pub const OpaqueFuture = EnqueuedFuture(anyopaque);
+
+/// A future that returns immediately.
+pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
+    return struct {
+        data: ?T,
+
+        pub const Result = T;
+        pub const Future = AsyncExecutor.Future(@This(), T);
+
+        pub fn init(data: T) @This() {
+            return .{ .data = data };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            if (deinit_fn) |f| {
+                if (self.data) |*data| f(data);
+                self.data = null;
+            }
+        }
+
+        pub fn intoFuture(self: @This()) AsyncExecutor.Future(@This(), T) {
+            return AsyncExecutor.Future(@This(), T).init(
+                self,
+                poll,
+                if (deinit_fn) deinit else null,
+            );
+        }
+
+        pub fn poll(self: *@This(), waker: Waker) Poll(T) {
+            _ = waker;
+            const x = self.data.?;
+            self.data = null;
+            return .{ .ready = x };
+        }
+
+        pub fn map(self: @This(), comptime U: type, map_fn: fn (T) U) MapFuture(@This(), U, map_fn) {
+            return MapFuture(@This(), U, map_fn).init(self);
+        }
+    };
+}
+
+/// A future that transforms the output type of another future.
+pub fn MapFuture(comptime T: type, comptime U: type, map_fn: fn (T.Result) U) type {
+    return struct {
+        data: T,
+
+        pub const Result = U;
+        pub const Future = AsyncExecutor.Future(@This(), U);
+
+        pub fn init(data: T) @This() {
+            return .{ .data = data };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.data.deinit();
+        }
+
+        pub fn intoFuture(self: @This()) AsyncExecutor.Future(@This(), U) {
+            return AsyncExecutor.Future(@This(), U).init(
+                self,
+                poll,
+                deinit,
+            );
+        }
+
+        pub fn poll(self: *@This(), waker: Waker) Poll(U) {
+            return switch (self.data.poll(waker)) {
+                .ready => |v| .{ .ready = map_fn(v) },
+                .pending => .pending,
+            };
+        }
+
+        pub fn map(self: @This(), comptime V: type, map_fn_: fn (U) V) MapFuture(@This(), V, map_fn_) {
+            return MapFuture(@This(), V, map_fn_).init(self);
+        }
+    };
+}
+
+/// An integer able to represent every state of a finite state machine.
+pub fn FSMState(comptime T: type) type {
+    var num_states = 0;
+    for (std.meta.declarations(T)) |decl| {
+        if (std.mem.startsWith(u8, decl.name, "__state")) num_states += 1;
+    }
+
+    return std.math.IntFittingRange(0, num_states);
+}
+
+/// An operation of the finite state machine.
+pub const FSMOp = enum {
+    next,
+    yield,
+    ret,
+};
+
+/// An operation of the finite state machine.
+pub fn FSMOpExt(comptime T: type) type {
+    return union(enum) {
+        transition: FSMState(T),
+        next,
+        yield,
+        ret,
+    };
+}
+
+/// Operations permitted while unwinding the finite state machine.
+pub const FSMUnwindOp = enum {
+    unwind,
+    ret,
+};
+
+/// Operations permitted while unwinding the finite state machine.
+pub fn FSMUnwindOpExt(comptime T: type) type {
+    return union(enum) {
+        transition: FSMState(T),
+        unwind,
+        ret,
+    };
+}
+
+/// Reason for the unwind operation.
+pub const FSMUnwindReason = enum {
+    abort,
+    completed,
+    err,
+};
+
+/// A future from a finite state machine.
+pub fn FSMFuture(comptime T: type) type {
+    comptime var num_states = 0;
+    for (std.meta.declarations(T)) |decl| {
+        if (std.mem.startsWith(u8, decl.name, "__state")) num_states += 1;
+    }
+    const U = @field(T, "__result");
+
+    const no_unwind = @hasDecl(T, "__no_unwind");
+
+    return struct {
+        state: FSMState(T) = 0,
+        data: T,
+
+        pub const Result = U;
+        pub const Future = AsyncExecutor.Future(@This(), U);
+
+        pub fn init(data: T) @This() {
+            return .{ .data = data };
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.unwind(.abort);
+            if (@hasDecl(T, "deinit")) {
+                self.data.deinit();
+            }
+        }
+
+        pub fn intoFuture(self: @This()) AsyncExecutor.Future(@This(), U) {
+            const cleanup_fn = if (no_unwind and !@hasDecl(T, "deinit"))
+                null
+            else
+                deinit;
+            return AsyncExecutor.Future(@This(), U).init(
+                self,
+                poll,
+                cleanup_fn,
+            );
+        }
+
+        fn unwind(self: *@This(), reason: FSMUnwindReason) void {
+            if (!no_unwind and num_states != 0) {
+                sm: switch (self.state) {
+                    inline 0...num_states - 1 => |i| {
+                        const unwind_func = std.fmt.comptimePrint("__unwind{}", .{i});
+                        if (!@hasDecl(T, unwind_func)) {
+                            const next_state = if (i != 0) i - 1 else num_states;
+                            continue :sm next_state;
+                        }
+
+                        const f = @field(T, unwind_func);
+                        switch (@typeInfo(@TypeOf(f)).@"fn".return_type.?) {
+                            void => {
+                                f(&self.data, reason);
+                                const next_state = if (i != 0) i - 1 else num_states;
+                                continue :sm next_state;
+                            },
+                            FSMUnwindOp => {
+                                switch (f(&self.data, reason)) {
+                                    .unwind => {
+                                        const next_state = if (i != 0) i - 1 else num_states;
+                                        continue :sm next_state;
+                                    },
+                                    .ret => {
+                                        continue :sm num_states;
+                                    },
+                                }
+                            },
+                            FSMUnwindOpExt(T) => {
+                                switch (f(&self.data, reason)) {
+                                    .transition => |next| {
+                                        std.debug.assert(next < num_states);
+                                        continue :sm next;
+                                    },
+                                    .unwind => {
+                                        const next_state = if (i != 0) i - 1 else num_states;
+                                        continue :sm next_state;
+                                    },
+                                    .ret => {
+                                        continue :sm num_states;
+                                    },
+                                }
+                            },
+                            else => |t| @compileError("invalid unwind return type " ++ @typeName(t)),
+                        }
+                    },
+                    else => self.state = num_states,
+                }
+            } else {
+                self.state = num_states;
+            }
+        }
+
+        pub fn poll(self: *@This(), waker: Waker) Poll(U) {
+            if (num_states != 0) {
+                sm: switch (self.state) {
+                    inline 0...num_states - 1 => |i| {
+                        const state_func = std.fmt.comptimePrint("__state{}", .{i});
+                        const f = @field(T, state_func);
+                        const result = f(&self.data, waker);
+
+                        const op = if (@typeInfo(@TypeOf(result)) == .error_union)
+                            result catch |err| {
+                                const set_err = @field(T, "__set_err");
+                                set_err(&self.data, err);
+                                self.state = i;
+                                self.unwind(.err);
+                                break :sm;
+                            }
+                        else
+                            result;
+
+                        switch (@TypeOf(op)) {
+                            void => {
+                                const next_state: comptime_int = i + 1;
+                                if (next_state == num_states) self.state = i;
+                                continue :sm next_state;
+                            },
+                            FSMOp => {
+                                const x: FSMOp = op;
+                                switch (x) {
+                                    .next => {
+                                        const next_state: comptime_int = i + 1;
+                                        if (next_state == num_states) self.state = i;
+                                        continue :sm next_state;
+                                    },
+                                    .yield => return .pending,
+                                    .ret => {
+                                        continue :sm num_states;
+                                    },
+                                }
+                            },
+                            FSMOpExt(T) => {
+                                const x: FSMOpExt(T) = op;
+                                switch (x) {
+                                    .transition => |next| {
+                                        std.debug.assert(next < num_states);
+                                        continue :sm next;
+                                    },
+                                    .next => {
+                                        const next_state: comptime_int = i + 1;
+                                        if (next_state == num_states) self.state = i;
+                                        continue :sm next_state;
+                                    },
+                                    .yield => {
+                                        self.state = i;
+                                        return .pending;
+                                    },
+                                    .ret => {
+                                        self.state = i;
+                                        continue :sm num_states;
+                                    },
+                                }
+                            },
+                            else => |t| @compileError("invalid state return type " ++ @typeName(t)),
+                        }
+                    },
+                    else => self.unwind(.completed),
+                }
+            }
+
+            const ret_f: fn (*T) U = @field(T, "__ret");
+            return .{ .ready = ret_f(&self.data) };
+        }
+
+        pub fn map(self: @This(), comptime V: type, map_fn: fn (U) V) MapFuture(@This(), V, map_fn) {
+            return MapFuture(@This(), V, map_fn).init(self);
+        }
+    };
+}
+
+/// A fallible result.
+pub fn Fallible(comptime T: type) type {
+    return extern struct {
+        result: c.FimoResult,
+        value: T,
+
+        const Self = @This();
+
+        /// A wrapper function.
+        pub fn Wrapper(comptime E: type) fn (E!T) Self {
+            return struct {
+                fn f(value: E!T) Self {
+                    return Self.wrap(value);
+                }
+            }.f;
+        }
+
+        /// Extracts the contained result.
+        pub fn unwrap(self: Self, err: *?AnyError) AnyError.Error!T {
+            try AnyError.initChecked(err, self.result);
+            return self.value;
+        }
+
+        /// Wraps an error union into a fallible result.
+        pub fn wrap(value: anyerror!T) Self {
+            const x = value catch |err| {
+                return .{
+                    .result = AnyError.initError(err).err,
+                    .value = undefined,
+                };
+            };
+            return .{
+                .result = AnyError.intoCResult(null),
+                .value = x,
+            };
+        }
+    };
+}
 
 /// VTable of the async subsystem.
 ///
