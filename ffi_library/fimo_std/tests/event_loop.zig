@@ -62,11 +62,12 @@ const NestedFuture = union(enum) {
     stop: struct {},
 
     const Result = struct { a: usize, b: usize };
+    const Future = Async.Future(@This(), Result, poll, deinit);
 
     const a_iter = 5;
     const b_iter = 10;
 
-    fn init(ctx: Context, err: *?AnyError) !Async.Future(@This(), Result) {
+    fn init(ctx: Context, err: *?AnyError) !Future {
         var a_fut = try LoopFuture(a_iter).init(ctx).enqueue(
             ctx.@"async"(),
             null,
@@ -82,17 +83,13 @@ const NestedFuture = union(enum) {
         errdefer b_fut.deinit();
 
         ctx.ref();
-        return Async.Future(@This(), Result).init(
-            .{
-                .start = .{
-                    .a = a_fut,
-                    .b = b_fut,
-                    .ctx = ctx,
-                },
+        return Future.init(.{
+            .start = .{
+                .a = a_fut,
+                .b = b_fut,
+                .ctx = ctx,
             },
-            poll,
-            deinit,
-        );
+        });
     }
 
     fn deinit(self: *@This()) void {
@@ -167,11 +164,11 @@ fn LoopFuture(comptime iterations: usize) type {
         ctx: Context,
 
         const Result = usize;
-        const Future = Async.Future(@This(), Result);
+        const Future = Async.Future(@This(), Result, poll, deinit);
 
         fn init(ctx: Context) Future {
             ctx.ref();
-            return Future.init(.{ .i = 0, .ctx = ctx }, poll, deinit);
+            return Future.init(.{ .i = 0, .ctx = ctx });
         }
 
         fn deinit(self: *@This()) void {

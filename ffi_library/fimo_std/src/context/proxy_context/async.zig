@@ -180,55 +180,37 @@ pub fn Poll(comptime T: type) type {
 }
 
 /// An asynchronous operation.
-pub fn Future(comptime T: type, comptime U: type) type {
-    const OptPointer = struct {
-        fn ty(comptime V: type) type {
-            return if (V == anyopaque or @sizeOf(V) == 0) ?*V else *V;
-        }
-        fn unwrap(comptime V: type, x: ty(V)) *V {
-            return if (V == anyopaque or @sizeOf(V) == 0) &.{} else x;
-        }
-    };
-    const OptT = OptPointer.ty(T);
-    const OptU = OptPointer.ty(U);
-
+pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U), deinit_fn: ?fn (*T) void) type {
     return struct {
         data: T,
-        poll_fn: *const fn (data: OptT, waker: Waker, result: OptU) bool,
-        cleanup_fn: ?*const fn (data: OptT) void,
 
         pub const Result = U;
+        pub const Future = @This();
 
-        /// Initializes a new future.
-        pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
-            const Wrapper = struct {
-                fn poll(dat: OptT, waker: Waker, result: OptU) bool {
-                    const d = OptPointer.unwrap(T, dat);
-                    const r = OptPointer.unwrap(U, result);
-                    r.* = switch (poll_fn(d, waker)) {
-                        .ready => |v| v,
-                        .pending => return false,
-                    };
-                    return true;
-                }
-                fn cleanup(dat: OptT) void {
-                    const d = OptPointer.unwrap(T, dat);
-                    if (cleanup_fn) |cl| cl(d);
-                }
-            };
-
-            return .{
-                .data = data,
-                .poll_fn = &Wrapper.poll,
-                .cleanup_fn = if (cleanup_fn != null) &Wrapper.cleanup else null,
-            };
+        /// Initializes the future.
+        pub fn init(data: T) @This() {
+            return .{ .data = data };
         }
 
         /// Deinitializes the future.
         ///
         /// Can be called at any time to abort the future.
         pub fn deinit(self: *@This()) void {
-            if (self.cleanup_fn) |cl| cl(&self.data);
+            if (deinit_fn) |f| f(&self.data);
+        }
+
+        /// Constructs a future from the current instance.
+        pub fn intoFuture(self: @This()) @This() {
+            return self;
+        }
+
+        /// Constructs an extern future from the current instance.
+        pub fn intoExternFuture(self: @This()) ExternFuture(@This(), U) {
+            return ExternFuture(@This(), U).init(
+                self,
+                poll,
+                if (deinit_fn) deinit else null,
+            );
         }
 
         /// Polls the future.
@@ -239,9 +221,7 @@ pub fn Future(comptime T: type, comptime U: type) type {
         /// The waker is not owned by the callee, and it may not decrease
         /// it's reference count without increasing it first.
         pub fn poll(self: *@This(), waker: Waker) Poll(U) {
-            var result: U = undefined;
-            if (self.poll_fn(&self.data, waker, &result)) return .{ .ready = result };
-            return .pending;
+            return poll_fn(&self.data, waker);
         }
 
         /// Maps the result of the future to another type.
@@ -263,7 +243,13 @@ pub fn Future(comptime T: type, comptime U: type) type {
                 fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
                     const this: *This = @alignCast(@ptrCast(data));
                     const res: *U = if (@sizeOf(U) != 0) @alignCast(@ptrCast(result)) else &.{};
-                    return this.poll_fn(&this.data, waker, res);
+                    switch (this.poll(waker)) {
+                        .ready => |v| {
+                            res.* = v;
+                            return true;
+                        },
+                        .pending => return false,
+                    }
                 }
                 fn deinit_data(data: ?*anyopaque) callconv(.c) void {
                     const this: *This = @alignCast(@ptrCast(data));
@@ -313,6 +299,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
         cleanup_fn: ?*const fn (data: OptT) callconv(.c) void,
 
         pub const Result = U;
+        pub const Future = AsyncExecutor.Future(T, U, poll, deinit);
 
         /// Initializes a new future.
         pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
@@ -346,6 +333,16 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
             if (self.cleanup_fn) |cl| cl(&self.data);
         }
 
+        /// Constructs a future from the current instance.
+        pub fn intoFuture(self: @This()) @This().Future {
+            return @This().Future.init(self);
+        }
+
+        /// Constructs an extern future from the current instance.
+        pub fn intoExternFuture(self: @This()) @This() {
+            return self;
+        }
+
         /// Polls the future.
         ///
         /// The object may not be moved once it is polled.
@@ -357,54 +354,6 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
             var result: U = undefined;
             if (self.poll_fn(&self.data, waker, &result)) return .{ .ready = result };
             return .pending;
-        }
-
-        /// Maps the result of the future to another type.
-        pub fn map(self: @This(), comptime V: type, map_fn: fn (U) V) MapFuture(@This(), V, map_fn) {
-            return MapFuture(@This(), V, map_fn).init(self);
-        }
-
-        /// Moves the future on the async executor.
-        ///
-        /// Polling the new future will block the current task.
-        pub fn enqueue(
-            self: @This(),
-            ctx: AsyncExecutor,
-            comptime deinit_result_fn: ?fn (*U) void,
-            err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(U) {
-            const This = @This();
-            const Wrapper = struct {
-                fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
-                    const this: *This = @alignCast(@ptrCast(data));
-                    const res: *U = if (@sizeOf(U) != 0) @alignCast(@ptrCast(result)) else &.{};
-                    return this.poll_fn(&this.data, waker, res);
-                }
-                fn deinit_data(data: ?*anyopaque) callconv(.c) void {
-                    const this: *This = @alignCast(@ptrCast(data));
-                    this.deinit();
-                }
-                fn deinit_result(result: ?*anyopaque) callconv(.c) void {
-                    const res: *U = if (@sizeOf(U) != 0) @alignCast(@ptrCast(result)) else &.{};
-                    if (deinit_result_fn) |f| f(res);
-                }
-            };
-
-            var enqueued: OpaqueFuture = undefined;
-            const result = ctx.context.vtable.async_v0.future_enqueue(
-                ctx.context.data,
-                std.mem.asBytes(&self),
-                @sizeOf(@This()),
-                @alignOf(@This()),
-                @sizeOf(U),
-                @alignOf(U),
-                &Wrapper.poll,
-                &Wrapper.deinit_data,
-                &Wrapper.deinit_result,
-                &enqueued,
-            );
-            try AnyError.initChecked(err, result);
-            return @bitCast(enqueued);
         }
     };
 }
@@ -423,7 +372,12 @@ pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
         data: ?T,
 
         pub const Result = T;
-        pub const Future = AsyncExecutor.Future(@This(), T);
+        pub const Future = AsyncExecutor.Future(
+            @This(),
+            T,
+            poll,
+            if (deinit_fn) deinit else null,
+        );
 
         pub fn init(data: T) @This() {
             return .{ .data = data };
@@ -436,12 +390,8 @@ pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
             }
         }
 
-        pub fn intoFuture(self: @This()) AsyncExecutor.Future(@This(), T) {
-            return AsyncExecutor.Future(@This(), T).init(
-                self,
-                poll,
-                if (deinit_fn) deinit else null,
-            );
+        pub fn intoFuture(self: @This()) @This().Future {
+            return @This().Future.init(self);
         }
 
         pub fn poll(self: *@This(), waker: Waker) Poll(T) {
@@ -449,10 +399,6 @@ pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
             const x = self.data.?;
             self.data = null;
             return .{ .ready = x };
-        }
-
-        pub fn map(self: @This(), comptime U: type, map_fn: fn (T) U) MapFuture(@This(), U, map_fn) {
-            return MapFuture(@This(), U, map_fn).init(self);
         }
     };
 }
@@ -463,7 +409,7 @@ pub fn MapFuture(comptime T: type, comptime U: type, map_fn: fn (T.Result) U) ty
         data: T,
 
         pub const Result = U;
-        pub const Future = AsyncExecutor.Future(@This(), U);
+        pub const Future = AsyncExecutor.Future(@This(), U, poll, deinit);
 
         pub fn init(data: T) @This() {
             return .{ .data = data };
@@ -473,12 +419,8 @@ pub fn MapFuture(comptime T: type, comptime U: type, map_fn: fn (T.Result) U) ty
             self.data.deinit();
         }
 
-        pub fn intoFuture(self: @This()) AsyncExecutor.Future(@This(), U) {
-            return AsyncExecutor.Future(@This(), U).init(
-                self,
-                poll,
-                deinit,
-            );
+        pub fn intoFuture(self: @This()) @This().Future {
+            return @This().Future.init(self);
         }
 
         pub fn poll(self: *@This(), waker: Waker) Poll(U) {
@@ -486,10 +428,6 @@ pub fn MapFuture(comptime T: type, comptime U: type, map_fn: fn (T.Result) U) ty
                 .ready => |v| .{ .ready = map_fn(v) },
                 .pending => .pending,
             };
-        }
-
-        pub fn map(self: @This(), comptime V: type, map_fn_: fn (U) V) MapFuture(@This(), V, map_fn_) {
-            return MapFuture(@This(), V, map_fn_).init(self);
         }
     };
 }
@@ -558,7 +496,12 @@ pub fn FSMFuture(comptime T: type) type {
         data: T,
 
         pub const Result = U;
-        pub const Future = AsyncExecutor.Future(@This(), U);
+        pub const Future = AsyncExecutor.Future(
+            @This(),
+            U,
+            poll,
+            if (no_unwind and !@hasDecl(T, "deinit")) null else deinit,
+        );
 
         pub fn init(data: T) @This() {
             return .{ .data = data };
@@ -571,16 +514,8 @@ pub fn FSMFuture(comptime T: type) type {
             }
         }
 
-        pub fn intoFuture(self: @This()) AsyncExecutor.Future(@This(), U) {
-            const cleanup_fn = if (no_unwind and !@hasDecl(T, "deinit"))
-                null
-            else
-                deinit;
-            return AsyncExecutor.Future(@This(), U).init(
-                self,
-                poll,
-                cleanup_fn,
-            );
+        pub fn intoFuture(self: @This()) @This().Future {
+            return @This().Future.init(self);
         }
 
         fn unwind(self: *@This(), reason: FSMUnwindReason) void {
@@ -706,10 +641,6 @@ pub fn FSMFuture(comptime T: type) type {
 
             const ret_f: fn (*T) U = @field(T, "__ret");
             return .{ .ready = ret_f(&self.data) };
-        }
-
-        pub fn map(self: @This(), comptime V: type, map_fn: fn (U) V) MapFuture(@This(), V, map_fn) {
-            return MapFuture(@This(), V, map_fn).init(self);
         }
     };
 }
