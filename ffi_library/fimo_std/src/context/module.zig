@@ -6,13 +6,18 @@ const AnyError = @import("../AnyError.zig");
 const Path = @import("../path.zig").Path;
 const Version = @import("../Version.zig");
 
+const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
+const Fallible = ProxyAsync.Fallible;
+
 const InstanceHandle = @import("module/InstanceHandle.zig");
 const LoadingSet = @import("module/LoadingSet.zig");
 const ModuleHandle = @import("module/ModuleHandle.zig");
 const System = @import("module/System.zig");
 
+const Async = @import("async.zig");
 const Context = @import("../context.zig");
 const ProxyContext = @import("proxy_context.zig");
+const ProxyAsync = @import("proxy_context/async.zig");
 const ProxyModule = @import("proxy_context/module.zig");
 
 const Self = @This();
@@ -97,9 +102,19 @@ pub fn removePseudoInstance(
 }
 
 /// Initializes a new empty loading set.
-pub fn addLoadingSet(self: *Self) Allocator.Error!*LoadingSet {
+pub fn addLoadingSet(self: *Self, err: *?AnyError) !EnqueuedFuture(Fallible(*LoadingSet)) {
     self.logTrace("creating new loading set", .{}, @src());
-    return LoadingSet.init(self.asContext());
+    var fut = LoadingSet.init(self.asContext()).intoFuture().map(
+        Fallible(*LoadingSet),
+        Fallible(*LoadingSet).Wrapper(anyerror),
+    ).intoFuture();
+    errdefer fut.deinit();
+    return Async.Task.initFuture(
+        @TypeOf(fut),
+        &self.asContext().@"async".sys,
+        &fut,
+        err,
+    );
 }
 
 /// Queries the loading set for a module.
@@ -818,14 +833,18 @@ const VTableImpl = struct {
     }
     fn addLoadingSet(
         ptr: *anyopaque,
-        set: **ProxyModule.LoadingSet,
+        fut: *EnqueuedFuture(Fallible(*ProxyModule.LoadingSet)),
     ) callconv(.C) c.FimoResult {
+        var err: ?AnyError = null;
         const ctx = Context.fromProxyPtr(ptr);
-        const s = ctx.module.addLoadingSet() catch |e| {
+        const f = ctx.module.addLoadingSet(&err) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
         };
-        set.* = @ptrCast(s);
+        fut.* = @bitCast(f);
         return AnyError.intoCResult(null);
     }
     fn queryLoadingSetModule(

@@ -4,6 +4,7 @@ const fimo_std = @import("fimo_std");
 const fimo_python_meta = @import("fimo_python_meta");
 
 const Context = fimo_std.Context;
+const Async = Context.Async;
 const Tracing = Context.Tracing;
 const Module = Context.Module;
 
@@ -28,6 +29,13 @@ pub fn main() !void {
     try ctx.tracing().registerThread(&err);
     defer ctx.tracing().unregisterThread(&err) catch unreachable;
 
+    defer Async.EventLoop.flushWithCurrentThread(ctx.@"async"(), &err) catch unreachable;
+    const event_loop = try Async.EventLoop.init(ctx.@"async"(), &err);
+    defer event_loop.join();
+
+    const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
+    defer async_ctx.deinit();
+
     var module_path = fimo_std.path.PathBuffer.init(allocator);
     defer module_path.deinit();
     try module_path.pushString("fimo_python");
@@ -36,7 +44,13 @@ pub fn main() !void {
     const path = try allocator.dupeZ(u8, module_path.asPath().raw);
     defer allocator.free(path);
 
-    const set = try Module.LoadingSet.init(ctx.module(), &err);
+    const set = blk: {
+        var fut = try Module.LoadingSet.init(ctx.module(), &err);
+        defer fut.deinit();
+
+        const s = async_ctx.awaitFuture(Async.Fallible(*Module.LoadingSet), &fut);
+        break :blk try s.unwrap(&err);
+    };
     try set.addModulesFromPath(
         ctx.module(),
         path,

@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Mutex = std.Thread.Mutex;
 
 const c = @import("../../c.zig");
 const heap = @import("../../heap.zig");
@@ -16,11 +15,13 @@ const SymbolRef = @import("SymbolRef.zig");
 const System = @import("System.zig");
 
 const Context = @import("../../context.zig");
+const Async = @import("../async.zig");
+const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyModule = @import("../proxy_context/module.zig");
 
 const Self = @This();
 
-mutex: Mutex = .{},
+mutex: Async.Mutex = .{},
 context: *Context,
 is_loading: bool = false,
 should_recreate_map: bool = false,
@@ -120,24 +121,71 @@ const ModuleInfo = struct {
 
 const Queue = std.ArrayListUnmanaged(*ModuleInfo);
 
-pub fn init(context: *Context) Allocator.Error!*Self {
+pub const InitOp = ProxyAsync.FSMFuture(struct {
+    context: *Context,
+    lock_fut: Async.Mutex.LockOp = undefined,
+    ret: __result = undefined,
+
+    pub const __result = Allocator.Error!*Self;
+
+    pub fn __set_err(self: *@This(), err: Allocator.Error) void {
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) __result {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        if (reason != .completed) self.context.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        self.lock_fut = self.context.module.sys.lockAsync();
+    }
+
+    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.lock_fut.deinit();
+    }
+
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
+        switch (self.lock_fut.poll(waker)) {
+            .pending => return .yield,
+            .ready => |v| {
+                try v;
+                return .next;
+            },
+        }
+    }
+
+    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.context.module.sys.unlock();
+    }
+
+    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!void {
+        _ = waker;
+        const module_load_path = try OwnedPathUnmanaged.initPath(
+            self.context.allocator,
+            self.context.module.sys.tmp_dir.path.asPath(),
+        );
+        errdefer module_load_path.deinit(self.context.allocator);
+
+        const set = try self.context.allocator.create(Self);
+        set.* = .{
+            .context = self.context,
+            .module_load_path = module_load_path,
+        };
+
+        self.ret = set;
+    }
+});
+
+pub fn init(context: *Context) InitOp {
     context.ref();
-    errdefer context.unref();
-
-    context.module.sys.lock();
-    defer context.module.sys.unlock();
-    const module_load_path = try OwnedPathUnmanaged.initPath(
-        context.allocator,
-        context.module.sys.tmp_dir.path.asPath(),
-    );
-    errdefer module_load_path.deinit(context.allocator);
-
-    const set = try context.allocator.create(Self);
-    set.* = .{
-        .context = context,
-        .module_load_path = module_load_path,
-    };
-    return set;
+    return InitOp.init(.{ .context = context });
 }
 
 pub fn deinit(self: *Self) void {

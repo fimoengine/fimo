@@ -7,6 +7,7 @@ const Path = fimo_std.path.Path;
 const Context = fimo_std.Context;
 const Tracing = Context.Tracing;
 const Module = Context.Module;
+const Async = Context.Async;
 
 const A0 = Module.Symbol{
     .name = "a_export_0",
@@ -199,7 +200,20 @@ pub fn main() !void {
     try ctx.tracing().registerThread(&err);
     defer ctx.tracing().unregisterThread(&err) catch unreachable;
 
-    const set = try Module.LoadingSet.init(ctx.module(), &err);
+    defer Async.EventLoop.flushWithCurrentThread(ctx.@"async"(), &err) catch unreachable;
+    const event_loop = try Async.EventLoop.init(ctx.@"async"(), &err);
+    defer event_loop.join();
+
+    const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
+    defer async_ctx.deinit();
+
+    const set = blk: {
+        var fut = try Module.LoadingSet.init(ctx.module(), &err);
+        defer fut.deinit();
+
+        const s = async_ctx.awaitFuture(Async.Fallible(*Module.LoadingSet), &fut);
+        break :blk try s.unwrap(&err);
+    };
     try set.addModulesFromPath(
         ctx.module(),
         null,

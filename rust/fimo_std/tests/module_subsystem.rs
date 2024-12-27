@@ -4,6 +4,7 @@ use fimo_std::{
     error::Error,
     export_module,
     module::*,
+    r#async::{BlockingContext, EventLoop},
     tracing::{default_subscriber, Config, Level, ThreadAccess},
 };
 
@@ -184,39 +185,44 @@ fn load_modules() -> Result<(), Error> {
         .build()?;
 
     let _access = ThreadAccess::new(&context)?;
+    let _event_loop = EventLoop::new(*context)?;
 
-    LoadingSet::with_loading_set(&*context, |ctx, set| {
-        set.append_modules(ctx, None, |export| {
-            emit_info!(ctx, "{export}");
-            LoadingFilterRequest::Load
-        })?;
-        Ok(LoadingSetRequest::Load)
-    })?;
+    let blocking = BlockingContext::new(*context)?;
+    blocking.block_on(async move {
+        LoadingSet::with_loading_set(&*context, |ctx, set| {
+            set.append_modules(ctx, None, |export| {
+                emit_info!(ctx, "{export}");
+                LoadingFilterRequest::Load
+            })?;
+            Ok(LoadingSetRequest::Load)
+        })?
+        .await?;
 
-    let module = PseudoModule::new(&*context)?;
-    let a = ModuleInfo::find_by_name(&*context, c"a")?;
-    let b = ModuleInfo::find_by_name(&*context, c"b")?;
-    let c = ModuleInfo::find_by_name(&*context, c"c")?;
-    assert!(module.module_info().is_loaded());
-    assert!(a.is_loaded());
-    assert!(b.is_loaded());
-    assert!(c.is_loaded());
+        let module = PseudoModule::new(&*context)?;
+        let a = ModuleInfo::find_by_name(&*context, c"a")?;
+        let b = ModuleInfo::find_by_name(&*context, c"b")?;
+        let c = ModuleInfo::find_by_name(&*context, c"c")?;
+        assert!(module.module_info().is_loaded());
+        assert!(a.is_loaded());
+        assert!(b.is_loaded());
+        assert!(c.is_loaded());
 
-    module.acquire_dependency(&a)?;
-    module.acquire_dependency(&b)?;
-    module.acquire_dependency(&c)?;
+        module.acquire_dependency(&a)?;
+        module.acquire_dependency(&b)?;
+        module.acquire_dependency(&c)?;
 
-    let a_0 = module.load_symbol::<AExport0>()?;
-    assert_eq!(*a_0, 5);
+        let a_0 = module.load_symbol::<AExport0>()?;
+        assert_eq!(*a_0, 5);
 
-    assert!(module.load_symbol::<b::BExport0>().is_err());
-    module.include_namespace(b::NamespaceItem::NAME)?;
-    assert!(module.load_symbol::<b::BExport0>().is_ok());
+        assert!(module.load_symbol::<b::BExport0>().is_err());
+        module.include_namespace(b::NamespaceItem::NAME)?;
+        assert!(module.load_symbol::<b::BExport0>().is_ok());
 
-    drop(module);
-    assert!(!a.is_loaded());
-    assert!(!b.is_loaded());
-    assert!(!c.is_loaded());
+        drop(module);
+        assert!(!a.is_loaded());
+        assert!(!b.is_loaded());
+        assert!(!c.is_loaded());
 
-    Ok(())
+        Ok(())
+    })
 }

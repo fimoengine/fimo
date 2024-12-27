@@ -9,6 +9,7 @@
 #include <fimo_std/context.h>
 #include <fimo_std/error.h>
 #include <fimo_std/version.h>
+#include <fimo_std/async.h>
 
 #include <fimo_std/impl/module.h>
 
@@ -1263,6 +1264,9 @@ typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo *arg0, voi
  */
 typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, void *arg1);
 
+typedef FIMO_ASYNC_FALLIBLE(FimoModuleLoadingSet*) FimoModuleLoadingSetNewFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetNewFutureResult) FimoModuleLoadingSetNewFuture;
+
 /**
  * VTable of the module subsystem.
  *
@@ -1311,7 +1315,7 @@ typedef struct FimoModuleVTableV0 {
      *
      * @return Status code.
      */
-    FimoResult (*set_new)(void *ctx, FimoModuleLoadingSet **set);
+    FimoResult (*set_new)(void *ctx, FimoModuleLoadingSetNewFuture *fut);
     /**
      * Checks whether a module set contains a module.
      *

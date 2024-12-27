@@ -1,9 +1,10 @@
-use core::{ffi::CStr, marker::PhantomData};
+use core::{ffi::CStr, future::Future, marker::PhantomData};
 
 use crate::{
     bindings,
     error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
+    r#async::{EnqueuedFuture, Fallible},
     version::Version,
 };
 
@@ -41,10 +42,13 @@ impl LoadingSet<'_> {
     /// If the closure `f` return [`LoadingSetRequest::Load`] then the module backend will start
     /// loading the modules contained in the set. The loading of the set can be dismissed by
     /// returning [`LoadingSetRequest::Dismiss`] or an error from the closure.
-    pub fn with_loading_set<T: ModuleSubsystem>(
+    pub fn with_loading_set<
+        T: ModuleSubsystem,
+        U: FnOnce(&T, &Self) -> Result<LoadingSetRequest, Error>,
+    >(
         ctx: &T,
-        f: impl FnOnce(&T, &Self) -> Result<LoadingSetRequest, Error>,
-    ) -> error::Result {
+        f: U,
+    ) -> Result<impl Future<Output = error::Result> + use<'_, T, U>, Error> {
         // Safety: Is always set.
         let f_ = unsafe { ctx.view().vtable().module_v0.set_new.unwrap_unchecked() };
 
@@ -54,31 +58,40 @@ impl LoadingSet<'_> {
                 *error = f_(ctx.view().data(), loading_set.as_mut_ptr());
             })?;
 
-            LoadingSet::from_ffi(x)
+            std::mem::transmute::<
+                bindings::FimoModuleLoadingSetNewFuture,
+                EnqueuedFuture<Fallible<*mut bindings::FimoModuleLoadingSet>>,
+            >(x)
         };
 
-        let request = f(ctx, &loading_set);
-        if matches!(request, Ok(LoadingSetRequest::Dismiss) | Err(_)) {
-            // Safety: Is always set.
-            let f_ = unsafe { ctx.view().vtable().module_v0.set_dismiss.unwrap_unchecked() };
+        Ok(async move {
+            let loading_set = loading_set.await.unwrap()?;
+            // Safety: Is safe.
+            let loading_set = unsafe { LoadingSet::from_ffi(loading_set) };
 
-            // Safety: The ffi call is safe.
-            let error = unsafe { f_(ctx.view().data(), loading_set.into_ffi()) };
-            // Safety:
-            unsafe {
-                to_result(error)?;
+            let request = f(ctx, &loading_set);
+            if matches!(request, Ok(LoadingSetRequest::Dismiss) | Err(_)) {
+                // Safety: Is always set.
+                let f_ = unsafe { ctx.view().vtable().module_v0.set_dismiss.unwrap_unchecked() };
+
+                // Safety: The ffi call is safe.
+                let error = unsafe { f_(ctx.view().data(), loading_set.into_ffi()) };
+                // Safety:
+                unsafe {
+                    to_result(error)?;
+                }
+                request?;
+                Ok(())
+            } else {
+                // Safety: Is always set.
+                let f_ = unsafe { ctx.view().vtable().module_v0.set_finish.unwrap_unchecked() };
+
+                // Safety: The ffi call is safe.
+                let error = unsafe { f_(ctx.view().data(), loading_set.into_ffi()) };
+                // Safety:
+                unsafe { to_result(error) }
             }
-            request?;
-            Ok(())
-        } else {
-            // Safety: Is always set.
-            let f_ = unsafe { ctx.view().vtable().module_v0.set_finish.unwrap_unchecked() };
-
-            // Safety: The ffi call is safe.
-            let error = unsafe { f_(ctx.view().data(), loading_set.into_ffi()) };
-            // Safety:
-            unsafe { to_result(error) }
-        }
+        })
     }
 
     /// Checks if the `LoadingSet` contains the module.

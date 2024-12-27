@@ -3,7 +3,7 @@
 use crate::{
     bindings,
     context::{private::SealedContext, ContextView},
-    error::{to_result_indirect, to_result_indirect_in_place, Error},
+    error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
 };
 use std::{
@@ -229,6 +229,48 @@ unsafe impl Sync for OpaqueState {}
 
 /// Type of futures that have been enqueued.
 pub type EnqueuedFuture<R> = Future<OpaqueState, R>;
+
+/// Result of a fallible future.
+#[repr(C)]
+#[derive(Debug)]
+pub struct Fallible<T> {
+    result: bindings::FimoResult,
+    value: MaybeUninit<T>,
+}
+
+impl<T> Fallible<T> {
+    /// Constructs a new instance from a value.
+    pub fn new(value: T) -> Self {
+        Self {
+            result: Ok::<(), Error>(()).into_ffi(),
+            value: MaybeUninit::new(value),
+        }
+    }
+
+    /// Constructs a new instance from a result.
+    pub fn new_result(res: Result<T, Error>) -> Self {
+        match res {
+            Ok(v) => Self {
+                result: Ok::<(), Error>(()).into_ffi(),
+                value: MaybeUninit::new(v),
+            },
+            Err(err) => Self {
+                result: err.into_ffi(),
+                value: MaybeUninit::uninit(),
+            },
+        }
+    }
+
+    /// Extracts the result.
+    pub fn unwrap(self) -> Result<T, Error> {
+        // Safety: Is initialized.
+        match unsafe { to_result(self.result) } {
+            // Safety: Must be initialized.
+            Ok(_) => Ok(unsafe { self.value.assume_init() }),
+            Err(e) => Err(e),
+        }
+    }
+}
 
 /// A future from the async subsystem.
 #[repr(C)]

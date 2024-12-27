@@ -164,6 +164,15 @@ typedef struct FimoAsyncBlockingContext {
 #define FIMO_ASYNC_ENQUEUED_FUTURE(R) FIMO_ASYNC_FUTURE(void*, R)
 
 /**
+ * Defines a pair of a FimoResult and a T.
+ */
+#define FIMO_ASYNC_FALLIBLE(T)    \
+    struct {                      \
+        FimoResult result;        \
+        T value;                  \
+    }
+
+/**
  * An enqueued future with an unknown result type.
  */
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(void) FimoAsyncOpaqueFuture;

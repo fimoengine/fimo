@@ -9,9 +9,13 @@ const Path = @import("../../path.zig").Path;
 const Version = @import("../../Version.zig");
 const Context = @import("../proxy_context.zig");
 
+const EnqueuedFuture = Async.EnqueuedFuture;
+const Fallible = Async.Fallible;
+
 context: Context,
 
 const Module = @This();
+const Async = @import("async.zig");
 
 pub const DebugInfo = @import("module/DebugInfo.zig");
 pub const exports = @import("module/exports.zig");
@@ -1351,11 +1355,11 @@ pub const LoadingSet = opaque {
     /// suitable loading order. To facilitate the loading, we load
     /// multiple modules together, and automatically determine an
     /// appropriate load order for all modules inside the module set.
-    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!*LoadingSet {
-        var set: *LoadingSet = undefined;
-        const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &set);
+    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!EnqueuedFuture(Fallible(*LoadingSet)) {
+        var fut: EnqueuedFuture(Fallible(*LoadingSet)) = undefined;
+        const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &fut);
         try AnyError.initChecked(err, result);
-        return set;
+        return fut;
     }
 
     /// Destroys the module set without loading any modules.
@@ -1610,7 +1614,10 @@ pub const VTable = extern struct {
         instance: *const PseudoInstance,
         context: *c.FimoContext,
     ) callconv(.C) c.FimoResult,
-    set_new: *const fn (ctx: *anyopaque, set: **LoadingSet) callconv(.C) c.FimoResult,
+    set_new: *const fn (
+        ctx: *anyopaque,
+        fut: *EnqueuedFuture(Fallible(*LoadingSet)),
+    ) callconv(.C) c.FimoResult,
     set_has_module: *const fn (
         ctx: *anyopaque,
         set: *LoadingSet,
