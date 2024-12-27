@@ -92,7 +92,7 @@ impl Duration {
         let mut high = 0;
         // Safety: FFI call is safe.
         let low = unsafe { bindings::fimo_duration_as_millis(&self.0, &mut high) };
-        (high as u128) << 64 | (low as u128)
+        ((high as u128) << 64) | (low as u128)
     }
 
     /// Returns the whole microseconds in a duration.
@@ -100,7 +100,7 @@ impl Duration {
         let mut high = 0;
         // Safety: FFI call is safe.
         let low = unsafe { bindings::fimo_duration_as_micros(&self.0, &mut high) };
-        (high as u128) << 64 | (low as u128)
+        ((high as u128) << 64) | (low as u128)
     }
 
     /// Returns the whole nanoseconds in a duration.
@@ -108,7 +108,7 @@ impl Duration {
         let mut high = 0;
         // Safety: FFI call is safe.
         let low = unsafe { bindings::fimo_duration_as_nanos(&self.0, &mut high) };
-        (high as u128) << 64 | (low as u128)
+        ((high as u128) << 64) | (low as u128)
     }
 
     /// Returns `Some(d)` where `d` is the duration `self + duration` if `d` can be represented as
