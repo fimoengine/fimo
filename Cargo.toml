@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["modules/fimo_tasks_impl", "rust/*"]
+members = ["rust/*"]
 
 [workspace.package]
 version = "0.1.0"
