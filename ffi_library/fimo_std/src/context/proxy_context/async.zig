@@ -487,9 +487,19 @@ pub fn FSMFuture(comptime T: type) type {
     for (std.meta.declarations(T)) |decl| {
         if (std.mem.startsWith(u8, decl.name, "__state")) num_states += 1;
     }
-    const U = @field(T, "__result");
 
-    const no_unwind = @hasDecl(T, "__no_unwind");
+    const ret_f = @field(T, "__ret");
+    const U = @typeInfo(@TypeOf(ret_f)).@"fn".return_type.?;
+
+    const no_unwind: bool = if (@hasDecl(T, "__no_unwind"))
+        @field(T, "__no_unwind")
+    else
+        false;
+
+    const no_abort: bool = if (@hasDecl(T, "__no_abort"))
+        @field(T, "__no_abort")
+    else
+        false;
 
     return struct {
         state: FSMState(T) = 0,
@@ -518,7 +528,12 @@ pub fn FSMFuture(comptime T: type) type {
             return @This().Future.init(self);
         }
 
-        fn unwind(self: *@This(), reason: FSMUnwindReason) void {
+        fn unwind(self: *@This(), comptime reason: FSMUnwindReason) void {
+            if (no_abort and reason == .abort) {
+                if (self.state != 0 and self.state != num_states)
+                    @panic("abort not supported by the future");
+            }
+
             if (!no_unwind and num_states != 0) {
                 sm: switch (self.state) {
                     inline 0...num_states - 1 => |i| {
@@ -639,7 +654,6 @@ pub fn FSMFuture(comptime T: type) type {
                 }
             }
 
-            const ret_f: fn (*T) U = @field(T, "__ret");
             return .{ .ready = ret_f(&self.data) };
         }
     };

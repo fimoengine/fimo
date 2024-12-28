@@ -115,9 +115,8 @@ const WaitQueue = struct {
 pub const LockOp = ProxyAsync.FSMFuture(struct {
     mutex: *Self,
     allocator: Allocator,
-    ret: __result = undefined,
+    ret: Allocator.Error!void = undefined,
 
-    pub const __result = Allocator.Error!void;
     const __op = ProxyAsync.FSMOp;
     const __poll_op = Allocator.Error!__op;
 
@@ -125,7 +124,7 @@ pub const LockOp = ProxyAsync.FSMFuture(struct {
         self.ret = err;
     }
 
-    pub fn __ret(self: *@This()) __result {
+    pub fn __ret(self: *@This()) Allocator.Error!void {
         return self.ret;
     }
 

@@ -124,15 +124,15 @@ const Queue = std.ArrayListUnmanaged(*ModuleInfo);
 pub const InitOp = ProxyAsync.FSMFuture(struct {
     context: *Context,
     lock_fut: Async.Mutex.LockOp = undefined,
-    ret: __result = undefined,
+    ret: Allocator.Error!*Self = undefined,
 
-    pub const __result = Allocator.Error!*Self;
+    pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), err: Allocator.Error) void {
         self.ret = err;
     }
 
-    pub fn __ret(self: *@This()) __result {
+    pub fn __ret(self: *@This()) Allocator.Error!*Self {
         return self.ret;
     }
 
