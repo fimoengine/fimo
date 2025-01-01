@@ -248,7 +248,7 @@ impl<T> Fallible<T> {
     }
 
     /// Constructs a new instance from a result.
-    pub fn new_result(res: Result<T, Error>) -> Self {
+    pub fn new_result(res: Result<T, Error<dyn Send + Sync>>) -> Self {
         match res {
             Ok(v) => Self {
                 result: Ok::<(), Error>(()).into_ffi(),
@@ -262,15 +262,22 @@ impl<T> Fallible<T> {
     }
 
     /// Extracts the result.
-    pub fn unwrap(self) -> Result<T, Error> {
+    pub fn unwrap(self) -> Result<T, Error<dyn Send + Sync>> {
         // Safety: Is initialized.
         match unsafe { to_result(self.result) } {
             // Safety: Must be initialized.
             Ok(_) => Ok(unsafe { self.value.assume_init() }),
-            Err(e) => Err(e),
+            // Safety: We know that the error is Send + Sync
+            Err(e) => Err(unsafe { std::mem::transmute::<Error, Error<dyn Send + Sync>>(e) }),
         }
     }
 }
+
+// Safety:
+unsafe impl<T: Send> Send for Fallible<T> {}
+
+// Safety:
+unsafe impl<T: Sync> Sync for Fallible<T> {}
 
 /// A future from the async subsystem.
 #[repr(C)]

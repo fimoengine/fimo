@@ -413,14 +413,14 @@ fn is_valid_error_code(errnum: bindings::FimoErrorCode) -> bool {
         .contains(&errnum.0)
 }
 
-impl fmt::Debug for Error {
+impl<T: ?Sized> fmt::Debug for Error<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = self.name();
         f.debug_tuple("Error").field(&&*name).finish()
     }
 }
 
-impl fmt::Display for Error {
+impl<T: ?Sized> fmt::Display for Error<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let description = self.description();
         write!(f, "{}", description.to_string_lossy())

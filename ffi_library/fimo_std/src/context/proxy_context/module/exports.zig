@@ -128,7 +128,7 @@ pub const Export = extern struct {
     modifiers_count: u32 = 0,
     constructor: ?*const fn (
         ctx: *const Module.OpaqueInstance,
-        set: *Module.LoadingSet,
+        set: Module.LoadingSet,
         data: *?*anyopaque,
     ) callconv(.C) c.FimoResult = null,
     destructor: ?*const fn (
@@ -238,7 +238,7 @@ pub const Builder = struct {
     stateType: type = void,
     constructor: ?*const fn (
         ctx: *const Module.OpaqueInstance,
-        set: *Module.LoadingSet,
+        set: Module.LoadingSet,
         data: *?*anyopaque,
     ) callconv(.C) c.FimoResult = null,
     destructor: ?*const fn (
@@ -304,18 +304,18 @@ pub const Builder = struct {
             return struct {
                 const InitFn = fn (
                     ctx: *const Module.OpaqueInstance,
-                    set: *Module.LoadingSet,
+                    set: Module.LoadingSet,
                 ) anyerror!void;
                 const DeinitFn = fn (ctx: *const Module.OpaqueInstance) void;
                 fn wrapInit(comptime f: InitFn) fn (
                     ctx: *const Module.OpaqueInstance,
-                    set: *Module.LoadingSet,
+                    set: Module.LoadingSet,
                     data: *?*anyopaque,
                 ) callconv(.C) c.FimoResult {
                     return struct {
                         fn wrapper(
                             ctx: *const Module.OpaqueInstance,
-                            set: *Module.LoadingSet,
+                            set: Module.LoadingSet,
                             data: *?*anyopaque,
                         ) callconv(.C) c.FimoResult {
                             f(ctx, set) catch |err| {
@@ -347,18 +347,18 @@ pub const Builder = struct {
             return struct {
                 const InitFn = fn (
                     ctx: *const Module.OpaqueInstance,
-                    set: *Module.LoadingSet,
+                    set: Module.LoadingSet,
                 ) anyerror!*T;
                 const DeinitFn = fn (ctx: *const Module.OpaqueInstance, state: *T) void;
                 fn wrapInit(comptime f: InitFn) fn (
                     ctx: *const Module.OpaqueInstance,
-                    set: *Module.LoadingSet,
+                    set: Module.LoadingSet,
                     data: *?*anyopaque,
                 ) callconv(.C) c.FimoResult {
                     return struct {
                         fn wrapper(
                             ctx: *const Module.OpaqueInstance,
-                            set: *Module.LoadingSet,
+                            set: Module.LoadingSet,
                             data: *?*anyopaque,
                         ) callconv(.C) c.FimoResult {
                             data.* = f(ctx, set) catch |err| {

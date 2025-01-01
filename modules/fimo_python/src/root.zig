@@ -68,7 +68,7 @@ const State = struct {
     const PyInterpreterConfig = Python.PyInterpreterConfig;
     const PyInterpreterState_Main = Python.PyInterpreterState_Main;
 
-    fn init(octx: *const Module.OpaqueInstance, set: *Module.LoadingSet) !*State {
+    fn init(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !*State {
         const ctx: *const Instance = @alignCast(@ptrCast(octx));
         ctx.context().tracing().emitTraceSimple("initializing fimo_python", .{}, @src());
         _ = set;

@@ -169,6 +169,18 @@ pub const BlockingContext = extern struct {
             }
         }
     }
+
+    /// Blocks the current thread until the future is completed.
+    ///
+    /// The function takes ownership of the future.
+    pub fn awaitFutureDeinit(self: BlockingContext, comptime T: type, future: anytype) T {
+        var fut = future;
+        const res = self.awaitFuture(T, &fut);
+        if (std.meta.hasMethod(@TypeOf(future), "deinit")) {
+            fut.deinit();
+        }
+        return res;
+    }
 };
 
 /// Result of poll operation.
@@ -225,7 +237,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
         }
 
         /// Maps the result of the future to another type.
-        pub fn map(self: @This(), comptime V: type, map_fn: fn (U) V) MapFuture(@This(), V, map_fn) {
+        pub fn map(self: @This(), comptime V: type, map_fn: anytype) MapFuture(@This(), V, map_fn) {
             return MapFuture(@This(), V, map_fn).init(self);
         }
 
@@ -404,7 +416,11 @@ pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
 }
 
 /// A future that transforms the output type of another future.
-pub fn MapFuture(comptime T: type, comptime U: type, map_fn: fn (T.Result) U) type {
+pub fn MapFuture(comptime T: type, comptime U: type, map_fn: anytype) type {
+    const MapFn = @TypeOf(map_fn);
+    std.debug.assert(@typeInfo(MapFn).@"fn".params.len == 1);
+    std.debug.assert(@typeInfo(MapFn).@"fn".return_type.? == U);
+
     return struct {
         data: T,
 
@@ -505,6 +521,7 @@ pub fn FSMFuture(comptime T: type) type {
         state: FSMState(T) = 0,
         data: T,
 
+        pub const Data = T;
         pub const Result = U;
         pub const Future = AsyncExecutor.Future(
             @This(),
@@ -596,8 +613,12 @@ pub fn FSMFuture(comptime T: type) type {
 
                         const op = if (@typeInfo(@TypeOf(result)) == .error_union)
                             result catch |err| {
+                                const tr = @errorReturnTrace();
                                 const set_err = @field(T, "__set_err");
-                                set_err(&self.data, err);
+                                if (@typeInfo(@TypeOf(set_err)).@"fn".params.len == 2)
+                                    set_err(&self.data, err)
+                                else if (@typeInfo(@TypeOf(set_err)).@"fn".params.len == 3)
+                                    set_err(&self.data, tr, err);
                                 self.state = i;
                                 self.unwind(.err);
                                 break :sm;

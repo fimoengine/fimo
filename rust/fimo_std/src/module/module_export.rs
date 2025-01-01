@@ -460,7 +460,7 @@ impl core::fmt::Display for ModifierValue<'_> {
 /// Module constructor.
 pub type ModuleConstructor = unsafe extern "C" fn(
     module: *const bindings::FimoModule,
-    set: *mut bindings::FimoModuleLoadingSet,
+    set: bindings::FimoModuleLoadingSet,
     state: *mut *mut std::ffi::c_void,
 ) -> bindings::FimoResult;
 

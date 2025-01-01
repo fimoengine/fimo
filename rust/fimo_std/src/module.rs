@@ -105,7 +105,7 @@ pub trait ModuleConstructor<T: Module> {
     /// request more modules.
     fn construct<'a>(
         module: ConstructorModule<'a, T>,
-        set: LoadingSet<'_>,
+        set: LoadingSetView<'_>,
     ) -> Result<&'a mut <T as Module>::Data, Error>;
 
     /// Destroys the module data.
@@ -129,7 +129,7 @@ where
 {
     fn construct<'a>(
         module: ConstructorModule<'a, T>,
-        _set: LoadingSet<'_>,
+        _set: LoadingSetView<'_>,
     ) -> Result<&'a mut T::Data, Error> {
         // Check that the version is compatible.
         let _ = module.unwrap()?;
@@ -899,7 +899,7 @@ macro_rules! export_module_private_data {
     (constructor $mod_ident:ident $($constructor:path)?) => {{
         unsafe extern "C" fn construct_module<T, C>(
             module: *const $crate::bindings::FimoModule,
-            set: *mut $crate::bindings::FimoModuleLoadingSet,
+            set: $crate::bindings::FimoModuleLoadingSet,
             data: *mut *mut core::ffi::c_void,
         ) -> $crate::bindings::FimoResult
         where
@@ -962,8 +962,8 @@ pub mod c_ffi {
         error::Error,
         ffi::FFITransferable,
         module::{
-            DynamicExport, LoadingSet, Module, ModuleConstructor, ParameterType, ParameterValue,
-            PartialModule, PreModule,
+            DynamicExport, LoadingSetView, Module, ModuleConstructor, ParameterType,
+            ParameterValue, PartialModule, PreModule,
         },
         version::Version,
     };
@@ -1176,7 +1176,7 @@ pub mod c_ffi {
 
     pub unsafe fn construct_module<T, C>(
         module: *const bindings::FimoModule,
-        set: *mut bindings::FimoModuleLoadingSet,
+        set: bindings::FimoModuleLoadingSet,
         data: *mut *mut core::ffi::c_void,
     ) -> Result<(), Error>
     where
@@ -1187,7 +1187,7 @@ pub mod c_ffi {
             // Safety: See above.
             unsafe {
                 let module = PreModule::<T>::from_ffi(module);
-                let set = LoadingSet::from_ffi(set);
+                let set = LoadingSetView::from_ffi(set);
                 let context = module.context();
                 crate::panic::with_panic_context(context, |_| {
                     match C::construct(module.into(), set) {

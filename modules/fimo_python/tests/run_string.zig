@@ -41,30 +41,29 @@ pub fn main() !void {
     try module_path.pushString("fimo_python");
     try module_path.pushString("module.fimo_module");
 
-    const path = try allocator.dupeZ(u8, module_path.asPath().raw);
-    defer allocator.free(path);
+    const set = try async_ctx.awaitFutureDeinit(
+        Async.Fallible(Module.LoadingSet),
+        try Module.LoadingSet.init(ctx.module(), &err),
+    ).unwrap(&err);
+    defer set.unref();
 
-    const set = blk: {
-        var fut = try Module.LoadingSet.init(ctx.module(), &err);
-        defer fut.deinit();
-
-        const s = async_ctx.awaitFuture(Async.Fallible(*Module.LoadingSet), &fut);
-        break :blk try s.unwrap(&err);
-    };
-    try set.addModulesFromPath(
-        ctx.module(),
-        path,
-        &{},
-        struct {
-            fn f(@"export": *const Module.Export, data: *const void) bool {
-                _ = @"export";
-                _ = data;
-                return true;
-            }
-        }.f,
-        &err,
-    );
-    try set.commit(ctx.module(), &err);
+    try async_ctx.awaitFutureDeinit(
+        Async.Fallible(void),
+        try set.addModulesFromPath(
+            module_path.asPath(),
+            &{},
+            struct {
+                fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
+                    _ = @"export";
+                    _ = data;
+                    return .load;
+                }
+            }.f,
+            null,
+            &err,
+        ),
+    ).unwrap(&err);
+    try async_ctx.awaitFutureDeinit(Async.Fallible(void), try set.commit(&err)).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
     defer (instance.deinit(&err) catch unreachable).unref();

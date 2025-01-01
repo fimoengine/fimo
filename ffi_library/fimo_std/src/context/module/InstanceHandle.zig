@@ -747,12 +747,10 @@ pub fn initExportedInstance(
     // Init instance data.
     if (@"export".constructor) |constructor| {
         inner.unlock();
-        set.unlock();
         sys.mutex.unlock();
         var data: ?*anyopaque = undefined;
-        const result = constructor(instance, @ptrCast(set), &data);
+        const result = constructor(instance, set.asProxySet(), &data);
         sys.mutex.lock();
-        set.lock();
         _ = instance_handle.lock();
         instance.data = @ptrCast(data);
         try AnyError.initChecked(err, result);

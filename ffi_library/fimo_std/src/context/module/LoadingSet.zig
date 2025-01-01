@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const AnyError = @import("../../AnyError.zig");
 const c = @import("../../c.zig");
 const heap = @import("../../heap.zig");
 const Path = @import("../../path.zig").Path;
@@ -8,6 +9,7 @@ const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
 const Version = @import("../../Version.zig");
 
 const graph = @import("../graph.zig");
+const RefCount = @import("../RefCount.zig");
 
 const InstanceHandle = @import("InstanceHandle.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
@@ -19,11 +21,14 @@ const Async = @import("../async.zig");
 const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyModule = @import("../proxy_context/module.zig");
 
+const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
+const FSMFuture = ProxyAsync.FSMFuture;
+const Fallible = ProxyAsync.Fallible;
+
 const Self = @This();
 
-mutex: Async.Mutex = .{},
+refcount: RefCount = .{},
 context: *Context,
-is_loading: bool = false,
 should_recreate_map: bool = false,
 module_load_path: OwnedPathUnmanaged,
 modules: std.StringArrayHashMapUnmanaged(ModuleInfo) = .{},
@@ -38,6 +43,7 @@ pub const Callback = struct {
     data: ?*anyopaque,
     on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.C) void,
     on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) void,
+    on_abort: ?*const fn (data: ?*anyopaque) callconv(.C) void,
 };
 
 const ModuleInfo = struct {
@@ -91,7 +97,7 @@ const ModuleInfo = struct {
         self.handle.unref();
     }
 
-    pub fn appendCallback(self: *ModuleInfo, callback: Callback) Allocator.Error!void {
+    fn appendCallback(self: *ModuleInfo, callback: Callback) Allocator.Error!void {
         switch (self.status) {
             .unloaded => try self.callbacks.append(self.allocator, callback),
             .loaded => callback.on_success(self.info.?, callback.data),
@@ -121,75 +127,16 @@ const ModuleInfo = struct {
 
 const Queue = std.ArrayListUnmanaged(*ModuleInfo);
 
-pub const InitOp = ProxyAsync.FSMFuture(struct {
-    context: *Context,
-    lock_fut: Async.Mutex.LockOp = undefined,
-    ret: Allocator.Error!*Self = undefined,
-
-    pub const __no_abort = true;
-
-    pub fn __set_err(self: *@This(), err: Allocator.Error) void {
-        self.ret = err;
-    }
-
-    pub fn __ret(self: *@This()) Allocator.Error!*Self {
-        return self.ret;
-    }
-
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        if (reason != .completed) self.context.unref();
-    }
-
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
-        _ = waker;
-        self.lock_fut = self.context.module.sys.lockAsync();
-    }
-
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.context.module.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!void {
-        _ = waker;
-        const module_load_path = try OwnedPathUnmanaged.initPath(
-            self.context.allocator,
-            self.context.module.sys.tmp_dir.path.asPath(),
-        );
-        errdefer module_load_path.deinit(self.context.allocator);
-
-        const set = try self.context.allocator.create(Self);
-        set.* = .{
-            .context = self.context,
-            .module_load_path = module_load_path,
-        };
-
-        self.ret = set;
-    }
-});
-
-pub fn init(context: *Context) InitOp {
-    context.ref();
-    return InitOp.init(.{ .context = context });
+pub fn init(context: *Context, err: *?AnyError) !EnqueuedFuture(Fallible(ProxyModule.LoadingSet)) {
+    return InitOp.Data.init(context, err);
 }
 
-pub fn deinit(self: *Self) void {
-    std.debug.assert(!self.is_loading);
+fn ref(self: *@This()) void {
+    self.refcount.ref();
+}
+
+fn unref(self: *@This()) void {
+    if (self.refcount.unref() == .noop) return;
     while (self.modules.popOrNull()) |*entry| {
         var value = entry.value;
         self.context.allocator.free(entry.key);
@@ -207,25 +154,24 @@ pub fn deinit(self: *Self) void {
     context.unref();
 }
 
-pub fn fromProxySet(set: *ProxyModule.LoadingSet) *Self {
-    return @alignCast(@ptrCast(set));
+pub fn asProxySet(self: *Self) ProxyModule.LoadingSet {
+    return .{
+        .data = self,
+        .vtable = &vtable,
+    };
 }
 
-pub fn lock(self: *Self) void {
-    self.mutex.lock();
+fn asSys(self: *Self) *System {
+    return &self.context.module.sys;
 }
 
-pub fn unlock(self: *Self) void {
-    self.mutex.unlock();
-}
-
-fn addModule(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
+fn addModuleInfo(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
     const name = try self.context.allocator.dupe(u8, module_info.@"export".getName());
     errdefer self.context.allocator.free(name);
     try self.modules.put(self.context.allocator, name, module_info);
 }
 
-pub fn getModule(self: *const Self, name: []const u8) ?*ModuleInfo {
+fn getModuleInfo(self: *const Self, name: []const u8) ?*ModuleInfo {
     return self.modules.getPtr(name);
 }
 
@@ -253,23 +199,23 @@ fn removeSymbol(self: *Self, name: []const u8, namespace: []const u8) void {
     entry.value.deinit(self.context.allocator);
 }
 
-pub fn getSymbolAny(self: *const Self, name: []const u8, ns: []const u8) ?*SymbolRef {
+fn getSymbolAny(self: *const Self, name: []const u8, ns: []const u8) ?*SymbolRef {
     return self.symbols.getPtr(.{ .name = @constCast(name), .namespace = @constCast(ns) });
 }
 
-pub fn getSymbol(self: *const Self, name: []const u8, ns: []const u8, version: Version) ?*SymbolRef {
+fn getSymbol(self: *const Self, name: []const u8, ns: []const u8, version: Version) ?*SymbolRef {
     const symbol = self.getSymbolAny(name, ns) orelse return null;
     if (!symbol.version.isCompatibleWith(version)) return null;
     return symbol;
 }
 
-fn addModuleFromExport(
+fn addModuleInner(
     self: *Self,
     module_handle: *ModuleHandle,
     @"export": *const ProxyModule.Export,
     owner: ?*const ProxyModule.OpaqueInstance,
 ) !void {
-    if (self.getModule(@"export".getName()) != null) return error.Duplicate;
+    if (self.getModuleInfo(@"export".getName()) != null) return error.Duplicate;
     for (@"export".getSymbolExports()) |exp| {
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
@@ -337,7 +283,7 @@ fn addModuleFromExport(
         owner,
     );
     errdefer module_info.deinit();
-    try self.addModule(module_info);
+    try self.addModuleInfo(module_info);
     self.should_recreate_map = true;
 }
 
@@ -550,29 +496,21 @@ fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) call
     return true;
 }
 
-pub fn addModuleDynamic(
+fn addModule(
     self: *Self,
     owner_inner: *InstanceHandle.Inner,
     @"export": *const ProxyModule.Export,
 ) !void {
     try validate_export(&self.context.module.sys, @"export");
-    try self.addModuleFromExport(owner_inner.handle.?, @"export", owner_inner.instance.?);
+    try self.addModuleInner(owner_inner.handle.?, @"export", owner_inner.instance.?);
 }
 
-pub fn addModulesFromPath(
+fn addModulesFromHandle(
     self: *Self,
-    module_path: ?Path,
-    iterator_fn: ModuleHandle.IteratorFn,
+    module_handle: *ModuleHandle,
     filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
     filter_data: ?*anyopaque,
-    bin_ptr: *const anyopaque,
 ) !void {
-    const module_handle = if (module_path) |p|
-        try ModuleHandle.initPath(self.context.allocator, p, self.module_load_path.asPath())
-    else
-        try ModuleHandle.initLocal(self.context.allocator, iterator_fn, bin_ptr);
-    defer module_handle.unref();
-
     var append_data = AppendModulesData{
         .sys = &self.context.module.sys,
         .filter_fn = filter_fn,
@@ -584,11 +522,42 @@ pub fn addModulesFromPath(
     if (append_data.err) |err| return err;
 
     for (append_data.exports.items) |exp| {
-        try self.addModuleFromExport(module_handle, exp, null);
+        try self.addModuleInner(module_handle, exp, null);
     }
 }
 
-pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
+fn addModulesFromPath(
+    self: *Self,
+    path: Path,
+    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_data: ?*anyopaque,
+) !void {
+    const module_handle = try ModuleHandle.initPath(
+        self.context.allocator,
+        path,
+        self.module_load_path.asPath(),
+    );
+    defer module_handle.unref();
+    try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
+}
+
+fn addModulesFromLocal(
+    self: *Self,
+    iterator_fn: ModuleHandle.IteratorFn,
+    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_data: ?*anyopaque,
+    bin_ptr: *const anyopaque,
+) !void {
+    const module_handle = try ModuleHandle.initLocal(
+        self.context.allocator,
+        iterator_fn,
+        bin_ptr,
+    );
+    defer module_handle.unref();
+    try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
+}
+
+fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
     var instances = graph.GraphUnmanaged(*ModuleInfo, void).init(null, null);
     defer instances.deinit(self.context.allocator);
     var instance_map = std.StringArrayHashMapUnmanaged(graph.NodeId){};
@@ -619,7 +588,7 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
             const imp_ver = Version.initC(imp.version);
             // Skip the module if a dependency could not be loaded.
             if (self.getSymbol(imp_name, imp_ns, imp_ver)) |sym| {
-                const owner = self.getModule(sym.owner).?;
+                const owner = self.getModuleInfo(sym.owner).?;
                 if (owner.status == .err) {
                     sys.logWarn(
                         "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
@@ -682,7 +651,7 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
     connect_graph: while (instance_it.next()) |entry| {
         const name = entry.key_ptr.*;
         const node = entry.value_ptr.*;
-        const instance = self.getModule(name).?;
+        const instance = self.getModuleInfo(name).?;
 
         for (instance.@"export".getSymbolImports()) |imp| {
             const i_name = std.mem.span(imp.name);
@@ -690,7 +659,7 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
             const i_version = Version.initC(imp.version);
             if (self.getSymbol(i_name, i_namespace, i_version)) |sym| {
                 const owner_entry = instance_map.get(sym.owner);
-                const owner = self.getModule(sym.owner).?;
+                const owner = self.getModuleInfo(sym.owner).?;
                 if (owner_entry == null or owner.status == .err) {
                     sys.asContext().tracing.emitWarnSimple(
                         "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
@@ -733,3 +702,862 @@ pub fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
 
     return queue;
 }
+
+// ----------------------------------------------------
+// Futures
+// ----------------------------------------------------
+
+const InitOp = FSMFuture(struct {
+    context: *Context,
+    lock_fut: Async.Mutex.LockOp = undefined,
+    ret: Allocator.Error!ProxyModule.LoadingSet = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(context: *Context, err: *?AnyError) !EnqueuedFuture(Fallible(ProxyModule.LoadingSet)) {
+        context.tracing.emitTraceSimple("creating new loading set", .{}, @src());
+        context.ref();
+        errdefer context.unref();
+
+        const data = @This(){
+            .context = context,
+        };
+        var f = InitOp.init(data).intoFuture().map(
+            Fallible(ProxyModule.LoadingSet),
+            Fallible(ProxyModule.LoadingSet).Wrapper(Allocator.Error),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: Allocator.Error) void {
+        if (trace) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) Allocator.Error!ProxyModule.LoadingSet {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        if (reason != .completed) self.context.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        self.lock_fut = self.context.module.sys.lockAsync();
+    }
+
+    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.lock_fut.deinit();
+    }
+
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
+        switch (self.lock_fut.poll(waker)) {
+            .pending => return .yield,
+            .ready => |v| {
+                try v;
+                return .next;
+            },
+        }
+    }
+
+    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.context.module.sys.unlock();
+    }
+
+    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!void {
+        _ = waker;
+        const module_load_path = try OwnedPathUnmanaged.initPath(
+            self.context.module.sys.allocator,
+            self.context.module.sys.tmp_dir.path.asPath(),
+        );
+        errdefer module_load_path.deinit(self.context.module.sys.allocator);
+
+        const set = try self.context.module.sys.allocator.create(Self);
+        set.* = .{
+            .context = self.context,
+            .module_load_path = module_load_path,
+        };
+
+        self.ret = set.asProxySet();
+    }
+});
+
+const QueryModuleOp = FSMFuture(struct {
+    set: *Self,
+    module: []u8,
+    ret: Allocator.Error!bool = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(set: *Self, module: []const u8, err: *?AnyError) !EnqueuedFuture(Fallible(bool)) {
+        set.asSys().logTrace(
+            "querying loading set module, set='{*}', name='{s}'",
+            .{ set, module },
+            @src(),
+        );
+        set.ref();
+        errdefer set.unref();
+        const module_ = try set.asSys().allocator.dupe(u8, module);
+        errdefer set.asSys().allocator.free(module_);
+
+        const data = @This(){
+            .set = set,
+            .module = module_,
+        };
+        var f = QueryModuleOp.init(data).intoFuture().map(
+            Fallible(bool),
+            Fallible(bool).Wrapper(Allocator.Error),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: Allocator.Error) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) Allocator.Error!bool {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.set.asSys().allocator.free(self.module);
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        self.ret = self.set.getModuleInfo(self.module) != null;
+    }
+});
+
+const QuerySymbolOp = FSMFuture(struct {
+    set: *Self,
+    name: []u8,
+    namespace: []u8,
+    version: Version,
+    ret: Allocator.Error!bool = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(
+        set: *Self,
+        name: []const u8,
+        namespace: []const u8,
+        version: Version,
+        err: *?AnyError,
+    ) !EnqueuedFuture(Fallible(bool)) {
+        set.asSys().logTrace(
+            "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{long}'",
+            .{ set, name, namespace, version },
+            @src(),
+        );
+        set.ref();
+        errdefer set.unref();
+        const name_ = try set.asSys().allocator.dupe(u8, name);
+        errdefer set.asSys().allocator.free(name_);
+        const namespace_ = try set.asSys().allocator.dupe(u8, namespace);
+        errdefer set.asSys().allocator.free(namespace_);
+
+        const data = @This(){
+            .set = set,
+            .name = name_,
+            .namespace = namespace_,
+            .version = version,
+        };
+        var f = QuerySymbolOp.init(data).intoFuture().map(
+            Fallible(bool),
+            Fallible(bool).Wrapper(Allocator.Error),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: Allocator.Error) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) Allocator.Error!bool {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.set.asSys().allocator.free(self.namespace);
+        self.set.asSys().allocator.free(self.name);
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        self.ret = self.set.getSymbol(self.name, self.namespace, self.version) != null;
+    }
+});
+
+const AddCallbackOp = FSMFuture(struct {
+    set: *Self,
+    module: []u8,
+    callback: Callback,
+    ret: anyerror!void = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(
+        set: *Self,
+        module: []const u8,
+        callback: Callback,
+        err: *?AnyError,
+    ) !EnqueuedFuture(Fallible(void)) {
+        set.asSys().logTrace(
+            "adding callback to the loading set, set='{*}', module='{s}', callback='{}'",
+            .{ set, module, callback },
+            @src(),
+        );
+        errdefer if (callback.on_abort) |f| f(callback.data);
+        set.ref();
+        errdefer set.unref();
+        const module_ = try set.asSys().allocator.dupe(u8, module);
+        errdefer set.asSys().allocator.free(module_);
+
+        const data = @This(){
+            .set = set,
+            .module = module_,
+            .callback = callback,
+        };
+        var f = AddCallbackOp.init(data).intoFuture().map(
+            Fallible(void),
+            Fallible(void).Wrapper(anyerror),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) !void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        if (reason != .completed) {
+            if (self.callback.on_abort) |f| f(self.callback.data);
+        }
+        self.set.asSys().allocator.free(self.module);
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
+        _ = waker;
+        const module_info = self.set.getModuleInfo(self.module) orelse return error.NotFound;
+        self.ret = try module_info.appendCallback(self.callback);
+    }
+});
+
+const AddModuleOp = FSMFuture(struct {
+    set: *Self,
+    owner: *const InstanceHandle,
+    @"export": *const ProxyModule.Export,
+    ret: anyerror!void = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(
+        set: *Self,
+        owner: *const ProxyModule.OpaqueInstance,
+        @"export": *const ProxyModule.Export,
+        err: *?AnyError,
+    ) !EnqueuedFuture(Fallible(void)) {
+        set.asSys().logTrace(
+            "adding module to the loading set, set='{*}', module='{s}'",
+            .{ set, @"export".getName() },
+            @src(),
+        );
+        set.ref();
+        errdefer set.unref();
+        const owner_handle = InstanceHandle.fromInstancePtr(owner);
+        const owner_inner = owner_handle.lock();
+        defer owner_inner.unlock();
+        try owner_inner.refStrong();
+        errdefer owner_inner.unrefStrong();
+
+        const data = @This(){
+            .set = set,
+            .owner = owner_handle,
+            .@"export" = @"export",
+        };
+        var f = AddModuleOp.init(data).intoFuture().map(
+            Fallible(void),
+            Fallible(void).Wrapper(anyerror),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) !void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        {
+            const owner_inner = self.owner.lock();
+            defer owner_inner.unlock();
+            owner_inner.unrefStrong();
+        }
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
+        _ = waker;
+        const owner_inner = self.owner.lock();
+        defer owner_inner.unlock();
+        self.ret = try self.set.addModule(owner_inner, self.@"export");
+    }
+});
+
+const AddModulesFromPathOp = FSMFuture(struct {
+    set: *Self,
+    path: OwnedPathUnmanaged,
+    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+    filter_data: ?*anyopaque,
+    ret: anyerror!void = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(
+        set: *Self,
+        path: Path,
+        filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+        filter_data: ?*anyopaque,
+        err: *?AnyError,
+    ) !EnqueuedFuture(Fallible(void)) {
+        set.asSys().logTrace(
+            "adding modules to loading set, set='{*}', path='{?}'",
+            .{ set, path },
+            @src(),
+        );
+        errdefer if (filter_deinit) |f| f(filter_data);
+
+        set.ref();
+        errdefer set.unref();
+
+        const path_ = try OwnedPathUnmanaged.initPath(set.asSys().allocator, path);
+        errdefer path_.deinit(set.asSys().allocator);
+
+        const data = @This(){
+            .set = set,
+            .path = path_,
+            .filter_fn = filter_fn,
+            .filter_deinit = filter_deinit,
+            .filter_data = filter_data,
+        };
+        var f = AddModulesFromPathOp.init(data).intoFuture().map(
+            Fallible(void),
+            Fallible(void).Wrapper(anyerror),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) !void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        if (self.filter_deinit) |f| f(self.filter_data);
+        self.path.deinit(self.set.asSys().allocator);
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
+        _ = waker;
+        self.ret = try self.set.addModulesFromPath(
+            self.path.asPath(),
+            self.filter_fn,
+            self.filter_data,
+        );
+    }
+});
+
+const AddModulesFromLocalOp = FSMFuture(struct {
+    set: *Self,
+    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+    filter_data: ?*anyopaque,
+    iterator_fn: ModuleHandle.IteratorFn,
+    bin_ptr: *const anyopaque,
+    ret: anyerror!void = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(
+        set: *Self,
+        filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+        filter_data: ?*anyopaque,
+        iterator_fn: ModuleHandle.IteratorFn,
+        bin_ptr: *const anyopaque,
+        err: *?AnyError,
+    ) !EnqueuedFuture(Fallible(void)) {
+        set.asSys().logTrace(
+            "adding local modules to loading set, set='{*}'",
+            .{set},
+            @src(),
+        );
+        errdefer if (filter_deinit) |f| f(filter_data);
+
+        set.ref();
+        errdefer set.unref();
+
+        const data = @This(){
+            .set = set,
+            .filter_fn = filter_fn,
+            .filter_deinit = filter_deinit,
+            .filter_data = filter_data,
+            .iterator_fn = iterator_fn,
+            .bin_ptr = bin_ptr,
+        };
+        var f = AddModulesFromLocalOp.init(data).intoFuture().map(
+            Fallible(void),
+            Fallible(void).Wrapper(anyerror),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) !void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        if (self.filter_deinit) |f| f(self.filter_data);
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
+        _ = waker;
+        self.ret = try self.set.addModulesFromLocal(
+            self.iterator_fn,
+            self.filter_fn,
+            self.filter_data,
+            self.bin_ptr,
+        );
+    }
+});
+
+const CommitOp = FSMFuture(struct {
+    set: *Self,
+    lock_fut: Async.Mutex.LockOp = undefined,
+    ret: anyerror!void = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(
+        set: *Self,
+        err: *?AnyError,
+    ) !EnqueuedFuture(Fallible(void)) {
+        set.asSys().logTrace("commiting loading set, set='{*}'", .{set}, @src());
+        set.ref();
+        errdefer set.unref();
+
+        const data = @This(){
+            .set = set,
+        };
+        var f = CommitOp.init(data).intoFuture().map(
+            Fallible(void),
+            Fallible(void).Wrapper(anyerror),
+        );
+        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) !void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.set.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        self.lock_fut = self.set.asSys().lockAsync();
+    }
+
+    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.lock_fut.deinit();
+    }
+
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) !ProxyAsync.FSMOp {
+        switch (self.lock_fut.poll(waker)) {
+            .pending => return .yield,
+            .ready => |v| {
+                try v;
+            },
+        }
+        errdefer self.set.asSys().mutex.unlock();
+
+        if (self.set.asSys().state == .loading_set) {
+            try self.set.asSys().loading_set_waiters.append(
+                self.set.asSys().allocator,
+                .{ .waiter = self, .waker = waker.ref() },
+            );
+            self.lock_fut.deinit();
+            self.lock_fut = self.set.asSys().lockAsync();
+            self.set.asSys().mutex.unlock();
+            return .yield;
+        }
+        self.set.asSys().state = .loading_set;
+        return .next;
+    }
+
+    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.set.asSys().state = .idle;
+        if (self.set.asSys().loading_set_waiters.popOrNull()) |waiter| {
+            waiter.waker.wakeUnref();
+        }
+        self.set.asSys().mutex.unlock();
+    }
+
+    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
+        _ = waker;
+        const set = self.set;
+        const sys = set.asSys();
+
+        set.should_recreate_map = false;
+        var queue = try set.createQueue(sys);
+        defer queue.deinit(sys.allocator);
+        outer: while (queue.items.len > 0 or set.should_recreate_map) {
+            if (set.should_recreate_map) {
+                set.should_recreate_map = false;
+                queue.deinit(sys.allocator);
+                queue = .{};
+                queue = try set.createQueue(sys);
+                continue;
+            }
+            const instance_info = queue.pop();
+            const instance_name = instance_info.@"export".name;
+
+            // Recheck that all dependencies could be loaded.
+            for (instance_info.@"export".getSymbolImports()) |i| {
+                const i_name = std.mem.span(i.name);
+                const i_namespace = std.mem.span(i.namespace);
+                const i_version = Version.initC(i.version);
+                if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
+                    const owner = set.getModuleInfo(sym.owner).?;
+                    if (owner.status == .err) {
+                        sys.logWarn(
+                            "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
+                                " instance='{s}', dependency='{s}'",
+                            .{ instance_name, sym.owner },
+                            @src(),
+                        );
+                        instance_info.signalError();
+                        continue :outer;
+                    }
+                }
+            }
+
+            // Check that the explicit dependencies exist.
+            for (instance_info.@"export".getModifiers()) |mod| {
+                if (mod.tag != .dependency) continue;
+                const dependency = mod.value.dependency;
+                if (sys.getInstance(std.mem.span(dependency.name)) == null) {
+                    sys.logWarn(
+                        "instance can not be loaded due to a missing dependency...skipping," ++
+                            " instance='{s}', dependency='{s}'",
+                        .{ instance_name, dependency.name },
+                        @src(),
+                    );
+                    instance_info.signalError();
+                    continue :outer;
+                }
+            }
+
+            // Construct the instance.
+            var err: ?AnyError = null;
+            const instance = InstanceHandle.initExportedInstance(
+                sys,
+                set,
+                instance_info.@"export",
+                instance_info.handle,
+                &err,
+            ) catch |e| switch (e) {
+                error.FfiError => {
+                    sys.logWarn(
+                        "instance construction error...skipping," ++
+                            " instance='{s}', error='{dbg}:{}'",
+                        .{ instance_name, err.?, err.? },
+                        @src(),
+                    );
+                    err.?.deinit();
+                    instance_info.signalError();
+                    continue :outer;
+                },
+                else => return e,
+            };
+
+            const instance_handle = InstanceHandle.fromInstancePtr(instance);
+            const inner = instance_handle.lock();
+            errdefer inner.deinit().unref();
+
+            inner.start(sys, &err) catch {
+                sys.logWarn(
+                    "instance `on_start` error...skipping," ++
+                        " instance='{s}', error='{dbg}:{}'",
+                    .{ instance_name, err.?, err.? },
+                    @src(),
+                );
+                err.?.deinit();
+                instance_info.signalError();
+                continue :outer;
+            };
+            errdefer inner.stop(sys);
+
+            try sys.addInstance(inner);
+            defer inner.unlock();
+            instance_info.signalSuccess(instance.info);
+        }
+    }
+});
+
+// ----------------------------------------------------
+// VTable
+// ----------------------------------------------------
+
+const VTableImpl = struct {
+    fn ref(this: *anyopaque) callconv(.c) void {
+        const self: *Self = @alignCast(@ptrCast(this));
+        self.ref();
+    }
+    fn unref(this: *anyopaque) callconv(.c) void {
+        const self: *Self = @alignCast(@ptrCast(this));
+        self.unref();
+    }
+    fn queryModule(
+        this: *anyopaque,
+        module: [*:0]const u8,
+        fut: *EnqueuedFuture(Fallible(bool)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+        const module_ = std.mem.span(module);
+
+        var err: ?AnyError = null;
+        fut.* = QueryModuleOp.Data.init(
+            self,
+            module_,
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn querySymbol(
+        this: *anyopaque,
+        name: [*:0]const u8,
+        namespace: [*:0]const u8,
+        version: c.FimoVersion,
+        fut: *EnqueuedFuture(Fallible(bool)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+        const name_ = std.mem.span(name);
+        const namespace_ = std.mem.span(namespace);
+        const version_ = Version.initC(version);
+
+        var err: ?AnyError = null;
+        fut.* = QuerySymbolOp.Data.init(
+            self,
+            name_,
+            namespace_,
+            version_,
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn addCallback(
+        this: *anyopaque,
+        module: [*:0]const u8,
+        on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.C) void,
+        on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) void,
+        on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+        data: ?*anyopaque,
+        fut: *EnqueuedFuture(Fallible(void)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+        const module_ = std.mem.span(module);
+        const callback = Callback{
+            .data = data,
+            .on_success = on_success,
+            .on_error = on_error,
+            .on_abort = on_abort,
+        };
+
+        var err: ?AnyError = null;
+        fut.* = AddCallbackOp.Data.init(
+            self,
+            module_,
+            callback,
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn addModule(
+        this: *anyopaque,
+        owner: *const ProxyModule.OpaqueInstance,
+        @"export": *const ProxyModule.Export,
+        fut: *EnqueuedFuture(Fallible(void)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+
+        var err: ?AnyError = null;
+        fut.* = AddModuleOp.Data.init(
+            self,
+            owner,
+            @"export",
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn addModulesFromPath(
+        this: *anyopaque,
+        path: c.FimoUTF8Path,
+        filter_fn: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+        filter_data: ?*anyopaque,
+        fut: *EnqueuedFuture(Fallible(void)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+        const path_ = Path.initC(path);
+
+        var err: ?AnyError = null;
+        fut.* = AddModulesFromPathOp.Data.init(
+            self,
+            path_,
+            filter_fn,
+            filter_deinit,
+            filter_data,
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn addModulesFromLocal(
+        this: *anyopaque,
+        filter_fn: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+        filter_data: ?*anyopaque,
+        iterator_fn: *const fn (
+            f: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+            data: ?*anyopaque,
+        ) callconv(.C) void,
+        bin_ptr: *const anyopaque,
+        fut: *EnqueuedFuture(Fallible(void)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+
+        var err: ?AnyError = null;
+        fut.* = AddModulesFromLocalOp.Data.init(
+            self,
+            filter_fn,
+            filter_deinit,
+            filter_data,
+            iterator_fn,
+            bin_ptr,
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn commit(
+        this: *anyopaque,
+        fut: *EnqueuedFuture(Fallible(void)),
+    ) callconv(.c) c.FimoResult {
+        const self: *Self = @alignCast(@ptrCast(this));
+
+        var err: ?AnyError = null;
+        fut.* = CommitOp.Data.init(
+            self,
+            &err,
+        ) catch |e| {
+            if (@errorReturnTrace()) |tr| self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            return switch (e) {
+                AnyError.Error.FfiError => AnyError.intoCResult(err),
+                else => AnyError.initError(e).err,
+            };
+        };
+        return AnyError.intoCResult(null);
+    }
+};
+
+const vtable = ProxyModule.LoadingSet.VTable{
+    .ref = &VTableImpl.ref,
+    .unref = &VTableImpl.unref,
+    .query_module = &VTableImpl.queryModule,
+    .query_symbol = &VTableImpl.querySymbol,
+    .add_callback = &VTableImpl.addCallback,
+    .add_module = &VTableImpl.addModule,
+    .add_modules_from_path = &VTableImpl.addModulesFromPath,
+    .add_modules_from_local = &VTableImpl.addModulesFromLocal,
+    .commit = &VTableImpl.commit,
+};

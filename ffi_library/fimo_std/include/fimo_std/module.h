@@ -6,10 +6,11 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 
+#include <fimo_std/async.h>
 #include <fimo_std/context.h>
 #include <fimo_std/error.h>
+#include <fimo_std/path.h>
 #include <fimo_std/version.h>
-#include <fimo_std/async.h>
 
 #include <fimo_std/impl/module.h>
 
@@ -18,11 +19,150 @@ extern "C" {
 #endif
 
 typedef struct FimoModule FimoModule;
+typedef struct FimoModuleInfo FimoModuleInfo;
+typedef struct FimoModuleExport FimoModuleExport;
+
+typedef FIMO_ASYNC_FALLIBLE(bool) FimoModuleLoadingSetQueryModuleFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetQueryModuleFutureResult) FimoModuleLoadingSetQueryModuleFuture;
+
+typedef FIMO_ASYNC_FALLIBLE(bool) FimoModuleLoadingSetQuerySymbolFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetQuerySymbolFutureResult) FimoModuleLoadingSetQuerySymbolFuture;
+
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddCallbackFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddModuleFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddModulesFromPathFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddModulesFromLocalFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetCommitFuture;
+
+/**
+ * VTable of a loading set.
+ *
+ * Adding fields to the VTable is not a breaking change.
+ */
+typedef struct FimoModuleLoadingSetVTable {
+    /**
+     * Increases the reference count of the instance.
+     */
+    void (*acquire)(void *ctx);
+    /**
+     * Decreases the reference count of the instance.
+     */
+    void (*release)(void *ctx);
+    /**
+     * Checks whether the set contains a specific module.
+     */
+    FimoResult (*query_module)(void *ctx, const char *name,
+                               FimoModuleLoadingSetQueryModuleFuture *fut);
+    /**
+     * Checks whether the set contains a specific symbol.
+     */
+    FimoResult (*query_symbol)(void *ctx, const char *name, const char *namespace,
+                               FimoVersion version, FimoModuleLoadingSetQuerySymbolFuture *fut);
+    /**
+     * Adds a status callback to the set.
+     *
+     * Adds a callback to report a successful or failed loading of
+     * a module. The success callback wil be called if the set was able to load
+     * all requested modules, whereas the error callback will be called immediately
+     * after the failed loading of the module. Since the module set can be in a
+     * partially loaded state at the time of calling this function, the error path
+     * may be invoked immediately. The callbacks will be provided with a user-specified
+     * data pointer, which they are in charge of cleaning up. If an error occurs during the
+     * execution of the returned future, it will invoke the optional `on_abort` callback.
+     * If the requested module does not exist, the returned future will return an error.
+     */
+    FimoResult (*add_callback)(void *ctx, const char *name,
+                               void (*on_success)(const FimoModuleInfo *info, void *data),
+                               void (*on_error)(const FimoModuleExport *exp, void *data),
+                               void (*on_abort)(void *data),
+                               void *data,
+                               FimoModuleLoadingSetAddCallbackFuture *fut);
+    /**
+     * Adds a module to the module set.
+     *
+     * Adds a module to the set, so that it may be loaded by a future call
+     * to `commit`. Trying to include an invalid module, a module with
+     * duplicate exports or duplicate name will result in an error. Unlike
+     * `add_modules_from_path`, this function allows for the loading of dynamic
+     * modules, i.e. modules that are created at runtime, like non-native
+     * modules, which may require a runtime to be executed in. The new module
+     * inherits a strong reference to the same binary as the caller's module.
+     *
+     * Note that the new module is not set up to automatically depend on the
+     * owner, but may prevent it from being unloaded while the set exists.
+     */
+    FimoResult (*add_module)(void *ctx, const FimoModule *owner, const FimoModuleExport *exp,
+                             FimoModuleLoadingSetAddModuleFuture *fut);
+    /**
+     * Adds modules to the set.
+     *
+     * Opens up a module binary to select which modules to load.
+     * If the path points to a file, the function will try to load the file
+     * as a binary, whereas, if it points to a directory, it will try to
+     * load a file named `module.fimo_module` contained in the directory.
+     * Each exported module is then passed to the filter, along with the
+     * provided data, which can then filter which modules to load. This
+     * function may skip invalid module exports. Trying to include a module
+     * with duplicate exports or duplicate name will result in an error.
+     * This function signals an error, if the binary does not contain the
+     * symbols necessary to query the exported modules, but does not return
+     * an error, if it does not export any modules. The necessary symbols
+     * are set up automatically, if the binary was linked with the fimo
+     * library. In case of an error, no modules are appended to the set.
+     */
+    FimoResult (*add_modules_from_path)(void *ctx, FimoUTF8Path path,
+                                        bool (*filter_fn)(const FimoModuleExport *exp, void *data),
+                                        void (*filter_deinit)(void *data),
+                                        void *filter_data,
+                                        FimoModuleLoadingSetAddModulesFromPathFuture *fut);
+    /**
+     * Adds modules to the set.
+     *
+     * Iterates over the exported modules of the current binary. Each exported
+     * module is then passed to the filter, along with the provided data,
+     * which can then filter which modules to load. This function may skip
+     * invalid module exports. Trying to include a module with duplicate
+     * exports or duplicate name will result in an error. This function
+     * signals an error, if the binary does not contain the symbols
+     * necessary to query the exported modules, but does not return
+     * an error, if it does not export any modules. The necessary
+     * symbols are set up automatically, if the binary was linked with
+     * the fimo library. In case of an error, no modules are appended
+     * to the set.
+     */
+    FimoResult (*add_modules_from_local)(void *ctx,
+                                        bool (*filter_fn)(const FimoModuleExport *exp, void *data),
+                                        void (*filter_deinit)(void *data),
+                                        void *filter_data,
+                                        void (*iterator_fn)(
+                                                bool (*filter_fn)(const FimoModuleExport *exp,
+                                                                  void *data),
+                                                void *data),
+                                        const void *bin_ptr,
+                                        FimoModuleLoadingSetAddModulesFromLocalFuture *fut);
+    /**
+     * Loads the modules contained in the set.
+     *
+     * If the returned future is successfull, the contained modules and their
+     * resources are made available to the remaining modules. Some conditions
+     * may hinder the loading of some module, like missing dependencies,
+     * duplicates, and other loading errors. In those cases, the modules will
+     * be skipped without erroring.
+     *
+     * It is possible to submit multiple concurrent commit requests, even from
+     * the same loading set. In that case, the requests will be handled
+     * atomically, in an unspecified order.
+     */
+    FimoResult (*commit)(void *ctx, FimoModuleLoadingSetCommitFuture *fut);
+} FimoModuleLoadingSetVTable;
 
 /**
  * Type-erased set of modules to load by the subsystem.
  */
-typedef struct FimoModuleLoadingSet FimoModuleLoadingSet;
+typedef struct FimoModuleLoadingSet {
+    void *data;
+    const FimoModuleLoadingSetVTable *vtable;
+} FimoModuleLoadingSet;
 
 /**
  * Tag of a debug info type.
@@ -924,7 +1064,7 @@ typedef struct FimoModuleExportModifierDebugInfo {
 /**
  * Declaration of a module export.
  */
-typedef struct FimoModuleExport {
+struct FimoModuleExport {
     /**
      * Type of the struct.
      *
@@ -1045,12 +1185,12 @@ typedef struct FimoModuleExport {
      * exported/initialized.
      *
      * @param module pointer to the partially initialized module
-     * @param set module set that contained the module
+     * @param set borrowed module set that contained the module
      * @param state pointer to the resulting module state
      *
      * @return Status code.
      */
-    FimoResult (*constructor)(const FimoModule *module, FimoModuleLoadingSet *set, void **state);
+    FimoResult (*constructor)(const FimoModule *module, FimoModuleLoadingSet set, void **state);
 
     /**
      * Optional destructor function for a module.
@@ -1082,7 +1222,7 @@ typedef struct FimoModuleExport {
      * @param module pointer to the module
      */
     void (*on_stop_event)(const FimoModule *module);
-} FimoModuleExport;
+};
 
 /**
  * Opaque type for a parameter table of a module.
@@ -1124,7 +1264,7 @@ typedef void FimoModuleSymbolExportTable;
 /**
  * Info of a loaded module.
  */
-typedef struct FimoModuleInfo {
+struct FimoModuleInfo {
     /**
      * Type of the struct.
      *
@@ -1186,7 +1326,7 @@ typedef struct FimoModuleInfo {
      * is no longer required.
      */
     void (*release_module_strong)(const struct FimoModuleInfo *info);
-} FimoModuleInfo;
+};
 
 /**
  * State of a loaded module.
@@ -1196,7 +1336,7 @@ typedef struct FimoModuleInfo {
  * remains loaded. Modules must not leak any resources outside it's own
  * module, ensuring that they are destroyed upon module unloading.
  */
-typedef struct FimoModule {
+struct FimoModule {
     /**
      * Module parameter table.
      */
@@ -1225,7 +1365,7 @@ typedef struct FimoModule {
      * Private data of the module.
      */
     void *module_data;
-} FimoModule;
+};
 
 /**
  * A filter for selection modules to load by the module subsystem.
@@ -1264,7 +1404,13 @@ typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo *arg0, voi
  */
 typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, void *arg1);
 
-typedef FIMO_ASYNC_FALLIBLE(FimoModuleLoadingSet*) FimoModuleLoadingSetNewFutureResult;
+typedef FIMO_ASYNC_FALLIBLE(const FimoModule*) FimoModulePseudoModuleNewFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModulePseudoModuleNewFutureResult) FimoModulePseudoModuleNewFuture;
+
+typedef FIMO_ASYNC_FALLIBLE(FimoContext) FimoModulePseudoModuleDestroyFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModulePseudoModuleDestroyFutureResult) FimoModulePseudoModuleDestroyFuture;
+
+typedef FIMO_ASYNC_FALLIBLE(FimoModuleLoadingSet) FimoModuleLoadingSetNewFutureResult;
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetNewFutureResult) FimoModuleLoadingSetNewFuture;
 
 /**
@@ -1281,11 +1427,6 @@ typedef struct FimoModuleVTableV0 {
      * of the context won't be assigned a module instance during bootstrapping.
      * As a workaround, we allow for the creation of pseudo modules, i.e.,
      * module handles without an associated module.
-     *
-     * @param ctx the context
-     * @param module resulting pseudo module
-     *
-     * @return Status code.
      */
     FimoResult (*pseudo_module_new)(void *ctx, const FimoModule **module);
     /**
@@ -1293,180 +1434,23 @@ typedef struct FimoModuleVTableV0 {
      *
      * By destroying the pseudo module, the caller ensures that they
      * relinquished all access to handles derived by the module subsystem.
-     *
-     * @param ctx the context
-     * @param module pseudo module to destroy
-     * @param out_ctx extracted context from the module
-     *
-     * @return Status code.
      */
     FimoResult (*pseudo_module_destroy)(void *ctx, const FimoModule *module, FimoContext *out_ctx);
     /**
-     * Constructs a new empty module set.
+     * Constructs a new empty set.
      *
-     * The loading of a module fails, if at least one dependency can
-     * not be satisfied, which requires the caller to manually find a
-     * suitable loading order. To facilitate the loading, we load
-     * multiple modules together, and automatically determine an
-     * appropriate load order for all modules inside the module set.
-     *
-     * @param ctx the context
-     * @param set new module set
-     *
-     * @return Status code.
+     * Modules can only be loaded, if all of their dependencies can be
+     * resolved, which requires us to determine a suitable load order.
+     * A loading set is a utility to facilitate this process, by
+     * automatically computing a suitable load order for a batch of
+     * modules.
      */
     FimoResult (*set_new)(void *ctx, FimoModuleLoadingSetNewFuture *fut);
-    /**
-     * Checks whether a module set contains a module.
-     *
-     * @param ctx the context
-     * @param set module set to query
-     * @param name name of the module
-     * @param contained query result
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_has_module)(void *ctx, FimoModuleLoadingSet *set, const char *name,
-                                 bool *contained);
-    /**
-     * Checks whether a module set contains a symbol.
-     *
-     * @param ctx the context
-     * @param set module set to query
-     * @param name symbol name
-     * @param ns namespace name
-     * @param version symbol version
-     * @param contained query result
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_has_symbol)(void *ctx, FimoModuleLoadingSet *set, const char *name,
-                                 const char *ns, FimoVersion version, bool *contained);
-    /**
-     * Adds a status callback to the module set.
-     *
-     * Adds a set of callbacks to report a successful or failed loading of
-     * a module. The `on_success` callback wil be called if the set was
-     * able to load all requested modules, whereas the `on_error` callback
-     * will be called immediately after the failed loading of the module. Since
-     * the module set can be in a partially loaded state at the time of calling
-     * this function, the `on_error` callback may be invoked immediately. The
-     * callbacks will be provided with a user-specified data pointer, which they
-     * are in charge of cleaning up. If the requested module `module` does
-     * not exist, this function will return an error.
-     *
-     * @param ctx the context
-     * @param set set of modules
-     * @param module module to query
-     * @param on_success success callback
-     * @param on_error error callback
-     * @param user_data callback user data
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_append_callback)(void *ctx, FimoModuleLoadingSet *set,
-                                      const char *module,
-                                      FimoModuleLoadingSuccessCallback on_success,
-                                      FimoModuleLoadingErrorCallback on_error,
-                                      void *user_data);
-    /**
-     * Adds a freestanding module to the module set.
-     *
-     * Adds a freestanding module to the set, so that it may be loaded
-     * by the set. Trying to include an invalid module, a module with
-     * duplicate exports or duplicate name will result in an error.
-     * This function allows for the loading of dynamic modules, i.e.
-     * modules that are created at runtime, like non-native modules,
-     * which may require a runtime to be executed in. The new module
-     * inherits a strong reference to the same binary as the caller's module.
-     * Note that the new module is not setup to automatically depend
-     * on `module`, but may prevent it from being unloaded while
-     * the set exists.
-     *
-     * @param ctx the context
-     * @param owner owner of the export
-     * @param set set of modules
-     * @param module_export module to append to the set
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_append_freestanding_module)(void *ctx, const FimoModule *owner,
-                                                 FimoModuleLoadingSet *set,
-                                                 const FimoModuleExport *module_export);
-    /**
-     * Adds modules to the module set.
-     *
-     * Opens up a module binary to select which modules to load.
-     * The binary path `module_path` must be encoded as `UTF-8`,
-     * and point to the binary that contains the modules.  If the
-     * path is `NULL`, it iterates over the exported modules of the
-     * current binary. Each exported module is then passed to the
-     * `filter`, along with the provided `filter_data`, which can
-     * then filter which modules to load. This function may skip
-     * invalid module exports. Trying to include a module with duplicate
-     * exports or duplicate name will result in an error. This function
-     * signals an error, if the binary does not contain the symbols
-     * necessary to query the exported modules, but does not return
-     * an error, if it does not export any modules. The necessary
-     * symbols are setup automatically, if the binary was linked with
-     * the fimo library. In case of an error, no modules are appended
-     * to the set.
-     *
-     * @param ctx the context
-     * @param set set of modules
-     * @param module_path path to the binary to inspect
-     * @param filter filter function
-     * @param filter_data custom data to pass to the filter function
-     * @param iterator export iterator function
-     * @param bin_handle pointer to a symbol contained in the callers binary
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_append_modules)(void *ctx, FimoModuleLoadingSet *set,
-                                     const char *module_path,
-                                     FimoModuleLoadingFilter filter, void * filter_data,
-                                     void (*iterator)(bool (*)(const FimoModuleExport *, void *), void *),
-                                     const void *bin_handle);
-    /**
-     * Destroys the module set without loading any modules.
-     *
-     * It is not possible to dismiss a module set that is currently
-     * being loaded.
-     *
-     * @param ctx the context
-     * @param set the module set to destroy
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_dismiss)(void *ctx, FimoModuleLoadingSet *set);
-    /**
-     * Destroys the module set and loads the modules contained in it.
-     *
-     * After successfully calling this function, the modules contained
-     * in the set are loaded, and their symbols are available to all
-     * other modules. If the construction of one module results in an
-     * error, or if a dependency can not be satisfied, this function
-     * rolls back the loading of all modules contained in the set
-     * and returns an error. It is not possible to load a module set,
-     * while another set is being loaded.
-     *
-     * @param ctx the context
-     * @param set a set of modules to load
-     *
-     * @return Status code.
-     */
-    FimoResult (*set_finish)(void *ctx, FimoModuleLoadingSet *set);
     /**
      * Searches for a module by it's name.
      *
      * Queries a module by its unique name. The returned `FimoModuleInfo`
      * will have its reference count increased.
-     *
-     * @param ctx context
-     * @param name module name
-     * @param info resulting module info.
-     *
-     * @return Status code.
      */
     FimoResult (*find_by_name)(void *ctx, const char *name, const FimoModuleInfo **info);
     /**
@@ -1474,14 +1458,6 @@ typedef struct FimoModuleVTableV0 {
      *
      * Queries the module that exported the specified symbol. The returned
      * `FimoModuleInfo` will have its reference count increased.
-     *
-     * @param ctx context
-     * @param name symbol name
-     * @param ns symbol namespace
-     * @param version symbol version
-     * @param info resulting module info
-     *
-     * @return Status code.
      */
     FimoResult (*find_by_symbol)(void *ctx, const char *name, const char *ns, FimoVersion version,
                                  const FimoModuleInfo **info);
@@ -1490,12 +1466,6 @@ typedef struct FimoModuleVTableV0 {
      *
      * A namespace exists, if at least one loaded module exports
      * one symbol in said namespace.
-     *
-     * @param ctx context
-     * @param ns namespace to query
-     * @param exists query result
-     *
-     * @return Status code.
      */
     FimoResult (*namespace_exists)(void *ctx, const char *ns, bool *exists);
     /**
@@ -1504,12 +1474,6 @@ typedef struct FimoModuleVTableV0 {
      * Once included, the module gains access to the symbols
      * of its dependencies that are exposed in said namespace.
      * A namespace can not be included multiple times.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param ns namespace to include
-     *
-     * @return Status code.
      */
     FimoResult (*namespace_include)(void *ctx, const FimoModule *caller, const char *ns);
     /**
@@ -1520,12 +1484,6 @@ typedef struct FimoModuleVTableV0 {
      * It is only possible to exclude namespaces that were
      * manually added, whereas static namespace includes
      * remain valid until the module is unloaded.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param ns namespace to exclude.
-     *
-     * @return Status code.
      */
     FimoResult (*namespace_exclude)(void *ctx, const FimoModule *caller, const char *ns);
     /**
@@ -1538,14 +1496,6 @@ typedef struct FimoModuleVTableV0 {
      * queries whether the include is static, i.e., the include was
      * specified by the module at load time. The include type is
      * stored in `is_static`.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param ns namespace to query
-     * @param is_included result of the query
-     * @param is_static resulting include type
-     *
-     * @return Status code.
      */
     FimoResult (*namespace_included)(void *ctx, const FimoModule *caller, const char *ns,
                                      bool *is_included, bool *is_static);
@@ -1558,12 +1508,6 @@ typedef struct FimoModuleVTableV0 {
      * module that is already a dependency, or to a module that
      * would result in a circular dependency will result in an
      * error.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param info module to acquire as a dependency
-     *
-     * @return Status code.
      */
     FimoResult (*acquire_dependency)(void *ctx, const FimoModule *caller,
                                      const FimoModuleInfo *info);
@@ -1577,12 +1521,6 @@ typedef struct FimoModuleVTableV0 {
      * dependencies to modules that were acquired dynamically,
      * as static dependencies remain valid until the module is
      * unloaded.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param info dependency to remove
-     *
-     * @return Status code.
      */
     FimoResult (*relinquish_dependency)(void *ctx, const FimoModule *caller,
                                         const FimoModuleInfo *info);
@@ -1596,14 +1534,6 @@ typedef struct FimoModuleVTableV0 {
      * queries whether the dependency is static, i.e., the
      * dependency was set by the module subsystem at load time.
      * The dependency type is stored in `is_static`.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param info other module to check as a dependency
-     * @param has_dependency result of the query
-     * @param is_static resulting dependency type
-     *
-     * @return Status code.
      */
     FimoResult (*has_dependency)(void *ctx, const FimoModule *caller, const FimoModuleInfo *info,
                                  bool *has_dependency, bool *is_static);
@@ -1619,15 +1549,6 @@ typedef struct FimoModuleVTableV0 {
      * the module that exported the symbol. This function fails,
      * if the module containing the symbol is not a dependency
      * of the module.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param name symbol name
-     * @param ns symbol namespace
-     * @param version symbol version
-     * @param symbol resulting symbol
-     *
-     * @return Status code.
      */
     FimoResult (*load_symbol)(void *ctx, const FimoModule *caller, const char *name,
                               const char *ns, FimoVersion version, const void **symbol);
@@ -1640,11 +1561,6 @@ typedef struct FimoModuleVTableV0 {
      * except if they are a pseudo module.
      *
      * Setting `module` to `NULL` only runs the cleanup of all loose modules.
-     *
-     * @param ctx the context
-     * @param info module to unload
-     *
-     * @return Status code.
      */
     FimoResult (*unload)(void *ctx, const FimoModuleInfo *info);
     /**
@@ -1653,15 +1569,6 @@ typedef struct FimoModuleVTableV0 {
      * This function can be used to query the datatype, the read access,
      * and the write access of a module parameter. This function fails,
      * if the parameter can not be found.
-     *
-     * @param ctx context
-     * @param module name of the module containing the parameter
-     * @param param parameter to query
-     * @param type queried parameter datatype
-     * @param read_group queried parameter read group
-     * @param write_group queried parameter write group
-     *
-     * @return Status code.
      */
     FimoResult (*param_query)(void *ctx, const char *module, const char *param,
                               FimoModuleParamType *type, FimoModuleParamAccessGroup *read_group,
@@ -1674,14 +1581,6 @@ typedef struct FimoModuleVTableV0 {
      * the parameter does not allow writing with a public access.
      * The caller must ensure that `value` points to an instance of
      * the same datatype as the parameter in question.
-     *
-     * @param ctx context
-     * @param value pointer to the value to store
-     * @param type type of the value
-     * @param module name of the module containing the parameter
-     * @param param name of the parameter
-     *
-     * @return Status code.
      */
     FimoResult (*param_set_public)(void *ctx, const void *value, FimoModuleParamType type,
                                    const char *module, const char *param);
@@ -1693,14 +1592,6 @@ typedef struct FimoModuleVTableV0 {
      * the parameter does not allow reading with a public access.
      * The caller must ensure that `value` points to an instance of
      * the same datatype as the parameter in question.
-     *
-     * @param ctx context
-     * @param value pointer where to store the value
-     * @param type buffer where to store the type of the parameter
-     * @param module name of the module containing the parameter
-     * @param param name of the parameter
-     *
-     * @return Status code.
      */
     FimoResult (*param_get_public)(void *ctx, void *value, FimoModuleParamType *type,
                                    const char *module, const char *param);
@@ -1712,15 +1603,6 @@ typedef struct FimoModuleVTableV0 {
      * or if the parameter does not allow writing with a dependency
      * access. The caller must ensure that `value` points to an
      * instance of the same datatype as the parameter in question.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param value pointer to the value to store
-     * @param type type of the value
-     * @param module name of the module containing the parameter
-     * @param param name of the parameter
-     *
-     * @return Status code.
      */
     FimoResult (*param_set_dependency)(void *ctx, const FimoModule *caller, const void *value,
                                        FimoModuleParamType type, const char *module,
@@ -1733,15 +1615,6 @@ typedef struct FimoModuleVTableV0 {
      * or if the parameter does not allow reading with a dependency
      * access. The caller must ensure that `value` points to an
      * instance of the same datatype as the parameter in question.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param value pointer where to store the value
-     * @param type buffer where to store the type of the parameter
-     * @param module name of the module containing the parameter
-     * @param param name of the parameter
-     *
-     * @return Status code.
      */
     FimoResult (*param_get_dependency)(void *ctx, const FimoModule *caller, void *value,
                                        FimoModuleParamType *type, const char *module,
@@ -1750,27 +1623,11 @@ typedef struct FimoModuleVTableV0 {
      * Setter for a module parameter.
      *
      * If the setter produces an error, the parameter won't be modified.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param value value to write
-     * @param type type of the value
-     * @param param parameter to write
-     *
-     * @return Status code.
      */
     FimoResult (*param_set_private)(void *ctx, const FimoModule *caller, const void *value,
                                     FimoModuleParamType type, FimoModuleParam *param);
     /**
      * Getter for a module parameter.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param value buffer where to store the parameter
-     * @param type buffer where to store the type of the parameter
-     * @param param parameter to load
-     *
-     * @return Status code.
      */
     FimoResult (*param_get_private)(void *ctx, const FimoModule *caller, void *value,
                                     FimoModuleParamType *type, const FimoModuleParam *param);
@@ -1778,27 +1635,11 @@ typedef struct FimoModuleVTableV0 {
      * Internal setter for a module parameter.
      *
      * If the setter produces an error, the parameter won't be modified.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param value value to write
-     * @param type type of the value
-     * @param param parameter to write
-     *
-     * @return Status code.
      */
     FimoResult (*param_set_inner)(void *ctx, const FimoModule *caller, const void *value,
                                   FimoModuleParamType type, FimoModuleParamData *param);
     /**
      * Internal getter for a module parameter.
-     *
-     * @param ctx context
-     * @param caller module of the caller
-     * @param value buffer where to store the parameter
-     * @param type buffer where to store the type of the parameter
-     * @param param parameter to load
-     *
-     * @return Status code.
      */
     FimoResult (*param_get_inner)(void *ctx, const FimoModule *caller, void *value,
                                   FimoModuleParamType *type, const FimoModuleParamData *param);

@@ -396,18 +396,18 @@ impl FFISharable<bindings::FiTasksContext> for Context {
 pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &Context)) {
     use fimo_std::{
         context::ContextBuilder,
-        module::{LoadingSet, LoadingSetRequest, Module, NamespaceItem},
+        module::{LoadingSet, Module, NamespaceItem},
         r#async::{BlockingContext, EventLoop},
         tracing::default_subscriber,
     };
-    use std::{ffi::CString, path::PathBuf};
+    use std::path::PathBuf;
 
     let modules_dir = std::env::var("MODULES_DIR")
         .expect("MODULES_DIR environment variable is required while testing");
     let mut tasks_dir = PathBuf::from(modules_dir);
     tasks_dir.push("fimo_tasks_impl");
     tasks_dir.push("module.module");
-    let tasks_dir = CString::new(tasks_dir.into_os_string().into_string().unwrap()).unwrap();
+    let tasks_dir = tasks_dir.into_os_string().into_string().unwrap();
 
     let context = <ContextBuilder>::new()
         .with_tracing_config(Config::new(
@@ -424,15 +424,18 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
         let blocking = BlockingContext::new(*context).expect("could not create blocking context");
 
         blocking.block_on(async {
-            LoadingSet::with_loading_set(&*context, |ctx, set| {
-                set.append_modules(ctx, Some(&tasks_dir), |_| {
-                    fimo_std::module::LoadingFilterRequest::Load
-                })?;
-                Ok(LoadingSetRequest::Load)
-            })
-            .expect("could not load modules")
-            .await
-            .expect("could not load modules");
+            let set = LoadingSet::new(&*context).unwrap().await.unwrap();
+            // Safety:
+            unsafe {
+                set.view()
+                    .add_modules_from_path(&tasks_dir, |_| {
+                        fimo_std::module::LoadingFilterRequest::Load
+                    })
+                    .unwrap()
+                    .await
+                    .unwrap();
+            }
+            set.view().commit().unwrap().await.unwrap();
 
             let module = fimo_std::module::PseudoModule::new(&*context)
                 .expect("could not create pseudo module");

@@ -10,6 +10,7 @@ const tmp_path = @import("../tmp_path.zig");
 const Context = @import("../../context.zig");
 const Async = @import("../async.zig");
 const Module = @import("../module.zig");
+const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyModule = @import("../proxy_context/module.zig");
 
 const InstanceHandle = @import("InstanceHandle.zig");
@@ -23,6 +24,7 @@ mutex: Async.Mutex = .{},
 allocator: Allocator,
 tmp_dir: tmp_path.TmpDirUnmanaged,
 state: enum { idle, loading_set } = .idle,
+loading_set_waiters: std.ArrayListUnmanaged(LoadingSetWaiter) = .{},
 dep_graph: graph.GraphUnmanaged(*const ProxyModule.OpaqueInstance, void),
 instances: std.StringArrayHashMapUnmanaged(InstanceRef) = .{},
 namespaces: std.StringArrayHashMapUnmanaged(NamespaceInfo) = .{},
@@ -42,6 +44,11 @@ pub const SystemError = error{
     CyclicDependency,
     LoadingInProcess,
 } || Allocator.Error;
+
+pub const LoadingSetWaiter = struct {
+    waiter: *anyopaque,
+    waker: ProxyAsync.Waker,
+};
 
 const InstanceRef = struct {
     id: graph.NodeId,
@@ -74,7 +81,11 @@ pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
 }
 
 pub fn deinit(self: *Self) void {
+    std.debug.assert(self.state == .idle);
+    std.debug.assert(self.loading_set_waiters.items.len == 0);
+
     self.tmp_dir.deinit(self.allocator);
+    self.loading_set_waiters.deinit(self.allocator);
     self.dep_graph.deinit(self.allocator);
     while (self.instances.popOrNull()) |entry| self.allocator.free(entry.key);
     while (self.namespaces.popOrNull()) |entry| self.allocator.free(entry.key);
@@ -105,7 +116,7 @@ pub fn asContext(self: *Self) *Context {
     return module.asContext();
 }
 
-fn logTrace(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
+pub fn logTrace(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
     self.asContext().tracing.emitTraceSimple(fmt, args, location);
 }
 
@@ -407,111 +418,4 @@ fn removeSymbol(self: *Self, name: []const u8, namespace: []const u8) void {
     const ns = self.getNamespace(namespace) orelse unreachable;
     ns.num_symbols -= 1;
     self.cleanupUnusedNamespace(namespace);
-}
-
-pub fn loadSet(
-    self: *Self,
-    set: *LoadingSet,
-) (SystemError || InstanceHandle.InstanceHandleError)!void {
-    if (self.state == .loading_set) return error.LoadingInProcess;
-    std.debug.assert(!set.is_loading);
-    self.state = .loading_set;
-    defer self.state = .idle;
-    set.is_loading = true;
-    defer set.is_loading = false;
-
-    set.should_recreate_map = false;
-    var queue = try set.createQueue(self);
-    defer queue.deinit(self.allocator);
-    outer: while (queue.items.len > 0 or set.should_recreate_map) {
-        if (set.should_recreate_map) {
-            set.should_recreate_map = false;
-            queue.deinit(self.allocator);
-            queue = .{};
-            queue = try set.createQueue(self);
-            continue;
-        }
-        const instance_info = queue.pop();
-        const instance_name = instance_info.@"export".name;
-
-        // Recheck that all dependencies could be loaded.
-        for (instance_info.@"export".getSymbolImports()) |i| {
-            const i_name = std.mem.span(i.name);
-            const i_namespace = std.mem.span(i.namespace);
-            const i_version = Version.initC(i.version);
-            if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
-                const owner = set.getModule(sym.owner).?;
-                if (owner.status == .err) {
-                    self.logWarn(
-                        "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
-                            " instance='{s}', dependency='{s}'",
-                        .{ instance_name, sym.owner },
-                        @src(),
-                    );
-                    instance_info.signalError();
-                    continue :outer;
-                }
-            }
-        }
-
-        // Check that the explicit dependencies exist.
-        for (instance_info.@"export".getModifiers()) |mod| {
-            if (mod.tag != .dependency) continue;
-            const dependency = mod.value.dependency;
-            if (self.getInstance(std.mem.span(dependency.name)) == null) {
-                self.logWarn(
-                    "instance can not be loaded due to a missing dependency...skipping," ++
-                        " instance='{s}', dependency='{s}'",
-                    .{ instance_name, dependency.name },
-                    @src(),
-                );
-                instance_info.signalError();
-                continue :outer;
-            }
-        }
-
-        // Construct the instance.
-        var err: ?AnyError = null;
-        const instance = InstanceHandle.initExportedInstance(
-            self,
-            set,
-            instance_info.@"export",
-            instance_info.handle,
-            &err,
-        ) catch |e| switch (e) {
-            error.FfiError => {
-                self.logWarn(
-                    "instance construction error...skipping," ++
-                        " instance='{s}', error='{dbg}:{}'",
-                    .{ instance_name, err.?, err.? },
-                    @src(),
-                );
-                err.?.deinit();
-                instance_info.signalError();
-                continue :outer;
-            },
-            else => return @as(SystemError || InstanceHandle.InstanceHandleError, @errorCast(e)),
-        };
-
-        const instance_handle = InstanceHandle.fromInstancePtr(instance);
-        const inner = instance_handle.lock();
-        errdefer inner.deinit().unref();
-
-        inner.start(self, &err) catch {
-            self.logWarn(
-                "instance `on_start` error...skipping," ++
-                    " instance='{s}', error='{dbg}:{}'",
-                .{ instance_name, err.?, err.? },
-                @src(),
-            );
-            err.?.deinit();
-            instance_info.signalError();
-            continue :outer;
-        };
-        errdefer inner.stop(self);
-
-        try self.addInstance(inner);
-        defer inner.unlock();
-        instance_info.signalSuccess(instance.info);
-    }
 }

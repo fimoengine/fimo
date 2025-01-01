@@ -118,7 +118,7 @@ struct CConstructor;
 impl<'m> ModuleConstructor<C<'m>> for CConstructor {
     fn construct<'a>(
         module: ConstructorModule<'a, C<'m>>,
-        set: LoadingSet<'_>,
+        set: LoadingSetView<'_>,
     ) -> Result<&'a mut <C<'m> as Module>::Data, Error> {
         let module = module.unwrap()?;
 
@@ -189,14 +189,11 @@ fn load_modules() -> Result<(), Error> {
 
     let blocking = BlockingContext::new(*context)?;
     blocking.block_on(async move {
-        LoadingSet::with_loading_set(&*context, |ctx, set| {
-            set.append_modules(ctx, None, |export| {
-                emit_info!(ctx, "{export}");
-                LoadingFilterRequest::Load
-            })?;
-            Ok(LoadingSetRequest::Load)
-        })?
-        .await?;
+        let set = LoadingSet::new(&*context)?.await?;
+        set.view()
+            .add_modules_from_local(|_| LoadingFilterRequest::Load)?
+            .await?;
+        set.view().commit()?.await?;
 
         let module = PseudoModule::new(&*context)?;
         let a = ModuleInfo::find_by_name(&*context, c"a")?;

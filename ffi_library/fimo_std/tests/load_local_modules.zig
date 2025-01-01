@@ -32,7 +32,7 @@ const B1 = Module.Symbol{
     .symbol = i32,
 };
 
-fn initCModule(octx: *const Module.OpaqueInstance, set: *Module.LoadingSet) !void {
+fn initCModule(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !void {
     _ = set;
     const ctx: *const C = @alignCast(@ptrCast(octx));
     ctx.context().tracing().emitInfoSimple(
@@ -207,27 +207,28 @@ pub fn main() !void {
     const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
     defer async_ctx.deinit();
 
-    const set = blk: {
-        var fut = try Module.LoadingSet.init(ctx.module(), &err);
-        defer fut.deinit();
+    const set = try async_ctx.awaitFutureDeinit(
+        Async.Fallible(Module.LoadingSet),
+        try Module.LoadingSet.init(ctx.module(), &err),
+    ).unwrap(&err);
+    defer set.unref();
 
-        const s = async_ctx.awaitFuture(Async.Fallible(*Module.LoadingSet), &fut);
-        break :blk try s.unwrap(&err);
-    };
-    try set.addModulesFromPath(
-        ctx.module(),
-        null,
-        &{},
-        struct {
-            fn f(@"export": *const Module.Export, data: *const void) bool {
-                _ = @"export";
-                _ = data;
-                return true;
-            }
-        }.f,
-        &err,
-    );
-    try set.commit(ctx.module(), &err);
+    try async_ctx.awaitFutureDeinit(
+        Async.Fallible(void),
+        try set.addModulesFromLocal(
+            &{},
+            struct {
+                fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
+                    _ = @"export";
+                    _ = data;
+                    return .load;
+                }
+            }.f,
+            null,
+            &err,
+        ),
+    ).unwrap(&err);
+    try async_ctx.awaitFutureDeinit(Async.Fallible(void), try set.commit(&err)).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
     errdefer (instance.deinit(&err) catch unreachable).unref();
