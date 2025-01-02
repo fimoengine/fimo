@@ -1,5 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
+const Thread = std.Thread;
+const Mutex = Thread.Mutex;
+const Condition = Thread.Condition;
 const builtin = @import("builtin");
 
 const fimo_python_meta = @import("fimo_python_meta");
@@ -37,6 +40,11 @@ comptime {
 }
 
 const State = struct {
+    thread: Thread,
+    mutex: Mutex,
+    condition: Condition,
+    state: enum { run, stop } = .stop,
+    err: ?anyerror,
     thread_state: *PyThreadState,
 
     const PyConfig = Python.PyConfig;
@@ -75,6 +83,64 @@ const State = struct {
 
         const self = try heap.fimo_allocator.create(State);
         errdefer heap.fimo_allocator.destroy(self);
+        self.* = .{
+            .thread = undefined,
+            .mutex = .{},
+            .condition = .{},
+            .state = .stop,
+            .err = null,
+            .thread_state = undefined,
+        };
+
+        // Python must be initialized and finalized from the same thread, which the fimo
+        // library does not guarantee. Therefore we create a custom idle thread, whose sole
+        // purpose is to initialize and eventually finalize the runtime.
+        self.thread = try Thread.spawn(.{}, initDeinitSubThread, .{ self, ctx });
+        errdefer self.thread.join();
+
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            while (self.state == .stop) {
+                self.condition.wait(&self.mutex);
+            }
+        }
+        if (self.err) |err| return err;
+
+        return self;
+    }
+
+    fn deinit(octx: *const Module.OpaqueInstance, self: *State) void {
+        _ = octx;
+
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.state = .stop;
+            self.condition.signal();
+        }
+
+        self.thread.join();
+        heap.fimo_allocator.destroy(self);
+    }
+
+    fn initDeinitSubThread(self: *State, ctx: *const Instance) void {
+        self.initSubThread(ctx) catch return;
+
+        self.mutex.lock();
+        while (self.state == .run) {
+            self.condition.wait(&self.mutex);
+        }
+
+        self.deinitSubThread(ctx);
+    }
+
+    fn initSubThread(self: *State, ctx: *const Instance) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        defer self.condition.signal();
+        defer self.state = .run;
+        errdefer |err| self.err = err;
 
         var cfg: PyConfig = undefined;
         PyConfig_InitIsolatedConfig(&cfg);
@@ -111,12 +177,10 @@ const State = struct {
             return error.PythonInit;
         }
 
-        self.* = .{ .thread_state = PyEval_SaveThread().? };
-        return self;
+        self.thread_state = PyEval_SaveThread().?;
     }
 
-    fn deinit(octx: *const Module.OpaqueInstance, self: *State) void {
-        const ctx: *const Instance = @alignCast(@ptrCast(octx));
+    fn deinitSubThread(self: *State, ctx: *const Instance) void {
         PyEval_RestoreThread(self.thread_state);
         const result = Py_FinalizeEx();
         if (result != 0) ctx.context().tracing().emitErrSimple(
@@ -124,7 +188,6 @@ const State = struct {
             .{},
             @src(),
         );
-        heap.fimo_allocator.destroy(self);
     }
 
     fn initRunString(octx: *const Module.OpaqueInstance) !*fimo_python_meta.RunString {
