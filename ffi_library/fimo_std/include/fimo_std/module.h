@@ -18,6 +18,43 @@
 extern "C" {
 #endif
 
+struct FimoModuleInfo;
+
+/**
+ * VTable of a FimoModuleInfo.
+ *
+ * Adding fields to the vtable is not a breaking change.
+ */
+typedef struct FimoModuleInfoVTable {
+    /**
+     * Increases the reference count of the info instance.
+     */
+    void (*acquire)(const struct FimoModuleInfo *info);
+    /**
+     * Decreases the reference count of the info instance.
+     */
+    void (*release)(const struct FimoModuleInfo *info);
+    /**
+     * Returns whether the owning module is still loaded.
+     */
+    bool (*is_loaded)(const struct FimoModuleInfo *info);
+    /**
+     * Increases the strong reference count of the module instance.
+     *
+     * Will prevent the module from being unloaded. This may be used to pass
+     * data, like callbacks, between modules, without registering the dependency
+     * with the subsystem.
+     */
+    FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *info);
+    /**
+     * Decreases the strong reference count of the module instance.
+     *
+     * Should only be called after `acquire_module_strong`, when the dependency
+     * is no longer required.
+     */
+    void (*release_module_strong)(const struct FimoModuleInfo *info);
+} FimoModuleInfoVTable;
+
 /**
  * Info of a loaded module.
  */
@@ -57,32 +94,9 @@ typedef struct FimoModuleInfo {
      */
     const char *module_path;
     /**
-     * Increases the reference count of the info instance.
+     * VTable of the info.
      */
-    void (*acquire)(const struct FimoModuleInfo *info);
-    /**
-     * Decreases the reference count of the info instance.
-     */
-    void (*release)(const struct FimoModuleInfo *info);
-    /**
-     * Returns whether the owning module is still loaded.
-     */
-    bool (*is_loaded)(const struct FimoModuleInfo *info);
-    /**
-     * Increases the strong reference count of the module instance.
-     *
-     * Will prevent the module from being unloaded. This may be used to pass
-     * data, like callbacks, between modules, without registering the dependency
-     * with the subsystem.
-     */
-    FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *info);
-    /**
-     * Decreases the strong reference count of the module instance.
-     *
-     * Should only be called after `acquire_module_strong`, when the dependency
-     * is no longer required.
-     */
-    void (*release_module_strong)(const struct FimoModuleInfo *info);
+    FimoModuleInfoVTable vtable;
 } FimoModuleInfo;
 
 typedef struct FimoModuleInstance FimoModuleInstance;

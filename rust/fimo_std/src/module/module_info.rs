@@ -129,7 +129,7 @@ impl ModuleInfoView<'_> {
 
     /// Checks whether the underlying module is still loaded.
     pub fn is_loaded(&self) -> bool {
-        let is_loaded = self.0.is_loaded.unwrap();
+        let is_loaded = self.0.vtable.is_loaded.unwrap();
         // Safety: The ffi call is safe.
         unsafe { (is_loaded)(self.share_to_ffi()) }
     }
@@ -139,7 +139,7 @@ impl ModuleInfoView<'_> {
     /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
     /// between modules, without registering the dependency with the subsystem.
     pub fn acquire_module_strong(&self) -> Result<ModuleInfoGuard<'_>, Error> {
-        let acquire_module_strong = self.0.acquire_module_strong.unwrap();
+        let acquire_module_strong = self.0.vtable.acquire_module_strong.unwrap();
         // Safety: The ffi call is safe.
         unsafe {
             to_result_indirect(|error| {
@@ -155,14 +155,14 @@ impl ModuleInfoView<'_> {
     ///
     /// The module must have been locked.
     pub unsafe fn release_module_strong(&self) {
-        let release_module_strong = self.0.release_module_strong.unwrap();
+        let release_module_strong = self.0.vtable.release_module_strong.unwrap();
         // Safety: The ffi call is safe.
         unsafe { (release_module_strong)(self.share_to_ffi()) }
     }
 
     /// Acquires the module info by increasing the reference count.
     pub fn to_owned(&self) -> ModuleInfo {
-        let acquire = self.0.acquire.unwrap();
+        let acquire = self.0.vtable.acquire.unwrap();
         // Safety: Is sound, as we acquired a strong reference.
         unsafe {
             (acquire)(self.share_to_ffi());
@@ -308,7 +308,7 @@ impl Clone for ModuleInfo {
 
 impl Drop for ModuleInfo {
     fn drop(&mut self) {
-        let release = self.0 .0.release.unwrap();
+        let release = self.0 .0.vtable.release.unwrap();
         // Safety: The ffi call is safe.
         unsafe { (release)(self.share_to_ffi()) }
     }

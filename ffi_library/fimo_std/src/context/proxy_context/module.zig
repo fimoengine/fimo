@@ -679,25 +679,32 @@ pub const Info = extern struct {
     author: ?[*:0]const u8 = null,
     license: ?[*:0]const u8 = null,
     module_path: ?[*:0]const u8 = null,
-    acquire_fn: *const fn (ctx: *const Info) callconv(.c) void,
-    release_fn: *const fn (ctx: *const Info) callconv(.c) void,
-    is_loaded_fn: *const fn (ctx: *const Info) callconv(.c) bool,
-    acquire_module_strong_fn: *const fn (ctx: *const Info) callconv(.c) c.FimoResult,
-    release_module_strong_fn: *const fn (ctx: *const Info) callconv(.c) void,
+    vtable: Info.VTable,
+
+    /// VTable of a info instance.
+    ///
+    /// Adding fields to the vtable is not a breaking change.
+    pub const VTable = extern struct {
+        ref: *const fn (ctx: *const Info) callconv(.c) void,
+        unref: *const fn (ctx: *const Info) callconv(.c) void,
+        is_loaded: *const fn (ctx: *const Info) callconv(.c) bool,
+        ref_instance_strong: *const fn (ctx: *const Info) callconv(.c) c.FimoResult,
+        unref_instance_strong: *const fn (ctx: *const Info) callconv(.c) void,
+    };
 
     /// Increases the reference count of the info instance.
     pub fn ref(self: *const Info) void {
-        self.acquire_fn(self);
+        self.vtable.ref(self);
     }
 
     /// Decreases the reference count of the info instance.
     pub fn unref(self: *const Info) void {
-        self.release_fn(self);
+        self.vtable.unref(self);
     }
 
     /// Returns whether the owning module instance is still loaded.
     pub fn isLoaded(self: *const Info) bool {
-        return self.is_loaded_fn(self);
+        return self.vtable.is_loaded(self);
     }
 
     /// Increases the strong reference count of the module instance.
@@ -706,7 +713,7 @@ pub const Info = extern struct {
     /// data, like callbacks, between modules, without registering the dependency
     /// with the subsystem.
     pub fn refInstanceStrong(self: *const Info, err: *?AnyError) AnyError.Error!void {
-        const result = self.acquire_module_strong_fn(self);
+        const result = self.vtable.ref_instance_strong(self);
         try AnyError.initChecked(err, result);
     }
 
@@ -715,7 +722,7 @@ pub const Info = extern struct {
     /// Should only be called after `acquire_module_strong`, when the dependency
     /// is no longer required.
     pub fn unrefInstanceStrong(self: *const Info) void {
-        self.release_module_strong_fn(self);
+        self.vtable.unref_instance_strong(self);
     }
 
     /// Searches for a module by it's name.

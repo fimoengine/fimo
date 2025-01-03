@@ -546,36 +546,6 @@ fn init(
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
-    const FfiInfo = struct {
-        fn ref(info: *const ProxyModule.Info) callconv(.C) void {
-            const x = Self.fromInfoPtr(info);
-            x.ref();
-        }
-        fn unref(info: *const ProxyModule.Info) callconv(.C) void {
-            const x = Self.fromInfoPtr(info);
-            x.unref();
-        }
-        fn isLoaded(info: *const ProxyModule.Info) callconv(.C) bool {
-            const x = Self.fromInfoPtr(info);
-            const inner = x.lock();
-            defer inner.unlock();
-            return !inner.isDetached();
-        }
-        fn refInstanceStrong(info: *const ProxyModule.Info) callconv(.C) c.FimoResult {
-            const x = Self.fromInfoPtr(info);
-            const inner = x.lock();
-            defer inner.unlock();
-            inner.refStrong() catch |err| return AnyError.initError(err).err;
-            return AnyError.intoCResult(null);
-        }
-        fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) void {
-            const x = Self.fromInfoPtr(info);
-            const inner = x.lock();
-            defer inner.unlock();
-            inner.unrefStrong();
-        }
-    };
-
     self.* = .{
         .sys = sys,
         .inner = .{
@@ -589,11 +559,7 @@ fn init(
             .author = undefined,
             .license = undefined,
             .module_path = undefined,
-            .acquire_fn = &FfiInfo.ref,
-            .release_fn = &FfiInfo.unref,
-            .is_loaded_fn = &FfiInfo.isLoaded,
-            .acquire_module_strong_fn = &FfiInfo.refInstanceStrong,
-            .release_module_strong_fn = &FfiInfo.unrefInstanceStrong,
+            .vtable = info_vtable,
         },
     };
 
@@ -637,7 +603,7 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
     }
     instance.* = .{
         .instance = .{
-            .vtable = &vtable,
+            .vtable = &instance_vtable,
             .parameters = null,
             .resources = null,
             .imports = null,
@@ -678,7 +644,7 @@ pub fn initExportedInstance(
 
     const instance = try sys.allocator.create(ProxyModule.OpaqueInstance);
     instance.* = .{
-        .vtable = &vtable,
+        .vtable = &instance_vtable,
         .parameters = null,
         .resources = null,
         .imports = null,
@@ -834,7 +800,7 @@ pub fn initExportedInstance(
 }
 
 pub fn fromInstancePtr(instance: *const ProxyModule.OpaqueInstance) *const Self {
-    std.debug.assert(instance.vtable == &vtable);
+    std.debug.assert(instance.vtable == &instance_vtable);
     return fromInfoPtr(instance.info);
 }
 
@@ -881,7 +847,49 @@ pub fn lock(self: *const Self) *Inner {
 }
 
 // ----------------------------------------------------
-// Futures
+// Info VTable
+// ----------------------------------------------------
+
+const InfoVTableImpl = struct {
+    fn ref(info: *const ProxyModule.Info) callconv(.C) void {
+        const x = Self.fromInfoPtr(info);
+        x.ref();
+    }
+    fn unref(info: *const ProxyModule.Info) callconv(.C) void {
+        const x = Self.fromInfoPtr(info);
+        x.unref();
+    }
+    fn isLoaded(info: *const ProxyModule.Info) callconv(.C) bool {
+        const x = Self.fromInfoPtr(info);
+        const inner = x.lock();
+        defer inner.unlock();
+        return !inner.isDetached();
+    }
+    fn refInstanceStrong(info: *const ProxyModule.Info) callconv(.C) c.FimoResult {
+        const x = Self.fromInfoPtr(info);
+        const inner = x.lock();
+        defer inner.unlock();
+        inner.refStrong() catch |err| return AnyError.initError(err).err;
+        return AnyError.intoCResult(null);
+    }
+    fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) void {
+        const x = Self.fromInfoPtr(info);
+        const inner = x.lock();
+        defer inner.unlock();
+        inner.unrefStrong();
+    }
+};
+
+const info_vtable = ProxyModule.Info.VTable{
+    .ref = &InfoVTableImpl.ref,
+    .unref = &InfoVTableImpl.unref,
+    .is_loaded = &InfoVTableImpl.isLoaded,
+    .ref_instance_strong = &InfoVTableImpl.refInstanceStrong,
+    .unref_instance_strong = &InfoVTableImpl.unrefInstanceStrong,
+};
+
+// ----------------------------------------------------
+// Instance Futures
 // ----------------------------------------------------
 
 const AddNamespaceOp = FSMFuture(struct {
@@ -1381,10 +1389,10 @@ const LoadSymbolOp = FSMFuture(struct {
 });
 
 // ----------------------------------------------------
-// VTable
+// Instance VTable
 // ----------------------------------------------------
 
-const VTableImpl = struct {
+const InstanceVTableImpl = struct {
     fn queryNamespace(
         ctx: *const ProxyModule.OpaqueInstance,
         namespace: [*:0]const u8,
@@ -1558,12 +1566,12 @@ const VTableImpl = struct {
     }
 };
 
-const vtable = ProxyModule.OpaqueInstance.VTable{
-    .query_namespace = &VTableImpl.queryNamespace,
-    .add_namespace = &VTableImpl.addNamespace,
-    .remove_namespace = &VTableImpl.removeNamespace,
-    .query_dependency = &VTableImpl.queryDependency,
-    .add_dependency = &VTableImpl.addDependency,
-    .remove_dependency = &VTableImpl.removeDependency,
-    .load_symbol = &VTableImpl.loadSymbol,
+const instance_vtable = ProxyModule.OpaqueInstance.VTable{
+    .query_namespace = &InstanceVTableImpl.queryNamespace,
+    .add_namespace = &InstanceVTableImpl.addNamespace,
+    .remove_namespace = &InstanceVTableImpl.removeNamespace,
+    .query_dependency = &InstanceVTableImpl.queryDependency,
+    .add_dependency = &InstanceVTableImpl.addDependency,
+    .remove_dependency = &InstanceVTableImpl.removeDependency,
+    .load_symbol = &InstanceVTableImpl.loadSymbol,
 };
