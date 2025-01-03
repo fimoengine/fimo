@@ -277,6 +277,7 @@ pub const Inner = struct {
     mutex: Mutex = .{},
     state: State = .uninit,
     strong_count: usize = 0,
+    dependents_count: usize = 0,
     is_detached: bool = false,
     handle: ?*ModuleHandle = null,
     @"export": ?*const ProxyModule.Export = null,
@@ -297,13 +298,12 @@ pub const Inner = struct {
         started,
     };
 
-    pub fn deinit(self: *Inner) ProxyContext {
+    pub fn deinit(self: *Inner) void {
         std.debug.assert(self.handle != null);
         const handle = Self.fromInnerPtr(self);
-        const ctx = self.detach(true);
+        self.detach();
         self.unlock();
-        handle.unref(true);
-        return ctx;
+        handle.unref();
     }
 
     pub fn unlock(self: *Inner) void {
@@ -315,7 +315,8 @@ pub const Inner = struct {
     }
 
     pub fn canUnload(self: *const Inner) bool {
-        return self.strong_count == 0;
+        std.debug.assert(!self.isDetached());
+        return self.strong_count == 0 and self.dependents_count == 0;
     }
 
     pub fn refStrong(self: *Inner) InstanceHandleError!void {
@@ -384,17 +385,51 @@ pub const Inner = struct {
         return self.dependencies.getPtr(name);
     }
 
-    pub fn addDependency(self: *Inner, name: []const u8, dep: InstanceDependency) InstanceHandleError!void {
-        if (self.isDetached()) return error.Detached;
+    pub fn addDependency(self: *Inner, other: *Inner, @"type": DependencyType) InstanceHandleError!void {
+        std.debug.assert(self != other);
+        if (self.isDetached() or other.isDetached()) return error.Detached;
+
+        const handle = Self.fromInnerPtr(other);
+        const name = std.mem.span(handle.info.name);
+        const dep = InstanceDependency{
+            .instance = handle,
+            .type = @"type",
+        };
+
+        handle.ref();
+        errdefer handle.unref();
+
         const n = try self.allocator().dupe(u8, name);
         errdefer self.allocator().free(n);
         try self.dependencies.put(self.allocator(), n, dep);
+        other.dependents_count += 1;
     }
 
-    pub fn removeDependency(self: *Inner, name: []const u8) InstanceHandleError!void {
+    pub fn removeDependency(self: *Inner, other: *Inner) InstanceHandleError!void {
+        std.debug.assert(self != other);
         if (self.isDetached()) return error.Detached;
+        std.debug.assert(!other.isDetached());
+
+        const handle = Self.fromInnerPtr(other);
+        const name = std.mem.span(handle.info.name);
         const dependency = self.dependencies.fetchSwapRemove(name) orelse return error.NotFound;
         self.allocator().free(@constCast(dependency.key));
+        other.dependents_count -= 1;
+        handle.unref();
+    }
+
+    pub fn clearDependencies(self: *Inner) void {
+        std.debug.assert(!self.isDetached());
+        while (self.dependencies.popOrNull()) |dep| {
+            const handle = dep.value.instance;
+            {
+                const inner = handle.lock();
+                defer inner.unlock();
+                self.allocator().free(@constCast(dep.key));
+                inner.dependents_count -= 1;
+            }
+            handle.unref();
+        }
     }
 
     pub fn start(self: *Inner, sys: *System, err: *?AnyError) AnyError.Error!void {
@@ -431,18 +466,16 @@ pub const Inner = struct {
         self.state = .init;
     }
 
-    fn detach(self: *Inner, cleanup: bool) ProxyContext {
-        std.debug.assert(!self.isDetached());
+    fn detach(self: *Inner) void {
         std.debug.assert(self.canUnload());
         std.debug.assert(self.state != .started);
         const instance = self.instance.?;
-        const context = ProxyContext.initC(instance.ctx);
 
         self.is_detached = true;
         if (self.@"export") |exp| {
             if (exp.destructor) |dtor|
                 if (self.state == .init) dtor(instance, @constCast(instance.data));
-            if (cleanup) exp.deinit();
+            exp.deinit();
         }
 
         if (instance.parameters) |p| {
@@ -492,8 +525,6 @@ pub const Inner = struct {
         self.handle = null;
         self.instance = null;
         self.@"export" = null;
-
-        return context;
     }
 };
 
@@ -522,7 +553,7 @@ fn init(
         }
         fn unref(info: *const ProxyModule.Info) callconv(.C) void {
             const x = Self.fromInfoPtr(info);
-            x.unref(true);
+            x.unref();
         }
         fn isLoaded(info: *const ProxyModule.Info) callconv(.C) bool {
             const x = Self.fromInfoPtr(info);
@@ -596,10 +627,7 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
         null,
         .pseudo,
     );
-    errdefer instance_handle.unref(true);
-
-    sys.asContext().ref();
-    errdefer sys.asContext().unref();
+    errdefer instance_handle.unref();
 
     const instance = try sys.allocator.create(ProxyModule.PseudoInstance);
     comptime {
@@ -643,13 +671,10 @@ pub fn initExportedInstance(
         .regular,
     );
     handle.ref();
-    errdefer instance_handle.unref(false);
+    errdefer instance_handle.unref();
 
     const inner = instance_handle.lock();
     defer inner.unlock();
-
-    sys.asContext().ref();
-    errdefer sys.asContext().unref();
 
     const instance = try sys.allocator.create(ProxyModule.OpaqueInstance);
     instance.* = .{
@@ -725,6 +750,7 @@ pub fn initExportedInstance(
     // Init imports.
     var imports = std.ArrayListUnmanaged(?*const anyopaque){};
     errdefer imports.deinit(sys.allocator);
+    errdefer inner.clearDependencies();
     for (@"export".getSymbolImports()) |imp| {
         const imp_name = std.mem.span(imp.name);
         const imp_namespace = std.mem.span(imp.namespace);
@@ -746,12 +772,7 @@ pub fn initExportedInstance(
             imp_version,
         ).?;
         try imports.append(sys.allocator, owner_sym.symbol);
-        if (inner.getDependency(sym.owner) == null) {
-            try inner.addDependency(sym.owner, .{
-                .instance = owner_handle,
-                .type = .static,
-            });
-        }
+        if (inner.getDependency(sym.owner) == null) try inner.addDependency(owner_inner, .static);
     }
     try imports.append(sys.allocator, null);
     instance.imports = @ptrCast((try imports.toOwnedSlice(sys.allocator)).ptr);
@@ -834,12 +855,12 @@ fn ref(self: *const Self) void {
     this.ref_count.ref();
 }
 
-fn unref(self: *const Self, cleanup: bool) void {
+fn unref(self: *const Self) void {
     const this: *Self = @constCast(self);
     if (this.ref_count.unref() == .noop) return;
 
     const inner = this.lock();
-    if (!inner.isDetached()) inner.detach(cleanup).unref();
+    if (!inner.isDetached()) inner.detach();
 
     const sys = this.sys;
     const allocator = sys.allocator;
@@ -879,7 +900,7 @@ const AddNamespaceOp = FSMFuture(struct {
         );
 
         handle.ref();
-        errdefer handle.unref(true);
+        errdefer handle.unref();
 
         const allocator = handle.sys.allocator;
         const namespace_ = try allocator.dupe(u8, namespace);
@@ -912,7 +933,7 @@ const AddNamespaceOp = FSMFuture(struct {
         _ = reason;
         const allocator = self.handle.sys.allocator;
         allocator.free(self.namespace);
-        self.handle.unref(true);
+        self.handle.unref();
     }
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
@@ -971,7 +992,7 @@ const RemoveNamespaceOp = FSMFuture(struct {
         );
 
         handle.ref();
-        errdefer handle.unref(true);
+        errdefer handle.unref();
 
         const allocator = handle.sys.allocator;
         const namespace_ = try allocator.dupe(u8, namespace);
@@ -1004,7 +1025,7 @@ const RemoveNamespaceOp = FSMFuture(struct {
         _ = reason;
         const allocator = self.handle.sys.allocator;
         allocator.free(self.namespace);
-        self.handle.unref(true);
+        self.handle.unref();
     }
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
@@ -1066,11 +1087,11 @@ const AddDependencyOp = FSMFuture(struct {
         );
 
         handle.ref();
-        errdefer handle.unref(true);
+        errdefer handle.unref();
 
         const info_handle = Self.fromInfoPtr(info);
         info_handle.ref();
-        errdefer info_handle.unref(true);
+        errdefer info_handle.unref();
 
         std.debug.assert(handle.sys == info_handle.sys);
 
@@ -1099,8 +1120,8 @@ const AddDependencyOp = FSMFuture(struct {
 
     pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
         _ = reason;
-        self.info_handle.unref(true);
-        self.handle.unref(true);
+        self.info_handle.unref();
+        self.handle.unref();
     }
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
@@ -1161,11 +1182,11 @@ const RemoveDependencyOp = FSMFuture(struct {
         );
 
         handle.ref();
-        errdefer handle.unref(true);
+        errdefer handle.unref();
 
         const info_handle = Self.fromInfoPtr(info);
         info_handle.ref();
-        errdefer info_handle.unref(true);
+        errdefer info_handle.unref();
         std.debug.assert(handle.sys == info_handle.sys);
 
         const context = handle.sys.asContext();
@@ -1193,8 +1214,8 @@ const RemoveDependencyOp = FSMFuture(struct {
 
     pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
         _ = reason;
-        self.info_handle.unref(true);
-        self.handle.unref(true);
+        self.info_handle.unref();
+        self.handle.unref();
     }
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
@@ -1259,7 +1280,7 @@ const LoadSymbolOp = FSMFuture(struct {
         );
 
         handle.ref();
-        errdefer handle.unref(true);
+        errdefer handle.unref();
 
         const allocator = handle.sys.allocator;
         const name_ = try allocator.dupe(u8, name);
@@ -1298,7 +1319,7 @@ const LoadSymbolOp = FSMFuture(struct {
         const allocator = self.handle.sys.allocator;
         allocator.free(self.namespace);
         allocator.free(self.name);
-        self.handle.unref(true);
+        self.handle.unref();
     }
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {

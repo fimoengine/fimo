@@ -63,7 +63,7 @@ pub fn addPseudoInstance(self: *Self) !*const ProxyModule.PseudoInstance {
     const instance = try InstanceHandle.initPseudoInstance(&self.sys, name);
     const handle = InstanceHandle.fromInstancePtr(&instance.instance);
     const inner = handle.lock();
-    errdefer inner.deinit().unref();
+    errdefer inner.deinit();
 
     var err: ?AnyError = null;
     inner.start(&self.sys, &err) catch unreachable;
@@ -76,7 +76,7 @@ pub fn addPseudoInstance(self: *Self) !*const ProxyModule.PseudoInstance {
 pub fn removePseudoInstance(
     self: *Self,
     instance: *const ProxyModule.PseudoInstance,
-) System.SystemError!ProxyContext {
+) System.SystemError!void {
     self.logTrace(
         "removing pseudo instance, instance='{s}'",
         .{instance.instance.info.name},
@@ -93,12 +93,10 @@ pub fn removePseudoInstance(
 
     try self.sys.removeInstance(inner);
     inner.stop(&self.sys);
-    const context = inner.deinit();
-    errdefer context.unref();
+    inner.deinit();
     inner_destroyed = true;
 
     try self.sys.cleanupLooseInstances();
-    return context;
 }
 
 /// Initializes a new empty loading set.
@@ -185,7 +183,7 @@ pub fn unloadInstance(self: *Self, instance_info: *const ProxyModule.Info) Syste
     errdefer if (!inner_destroyed) inner.unlock();
     try self.sys.removeInstance(inner);
     inner.stop(&self.sys);
-    inner.deinit().unref();
+    inner.deinit();
     inner_destroyed = true;
     try self.sys.cleanupLooseInstances();
 }
@@ -441,14 +439,12 @@ const VTableImpl = struct {
     fn removePseudoInstance(
         ptr: *anyopaque,
         instance: *const ProxyModule.PseudoInstance,
-        context: *c.FimoContext,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        const ctx_ = ctx.module.removePseudoInstance(instance) catch |e| {
+        ctx.module.removePseudoInstance(instance) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
-        context.* = ctx_.intoC();
         return AnyError.intoCResult(null);
     }
     fn addLoadingSet(

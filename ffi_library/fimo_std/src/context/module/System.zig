@@ -128,15 +128,6 @@ pub fn logError(self: *Self, comptime fmt: []const u8, args: anytype, location: 
     self.asContext().tracing.emitErrSimple(fmt, args, location);
 }
 
-fn canRemoveInstance(self: *Self, inner: *InstanceHandle.Inner) bool {
-    const handle = InstanceHandle.fromInnerPtr(inner);
-    if (!inner.canUnload()) return false;
-
-    const data = self.getInstance(std.mem.span(handle.info.name)).?;
-    const neighbors = self.dep_graph.neighborsCount(data.id, .incoming) catch unreachable;
-    return neighbors == 0;
-}
-
 pub fn getInstance(self: *Self, name: []const u8) ?*InstanceRef {
     return self.instances.getPtr(name);
 }
@@ -222,7 +213,7 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
 
 pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
     const handle = InstanceHandle.fromInnerPtr(inner);
-    if (!self.canRemoveInstance(inner)) return error.NotPermitted;
+    if (!inner.canUnload()) return error.NotPermitted;
     if (!self.instances.contains(std.mem.span(handle.info.name))) return error.NotFound;
 
     for (inner.symbols.keys()) |key| self.removeSymbol(key.name, key.namespace);
@@ -246,6 +237,7 @@ pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!voi
             if (ns.num_references != 0 and ns.num_symbols == 0) return error.InUse;
         }
     }
+    inner.clearDependencies();
 
     const instance = self.instances.fetchSwapRemove(std.mem.span(handle.info.name)).?;
     self.allocator.free(instance.key);
@@ -287,10 +279,7 @@ pub fn linkInstances(
         else => unreachable,
     };
     errdefer _ = self.dep_graph.removeEdge(self.allocator, edge.id) catch unreachable;
-    try inner.addDependency(
-        std.mem.span(other_handle.info.name),
-        .{ .instance = other_handle, .type = .dynamic },
-    );
+    try inner.addDependency(other, .dynamic);
 }
 
 pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *InstanceHandle.Inner) SystemError!void {
@@ -310,7 +299,7 @@ pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *Instan
         other_instance_ref.id,
     ) catch unreachable).?;
     _ = self.dep_graph.removeEdge(self.allocator, edge) catch unreachable;
-    inner.removeDependency(std.mem.span(other_handle.info.name)) catch unreachable;
+    inner.removeDependency(other) catch unreachable;
 }
 
 pub fn cleanupLooseInstances(self: *Self) SystemError!void {
@@ -324,7 +313,7 @@ pub fn cleanupLooseInstances(self: *Self) SystemError!void {
         var unlock_inner = true;
         defer if (unlock_inner) inner.unlock();
 
-        if (!self.canRemoveInstance(inner)) continue;
+        if (!inner.canUnload()) continue;
         self.logTrace(
             "unloading unused instance, instance='{s}'",
             .{instance.info.name},
@@ -332,7 +321,7 @@ pub fn cleanupLooseInstances(self: *Self) SystemError!void {
         );
         try self.removeInstance(inner);
         inner.stop(self);
-        inner.deinit().unref();
+        inner.deinit();
         unlock_inner = false;
 
         // Rebuild the iterator.

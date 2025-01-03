@@ -1,7 +1,7 @@
 use super::{ModuleSubsystem, NamespaceItem, NoState, Symbol, SymbolItem};
 use crate::{
     bindings,
-    context::{Context, ContextView},
+    context::ContextView,
     error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
     r#async::{EnqueuedFuture, Fallible},
@@ -1135,7 +1135,7 @@ impl PseudoModule {
         unsafe { Ok(PseudoModule::from_ffi(module)) }
     }
 
-    unsafe fn destroy_by_ref(&mut self) -> Result<Context, Error> {
+    unsafe fn destroy_by_ref(&mut self) -> Result<(), Error> {
         // Safety: Is always set.
         let f = unsafe {
             self.context()
@@ -1146,25 +1146,18 @@ impl PseudoModule {
         };
 
         // Safety: The ffi call is safe.
-        let context = unsafe {
-            to_result_indirect_in_place(|error, context| {
-                *error = f(
-                    self.context().data(),
-                    self.share_to_ffi(),
-                    context.as_mut_ptr(),
-                );
+        unsafe {
+            to_result_indirect(|error| {
+                *error = f(self.context().data(), self.share_to_ffi());
             })
-        }?;
-
-        // Safety: The context returned by destroying the pseudo module is valid.
-        unsafe { Ok(Context::from_ffi(context)) }
+        }
     }
 
     /// Destroys the `PseudoModule`.
     ///
     /// Unlike [`PseudoModule::drop`] this method can be called while the module
     /// backend is still locked.
-    pub fn destroy(self) -> Result<Context, Error> {
+    pub fn destroy(self) -> Result<(), Error> {
         let mut this = ManuallyDrop::new(self);
 
         // Safety: The module is not used afterward.

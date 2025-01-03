@@ -66,7 +66,7 @@ pub fn main() !void {
     try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
-    defer (instance.deinit(&err) catch unreachable).unref();
+    defer instance.deinit(&err) catch unreachable;
 
     const info = try Module.Info.findByName(ctx.module(), "fimo_python", &err);
     defer info.unref();

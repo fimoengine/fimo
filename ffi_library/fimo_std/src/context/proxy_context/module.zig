@@ -1182,16 +1182,13 @@ pub const PseudoInstance = extern struct {
     ///
     /// By destroying the pseudo module, the caller ensures that they
     /// relinquished all access to handles derived by the module subsystem.
-    pub fn deinit(self: *const PseudoInstance, err: *?AnyError) AnyError.Error!Context {
-        var out_ctx: c.FimoContext = undefined;
+    pub fn deinit(self: *const PseudoInstance, err: *?AnyError) AnyError.Error!void {
         const ctx = Context.initC(self.instance.ctx);
         const result = ctx.vtable.module_v0.pseudo_module_destroy(
             ctx.data,
             self,
-            &out_ctx,
         );
         try AnyError.initChecked(err, result);
-        return Context.initC(out_ctx);
     }
 
     /// Checks the status of a namespace from the view of the module.
@@ -1819,7 +1816,6 @@ pub const VTable = extern struct {
     pseudo_module_destroy: *const fn (
         ctx: *anyopaque,
         instance: *const PseudoInstance,
-        context: *c.FimoContext,
     ) callconv(.c) c.FimoResult,
     set_new: *const fn (
         ctx: *anyopaque,

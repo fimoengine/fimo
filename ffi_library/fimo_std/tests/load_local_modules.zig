@@ -231,7 +231,7 @@ pub fn main() !void {
     try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
-    errdefer (instance.deinit(&err) catch unreachable).unref();
+    errdefer instance.deinit(&err) catch unreachable;
 
     const a = try Module.Info.findByName(ctx.module(), "a", &err);
     defer a.unref();
@@ -280,7 +280,7 @@ pub fn main() !void {
         .awaitBlocking(async_ctx)
         .unwrap(&err);
 
-    (instance.deinit(&err) catch unreachable).unref();
+    instance.deinit(&err) catch unreachable;
     try testing.expect(!a.isLoaded());
     try testing.expect(!b.isLoaded());
     try testing.expect(!c.isLoaded());

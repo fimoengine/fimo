@@ -1328,7 +1328,7 @@ const CommitOp = FSMFuture(struct {
 
             const instance_handle = InstanceHandle.fromInstancePtr(instance);
             const inner = instance_handle.lock();
-            errdefer inner.deinit().unref();
+            errdefer inner.deinit();
 
             inner.start(sys, &err) catch {
                 sys.logWarn(

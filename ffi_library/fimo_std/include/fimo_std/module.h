@@ -1532,7 +1532,7 @@ typedef struct FimoModuleVTableV0 {
      * By destroying the pseudo module, the caller ensures that they
      * relinquished all access to handles derived by the module subsystem.
      */
-    FimoResult (*pseudo_module_destroy)(void *ctx, const FimoModuleInstance *module, FimoContext *out_ctx);
+    FimoResult (*pseudo_module_destroy)(void *ctx, const FimoModuleInstance *module);
     /**
      * Constructs a new empty set.
      *
