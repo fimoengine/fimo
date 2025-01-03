@@ -1842,48 +1842,6 @@ pub const VTable = extern struct {
         namespace: [*:0]const u8,
         exists: *bool,
     ) callconv(.c) c.FimoResult,
-    namespace_include: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        namespace: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
-    namespace_exclude: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        namespace: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
-    namespace_included: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        namespace: [*:0]const u8,
-        is_included: *bool,
-        is_static: *bool,
-    ) callconv(.c) c.FimoResult,
-    acquire_dependency: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        info: *const Info,
-    ) callconv(.c) c.FimoResult,
-    relinquish_dependency: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        info: *const Info,
-    ) callconv(.c) c.FimoResult,
-    has_dependency: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        info: *const Info,
-        is_dependency: *bool,
-        is_static: *bool,
-    ) callconv(.c) c.FimoResult,
-    load_symbol: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        name: [*:0]const u8,
-        namespace: [*:0]const u8,
-        version: c.FimoVersion,
-        symbol: **const anyopaque,
-    ) callconv(.c) c.FimoResult,
     unload: *const fn (
         ctx: *anyopaque,
         info: ?*const Info,

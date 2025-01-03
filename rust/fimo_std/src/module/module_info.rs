@@ -1,3 +1,12 @@
+use super::{ModuleSubsystem, NamespaceItem, NoState, Symbol, SymbolItem};
+use crate::{
+    bindings,
+    context::{Context, ContextView},
+    error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
+    ffi::{FFISharable, FFITransferable},
+    r#async::{EnqueuedFuture, Fallible},
+    version::Version,
+};
 use core::{
     ffi::CStr,
     fmt::{Debug, Formatter},
@@ -5,16 +14,7 @@ use core::{
     mem::ManuallyDrop,
     ops::Deref,
 };
-
-use crate::{
-    bindings,
-    context::{Context, ContextView},
-    error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
-    ffi::{FFISharable, FFITransferable},
-    version::Version,
-};
-
-use super::{ModuleSubsystem, NamespaceItem, NoState, Symbol, SymbolItem};
+use std::future::Future;
 
 /// View of a `ModuleInfo`.
 #[derive(Copy, Clone)]
@@ -402,13 +402,16 @@ pub unsafe trait Module:
     ///
     /// Checks if the module specified that it includes the namespace `namespace`. In that case, the
     /// module is allowed access to the symbols in the namespace.
-    fn has_namespace_dependency(&self, namespace: &CStr) -> Result<DependencyType, Error>;
+    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, Error>;
 
     /// Includes a namespace by the module.
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are exposed
     /// in said namespace. A namespace can not be included multiple times.
-    fn include_namespace(&self, namespace: &CStr) -> error::Result;
+    fn add_namespace(
+        &self,
+        namespace: &CStr,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
 
     /// Removes a namespace from the module.
     ///
@@ -420,13 +423,16 @@ pub unsafe trait Module:
     ///
     /// The caller must ensure that they don't utilize and symbol from the namespace that will be
     /// excluded.
-    unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result;
+    unsafe fn remove_namespace(
+        &self,
+        namespace: &CStr,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
 
     /// Checks if a module depends on another module.
     ///
     /// Checks if `module` is a dependency of the current instance. In that case the instance is
     /// allowed to access the symbols exported by `module`.
-    fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error>;
+    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error>;
 
     /// Acquires another module as a dependency.
     ///
@@ -434,7 +440,10 @@ pub unsafe trait Module:
     /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
     /// already a dependency, or to a module that would result in a circular dependency will result
     /// in an error.
-    fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result;
+    fn add_dependency(
+        &self,
+        dependency: &ModuleInfoView<'_>,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
 
     /// Removes a module as a dependency.
     ///
@@ -446,7 +455,10 @@ pub unsafe trait Module:
     /// # Safety
     ///
     /// Calling this method invalidates all loaded symbols from the dependency.
-    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result;
+    unsafe fn remove_dependency(
+        &self,
+        dependency: ModuleInfoView<'_>,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
 
     /// Loads a symbol from the module subsystem.
     ///
@@ -455,7 +467,13 @@ pub unsafe trait Module:
     /// exists, is returned, and can be used until the module relinquishes the dependency to the
     /// module that exported the symbol. This function fails, if the module containing the symbol is
     /// not a dependency of the module, or if the module has not included the required namespace.
-    fn load_symbol<T: SymbolItem>(&self) -> Result<Symbol<'_, T::Type>, Error> {
+    #[allow(clippy::type_complexity)]
+    fn load_symbol<T: SymbolItem>(
+        &self,
+    ) -> Result<impl Future<Output = Result<Symbol<'_, T::Type>, Error<dyn Send + Sync>>>, Error>
+    where
+        T::Type: 'static,
+    {
         // Safety: We know the type of the symbol from the item.
         unsafe { self.load_symbol_unchecked(T::NAME, T::Namespace::NAME, T::VERSION) }
     }
@@ -471,18 +489,25 @@ pub unsafe trait Module:
     /// # Safety
     ///
     /// Users of this API must specify the correct type of the symbol.
-    unsafe fn load_symbol_unchecked<T>(
+    unsafe fn load_symbol_unchecked<T: 'static>(
         &self,
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Symbol<'_, T>, Error>;
+    ) -> Result<impl Future<Output = Result<Symbol<'_, T>, Error<dyn Send + Sync>>>, Error>;
 }
 
 /// Reference to an unknown module.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct OpaqueModule<'a>(&'a bindings::FimoModuleInstance);
+
+impl OpaqueModule<'_> {
+    pub(crate) fn vtable(&self) -> &bindings::FimoModuleInstanceVTable {
+        // Safety: Is always valid.
+        unsafe { &*self.0.vtable }
+    }
+}
 
 // Safety: `FimoModuleInstance` must be `Send + Sync`.
 unsafe impl Send for OpaqueModule<'_> {}
@@ -539,23 +564,16 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn has_namespace_dependency(&self, namespace: &CStr) -> Result<DependencyType, Error> {
+    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, Error> {
         let mut has_dependency = false;
         let mut is_static = false;
 
         // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .namespace_included
-                .unwrap_unchecked()
-        };
+        let f = unsafe { self.vtable().query_namespace.unwrap_unchecked() };
 
         // Safety: FFI call is safe.
         let error = unsafe {
             f(
-                self.context().data(),
                 self.share_to_ffi(),
                 namespace.as_ptr(),
                 &mut has_dependency,
@@ -574,160 +592,134 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn include_namespace(&self, namespace: &CStr) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .namespace_include
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
-        let error = unsafe {
-            f(
-                self.context().data(),
-                self.share_to_ffi(),
-                namespace.as_ptr(),
-            )
-        };
+    fn add_namespace(
+        &self,
+        namespace: &CStr,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
         // Safety:
-        unsafe { to_result(error) }
+        unsafe {
+            let f = self.vtable().add_namespace.unwrap_unchecked();
+            let fut = to_result_indirect_in_place(|error, fut| {
+                *error = f(self.share_to_ffi(), namespace.as_ptr(), fut.as_mut_ptr());
+            })?;
+            let fut = std::mem::transmute::<
+                bindings::FimoModuleInstanceAddNamespaceFuture,
+                EnqueuedFuture<Fallible<()>>,
+            >(fut);
+            Ok(async move { fut.await.unwrap() })
+        }
     }
 
-    unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .namespace_exclude
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
-        let error = unsafe {
-            f(
-                self.context().data(),
-                self.share_to_ffi(),
-                namespace.as_ptr(),
-            )
-        };
+    unsafe fn remove_namespace(
+        &self,
+        namespace: &CStr,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
         // Safety:
-        unsafe { to_result(error) }
+        unsafe {
+            let f = self.vtable().remove_namespace.unwrap_unchecked();
+            let fut = to_result_indirect_in_place(|error, fut| {
+                *error = f(self.share_to_ffi(), namespace.as_ptr(), fut.as_mut_ptr());
+            })?;
+            let fut = std::mem::transmute::<
+                bindings::FimoModuleInstanceRemoveNamespaceFuture,
+                EnqueuedFuture<Fallible<()>>,
+            >(fut);
+            Ok(async move { fut.await.unwrap() })
+        }
     }
 
-    fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
-        let mut has_dependency = false;
-        let mut is_static = false;
+    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
+        // Safety:
+        unsafe {
+            let f = self.vtable().query_dependency.unwrap_unchecked();
 
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .has_dependency
-                .unwrap_unchecked()
-        };
+            let mut has_dependency = false;
+            let mut is_static = false;
 
-        // Safety: FFI call is safe.
-        let error = unsafe {
-            f(
-                self.context().data(),
+            let error = f(
                 self.share_to_ffi(),
                 module.share_to_ffi(),
                 &mut has_dependency,
                 &mut is_static,
-            )
-        };
+            );
+            to_result(error)?;
+
+            match (has_dependency, is_static) {
+                (true, true) => Ok(DependencyType::StaticDependency),
+                (true, false) => Ok(DependencyType::DynamicDependency),
+                (false, _) => Ok(DependencyType::NoDependency),
+            }
+        }
+    }
+
+    fn add_dependency(
+        &self,
+        dependency: &ModuleInfoView<'_>,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
         // Safety:
         unsafe {
-            to_result(error)?;
+            let f = self.vtable().add_dependency.unwrap_unchecked();
+            let fut = to_result_indirect_in_place(|error, fut| {
+                *error = f(
+                    self.share_to_ffi(),
+                    dependency.share_to_ffi(),
+                    fut.as_mut_ptr(),
+                );
+            })?;
+            let fut = std::mem::transmute::<
+                bindings::FimoModuleInstanceAddDependencyFuture,
+                EnqueuedFuture<Fallible<()>>,
+            >(fut);
+            Ok(async move { fut.await.unwrap() })
         }
+    }
 
-        match (has_dependency, is_static) {
-            (true, true) => Ok(DependencyType::StaticDependency),
-            (true, false) => Ok(DependencyType::DynamicDependency),
-            (false, _) => Ok(DependencyType::NoDependency),
+    unsafe fn remove_dependency(
+        &self,
+        dependency: ModuleInfoView<'_>,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+        // Safety:
+        unsafe {
+            let f = self.vtable().remove_dependency.unwrap_unchecked();
+            let fut = to_result_indirect_in_place(|error, fut| {
+                *error = f(
+                    self.share_to_ffi(),
+                    dependency.share_to_ffi(),
+                    fut.as_mut_ptr(),
+                );
+            })?;
+            let fut = std::mem::transmute::<
+                bindings::FimoModuleInstanceRemoveDependencyFuture,
+                EnqueuedFuture<Fallible<()>>,
+            >(fut);
+            Ok(async move { fut.await.unwrap() })
         }
     }
 
-    fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .acquire_dependency
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
-        let error = unsafe {
-            f(
-                self.context().data(),
-                self.share_to_ffi(),
-                dependency.share_to_ffi(),
-            )
-        };
-        // Safety:
-        unsafe { to_result(error) }
-    }
-
-    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .relinquish_dependency
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
-        let error = unsafe {
-            f(
-                self.context().data(),
-                self.share_to_ffi(),
-                dependency.into_ffi(),
-            )
-        };
-        // Safety:
-        unsafe { to_result(error) }
-    }
-
-    unsafe fn load_symbol_unchecked<T>(
+    unsafe fn load_symbol_unchecked<T: 'static>(
         &self,
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Symbol<'_, T>, Error> {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .load_symbol
-                .unwrap_unchecked()
-        };
-
-        // Safety: We either initialize `symbol` or write an error.
-        let symbol = unsafe {
-            to_result_indirect_in_place(|error, symbol| {
+    ) -> Result<impl Future<Output = Result<Symbol<'_, T>, Error<dyn Send + Sync>>>, Error> {
+        // Safety:
+        unsafe {
+            let f = self.vtable().load_symbol.unwrap_unchecked();
+            let fut = to_result_indirect_in_place(|error, fut| {
                 *error = f(
-                    self.context().data(),
                     self.share_to_ffi(),
                     name.as_ptr(),
                     namespace.as_ptr(),
                     version.into_ffi(),
-                    symbol.as_mut_ptr(),
+                    fut.as_mut_ptr(),
                 );
-            })
-        }?;
-
-        // Safety: We own the symbol.
-        unsafe { Ok(Symbol::from_ffi(symbol)) }
+            })?;
+            let fut = std::mem::transmute::<
+                bindings::FimoModuleInstanceLoadSymbolFuture,
+                EnqueuedFuture<Fallible<*const std::ffi::c_void>>,
+            >(fut);
+            Ok(async move { fut.await.unwrap().map(|x| Symbol::from_ffi(x)) })
+        }
     }
 }
 
@@ -887,38 +879,50 @@ where
         unsafe { &*core::ptr::from_ref(self.module.data()).cast() }
     }
 
-    fn has_namespace_dependency(&self, namespace: &CStr) -> Result<DependencyType, Error> {
-        self.module.has_namespace_dependency(namespace)
+    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, Error> {
+        self.module.query_namespace(namespace)
     }
 
-    fn include_namespace(&self, namespace: &CStr) -> error::Result {
-        self.module.include_namespace(namespace)
+    fn add_namespace(
+        &self,
+        namespace: &CStr,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+        self.module.add_namespace(namespace)
     }
 
-    unsafe fn exclude_namespace(&self, namespace: &CStr) -> error::Result {
+    unsafe fn remove_namespace(
+        &self,
+        namespace: &CStr,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
         // Safety: The caller ensures that the contract is valid.
-        unsafe { self.module.exclude_namespace(namespace) }
+        unsafe { self.module.remove_namespace(namespace) }
     }
 
-    fn has_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
-        self.module.has_dependency(module)
+    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
+        self.module.query_dependency(module)
     }
 
-    fn acquire_dependency(&self, dependency: &ModuleInfoView<'_>) -> error::Result {
-        self.module.acquire_dependency(dependency)
+    fn add_dependency(
+        &self,
+        dependency: &ModuleInfoView<'_>,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+        self.module.add_dependency(dependency)
     }
 
-    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> error::Result {
+    unsafe fn remove_dependency(
+        &self,
+        dependency: ModuleInfoView<'_>,
+    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
         // Safety: The caller ensures that the contract is valid.
         unsafe { self.module.remove_dependency(dependency) }
     }
 
-    unsafe fn load_symbol_unchecked<T>(
+    unsafe fn load_symbol_unchecked<T: 'static>(
         &self,
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Symbol<'_, T>, Error> {
+    ) -> Result<impl Future<Output = Result<Symbol<'_, T>, Error<dyn Send + Sync>>>, Error> {
         // Safety: The caller ensures that the contract is valid.
         unsafe {
             self.module

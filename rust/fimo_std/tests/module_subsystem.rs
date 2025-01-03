@@ -204,16 +204,16 @@ fn load_modules() -> Result<(), Error> {
         assert!(b.is_loaded());
         assert!(c.is_loaded());
 
-        module.acquire_dependency(&a)?;
-        module.acquire_dependency(&b)?;
-        module.acquire_dependency(&c)?;
+        module.add_dependency(&a)?.await?;
+        module.add_dependency(&b)?.await?;
+        module.add_dependency(&c)?.await?;
 
-        let a_0 = module.load_symbol::<AExport0>()?;
+        let a_0 = module.load_symbol::<AExport0>()?.await?;
         assert_eq!(*a_0, 5);
 
-        assert!(module.load_symbol::<b::BExport0>().is_err());
-        module.include_namespace(b::NamespaceItem::NAME)?;
-        assert!(module.load_symbol::<b::BExport0>().is_ok());
+        assert!(module.load_symbol::<b::BExport0>()?.await.is_err());
+        module.add_namespace(b::NamespaceItem::NAME)?.await?;
+        assert!(module.load_symbol::<b::BExport0>()?.await.is_ok());
 
         drop(module);
         assert!(!a.is_loaded());

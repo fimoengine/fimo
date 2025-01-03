@@ -444,14 +444,20 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
                     .expect("could not find the tasks module");
 
             module
-                .include_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
+                .add_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
+                .unwrap()
+                .await
                 .expect("could not include the tasks namespace");
             module
-                .acquire_dependency(&tasks_module)
+                .add_dependency(&tasks_module)
+                .unwrap()
+                .await
                 .expect("could not acquire the dependency to the tasks module");
 
             let context = module
                 .load_symbol::<symbols::fimo_tasks::Context>()
+                .unwrap()
+                .await
                 .expect("could not load context symbol");
 
             f(&module, &context);

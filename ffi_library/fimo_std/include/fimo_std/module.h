@@ -18,9 +18,249 @@
 extern "C" {
 #endif
 
-typedef struct FimoModuleInfo FimoModuleInfo;
-typedef struct FimoModuleExport FimoModuleExport;
+/**
+ * Info of a loaded module.
+ */
+typedef struct FimoModuleInfo {
+    /**
+     * Type of the struct.
+     *
+     * Must be `FIMO_STRUCT_TYPE_MODULE_INFO`.
+     */
+    FimoStructType type;
+    /**
+     * Pointer to a possible extension.
+     *
+     * Reserved for future use. Must be `NULL`.
+     */
+    const FimoBaseStructIn *next;
+    /**
+     * Module name.
+     *
+     * Must not be `NULL`.
+     */
+    const char *name;
+    /**
+     * Module description.
+     */
+    const char *description;
+    /**
+     * Module author.
+     */
+    const char *author;
+    /**
+     * Module license.
+     */
+    const char *license;
+    /**
+     * Path to the module directory.
+     */
+    const char *module_path;
+    /**
+     * Increases the reference count of the info instance.
+     */
+    void (*acquire)(const struct FimoModuleInfo *info);
+    /**
+     * Decreases the reference count of the info instance.
+     */
+    void (*release)(const struct FimoModuleInfo *info);
+    /**
+     * Returns whether the owning module is still loaded.
+     */
+    bool (*is_loaded)(const struct FimoModuleInfo *info);
+    /**
+     * Increases the strong reference count of the module instance.
+     *
+     * Will prevent the module from being unloaded. This may be used to pass
+     * data, like callbacks, between modules, without registering the dependency
+     * with the subsystem.
+     */
+    FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *info);
+    /**
+     * Decreases the strong reference count of the module instance.
+     *
+     * Should only be called after `acquire_module_strong`, when the dependency
+     * is no longer required.
+     */
+    void (*release_module_strong)(const struct FimoModuleInfo *info);
+} FimoModuleInfo;
+
 typedef struct FimoModuleInstance FimoModuleInstance;
+
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceAddNamespaceFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceRemoveNamespaceFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceAddDependencyFuture;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceRemoveDependencyFuture;
+
+typedef FIMO_ASYNC_FALLIBLE(const void*) FimoModuleInstanceLoadSymbolFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleInstanceLoadSymbolFutureResult) FimoModuleInstanceLoadSymbolFuture;
+
+/**
+ * VTable of a FimoModuleInstance.
+ *
+ * Adding fields to the vtable is not a breaking change.
+ */
+typedef struct FimoModuleInstanceVTable {
+    /**
+     * Checks if a module includes a namespace.
+     *
+     * Checks if `module` specified that it includes the namespace `ns`. In
+     * that case, the module is allowed access to the symbols in the namespace.
+     * The result of the query is stored in `has_dependency`. Additionally,
+     * this function also queries whether the include is static, i.e., the
+     * include was specified by the module at load time. The include type is
+     * stored in `is_static`.
+     */
+    FimoResult (*query_namespace)(const FimoModuleInstance* ctx, const char *ns,
+                                  bool *has_dependency, bool *is_static);
+    /**
+     * Includes a namespace by the module.
+     *
+     * Once included, the module gains access to the symbols of its
+     * dependencies that are exposed in said namespace. A namespace can not be
+     * included multiple times.
+     */
+    FimoResult (*add_namespace)(const FimoModuleInstance* ctx, const char *ns,
+                                FimoModuleInstanceAddNamespaceFuture *fut);
+    /**
+     * Removes a namespace include from the module.
+     *
+     * Once excluded, the caller guarantees to relinquish access to the symbols
+     * contained in said namespace. It is only possible to exclude namespaces
+     * that were manually added, whereas static namespace includes remain valid
+     * until the module is unloaded.
+     */
+    FimoResult (*remove_namespace)(const FimoModuleInstance* ctx, const char *ns,
+                                   FimoModuleInstanceRemoveNamespaceFuture *fut);
+    /**
+     * Checks if a module depends on another module.
+     *
+     * Checks if `info` is a dependency of `module`. In that case `ctx` is
+     * allowed to access the symbols exported by `info`. The result of the
+     * query is stored in `has_dependency`. Additionally, this function also
+     * queries whether the dependency is static, i.e., the dependency was set
+     * by the module subsystem at load time. The dependency type is stored in
+     * `is_static`.
+     */
+    FimoResult (*query_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info,
+                                   bool *has_dependency, bool *is_static);
+    /**
+     * Acquires another module as a dependency.
+     *
+     * After acquiring a module as a dependency, the module is allowed access
+     * to the symbols and protected parameters of said dependency. Trying to
+     * acquire a dependency to a module that is already a dependency, or to a
+     * module that would result in a circular dependency will result in an error.
+     */
+    FimoResult (*add_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info,
+                                 FimoModuleInstanceAddDependencyFuture *fut);
+    /**
+     * Removes a module as a dependency.
+     *
+     * By removing a module as a dependency, the caller ensures that it does
+     * not own any references to resources originating from the former
+     * dependency, and allows for the unloading of the module. A module can
+     * only relinquish dependencies to modules that were acquired dynamically,
+     * as static dependencies remain valid until the module is unloaded.
+     */
+    FimoResult (*remove_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info,
+                                    FimoModuleInstanceRemoveDependencyFuture *fut);
+    /**
+     * Loads a symbol from the module subsystem.
+     *
+     * The caller can query the subsystem for a symbol of a loaded module. This
+     * is useful for loading optional symbols, or for loading symbols after the
+     * creation of a module. The symbol, if it exists, can be used until the
+     * module relinquishes the dependency to the module that exported the
+     * symbol. This function fails, if the module containing the symbol is not
+     * a dependency of the module.
+     */
+    FimoResult (*load_symbol)(const FimoModuleInstance* ctx, const char *name,
+                              const char *ns, FimoVersion version,
+                              FimoModuleInstanceLoadSymbolFuture *fut);
+} FimoModuleInstanceVTable;
+
+/**
+ * Opaque type for a parameter table of a module.
+ *
+ * The layout of a parameter table is equivalent to an array of
+ * `FimoModuleParam*`, where each entry represents one parameter
+ * of the module parameter declaration list.
+ */
+typedef void FimoModuleParamTable;
+
+/**
+ * Opaque type for a resource path table of a module.
+ *
+ * The import table is equivalent to an array of `const char*`,
+ * where each entry represents one resource path. The resource
+ * paths are ordered in declaration order.
+ */
+typedef void FimoModuleResourceTable;
+
+/**
+ * Opaque type for a symbol import table of a module.
+ *
+ * The import table is equivalent to an array of `const void*`,
+ * where each entry represents one symbol of the module symbol
+ * import list. The symbols are ordered in declaration order.
+ */
+typedef void FimoModuleSymbolImportTable;
+
+/**
+ * Opaque type for a symbol export table of a module.
+ *
+ * The export table is equivalent to an array of `const void*`,
+ * where each entry represents one symbol of the module symbol
+ * export list, followed by the entries of the dynamic symbol
+ * export list.
+ */
+typedef void FimoModuleSymbolExportTable;
+
+/**
+ * State of a loaded module.
+ *
+ * A module is self-contained, and may not be passed to other modules.
+ * An instance of `FimoModuleInstance` is valid for as long as the owning module
+ * remains loaded. Modules must not leak any resources outside it's own
+ * module, ensuring that they are destroyed upon module unloading.
+ */
+typedef struct FimoModuleInstance {
+    /**
+     * VTable of the instance.
+     */
+    const FimoModuleInstanceVTable* vtable;
+    /**
+     * Module parameter table.
+     */
+    const FimoModuleParamTable *parameters;
+    /**
+     * Module resource table.
+     */
+    const FimoModuleResourceTable *resources;
+    /**
+     * Module symbol import table.
+     */
+    const FimoModuleSymbolImportTable *imports;
+    /**
+     * Module symbol export table.
+     */
+    const FimoModuleSymbolExportTable *exports;
+    /**
+     * Module info.
+     */
+    const FimoModuleInfo *module_info;
+    /**
+     * Context that loaded the module.
+     */
+    FimoContext context;
+    /**
+     * Private data of the module.
+     */
+    void *module_data;
+} FimoModuleInstance;
+
+typedef struct FimoModuleExport FimoModuleExport;
 
 typedef FIMO_ASYNC_FALLIBLE(bool) FimoModuleLoadingSetQueryModuleFutureResult;
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetQueryModuleFutureResult) FimoModuleLoadingSetQueryModuleFuture;
@@ -1225,153 +1465,6 @@ struct FimoModuleExport {
 };
 
 /**
- * Opaque type for a parameter table of a module.
- *
- * The layout of a parameter table is equivalent to an array of
- * `FimoModuleParam*`, where each entry represents one parameter
- * of the module parameter declaration list.
- */
-typedef void FimoModuleParamTable;
-
-/**
- * Opaque type for a resource path table of a module.
- *
- * The import table is equivalent to an array of `const char*`,
- * where each entry represents one resource path. The resource
- * paths are ordered in declaration order.
- */
-typedef void FimoModuleResourceTable;
-
-/**
- * Opaque type for a symbol import table of a module.
- *
- * The import table is equivalent to an array of `const void*`,
- * where each entry represents one symbol of the module symbol
- * import list. The symbols are ordered in declaration order.
- */
-typedef void FimoModuleSymbolImportTable;
-
-/**
- * Opaque type for a symbol export table of a module.
- *
- * The export table is equivalent to an array of `const void*`,
- * where each entry represents one symbol of the module symbol
- * export list, followed by the entries of the dynamic symbol
- * export list.
- */
-typedef void FimoModuleSymbolExportTable;
-
-/**
- * Info of a loaded module.
- */
-struct FimoModuleInfo {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_MODULE_INFO`.
-     */
-    FimoStructType type;
-    /**
-     * Pointer to a possible extension.
-     *
-     * Reserved for future use. Must be `NULL`.
-     */
-    const FimoBaseStructIn *next;
-    /**
-     * Module name.
-     *
-     * Must not be `NULL`.
-     */
-    const char *name;
-    /**
-     * Module description.
-     */
-    const char *description;
-    /**
-     * Module author.
-     */
-    const char *author;
-    /**
-     * Module license.
-     */
-    const char *license;
-    /**
-     * Path to the module directory.
-     */
-    const char *module_path;
-    /**
-     * Increases the reference count of the info instance.
-     */
-    void (*acquire)(const struct FimoModuleInfo *info);
-    /**
-     * Decreases the reference count of the info instance.
-     */
-    void (*release)(const struct FimoModuleInfo *info);
-    /**
-     * Returns whether the owning module is still loaded.
-     */
-    bool (*is_loaded)(const struct FimoModuleInfo *info);
-    /**
-     * Increases the strong reference count of the module instance.
-     *
-     * Will prevent the module from being unloaded. This may be used to pass
-     * data, like callbacks, between modules, without registering the dependency
-     * with the subsystem.
-     */
-    FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *info);
-    /**
-     * Decreases the strong reference count of the module instance.
-     *
-     * Should only be called after `acquire_module_strong`, when the dependency
-     * is no longer required.
-     */
-    void (*release_module_strong)(const struct FimoModuleInfo *info);
-};
-
-/**
- * State of a loaded module.
- *
- * A module is self-contained, and may not be passed to other modules.
- * An instance of `FimoModuleInstance` is valid for as long as the owning module
- * remains loaded. Modules must not leak any resources outside it's own
- * module, ensuring that they are destroyed upon module unloading.
- */
-struct FimoModuleInstance {
-    /**
-     * VTable of the instance.
-     */
-    const void* vtable;
-    /**
-     * Module parameter table.
-     */
-    const FimoModuleParamTable *parameters;
-    /**
-     * Module resource table.
-     */
-    const FimoModuleResourceTable *resources;
-    /**
-     * Module symbol import table.
-     */
-    const FimoModuleSymbolImportTable *imports;
-    /**
-     * Module symbol export table.
-     */
-    const FimoModuleSymbolExportTable *exports;
-    /**
-     * Module info.
-     */
-    const FimoModuleInfo *module_info;
-    /**
-     * Context that loaded the module.
-     */
-    FimoContext context;
-    /**
-     * Private data of the module.
-     */
-    void *module_data;
-};
-
-/**
  * A filter for selection modules to load by the module subsystem.
  *
  * The filter function is passed the module export declaration
@@ -1472,90 +1565,6 @@ typedef struct FimoModuleVTableV0 {
      * one symbol in said namespace.
      */
     FimoResult (*namespace_exists)(void *ctx, const char *ns, bool *exists);
-    /**
-     * Includes a namespace by the module.
-     *
-     * Once included, the module gains access to the symbols
-     * of its dependencies that are exposed in said namespace.
-     * A namespace can not be included multiple times.
-     */
-    FimoResult (*namespace_include)(void *ctx, const FimoModuleInstance *caller, const char *ns);
-    /**
-     * Removes a namespace include from the module.
-     *
-     * Once excluded, the caller guarantees to relinquish
-     * access to the symbols contained in said namespace.
-     * It is only possible to exclude namespaces that were
-     * manually added, whereas static namespace includes
-     * remain valid until the module is unloaded.
-     */
-    FimoResult (*namespace_exclude)(void *ctx, const FimoModuleInstance *caller, const char *ns);
-    /**
-     * Checks if a module includes a namespace.
-     *
-     * Checks if `module` specified that it includes the
-     * namespace `ns`. In that case, the module is allowed access
-     * to the symbols in the namespace. The result of the query
-     * is stored in `is_included`. Additionally, this function also
-     * queries whether the include is static, i.e., the include was
-     * specified by the module at load time. The include type is
-     * stored in `is_static`.
-     */
-    FimoResult (*namespace_included)(void *ctx, const FimoModuleInstance *caller, const char *ns,
-                                     bool *is_included, bool *is_static);
-    /**
-     * Acquires another module as a dependency.
-     *
-     * After acquiring a module as a dependency, the module
-     * is allowed access to the symbols and protected parameters
-     * of said dependency. Trying to acquire a dependency to a
-     * module that is already a dependency, or to a module that
-     * would result in a circular dependency will result in an
-     * error.
-     */
-    FimoResult (*acquire_dependency)(void *ctx, const FimoModuleInstance *caller,
-                                     const FimoModuleInfo *info);
-    /**
-     * Removes a module as a dependency.
-     *
-     * By removing a module as a dependency, the caller
-     * ensures that it does not own any references to resources
-     * originating from the former dependency, and allows for
-     * the unloading of the module. A module can only relinquish
-     * dependencies to modules that were acquired dynamically,
-     * as static dependencies remain valid until the module is
-     * unloaded.
-     */
-    FimoResult (*relinquish_dependency)(void *ctx, const FimoModuleInstance *caller,
-                                        const FimoModuleInfo *info);
-    /**
-     * Checks if a module depends on another module.
-     *
-     * Checks if `other` is a dependency of `module`. In that
-     * case `module` is allowed to access the symbols exported
-     * by `other`. The result of the query is stored in
-     * `has_dependency`. Additionally, this function also
-     * queries whether the dependency is static, i.e., the
-     * dependency was set by the module subsystem at load time.
-     * The dependency type is stored in `is_static`.
-     */
-    FimoResult (*has_dependency)(void *ctx, const FimoModuleInstance *caller, const FimoModuleInfo *info,
-                                 bool *has_dependency, bool *is_static);
-
-    /**
-     * Loads a symbol from the module subsystem.
-     *
-     * The caller can query the subsystem for a symbol of a loaded
-     * module. This is useful for loading optional symbols, or
-     * for loading symbols after the creation of a module. The
-     * symbol, if it exists, is written into `symbol`, and can
-     * be used until the module relinquishes the dependency to
-     * the module that exported the symbol. This function fails,
-     * if the module containing the symbol is not a dependency
-     * of the module.
-     */
-    FimoResult (*load_symbol)(void *ctx, const FimoModuleInstance *caller, const char *name,
-                              const char *ns, FimoVersion version, const void **symbol);
     /**
      * Unloads a module.
      *
