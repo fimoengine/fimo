@@ -32,10 +32,8 @@ pub fn main() !void {
     const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
     defer async_ctx.deinit();
 
-    var fut = try NestedFuture.init(ctx, &err);
-    defer fut.deinit();
-
-    const ab = async_ctx.awaitFuture(NestedFuture.Result, &fut);
+    const ab: NestedFuture.Result = (try NestedFuture.init(ctx, &err))
+        .awaitBlocking(async_ctx);
     const a = ab.a;
     const b = ab.b;
 

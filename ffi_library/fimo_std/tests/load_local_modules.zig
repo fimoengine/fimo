@@ -207,28 +207,28 @@ pub fn main() !void {
     const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
     defer async_ctx.deinit();
 
-    const set = try async_ctx.awaitFutureDeinit(
-        Async.Fallible(Module.LoadingSet),
-        try Module.LoadingSet.init(ctx.module(), &err),
-    ).unwrap(&err);
+    const set = try (try Module.LoadingSet.init(ctx.module(), &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
     defer set.unref();
 
-    try async_ctx.awaitFutureDeinit(
-        Async.Fallible(void),
-        try set.addModulesFromLocal(
-            &{},
-            struct {
-                fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
-                    _ = @"export";
-                    _ = data;
-                    return .load;
-                }
-            }.f,
-            null,
-            &err,
-        ),
-    ).unwrap(&err);
-    try async_ctx.awaitFutureDeinit(Async.Fallible(void), try set.commit(&err)).unwrap(&err);
+    try (try set.addModulesFromLocal(
+        &{},
+        struct {
+            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
+                _ = @"export";
+                _ = data;
+                return .load;
+            }
+        }.f,
+        null,
+        &err,
+    ))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+    try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
     errdefer (instance.deinit(&err) catch unreachable).unref();
@@ -244,16 +244,41 @@ pub fn main() !void {
     try testing.expect(b.isLoaded());
     try testing.expect(c.isLoaded());
 
-    try instance.addDependency(a, &err);
-    try instance.addDependency(b, &err);
-    try instance.addDependency(c, &err);
+    try (try instance.addDependency(a, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+    try (try instance.addDependency(b, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+    try (try instance.addDependency(c, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
 
-    const a0 = try instance.loadSymbol(A0, &err);
+    const a0 = try (try instance.loadSymbol(A0, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
     try testing.expectEqual(a0.*, 5);
 
-    try testing.expectError(error.FfiError, instance.loadSymbol(B0, &err));
-    try instance.addNamespace(B0.namespace, &err);
-    _ = try instance.loadSymbol(B0, &err);
+    try testing.expectError(
+        error.FfiError,
+        (try instance.loadSymbol(B0, &err))
+            .intoFuture()
+            .awaitBlocking(async_ctx)
+            .unwrap(&err),
+    );
+    try (try instance.addNamespace(B0.namespace, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+
+    _ = try (try instance.loadSymbol(B0, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
 
     (instance.deinit(&err) catch unreachable).unref();
     try testing.expect(!a.isLoaded());

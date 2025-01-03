@@ -41,29 +41,29 @@ pub fn main() !void {
     try module_path.pushString("fimo_python");
     try module_path.pushString("module.fimo_module");
 
-    const set = try async_ctx.awaitFutureDeinit(
-        Async.Fallible(Module.LoadingSet),
-        try Module.LoadingSet.init(ctx.module(), &err),
-    ).unwrap(&err);
+    const set = try (try Module.LoadingSet.init(ctx.module(), &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
     defer set.unref();
 
-    try async_ctx.awaitFutureDeinit(
-        Async.Fallible(void),
-        try set.addModulesFromPath(
-            module_path.asPath(),
-            &{},
-            struct {
-                fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
-                    _ = @"export";
-                    _ = data;
-                    return .load;
-                }
-            }.f,
-            null,
-            &err,
-        ),
-    ).unwrap(&err);
-    try async_ctx.awaitFutureDeinit(Async.Fallible(void), try set.commit(&err)).unwrap(&err);
+    try (try set.addModulesFromPath(
+        module_path.asPath(),
+        &{},
+        struct {
+            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
+                _ = @"export";
+                _ = data;
+                return .load;
+            }
+        }.f,
+        null,
+        &err,
+    ))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+    try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
     defer (instance.deinit(&err) catch unreachable).unref();
@@ -71,10 +71,19 @@ pub fn main() !void {
     const info = try Module.Info.findByName(ctx.module(), "fimo_python", &err);
     defer info.unref();
 
-    try instance.addDependency(info, &err);
-    try instance.addNamespace(fimo_python_meta.symbols.RunString.namespace, &err);
+    try (try instance.addDependency(info, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+    try (try instance.addNamespace(fimo_python_meta.symbols.RunString.namespace, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
+    const run_string = try (try instance.loadSymbol(fimo_python_meta.symbols.RunString, &err))
+        .intoFuture()
+        .awaitBlocking(async_ctx)
+        .unwrap(&err);
 
-    const run_string = try instance.loadSymbol(fimo_python_meta.symbols.RunString, &err);
     try run_string.call(
         \\import sys
         \\

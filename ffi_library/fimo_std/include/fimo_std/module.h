@@ -1338,6 +1338,10 @@ struct FimoModuleInfo {
  */
 struct FimoModule {
     /**
+     * VTable of the instance.
+     */
+    const void* vtable;
+    /**
      * Module parameter table.
      */
     const FimoModuleParamTable *parameters;

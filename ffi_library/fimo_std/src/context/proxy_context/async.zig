@@ -169,18 +169,6 @@ pub const BlockingContext = extern struct {
             }
         }
     }
-
-    /// Blocks the current thread until the future is completed.
-    ///
-    /// The function takes ownership of the future.
-    pub fn awaitFutureDeinit(self: BlockingContext, comptime T: type, future: anytype) T {
-        var fut = future;
-        const res = self.awaitFuture(T, &fut);
-        if (std.meta.hasMethod(@TypeOf(future), "deinit")) {
-            fut.deinit();
-        }
-        return res;
-    }
 };
 
 /// Result of poll operation.
@@ -234,6 +222,26 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
         /// it's reference count without increasing it first.
         pub fn poll(self: *@This(), waker: Waker) Poll(U) {
             return poll_fn(&self.data, waker);
+        }
+
+        /// Awaits for the completion of the future using the specified context.
+        ///
+        /// The context must provide a generic method called `awaitFuture`, that
+        /// takes the return type as the first parameter and a pointer to the
+        /// future as the second parameter, and blocks the current task until
+        /// the future polls as ready.
+        pub fn awaitBlockingBorrow(self: *@This(), ctx: anytype) U {
+            return ctx.awaitFuture(U, self);
+        }
+
+        /// Awaits for the completion of the future using the specified context.
+        ///
+        /// Like `awaitBlockingBorrow`, but this method takes ownership of the future.
+        pub fn awaitBlocking(self: @This(), ctx: anytype) U {
+            var this = self;
+            const result = this.awaitBlockingBorrow(ctx);
+            this.deinit();
+            return result;
         }
 
         /// Maps the result of the future to another type.
@@ -311,7 +319,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
         cleanup_fn: ?*const fn (data: OptT) callconv(.c) void,
 
         pub const Result = U;
-        pub const Future = AsyncExecutor.Future(T, U, poll, deinit);
+        pub const Future = AsyncExecutor.Future(@This(), U, poll, deinit);
 
         /// Initializes a new future.
         pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
