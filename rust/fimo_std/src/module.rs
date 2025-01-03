@@ -195,7 +195,7 @@ macro_rules! export_module {
         }
 
         const _: () = {
-            struct ModuleLock(std::sync::RwLock<*const $crate::bindings::FimoModule>);
+            struct ModuleLock(std::sync::RwLock<*const $crate::bindings::FimoModuleInstance>);
             // Safety:
             unsafe impl Send for ModuleLock {}
             // Safety:
@@ -265,7 +265,7 @@ macro_rules! export_module {
 
                         // Safety:
                         unsafe {
-                            let module = <$mod_ident<'_> as $crate::ffi::FFITransferable<*const $crate::bindings::FimoModule>>::from_ffi(*guard);
+                            let module = <$mod_ident<'_> as $crate::ffi::FFITransferable<*const $crate::bindings::FimoModuleInstance>>::from_ffi(*guard);
                             f(module)
                         }
                     }
@@ -484,7 +484,7 @@ macro_rules! export_module_private_parameter {
     };
     (getter $mod_ident:ident; $x:ident) => {{
         extern "C" fn getter(
-            module: *const $crate::bindings::FimoModule,
+            module: *const $crate::bindings::FimoModuleInstance,
             value: *mut core::ffi::c_void,
             type_: *mut $crate::bindings::FimoModuleParamType,
             data: *const $crate::bindings::FimoModuleParamData,
@@ -502,7 +502,7 @@ macro_rules! export_module_private_parameter {
     };
     (setter $mod_ident:ident; $x:ident) => {{
         extern "C" fn setter(
-            module: *const $crate::bindings::FimoModule,
+            module: *const $crate::bindings::FimoModuleInstance,
             value: *const core::ffi::c_void,
             type_: $crate::bindings::FimoModuleParamType,
             data: *mut $crate::bindings::FimoModuleParamData,
@@ -775,7 +775,7 @@ macro_rules! export_module_private_exports {
     };
     (dynamic $mod_ident:ident; $($name:ident: $export:path),* $(,)?) => {{
         unsafe extern "C" fn construct_dynamic_symbol<T, S>(
-            module: *const $crate::bindings::FimoModule,
+            module: *const $crate::bindings::FimoModuleInstance,
             symbol: *mut *mut core::ffi::c_void,
         ) -> $crate::bindings::FimoResult
         where
@@ -898,7 +898,7 @@ macro_rules! export_module_private_data {
     };
     (constructor $mod_ident:ident $($constructor:path)?) => {{
         unsafe extern "C" fn construct_module<T, C>(
-            module: *const $crate::bindings::FimoModule,
+            module: *const $crate::bindings::FimoModuleInstance,
             set: $crate::bindings::FimoModuleLoadingSet,
             data: *mut *mut core::ffi::c_void,
         ) -> $crate::bindings::FimoResult
@@ -932,7 +932,7 @@ macro_rules! export_module_private_data {
     }};
     (destructor $mod_ident:ident $($constructor:path)?) => {{
         unsafe extern "C" fn destroy_module<T, C>(
-            module: *const $crate::bindings::FimoModule,
+            module: *const $crate::bindings::FimoModuleInstance,
             data: *mut core::ffi::c_void,
         ) where
             T: $crate::module::Module,
@@ -974,7 +974,7 @@ pub mod c_ffi {
     }
 
     pub unsafe extern "C" fn get_param_default(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         value: *mut core::ffi::c_void,
         type_: *mut bindings::FimoModuleParamType,
         data: *const bindings::FimoModuleParamData,
@@ -990,7 +990,7 @@ pub mod c_ffi {
     }
 
     pub unsafe extern "C" fn set_param_default(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         value: *const core::ffi::c_void,
         type_: bindings::FimoModuleParamType,
         data: *mut bindings::FimoModuleParamData,
@@ -1006,7 +1006,7 @@ pub mod c_ffi {
     }
 
     pub unsafe extern "C" fn get_param<T, F>(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         value: *mut core::ffi::c_void,
         type_: *mut bindings::FimoModuleParamType,
         data: *mut bindings::FimoModuleParamData,
@@ -1095,7 +1095,7 @@ pub mod c_ffi {
     }
 
     pub unsafe extern "C" fn set_param<T, F>(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         value: *const core::ffi::c_void,
         type_: bindings::FimoModuleParamType,
         data: *mut bindings::FimoModuleParamData,
@@ -1134,7 +1134,7 @@ pub mod c_ffi {
     }
 
     pub unsafe fn construct_dynamic_symbol<T, S>(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         symbol: *mut *mut core::ffi::c_void,
     ) -> Result<(), Error>
     where
@@ -1175,7 +1175,7 @@ pub mod c_ffi {
     }
 
     pub unsafe fn construct_module<T, C>(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         set: bindings::FimoModuleLoadingSet,
         data: *mut *mut core::ffi::c_void,
     ) -> Result<(), Error>
@@ -1205,7 +1205,7 @@ pub mod c_ffi {
     }
 
     pub unsafe fn destroy_module<T, C>(
-        module: *const bindings::FimoModule,
+        module: *const bindings::FimoModuleInstance,
         data: *mut core::ffi::c_void,
     ) where
         T: Module,

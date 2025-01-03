@@ -314,7 +314,7 @@ impl FFITransferable<bindings::FimoModuleSymbolExport> for SymbolExport {
 
 /// Module symbol constructor.
 pub type ModuleSymbolConstructor = unsafe extern "C" fn(
-    module: *const bindings::FimoModule,
+    module: *const bindings::FimoModuleInstance,
     symbol: *mut *mut std::ffi::c_void,
 ) -> bindings::FimoResult;
 
@@ -459,14 +459,14 @@ impl core::fmt::Display for ModifierValue<'_> {
 
 /// Module constructor.
 pub type ModuleConstructor = unsafe extern "C" fn(
-    module: *const bindings::FimoModule,
+    module: *const bindings::FimoModuleInstance,
     set: bindings::FimoModuleLoadingSet,
     state: *mut *mut std::ffi::c_void,
 ) -> bindings::FimoResult;
 
 /// Module destructor.
 pub type ModuleDestructor =
-    unsafe extern "C" fn(module: *const bindings::FimoModule, state: *mut std::ffi::c_void);
+    unsafe extern "C" fn(module: *const bindings::FimoModuleInstance, state: *mut std::ffi::c_void);
 
 /// Declaration of an exported module.
 #[repr(transparent)]

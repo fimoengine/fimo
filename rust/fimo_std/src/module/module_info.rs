@@ -358,7 +358,9 @@ pub enum DependencyType {
 /// The implementor must ensure that the associated table types are compatible
 /// with the ones the module expects.
 pub unsafe trait Module:
-    Send + Sync + for<'a> FFISharable<*const bindings::FimoModule, BorrowedView<'a> = OpaqueModule<'a>>
+    Send
+    + Sync
+    + for<'a> FFISharable<*const bindings::FimoModuleInstance, BorrowedView<'a> = OpaqueModule<'a>>
 {
     /// Type of the parameter table.
     type Parameters: Send + Sync + 'static;
@@ -480,12 +482,12 @@ pub unsafe trait Module:
 /// Reference to an unknown module.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
-pub struct OpaqueModule<'a>(&'a bindings::FimoModule);
+pub struct OpaqueModule<'a>(&'a bindings::FimoModuleInstance);
 
-// Safety: `FimoModule` must be `Send + Sync`.
+// Safety: `FimoModuleInstance` must be `Send + Sync`.
 unsafe impl Send for OpaqueModule<'_> {}
 
-// Safety: `FimoModule` must be `Send + Sync`.
+// Safety: `FimoModuleInstance` must be `Send + Sync`.
 unsafe impl Sync for OpaqueModule<'_> {}
 
 // Safety: `()` is compatible with any type.
@@ -729,25 +731,27 @@ unsafe impl Module for OpaqueModule<'_> {
     }
 }
 
-impl FFISharable<*const bindings::FimoModule> for OpaqueModule<'_> {
+impl FFISharable<*const bindings::FimoModuleInstance> for OpaqueModule<'_> {
     type BorrowedView<'a> = OpaqueModule<'a>;
 
-    fn share_to_ffi(&self) -> *const bindings::FimoModule {
+    fn share_to_ffi(&self) -> *const bindings::FimoModuleInstance {
         self.0
     }
 
-    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModule) -> Self::BorrowedView<'a> {
-        // Safety: `OpaqueModule` is a wrapper over a `FimoModule`.
+    unsafe fn borrow_from_ffi<'a>(
+        ffi: *const bindings::FimoModuleInstance,
+    ) -> Self::BorrowedView<'a> {
+        // Safety: `OpaqueModule` is a wrapper over a `FimoModuleInstance`.
         unsafe { OpaqueModule(&*ffi) }
     }
 }
 
-impl FFITransferable<*const bindings::FimoModule> for OpaqueModule<'_> {
-    fn into_ffi(self) -> *const bindings::FimoModule {
+impl FFITransferable<*const bindings::FimoModuleInstance> for OpaqueModule<'_> {
+    fn into_ffi(self) -> *const bindings::FimoModuleInstance {
         self.0
     }
 
-    unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
+    unsafe fn from_ffi(ffi: *const bindings::FimoModuleInstance) -> Self {
         // Safety: The value must be valid.
         unsafe { Self(&*ffi) }
     }
@@ -938,7 +942,7 @@ where
     }
 }
 
-impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModule>
+impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModuleInstance>
     for GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
     Par: Send + Sync + 'static,
@@ -949,17 +953,19 @@ where
 {
     type BorrowedView<'a> = OpaqueModule<'a>;
 
-    fn share_to_ffi(&self) -> *const bindings::FimoModule {
+    fn share_to_ffi(&self) -> *const bindings::FimoModuleInstance {
         self.module.into_ffi()
     }
 
-    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModule) -> Self::BorrowedView<'a> {
-        // Safety: `GenericModule` is a wrapper over a `FimoModule`.
+    unsafe fn borrow_from_ffi<'a>(
+        ffi: *const bindings::FimoModuleInstance,
+    ) -> Self::BorrowedView<'a> {
+        // Safety: `GenericModule` is a wrapper over a `FimoModuleInstance`.
         unsafe { OpaqueModule::from_ffi(ffi) }
     }
 }
 
-impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModule>
+impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModuleInstance>
     for GenericModule<'_, Par, Res, Imp, Exp, Data>
 where
     Par: Send + Sync + 'static,
@@ -968,11 +974,11 @@ where
     Exp: Send + Sync + 'static,
     Data: Send + Sync + 'static,
 {
-    fn into_ffi(self) -> *const bindings::FimoModule {
+    fn into_ffi(self) -> *const bindings::FimoModuleInstance {
         self.module.into_ffi()
     }
 
-    unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
+    unsafe fn from_ffi(ffi: *const bindings::FimoModuleInstance) -> Self {
         // Safety: The value must be valid.
         unsafe {
             Self {
@@ -1045,7 +1051,7 @@ where
     }
 }
 
-impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModule>
+impl<Par, Res, Imp, Exp, Data> FFISharable<*const bindings::FimoModuleInstance>
     for GenericLockedModule<Par, Res, Imp, Exp, Data>
 where
     Par: Send + Sync + 'static,
@@ -1056,17 +1062,19 @@ where
 {
     type BorrowedView<'a> = GenericModule<'a, Par, Res, Imp, Exp, Data>;
 
-    fn share_to_ffi(&self) -> *const bindings::FimoModule {
+    fn share_to_ffi(&self) -> *const bindings::FimoModuleInstance {
         self.module.into_ffi()
     }
 
-    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModule) -> Self::BorrowedView<'a> {
+    unsafe fn borrow_from_ffi<'a>(
+        ffi: *const bindings::FimoModuleInstance,
+    ) -> Self::BorrowedView<'a> {
         // Safety: `GenericLockedModule` is a wrapper over a `GenericModule`.
         unsafe { GenericModule::from_ffi(ffi) }
     }
 }
 
-impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModule>
+impl<Par, Res, Imp, Exp, Data> FFITransferable<*const bindings::FimoModuleInstance>
     for GenericLockedModule<Par, Res, Imp, Exp, Data>
 where
     Par: Send + Sync + 'static,
@@ -1075,11 +1083,11 @@ where
     Exp: Send + Sync + 'static,
     Data: Send + Sync + 'static,
 {
-    fn into_ffi(self) -> *const bindings::FimoModule {
+    fn into_ffi(self) -> *const bindings::FimoModuleInstance {
         self.module.into_ffi()
     }
 
-    unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
+    unsafe fn from_ffi(ffi: *const bindings::FimoModuleInstance) -> Self {
         // Safety: The value must be valid.
         unsafe {
             Self {
@@ -1168,26 +1176,28 @@ impl Deref for PseudoModule {
     }
 }
 
-impl FFISharable<*const bindings::FimoModule> for PseudoModule {
+impl FFISharable<*const bindings::FimoModuleInstance> for PseudoModule {
     type BorrowedView<'a> = OpaqueModule<'a>;
 
-    fn share_to_ffi(&self) -> *const bindings::FimoModule {
+    fn share_to_ffi(&self) -> *const bindings::FimoModuleInstance {
         self.0.into_ffi()
     }
 
-    unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModule) -> Self::BorrowedView<'a> {
-        // Safety: `PseudoModule` is a wrapper over a `FimoModule`.
+    unsafe fn borrow_from_ffi<'a>(
+        ffi: *const bindings::FimoModuleInstance,
+    ) -> Self::BorrowedView<'a> {
+        // Safety: `PseudoModule` is a wrapper over a `FimoModuleInstance`.
         unsafe { OpaqueModule::from_ffi(ffi) }
     }
 }
 
-impl FFITransferable<*const bindings::FimoModule> for PseudoModule {
-    fn into_ffi(self) -> *const bindings::FimoModule {
+impl FFITransferable<*const bindings::FimoModuleInstance> for PseudoModule {
+    fn into_ffi(self) -> *const bindings::FimoModuleInstance {
         let this = ManuallyDrop::new(self);
         this.0.into_ffi()
     }
 
-    unsafe fn from_ffi(ffi: *const bindings::FimoModule) -> Self {
+    unsafe fn from_ffi(ffi: *const bindings::FimoModuleInstance) -> Self {
         // Safety: The value must be valid.
         unsafe { Self(OpaqueModule::from_ffi(ffi)) }
     }

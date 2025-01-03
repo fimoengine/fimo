@@ -18,9 +18,9 @@
 extern "C" {
 #endif
 
-typedef struct FimoModule FimoModule;
 typedef struct FimoModuleInfo FimoModuleInfo;
 typedef struct FimoModuleExport FimoModuleExport;
+typedef struct FimoModuleInstance FimoModuleInstance;
 
 typedef FIMO_ASYNC_FALLIBLE(bool) FimoModuleLoadingSetQueryModuleFutureResult;
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetQueryModuleFutureResult) FimoModuleLoadingSetQueryModuleFuture;
@@ -91,7 +91,7 @@ typedef struct FimoModuleLoadingSetVTable {
      * Note that the new module is not set up to automatically depend on the
      * owner, but may prevent it from being unloaded while the set exists.
      */
-    FimoResult (*add_module)(void *ctx, const FimoModule *owner, const FimoModuleExport *exp,
+    FimoResult (*add_module)(void *ctx, const FimoModuleInstance *owner, const FimoModuleExport *exp,
                              FimoModuleLoadingSetAddModuleFuture *fut);
     /**
      * Adds modules to the set.
@@ -844,7 +844,7 @@ typedef struct FimoModuleParamDecl {
      *
      * @return Status code.
      */
-    FimoResult (*setter)(const FimoModule *arg0, const void *value, FimoModuleParamType type,
+    FimoResult (*setter)(const FimoModuleInstance *arg0, const void *value, FimoModuleParamType type,
                          FimoModuleParamData *param);
     /**
      * Getter for a module parameter.
@@ -856,7 +856,7 @@ typedef struct FimoModuleParamDecl {
      *
      * @return Status code.
      */
-    FimoResult (*getter)(const FimoModule *module, void *value, FimoModuleParamType *type,
+    FimoResult (*getter)(const FimoModuleInstance *module, void *value, FimoModuleParamType *type,
                          const FimoModuleParamData *param);
     /**
      * Name of the parameter.
@@ -972,7 +972,7 @@ typedef struct FimoModuleDynamicSymbolExport {
      *
      * @return Status code.
      */
-    FimoResult (*constructor)(const FimoModule *module, void **symbol);
+    FimoResult (*constructor)(const FimoModuleInstance *module, void **symbol);
     /**
      * Destructor function for a dynamic symbol.
      *
@@ -1190,7 +1190,7 @@ struct FimoModuleExport {
      *
      * @return Status code.
      */
-    FimoResult (*constructor)(const FimoModule *module, FimoModuleLoadingSet set, void **state);
+    FimoResult (*constructor)(const FimoModuleInstance *module, FimoModuleLoadingSet set, void **state);
 
     /**
      * Optional destructor function for a module.
@@ -1202,7 +1202,7 @@ struct FimoModuleExport {
      * @param module pointer to the module
      * @param state module state to destroy
      */
-    void (*destructor)(const FimoModule *module, void *state);
+    void (*destructor)(const FimoModuleInstance *module, void *state);
     /**
      * Optional function to call once the module has been loaded.
      *
@@ -1212,7 +1212,7 @@ struct FimoModuleExport {
      *
      * @param module pointer to the partially initialized module
      */
-    FimoResult (*on_start_event)(const FimoModule *module);
+    FimoResult (*on_start_event)(const FimoModuleInstance *module);
     /**
      * Optional function to call before the module is unloaded.
      *
@@ -1221,7 +1221,7 @@ struct FimoModuleExport {
      *
      * @param module pointer to the module
      */
-    void (*on_stop_event)(const FimoModule *module);
+    void (*on_stop_event)(const FimoModuleInstance *module);
 };
 
 /**
@@ -1332,11 +1332,11 @@ struct FimoModuleInfo {
  * State of a loaded module.
  *
  * A module is self-contained, and may not be passed to other modules.
- * An instance of `FimoModule` is valid for as long as the owning module
+ * An instance of `FimoModuleInstance` is valid for as long as the owning module
  * remains loaded. Modules must not leak any resources outside it's own
  * module, ensuring that they are destroyed upon module unloading.
  */
-struct FimoModule {
+struct FimoModuleInstance {
     /**
      * VTable of the instance.
      */
@@ -1408,7 +1408,7 @@ typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo *arg0, voi
  */
 typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, void *arg1);
 
-typedef FIMO_ASYNC_FALLIBLE(const FimoModule*) FimoModulePseudoModuleNewFutureResult;
+typedef FIMO_ASYNC_FALLIBLE(const FimoModuleInstance*) FimoModulePseudoModuleNewFutureResult;
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModulePseudoModuleNewFutureResult) FimoModulePseudoModuleNewFuture;
 
 typedef FIMO_ASYNC_FALLIBLE(FimoContext) FimoModulePseudoModuleDestroyFutureResult;
@@ -1432,14 +1432,14 @@ typedef struct FimoModuleVTableV0 {
      * As a workaround, we allow for the creation of pseudo modules, i.e.,
      * module handles without an associated module.
      */
-    FimoResult (*pseudo_module_new)(void *ctx, const FimoModule **module);
+    FimoResult (*pseudo_module_new)(void *ctx, const FimoModuleInstance **module);
     /**
      * Destroys an existing pseudo module.
      *
      * By destroying the pseudo module, the caller ensures that they
      * relinquished all access to handles derived by the module subsystem.
      */
-    FimoResult (*pseudo_module_destroy)(void *ctx, const FimoModule *module, FimoContext *out_ctx);
+    FimoResult (*pseudo_module_destroy)(void *ctx, const FimoModuleInstance *module, FimoContext *out_ctx);
     /**
      * Constructs a new empty set.
      *
@@ -1479,7 +1479,7 @@ typedef struct FimoModuleVTableV0 {
      * of its dependencies that are exposed in said namespace.
      * A namespace can not be included multiple times.
      */
-    FimoResult (*namespace_include)(void *ctx, const FimoModule *caller, const char *ns);
+    FimoResult (*namespace_include)(void *ctx, const FimoModuleInstance *caller, const char *ns);
     /**
      * Removes a namespace include from the module.
      *
@@ -1489,7 +1489,7 @@ typedef struct FimoModuleVTableV0 {
      * manually added, whereas static namespace includes
      * remain valid until the module is unloaded.
      */
-    FimoResult (*namespace_exclude)(void *ctx, const FimoModule *caller, const char *ns);
+    FimoResult (*namespace_exclude)(void *ctx, const FimoModuleInstance *caller, const char *ns);
     /**
      * Checks if a module includes a namespace.
      *
@@ -1501,7 +1501,7 @@ typedef struct FimoModuleVTableV0 {
      * specified by the module at load time. The include type is
      * stored in `is_static`.
      */
-    FimoResult (*namespace_included)(void *ctx, const FimoModule *caller, const char *ns,
+    FimoResult (*namespace_included)(void *ctx, const FimoModuleInstance *caller, const char *ns,
                                      bool *is_included, bool *is_static);
     /**
      * Acquires another module as a dependency.
@@ -1513,7 +1513,7 @@ typedef struct FimoModuleVTableV0 {
      * would result in a circular dependency will result in an
      * error.
      */
-    FimoResult (*acquire_dependency)(void *ctx, const FimoModule *caller,
+    FimoResult (*acquire_dependency)(void *ctx, const FimoModuleInstance *caller,
                                      const FimoModuleInfo *info);
     /**
      * Removes a module as a dependency.
@@ -1526,7 +1526,7 @@ typedef struct FimoModuleVTableV0 {
      * as static dependencies remain valid until the module is
      * unloaded.
      */
-    FimoResult (*relinquish_dependency)(void *ctx, const FimoModule *caller,
+    FimoResult (*relinquish_dependency)(void *ctx, const FimoModuleInstance *caller,
                                         const FimoModuleInfo *info);
     /**
      * Checks if a module depends on another module.
@@ -1539,7 +1539,7 @@ typedef struct FimoModuleVTableV0 {
      * dependency was set by the module subsystem at load time.
      * The dependency type is stored in `is_static`.
      */
-    FimoResult (*has_dependency)(void *ctx, const FimoModule *caller, const FimoModuleInfo *info,
+    FimoResult (*has_dependency)(void *ctx, const FimoModuleInstance *caller, const FimoModuleInfo *info,
                                  bool *has_dependency, bool *is_static);
 
     /**
@@ -1554,7 +1554,7 @@ typedef struct FimoModuleVTableV0 {
      * if the module containing the symbol is not a dependency
      * of the module.
      */
-    FimoResult (*load_symbol)(void *ctx, const FimoModule *caller, const char *name,
+    FimoResult (*load_symbol)(void *ctx, const FimoModuleInstance *caller, const char *name,
                               const char *ns, FimoVersion version, const void **symbol);
     /**
      * Unloads a module.
@@ -1608,7 +1608,7 @@ typedef struct FimoModuleVTableV0 {
      * access. The caller must ensure that `value` points to an
      * instance of the same datatype as the parameter in question.
      */
-    FimoResult (*param_set_dependency)(void *ctx, const FimoModule *caller, const void *value,
+    FimoResult (*param_set_dependency)(void *ctx, const FimoModuleInstance *caller, const void *value,
                                        FimoModuleParamType type, const char *module,
                                        const char *param);
     /**
@@ -1620,7 +1620,7 @@ typedef struct FimoModuleVTableV0 {
      * access. The caller must ensure that `value` points to an
      * instance of the same datatype as the parameter in question.
      */
-    FimoResult (*param_get_dependency)(void *ctx, const FimoModule *caller, void *value,
+    FimoResult (*param_get_dependency)(void *ctx, const FimoModuleInstance *caller, void *value,
                                        FimoModuleParamType *type, const char *module,
                                        const char *param);
     /**
@@ -1628,24 +1628,24 @@ typedef struct FimoModuleVTableV0 {
      *
      * If the setter produces an error, the parameter won't be modified.
      */
-    FimoResult (*param_set_private)(void *ctx, const FimoModule *caller, const void *value,
+    FimoResult (*param_set_private)(void *ctx, const FimoModuleInstance *caller, const void *value,
                                     FimoModuleParamType type, FimoModuleParam *param);
     /**
      * Getter for a module parameter.
      */
-    FimoResult (*param_get_private)(void *ctx, const FimoModule *caller, void *value,
+    FimoResult (*param_get_private)(void *ctx, const FimoModuleInstance *caller, void *value,
                                     FimoModuleParamType *type, const FimoModuleParam *param);
     /**
      * Internal setter for a module parameter.
      *
      * If the setter produces an error, the parameter won't be modified.
      */
-    FimoResult (*param_set_inner)(void *ctx, const FimoModule *caller, const void *value,
+    FimoResult (*param_set_inner)(void *ctx, const FimoModuleInstance *caller, const void *value,
                                   FimoModuleParamType type, FimoModuleParamData *param);
     /**
      * Internal getter for a module parameter.
      */
-    FimoResult (*param_get_inner)(void *ctx, const FimoModule *caller, void *value,
+    FimoResult (*param_get_inner)(void *ctx, const FimoModuleInstance *caller, void *value,
                                   FimoModuleParamType *type, const FimoModuleParamData *param);
 } FimoModuleVTableV0;
 
