@@ -1527,13 +1527,6 @@ typedef struct FimoModuleVTableV0 {
      */
     FimoResult (*pseudo_module_new)(void *ctx, const FimoModuleInstance **module);
     /**
-     * Destroys an existing pseudo module.
-     *
-     * By destroying the pseudo module, the caller ensures that they
-     * relinquished all access to handles derived by the module subsystem.
-     */
-    FimoResult (*pseudo_module_destroy)(void *ctx, const FimoModuleInstance *module);
-    /**
      * Constructs a new empty set.
      *
      * Modules can only be loaded, if all of their dependencies can be

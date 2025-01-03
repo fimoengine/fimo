@@ -72,33 +72,6 @@ pub fn addPseudoInstance(self: *Self) !*const ProxyModule.PseudoInstance {
     return instance;
 }
 
-/// Removes a pseudo instance.
-pub fn removePseudoInstance(
-    self: *Self,
-    instance: *const ProxyModule.PseudoInstance,
-) System.SystemError!void {
-    self.logTrace(
-        "removing pseudo instance, instance='{s}'",
-        .{instance.instance.info.name},
-        @src(),
-    );
-    self.sys.lock();
-    defer self.sys.unlock();
-
-    const handle = InstanceHandle.fromInstancePtr(&instance.instance);
-    if (handle.type != .pseudo) return error.NotPermitted;
-    const inner = handle.lock();
-    var inner_destroyed = false;
-    errdefer if (!inner_destroyed) inner.unlock();
-
-    try self.sys.removeInstance(inner);
-    inner.stop(&self.sys);
-    inner.deinit();
-    inner_destroyed = true;
-
-    try self.sys.cleanupLooseInstances();
-}
-
 /// Initializes a new empty loading set.
 pub fn addLoadingSet(self: *Self, err: *?AnyError) !EnqueuedFuture(Fallible(*LoadingSet)) {
     self.logTrace("creating new loading set", .{}, @src());
@@ -177,10 +150,10 @@ pub fn unloadInstance(self: *Self, instance_info: *const ProxyModule.Info) Syste
     defer self.sys.unlock();
 
     const handle = InstanceHandle.fromInfoPtr(instance_info);
-    if (handle.type != .regular) return error.NotPermitted;
     const inner = handle.lock();
     var inner_destroyed = false;
     errdefer if (!inner_destroyed) inner.unlock();
+
     try self.sys.removeInstance(inner);
     inner.stop(&self.sys);
     inner.deinit();
@@ -436,17 +409,6 @@ const VTableImpl = struct {
         };
         return AnyError.intoCResult(null);
     }
-    fn removePseudoInstance(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.PseudoInstance,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        ctx.module.removePseudoInstance(instance) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
-        };
-        return AnyError.intoCResult(null);
-    }
     fn addLoadingSet(
         ptr: *anyopaque,
         fut: *EnqueuedFuture(Fallible(ProxyModule.LoadingSet)),
@@ -692,7 +654,6 @@ const VTableImpl = struct {
 
 pub const vtable = ProxyModule.VTable{
     .pseudo_module_new = &VTableImpl.addPseudoInstance,
-    .pseudo_module_destroy = &VTableImpl.removePseudoInstance,
     .set_new = &VTableImpl.addLoadingSet,
     .find_by_name = &VTableImpl.findInstanceByName,
     .find_by_symbol = &VTableImpl.findInstanceBySymbol,

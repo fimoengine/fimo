@@ -1135,33 +1135,13 @@ impl PseudoModule {
         unsafe { Ok(PseudoModule::from_ffi(module)) }
     }
 
-    unsafe fn destroy_by_ref(&mut self) -> Result<(), Error> {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.context()
-                .vtable()
-                .module_v0
-                .pseudo_module_destroy
-                .unwrap_unchecked()
-        };
-
-        // Safety: The ffi call is safe.
-        unsafe {
-            to_result_indirect(|error| {
-                *error = f(self.context().data(), self.share_to_ffi());
-            })
-        }
-    }
-
     /// Destroys the `PseudoModule`.
     ///
     /// Unlike [`PseudoModule::drop`] this method can be called while the module
     /// backend is still locked.
     pub fn destroy(self) -> Result<(), Error> {
-        let mut this = ManuallyDrop::new(self);
-
-        // Safety: The module is not used afterward.
-        unsafe { this.destroy_by_ref() }
+        let this = ManuallyDrop::new(self);
+        this.0.module_info().unload(&this.context())
     }
 }
 
@@ -1202,10 +1182,9 @@ impl FFITransferable<*const bindings::FimoModuleInstance> for PseudoModule {
 
 impl Drop for PseudoModule {
     fn drop(&mut self) {
-        // Safety: The module is not used afterward.
-        unsafe {
-            self.destroy_by_ref()
-                .expect("no module should depend on the pseudo module");
-        }
+        self.0
+            .module_info()
+            .unload(&self.context())
+            .expect("no module should depend on the pseudo module");
     }
 }

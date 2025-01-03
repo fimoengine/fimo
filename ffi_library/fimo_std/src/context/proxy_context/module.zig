@@ -1184,9 +1184,9 @@ pub const PseudoInstance = extern struct {
     /// relinquished all access to handles derived by the module subsystem.
     pub fn deinit(self: *const PseudoInstance, err: *?AnyError) AnyError.Error!void {
         const ctx = Context.initC(self.instance.ctx);
-        const result = ctx.vtable.module_v0.pseudo_module_destroy(
+        const result = ctx.vtable.module_v0.unload(
             ctx.data,
-            self,
+            self.instance.info,
         );
         try AnyError.initChecked(err, result);
     }
@@ -1812,10 +1812,6 @@ pub const VTable = extern struct {
     pseudo_module_new: *const fn (
         ctx: *anyopaque,
         instance: **const PseudoInstance,
-    ) callconv(.c) c.FimoResult,
-    pseudo_module_destroy: *const fn (
-        ctx: *anyopaque,
-        instance: *const PseudoInstance,
     ) callconv(.c) c.FimoResult,
     set_new: *const fn (
         ctx: *anyopaque,
