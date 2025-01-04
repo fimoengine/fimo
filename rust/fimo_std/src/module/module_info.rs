@@ -2,7 +2,7 @@ use super::{ModuleSubsystem, NamespaceItem, NoState, Symbol, SymbolItem};
 use crate::{
     bindings,
     context::ContextView,
-    error::{self, to_result, to_result_indirect, to_result_indirect_in_place, Error},
+    error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
     r#async::{EnqueuedFuture, Fallible},
     version::Version,
@@ -115,15 +115,11 @@ impl ModuleInfoView<'_> {
     /// If successful, this function unloads the module. To succeed, the module no other module may
     /// depend on the module. This function automatically unloads cleans up unreferenced modules,
     /// except if they are a pseudo module.
-    pub fn unload(&self, ctx: &impl ModuleSubsystem) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe { ctx.view().vtable().module_v0.unload.unwrap_unchecked() };
-
-        // Safety: The ffi call is safe.
+    pub fn mark_unloadable(&self) {
+        // Safety:
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(ctx.view().data(), self.share_to_ffi());
-            })
+            let f = self.0.vtable.mark_unloadable.unwrap_unchecked();
+            f(self.share_to_ffi());
         }
     }
 
@@ -1139,9 +1135,8 @@ impl PseudoModule {
     ///
     /// Unlike [`PseudoModule::drop`] this method can be called while the module
     /// backend is still locked.
-    pub fn destroy(self) -> Result<(), Error> {
-        let this = ManuallyDrop::new(self);
-        this.0.module_info().unload(&this.context())
+    pub fn destroy(self) {
+        drop(self);
     }
 }
 
@@ -1182,9 +1177,6 @@ impl FFITransferable<*const bindings::FimoModuleInstance> for PseudoModule {
 
 impl Drop for PseudoModule {
     fn drop(&mut self) {
-        self.0
-            .module_info()
-            .unload(&self.context())
-            .expect("no module should depend on the pseudo module");
+        self.0.module_info().mark_unloadable()
     }
 }

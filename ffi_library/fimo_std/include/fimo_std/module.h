@@ -35,15 +35,22 @@ typedef struct FimoModuleInfoVTable {
      */
     void (*release)(const struct FimoModuleInfo *info);
     /**
-     * Returns whether the owning module is still loaded.
+     * Signals that the module instance may be unloaded.
+     *
+     * The instance will be unloaded once it is no longer
+     * actively used by another instance.
+     */
+    void (*mark_unloadable)(const struct FimoModuleInfo *info);
+    /**
+     * Returns whether the owning instance is still loaded.
      */
     bool (*is_loaded)(const struct FimoModuleInfo *info);
     /**
      * Increases the strong reference count of the module instance.
      *
-     * Will prevent the module from being unloaded. This may be used to pass
-     * data, like callbacks, between modules, without registering the dependency
-     * with the subsystem.
+     * Will prevent the instance from being unloaded. This may be used to pass
+     * data, like callbacks, between instances, without registering the
+     * dependency with the subsystem.
      */
     FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *info);
     /**
@@ -1573,16 +1580,11 @@ typedef struct FimoModuleVTableV0 {
      */
     FimoResult (*namespace_exists)(void *ctx, const char *ns, bool *exists);
     /**
-     * Unloads a module.
+     * Unloads all unused instances.
      *
-     * If successful, this function unloads the module `module`.
-     * To succeed, the module no other module may depend on the module.
-     * This function automatically unloads cleans up unreferenced modules,
-     * except if they are a pseudo module.
-     *
-     * Setting `module` to `NULL` only runs the cleanup of all loose modules.
+     * After calling this function, all unreferenced instances are unloaded.
      */
-    FimoResult (*unload)(void *ctx, const FimoModuleInfo *info);
+    FimoResult (*prune_instances)(void *ctx);
     /**
      * Queries the info of a module parameter.
      *

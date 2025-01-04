@@ -189,6 +189,8 @@ fn load_modules() -> Result<(), Error> {
 
     let blocking = BlockingContext::new(*context)?;
     blocking.block_on(async move {
+        let _prune = PruneInstancesOnDrop::new(&*context);
+
         let set = LoadingSet::new(&*context)?.await?;
         set.view()
             .add_modules_from_local(|_| LoadingFilterRequest::Load)?
@@ -215,10 +217,13 @@ fn load_modules() -> Result<(), Error> {
         module.add_namespace(b::NamespaceItem::NAME)?.await?;
         assert!(module.load_symbol::<b::BExport0>()?.await.is_ok());
 
+        let info = module.module_info().to_owned();
+        let _guard = info.acquire_module_strong()?;
+
         drop(module);
-        assert!(!a.is_loaded());
-        assert!(!b.is_loaded());
-        assert!(!c.is_loaded());
+        assert!(a.is_loaded());
+        assert!(b.is_loaded());
+        assert!(c.is_loaded());
 
         Ok(())
     })

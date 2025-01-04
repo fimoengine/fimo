@@ -687,6 +687,7 @@ pub const Info = extern struct {
     pub const VTable = extern struct {
         ref: *const fn (ctx: *const Info) callconv(.c) void,
         unref: *const fn (ctx: *const Info) callconv(.c) void,
+        mark_unloadable: *const fn (ctx: *const Info) callconv(.c) void,
         is_loaded: *const fn (ctx: *const Info) callconv(.c) bool,
         ref_instance_strong: *const fn (ctx: *const Info) callconv(.c) c.FimoResult,
         unref_instance_strong: *const fn (ctx: *const Info) callconv(.c) void,
@@ -700,6 +701,14 @@ pub const Info = extern struct {
     /// Decreases the reference count of the info instance.
     pub fn unref(self: *const Info) void {
         self.vtable.unref(self);
+    }
+
+    /// Signals that the owning instance may be unloaded.
+    ///
+    /// The instance will be unladed once it is no longer actively used by
+    /// another instance.
+    pub fn markUnloadable(self: *const Info) void {
+        self.vtable.mark_unloadable(self);
     }
 
     /// Returns whether the owning module instance is still loaded.
@@ -1189,13 +1198,8 @@ pub const PseudoInstance = extern struct {
     ///
     /// By destroying the pseudo module, the caller ensures that they
     /// relinquished all access to handles derived by the module subsystem.
-    pub fn deinit(self: *const PseudoInstance, err: *?AnyError) AnyError.Error!void {
-        const ctx = Context.initC(self.instance.ctx);
-        const result = ctx.vtable.module_v0.unload(
-            ctx.data,
-            self.instance.info,
-        );
-        try AnyError.initChecked(err, result);
+    pub fn deinit(self: *const PseudoInstance) void {
+        self.castOpaque().info.markUnloadable();
     }
 
     /// Checks the status of a namespace from the view of the module.
@@ -1841,10 +1845,7 @@ pub const VTable = extern struct {
         namespace: [*:0]const u8,
         exists: *bool,
     ) callconv(.c) c.FimoResult,
-    unload: *const fn (
-        ctx: *anyopaque,
-        info: ?*const Info,
-    ) callconv(.c) c.FimoResult,
+    prune_instances: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
     param_query: *const fn (
         ctx: *anyopaque,
         module: [*:0]const u8,
@@ -1932,23 +1933,14 @@ pub fn namespaceExists(
     return exists;
 }
 
-/// Unloads a module.
+/// Unloads all unused instances.
 ///
-/// If successful, this function unloads the module.
-/// To succeed, the module no other module may depend on the module.
-/// This function automatically unloads cleans up unreferenced modules,
-/// except if they are a pseudo module.
-///
-/// Setting `info` to `null` only runs the cleanup of all loose modules.
-pub fn unloadModule(
+/// After calling this function, all unreferenced instances are unloaded.
+pub fn pruneInstances(
     self: Module,
-    info: ?*const Info,
     err: *?AnyError,
 ) AnyError.Error!void {
-    const result = self.context.vtable.module_v0.unload(
-        self.context.data,
-        info,
-    );
+    const result = self.context.vtable.module_v0.prune_instances(self.context.data);
     try AnyError.initChecked(err, result);
 }
 

@@ -261,10 +261,11 @@ pub fn initFuture(
             result: ?*anyopaque,
         ) callconv(.c) bool {
             const this: *T = @alignCast(@ptrCast(data));
-            const res: *T.Result = if (@sizeOf(T.Result) != 0) @alignCast(@ptrCast(result)) else &.{};
             return switch (this.poll(waker)) {
                 .ready => |v| {
-                    res.* = v;
+                    if (@sizeOf(T.Result) != 0) {
+                        @as(*T.Result, @alignCast(@ptrCast(result))).* = v;
+                    }
                     return true;
                 },
                 .pending => false,
@@ -275,9 +276,12 @@ pub fn initFuture(
             this.deinit();
         }
         fn deinit_result(result: ?*anyopaque) callconv(.c) void {
-            if (@hasField(T.Result, "deinit")) {
-                const res: *T.Result = if (@sizeOf(T.Result) != 0) @alignCast(@ptrCast(result)) else &.{};
-                res.deinit();
+            switch (@typeInfo(T.Result)) {
+                .@"struct", .@"union", .@"enum" => if (@hasField(T.Result, "deinit")) {
+                    const res: *T.Result = if (@sizeOf(T.Result) != 0) @alignCast(@ptrCast(result)) else &.{};
+                    res.deinit();
+                },
+                else => {},
             }
         }
     };

@@ -207,6 +207,8 @@ pub fn main() !void {
     const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
     defer async_ctx.deinit();
 
+    defer ctx.module().pruneInstances(&err) catch unreachable;
+
     const set = try (try Module.LoadingSet.init(ctx.module(), &err))
         .intoFuture()
         .awaitBlocking(async_ctx)
@@ -231,7 +233,7 @@ pub fn main() !void {
     try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
-    errdefer instance.deinit(&err) catch unreachable;
+    defer instance.deinit();
 
     const a = try Module.Info.findByName(ctx.module(), "a", &err);
     defer a.unref();
@@ -280,8 +282,16 @@ pub fn main() !void {
         .awaitBlocking(async_ctx)
         .unwrap(&err);
 
-    instance.deinit(&err) catch unreachable;
-    try testing.expect(!a.isLoaded());
-    try testing.expect(!b.isLoaded());
-    try testing.expect(!c.isLoaded());
+    // Increase the strong reference to ensure that it is not unloaded.
+    const info = instance.castOpaque().info;
+    info.ref();
+    defer info.unref();
+
+    info.refInstanceStrong(&err) catch unreachable;
+    defer info.unrefInstanceStrong();
+
+    instance.deinit();
+    try testing.expect(a.isLoaded());
+    try testing.expect(b.isLoaded());
+    try testing.expect(c.isLoaded());
 }

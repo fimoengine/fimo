@@ -279,6 +279,8 @@ pub const Inner = struct {
     strong_count: usize = 0,
     dependents_count: usize = 0,
     is_detached: bool = false,
+    unload_requested: bool = false,
+    unload_waiter: ?ProxyAsync.Waker = null,
     handle: ?*ModuleHandle = null,
     @"export": ?*const ProxyModule.Export = null,
     instance: ?*const ProxyModule.OpaqueInstance = null,
@@ -319,6 +321,32 @@ pub const Inner = struct {
         return self.strong_count == 0 and self.dependents_count == 0;
     }
 
+    fn unloadRequested(self: *const Inner) bool {
+        return self.unload_requested;
+    }
+
+    fn requestUnload(self: *Inner, waiter: ProxyAsync.Waker) enum { noop, wait, unload } {
+        if (self.unload_requested or self.isDetached()) return .noop;
+        self.unload_requested = true;
+
+        std.debug.assert(self.unload_waiter == null);
+        if (self.canUnload()) return .unload;
+
+        self.unload_waiter = waiter.ref();
+        return .wait;
+    }
+
+    fn unblockUnload(self: *Inner) void {
+        std.debug.assert(!self.isDetached());
+        if (!self.unloadRequested()) return;
+        if (!self.canUnload()) return;
+
+        if (self.unload_waiter) |waiter| {
+            self.unload_waiter = null;
+            waiter.wakeUnref();
+        }
+    }
+
     pub fn refStrong(self: *Inner) InstanceHandleError!void {
         if (self.isDetached()) return error.Detached;
         self.strong_count += 1;
@@ -327,6 +355,7 @@ pub const Inner = struct {
     pub fn unrefStrong(self: *Inner) void {
         std.debug.assert(!self.isDetached());
         self.strong_count -= 1;
+        self.unblockUnload();
     }
 
     fn allocator(self: *Inner) Allocator {
@@ -415,6 +444,7 @@ pub const Inner = struct {
         const dependency = self.dependencies.fetchSwapRemove(name) orelse return error.NotFound;
         self.allocator().free(@constCast(dependency.key));
         other.dependents_count -= 1;
+        other.unblockUnload();
         handle.unref();
     }
 
@@ -427,6 +457,7 @@ pub const Inner = struct {
                 defer inner.unlock();
                 self.allocator().free(@constCast(dep.key));
                 inner.dependents_count -= 1;
+                inner.unblockUnload();
             }
             handle.unref();
         }
@@ -847,6 +878,98 @@ pub fn lock(self: *const Self) *Inner {
 }
 
 // ----------------------------------------------------
+// Info Futures
+// ----------------------------------------------------
+
+const InfoRequestUnloadOp = FSMFuture(struct {
+    handle: *const Self,
+    lock_fut: Async.Mutex.LockOp = undefined,
+    ret: void = undefined,
+
+    pub const __no_abort = true;
+
+    fn init(handle: *const Self) void {
+        handle.sys.logTrace(
+            "requesting unnload of instance, instance='{s}'",
+            .{handle.info.name},
+            @src(),
+        );
+        handle.ref();
+
+        var err: ?AnyError = null;
+        const context = handle.sys.asContext();
+        const f = InfoRequestUnloadOp.init(@This(){
+            .handle = handle,
+        }).intoFuture();
+        var enqueued = Async.Task.initFuture(
+            @TypeOf(f),
+            &context.@"async".sys,
+            &f,
+            &err,
+        ) catch |e| @panic(@errorName(e));
+
+        // Detaches the future.
+        enqueued.deinit();
+    }
+
+    pub fn __ret(self: *@This()) void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.handle.unref();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        const inner = self.handle.lock();
+        defer inner.unlock();
+        switch (inner.requestUnload(waker)) {
+            .noop => {
+                self.ret = {};
+                return .ret;
+            },
+            .wait => return .yield,
+            .unload => {
+                self.lock_fut = self.handle.sys.lockAsync();
+                return .next;
+            },
+        }
+    }
+
+    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.lock_fut.deinit();
+    }
+
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        switch (self.lock_fut.poll(waker)) {
+            .pending => return .yield,
+            .ready => |v| {
+                v catch |err| @panic(@errorName(err));
+                return .next;
+            },
+        }
+    }
+
+    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.handle.sys.unlock();
+    }
+
+    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        const inner = self.handle.lock();
+
+        const sys = self.handle.sys;
+        sys.removeInstance(inner) catch |err| @panic(@errorName(err));
+        inner.stop(sys);
+        inner.deinit();
+        self.ret = {};
+    }
+});
+
+// ----------------------------------------------------
 // Info VTable
 // ----------------------------------------------------
 
@@ -858,6 +981,10 @@ const InfoVTableImpl = struct {
     fn unref(info: *const ProxyModule.Info) callconv(.C) void {
         const x = Self.fromInfoPtr(info);
         x.unref();
+    }
+    fn markUnloadable(info: *const ProxyModule.Info) callconv(.c) void {
+        const x = Self.fromInfoPtr(info);
+        InfoRequestUnloadOp.Data.init(x);
     }
     fn isLoaded(info: *const ProxyModule.Info) callconv(.C) bool {
         const x = Self.fromInfoPtr(info);
@@ -883,6 +1010,7 @@ const InfoVTableImpl = struct {
 const info_vtable = ProxyModule.Info.VTable{
     .ref = &InfoVTableImpl.ref,
     .unref = &InfoVTableImpl.unref,
+    .mark_unloadable = &InfoVTableImpl.markUnloadable,
     .is_loaded = &InfoVTableImpl.isLoaded,
     .ref_instance_strong = &InfoVTableImpl.refInstanceStrong,
     .unref_instance_strong = &InfoVTableImpl.unrefInstanceStrong,

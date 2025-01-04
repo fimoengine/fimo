@@ -15,6 +15,7 @@ mod module_info;
 mod parameter;
 mod symbol;
 
+use crate::{context::ContextView, error::to_result_indirect};
 pub use loading_set::*;
 pub use module_export::*;
 pub use module_info::*;
@@ -27,6 +28,11 @@ pub trait ModuleSubsystem: SealedContext {
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
     fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error>;
+
+    /// Unloads all unused instances.
+    ///
+    /// After calling this function, all unreferenced instances are unloaded.
+    fn prune_instances(&self) -> Result<(), Error>;
 }
 
 impl<T> ModuleSubsystem for T
@@ -49,6 +55,41 @@ where
                 *error = f(self.view().data(), namespace.as_ptr(), exists.as_mut_ptr());
             })
         }
+    }
+
+    fn prune_instances(&self) -> Result<(), Error> {
+        // Safety:
+        unsafe {
+            let f = self
+                .view()
+                .vtable()
+                .module_v0
+                .prune_instances
+                .unwrap_unchecked();
+
+            to_result_indirect(|error| {
+                *error = f(self.view().data());
+            })
+        }
+    }
+}
+
+/// Helper struct that prunes all unused instances on drop.
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct PruneInstancesOnDrop<'a>(ContextView<'a>);
+
+impl PruneInstancesOnDrop<'_> {
+    /// Constructs a new instance of the dropper.
+    pub fn new(ctx: &impl ModuleSubsystem) -> PruneInstancesOnDrop<'_> {
+        let view = ctx.view();
+        PruneInstancesOnDrop(view)
+    }
+}
+
+impl Drop for PruneInstancesOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.prune_instances().expect("could not prune instances");
     }
 }
 

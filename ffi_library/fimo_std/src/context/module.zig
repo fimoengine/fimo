@@ -136,34 +136,9 @@ pub fn queryNamespace(self: *Self, namespace: []const u8) bool {
     return self.sys.getNamespace(namespace) != null;
 }
 
-/// Unloads an instance.
-///
-/// To succeed, the instance may not be in use by any other instance.
-/// After unloading the instance, this function cleans up unreferenced instances, except pseudo instances.
-pub fn unloadInstance(self: *Self, instance_info: *const ProxyModule.Info) System.SystemError!void {
-    self.logTrace(
-        "unloading instance, instance='{s}'",
-        .{instance_info.name},
-        @src(),
-    );
-    self.sys.lock();
-    defer self.sys.unlock();
-
-    const handle = InstanceHandle.fromInfoPtr(instance_info);
-    const inner = handle.lock();
-    var inner_destroyed = false;
-    errdefer if (!inner_destroyed) inner.unlock();
-
-    try self.sys.removeInstance(inner);
-    inner.stop(&self.sys);
-    inner.deinit();
-    inner_destroyed = true;
-    try self.sys.cleanupLooseInstances();
-}
-
 /// Unloads all unreferenced instances.
-pub fn unloadUnusedInstances(self: *Self) System.SystemError!void {
-    self.logTrace("unloading unused instances", .{}, @src());
+pub fn pruneInstances(self: *Self) System.SystemError!void {
+    self.logTrace("pruning instances", .{}, @src());
     self.sys.lock();
     defer self.sys.unlock();
     try self.sys.cleanupLooseInstances();
@@ -463,18 +438,12 @@ const VTableImpl = struct {
         exists.* = ctx.module.queryNamespace(std.mem.span(namespace));
         return AnyError.intoCResult(null);
     }
-    fn unloadInstance(ptr: *anyopaque, instance_info: ?*const ProxyModule.Info) callconv(.C) c.FimoResult {
+    fn pruneInstances(ptr: *anyopaque) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        if (instance_info) |info|
-            ctx.module.unloadInstance(info) catch |e| {
-                if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-                return AnyError.initError(e).err;
-            }
-        else
-            ctx.module.unloadUnusedInstances() catch |e| {
-                if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-                return AnyError.initError(e).err;
-            };
+        ctx.module.pruneInstances() catch |e| {
+            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            return AnyError.initError(e).err;
+        };
         return AnyError.intoCResult(null);
     }
     fn queryParameterInfo(
@@ -658,7 +627,7 @@ pub const vtable = ProxyModule.VTable{
     .find_by_name = &VTableImpl.findInstanceByName,
     .find_by_symbol = &VTableImpl.findInstanceBySymbol,
     .namespace_exists = &VTableImpl.queryNamespace,
-    .unload = &VTableImpl.unloadInstance,
+    .prune_instances = &VTableImpl.pruneInstances,
     .param_query = &VTableImpl.queryParameterInfo,
     .param_set_public = &VTableImpl.writePublicParameterFrom,
     .param_get_public = &VTableImpl.readPublicParameterTo,
