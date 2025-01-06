@@ -140,6 +140,17 @@ impl<T: ?Sized> Hash for OpaqueHandle<T> {
     }
 }
 
+/// Helper trait for types that can be borrowed.
+pub trait Viewable {
+    /// View type.
+    type View<'a>: for<'v> Viewable<View<'v> = Self::View<'v>>
+    where
+        Self: 'a;
+
+    /// Borrows a view to the data.
+    fn view(&self) -> Self::View<'_>;
+}
+
 /// Used to transfer ownership to and from a ffi interface.
 ///
 /// The ownership of a type is transferred by calling [`Self::into_ffi`] and

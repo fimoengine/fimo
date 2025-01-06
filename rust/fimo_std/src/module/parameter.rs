@@ -140,10 +140,10 @@ impl<T: ParameterRepr> ParameterCast for T {
 /// Virtual function table of a [`Parameter`].
 #[repr(C)]
 pub struct ParameterVTable<T: ParameterCast> {
-    r#type: extern "C" fn(data: Pin<&'_ Parameter<T>>) -> ParameterType,
-    read: extern "C" fn(data: Pin<&'_ Parameter<T>>, &'_ mut MaybeUninit<T::Repr>),
-    write: extern "C" fn(data: Pin<&'_ Parameter<T>>, &'_ T::Repr),
-    _phantom: PhantomData<fn(T::Repr) -> T::Repr>,
+    pub r#type: extern "C" fn(data: Pin<&'_ Parameter<T>>) -> ParameterType,
+    pub read: extern "C" fn(data: Pin<&'_ Parameter<T>>, &'_ mut MaybeUninit<T::Repr>),
+    pub write: extern "C" fn(data: Pin<&'_ Parameter<T>>, &'_ T::Repr),
+    pub phantom: PhantomData<fn(T::Repr) -> T::Repr>,
 }
 
 impl<T: ParameterCast> Debug for ParameterVTable<T> {
@@ -186,10 +186,10 @@ impl<T: ParameterCast> Parameter<T> {
 }
 
 pub struct ParameterDataVTable<T: ParameterRepr> {
-    r#type: extern "C" fn(handle: OpaqueHandle<dyn Send + Sync>) -> ParameterType,
-    read: extern "C" fn(handle: OpaqueHandle<dyn Send + Sync>, &'_ mut MaybeUninit<T>),
-    write: extern "C" fn(handle: OpaqueHandle<dyn Send + Sync>, &'_ T),
-    _phantom: PhantomData<fn(T) -> T>,
+    pub r#type: extern "C" fn(handle: OpaqueHandle<dyn Send + Sync>) -> ParameterType,
+    pub read: extern "C" fn(handle: OpaqueHandle<dyn Send + Sync>, &'_ mut MaybeUninit<T>),
+    pub write: extern "C" fn(handle: OpaqueHandle<dyn Send + Sync>, &'_ T),
+    pub phantom: PhantomData<fn(T) -> T>,
 }
 
 /// Internal parameter data.
