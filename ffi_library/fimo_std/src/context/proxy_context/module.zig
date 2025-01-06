@@ -986,8 +986,7 @@ pub const LoadingSet = extern struct {
         ) callconv(.c) c.FimoResult,
         commit: *const fn (
             ctx: *anyopaque,
-            fut: *EnqueuedFuture(Fallible(void)),
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) EnqueuedFuture(Fallible(void)),
     };
 
     /// Constructs a new empty set.
@@ -1291,11 +1290,8 @@ pub const LoadingSet = extern struct {
     ///
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
-    pub fn commit(self: LoadingSet, err: *?AnyError) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-        var fut: EnqueuedFuture(Fallible(void)) = undefined;
-        const result = self.vtable.commit(self.data, &fut);
-        try AnyError.initChecked(err, result);
-        return fut;
+    pub fn commit(self: LoadingSet) EnqueuedFuture(Fallible(void)) {
+        return self.vtable.commit(self.data);
     }
 };
 

@@ -194,7 +194,7 @@ fn load_modules() -> Result<(), Error> {
         let set = LoadingSet::new(&*context)?;
         set.view()
             .add_modules_from_local(|_| LoadingFilterRequest::Load)?;
-        set.view().commit()?.await?;
+        set.view().commit().await?;
 
         let module = PseudoModule::new(&*context)?;
         let a = ModuleInfo::find_by_name(&*context, c"a")?;

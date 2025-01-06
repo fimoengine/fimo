@@ -433,7 +433,7 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
                     })
                     .unwrap();
             }
-            set.view().commit().unwrap().await.unwrap();
+            set.view().commit().unwrap();
 
             let module = fimo_std::module::PseudoModule::new(&*context)
                 .expect("could not create pseudo module");

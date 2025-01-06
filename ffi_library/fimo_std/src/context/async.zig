@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const c = @import("../c.zig");
 const AnyError = @import("../AnyError.zig");
 
@@ -24,6 +26,27 @@ pub fn deinit(self: *Self) void {
 
 pub fn asContext(self: *Self) *Context {
     return @fieldParentPtr("async", self);
+}
+
+pub fn initErrorFuture(comptime T: type, e: anyerror) ProxyAsync.EnqueuedFuture(ProxyAsync.Fallible(T)) {
+    const Wrapper = struct {
+        fn poll(data: **anyopaque, waker: ProxyAsync.Waker) ProxyAsync.Poll(ProxyAsync.Fallible(T)) {
+            _ = waker;
+            const err_int: std.meta.Int(.unsigned, @bitSizeOf(anyerror)) = @intCast(@intFromPtr(data.*));
+            const err = @errorFromInt(err_int);
+            return .{ .ready = .{
+                .result = AnyError.initError(err).err,
+                .value = undefined,
+            } };
+        }
+    };
+
+    const e_ptr: *anyopaque = @ptrFromInt(@intFromError(e));
+    return ProxyAsync.EnqueuedFuture(ProxyAsync.Fallible(T)).init(
+        e_ptr,
+        Wrapper.poll,
+        null,
+    );
 }
 
 // ----------------------------------------------------

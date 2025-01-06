@@ -486,7 +486,7 @@ typedef struct FimoModuleLoadingSetVTable {
      * the same loading set. In that case, the requests will be handled
      * atomically, in an unspecified order.
      */
-    FimoResult (*commit)(void *ctx, FimoModuleLoadingSetCommitFuture *fut);
+    FimoModuleLoadingSetCommitFuture (*commit)(void *ctx);
 } FimoModuleLoadingSetVTable;
 
 /**

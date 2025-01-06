@@ -221,7 +221,7 @@ pub fn main() !void {
         null,
         &err,
     );
-    try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
+    try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
     defer instance.deinit();

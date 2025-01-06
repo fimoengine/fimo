@@ -309,20 +309,16 @@ impl LoadingSetView<'_> {
     ///
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
-    pub fn commit(
-        &self,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    pub fn commit(&self) -> impl Future<Output = Result<(), Error<dyn Send + Sync>>> {
         // Safety:
         unsafe {
             let f = self.vtable().commit.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(self.data(), fut.as_mut_ptr());
-            })?;
+            let fut = f(self.data());
             let fut = std::mem::transmute::<
                 bindings::FimoModuleLoadingSetCommitFuture,
                 EnqueuedFuture<Fallible<()>>,
             >(fut);
-            Ok(async move { fut.await.unwrap() })
+            async move { fut.await.unwrap() }
         }
     }
 }

@@ -748,10 +748,7 @@ const CommitOp = FSMFuture(struct {
 
     pub const __no_abort = true;
 
-    fn init(
-        set: *Self,
-        err: *?AnyError,
-    ) !EnqueuedFuture(Fallible(void)) {
+    fn init(set: *Self) EnqueuedFuture(Fallible(void)) {
         set.asSys().logTrace("commiting loading set, set='{*}'", .{set}, @src());
         set.ref();
         errdefer set.unref();
@@ -763,7 +760,15 @@ const CommitOp = FSMFuture(struct {
             Fallible(void),
             Fallible(void).Wrapper(anyerror),
         );
-        return Async.Task.initFuture(@TypeOf(f), &set.context.@"async".sys, &f, err);
+
+        var err: ?AnyError = null;
+        defer if (err) |e| e.deinit();
+        return Async.Task.initFuture(
+            @TypeOf(f),
+            &set.context.@"async".sys,
+            &f,
+            &err,
+        ) catch |e| Async.initErrorFuture(void, e);
     }
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
@@ -1103,25 +1108,9 @@ const VTableImpl = struct {
         };
         return AnyError.intoCResult(null);
     }
-    fn commit(
-        this: *anyopaque,
-        fut: *EnqueuedFuture(Fallible(void)),
-    ) callconv(.c) c.FimoResult {
+    fn commit(this: *anyopaque) callconv(.c) EnqueuedFuture(Fallible(void)) {
         const self: *Self = @alignCast(@ptrCast(this));
-
-        var err: ?AnyError = null;
-        fut.* = CommitOp.Data.init(
-            self,
-            &err,
-        ) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.context.tracing.emitStackTraceSimple(tr.*, @src());
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
-        };
-        return AnyError.intoCResult(null);
+        return CommitOp.Data.init(self);
     }
 };
 
