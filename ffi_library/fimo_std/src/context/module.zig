@@ -240,23 +240,21 @@ const VTableImpl = struct {
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
         instance.* = ctx.module.addPseudoInstance() catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
     fn addLoadingSet(
         ptr: *anyopaque,
-        fut: *EnqueuedFuture(Fallible(ProxyModule.LoadingSet)),
+        set: *ProxyModule.LoadingSet,
     ) callconv(.C) c.FimoResult {
-        var err: ?AnyError = null;
         const ctx = Context.fromProxyPtr(ptr);
-
-        fut.* = LoadingSet.init(ctx, &err) catch |e| {
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
+        set.* = LoadingSet.init(ctx) catch |e| {
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
@@ -267,7 +265,8 @@ const VTableImpl = struct {
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
         info.* = ctx.module.findInstanceByName(std.mem.span(name)) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
@@ -285,7 +284,8 @@ const VTableImpl = struct {
             std.mem.span(namespace),
             Version.initC(version),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
@@ -302,7 +302,8 @@ const VTableImpl = struct {
     fn pruneInstances(ptr: *anyopaque) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.pruneInstances() catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
@@ -320,7 +321,8 @@ const VTableImpl = struct {
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         @"type".* = info.type;
@@ -342,7 +344,8 @@ const VTableImpl = struct {
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
@@ -361,7 +364,8 @@ const VTableImpl = struct {
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr|
+                ctx.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);

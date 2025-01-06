@@ -4,7 +4,6 @@ use crate::{
     context::ContextView,
     error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
-    r#async::{EnqueuedFuture, Fallible},
     version::Version,
 };
 use core::{
@@ -14,7 +13,6 @@ use core::{
     mem::ManuallyDrop,
     ops::Deref,
 };
-use std::future::Future;
 
 /// View of a `ModuleInfo`.
 #[derive(Copy, Clone)]
@@ -404,10 +402,7 @@ pub unsafe trait Module:
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are exposed
     /// in said namespace. A namespace can not be included multiple times.
-    fn add_namespace(
-        &self,
-        namespace: &CStr,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
+    fn add_namespace(&self, namespace: &CStr) -> Result<(), Error>;
 
     /// Removes a namespace from the module.
     ///
@@ -419,10 +414,7 @@ pub unsafe trait Module:
     ///
     /// The caller must ensure that they don't utilize and symbol from the namespace that will be
     /// excluded.
-    unsafe fn remove_namespace(
-        &self,
-        namespace: &CStr,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
+    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), Error>;
 
     /// Checks if a module depends on another module.
     ///
@@ -436,10 +428,7 @@ pub unsafe trait Module:
     /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
     /// already a dependency, or to a module that would result in a circular dependency will result
     /// in an error.
-    fn add_dependency(
-        &self,
-        dependency: &ModuleInfoView<'_>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
+    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), Error>;
 
     /// Removes a module as a dependency.
     ///
@@ -451,10 +440,7 @@ pub unsafe trait Module:
     /// # Safety
     ///
     /// Calling this method invalidates all loaded symbols from the dependency.
-    unsafe fn remove_dependency(
-        &self,
-        dependency: ModuleInfoView<'_>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>;
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), Error>;
 
     /// Loads a symbol from the module subsystem.
     ///
@@ -464,9 +450,7 @@ pub unsafe trait Module:
     /// module that exported the symbol. This function fails, if the module containing the symbol is
     /// not a dependency of the module, or if the module has not included the required namespace.
     #[allow(clippy::type_complexity)]
-    fn load_symbol<T: SymbolItem>(
-        &self,
-    ) -> Result<impl Future<Output = Result<Symbol<'_, T::Type>, Error<dyn Send + Sync>>>, Error>
+    fn load_symbol<T: SymbolItem>(&self) -> Result<Symbol<'_, T::Type>, Error>
     where
         T::Type: 'static,
     {
@@ -490,7 +474,7 @@ pub unsafe trait Module:
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<impl Future<Output = Result<Symbol<'_, T>, Error<dyn Send + Sync>>>, Error>;
+    ) -> Result<Symbol<'_, T>, Error>;
 }
 
 /// Reference to an unknown module.
@@ -588,39 +572,22 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn add_namespace(
-        &self,
-        namespace: &CStr,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
-        // Safety:
+    fn add_namespace(&self, namespace: &CStr) -> Result<(), Error> {
         unsafe {
             let f = self.vtable().add_namespace.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(self.share_to_ffi(), namespace.as_ptr(), fut.as_mut_ptr());
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleInstanceAddNamespaceFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            to_result_indirect(|error| {
+                *error = f(self.share_to_ffi(), namespace.as_ptr());
+            })
         }
     }
 
-    unsafe fn remove_namespace(
-        &self,
-        namespace: &CStr,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), Error> {
         // Safety:
         unsafe {
             let f = self.vtable().remove_namespace.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(self.share_to_ffi(), namespace.as_ptr(), fut.as_mut_ptr());
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleInstanceRemoveNamespaceFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            to_result_indirect(|error| {
+                *error = f(self.share_to_ffi(), namespace.as_ptr());
+            })
         }
     }
 
@@ -648,47 +615,23 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn add_dependency(
-        &self,
-        dependency: &ModuleInfoView<'_>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), Error> {
         // Safety:
         unsafe {
             let f = self.vtable().add_dependency.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(
-                    self.share_to_ffi(),
-                    dependency.share_to_ffi(),
-                    fut.as_mut_ptr(),
-                );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleInstanceAddDependencyFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            to_result_indirect(|error| {
+                *error = f(self.share_to_ffi(), dependency.share_to_ffi());
+            })
         }
     }
 
-    unsafe fn remove_dependency(
-        &self,
-        dependency: ModuleInfoView<'_>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), Error> {
         // Safety:
         unsafe {
             let f = self.vtable().remove_dependency.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(
-                    self.share_to_ffi(),
-                    dependency.share_to_ffi(),
-                    fut.as_mut_ptr(),
-                );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleInstanceRemoveDependencyFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            to_result_indirect(|error| {
+                *error = f(self.share_to_ffi(), dependency.share_to_ffi());
+            })
         }
     }
 
@@ -697,11 +640,11 @@ unsafe impl Module for OpaqueModule<'_> {
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<impl Future<Output = Result<Symbol<'_, T>, Error<dyn Send + Sync>>>, Error> {
+    ) -> Result<Symbol<'_, T>, Error> {
         // Safety:
         unsafe {
             let f = self.vtable().load_symbol.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
+            let sym = to_result_indirect_in_place(|error, fut| {
                 *error = f(
                     self.share_to_ffi(),
                     name.as_ptr(),
@@ -710,11 +653,7 @@ unsafe impl Module for OpaqueModule<'_> {
                     fut.as_mut_ptr(),
                 );
             })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleInstanceLoadSymbolFuture,
-                EnqueuedFuture<Fallible<*const std::ffi::c_void>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap().map(|x| Symbol::from_ffi(x)) })
+            Ok(Symbol::from_ffi(sym))
         }
     }
 }
@@ -879,17 +818,11 @@ where
         self.module.query_namespace(namespace)
     }
 
-    fn add_namespace(
-        &self,
-        namespace: &CStr,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    fn add_namespace(&self, namespace: &CStr) -> Result<(), Error> {
         self.module.add_namespace(namespace)
     }
 
-    unsafe fn remove_namespace(
-        &self,
-        namespace: &CStr,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), Error> {
         // Safety: The caller ensures that the contract is valid.
         unsafe { self.module.remove_namespace(namespace) }
     }
@@ -898,17 +831,11 @@ where
         self.module.query_dependency(module)
     }
 
-    fn add_dependency(
-        &self,
-        dependency: &ModuleInfoView<'_>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), Error> {
         self.module.add_dependency(dependency)
     }
 
-    unsafe fn remove_dependency(
-        &self,
-        dependency: ModuleInfoView<'_>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), Error> {
         // Safety: The caller ensures that the contract is valid.
         unsafe { self.module.remove_dependency(dependency) }
     }
@@ -918,7 +845,7 @@ where
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<impl Future<Output = Result<Symbol<'_, T>, Error<dyn Send + Sync>>>, Error> {
+    ) -> Result<Symbol<'_, T>, Error> {
         // Safety: The caller ensures that the contract is valid.
         unsafe {
             self.module

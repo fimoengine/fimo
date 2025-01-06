@@ -188,14 +188,6 @@ typedef struct FimoModuleInfo {
 
 typedef struct FimoModuleInstance FimoModuleInstance;
 
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceAddNamespaceFuture;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceRemoveNamespaceFuture;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceAddDependencyFuture;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleInstanceRemoveDependencyFuture;
-
-typedef FIMO_ASYNC_FALLIBLE(const void*) FimoModuleInstanceLoadSymbolFutureResult;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleInstanceLoadSymbolFutureResult) FimoModuleInstanceLoadSymbolFuture;
-
 /**
  * VTable of a FimoModuleInstance.
  *
@@ -221,8 +213,7 @@ typedef struct FimoModuleInstanceVTable {
      * dependencies that are exposed in said namespace. A namespace can not be
      * included multiple times.
      */
-    FimoResult (*add_namespace)(const FimoModuleInstance* ctx, const char *ns,
-                                FimoModuleInstanceAddNamespaceFuture *fut);
+    FimoResult (*add_namespace)(const FimoModuleInstance* ctx, const char *ns);
     /**
      * Removes a namespace include from the module.
      *
@@ -231,8 +222,7 @@ typedef struct FimoModuleInstanceVTable {
      * that were manually added, whereas static namespace includes remain valid
      * until the module is unloaded.
      */
-    FimoResult (*remove_namespace)(const FimoModuleInstance* ctx, const char *ns,
-                                   FimoModuleInstanceRemoveNamespaceFuture *fut);
+    FimoResult (*remove_namespace)(const FimoModuleInstance* ctx, const char *ns);
     /**
      * Checks if a module depends on another module.
      *
@@ -253,8 +243,7 @@ typedef struct FimoModuleInstanceVTable {
      * acquire a dependency to a module that is already a dependency, or to a
      * module that would result in a circular dependency will result in an error.
      */
-    FimoResult (*add_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info,
-                                 FimoModuleInstanceAddDependencyFuture *fut);
+    FimoResult (*add_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info);
     /**
      * Removes a module as a dependency.
      *
@@ -264,8 +253,7 @@ typedef struct FimoModuleInstanceVTable {
      * only relinquish dependencies to modules that were acquired dynamically,
      * as static dependencies remain valid until the module is unloaded.
      */
-    FimoResult (*remove_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info,
-                                    FimoModuleInstanceRemoveDependencyFuture *fut);
+    FimoResult (*remove_dependency)(const FimoModuleInstance* ctx, const FimoModuleInfo *info);
     /**
      * Loads a symbol from the module subsystem.
      *
@@ -278,7 +266,7 @@ typedef struct FimoModuleInstanceVTable {
      */
     FimoResult (*load_symbol)(const FimoModuleInstance* ctx, const char *name,
                               const char *ns, FimoVersion version,
-                              FimoModuleInstanceLoadSymbolFuture *fut);
+                              const void **symbol);
     /**
      * Reads a module parameter with dependency read access.
      *
@@ -383,16 +371,6 @@ typedef struct FimoModuleInstance {
 
 typedef struct FimoModuleExport FimoModuleExport;
 
-typedef FIMO_ASYNC_FALLIBLE(bool) FimoModuleLoadingSetQueryModuleFutureResult;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetQueryModuleFutureResult) FimoModuleLoadingSetQueryModuleFuture;
-
-typedef FIMO_ASYNC_FALLIBLE(bool) FimoModuleLoadingSetQuerySymbolFutureResult;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetQuerySymbolFutureResult) FimoModuleLoadingSetQuerySymbolFuture;
-
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddCallbackFuture;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddModuleFuture;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddModulesFromPathFuture;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetAddModulesFromLocalFuture;
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetCommitFuture;
 
 /**
@@ -412,13 +390,11 @@ typedef struct FimoModuleLoadingSetVTable {
     /**
      * Checks whether the set contains a specific module.
      */
-    FimoResult (*query_module)(void *ctx, const char *name,
-                               FimoModuleLoadingSetQueryModuleFuture *fut);
+    bool (*query_module)(void *ctx, const char *name);
     /**
      * Checks whether the set contains a specific symbol.
      */
-    FimoResult (*query_symbol)(void *ctx, const char *name, const char *namespace,
-                               FimoVersion version, FimoModuleLoadingSetQuerySymbolFuture *fut);
+    bool (*query_symbol)(void *ctx, const char *name, const char *namespace, FimoVersion version);
     /**
      * Adds a status callback to the set.
      *
@@ -429,15 +405,14 @@ typedef struct FimoModuleLoadingSetVTable {
      * partially loaded state at the time of calling this function, the error path
      * may be invoked immediately. The callbacks will be provided with a user-specified
      * data pointer, which they are in charge of cleaning up. If an error occurs during the
-     * execution of the returned future, it will invoke the optional `on_abort` callback.
-     * If the requested module does not exist, the returned future will return an error.
+     * execution of the function, it will invoke the optional `on_abort` callback. If the
+     * requested module does not exist, the function will return an error.
      */
     FimoResult (*add_callback)(void *ctx, const char *name,
                                void (*on_success)(const FimoModuleInfo *info, void *data),
                                void (*on_error)(const FimoModuleExport *exp, void *data),
                                void (*on_abort)(void *data),
-                               void *data,
-                               FimoModuleLoadingSetAddCallbackFuture *fut);
+                               void *data);
     /**
      * Adds a module to the module set.
      *
@@ -452,8 +427,7 @@ typedef struct FimoModuleLoadingSetVTable {
      * Note that the new module is not set up to automatically depend on the
      * owner, but may prevent it from being unloaded while the set exists.
      */
-    FimoResult (*add_module)(void *ctx, const FimoModuleInstance *owner, const FimoModuleExport *exp,
-                             FimoModuleLoadingSetAddModuleFuture *fut);
+    FimoResult (*add_module)(void *ctx, const FimoModuleInstance *owner, const FimoModuleExport *exp);
     /**
      * Adds modules to the set.
      *
@@ -474,8 +448,7 @@ typedef struct FimoModuleLoadingSetVTable {
     FimoResult (*add_modules_from_path)(void *ctx, FimoUTF8Path path,
                                         bool (*filter_fn)(const FimoModuleExport *exp, void *data),
                                         void (*filter_deinit)(void *data),
-                                        void *filter_data,
-                                        FimoModuleLoadingSetAddModulesFromPathFuture *fut);
+                                        void *filter_data);
     /**
      * Adds modules to the set.
      *
@@ -499,8 +472,7 @@ typedef struct FimoModuleLoadingSetVTable {
                                                 bool (*filter_fn)(const FimoModuleExport *exp,
                                                                   void *data),
                                                 void *data),
-                                        const void *bin_ptr,
-                                        FimoModuleLoadingSetAddModulesFromLocalFuture *fut);
+                                        const void *bin_ptr);
     /**
      * Loads the modules contained in the set.
      *
@@ -1572,15 +1544,6 @@ typedef void (*FimoModuleLoadingSuccessCallback)(const FimoModuleInfo *arg0, voi
  */
 typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, void *arg1);
 
-typedef FIMO_ASYNC_FALLIBLE(const FimoModuleInstance*) FimoModulePseudoModuleNewFutureResult;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModulePseudoModuleNewFutureResult) FimoModulePseudoModuleNewFuture;
-
-typedef FIMO_ASYNC_FALLIBLE(FimoContext) FimoModulePseudoModuleDestroyFutureResult;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModulePseudoModuleDestroyFutureResult) FimoModulePseudoModuleDestroyFuture;
-
-typedef FIMO_ASYNC_FALLIBLE(FimoModuleLoadingSet) FimoModuleLoadingSetNewFutureResult;
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleLoadingSetNewFutureResult) FimoModuleLoadingSetNewFuture;
-
 /**
  * VTable of the module subsystem.
  *
@@ -1606,7 +1569,7 @@ typedef struct FimoModuleVTableV0 {
      * automatically computing a suitable load order for a batch of
      * modules.
      */
-    FimoResult (*set_new)(void *ctx, FimoModuleLoadingSetNewFuture *fut);
+    FimoResult (*set_new)(void *ctx, FimoModuleLoadingSet *set);
     /**
      * Searches for a module by it's name.
      *

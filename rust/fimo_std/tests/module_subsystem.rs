@@ -191,10 +191,9 @@ fn load_modules() -> Result<(), Error> {
     blocking.block_on(async move {
         let _prune = PruneInstancesOnDrop::new(&*context);
 
-        let set = LoadingSet::new(&*context)?.await?;
+        let set = LoadingSet::new(&*context)?;
         set.view()
-            .add_modules_from_local(|_| LoadingFilterRequest::Load)?
-            .await?;
+            .add_modules_from_local(|_| LoadingFilterRequest::Load)?;
         set.view().commit()?.await?;
 
         let module = PseudoModule::new(&*context)?;
@@ -206,16 +205,16 @@ fn load_modules() -> Result<(), Error> {
         assert!(b.is_loaded());
         assert!(c.is_loaded());
 
-        module.add_dependency(&a)?.await?;
-        module.add_dependency(&b)?.await?;
-        module.add_dependency(&c)?.await?;
+        module.add_dependency(&a)?;
+        module.add_dependency(&b)?;
+        module.add_dependency(&c)?;
 
-        let a_0 = module.load_symbol::<AExport0>()?.await?;
+        let a_0 = module.load_symbol::<AExport0>()?;
         assert_eq!(*a_0, 5);
 
-        assert!(module.load_symbol::<b::BExport0>()?.await.is_err());
-        module.add_namespace(b::NamespaceItem::NAME)?.await?;
-        assert!(module.load_symbol::<b::BExport0>()?.await.is_ok());
+        assert!(module.load_symbol::<b::BExport0>().is_err());
+        module.add_namespace(b::NamespaceItem::NAME)?;
+        assert!(module.load_symbol::<b::BExport0>().is_ok());
 
         let info = module.module_info().to_owned();
         let _guard = info.acquire_module_strong()?;

@@ -419,12 +419,10 @@ pub fn Instance(
             add_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
-                fut: *EnqueuedFuture(Fallible(void)),
             ) callconv(.c) c.FimoResult,
             remove_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
-                fut: *EnqueuedFuture(Fallible(void)),
             ) callconv(.c) c.FimoResult,
             query_dependency: *const fn (
                 ctx: *const OpaqueInstance,
@@ -435,19 +433,17 @@ pub fn Instance(
             add_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
-                fut: *EnqueuedFuture(Fallible(void)),
             ) callconv(.c) c.FimoResult,
             remove_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
-                fut: *EnqueuedFuture(Fallible(void)),
             ) callconv(.c) c.FimoResult,
             load_symbol: *const fn (
                 ctx: *const OpaqueInstance,
                 name: [*:0]const u8,
                 namespace: [*:0]const u8,
                 version: c.FimoVersion,
-                fut: *EnqueuedFuture(Fallible(*const anyopaque)),
+                symbol: **const anyopaque,
             ) callconv(.c) c.FimoResult,
             read_parameter: *const fn (
                 ctx: *const OpaqueInstance,
@@ -502,15 +498,12 @@ pub fn Instance(
             self: *const @This(),
             namespace: [:0]const u8,
             err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-            var fut: EnqueuedFuture(Fallible(void)) = undefined;
+        ) AnyError.Error!void {
             const result = self.vtable.add_namespace(
                 self.castOpaque(),
                 namespace.ptr,
-                &fut,
             );
             try AnyError.initChecked(err, result);
-            return fut;
         }
 
         /// Removes a namespace include from the module.
@@ -522,15 +515,12 @@ pub fn Instance(
             self: *const @This(),
             namespace: [:0]const u8,
             err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-            var fut: EnqueuedFuture(Fallible(void)) = undefined;
+        ) AnyError.Error!void {
             const result = self.vtable.remove_namespace(
                 self.castOpaque(),
                 namespace.ptr,
-                &fut,
             );
             try AnyError.initChecked(err, result);
-            return fut;
         }
 
         /// Checks if a module depends on another module.
@@ -568,15 +558,12 @@ pub fn Instance(
             self: *const @This(),
             info: *const Info,
             err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-            var fut: EnqueuedFuture(Fallible(void)) = undefined;
+        ) AnyError.Error!void {
             const result = self.vtable.add_dependency(
                 self.castOpaque(),
                 info,
-                &fut,
             );
             try AnyError.initChecked(err, result);
-            return fut;
         }
 
         /// Removes a module as a dependency.
@@ -589,15 +576,12 @@ pub fn Instance(
             self: *const @This(),
             info: *const Info,
             err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-            var fut: EnqueuedFuture(Fallible(void)) = undefined;
+        ) AnyError.Error!void {
             const result = self.vtable.remove_dependency(
                 self.castOpaque(),
                 info,
-                &fut,
             );
             try AnyError.initChecked(err, result);
-            return fut;
         }
 
         /// Loads a symbol from the module subsystem.
@@ -611,14 +595,14 @@ pub fn Instance(
             self: *const @This(),
             comptime symbol: Symbol,
             err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(Fallible(*const symbol.symbol)) {
+        ) AnyError.Error!*const symbol.symbol {
             const s = try self.loadSymbolRaw(
                 symbol.name,
                 symbol.namespace,
                 symbol.version,
                 err,
             );
-            return @bitCast(s);
+            return @alignCast(@ptrCast(s));
         }
 
         /// Loads a symbol from the module subsystem.
@@ -634,17 +618,17 @@ pub fn Instance(
             namespace: [:0]const u8,
             version: Version,
             err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(Fallible(*const anyopaque)) {
-            var fut: EnqueuedFuture(Fallible(*const anyopaque)) = undefined;
+        ) AnyError.Error!*const anyopaque {
+            var sym: *const anyopaque = undefined;
             const result = self.vtable.load_symbol(
                 self.castOpaque(),
                 name,
                 namespace,
                 version.intoC(),
-                &fut,
+                &sym,
             );
             try AnyError.initChecked(err, result);
-            return fut;
+            return sym;
         }
 
         /// Reads a module parameter with dependency read access.
@@ -784,7 +768,7 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         namespace: [:0]const u8,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         return self.castOpaque().addNamespace(
             namespace,
             err,
@@ -800,7 +784,7 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         namespace: [:0]const u8,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         return self.castOpaque().removeNamespace(
             namespace,
             err,
@@ -834,7 +818,7 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         info: *const Info,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         return self.castOpaque().addDependency(
             info,
             err,
@@ -851,7 +835,7 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         info: *const Info,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         return self.castOpaque().removeDependency(
             info,
             err,
@@ -869,7 +853,7 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         comptime symbol: Symbol,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(*const symbol.symbol)) {
+    ) AnyError.Error!*const symbol.symbol {
         return self.castOpaque().loadSymbol(symbol, err);
     }
 
@@ -886,7 +870,7 @@ pub const PseudoInstance = extern struct {
         namespace: [:0]const u8,
         version: Version,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(*const anyopaque)) {
+    ) AnyError.Error!*const anyopaque {
         return self.castOpaque().loadSymbolRaw(
             name,
             namespace,
@@ -962,15 +946,13 @@ pub const LoadingSet = extern struct {
         query_module: *const fn (
             ctx: *anyopaque,
             module: [*:0]const u8,
-            fut: *EnqueuedFuture(Fallible(bool)),
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) bool,
         query_symbol: *const fn (
             ctx: *anyopaque,
             symbol: [*:0]const u8,
             namespace: [*:0]const u8,
             version: c.FimoVersion,
-            fut: *EnqueuedFuture(Fallible(bool)),
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) bool,
         add_callback: *const fn (
             ctx: *anyopaque,
             module: [*:0]const u8,
@@ -978,13 +960,11 @@ pub const LoadingSet = extern struct {
             on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
             on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             data: ?*anyopaque,
-            fut: *EnqueuedFuture(Fallible(void)),
         ) callconv(.c) c.FimoResult,
         add_module: *const fn (
             ctx: *anyopaque,
             owner: *const OpaqueInstance,
             module: *const Export,
-            fut: *EnqueuedFuture(Fallible(void)),
         ) callconv(.c) c.FimoResult,
         add_modules_from_path: *const fn (
             ctx: *anyopaque,
@@ -992,7 +972,6 @@ pub const LoadingSet = extern struct {
             filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
             filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             filter_data: ?*anyopaque,
-            fut: *EnqueuedFuture(Fallible(void)),
         ) callconv(.c) c.FimoResult,
         add_modules_from_local: *const fn (
             ctx: *anyopaque,
@@ -1004,7 +983,6 @@ pub const LoadingSet = extern struct {
                 data: ?*anyopaque,
             ) callconv(.c) void,
             bin_ptr: *const anyopaque,
-            fut: *EnqueuedFuture(Fallible(void)),
         ) callconv(.c) c.FimoResult,
         commit: *const fn (
             ctx: *anyopaque,
@@ -1017,11 +995,11 @@ pub const LoadingSet = extern struct {
     /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
     /// to determine a suitable load order. A loading set is a utility to facilitate this process,
     /// by automatically computing a suitable load order for a batch of modules.
-    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!EnqueuedFuture(Fallible(LoadingSet)) {
-        var fut: EnqueuedFuture(Fallible(LoadingSet)) = undefined;
-        const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &fut);
+    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!LoadingSet {
+        var set: LoadingSet = undefined;
+        const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &set);
         try AnyError.initChecked(err, result);
-        return fut;
+        return set;
     }
 
     /// Increases the reference count of the instance.
@@ -1038,12 +1016,8 @@ pub const LoadingSet = extern struct {
     pub fn queryModule(
         self: LoadingSet,
         module: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(bool)) {
-        var fut: EnqueuedFuture(Fallible(bool)) = undefined;
-        const result = self.vtable.query_module(self.data, module, &fut);
-        try AnyError.initChecked(err, result);
-        return fut;
+    ) bool {
+        return self.vtable.query_module(self.data, module);
     }
 
     /// Checks whether the set contains a specific symbol.
@@ -1052,30 +1026,25 @@ pub const LoadingSet = extern struct {
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
-        err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(bool)) {
-        var fut: EnqueuedFuture(Fallible(bool)) = undefined;
-        const result = self.vtable.query_symbol(
+    ) bool {
+        return self.vtable.query_symbol(
             self.data,
             name.ptr,
             namespace.ptr,
             version.intoC(),
-            &fut,
         );
-        try AnyError.initChecked(err, result);
-        return fut;
     }
 
     /// Adds a status callback to the set.
     ///
-    /// Adds a callback to report a successful or failed loading of a module. The success callback
-    /// will be called if the set was able to load all requested modules, whereas the error
-    /// callback will be called immediately after the failed loading of the module. Since the
-    /// module set can be in a partially loaded state at the time of calling this function, the
-    /// error path may be invoked immediately. The callbacks will be provided with a user-specified
-    /// data pointer, which they are in charge of cleaning up. If an error occurs during the
-    /// execution of the returned future, it will invoke the optional `on_abort` function. If the
-    /// requested module does not exist, the returned future will return an error.
+    /// Adds a callback to report a successful or failed loading of a module. The success path will
+    /// be called if the set was able to load all requested modules, whereas the error path will be
+    /// called immediately after the failed loading of the module. Since the module set can be in a
+    /// partially loaded state at the time of calling this function, the error path may be invoked
+    /// immediately. The callbacks will be provided with a user-specified data pointer, which they
+    /// are in charge of cleaning up. If an error occurs during the execution of the function, it
+    /// will invoke the optional `on_abort` function. If the requested module does not exist, the
+    /// function will return an error.
     pub fn addCallback(
         self: LoadingSet,
         module: [:0]const u8,
@@ -1086,7 +1055,7 @@ pub const LoadingSet = extern struct {
         ) void,
         comptime on_abort: ?fn (data: @TypeOf(obj)) void,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
@@ -1123,9 +1092,9 @@ pub const LoadingSet = extern struct {
     /// called immediately after the failed loading of the module. Since the module set can be in a
     /// partially loaded state at the time of calling this function, the error path may be invoked
     /// immediately. The callbacks will be provided with a user-specified data pointer, which they
-    /// are in charge of cleaning up. If an error occurs during the execution of the returned
-    /// future, it will invoke the optional `on_abort` function. If the requested module does not
-    /// exist, the returned future will return an error.
+    /// are in charge of cleaning up. If an error occurs during the execution of the function, it
+    /// will invoke the optional `on_abort` function. If the requested module does not exist, the
+    /// function will return an error.
     pub fn addCallbackCustom(
         self: LoadingSet,
         module: [*:0]const u8,
@@ -1134,8 +1103,7 @@ pub const LoadingSet = extern struct {
         on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-        var fut: EnqueuedFuture(Fallible(void)) = undefined;
+    ) AnyError.Error!void {
         const result = self.vtable.add_callback(
             self.data,
             module,
@@ -1143,10 +1111,8 @@ pub const LoadingSet = extern struct {
             on_error,
             on_abort,
             data,
-            &fut,
         );
         try AnyError.initChecked(err, result);
-        return fut;
     }
 
     /// Adds a module to the set.
@@ -1165,16 +1131,13 @@ pub const LoadingSet = extern struct {
         owner: *const OpaqueInstance,
         module: *const Export,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-        var fut: EnqueuedFuture(Fallible(void)) = undefined;
+    ) AnyError.Error!void {
         const result = self.vtable.add_module(
             self.data,
             owner,
             module,
-            &fut,
         );
         try AnyError.initChecked(err, result);
-        return fut;
     }
 
     /// Adds modules to the set.
@@ -1196,7 +1159,7 @@ pub const LoadingSet = extern struct {
         comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterOp,
         comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
@@ -1240,18 +1203,15 @@ pub const LoadingSet = extern struct {
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-        var fut: EnqueuedFuture(Fallible(void)) = undefined;
+    ) AnyError.Error!void {
         const result = self.vtable.add_modules_from_path(
             self.data,
             path.intoC(),
             filter,
             filter_deinit,
             filter_data,
-            &fut,
         );
         try AnyError.initChecked(err, result);
-        return fut;
     }
 
     /// Adds modules to the set.
@@ -1270,7 +1230,7 @@ pub const LoadingSet = extern struct {
         comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterOp,
         comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
+    ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
@@ -1310,8 +1270,7 @@ pub const LoadingSet = extern struct {
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
-    ) AnyError.Error!EnqueuedFuture(Fallible(void)) {
-        var fut: EnqueuedFuture(Fallible(void)) = undefined;
+    ) AnyError.Error!void {
         const result = self.vtable.add_modules_from_local(
             self.data,
             filter,
@@ -1319,10 +1278,8 @@ pub const LoadingSet = extern struct {
             filter_data,
             exports.ExportIter.fimo_impl_module_export_iterator,
             @ptrCast(&exports.ExportIter.fimo_impl_module_export_iterator),
-            &fut,
         );
         try AnyError.initChecked(err, result);
-        return fut;
     }
 
     /// Loads the modules contained in the set.
@@ -1352,7 +1309,7 @@ pub const VTable = extern struct {
     ) callconv(.c) c.FimoResult,
     set_new: *const fn (
         ctx: *anyopaque,
-        fut: *EnqueuedFuture(Fallible(LoadingSet)),
+        fut: *LoadingSet,
     ) callconv(.c) c.FimoResult,
     find_by_name: *const fn (
         ctx: *anyopaque,

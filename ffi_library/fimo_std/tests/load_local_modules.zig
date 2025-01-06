@@ -206,13 +206,10 @@ pub fn main() !void {
 
     defer ctx.module().pruneInstances(&err) catch unreachable;
 
-    const set = try (try Module.LoadingSet.init(ctx.module(), &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    const set = try Module.LoadingSet.init(ctx.module(), &err);
     defer set.unref();
 
-    try (try set.addModulesFromLocal(
+    try set.addModulesFromLocal(
         &{},
         struct {
             fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
@@ -223,10 +220,7 @@ pub fn main() !void {
         }.f,
         null,
         &err,
-    ))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    );
     try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
@@ -243,41 +237,17 @@ pub fn main() !void {
     try testing.expect(b.isLoaded());
     try testing.expect(c.isLoaded());
 
-    try (try instance.addDependency(a, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
-    try (try instance.addDependency(b, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
-    try (try instance.addDependency(c, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    try instance.addDependency(a, &err);
+    try instance.addDependency(b, &err);
+    try instance.addDependency(c, &err);
 
-    const a0 = try (try instance.loadSymbol(A0, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    const a0 = try instance.loadSymbol(A0, &err);
     try testing.expectEqual(a0.*, 5);
 
-    try testing.expectError(
-        error.FfiError,
-        (try instance.loadSymbol(B0, &err))
-            .intoFuture()
-            .awaitBlocking(async_ctx)
-            .unwrap(&err),
-    );
-    try (try instance.addNamespace(B0.namespace, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    try testing.expectError(error.FfiError, instance.loadSymbol(B0, &err));
+    try instance.addNamespace(B0.namespace, &err);
 
-    _ = try (try instance.loadSymbol(B0, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    _ = try instance.loadSymbol(B0, &err);
 
     // Increase the strong reference to ensure that it is not unloaded.
     const info = instance.castOpaque().info;

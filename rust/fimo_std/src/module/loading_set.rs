@@ -1,15 +1,14 @@
 use core::{ffi::CStr, future::Future, marker::PhantomData};
 
+use super::{
+    Module, ModuleExport, ModuleInfo, ModuleInfoView, ModuleSubsystem, NamespaceItem, SymbolItem,
+};
 use crate::{
     bindings,
-    error::{to_result_indirect_in_place, Error},
+    error::{to_result_indirect, to_result_indirect_in_place, Error},
     ffi::{FFISharable, FFITransferable},
     r#async::{EnqueuedFuture, Fallible},
     version::Version,
-};
-
-use super::{
-    Module, ModuleExport, ModuleInfo, ModuleInfoView, ModuleSubsystem, NamespaceItem, SymbolItem,
 };
 
 /// Result of the filter operation of a [`LoadingSet`].
@@ -43,7 +42,6 @@ impl LoadingSetView<'_> {
 
     /// Promotes the view to an owned set.
     pub fn to_loading_set(&self) -> LoadingSet {
-        // Safety:
         unsafe {
             let f = self.vtable().acquire.unwrap_unchecked();
             f(self.data());
@@ -52,55 +50,28 @@ impl LoadingSetView<'_> {
     }
 
     /// Checks whether the set contains a specific module.
-    pub fn query_module(
-        &self,
-        module: &CStr,
-    ) -> Result<impl Future<Output = Result<bool, Error<dyn Send + Sync>>>, Error> {
-        // Safety:
+    pub fn query_module(&self, module: &CStr) -> bool {
         unsafe {
             let f = self.vtable().query_module.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(self.data(), module.as_ptr(), fut.as_mut_ptr());
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetQueryModuleFuture,
-                EnqueuedFuture<Fallible<bool>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            f(self.data(), module.as_ptr())
         }
     }
 
     /// Checks whether the set contains a specific symbol.
-    pub fn query_symbol<T: SymbolItem>(
-        &self,
-    ) -> Result<impl Future<Output = Result<bool, Error<dyn Send + Sync>>>, Error> {
+    pub fn query_symbol<T: SymbolItem>(&self) -> bool {
         self.query_symbol_raw(T::NAME, T::Namespace::NAME, T::VERSION)
     }
 
     /// Checks whether the set contains a specific symbol.
-    pub fn query_symbol_raw(
-        &self,
-        name: &CStr,
-        namespace: &CStr,
-        version: Version,
-    ) -> Result<impl Future<Output = Result<bool, Error<dyn Send + Sync>>>, Error> {
-        // Safety:
+    pub fn query_symbol_raw(&self, name: &CStr, namespace: &CStr, version: Version) -> bool {
         unsafe {
             let f = self.vtable().query_symbol.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(
-                    self.data(),
-                    name.as_ptr(),
-                    namespace.as_ptr(),
-                    version.into_ffi(),
-                    fut.as_mut_ptr(),
-                );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetQuerySymbolFuture,
-                EnqueuedFuture<Fallible<bool>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            f(
+                self.data(),
+                name.as_ptr(),
+                namespace.as_ptr(),
+                version.into_ffi(),
+            )
         }
     }
 
@@ -110,15 +81,11 @@ impl LoadingSetView<'_> {
     /// wil be called if the set was able to load all requested modules, whereas the error path
     /// will be called immediately after the failed loading of the module. Since the module set
     /// can be in a partially loaded state at the time of calling this function, the error path
-    /// may be invoked immediately. If the requested module does not exist, the returned future
-    /// will return an error.
-    pub fn add_callback<F>(
-        &self,
-        module: &CStr,
-        callback: F,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>
+    /// may be invoked immediately. If the requested module does not exist, the function will return
+    /// an error.
+    pub fn add_callback<F>(&self, module: &CStr, callback: F) -> Result<(), Error>
     where
-        F: FnOnce(LoadingStatus<'_>) + 'static,
+        F: FnOnce(LoadingStatus<'_>) + Send + 'static,
     {
         unsafe extern "C" fn success_callback<F>(
             module: *const bindings::FimoModuleInfo,
@@ -165,7 +132,7 @@ impl LoadingSetView<'_> {
         // Safety:
         unsafe {
             let f = self.vtable().add_callback.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
+            to_result_indirect(|error| {
                 *error = f(
                     self.data(),
                     module.as_ptr(),
@@ -173,14 +140,8 @@ impl LoadingSetView<'_> {
                     on_error,
                     on_abort,
                     callback.cast(),
-                    fut.as_mut_ptr(),
                 );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetAddCallbackFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            })
         }
     }
 
@@ -203,23 +164,13 @@ impl LoadingSetView<'_> {
         &self,
         owner: &impl Module,
         export: impl FFITransferable<*const bindings::FimoModuleExport>,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error> {
+    ) -> Result<(), Error> {
         // Safety:
         unsafe {
             let f = self.vtable().add_module.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(
-                    self.data(),
-                    owner.share_to_ffi(),
-                    export.into_ffi(),
-                    fut.as_mut_ptr(),
-                );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetAddModuleFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            to_result_indirect(|error| {
+                *error = f(self.data(), owner.share_to_ffi(), export.into_ffi());
+            })
         }
     }
 
@@ -239,13 +190,9 @@ impl LoadingSetView<'_> {
     /// # Safety
     ///
     /// Loading a library may execute arbitrary code.
-    pub unsafe fn add_modules_from_path<F>(
-        &self,
-        path: &str,
-        filter: F,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>
+    pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), Error>
     where
-        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest + 'static,
+        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
     {
         unsafe extern "C" fn filter_func<F>(
             export: *const bindings::FimoModuleExport,
@@ -278,7 +225,7 @@ impl LoadingSetView<'_> {
         // Safety:
         unsafe {
             let f = self.vtable().add_modules_from_path.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
+            to_result_indirect(|error| {
                 *error = f(
                     self.data(),
                     bindings::FimoUTF8Path {
@@ -288,14 +235,8 @@ impl LoadingSetView<'_> {
                     filter_fn,
                     filter_drop_fn,
                     filter.cast(),
-                    fut.as_mut_ptr(),
                 );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetAddModulesFromPathFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            })
         }
     }
 
@@ -309,12 +250,9 @@ impl LoadingSetView<'_> {
     /// not return an error, if it does not export any modules. The necessary symbols are set up
     /// automatically, if the binary was linked with the fimo library. In case of an error, no
     /// modules are appended to the set.
-    pub fn add_modules_from_local<F>(
-        &self,
-        filter: F,
-    ) -> Result<impl Future<Output = Result<(), Error<dyn Send + Sync>>>, Error>
+    pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), Error>
     where
-        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest + 'static,
+        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
     {
         unsafe extern "C" fn filter_func<F>(
             export: *const bindings::FimoModuleExport,
@@ -349,7 +287,7 @@ impl LoadingSetView<'_> {
         // Safety:
         unsafe {
             let f = self.vtable().add_modules_from_local.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
+            to_result_indirect(|error| {
                 *error = f(
                     self.data(),
                     filter_fn,
@@ -357,23 +295,17 @@ impl LoadingSetView<'_> {
                     filter.cast(),
                     Some(iterator),
                     iterator as _,
-                    fut.as_mut_ptr(),
                 );
-            })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetAddModulesFromLocalFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
-            Ok(async move { fut.await.unwrap() })
+            })
         }
     }
 
     /// Loads the modules contained in the set.
     ///
-    /// If the returned future is successfull, the contained modules and their resources are made
+    /// If the returned future is successful, the contained modules and their resources are made
     /// available to the remaining modules. Some conditions may hinder the loading of some module,
     /// like missing dependencies, duplicates, and other loading errors. In those cases, the modules
-    /// will be skipped without erroring.
+    /// will be skipped without errors.
     ///
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
@@ -429,23 +361,13 @@ pub struct LoadingSet(LoadingSetView<'static>);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new(
-        ctx: &impl ModuleSubsystem,
-    ) -> Result<impl Future<Output = Result<Self, Error<dyn Send + Sync>>>, Error> {
-        // Safety:
+    pub fn new(ctx: &impl ModuleSubsystem) -> Result<Self, Error> {
         unsafe {
             let f = ctx.view().vtable().module_v0.set_new.unwrap_unchecked();
-            let fut = to_result_indirect_in_place(|error, fut| {
-                *error = f(ctx.view().data(), fut.as_mut_ptr());
+            let set = to_result_indirect_in_place(|error, set| {
+                *error = f(ctx.view().data(), set.as_mut_ptr());
             })?;
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetNewFuture,
-                EnqueuedFuture<Fallible<bindings::FimoModuleLoadingSet>>,
-            >(fut);
-            Ok(async move {
-                let set = fut.await.unwrap()?;
-                Ok(Self::from_ffi(set))
-            })
+            Ok(Self(LoadingSetView::from_ffi(set)))
         }
     }
 

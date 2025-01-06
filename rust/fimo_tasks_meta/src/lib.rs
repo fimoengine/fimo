@@ -424,15 +424,13 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
         let blocking = BlockingContext::new(*context).expect("could not create blocking context");
 
         blocking.block_on(async {
-            let set = LoadingSet::new(&*context).unwrap().await.unwrap();
+            let set = LoadingSet::new(&*context).unwrap();
             // Safety:
             unsafe {
                 set.view()
                     .add_modules_from_path(&tasks_dir, |_| {
                         fimo_std::module::LoadingFilterRequest::Load
                     })
-                    .unwrap()
-                    .await
                     .unwrap();
             }
             set.view().commit().unwrap().await.unwrap();
@@ -445,19 +443,13 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
 
             module
                 .add_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
-                .unwrap()
-                .await
                 .expect("could not include the tasks namespace");
             module
                 .add_dependency(&tasks_module)
-                .unwrap()
-                .await
                 .expect("could not acquire the dependency to the tasks module");
 
             let context = module
                 .load_symbol::<symbols::fimo_tasks::Context>()
-                .unwrap()
-                .await
                 .expect("could not load context symbol");
 
             f(&module, &context);

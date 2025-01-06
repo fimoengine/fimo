@@ -41,13 +41,10 @@ pub fn main() !void {
     try module_path.pushString("fimo_python");
     try module_path.pushString("module.fimo_module");
 
-    const set = try (try Module.LoadingSet.init(ctx.module(), &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    const set = try Module.LoadingSet.init(ctx.module(), &err);
     defer set.unref();
 
-    try (try set.addModulesFromPath(
+    try set.addModulesFromPath(
         module_path.asPath(),
         &{},
         struct {
@@ -59,10 +56,7 @@ pub fn main() !void {
         }.f,
         null,
         &err,
-    ))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    );
     try (try set.commit(&err)).intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
@@ -71,18 +65,9 @@ pub fn main() !void {
     const info = try Module.Info.findByName(ctx.module(), "fimo_python", &err);
     defer info.unref();
 
-    try (try instance.addDependency(info, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
-    try (try instance.addNamespace(fimo_python_meta.symbols.RunString.namespace, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
-    const run_string = try (try instance.loadSymbol(fimo_python_meta.symbols.RunString, &err))
-        .intoFuture()
-        .awaitBlocking(async_ctx)
-        .unwrap(&err);
+    try instance.addDependency(info, &err);
+    try instance.addNamespace(fimo_python_meta.symbols.RunString.namespace, &err);
+    const run_string = try instance.loadSymbol(fimo_python_meta.symbols.RunString, &err);
 
     try run_string.call(
         \\import sys

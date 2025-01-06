@@ -736,10 +736,12 @@ pub fn initExportedInstance(
     // Init instance data.
     if (@"export".constructor) |constructor| {
         inner.unlock();
+        set.unlock();
         sys.mutex.unlock();
         var data: ?*anyopaque = undefined;
         const result = constructor(instance, set.asProxySet(), &data);
         sys.mutex.lock();
+        set.lock();
         _ = instance_handle.lock();
         instance.data = @ptrCast(data);
         try AnyError.initChecked(err, result);
@@ -763,10 +765,12 @@ pub fn initExportedInstance(
     }
     for (@"export".getDynamicSymbolExports()) |exp| {
         inner.unlock();
+        set.unlock();
         sys.mutex.unlock();
         var sym: *anyopaque = undefined;
         const result = exp.constructor(instance, &sym);
         sys.mutex.lock();
+        set.lock();
         _ = instance_handle.lock();
         try AnyError.initChecked(err, result);
         var skip_dtor = false;
@@ -834,6 +838,131 @@ pub fn lock(self: *const Self) *Inner {
     const this: *Self = @constCast(self);
     this.inner.mutex.lock();
     return &this.inner;
+}
+
+fn addNamespace(self: *const Self, namespace: []const u8) !void {
+    self.logTrace(
+        "adding namespace to instance, instance='{s}', namespace='{s}'",
+        .{ self.info.name, namespace },
+        @src(),
+    );
+
+    if (std.mem.eql(u8, namespace, System.global_namespace)) return error.NotPermitted;
+
+    self.sys.lock();
+    defer self.sys.unlock();
+
+    const inner = self.lock();
+    defer inner.unlock();
+
+    if (inner.getNamespace(namespace) != null) return error.Duplicate;
+
+    try self.sys.refNamespace(namespace);
+    errdefer self.sys.unrefNamespace(namespace);
+    try inner.addNamespace(namespace, .dynamic);
+}
+
+fn removeNamespace(self: *const Self, namespace: []const u8) !void {
+    self.logTrace(
+        "removing namespace from instance, instance='{s}', namespace='{s}'",
+        .{ self.info.name, namespace },
+        @src(),
+    );
+
+    if (std.mem.eql(u8, namespace, System.global_namespace)) return error.NotPermitted;
+
+    self.sys.lock();
+    defer self.sys.unlock();
+
+    const inner = self.lock();
+    defer inner.unlock();
+
+    const ns_info = inner.getNamespace(namespace) orelse return error.NotFound;
+    if (ns_info.* == .static) return error.NotPermitted;
+
+    try inner.removeNamespace(namespace);
+    self.sys.unrefNamespace(namespace);
+}
+
+fn addDependency(self: *const Self, info: *const ProxyModule.Info) !void {
+    self.logTrace(
+        "adding dependency to instance, instance='{s}', other='{s}'",
+        .{ self.info.name, info.name },
+        @src(),
+    );
+
+    const info_handle = Self.fromInfoPtr(info);
+    if (self == info_handle) return error.CyclicDependency;
+
+    self.sys.lock();
+    defer self.sys.unlock();
+
+    const inner = self.lock();
+    defer inner.unlock();
+
+    const info_inner = info_handle.lock();
+    defer info_inner.unlock();
+
+    try self.sys.linkInstances(inner, info_inner);
+}
+
+fn removeDependency(self: *const Self, info: *const ProxyModule.Info) !void {
+    self.logTrace(
+        "removing dependency from instance, instance='{s}', other='{s}'",
+        .{ self.info.name, info.name },
+        @src(),
+    );
+
+    const info_handle = Self.fromInfoPtr(info);
+    if (self == info_handle) return error.NotADependency;
+
+    self.sys.lock();
+    defer self.sys.unlock();
+
+    const inner = self.lock();
+    defer inner.unlock();
+
+    const info_inner = info_handle.lock();
+    defer info_inner.unlock();
+
+    try self.sys.unlinkInstances(inner, info_inner);
+}
+
+fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
+    self.logTrace(
+        "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{long}'",
+        .{ self.info.name, name, namespace, version },
+        @src(),
+    );
+    self.sys.lock();
+    defer self.sys.unlock();
+    const symbol_ref = self.sys.getSymbolCompatible(
+        name,
+        namespace,
+        version,
+    ) orelse return error.NotFound;
+
+    const inner = self.lock();
+    defer inner.unlock();
+
+    if (inner.getDependency(symbol_ref.owner) == null) return error.NotADependency;
+    if (inner.getNamespace(namespace) == null and
+        !std.mem.eql(u8, namespace, System.global_namespace))
+    {
+        return error.NotADependency;
+    }
+
+    const owner_instance = self.sys.getInstance(symbol_ref.owner) orelse return error.NotFound;
+    const owner_handle = Self.fromInstancePtr(owner_instance.instance);
+    const owner_inner = owner_handle.lock();
+    defer owner_inner.unlock();
+
+    const symbol = owner_inner.getSymbol(
+        name,
+        namespace,
+        version,
+    ) orelse return error.Detached;
+    return symbol.symbol;
 }
 
 fn readParameter(
@@ -1074,506 +1203,6 @@ const info_vtable = ProxyModule.Info.VTable{
 };
 
 // ----------------------------------------------------
-// Instance Futures
-// ----------------------------------------------------
-
-const AddNamespaceOp = FSMFuture(struct {
-    handle: *const Self,
-    namespace: []u8,
-    lock_fut: Async.Mutex.LockOp = undefined,
-    ret: anyerror!void = undefined,
-
-    pub const __no_abort = true;
-
-    fn init(handle: *const Self, namespace: []const u8, err: *?AnyError) !EnqueuedFuture(Fallible(void)) {
-        handle.sys.logTrace(
-            "adding namespace to instance, instance='{s}', namespace='{s}'",
-            .{ handle.info.name, namespace },
-            @src(),
-        );
-
-        handle.ref();
-        errdefer handle.unref();
-
-        const allocator = handle.sys.allocator;
-        const namespace_ = try allocator.dupe(u8, namespace);
-        errdefer allocator.free(namespace_);
-
-        const context = handle.sys.asContext();
-        const f = AddNamespaceOp.init(@This(){
-            .handle = handle,
-            .namespace = namespace_,
-        }).intoFuture().map(
-            Fallible(void),
-            Fallible(void).Wrapper(anyerror),
-        );
-        return Async.Task.initFuture(@TypeOf(f), &context.@"async".sys, &f, err);
-    }
-
-    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.handle.sys.asContext().tracing.emitStackTraceSimple(
-            tr.*,
-            @src(),
-        );
-        self.ret = err;
-    }
-
-    pub fn __ret(self: *@This()) anyerror!void {
-        return self.ret;
-    }
-
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        const allocator = self.handle.sys.allocator;
-        allocator.free(self.namespace);
-        self.handle.unref();
-    }
-
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
-        _ = waker;
-        self.lock_fut = self.handle.sys.lockAsync();
-    }
-
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.handle.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        const inner = self.handle.lock();
-        defer inner.unlock();
-
-        if (std.mem.eql(u8, self.namespace, System.global_namespace)) return error.NotPermitted;
-        if (inner.getNamespace(self.namespace) != null) return error.Duplicate;
-
-        const sys = self.handle.sys;
-        try sys.refNamespace(self.namespace);
-        errdefer sys.unrefNamespace(self.namespace);
-        self.ret = try inner.addNamespace(self.namespace, .dynamic);
-    }
-});
-
-const RemoveNamespaceOp = FSMFuture(struct {
-    handle: *const Self,
-    namespace: []u8,
-    lock_fut: Async.Mutex.LockOp = undefined,
-    ret: anyerror!void = undefined,
-
-    pub const __no_abort = true;
-
-    fn init(handle: *const Self, namespace: []const u8, err: *?AnyError) !EnqueuedFuture(Fallible(void)) {
-        handle.sys.logTrace(
-            "removing namespace from instance, instance='{s}', namespace='{s}'",
-            .{ handle.info.name, namespace },
-            @src(),
-        );
-
-        handle.ref();
-        errdefer handle.unref();
-
-        const allocator = handle.sys.allocator;
-        const namespace_ = try allocator.dupe(u8, namespace);
-        errdefer allocator.free(namespace_);
-
-        const context = handle.sys.asContext();
-        const f = RemoveNamespaceOp.init(@This(){
-            .handle = handle,
-            .namespace = namespace_,
-        }).intoFuture().map(
-            Fallible(void),
-            Fallible(void).Wrapper(anyerror),
-        );
-        return Async.Task.initFuture(@TypeOf(f), &context.@"async".sys, &f, err);
-    }
-
-    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.handle.sys.asContext().tracing.emitStackTraceSimple(
-            tr.*,
-            @src(),
-        );
-        self.ret = err;
-    }
-
-    pub fn __ret(self: *@This()) anyerror!void {
-        return self.ret;
-    }
-
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        const allocator = self.handle.sys.allocator;
-        allocator.free(self.namespace);
-        self.handle.unref();
-    }
-
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
-        _ = waker;
-        self.lock_fut = self.handle.sys.lockAsync();
-    }
-
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.handle.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        const inner = self.handle.lock();
-        defer inner.unlock();
-
-        if (std.mem.eql(u8, self.namespace, System.global_namespace)) return error.NotPermitted;
-        const ns_info = inner.getNamespace(self.namespace) orelse return error.NotFound;
-        if (ns_info.* == .static) return error.NotPermitted;
-
-        try inner.removeNamespace(self.namespace);
-        self.ret = self.handle.sys.unrefNamespace(self.namespace);
-    }
-});
-
-const AddDependencyOp = FSMFuture(struct {
-    handle: *const Self,
-    info_handle: *const Self,
-    lock_fut: Async.Mutex.LockOp = undefined,
-    ret: anyerror!void = undefined,
-
-    pub const __no_abort = true;
-
-    fn init(
-        handle: *const Self,
-        info: *const ProxyModule.Info,
-        err: *?AnyError,
-    ) !EnqueuedFuture(Fallible(void)) {
-        handle.sys.logTrace(
-            "adding dependency to instance, instance='{s}', other='{s}'",
-            .{ handle.info.name, info.name },
-            @src(),
-        );
-
-        handle.ref();
-        errdefer handle.unref();
-
-        const info_handle = Self.fromInfoPtr(info);
-        info_handle.ref();
-        errdefer info_handle.unref();
-
-        std.debug.assert(handle.sys == info_handle.sys);
-
-        const context = handle.sys.asContext();
-        const f = AddDependencyOp.init(@This(){
-            .handle = handle,
-            .info_handle = info_handle,
-        }).intoFuture().map(
-            Fallible(void),
-            Fallible(void).Wrapper(anyerror),
-        );
-        return Async.Task.initFuture(@TypeOf(f), &context.@"async".sys, &f, err);
-    }
-
-    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.handle.sys.asContext().tracing.emitStackTraceSimple(
-            tr.*,
-            @src(),
-        );
-        self.ret = err;
-    }
-
-    pub fn __ret(self: *@This()) anyerror!void {
-        return self.ret;
-    }
-
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.info_handle.unref();
-        self.handle.unref();
-    }
-
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        if (self.handle == self.info_handle) return error.CyclicDependency;
-        self.lock_fut = self.handle.sys.lockAsync();
-    }
-
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.handle.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        const inner = self.handle.lock();
-        defer inner.unlock();
-
-        const info_inner = self.info_handle.lock();
-        defer info_inner.unlock();
-
-        self.ret = try self.handle.sys.linkInstances(inner, info_inner);
-    }
-});
-
-const RemoveDependencyOp = FSMFuture(struct {
-    handle: *const Self,
-    info_handle: *const Self,
-    lock_fut: Async.Mutex.LockOp = undefined,
-    ret: anyerror!void = undefined,
-
-    pub const __no_abort = true;
-
-    fn init(
-        handle: *const Self,
-        info: *const ProxyModule.Info,
-        err: *?AnyError,
-    ) !EnqueuedFuture(Fallible(void)) {
-        handle.sys.logTrace(
-            "removing dependency from instance, instance='{s}', other='{s}'",
-            .{ handle.info.name, info.name },
-            @src(),
-        );
-
-        handle.ref();
-        errdefer handle.unref();
-
-        const info_handle = Self.fromInfoPtr(info);
-        info_handle.ref();
-        errdefer info_handle.unref();
-        std.debug.assert(handle.sys == info_handle.sys);
-
-        const context = handle.sys.asContext();
-        const f = RemoveDependencyOp.init(@This(){
-            .handle = handle,
-            .info_handle = info_handle,
-        }).intoFuture().map(
-            Fallible(void),
-            Fallible(void).Wrapper(anyerror),
-        );
-        return Async.Task.initFuture(@TypeOf(f), &context.@"async".sys, &f, err);
-    }
-
-    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.handle.sys.asContext().tracing.emitStackTraceSimple(
-            tr.*,
-            @src(),
-        );
-        self.ret = err;
-    }
-
-    pub fn __ret(self: *@This()) anyerror!void {
-        return self.ret;
-    }
-
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.info_handle.unref();
-        self.handle.unref();
-    }
-
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        if (self.handle == self.info_handle) return error.NotADependency;
-        self.lock_fut = self.handle.sys.lockAsync();
-    }
-
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.handle.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        const inner = self.handle.lock();
-        defer inner.unlock();
-
-        const info_inner = self.info_handle.lock();
-        defer info_inner.unlock();
-
-        self.ret = try self.handle.sys.unlinkInstances(inner, info_inner);
-    }
-});
-
-const LoadSymbolOp = FSMFuture(struct {
-    handle: *const Self,
-    name: []u8,
-    namespace: []u8,
-    version: Version,
-    lock_fut: Async.Mutex.LockOp = undefined,
-    ret: anyerror!*const anyopaque = undefined,
-
-    pub const __no_abort = true;
-
-    fn init(
-        handle: *const Self,
-        name: []const u8,
-        namespace: []const u8,
-        version: Version,
-        err: *?AnyError,
-    ) !EnqueuedFuture(Fallible(*const anyopaque)) {
-        handle.sys.logTrace(
-            "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{long}'",
-            .{ handle.info.name, name, namespace, version },
-            @src(),
-        );
-
-        handle.ref();
-        errdefer handle.unref();
-
-        const allocator = handle.sys.allocator;
-        const name_ = try allocator.dupe(u8, name);
-        errdefer allocator.free(name_);
-
-        const namespace_ = try allocator.dupe(u8, namespace);
-        errdefer allocator.free(namespace_);
-
-        const context = handle.sys.asContext();
-        const f = LoadSymbolOp.init(@This(){
-            .handle = handle,
-            .name = name_,
-            .namespace = namespace_,
-            .version = version,
-        }).intoFuture().map(
-            Fallible(*const anyopaque),
-            Fallible(*const anyopaque).Wrapper(anyerror),
-        );
-        return Async.Task.initFuture(@TypeOf(f), &context.@"async".sys, &f, err);
-    }
-
-    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.handle.sys.asContext().tracing.emitStackTraceSimple(
-            tr.*,
-            @src(),
-        );
-        self.ret = err;
-    }
-
-    pub fn __ret(self: *@This()) anyerror!*const anyopaque {
-        return self.ret;
-    }
-
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        const allocator = self.handle.sys.allocator;
-        allocator.free(self.namespace);
-        allocator.free(self.name);
-        self.handle.unref();
-    }
-
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        self.lock_fut = self.handle.sys.lockAsync();
-    }
-
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Allocator.Error!ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.handle.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        const sys = self.handle.sys;
-        const symbol_ref = sys.getSymbolCompatible(
-            self.name,
-            self.namespace,
-            self.version,
-        ) orelse return error.NotFound;
-
-        const inner = self.handle.lock();
-        defer inner.unlock();
-
-        if (inner.getDependency(symbol_ref.owner) == null) return error.NotADependency;
-        if (inner.getNamespace(self.namespace) == null and
-            std.mem.eql(u8, self.namespace, System.global_namespace) == false)
-        {
-            return error.NotADependency;
-        }
-
-        const owner_instance = sys.getInstance(symbol_ref.owner) orelse return error.NotFound;
-        const owner_handle = Self.fromInstancePtr(owner_instance.instance);
-        const owner_inner = owner_handle.lock();
-        defer owner_inner.unlock();
-
-        const symbol = owner_inner.getSymbol(
-            self.name,
-            self.namespace,
-            self.version,
-        ) orelse return error.Detached;
-        self.ret = symbol.symbol;
-    }
-});
-
-// ----------------------------------------------------
 // Instance VTable
 // ----------------------------------------------------
 
@@ -1607,46 +1236,28 @@ const InstanceVTableImpl = struct {
     fn addNamespace(
         ctx: *const ProxyModule.OpaqueInstance,
         namespace: [*:0]const u8,
-        fut: *EnqueuedFuture(Fallible(void)),
     ) callconv(.c) c.FimoResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
 
-        var err: ?AnyError = null;
-        fut.* = AddNamespaceOp.Data.init(
-            self,
-            namespace_,
-            &err,
-        ) catch |e| {
+        self.addNamespace(namespace_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
+            return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
     fn removeNamespace(
         ctx: *const ProxyModule.OpaqueInstance,
         namespace: [*:0]const u8,
-        fut: *EnqueuedFuture(Fallible(void)),
     ) callconv(.c) c.FimoResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
 
-        var err: ?AnyError = null;
-        fut.* = RemoveNamespaceOp.Data.init(
-            self,
-            namespace_,
-            &err,
-        ) catch |e| {
+        self.removeNamespace(namespace_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
+            return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
@@ -1679,44 +1290,26 @@ const InstanceVTableImpl = struct {
     fn addDependency(
         ctx: *const ProxyModule.OpaqueInstance,
         info: *const ProxyModule.Info,
-        fut: *EnqueuedFuture(Fallible(void)),
     ) callconv(.c) c.FimoResult {
         const self = Self.fromInstancePtr(ctx);
 
-        var err: ?AnyError = null;
-        fut.* = AddDependencyOp.Data.init(
-            self,
-            info,
-            &err,
-        ) catch |e| {
+        self.addDependency(info) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
+            return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
     fn removeDependency(
         ctx: *const ProxyModule.OpaqueInstance,
         info: *const ProxyModule.Info,
-        fut: *EnqueuedFuture(Fallible(void)),
     ) callconv(.c) c.FimoResult {
         const self = Self.fromInstancePtr(ctx);
 
-        var err: ?AnyError = null;
-        fut.* = RemoveDependencyOp.Data.init(
-            self,
-            info,
-            &err,
-        ) catch |e| {
+        self.removeDependency(info) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
+            return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
@@ -1725,27 +1318,17 @@ const InstanceVTableImpl = struct {
         name: [*:0]const u8,
         namespace: [*:0]const u8,
         version: c.FimoVersion,
-        fut: *EnqueuedFuture(Fallible(*const anyopaque)),
+        symbol: **const anyopaque,
     ) callconv(.c) c.FimoResult {
         const self = Self.fromInstancePtr(ctx);
         const name_ = std.mem.span(name);
         const namespace_ = std.mem.span(namespace);
         const version_ = Version.initC(version);
 
-        var err: ?AnyError = null;
-        fut.* = LoadSymbolOp.Data.init(
-            self,
-            name_,
-            namespace_,
-            version_,
-            &err,
-        ) catch |e| {
+        symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return switch (e) {
-                AnyError.Error.FfiError => AnyError.intoCResult(err),
-                else => AnyError.initError(e).err,
-            };
+            return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
