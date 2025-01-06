@@ -123,24 +123,24 @@ impl<'m> ModuleConstructor<C<'m>> for CConstructor {
         let module = module.unwrap()?;
 
         let parameters = module.parameters();
-        assert_eq!(parameters.pub_pub.read(&module)?, 0u32);
-        assert_eq!(parameters.pub_dep.read(&module)?, 1u32);
-        assert_eq!(parameters.pub_pri.read(&module)?, 2u32);
-        assert_eq!(parameters.dep_pub.read(&module)?, 3u32);
-        assert_eq!(parameters.dep_dep.read(&module)?, 4u32);
-        assert_eq!(parameters.dep_pri.read(&module)?, 5u32);
-        assert_eq!(parameters.pri_pub.read(&module)?, 6u32);
-        assert_eq!(parameters.pri_dep.read(&module)?, 7u32);
-        assert_eq!(parameters.pri_pri.read(&module)?, 8u32);
-        parameters.pub_pub.write(&module, 0)?;
-        parameters.pub_dep.write(&module, 1)?;
-        parameters.pub_pri.write(&module, 2)?;
-        parameters.dep_pub.write(&module, 3)?;
-        parameters.dep_dep.write(&module, 4)?;
-        parameters.dep_pri.write(&module, 5)?;
-        parameters.pri_pub.write(&module, 6)?;
-        parameters.pri_dep.write(&module, 7)?;
-        parameters.pri_pri.write(&module, 8)?;
+        assert_eq!(parameters.pub_pub.read(), 0u32);
+        assert_eq!(parameters.pub_dep.read(), 1u32);
+        assert_eq!(parameters.pub_pri.read(), 2u32);
+        assert_eq!(parameters.dep_pub.read(), 3u32);
+        assert_eq!(parameters.dep_dep.read(), 4u32);
+        assert_eq!(parameters.dep_pri.read(), 5u32);
+        assert_eq!(parameters.pri_pub.read(), 6u32);
+        assert_eq!(parameters.pri_dep.read(), 7u32);
+        assert_eq!(parameters.pri_pri.read(), 8u32);
+        parameters.pub_pub.write(0);
+        parameters.pub_dep.write(1);
+        parameters.pub_pri.write(2);
+        parameters.dep_pub.write(3);
+        parameters.dep_dep.write(4);
+        parameters.dep_pri.write(5);
+        parameters.pri_pub.write(6);
+        parameters.pri_dep.write(7);
+        parameters.pri_pri.write(8);
 
         let resources = module.resources();
         emit_info!(

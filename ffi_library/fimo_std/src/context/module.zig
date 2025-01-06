@@ -145,7 +145,7 @@ pub fn pruneInstances(self: *Self) System.SystemError!void {
 }
 
 /// Queries the info of a module parameter.
-pub fn queryParameterInfo(
+pub fn queryParameter(
     self: *Self,
     owner: []const u8,
     parameter: []const u8,
@@ -169,24 +169,23 @@ pub fn queryParameterInfo(
 
     const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
     return .{
-        .type = param.data.getType(),
+        .type = param.type(),
         .read_group = param.read_group,
         .write_group = param.write_group,
     };
 }
 
 /// Atomically reads the value and type of a public parameter.
-pub fn readPublicParameterTo(
+pub fn readParameter(
     self: *Self,
     value: *anyopaque,
-    @"type": *ProxyModule.ParameterType,
+    @"type": ProxyModule.ParameterType,
     owner: []const u8,
     parameter: []const u8,
-    err: *?AnyError,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
     self.logTrace(
-        "reading public parameter, value='{*}', type='{*}', owner='{s}', parameter='{s}'",
-        .{ value, @"type", owner, parameter },
+        "reading public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
+        .{ value, @tagName(@"type"), owner, parameter },
         @src(),
     );
     self.sys.lock();
@@ -198,18 +197,18 @@ pub fn readPublicParameterTo(
     defer owner_inner.unlock();
 
     const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
+    try param.checkType(@"type");
     try param.checkReadPublic();
-    try param.readTo(value, @"type", err);
+    param.readTo(value);
 }
 
 /// Atomically reads the value and type of a public parameter.
-pub fn writePublicParameterFrom(
+pub fn writeParameter(
     self: *Self,
     value: *const anyopaque,
     @"type": ProxyModule.ParameterType,
     owner: []const u8,
     parameter: []const u8,
-    err: *?AnyError,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
     self.logTrace(
         "write public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
@@ -225,146 +224,8 @@ pub fn writePublicParameterFrom(
     defer owner_inner.unlock();
 
     const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
-    try param.checkWritePublic();
-    try param.writeFrom(value, @"type", err);
-}
-
-/// Atomically reads the value and type of a dependency parameter.
-pub fn readDependencyParameterTo(
-    self: *Self,
-    reader: *const ProxyModule.OpaqueInstance,
-    value: *anyopaque,
-    @"type": *ProxyModule.ParameterType,
-    owner: []const u8,
-    parameter: []const u8,
-    err: *?AnyError,
-) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
-    self.logTrace(
-        "reading dependency parameter, reader='{s}', value='{*}', type='{*}', owner='{s}', parameter='{s}'",
-        .{ reader.info.name, value, @"type", owner, parameter },
-        @src(),
-    );
-    const handle = InstanceHandle.fromInstancePtr(reader);
-    const inner = handle.lock();
-    defer inner.unlock();
-
-    const owner_handle = inner.getDependency(owner) orelse return error.NotADependency;
-    const owner_inner = owner_handle.instance.lock();
-    defer owner_inner.unlock();
-
-    const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
-    try param.checkReadDependency(inner);
-    try param.readTo(value, @"type", err);
-}
-
-/// Atomically reads the value and type of a dependency parameter.
-pub fn writeDependencyParameterFrom(
-    self: *Self,
-    writer: *const ProxyModule.OpaqueInstance,
-    value: *const anyopaque,
-    @"type": ProxyModule.ParameterType,
-    owner: []const u8,
-    parameter: []const u8,
-    err: *?AnyError,
-) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
-    self.logTrace(
-        "writing dependency parameter, reader='{s}', value='{*}', type='{s}', owner='{s}', parameter='{s}'",
-        .{ writer.info.name, value, @tagName(@"type"), owner, parameter },
-        @src(),
-    );
-    const handle = InstanceHandle.fromInstancePtr(writer);
-    const inner = handle.lock();
-    defer inner.unlock();
-
-    const owner_handle = inner.getDependency(owner) orelse return error.NotADependency;
-    const owner_inner = owner_handle.instance.lock();
-    defer owner_inner.unlock();
-
-    const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
-    try param.checkWriteDependency(inner);
-    try param.writeFrom(value, @"type", err);
-}
-
-/// Atomically reads the value and type of a private parameter.
-pub fn readPrivateParameterTo(
-    self: *Self,
-    reader: *const ProxyModule.OpaqueInstance,
-    value: *anyopaque,
-    @"type": *ProxyModule.ParameterType,
-    o_param: *const ProxyModule.OpaqueParameter,
-    err: *?AnyError,
-) (InstanceHandle.ParameterError || AnyError.Error)!void {
-    self.logTrace(
-        "reading private parameter, reader='{s}', value='{*}', type='{*}', parameter='{*}'",
-        .{ reader.info.name, value, @"type", o_param },
-        @src(),
-    );
-    const handle = InstanceHandle.fromInstancePtr(reader);
-    const inner = handle.lock();
-    defer inner.unlock();
-
-    const param: *const InstanceHandle.Parameter = @alignCast(@ptrCast(o_param));
-    try param.checkReadPrivate(reader);
-    try param.readTo(value, @"type", err);
-}
-
-/// Atomically writes the value of a private parameter.
-pub fn writePrivateParameterFrom(
-    self: *Self,
-    writer: *const ProxyModule.OpaqueInstance,
-    value: *const anyopaque,
-    @"type": ProxyModule.ParameterType,
-    o_param: *ProxyModule.OpaqueParameter,
-    err: *?AnyError,
-) (InstanceHandle.ParameterError || AnyError.Error)!void {
-    self.logTrace(
-        "writing private parameter, writer='{s}', value='{*}', type='{s}', parameter='{*}'",
-        .{ writer.info.name, value, @tagName(@"type"), o_param },
-        @src(),
-    );
-    const handle = InstanceHandle.fromInstancePtr(writer);
-    const inner = handle.lock();
-    defer inner.unlock();
-
-    const param: *InstanceHandle.Parameter = @alignCast(@ptrCast(o_param));
-    try param.checkReadPrivate(writer);
-    try param.writeFrom(value, @"type", err);
-}
-
-/// Atomically reads the value and type of a parameter data.
-pub fn readParameterDataTo(
-    self: *Self,
-    reader: *const ProxyModule.OpaqueInstance,
-    value: *anyopaque,
-    @"type": *ProxyModule.ParameterType,
-    o_param: *const ProxyModule.OpaqueParameterData,
-) InstanceHandle.ParameterError!void {
-    const param: *const InstanceHandle.Parameter.Data = @alignCast(@ptrCast(o_param));
-    self.logTrace(
-        "reading parameter data, reader='{s}', value='{*}', type='{*}', parameter='{*}'",
-        .{ reader.info.name, value, @"type", param },
-        @src(),
-    );
-    try param.checkOwner(reader);
-    param.readTo(value, @"type");
-}
-
-/// Atomically writes the value a parameter data.
-pub fn writeParameterDataFrom(
-    self: *Self,
-    writer: *const ProxyModule.OpaqueInstance,
-    value: *const anyopaque,
-    @"type": ProxyModule.ParameterType,
-    o_param: *ProxyModule.OpaqueParameterData,
-) InstanceHandle.ParameterError!void {
-    const param: *InstanceHandle.Parameter.Data = @alignCast(@ptrCast(o_param));
-    self.logTrace(
-        "writing parameter data, writer='{s}', value='{*}', type='{s}', parameter='{*}'",
-        .{ writer.info.name, value, @tagName(@"type"), param },
-        @src(),
-    );
-    try param.checkOwner(writer);
     try param.checkType(@"type");
+    try param.checkWritePublic();
     param.writeFrom(value);
 }
 
@@ -446,7 +307,7 @@ const VTableImpl = struct {
         };
         return AnyError.intoCResult(null);
     }
-    fn queryParameterInfo(
+    fn queryParameter(
         ptr: *anyopaque,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
@@ -455,7 +316,7 @@ const VTableImpl = struct {
         write_group: *ProxyModule.ParameterAccessGroup,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        const info = ctx.module.queryParameterInfo(
+        const info = ctx.module.queryParameter(
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
@@ -467,29 +328,26 @@ const VTableImpl = struct {
         write_group.* = info.write_group;
         return AnyError.intoCResult(null);
     }
-    fn readPublicParameterTo(
+    fn readParameter(
         ptr: *anyopaque,
         value: *anyopaque,
-        @"type": *ProxyModule.ParameterType,
+        @"type": ProxyModule.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?AnyError = null;
-        ctx.module.readPublicParameterTo(
+        ctx.module.readParameter(
             value,
             @"type",
             std.mem.span(owner),
             std.mem.span(parameter),
-            &err,
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |x| return x.err;
             return AnyError.initError(e).err;
         };
         return AnyError.intoCResult(null);
     }
-    fn writePublicParameterFrom(
+    fn writeParameter(
         ptr: *anyopaque,
         value: *const anyopaque,
         @"type": ProxyModule.ParameterType,
@@ -497,125 +355,14 @@ const VTableImpl = struct {
         parameter: [*:0]const u8,
     ) callconv(.C) c.FimoResult {
         const ctx = Context.fromProxyPtr(ptr);
-        var err: ?AnyError = null;
-        ctx.module.writePublicParameterFrom(
+        ctx.module.writeParameter(
             value,
             @"type",
             std.mem.span(owner),
             std.mem.span(parameter),
-            &err,
         ) catch |e| {
             if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |x| return x.err;
             return AnyError.initError(e).err;
-        };
-        return AnyError.intoCResult(null);
-    }
-    fn readDependencyParameterTo(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.OpaqueInstance,
-        value: *anyopaque,
-        @"type": *ProxyModule.ParameterType,
-        owner: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        var err: ?AnyError = null;
-        ctx.module.readDependencyParameterTo(
-            instance,
-            value,
-            @"type",
-            std.mem.span(owner),
-            std.mem.span(parameter),
-            &err,
-        ) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |x| return x.err;
-            return AnyError.initError(e).err;
-        };
-        return AnyError.intoCResult(null);
-    }
-    fn writeDependencyParameterFrom(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.OpaqueInstance,
-        value: *const anyopaque,
-        @"type": ProxyModule.ParameterType,
-        owner: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        var err: ?AnyError = null;
-        ctx.module.writeDependencyParameterFrom(
-            instance,
-            value,
-            @"type",
-            std.mem.span(owner),
-            std.mem.span(parameter),
-            &err,
-        ) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |x| return x.err;
-            return AnyError.initError(e).err;
-        };
-        return AnyError.intoCResult(null);
-    }
-    fn readPrivateParameterTo(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.OpaqueInstance,
-        value: *anyopaque,
-        @"type": *ProxyModule.ParameterType,
-        param: *const ProxyModule.OpaqueParameter,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        var err: ?AnyError = null;
-        ctx.module.readPrivateParameterTo(instance, value, @"type", param, &err) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |x| return x.err;
-            return AnyError.initError(e).err;
-        };
-        return AnyError.intoCResult(null);
-    }
-    fn writePrivateParameterFrom(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.OpaqueInstance,
-        value: *const anyopaque,
-        @"type": ProxyModule.ParameterType,
-        param: *ProxyModule.OpaqueParameter,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        var err: ?AnyError = null;
-        ctx.module.writePrivateParameterFrom(instance, value, @"type", param, &err) catch |e| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |x| return x.err;
-            return AnyError.initError(e).err;
-        };
-        return AnyError.intoCResult(null);
-    }
-    fn readParameterDataTo(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.OpaqueInstance,
-        value: *anyopaque,
-        @"type": *ProxyModule.ParameterType,
-        param: *const ProxyModule.OpaqueParameterData,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        ctx.module.readParameterDataTo(instance, value, @"type", param) catch |err| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(err).err;
-        };
-        return AnyError.intoCResult(null);
-    }
-    fn writeParameterDataFrom(
-        ptr: *anyopaque,
-        instance: *const ProxyModule.OpaqueInstance,
-        value: *const anyopaque,
-        @"type": ProxyModule.ParameterType,
-        param: *ProxyModule.OpaqueParameterData,
-    ) callconv(.C) c.FimoResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        ctx.module.writeParameterDataFrom(instance, value, @"type", param) catch |err| {
-            if (@errorReturnTrace()) |tr| ctx.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(err).err;
         };
         return AnyError.intoCResult(null);
     }
@@ -628,13 +375,7 @@ pub const vtable = ProxyModule.VTable{
     .find_by_symbol = &VTableImpl.findInstanceBySymbol,
     .namespace_exists = &VTableImpl.queryNamespace,
     .prune_instances = &VTableImpl.pruneInstances,
-    .param_query = &VTableImpl.queryParameterInfo,
-    .param_set_public = &VTableImpl.writePublicParameterFrom,
-    .param_get_public = &VTableImpl.readPublicParameterTo,
-    .param_set_dependency = &VTableImpl.writeDependencyParameterFrom,
-    .param_get_dependency = &VTableImpl.readDependencyParameterTo,
-    .param_set_private = &VTableImpl.writePrivateParameterFrom,
-    .param_get_private = &VTableImpl.readPrivateParameterTo,
-    .param_set_inner = &VTableImpl.writeParameterDataFrom,
-    .param_get_inner = &VTableImpl.readParameterDataTo,
+    .query_parameter = &VTableImpl.queryParameter,
+    .read_parameter = &VTableImpl.readParameter,
+    .write_parameter = &VTableImpl.writeParameter,
 };

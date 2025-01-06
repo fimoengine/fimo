@@ -8,8 +8,6 @@
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
 
-extern crate alloc;
-
 #[doc(hidden)]
 pub use paste;
 

@@ -1,12 +1,41 @@
-use core::{ffi::CStr, marker::PhantomData};
+use core::fmt::{Display, Formatter};
+use std::{ffi::CStr, marker::PhantomData};
 
-use super::{ParameterAccess, ParameterType, ParameterValue};
+use super::{ParameterAccess, ParameterType};
 use crate::{
     bindings,
     context::ContextView,
     ffi::{FFISharable, FFITransferable},
     version::Version,
 };
+
+/// Default value of a module parameter.
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub enum DefaultParameterValue {
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+}
+
+impl Display for DefaultParameterValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            DefaultParameterValue::U8(x) => write!(f, "{x}"),
+            DefaultParameterValue::U16(x) => write!(f, "{x}"),
+            DefaultParameterValue::U32(x) => write!(f, "{x}"),
+            DefaultParameterValue::U64(x) => write!(f, "{x}"),
+            DefaultParameterValue::I8(x) => write!(f, "{x}"),
+            DefaultParameterValue::I16(x) => write!(f, "{x}"),
+            DefaultParameterValue::I32(x) => write!(f, "{x}"),
+            DefaultParameterValue::I64(x) => write!(f, "{x}"),
+        }
+    }
+}
 
 /// Declaration of a module parameter.
 #[repr(transparent)]
@@ -15,23 +44,17 @@ pub struct ParameterDeclaration(bindings::FimoModuleParamDecl);
 impl ParameterDeclaration {
     /// Fetches the type of the parameter.
     pub fn parameter_type(&self) -> ParameterType {
-        self.0.type_.try_into().expect("expected known enum value")
+        unsafe { std::mem::transmute(self.0.type_) }
     }
 
     /// Fetches the access group specifier for the read permission.
     pub fn read_group(&self) -> ParameterAccess {
-        self.0
-            .read_group
-            .try_into()
-            .expect("expected known enum value")
+        unsafe { std::mem::transmute(self.0.read_group) }
     }
 
     /// Fetches the access group specifier for the write permission.
     pub fn write_group(&self) -> ParameterAccess {
-        self.0
-            .write_group
-            .try_into()
-            .expect("expected known enum value")
+        unsafe { std::mem::transmute(self.0.write_group) }
     }
 
     /// Fetches the name of the parameter.
@@ -41,18 +64,18 @@ impl ParameterDeclaration {
     }
 
     /// Fetches the default value of the parameter.
-    pub fn default_value(&self) -> ParameterValue {
+    pub fn default_value(&self) -> DefaultParameterValue {
         // Safety: We check the tag of the union.
         unsafe {
             match self.parameter_type() {
-                ParameterType::U8 => ParameterValue::U8(self.0.default_value.u8_),
-                ParameterType::U16 => ParameterValue::U16(self.0.default_value.u16_),
-                ParameterType::U32 => ParameterValue::U32(self.0.default_value.u32_),
-                ParameterType::U64 => ParameterValue::U64(self.0.default_value.u64_),
-                ParameterType::I8 => ParameterValue::I8(self.0.default_value.i8_),
-                ParameterType::I16 => ParameterValue::I16(self.0.default_value.i16_),
-                ParameterType::I32 => ParameterValue::I32(self.0.default_value.i32_),
-                ParameterType::I64 => ParameterValue::I64(self.0.default_value.i64_),
+                ParameterType::U8 => DefaultParameterValue::U8(self.0.default_value.u8_),
+                ParameterType::U16 => DefaultParameterValue::U16(self.0.default_value.u16_),
+                ParameterType::U32 => DefaultParameterValue::U32(self.0.default_value.u32_),
+                ParameterType::U64 => DefaultParameterValue::U64(self.0.default_value.u64_),
+                ParameterType::I8 => DefaultParameterValue::I8(self.0.default_value.i8_),
+                ParameterType::I16 => DefaultParameterValue::I16(self.0.default_value.i16_),
+                ParameterType::I32 => DefaultParameterValue::I32(self.0.default_value.i32_),
+                ParameterType::I64 => DefaultParameterValue::I64(self.0.default_value.i64_),
             }
         }
     }

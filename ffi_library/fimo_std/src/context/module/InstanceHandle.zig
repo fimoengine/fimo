@@ -58,6 +58,7 @@ pub const ParameterError = error{
     NotPermitted,
     NotADependency,
     InvalidParameterType,
+    NotFound,
 };
 
 pub const InstanceHandleError = error{
@@ -67,8 +68,21 @@ pub const InstanceHandleError = error{
 } || PathError || Allocator.Error;
 
 pub const Parameter = struct {
-    pub const Data = struct {
-        owner: *const ProxyModule.OpaqueInstance,
+    inner: Data,
+    owner: *Self,
+    read_group: ProxyModule.ParameterAccessGroup,
+    write_group: ProxyModule.ParameterAccessGroup,
+    proxy: ProxyModule.OpaqueParameter,
+    read_fn: *const fn (
+        data: ProxyModule.OpaqueParameterData,
+        value: *anyopaque,
+    ) callconv(.c) void,
+    write_fn: *const fn (
+        data: ProxyModule.OpaqueParameterData,
+        value: *const anyopaque,
+    ) callconv(.c) void,
+
+    const Data = struct {
         value: union(enum) {
             u8: std.atomic.Value(u8),
             u16: std.atomic.Value(u16),
@@ -80,21 +94,7 @@ pub const Parameter = struct {
             i64: std.atomic.Value(i64),
         },
 
-        pub fn checkOwner(
-            self: *const Data,
-            instance: *const ProxyModule.OpaqueInstance,
-        ) ParameterError!void {
-            if (self.owner != instance) return error.NotPermitted;
-        }
-
-        pub fn checkType(
-            self: *const Data,
-            @"type": ProxyModule.ParameterType,
-        ) ParameterError!void {
-            if (!(self.getType() == @"type")) return error.InvalidParameterType;
-        }
-
-        pub fn getType(self: *const Data) ProxyModule.ParameterType {
+        fn @"type"(self: *const @This()) ProxyModule.ParameterType {
             return switch (self.value) {
                 .u8 => .u8,
                 .u16 => .u16,
@@ -107,48 +107,20 @@ pub const Parameter = struct {
             };
         }
 
-        pub fn readTo(
-            self: *const Data,
-            ptr: *anyopaque,
-            @"type": *ProxyModule.ParameterType,
-        ) void {
+        fn readTo(self: *const @This(), ptr: *anyopaque) void {
             switch (self.value) {
-                .u8 => |*v| {
-                    @as(*u8, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .u8;
-                },
-                .u16 => |*v| {
-                    @as(*u16, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .u16;
-                },
-                .u32 => |*v| {
-                    @as(*u32, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .u32;
-                },
-                .u64 => |*v| {
-                    @as(*u64, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .u64;
-                },
-                .i8 => |*v| {
-                    @as(*i8, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .i8;
-                },
-                .i16 => |*v| {
-                    @as(*i16, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .i16;
-                },
-                .i32 => |*v| {
-                    @as(*i32, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .i32;
-                },
-                .i64 => |*v| {
-                    @as(*i64, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst);
-                    @"type".* = .i64;
-                },
+                .u8 => |*v| @as(*u8, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .u16 => |*v| @as(*u16, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .u32 => |*v| @as(*u32, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .u64 => |*v| @as(*u64, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .i8 => |*v| @as(*i8, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .i16 => |*v| @as(*i16, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .i32 => |*v| @as(*i32, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .i64 => |*v| @as(*i64, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
             }
         }
 
-        pub fn writeFrom(self: *Data, ptr: *const anyopaque) void {
+        fn writeFrom(self: *@This(), ptr: *const anyopaque) void {
             switch (self.value) {
                 .u8 => |*v| v.store(@as(*const u8, @alignCast(@ptrCast(ptr))).*, .seq_cst),
                 .u16 => |*v| v.store(@as(*const u16, @alignCast(@ptrCast(ptr))).*, .seq_cst),
@@ -160,50 +132,70 @@ pub const Parameter = struct {
                 .i64 => |*v| v.store(@as(*const i64, @alignCast(@ptrCast(ptr))).*, .seq_cst),
             }
         }
+
+        fn asProxyParameter(self: *@This()) ProxyModule.OpaqueParameterData {
+            return .{
+                .data = self,
+                .vtable = &param_data_vtable,
+            };
+        }
     };
 
-    const GetterFn = *const fn (
-        ctx: *const ProxyModule.OpaqueInstance,
-        value: *anyopaque,
-        type: *ProxyModule.ParameterType,
-        data: *const ProxyModule.OpaqueParameterData,
-    ) callconv(.C) c.FimoResult;
-    const SetterFn = *const fn (
-        ctx: *const ProxyModule.OpaqueInstance,
-        value: *const anyopaque,
-        type: ProxyModule.ParameterType,
-        data: *ProxyModule.OpaqueParameterData,
-    ) callconv(.C) c.FimoResult;
-
-    data: Data,
-    allocator: Allocator,
-    read_group: ProxyModule.ParameterAccessGroup,
-    write_group: ProxyModule.ParameterAccessGroup,
-    getter: GetterFn,
-    setter: SetterFn,
-
     fn init(
-        allocator: Allocator,
-        data: Data,
+        owner: *Self,
+        inner: Data,
         read_group: ProxyModule.ParameterAccessGroup,
         write_group: ProxyModule.ParameterAccessGroup,
-        getter: GetterFn,
-        setter: SetterFn,
+        read_fn: ?*const fn (
+            data: ProxyModule.OpaqueParameterData,
+            value: *anyopaque,
+        ) callconv(.c) void,
+        write_fn: ?*const fn (
+            data: ProxyModule.OpaqueParameterData,
+            value: *const anyopaque,
+        ) callconv(.c) void,
     ) Allocator.Error!*Parameter {
+        const Wrapper = struct {
+            fn read(this: ProxyModule.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
+                const self: *Data = @alignCast(@ptrCast(this.data));
+                self.readTo(value);
+            }
+            fn write(this: ProxyModule.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
+                const self: *Data = @alignCast(@ptrCast(this.data));
+                self.writeFrom(value);
+            }
+        };
+
+        owner.ref();
+        errdefer owner.unref();
+
+        const allocator = owner.sys.allocator;
         const p = try allocator.create(Parameter);
         p.* = .{
-            .data = data,
-            .allocator = allocator,
+            .inner = inner,
+            .owner = owner,
             .read_group = read_group,
             .write_group = write_group,
-            .getter = getter,
-            .setter = setter,
+            .proxy = .{
+                .vtable = param_vtable,
+            },
+            .read_fn = read_fn orelse &Wrapper.read,
+            .write_fn = write_fn orelse &Wrapper.write,
         };
         return p;
     }
 
     fn deinit(self: *Parameter) void {
-        self.allocator.destroy(self);
+        const owner = self.owner;
+        owner.sys.allocator.destroy(self);
+        owner.unref();
+    }
+
+    pub fn checkType(
+        self: *const Parameter,
+        ty: ProxyModule.ParameterType,
+    ) ParameterError!void {
+        if (!(self.inner.type() == ty)) return error.InvalidParameterType;
     }
 
     pub fn checkReadPublic(self: *const Parameter) ParameterError!void {
@@ -214,62 +206,30 @@ pub const Parameter = struct {
         if (!(self.write_group == .public)) return error.NotPermitted;
     }
 
-    pub fn checkReadDependency(self: *const Parameter, reader: *const Inner) ParameterError!void {
+    fn checkReadDependency(self: *const Parameter, reader: *const Inner) ParameterError!void {
         const min_permission = ProxyModule.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.read_group) > @intFromEnum(min_permission)) return error.NotPermitted;
-        const owner_name = std.mem.span(self.data.owner.info.name);
+        const owner_name = std.mem.span(self.owner.info.name);
         if (!reader.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
-    pub fn checkWriteDependency(self: *const Parameter, writer: *const Inner) ParameterError!void {
+    fn checkWriteDependency(self: *const Parameter, writer: *const Inner) ParameterError!void {
         const min_permission = ProxyModule.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.write_group) > @intFromEnum(min_permission)) return error.NotPermitted;
-        const owner_name = std.mem.span(self.data.owner.info.name);
+        const owner_name = std.mem.span(self.owner.info.name);
         if (!writer.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
-    pub fn checkReadPrivate(
-        self: *const Parameter,
-        reader: *const ProxyModule.OpaqueInstance,
-    ) ParameterError!void {
-        if (self.data.owner != reader) return error.NotPermitted;
+    pub fn @"type"(self: *const Parameter) ProxyModule.ParameterType {
+        return self.inner.type();
     }
 
-    pub fn checkWritePrivate(
-        self: *const Parameter,
-        writer: *const ProxyModule.OpaqueInstance,
-    ) ParameterError!void {
-        if (self.data.owner != writer) return error.NotPermitted;
+    pub fn readTo(self: *const Parameter, value: *anyopaque) void {
+        self.read_fn(@constCast(self).inner.asProxyParameter(), value);
     }
 
-    pub fn readTo(
-        self: *const Parameter,
-        value: *anyopaque,
-        @"type": *ProxyModule.ParameterType,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        const result = self.getter(
-            self.data.owner,
-            value,
-            @"type",
-            @ptrCast(&self.data),
-        );
-        try AnyError.initChecked(err, result);
-    }
-
-    pub fn writeFrom(
-        self: *Parameter,
-        value: *const anyopaque,
-        @"type": ProxyModule.ParameterType,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        const result = self.setter(
-            self.data.owner,
-            value,
-            @"type",
-            @ptrCast(&self.data),
-        );
-        try AnyError.initChecked(err, result);
+    pub fn writeFrom(self: *Parameter, value: *const anyopaque) void {
+        self.write_fn(self.inner.asProxyParameter(), value);
     }
 };
 
@@ -687,11 +647,10 @@ pub fn initExportedInstance(
     inner.instance = instance;
 
     // Init parameters.
-    var parameters = std.ArrayListUnmanaged(?*Parameter){};
+    var parameters = std.ArrayListUnmanaged(?*ProxyModule.OpaqueParameter){};
     errdefer parameters.deinit(sys.allocator);
     for (@"export".getParameters()) |p| {
         const data = Parameter.Data{
-            .owner = instance,
             .value = switch (p.type) {
                 .u8 => .{ .u8 = std.atomic.Value(u8).init(p.default_value.u8) },
                 .u16 => .{ .u16 = std.atomic.Value(u16).init(p.default_value.u16) },
@@ -705,16 +664,16 @@ pub fn initExportedInstance(
             },
         };
         var param: ?*Parameter = try Parameter.init(
-            sys.allocator,
+            instance_handle,
             data,
             p.read_group,
             p.write_group,
-            p.getter,
-            p.setter,
+            p.read,
+            p.write,
         );
         errdefer if (param) |pa| pa.deinit();
         try inner.addParameter(std.mem.span(p.name), param.?);
-        const param_copy = param;
+        const param_copy = &param.?.proxy;
         param = null;
         try parameters.append(sys.allocator, param_copy);
     }
@@ -876,6 +835,104 @@ pub fn lock(self: *const Self) *Inner {
     this.inner.mutex.lock();
     return &this.inner;
 }
+
+fn readParameter(
+    self: *const Self,
+    value: *anyopaque,
+    @"type": ProxyModule.ParameterType,
+    module: []const u8,
+    parameter: []const u8,
+) ParameterError!void {
+    self.logTrace(
+        "reading dependency parameter, reader='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
+        .{ self.info.name, value, @tagName(@"type"), module, parameter },
+        @src(),
+    );
+    const inner = self.lock();
+    defer inner.unlock();
+
+    const module_handle = inner.getDependency(module) orelse return error.NotADependency;
+    const module_inner = module_handle.instance.lock();
+    defer module_inner.unlock();
+
+    const param = module_inner.getParameter(parameter) orelse return error.NotFound;
+    try param.checkReadDependency(inner);
+    param.readTo(value);
+}
+
+fn writeParameter(
+    self: *const Self,
+    value: *const anyopaque,
+    @"type": ProxyModule.ParameterType,
+    module: []const u8,
+    parameter: []const u8,
+) ParameterError!void {
+    self.logTrace(
+        "writing dependency parameter, writer='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
+        .{ self.info.name, value, @tagName(@"type"), module, parameter },
+        @src(),
+    );
+    const inner = self.lock();
+    defer inner.unlock();
+
+    const module_handle = inner.getDependency(module) orelse return error.NotADependency;
+    const module_inner = module_handle.instance.lock();
+    defer module_inner.unlock();
+
+    const param = module_inner.getParameter(parameter) orelse return error.NotFound;
+    try param.checkWriteDependency(inner);
+    param.writeFrom(value);
+}
+
+// ----------------------------------------------------
+// Parameter VTable
+// ----------------------------------------------------
+
+const ParamVTableImpl = struct {
+    fn @"type"(data: *const ProxyModule.OpaqueParameter) callconv(.c) ProxyModule.ParameterType {
+        const self: *const Parameter = @fieldParentPtr("proxy", data);
+        return self.type();
+    }
+    fn read(data: *const ProxyModule.OpaqueParameter, value: *anyopaque) callconv(.c) void {
+        const self: *const Parameter = @fieldParentPtr("proxy", data);
+        return self.readTo(value);
+    }
+    fn write(data: *ProxyModule.OpaqueParameter, value: *const anyopaque) callconv(.c) void {
+        const self: *Parameter = @fieldParentPtr("proxy", data);
+        return self.writeFrom(value);
+    }
+};
+
+const param_vtable = ProxyModule.OpaqueParameter.VTable{
+    .type = &ParamVTableImpl.type,
+    .read = &ParamVTableImpl.read,
+    .write = &ParamVTableImpl.write,
+};
+
+// ----------------------------------------------------
+// ParameterData VTable
+// ----------------------------------------------------
+
+const ParamDataVTableImpl = struct {
+    fn @"type"(data: *anyopaque) callconv(.c) ProxyModule.ParameterType {
+        const self: *Parameter.Data = @alignCast(@ptrCast(data));
+        return self.type();
+    }
+    fn read(data: *anyopaque, value: *anyopaque) callconv(.c) void {
+        const self: *Parameter.Data = @alignCast(@ptrCast(data));
+        return self.readTo(value);
+    }
+    fn write(data: *anyopaque, value: *const anyopaque) callconv(.c) void {
+        const self: *Parameter.Data = @alignCast(@ptrCast(data));
+        return self.writeFrom(value);
+    }
+};
+
+const param_data_vtable = ProxyModule.OpaqueParameterData.VTable{
+    .type = &ParamDataVTableImpl.type,
+    .read = &ParamDataVTableImpl.read,
+    .write = &ParamDataVTableImpl.write,
+};
 
 // ----------------------------------------------------
 // Info Futures
@@ -1692,6 +1749,42 @@ const InstanceVTableImpl = struct {
         };
         return AnyError.intoCResult(null);
     }
+    fn readParameter(
+        ctx: *const ProxyModule.OpaqueInstance,
+        value: *anyopaque,
+        @"type": ProxyModule.ParameterType,
+        module: [*:0]const u8,
+        parameter: [*:0]const u8,
+    ) callconv(.C) c.FimoResult {
+        const self = Self.fromInstancePtr(ctx);
+        const module_ = std.mem.span(module);
+        const parameter_ = std.mem.span(parameter);
+
+        self.readParameter(value, @"type", module_, parameter_) catch |e| {
+            if (@errorReturnTrace()) |tr|
+                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            return AnyError.initError(e).err;
+        };
+        return AnyError.intoCResult(null);
+    }
+    fn writeParameter(
+        ctx: *const ProxyModule.OpaqueInstance,
+        value: *const anyopaque,
+        @"type": ProxyModule.ParameterType,
+        module: [*:0]const u8,
+        parameter: [*:0]const u8,
+    ) callconv(.C) c.FimoResult {
+        const self = Self.fromInstancePtr(ctx);
+        const module_ = std.mem.span(module);
+        const parameter_ = std.mem.span(parameter);
+
+        self.writeParameter(value, @"type", module_, parameter_) catch |e| {
+            if (@errorReturnTrace()) |tr|
+                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            return AnyError.initError(e).err;
+        };
+        return AnyError.intoCResult(null);
+    }
 };
 
 const instance_vtable = ProxyModule.OpaqueInstance.VTable{
@@ -1702,4 +1795,6 @@ const instance_vtable = ProxyModule.OpaqueInstance.VTable{
     .add_dependency = &InstanceVTableImpl.addDependency,
     .remove_dependency = &InstanceVTableImpl.removeDependency,
     .load_symbol = &InstanceVTableImpl.loadSymbol,
+    .read_parameter = &InstanceVTableImpl.readParameter,
+    .write_parameter = InstanceVTableImpl.writeParameter,
 };

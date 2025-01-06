@@ -18,6 +18,86 @@
 extern "C" {
 #endif
 
+/**
+ * Data type of a module parameter.
+ */
+typedef enum FimoModuleParamType : FimoI32 {
+    FIMO_MODULE_PARAM_TYPE_U8,
+    FIMO_MODULE_PARAM_TYPE_U16,
+    FIMO_MODULE_PARAM_TYPE_U32,
+    FIMO_MODULE_PARAM_TYPE_U64,
+    FIMO_MODULE_PARAM_TYPE_I8,
+    FIMO_MODULE_PARAM_TYPE_I16,
+    FIMO_MODULE_PARAM_TYPE_I32,
+    FIMO_MODULE_PARAM_TYPE_I64,
+} FimoModuleParamType;
+
+/**
+ * Access group for a module parameter.
+ */
+typedef enum FimoModuleParamAccessGroup : FimoI32 {
+    FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC,
+    FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY,
+    FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE,
+} FimoModuleParamAccessGroup;
+
+struct FimoModuleParam;
+
+/**
+ * VTable of a parameter.
+ *
+ * Adding fields to this struct is not a breaking change.
+ */
+typedef struct FimoModuleParamVTable {
+    /**
+     * Returns the value type of the parameter.
+     */
+    FimoModuleParamType (*type)(const struct FimoModuleParam *param);
+    /**
+     * Reads the value from the parameter.
+     */
+    void (*read)(const struct FimoModuleParam *param, void *value);
+    /**
+     * Writes the value into the parameter.
+     */
+    void (*write)(const struct FimoModuleParam *param, const void *value);
+} FimoModuleParamVTable;
+
+/**
+ * A type-erased module parameter.
+ */
+typedef struct FimoModuleParam {
+    FimoModuleParamVTable vtable;
+} FimoModuleParam;
+
+/**
+ * VTable of a parameter data.
+ *
+ * Adding fields to this struct is not a breaking change.
+ */
+typedef struct FimoModuleParamDataVTable {
+    /**
+     * Returns the value type of the parameter.
+     */
+    FimoModuleParamType (*type)(void *data);
+    /**
+     * Reads the value from the parameter.
+     */
+    void (*read)(void *param, void *value);
+    /**
+     * Writes the value into the parameter.
+     */
+    void (*write)(void *param, const void *value);
+} FimoModuleParamDataVTable;
+
+/**
+ * A type-erased internal data type for a module parameter.
+ */
+typedef struct FimoModuleParamData {
+    void *data;
+    const FimoModuleParamDataVTable *vtable;
+} FimoModuleParamData;
+
 struct FimoModuleInfo;
 
 /**
@@ -199,6 +279,26 @@ typedef struct FimoModuleInstanceVTable {
     FimoResult (*load_symbol)(const FimoModuleInstance* ctx, const char *name,
                               const char *ns, FimoVersion version,
                               FimoModuleInstanceLoadSymbolFuture *fut);
+    /**
+     * Reads a module parameter with dependency read access.
+     *
+     * Reads the value of a module parameter with dependency read access. The operation fails, if
+     * the parameter does not exist, or if the parameter does not allow reading with a dependency
+     * access.
+     */
+    FimoResult (*read_parameter)(void *ctx, void *value,
+                                 FimoModuleParamType type, const char *module,
+                                 const char *param);
+    /**
+     * Sets a module parameter with dependency write access.
+     *
+     * Sets the value of a module parameter with dependency write access. The operation fails, if
+     * the parameter does not exist, or if the parameter does not allow writing with a dependency
+     * access.
+     */
+    FimoResult (*write_parameter)(void *ctx, const void *value,
+                                  FimoModuleParamType type, const char *module,
+                                  const char *param);
 } FimoModuleInstanceVTable;
 
 /**
@@ -428,7 +528,7 @@ typedef struct FimoModuleLoadingSet {
 /**
  * Tag of a debug info type.
  */
-typedef enum FimoModuleDebugInfoTypeTag {
+typedef enum FimoModuleDebugInfoTypeTag : FimoI32 {
     FIMO_MODULE_DEBUG_INFO_TYPE_TAG_VOID,
     FIMO_MODULE_DEBUG_INFO_TYPE_TAG_BOOL,
     FIMO_MODULE_DEBUG_INFO_TYPE_TAG_INT,
@@ -446,7 +546,7 @@ typedef enum FimoModuleDebugInfoTypeTag {
 /**
  * Recognized calling conventions.
  */
-typedef enum FimoModuleDebugInfoCallingConvention {
+typedef enum FimoModuleDebugInfoCallingConvention : FimoI32 {
     FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_X86_64_SYSV,
     FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_X86_64_WIN,
     FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_AARCH64_AAPCS,
@@ -1042,41 +1142,6 @@ typedef struct FimoModuleDebugInfo {
 } FimoModuleDebugInfo;
 
 /**
- * Data type of a module parameter.
- */
-typedef enum FimoModuleParamType {
-    FIMO_MODULE_PARAM_TYPE_U8,
-    FIMO_MODULE_PARAM_TYPE_U16,
-    FIMO_MODULE_PARAM_TYPE_U32,
-    FIMO_MODULE_PARAM_TYPE_U64,
-    FIMO_MODULE_PARAM_TYPE_I8,
-    FIMO_MODULE_PARAM_TYPE_I16,
-    FIMO_MODULE_PARAM_TYPE_I32,
-    FIMO_MODULE_PARAM_TYPE_I64,
-    FIMO_MODULE_PARAM_TYPE_FORCE32 = 0x7FFFFFFF
-} FimoModuleParamType;
-
-/**
- * Access group for a module parameter.
- */
-typedef enum FimoModuleParamAccessGroup {
-    FIMO_MODULE_PARAM_ACCESS_GROUP_PUBLIC,
-    FIMO_MODULE_PARAM_ACCESS_GROUP_DEPENDENCY,
-    FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE,
-    FIMO_MODULE_PARAM_ACCESS_GROUP_FORCE32 = 0x7FFFFFFF
-} FimoModuleParamAccessGroup;
-
-/**
- * A type-erased module parameter.
- */
-typedef struct FimoModuleParam FimoModuleParam;
-
-/**
- * A type-erased internal data type for a module parameter.
- */
-typedef struct FimoModuleParamData FimoModuleParamData;
-
-/**
  * Declaration of a module parameter.
  */
 typedef struct FimoModuleParamDecl {
@@ -1093,32 +1158,17 @@ typedef struct FimoModuleParamDecl {
      */
     FimoModuleParamAccessGroup write_group;
     /**
-     * Setter for a module parameter.
+     * Optional read function for the parameter.
      *
-     * The setter can perform some validation before the parameter is set.
-     * If the setter produces an error, the parameter won't be modified.
-     *
-     * @param module pointer to the module
-     * @param value pointer to the new value
-     * @param type type of the value
-     * @param param data of the parameter
-     *
-     * @return Status code.
+     * Calling into the context may cause a deadlock.
      */
-    FimoResult (*setter)(const FimoModuleInstance *arg0, const void *value, FimoModuleParamType type,
-                         FimoModuleParamData *param);
+    void (*read)(FimoModuleParamData param, void *value);
     /**
-     * Getter for a module parameter.
+     * Optional write function for the parameter.
      *
-     * @param module pointer to the module
-     * @param value buffer to store the value into
-     * @param type buffer to store the type of the value into
-     * @param param data of the parameter
-     *
-     * @return Status code.
+     * Calling into the context may cause a deadlock.
      */
-    FimoResult (*getter)(const FimoModuleInstance *module, void *value, FimoModuleParamType *type,
-                         const FimoModuleParamData *param);
+    void (*write)(FimoModuleParamData param, const void *value);
     /**
      * Name of the parameter.
      *
@@ -1265,7 +1315,7 @@ typedef struct FimoModuleDynamicSymbolExport {
 /**
  * Valid keys of `FimoModuleExportModifier`.
  */
-typedef enum FimoModuleExportModifierKey {
+typedef enum FimoModuleExportModifierKey : FimoI32 {
     /**
      * Specifies that the module export has a destructor function
      * that must be called. The value must be a pointer to a
@@ -1563,15 +1613,16 @@ typedef struct FimoModuleVTableV0 {
      * Queries a module by its unique name. The returned `FimoModuleInfo`
      * will have its reference count increased.
      */
-    FimoResult (*find_by_name)(void *ctx, const char *name, const FimoModuleInfo **info);
+    FimoResult (*find_by_name)(void *ctx, const char *name,
+                               const FimoModuleInfo **info);
     /**
      * Searches for a module by a symbol it exports.
      *
      * Queries the module that exported the specified symbol. The returned
      * `FimoModuleInfo` will have its reference count increased.
      */
-    FimoResult (*find_by_symbol)(void *ctx, const char *name, const char *ns, FimoVersion version,
-                                 const FimoModuleInfo **info);
+    FimoResult (*find_by_symbol)(void *ctx, const char *name, const char *ns,
+                                 FimoVersion version, const FimoModuleInfo **info);
     /**
      * Checks for the presence of a namespace in the module subsystem.
      *
@@ -1592,20 +1643,10 @@ typedef struct FimoModuleVTableV0 {
      * and the write access of a module parameter. This function fails,
      * if the parameter can not be found.
      */
-    FimoResult (*param_query)(void *ctx, const char *module, const char *param,
-                              FimoModuleParamType *type, FimoModuleParamAccessGroup *read_group,
-                              FimoModuleParamAccessGroup *write_group);
-    /**
-     * Sets a module parameter with public write access.
-     *
-     * Sets the value of a module parameter with public write access.
-     * The operation fails, if the parameter does not exist, or if
-     * the parameter does not allow writing with a public access.
-     * The caller must ensure that `value` points to an instance of
-     * the same datatype as the parameter in question.
-     */
-    FimoResult (*param_set_public)(void *ctx, const void *value, FimoModuleParamType type,
-                                   const char *module, const char *param);
+    FimoResult (*query_parameter)(void *ctx, const char *module,
+                                  const char *param, FimoModuleParamType *type,
+                                  FimoModuleParamAccessGroup *read_group,
+                                  FimoModuleParamAccessGroup *write_group);
     /**
      * Reads a module parameter with public read access.
      *
@@ -1615,56 +1656,21 @@ typedef struct FimoModuleVTableV0 {
      * The caller must ensure that `value` points to an instance of
      * the same datatype as the parameter in question.
      */
-    FimoResult (*param_get_public)(void *ctx, void *value, FimoModuleParamType *type,
-                                   const char *module, const char *param);
+    FimoResult (*read_parameter)(void *ctx, void *value,
+                                 FimoModuleParamType type, const char *module,
+                                 const char *param);
     /**
-     * Sets a module parameter with dependency write access.
+     * Sets a module parameter with public write access.
      *
-     * Sets the value of a module parameter with dependency write
-     * access. The operation fails, if the parameter does not exist,
-     * or if the parameter does not allow writing with a dependency
-     * access. The caller must ensure that `value` points to an
-     * instance of the same datatype as the parameter in question.
+     * Sets the value of a module parameter with public write access.
+     * The operation fails, if the parameter does not exist, or if
+     * the parameter does not allow writing with a public access.
+     * The caller must ensure that `value` points to an instance of
+     * the same datatype as the parameter in question.
      */
-    FimoResult (*param_set_dependency)(void *ctx, const FimoModuleInstance *caller, const void *value,
-                                       FimoModuleParamType type, const char *module,
-                                       const char *param);
-    /**
-     * Reads a module parameter with dependency read access.
-     *
-     * Reads the value of a module parameter with dependency read
-     * access. The operation fails, if the parameter does not exist,
-     * or if the parameter does not allow reading with a dependency
-     * access. The caller must ensure that `value` points to an
-     * instance of the same datatype as the parameter in question.
-     */
-    FimoResult (*param_get_dependency)(void *ctx, const FimoModuleInstance *caller, void *value,
-                                       FimoModuleParamType *type, const char *module,
-                                       const char *param);
-    /**
-     * Setter for a module parameter.
-     *
-     * If the setter produces an error, the parameter won't be modified.
-     */
-    FimoResult (*param_set_private)(void *ctx, const FimoModuleInstance *caller, const void *value,
-                                    FimoModuleParamType type, FimoModuleParam *param);
-    /**
-     * Getter for a module parameter.
-     */
-    FimoResult (*param_get_private)(void *ctx, const FimoModuleInstance *caller, void *value,
-                                    FimoModuleParamType *type, const FimoModuleParam *param);
-    /**
-     * Internal setter for a module parameter.
-     *
-     * If the setter produces an error, the parameter won't be modified.
-     */
-    FimoResult (*param_set_inner)(void *ctx, const FimoModuleInstance *caller, const void *value,
-                                  FimoModuleParamType type, FimoModuleParamData *param);
-    /**
-     * Internal getter for a module parameter.
-     */
-    FimoResult (*param_get_inner)(void *ctx, const FimoModuleInstance *caller, void *value,
-                                  FimoModuleParamType *type, const FimoModuleParamData *param);
+    FimoResult (*write_parameter)(void *ctx, const void *value,
+                                  FimoModuleParamType type, const char *module,
+                                  const char *param);
 } FimoModuleVTableV0;
 
 #ifdef __cplusplus

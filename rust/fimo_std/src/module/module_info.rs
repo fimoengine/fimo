@@ -1177,6 +1177,6 @@ impl FFITransferable<*const bindings::FimoModuleInstance> for PseudoModule {
 
 impl Drop for PseudoModule {
     fn drop(&mut self) {
-        self.0.module_info().mark_unloadable()
+        self.0.module_info().mark_unloadable();
     }
 }

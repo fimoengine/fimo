@@ -86,7 +86,7 @@ pub const Symbol = extern struct {
 };
 
 /// Tag of a type.
-pub const TypeTag = enum(c.FimoModuleDebugInfoTypeTag) {
+pub const TypeTag = enum(i32) {
     void = c.FIMO_MODULE_DEBUG_INFO_TYPE_TAG_VOID,
     bool = c.FIMO_MODULE_DEBUG_INFO_TYPE_TAG_BOOL,
     int = c.FIMO_MODULE_DEBUG_INFO_TYPE_TAG_INT,
@@ -744,7 +744,7 @@ pub const FnType = extern struct {
     vtable: *const FnType.VTable,
 
     /// Recognized calling conventions.
-    pub const CallingConvention = enum(c.FimoModuleDebugInfoCallingConvention) {
+    pub const CallingConvention = enum(i32) {
         x86_64_sysv = c.FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_X86_64_SYSV,
         x86_64_win = c.FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_X86_64_WIN,
         aarch64_aapcs = c.FIMO_MODULE_DEBUG_INFO_CALLING_CONVENTION_AARCH64_AAPCS,

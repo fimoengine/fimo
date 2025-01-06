@@ -22,7 +22,7 @@ pub const exports = @import("module/exports.zig");
 pub const Export = exports.Export;
 
 /// Data type of a module parameter.
-pub const ParameterType = enum(c.FimoModuleParamType) {
+pub const ParameterType = enum(i32) {
     u8,
     u16,
     u32,
@@ -35,7 +35,7 @@ pub const ParameterType = enum(c.FimoModuleParamType) {
 };
 
 /// Access group for a module parameter.
-pub const ParameterAccessGroup = enum(c.FimoModuleParamAccessGroup) {
+pub const ParameterAccessGroup = enum(i32) {
     /// Parameter can be accessed publicly.
     public,
     /// Parameter can be accessed from dependent modules.
@@ -44,623 +44,168 @@ pub const ParameterAccessGroup = enum(c.FimoModuleParamAccessGroup) {
     private,
 };
 
-/// A typed parameter.
-pub fn Parameter(comptime T: type, comptime InstanceT: type) type {
-    std.debug.assert(
-        std.mem.indexOfScalar(u16, &.{ 8, 16, 32, 64 }, @typeInfo(T).int.bits) != null,
-    );
-    return opaque {
+/// Parameter accessor.
+pub fn Parameter(comptime T: type) type {
+    std.debug.assert(T == anyopaque or std.mem.indexOfScalar(
+        u16,
+        &.{ 8, 16, 32, 64 },
+        @typeInfo(T).int.bits,
+    ) != null);
+
+    return extern struct {
+        vtable: Self.VTable,
+
+        fn isParameter() bool {
+            return true;
+        }
+
         const Self = @This();
 
-        fn unwrapValue(value: OpaqueParameter.Value) T {
-            return switch (@typeInfo(T).int.bits) {
-                8 => if (@typeInfo(T).int.signedness == .signed) value.i8 else value.u8,
-                16 => if (@typeInfo(T).int.signedness == .signed) value.i16 else value.u16,
-                32 => if (@typeInfo(T).int.signedness == .signed) value.i32 else value.u32,
-                64 => if (@typeInfo(T).int.signedness == .signed) value.i64 else value.u64,
-                else => @compileError("Invalid parameter bit size"),
-            };
-        }
-        fn wrapValue(value: T) OpaqueParameter.Value {
-            return switch (@typeInfo(T).int.bits) {
-                8 => if (@typeInfo(T).int.signedness == .signed) .{ .i8 = value } else .{ .u8 = value },
-                16 => if (@typeInfo(T).int.signedness == .signed) .{ .i16 = value } else .{ .u16 = value },
-                32 => if (@typeInfo(T).int.signedness == .signed) .{ .i32 = value } else .{ .u32 = value },
-                64 => if (@typeInfo(T).int.signedness == .signed) .{ .i64 = value } else .{ .u64 = value },
-                else => @compileError("Invalid parameter bit size"),
-            };
-        }
-
-        /// Reads a module parameter with public read access.
-        ///
-        /// Reads the value of a module parameter with public read access.
-        /// The operation fails, if the parameter does not exist, or if
-        /// the parameter does not allow reading with a public access.
-        pub fn readPublic(
-            ctx: Module,
-            module: [:0]const u8,
-            parameter: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!T {
-            const value = try OpaqueParameter.readPublic(
-                ctx,
-                module,
-                parameter,
-                err,
-            );
-            return Self.unwrapValue(value);
-        }
-
-        /// Reads a module parameter with dependency read access.
-        ///
-        /// Reads the value of a module parameter with dependency read
-        /// access. The operation fails, if the parameter does not exist,
-        /// or if the parameter does not allow reading with a dependency
-        /// access.
-        pub fn readDependency(
-            instance: *const InstanceT,
-            module: [:0]const u8,
-            parameter: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!T {
-            const value = try OpaqueParameter.readDependency(
-                instance.castOpaque(),
-                module,
-                parameter,
-                err,
-            );
-            return Self.unwrapValue(value);
-        }
-
-        /// Getter for a module parameter.
-        ///
-        /// Reads the value of a module parameter with private read access.
-        pub fn read(
-            self: *const Self,
-            instance: *const InstanceT,
-            err: *?AnyError,
-        ) AnyError.Error!T {
-            const value = try self.castOpaqueConst().read(instance.castOpaque(), err);
-            return Self.unwrapValue(value);
-        }
-
-        /// Sets a module parameter with public write access.
-        ///
-        /// Sets the value of a module parameter with public write access.
-        /// The operation fails, if the parameter does not exist, or if
-        /// the parameter does not allow writing with a public access.
-        pub fn writePublic(
-            ctx: Module,
-            value: T,
-            module: [:0]const u8,
-            parameter: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            const v = Self.wrapValue(value);
-            try OpaqueParameter.writePublic(ctx, v, module, parameter, err);
-        }
-
-        /// Sets a module parameter with dependency write access.
-        ///
-        /// Sets the value of a module parameter with dependency write
-        /// access. The operation fails, if the parameter does not exist,
-        /// or if the parameter does not allow writing with a dependency
-        /// access.
-        pub fn writeDependency(
-            instance: *const InstanceT,
-            value: T,
-            module: [:0]const u8,
-            parameter: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            const v = Self.wrapValue(value);
-            try OpaqueParameter.writeDependency(
-                instance.castOpaque(),
-                v,
-                module,
-                parameter,
-                err,
-            );
-        }
-
-        /// Setter for a module parameter.
-        ///
-        /// Sets the value of a module parameter with private write access.
-        pub fn write(
-            self: *Self,
-            instance: *const InstanceT,
-            value: T,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            const v = Self.wrapValue(value);
-            try self.castOpaque().write(instance.castOpaque(), v, err);
-        }
-
-        /// Casts the parameter to an opaque parameter pointer.
-        pub fn castOpaque(self: *@This()) *OpaqueParameter {
-            return @ptrCast(self);
-        }
-
-        /// Casts the parameter to an opaque parameter pointer.
-        pub fn castOpaqueConst(self: *const @This()) *const OpaqueParameter {
-            return @ptrCast(self);
-        }
-    };
-}
-
-/// An opaque parameter.
-pub const OpaqueParameter = opaque {
-    /// Possible values contained in the parameter.
-    pub const Value = OpaqueParameterData.Value;
-    const ValueUntagged = OpaqueParameterData.ValueUntagged;
-
-    /// Parameter info.
-    pub const Info = struct {
-        tag: ParameterType,
-        read_group: ParameterAccessGroup,
-        write_group: ParameterAccessGroup,
-    };
-
-    fn readPublicFfi(
-        ctx: Module,
-        value: *anyopaque,
-        value_type: *ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) c.FimoResult {
-        return ctx.context.vtable.module_v0.param_get_public(
-            ctx.context.data,
-            value,
-            value_type,
-            module,
-            parameter,
-        );
-    }
-    fn writePublicFfi(
-        ctx: Module,
-        value: *const anyopaque,
-        value_type: ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) c.FimoResult {
-        return ctx.context.vtable.module_v0.param_set_public(
-            ctx.context.data,
-            value,
-            value_type,
-            module,
-            parameter,
-        );
-    }
-    fn readDependencyFfi(
-        instance: *const OpaqueInstance,
-        value: *anyopaque,
-        value_type: *ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) c.FimoResult {
-        const ctx = Context.initC(instance.ctx);
-        return ctx.vtable.module_v0.param_get_dependency(
-            ctx.data,
-            instance,
-            value,
-            value_type,
-            module,
-            parameter,
-        );
-    }
-    fn writeDependencyFfi(
-        instance: *const OpaqueInstance,
-        value: *const anyopaque,
-        value_type: ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) c.FimoResult {
-        const ctx = Context.initC(instance.ctx);
-        return ctx.vtable.module_v0.param_set_dependency(
-            ctx.data,
-            instance,
-            value,
-            value_type,
-            module,
-            parameter,
-        );
-    }
-    fn readPrivateFfi(
-        self: *const OpaqueParameter,
-        instance: *const OpaqueInstance,
-        value: *anyopaque,
-        value_type: *ParameterType,
-    ) c.FimoResult {
-        const ctx = Context.initC(instance.ctx);
-        return ctx.vtable.module_v0.param_get_private(
-            ctx.data,
-            instance,
-            value,
-            value_type,
-            self,
-        );
-    }
-    fn writePrivateFfi(
-        self: *OpaqueParameter,
-        instance: *const OpaqueInstance,
-        value: *const anyopaque,
-        value_type: ParameterType,
-    ) c.FimoResult {
-        const ctx = Context.initC(instance.ctx);
-        return ctx.vtable.module_v0.param_set_private(
-            ctx.data,
-            instance,
-            value,
-            value_type,
-            self,
-        );
-    }
-
-    /// Queries the info of a module parameter.
-    ///
-    /// This function can be used to query the datatype, the read access,
-    /// and the write access of a module parameter. This function fails,
-    /// if the parameter can not be found.
-    pub fn query(
-        ctx: Module,
-        module: [:0]const u8,
-        parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!OpaqueParameter.Info {
-        var tag: ParameterType = undefined;
-        var read_group: ParameterAccessGroup = undefined;
-        var write_group: ParameterAccessGroup = undefined;
-        const result = ctx.context.vtable.module_v0.param_query(
-            ctx.context.data,
-            module.ptr,
-            parameter.ptr,
-            &tag,
-            &read_group,
-            &write_group,
-        );
-        try AnyError.initChecked(err, result);
-        return .{
-            .tag = tag,
-            .read_group = read_group,
-            .write_group = write_group,
+        /// Parameter info.
+        pub const Info = struct {
+            tag: ParameterType,
+            read_group: ParameterAccessGroup,
+            write_group: ParameterAccessGroup,
         };
-    }
 
-    /// Reads a module parameter with public read access.
-    ///
-    /// Reads the value of a module parameter with public read access.
-    /// The operation fails, if the parameter does not exist, or if
-    /// the parameter does not allow reading with a public access.
-    pub fn readPublic(
-        ctx: Module,
-        module: [:0]const u8,
-        parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!OpaqueParameter.Value {
-        var value: OpaqueParameter.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        const result = OpaqueParameter.readPublicFfi(
-            ctx,
-            &value,
-            &value_type,
-            module.ptr,
-            parameter.ptr,
-        );
-        try AnyError.initChecked(err, result);
-        return OpaqueParameter.Value.fromUntagged(value, value_type);
-    }
+        /// VTable of a parameter.
+        ///
+        /// Adding fields to this struct is not a breaking change.
+        pub const VTable = extern struct {
+            type: *const fn (data: *const Self) callconv(.c) ParameterType,
+            read: *const fn (data: *const Self, value: *T) callconv(.c) void,
+            write: *const fn (data: *Self, value: *const T) callconv(.c) void,
+        };
 
-    /// Reads a module parameter with dependency read access.
-    ///
-    /// Reads the value of a module parameter with dependency read
-    /// access. The operation fails, if the parameter does not exist,
-    /// or if the parameter does not allow reading with a dependency
-    /// access.
-    pub fn readDependency(
-        instance: *const OpaqueInstance,
-        module: [:0]const u8,
-        parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!OpaqueParameter.Value {
-        var value: OpaqueParameter.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        const result = OpaqueParameter.readDependencyFfi(
-            instance,
-            &value,
-            &value_type,
-            module.ptr,
-            parameter.ptr,
-        );
-        try AnyError.initChecked(err, result);
-        return OpaqueParameter.Value.fromUntagged(value, value_type);
-    }
-
-    /// Getter for a module parameter.
-    ///
-    /// Reads the value of a module parameter with private read access.
-    pub fn read(
-        self: *const OpaqueParameter,
-        instance: *const OpaqueInstance,
-        err: *?AnyError,
-    ) AnyError.Error!OpaqueParameter.Value {
-        var value: OpaqueParameter.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        const result = self.readPrivateFfi(
-            instance,
-            &value,
-            &value_type,
-        );
-        try AnyError.initChecked(err, result);
-        return OpaqueParameter.Value.fromUntagged(value, value_type);
-    }
-
-    /// Sets a module parameter with public write access.
-    ///
-    /// Sets the value of a module parameter with public write access.
-    /// The operation fails, if the parameter does not exist, or if
-    /// the parameter does not allow writing with a public access.
-    pub fn writePublic(
-        ctx: Module,
-        value: OpaqueParameter.Value,
-        module: [:0]const u8,
-        parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        var val: OpaqueParameter.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        value.toUntagged(&val, &value_type);
-        const result = OpaqueParameter.writePublicFfi(
-            ctx,
-            &value,
-            value_type,
-            module.ptr,
-            parameter.ptr,
-        );
-        try AnyError.initChecked(err, result);
-    }
-
-    /// Sets a module parameter with dependency write access.
-    ///
-    /// Sets the value of a module parameter with dependency write
-    /// access. The operation fails, if the parameter does not exist,
-    /// or if the parameter does not allow writing with a dependency
-    /// access.
-    pub fn writeDependency(
-        instance: *const OpaqueInstance,
-        value: OpaqueParameter.Value,
-        module: [:0]const u8,
-        parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        var val: OpaqueParameter.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        value.toUntagged(&val, &value_type);
-        const result = OpaqueParameter.writeDependencyFfi(
-            instance,
-            &value,
-            value_type,
-            module.ptr,
-            parameter.ptr,
-        );
-        try AnyError.initChecked(err, result);
-    }
-
-    /// Setter for a module parameter.
-    ///
-    /// Sets the value of a module parameter with private write access.
-    pub fn write(
-        self: *OpaqueParameter,
-        instance: *const OpaqueInstance,
-        value: OpaqueParameter.Value,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        var val: OpaqueParameter.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        value.toUntagged(&val, &value_type);
-        const result = self.writePrivateFfi(
-            instance,
-            &val,
-            value_type,
-        );
-        try AnyError.initChecked(err, result);
-    }
-};
-
-/// Typed internal state of a parameter.
-pub fn ParameterData(comptime T: type, comptime InstanceT: type) type {
-    std.debug.assert(
-        std.mem.indexOfScalar(u16, &.{ 8, 16, 32, 64 }, @typeInfo(T).int.bits) != null,
-    );
-    return opaque {
-        /// Internal getter for a module parameter.
-        pub fn read(
-            self: *const @This(),
-            instance: *const InstanceT,
-            err: *?AnyError,
-        ) AnyError.Error!T {
-            const value = try self.castOpaque().read(instance.castOpaque(), err);
-            return switch (@typeInfo(T).int.bits) {
-                8 => if (@typeInfo(T).int.signedness == .signed) value.i8 else value.u8,
-                16 => if (@typeInfo(T).int.signedness == .signed) value.i16 else value.u16,
-                32 => if (@typeInfo(T).int.signedness == .signed) value.i32 else value.u32,
-                64 => if (@typeInfo(T).int.signedness == .signed) value.i64 else value.u64,
-            };
+        /// Returns the value type of the parameter.
+        pub fn @"type"(self: *const Self) ParameterType {
+            return self.vtable.type(self);
         }
 
-        /// Internal setter for a module parameter.
-        pub fn write(
-            self: *@This(),
-            instance: *const InstanceT,
-            value: T,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            const v: OpaqueParameterData.Value = switch (@typeInfo(T).int.bits) {
-                8 => if (@typeInfo(T).int.signedness == .signed) .{ .i8 = value } else .{ .u8 = value },
-                16 => if (@typeInfo(T).int.signedness == .signed) .{ .i16 = value } else .{ .u16 = value },
-                32 => if (@typeInfo(T).int.signedness == .signed) .{ .i32 = value } else .{ .u32 = value },
-                64 => if (@typeInfo(T).int.signedness == .signed) .{ .i64 = value } else .{ .u64 = value },
-            };
-            try self.castOpaque().write(instance.castOpaque(), v, err);
+        /// Reads the value from the parameter.
+        pub fn read(self: *const Self) T {
+            var value: T = undefined;
+            self.vtable.read(self, &value);
+            return value;
         }
 
-        /// Casts the parameter data to an opaque parameter data pointer.
-        pub fn castOpaque(self: *@This()) *OpaqueParameterData {
-            return @ptrCast(self);
+        /// Writes the value into the parameter.
+        pub fn write(self: *Self, value: T) void {
+            self.vtable.write(self, &value);
         }
 
-        /// Casts the parameter data to an opaque parameter data pointer.
-        pub fn castOpaqueConst(self: *const @This()) *const OpaqueParameterData {
-            return @ptrCast(self);
-        }
-    };
-}
-
-/// Internal state of a parameter.
-pub const OpaqueParameterData = opaque {
-    /// Possible values contained in the parameter.
-    pub const Value = union(enum) {
-        u8: u8,
-        u16: u16,
-        u32: u32,
-        u64: u64,
-        i8: i8,
-        i16: i16,
-        i32: i32,
-        i64: i64,
-
-        fn fromUntagged(untagged: ValueUntagged, value_type: ParameterType) Value {
-            return switch (value_type) {
-                .u8 => .{ .u8 = untagged.u8 },
-                .u16 => .{ .u16 = untagged.u16 },
-                .u32 => .{ .u32 = untagged.u32 },
-                .u64 => .{ .u64 = untagged.u64 },
-                .i8 => .{ .i8 = untagged.i8 },
-                .i16 => .{ .i16 = untagged.i16 },
-                .i32 => .{ .i32 = untagged.i32 },
-                .i64 => .{ .i64 = untagged.i64 },
-                else => @panic("unknown parameter type"),
-            };
-        }
-
-        fn toUntagged(self: Value, untagged: *ValueUntagged, value_type: *ParameterType) void {
-            switch (self) {
-                .u8 => |v| {
-                    untagged.* = .{ .u8 = v };
-                    value_type.* = .u8;
-                },
-                .u16 => |v| {
-                    untagged.* = .{ .u16 = v };
-                    value_type.* = .u16;
-                },
-                .u32 => |v| {
-                    untagged.* = .{ .u32 = v };
-                    value_type.* = .u32;
-                },
-                .u64 => |v| {
-                    untagged.* = .{ .u64 = v };
-                    value_type.* = .u64;
-                },
-                .i8 => |v| {
-                    untagged.* = .{ .i8 = v };
-                    value_type.* = .i8;
-                },
-                .i16 => |v| {
-                    untagged.* = .{ .i16 = v };
-                    value_type.* = .i16;
-                },
-                .i32 => |v| {
-                    untagged.* = .{ .i32 = v };
-                    value_type.* = .i32;
-                },
-                .i64 => |v| {
-                    untagged.* = .{ .i64 = v };
-                    value_type.* = .i64;
-                },
+        /// Casts the opaque parameter to a typed variant.
+        pub fn castFromOpaque(parameter: *OpaqueParameter) *Self {
+            if (comptime T == void) {
+                return parameter;
+            } else {
+                const expected_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+                    8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+                    16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+                    32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+                    64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+                };
+                std.debug.assert(parameter.type() == expected_type);
+                return @ptrCast(parameter);
             }
         }
+
+        /// Casts the opaque parameter to a typed variant.
+        pub fn castFromOpaqueConst(parameter: *const OpaqueParameter) *const Self {
+            if (comptime T == void) {
+                return parameter;
+            } else {
+                const expected_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+                    8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+                    16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+                    32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+                    64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+                };
+                std.debug.assert(parameter.type() == expected_type);
+                return @ptrCast(parameter);
+            }
+        }
+
+        /// Casts the parameter to an opaque parameter.
+        pub fn castToOpaque(self: *Self) *OpaqueParameter {
+            return @ptrCast(self);
+        }
+
+        /// Casts the parameter to an opaque parameter.
+        pub fn castToOpaqueConst(self: *const Self) *const OpaqueParameter {
+            return @ptrCast(self);
+        }
     };
-    const ValueUntagged = extern union {
-        u8: u8,
-        u16: u16,
-        u32: u32,
-        u64: u64,
-        i8: i8,
-        i16: i16,
-        i32: i32,
-        i64: i64,
+}
+
+/// Untyped parameter accessor.
+pub const OpaqueParameter = Parameter(anyopaque);
+
+/// Internal state of a parameter.
+pub fn ParameterData(comptime T: type) type {
+    std.debug.assert(
+        T == anyopaque or std.mem.indexOfScalar(
+            u16,
+            &.{ 8, 16, 32, 64 },
+            @typeInfo(T).int.bits,
+        ) != null,
+    );
+
+    return extern struct {
+        data: *anyopaque,
+        vtable: *const @This().VTable,
+
+        /// VTable of a parameter data.
+        ///
+        /// Adding fields to this struct is not a breaking change.
+        pub const VTable = extern struct {
+            type: *const fn (data: *anyopaque) callconv(.c) ParameterType,
+            read: *const fn (data: *anyopaque, value: *T) callconv(.c) void,
+            write: *const fn (data: *anyopaque, value: *const T) callconv(.c) void,
+        };
+
+        /// Returns the value type of the parameter.
+        pub fn @"type"(self: @This()) ParameterType {
+            return self.vtable.type(self.data);
+        }
+
+        /// Reads the value from the parameter data.
+        pub fn read(self: @This()) T {
+            var value: T = undefined;
+            self.vtable.read(self.data, &value);
+            return value;
+        }
+
+        /// Writes the value into the parameter data.
+        pub fn write(self: @This(), value: T) void {
+            self.vtable.write(self.data, &value);
+        }
+
+        /// Casts the opaque parameter data to a typed variant.
+        pub fn castFromOpaque(parameter: OpaqueParameterData) @This() {
+            if (comptime T == void) {
+                return parameter;
+            } else {
+                const expected_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+                    8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+                    16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+                    32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+                    64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+                };
+                std.debug.assert(parameter.type() == expected_type);
+                return @bitCast(parameter);
+            }
+        }
+
+        /// Casts the parameter data to an opaque parameter data.
+        pub fn castToOpaque(self: @This()) OpaqueParameterData {
+            return @bitCast(self);
+        }
     };
+}
 
-    /// Internal getter for the module parameter data.
-    pub fn readFfi(
-        instance: *const OpaqueInstance,
-        value: *anyopaque,
-        value_type: *ParameterType,
-        self: *const OpaqueParameterData,
-    ) callconv(.c) c.FimoResult {
-        const ctx = Context.initC(instance.ctx);
-        return ctx.vtable.module_v0.param_get_inner(
-            ctx.data,
-            instance,
-            value,
-            value_type,
-            self,
-        );
-    }
-
-    /// Internal setter for the module parameter data.
-    pub fn writeFfi(
-        instance: *const OpaqueInstance,
-        value: *const anyopaque,
-        value_type: ParameterType,
-        self: *OpaqueParameterData,
-    ) callconv(.c) c.FimoResult {
-        const ctx = Context.initC(instance.ctx);
-        return ctx.vtable.module_v0.param_set_inner(
-            ctx.data,
-            instance,
-            value,
-            value_type,
-            self,
-        );
-    }
-
-    /// Internal getter for a module parameter.
-    pub fn read(
-        self: *const OpaqueParameterData,
-        instance: *const OpaqueInstance,
-        err: *?AnyError,
-    ) AnyError.Error!OpaqueParameterData.Value {
-        var value: OpaqueParameterData.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        const result = OpaqueParameterData.readFfi(
-            instance,
-            &value,
-            &value_type,
-            self,
-        );
-        try AnyError.initChecked(err, result);
-        return OpaqueParameterData.Value.fromUntagged(value, value_type);
-    }
-
-    /// Internal setter for a module parameter.
-    pub fn write(
-        self: *const OpaqueParameterData,
-        instance: *const OpaqueInstance,
-        value: OpaqueParameterData.Value,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        var val: OpaqueParameterData.ValueUntagged = undefined;
-        var value_type: ParameterType = undefined;
-        value.toUntagged(&val, &value_type);
-        const result = OpaqueParameterData.writeFfi(
-            instance,
-            &val,
-            value_type,
-            self,
-        );
-        try AnyError.initChecked(err, result);
-    }
-};
+/// Untyped state of a parameter.
+pub const OpaqueParameterData = ParameterData(anyopaque);
 
 /// Information about a symbol.
 pub const Symbol = struct {
@@ -705,8 +250,7 @@ pub const Info = extern struct {
 
     /// Signals that the owning instance may be unloaded.
     ///
-    /// The instance will be unladed once it is no longer actively used by
-    /// another instance.
+    /// The instance will be unladed once it is no longer actively used by another instance.
     pub fn markUnloadable(self: *const Info) void {
         self.vtable.mark_unloadable(self);
     }
@@ -718,9 +262,8 @@ pub const Info = extern struct {
 
     /// Increases the strong reference count of the module instance.
     ///
-    /// Will prevent the module from being unloaded. This may be used to pass
-    /// data, like callbacks, between modules, without registering the dependency
-    /// with the subsystem.
+    /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
+    /// between modules, without registering the dependency with the subsystem.
     pub fn refInstanceStrong(self: *const Info, err: *?AnyError) AnyError.Error!void {
         const result = self.vtable.ref_instance_strong(self);
         try AnyError.initChecked(err, result);
@@ -728,16 +271,16 @@ pub const Info = extern struct {
 
     /// Decreases the strong reference count of the module instance.
     ///
-    /// Should only be called after `acquire_module_strong`, when the dependency
-    /// is no longer required.
+    /// Should only be called after `acquire_module_strong`, when the dependency is no longer
+    /// required.
     pub fn unrefInstanceStrong(self: *const Info) void {
         self.vtable.unref_instance_strong(self);
     }
 
     /// Searches for a module by it's name.
     ///
-    /// Queries a module by its unique name. The returned `Info` instance
-    /// will have its reference count increased.
+    /// Queries a module by its unique name. The returned `Info` instance will have its reference
+    /// count increased.
     pub fn findByName(ctx: Module, module: [:0]const u8, err: *?AnyError) AnyError.Error!*const Info {
         var info: *const Info = undefined;
         const result = ctx.context.vtable.module_v0.find_by_name(
@@ -751,8 +294,8 @@ pub const Info = extern struct {
 
     /// Searches for a module by a symbol it exports.
     ///
-    /// Queries the module that exported the specified symbol. The returned
-    /// `Info` instance will have its reference count increased.
+    /// Queries the module that exported the specified symbol. The returned `Info` instance will
+    /// have its reference count increased.
     pub fn findBySymbol(
         ctx: Module,
         name: [:0]const u8,
@@ -775,10 +318,9 @@ pub const Info = extern struct {
 
 /// State of a loaded module.
 ///
-/// A module is self-contained, and may not be passed to other modules.
-/// An instance is valid for as long as the owning module remains loaded.
-/// Modules must not leak any resources outside it's own module, ensuring
-/// that they are destroyed upon module unloading.
+/// A module is self-contained, and may not be passed to other modules. An instance is valid for
+/// as long as the owning module remains loaded. Modules must not leak any resources outside it's
+/// own module, ensuring that they are destroyed upon module unloading.
 pub fn Instance(
     comptime ParametersT: type,
     comptime ResourcesT: type,
@@ -792,11 +334,9 @@ pub fn Instance(
             std.debug.assert(@alignOf(ParametersT) <= @alignOf(*OpaqueParameter));
             std.debug.assert(@sizeOf(ParametersT) % @sizeOf(*OpaqueParameter) == 0);
             for (@typeInfo(ParametersT).@"struct".fields) |field| {
-                const is_opaque_parameter = field.type == *OpaqueParameter;
-                const is_opaque = @typeInfo(@typeInfo(field.type).pointer.child) == .@"opaque";
-                std.debug.assert(is_opaque_parameter or is_opaque);
-                std.debug.assert(@typeInfo(field.type).pointer.is_const == false);
-                std.debug.assert(field.alignment == @alignOf(*OpaqueParameter));
+                std.debug.assert(@sizeOf(field.type) == @sizeOf(*OpaqueParameter));
+                std.debug.assert(@alignOf(field.type) == @alignOf(*OpaqueParameter));
+                std.debug.assert(@typeInfo(field.type).pointer.child.isParameter());
             }
         },
         .void => {},
@@ -909,21 +449,32 @@ pub fn Instance(
                 version: c.FimoVersion,
                 fut: *EnqueuedFuture(Fallible(*const anyopaque)),
             ) callconv(.c) c.FimoResult,
+            read_parameter: *const fn (
+                ctx: *const OpaqueInstance,
+                value: *anyopaque,
+                type: ParameterType,
+                module: [*:0]const u8,
+                parameter: [*:0]const u8,
+            ) callconv(.c) c.FimoResult,
+            write_parameter: *const fn (
+                ctx: *const OpaqueInstance,
+                value: *const anyopaque,
+                type: ParameterType,
+                module: [*:0]const u8,
+                parameter: [*:0]const u8,
+            ) callconv(.c) c.FimoResult,
         };
 
-        /// Returns the contained context without increasing the
-        /// reference count.
+        /// Returns the contained context without increasing the reference count.
         pub fn context(self: *const @This()) Context {
             return Context.initC(self.ctx);
         }
 
         /// Checks the status of a namespace from the view of the module.
         ///
-        /// Checks if the module includes the namespace. In that case,
-        /// the module is allowed access to the symbols in the namespace.
-        /// Additionally, this function also queries whether the include
-        /// is static, i.e., the include was specified by the module at
-        /// load time.
+        /// Checks if the module includes the namespace. In that case, the module is allowed access
+        /// to the symbols in the namespace. Additionally, this function also queries whether the
+        /// include is static, i.e., the include was specified by the module at load time.
         pub fn queryNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
@@ -945,9 +496,8 @@ pub fn Instance(
 
         /// Includes a namespace by the module.
         ///
-        /// Once included, the module gains access to the symbols
-        /// of its dependencies that are exposed in said namespace.
-        /// A namespace can not be included multiple times.
+        /// Once included, the module gains access to the symbols of its dependencies that are
+        /// exposed in said namespace. A namespace can not be included multiple times.
         pub fn addNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
@@ -965,11 +515,9 @@ pub fn Instance(
 
         /// Removes a namespace include from the module.
         ///
-        /// Once excluded, the caller guarantees to relinquish
-        /// access to the symbols contained in said namespace.
-        /// It is only possible to exclude namespaces that were
-        /// manually added, whereas static namespace includes
-        /// remain valid until the module is unloaded.
+        /// Once excluded, the caller guarantees to relinquish access to the symbols contained in
+        /// said namespace. It is only possible to exclude namespaces that were manually added,
+        /// whereas static namespace includes remain valid until the module is unloaded.
         pub fn removeNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
@@ -987,11 +535,10 @@ pub fn Instance(
 
         /// Checks if a module depends on another module.
         ///
-        /// Checks if the specified module is a dependency of the
-        /// current instance. In that case the instance is allowed
-        /// to access the symbols exported by the module. Additionally,
-        /// this function also queries whether the dependency is static,
-        /// i.e., the dependency was specified by the module at load time.
+        /// Checks if the specified module is a dependency of the current instance. In that case
+        /// the instance is allowed to access the symbols exported by the module. Additionally,
+        /// this function also queries whether the dependency is static, i.e., the dependency was
+        /// specified by the module at load time.
         pub fn queryDependency(
             self: *const @This(),
             info: *const Info,
@@ -1013,12 +560,10 @@ pub fn Instance(
 
         /// Acquires another module as a dependency.
         ///
-        /// After acquiring a module as a dependency, the module
-        /// is allowed access to the symbols and protected parameters
-        /// of said dependency. Trying to acquire a dependency to a
-        /// module that is already a dependency, or to a module that
-        /// would result in a circular dependency will result in an
-        /// error.
+        /// After acquiring a module as a dependency, the module is allowed access to the symbols
+        /// and protected parameters of said dependency. Trying to acquire a dependency to a module
+        /// that is already a dependency, or to a module that would result in a circular dependency
+        /// will result in an error.
         pub fn addDependency(
             self: *const @This(),
             info: *const Info,
@@ -1036,13 +581,10 @@ pub fn Instance(
 
         /// Removes a module as a dependency.
         ///
-        /// By removing a module as a dependency, the caller
-        /// ensures that it does not own any references to resources
-        /// originating from the former dependency, and allows for
-        /// the unloading of the module. A module can only relinquish
-        /// dependencies to modules that were acquired dynamically,
-        /// as static dependencies remain valid until the module is
-        /// unloaded.
+        /// By removing a module as a dependency, the caller ensures that it does not own any
+        /// references to resources originating from the former dependency, and allows for the
+        /// unloading of the module. A module can only relinquish dependencies to modules that were
+        /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
         pub fn removeDependency(
             self: *const @This(),
             info: *const Info,
@@ -1060,12 +602,10 @@ pub fn Instance(
 
         /// Loads a symbol from the module subsystem.
         ///
-        /// The caller can query the subsystem for a symbol of a loaded
-        /// module. This is useful for loading optional symbols, or
-        /// for loading symbols after the creation of a module. The
-        /// symbol, if it exists, is returned, and can be used until
-        /// the module relinquishes the dependency to the module that
-        /// exported the symbol. This function fails, if the module
+        /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+        /// loading optional symbols, or for loading symbols after the creation of a module. The
+        /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+        /// dependency to the module that exported the symbol. This function fails, if the module
         /// containing the symbol is not a dependency of the module.
         pub fn loadSymbol(
             self: *const @This(),
@@ -1083,12 +623,10 @@ pub fn Instance(
 
         /// Loads a symbol from the module subsystem.
         ///
-        /// The caller can query the subsystem for a symbol of a loaded
-        /// module. This is useful for loading optional symbols, or
-        /// for loading symbols after the creation of a module. The
-        /// symbol, if it exists, is returned, and can be used until
-        /// the module relinquishes the dependency to the module that
-        /// exported the symbol. This function fails, if the module
+        /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+        /// loading optional symbols, or for loading symbols after the creation of a module. The
+        /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+        /// dependency to the module that exported the symbol. This function fails, if the module
         /// containing the symbol is not a dependency of the module.
         pub fn loadSymbolRaw(
             self: *const @This(),
@@ -1111,44 +649,65 @@ pub fn Instance(
 
         /// Reads a module parameter with dependency read access.
         ///
-        /// Reads the value of a module parameter with dependency read
-        /// access. The operation fails, if the parameter does not exist,
-        /// or if the parameter does not allow reading with a dependency
-        /// access.
+        /// Reads the value of a module parameter with dependency read access. The operation fails,
+        /// if the parameter does not exist, or if the parameter does not allow reading with a
+        /// dependency access.
         pub fn readParameter(
             self: *const @This(),
+            comptime T: type,
             module: [:0]const u8,
             parameter: [:0]const u8,
             err: *?AnyError,
-        ) AnyError.Error!OpaqueParameter.Value {
-            return OpaqueParameter.readDependency(
+        ) AnyError.Error!T {
+            std.debug.assert(std.mem.indexOfScalar(
+                u16,
+                &.{ 8, 16, 32, 64 },
+                @typeInfo(T).int.bits,
+            ) != null);
+            var value: T = undefined;
+            const value_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+                8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+                16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+                32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+                64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+            };
+            const result = self.vtable.read_parameter(
                 self.castOpaque(),
-                module,
-                parameter,
-                err,
+                &value,
+                value_type,
+                module.ptr,
+                parameter.ptr,
             );
+            try AnyError.initChecked(err, result);
         }
 
         /// Sets a module parameter with dependency write access.
         ///
-        /// Sets the value of a module parameter with dependency write
-        /// access. The operation fails, if the parameter does not exist,
-        /// or if the parameter does not allow writing with a dependency
-        /// access.
+        /// Sets the value of a module parameter with dependency write access. The operation fails,
+        /// if the parameter does not exist, or if the parameter does not allow writing with a
+        /// dependency access.
         pub fn writeParameter(
             self: *const @This(),
-            value: OpaqueParameter.Value,
+            comptime T: type,
+            value: T,
             module: [:0]const u8,
             parameter: [:0]const u8,
             err: *?AnyError,
         ) AnyError.Error!void {
-            return OpaqueParameter.writeDependency(
+            const value_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+                8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+                16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+                32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+                64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+            };
+            const result = self.vtable.write_parameter(
                 self.castOpaque(),
-                value,
-                module,
-                parameter,
-                err,
+                &value,
+                value_type,
+                module.ptr,
+                parameter.ptr,
             );
+            try AnyError.initChecked(err, result);
         }
 
         /// Casts the instance pointer to an opaque instance pointer.
@@ -1177,13 +736,12 @@ pub const PseudoInstance = extern struct {
     pub const Exports = OpaqueInstance.Exports;
     pub const Data = OpaqueInstance.Data;
 
-    /// Constructs a new pseudo module.
+    /// Constructs a new pseudo instance.
     ///
-    /// The functions of the module subsystem require that the caller owns
-    /// a reference to their own module. This is a problem, as the constructor
-    /// of the context won't be assigned a module instance during bootstrapping.
-    /// As a workaround, we allow for the creation of pseudo modules, i.e.,
-    /// module handles without an associated module.
+    /// The functions of the module subsystem require that the caller owns a reference to their own
+    /// module. This is a problem, as the constructor of the context won't be assigned a module
+    /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
+    /// instances, i.e., module handles without an associated module.
     pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!*const PseudoInstance {
         var instance: *const PseudoInstance = undefined;
         const result = ctx.context.vtable.module_v0.pseudo_module_new(
@@ -1196,19 +754,17 @@ pub const PseudoInstance = extern struct {
 
     /// Destroys the pseudo module.
     ///
-    /// By destroying the pseudo module, the caller ensures that they
-    /// relinquished all access to handles derived by the module subsystem.
+    /// By destroying the pseudo module, the caller ensures that they relinquished all access to
+    /// handles derived by the module subsystem.
     pub fn deinit(self: *const PseudoInstance) void {
         self.castOpaque().info.markUnloadable();
     }
 
     /// Checks the status of a namespace from the view of the module.
     ///
-    /// Checks if the module includes the namespace. In that case,
-    /// the module is allowed access to the symbols in the namespace.
-    /// Additionally, this function also queries whether the include
-    /// is static, i.e., the include was specified by the module at
-    /// load time.
+    /// Checks if the module includes the namespace. In that case, the module is allowed access to
+    /// the symbols in the namespace. Additionally, this function also queries whether the include
+    /// is static, i.e., the include was specified by the module at load time.
     pub fn queryNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
@@ -1222,9 +778,8 @@ pub const PseudoInstance = extern struct {
 
     /// Includes a namespace by the module.
     ///
-    /// Once included, the module gains access to the symbols
-    /// of its dependencies that are exposed in said namespace.
-    /// A namespace can not be included multiple times.
+    /// Once included, the module gains access to the symbols of its dependencies that are exposed
+    /// in said namespace. A namespace can not be included multiple times.
     pub fn addNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
@@ -1238,11 +793,9 @@ pub const PseudoInstance = extern struct {
 
     /// Removes a namespace include from the module.
     ///
-    /// Once excluded, the caller guarantees to relinquish
-    /// access to the symbols contained in said namespace.
-    /// It is only possible to exclude namespaces that were
-    /// manually added, whereas static namespace includes
-    /// remain valid until the module is unloaded.
+    /// Once excluded, the caller guarantees to relinquish access to the symbols contained in said
+    /// namespace. It is only possible to exclude namespaces that were manually added, whereas
+    /// static namespace includes remain valid until the module is unloaded.
     pub fn removeNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
@@ -1256,11 +809,10 @@ pub const PseudoInstance = extern struct {
 
     /// Checks if a module depends on another module.
     ///
-    /// Checks if the specified module is a dependency of the
-    /// current instance. In that case the instance is allowed
-    /// to access the symbols exported by the module. Additionally,
-    /// this function also queries whether the dependency is static,
-    /// i.e., the dependency was specified by the module at load time.
+    /// Checks if the specified module is a dependency of the current instance. In that case the
+    /// instance is allowed to access the symbols exported by the module. Additionally, this
+    /// function also queries whether the dependency is static, i.e., the dependency was specified
+    /// by the module at load time.
     pub fn queryDependency(
         self: *const @This(),
         info: *const Info,
@@ -1274,12 +826,10 @@ pub const PseudoInstance = extern struct {
 
     /// Acquires another module as a dependency.
     ///
-    /// After acquiring a module as a dependency, the module
-    /// is allowed access to the symbols and protected parameters
-    /// of said dependency. Trying to acquire a dependency to a
-    /// module that is already a dependency, or to a module that
-    /// would result in a circular dependency will result in an
-    /// error.
+    /// After acquiring a module as a dependency, the module is allowed access to the symbols and
+    /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
+    /// already a dependency, or to a module that would result in a circular dependency will result
+    /// in an error.
     pub fn addDependency(
         self: *const @This(),
         info: *const Info,
@@ -1293,13 +843,10 @@ pub const PseudoInstance = extern struct {
 
     /// Removes a module as a dependency.
     ///
-    /// By removing a module as a dependency, the caller
-    /// ensures that it does not own any references to resources
-    /// originating from the former dependency, and allows for
-    /// the unloading of the module. A module can only relinquish
-    /// dependencies to modules that were acquired dynamically,
-    /// as static dependencies remain valid until the module is
-    /// unloaded.
+    /// By removing a module as a dependency, the caller ensures that it does not own any
+    /// references to resources originating from the former dependency, and allows for the
+    /// unloading of the module. A module can only relinquish dependencies to modules that were
+    /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
     pub fn removeDependency(
         self: *const @This(),
         info: *const Info,
@@ -1313,12 +860,10 @@ pub const PseudoInstance = extern struct {
 
     /// Loads a symbol from the module subsystem.
     ///
-    /// The caller can query the subsystem for a symbol of a loaded
-    /// module. This is useful for loading optional symbols, or
-    /// for loading symbols after the creation of a module. The
-    /// symbol, if it exists, is returned, and can be used until
-    /// the module relinquishes the dependency to the module that
-    /// exported the symbol. This function fails, if the module
+    /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+    /// loading optional symbols, or for loading symbols after the creation of a module. The
+    /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+    /// dependency to the module that exported the symbol. This function fails, if the module
     /// containing the symbol is not a dependency of the module.
     pub fn loadSymbol(
         self: *const @This(),
@@ -1330,12 +875,10 @@ pub const PseudoInstance = extern struct {
 
     /// Loads a symbol from the module subsystem.
     ///
-    /// The caller can query the subsystem for a symbol of a loaded
-    /// module. This is useful for loading optional symbols, or
-    /// for loading symbols after the creation of a module. The
-    /// symbol, if it exists, is returned, and can be used until
-    /// the module relinquishes the dependency to the module that
-    /// exported the symbol. This function fails, if the module
+    /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+    /// loading optional symbols, or for loading symbols after the creation of a module. The
+    /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+    /// dependency to the module that exported the symbol. This function fails, if the module
     /// containing the symbol is not a dependency of the module.
     pub fn loadSymbolRaw(
         self: *const @This(),
@@ -1354,17 +897,18 @@ pub const PseudoInstance = extern struct {
 
     /// Reads a module parameter with dependency read access.
     ///
-    /// Reads the value of a module parameter with dependency read
-    /// access. The operation fails, if the parameter does not exist,
-    /// or if the parameter does not allow reading with a dependency
+    /// Reads the value of a module parameter with dependency read access. The operation fails, if
+    /// the parameter does not exist, or if the parameter does not allow reading with a dependency
     /// access.
     pub fn readParameter(
         self: *const @This(),
+        comptime T: type,
         module: [:0]const u8,
         parameter: [:0]const u8,
         err: *?AnyError,
-    ) AnyError.Error!OpaqueParameter.Value {
+    ) AnyError.Error!T {
         return self.castOpaque().readParameter(
+            T,
             module,
             parameter,
             err,
@@ -1373,18 +917,19 @@ pub const PseudoInstance = extern struct {
 
     /// Sets a module parameter with dependency write access.
     ///
-    /// Sets the value of a module parameter with dependency write
-    /// access. The operation fails, if the parameter does not exist,
-    /// or if the parameter does not allow writing with a dependency
+    /// Sets the value of a module parameter with dependency write access. The operation fails, if
+    /// the parameter does not exist, or if the parameter does not allow writing with a dependency
     /// access.
     pub fn writeParameter(
         self: *const @This(),
-        value: OpaqueParameter.Value,
+        comptime T: type,
+        value: T,
         module: [:0]const u8,
         parameter: [:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!void {
         return self.castOpaque().writeParameter(
+            T,
             value,
             module,
             parameter,
@@ -1469,11 +1014,9 @@ pub const LoadingSet = extern struct {
 
     /// Constructs a new empty set.
     ///
-    /// Modules can only be loaded, if all of their dependencies can be
-    /// resolved, which requires us to determine a suitable load order.
-    /// A loading set is a utility to facilitate this process, by
-    /// automatically computing a suitable load order for a batch of
-    /// modules.
+    /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
+    /// to determine a suitable load order. A loading set is a utility to facilitate this process,
+    /// by automatically computing a suitable load order for a batch of modules.
     pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!EnqueuedFuture(Fallible(LoadingSet)) {
         var fut: EnqueuedFuture(Fallible(LoadingSet)) = undefined;
         const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &fut);
@@ -1525,15 +1068,14 @@ pub const LoadingSet = extern struct {
 
     /// Adds a status callback to the set.
     ///
-    /// Adds a callback to report a successful or failed loading of
-    /// a module. The success callback wil be called if the set was able to load
-    /// all requested modules, whereas the error callback will be called immediately
-    /// after the failed loading of the module. Since the module set can be in a
-    /// partially loaded state at the time of calling this function, the error path
-    /// may be invoked immediately. The callbacks will be provided with a user-specified
+    /// Adds a callback to report a successful or failed loading of a module. The success callback
+    /// will be called if the set was able to load all requested modules, whereas the error
+    /// callback will be called immediately after the failed loading of the module. Since the
+    /// module set can be in a partially loaded state at the time of calling this function, the
+    /// error path may be invoked immediately. The callbacks will be provided with a user-specified
     /// data pointer, which they are in charge of cleaning up. If an error occurs during the
-    /// execution of the returned future, it will invoke the optional `on_abort` function.
-    /// If the requested module does not exist, the returned future will return an error.
+    /// execution of the returned future, it will invoke the optional `on_abort` function. If the
+    /// requested module does not exist, the returned future will return an error.
     pub fn addCallback(
         self: LoadingSet,
         module: [:0]const u8,
@@ -1576,15 +1118,14 @@ pub const LoadingSet = extern struct {
 
     /// Adds a status callback to the set.
     ///
-    /// Adds a callback to report a successful or failed loading of
-    /// a module. The success path wil be called if the set was able to load
-    /// all requested modules, whereas the error path will be called immediately
-    /// after the failed loading of the module. Since the module set can be in a
-    /// partially loaded state at the time of calling this function, the error path
-    /// may be invoked immediately. The callbacks will be provided with a user-specified
-    /// data pointer, which they are in charge of cleaning up. If an error occurs during the
-    /// execution of the returned future, it will invoke the optional `on_abort` function.
-    /// If the requested module does not exist, the returned future will return an error.
+    /// Adds a callback to report a successful or failed loading of a module. The success path will
+    /// be called if the set was able to load all requested modules, whereas the error path will be
+    /// called immediately after the failed loading of the module. Since the module set can be in a
+    /// partially loaded state at the time of calling this function, the error path may be invoked
+    /// immediately. The callbacks will be provided with a user-specified data pointer, which they
+    /// are in charge of cleaning up. If an error occurs during the execution of the returned
+    /// future, it will invoke the optional `on_abort` function. If the requested module does not
+    /// exist, the returned future will return an error.
     pub fn addCallbackCustom(
         self: LoadingSet,
         module: [*:0]const u8,
@@ -1610,16 +1151,15 @@ pub const LoadingSet = extern struct {
 
     /// Adds a module to the set.
     ///
-    /// Adds a module to the set, so that it may be loaded by a future call
-    /// to `commit`. Trying to include an invalid module, a module with
-    /// duplicate exports or duplicate name will result in an error. Unlike
-    /// `addModulesFromPath`, this function allows for the loading of dynamic
-    /// modules, i.e. modules that are created at runtime, like non-native
-    /// modules, which may require a runtime to be executed in. The new module
-    /// inherits a strong reference to the same binary as the caller's module.
+    /// Adds a module to the set, so that it may be loaded by a future call to `commit`. Trying to
+    /// include an invalid module, a module with duplicate exports or duplicate name will result in
+    /// an error. Unlike `addModulesFromPath`, this function allows for the loading of dynamic
+    /// modules, i.e. modules that are created at runtime, like non-native modules, which may
+    /// require a runtime to be executed in. The new module inherits a strong reference to the same
+    /// binary as the caller's module.
     ///
-    /// Note that the new module is not setup to automatically depend on the
-    /// owner, but may prevent it from being unloaded while the set exists.
+    /// Note that the new module is not setup to automatically depend on the owner, but may prevent
+    /// it from being unloaded while the set exists.
     pub fn addModule(
         self: LoadingSet,
         owner: *const OpaqueInstance,
@@ -1639,19 +1179,16 @@ pub const LoadingSet = extern struct {
 
     /// Adds modules to the set.
     ///
-    /// Opens up a module binary to select which modules to load.
-    /// If the path points to a file, the function will try to load the file
-    /// as a binary, whereas, if it points to a directory, it will try to
-    /// load a file named `module.fimo_module` contained in the directory.
-    /// Each exported module is then passed to the filter, along with the
-    /// provided data, which can then filter which modules to load. This
-    /// function may skip invalid module exports. Trying to include a module
-    /// with duplicate exports or duplicate name will result in an error.
-    /// This function signals an error, if the binary does not contain the
-    /// symbols necessary to query the exported modules, but does not return
-    /// an error, if it does not export any modules. The necessary symbols
-    /// are set up automatically, if the binary was linked with the fimo
-    /// library. In case of an error, no modules are appended to the set.
+    /// Opens up a module binary to select which modules to load. If the path points to a file, the
+    /// function will try to load the file as a binary, whereas, if it points to a directory, it
+    /// will try to load a file named `module.fimo_module` contained in the directory. Each
+    /// exported module is then passed to the filter, along with the provided data, which can then
+    /// filter which modules to load. This function may skip invalid module exports. Trying to
+    /// include a module with duplicate exports or duplicate name will result in an error. This
+    /// function signals an error, if the binary does not contain the symbols necessary to query
+    /// the exported modules, but does not return an error, if it does not export any modules. The
+    /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
+    /// In case of an error, no modules are appended to the set.
     pub fn addModulesFromPath(
         self: LoadingSet,
         path: Path,
@@ -1686,19 +1223,16 @@ pub const LoadingSet = extern struct {
 
     /// Adds modules to the set.
     ///
-    /// Opens up a module binary to select which modules to load.
-    /// If the path points to a file, the function will try to load the file
-    /// as a binary, whereas, if it points to a directory, it will try to
-    /// load a file named `module.fimo_module` contained in the directory.
-    /// Each exported module is then passed to the filter, along with the
-    /// provided data, which can then filter which modules to load. This
-    /// function may skip invalid module exports. Trying to include a module
-    /// with duplicate exports or duplicate name will result in an error.
-    /// This function signals an error, if the binary does not contain the
-    /// symbols necessary to query the exported modules, but does not return
-    /// an error, if it does not export any modules. The necessary symbols
-    /// are set up automatically, if the binary was linked with the fimo
-    /// library. In case of an error, no modules are appended to the set.
+    /// Opens up a module binary to select which modules to load. If the path points to a file, the
+    /// function will try to load the file as a binary, whereas, if it points to a directory, it
+    /// will try to load a file named `module.fimo_module` contained in the directory. Each
+    /// exported module is then passed to the filter, along with the provided data, which can then
+    /// filter which modules to load. This function may skip invalid module exports. Trying to
+    /// include a module with duplicate exports or duplicate name will result in an error. This
+    /// function signals an error, if the binary does not contain the symbols necessary to query
+    /// the exported modules, but does not return an error, if it does not export any modules. The
+    /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
+    /// In case of an error, no modules are appended to the set.
     pub fn addModulesFromPathCustom(
         self: LoadingSet,
         path: Path,
@@ -1722,17 +1256,14 @@ pub const LoadingSet = extern struct {
 
     /// Adds modules to the set.
     ///
-    /// Iterates over the exported modules of the current binary. Each exported
-    /// module is then passed to the filter, along with the provided data,
-    /// which can then filter which modules to load. This function may skip
-    /// invalid module exports. Trying to include a module with duplicate
-    /// exports or duplicate name will result in an error. This function
-    /// signals an error, if the binary does not contain the symbols
-    /// necessary to query the exported modules, but does not return
-    /// an error, if it does not export any modules. The necessary
-    /// symbols are set up automatically, if the binary was linked with
-    /// the fimo library. In case of an error, no modules are appended
-    /// to the set.
+    /// Iterates over the exported modules of the current binary. Each exported module is then
+    /// passed to the filter, along with the provided data, which can then filter which modules to
+    /// load. This function may skip invalid module exports. Trying to include a module with
+    /// duplicate exports or duplicate name will result in an error. This function signals an
+    /// error, if the binary does not contain the symbols necessary to query the exported modules,
+    /// but does not return an error, if it does not export any modules. The necessary symbols are
+    /// set up automatically, if the binary was linked with the fimo library. In case of an error,
+    /// no modules are appended to the set.
     pub fn addModulesFromLocal(
         self: LoadingSet,
         obj: anytype,
@@ -1765,17 +1296,14 @@ pub const LoadingSet = extern struct {
 
     /// Adds modules to the set.
     ///
-    /// Iterates over the exported modules of the current binary. Each exported
-    /// module is then passed to the filter, along with the provided data,
-    /// which can then filter which modules to load. This function may skip
-    /// invalid module exports. Trying to include a module with duplicate
-    /// exports or duplicate name will result in an error. This function
-    /// signals an error, if the binary does not contain the symbols
-    /// necessary to query the exported modules, but does not return
-    /// an error, if it does not export any modules. The necessary
-    /// symbols are set up automatically, if the binary was linked with
-    /// the fimo library. In case of an error, no modules are appended
-    /// to the set.
+    /// Iterates over the exported modules of the current binary. Each exported module is then
+    /// passed to the filter, along with the provided data, which can then filter which modules to
+    /// load. This function may skip invalid module exports. Trying to include a module with
+    /// duplicate exports or duplicate name will result in an error. This function signals an
+    /// error, if the binary does not contain the symbols necessary to query the exported modules,
+    /// but does not return an error, if it does not export any modules. The necessary symbols are
+    /// set up automatically, if the binary was linked with the fimo library. In case of an error,
+    /// no modules are appended to the set.
     pub fn addModulesFromLocalCustom(
         self: LoadingSet,
         filter_data: ?*anyopaque,
@@ -1799,15 +1327,13 @@ pub const LoadingSet = extern struct {
 
     /// Loads the modules contained in the set.
     ///
-    /// If the returned future is successfull, the contained modules and their
-    /// resources are made available to the remaining modules. Some conditions
-    /// may hinder the loading of some module, like missing dependencies,
-    /// duplicates, and other loading errors. In those cases, the modules will
-    /// be skipped without erroring.
+    /// If the returned future is successfull, the contained modules and their resources are made
+    /// available to the remaining modules. Some conditions may hinder the loading of some module,
+    /// like missing dependencies, duplicates, and other loading errors. In those cases, the
+    /// modules will be skipped without erroring.
     ///
-    /// It is possible to submit multiple concurrent commit requests, even from
-    /// the same loading set. In that case, the requests will be handled
-    /// atomically, in an unspecified order.
+    /// It is possible to submit multiple concurrent commit requests, even from the same loading
+    /// set. In that case, the requests will be handled atomically, in an unspecified order.
     pub fn commit(self: LoadingSet, err: *?AnyError) AnyError.Error!EnqueuedFuture(Fallible(void)) {
         var fut: EnqueuedFuture(Fallible(void)) = undefined;
         const result = self.vtable.commit(self.data, &fut);
@@ -1846,7 +1372,7 @@ pub const VTable = extern struct {
         exists: *bool,
     ) callconv(.c) c.FimoResult,
     prune_instances: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
-    param_query: *const fn (
+    query_parameter: *const fn (
         ctx: *anyopaque,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
@@ -1854,70 +1380,25 @@ pub const VTable = extern struct {
         read_group: *ParameterAccessGroup,
         write_group: *ParameterAccessGroup,
     ) callconv(.c) c.FimoResult,
-    param_set_public: *const fn (
+    read_parameter: *const fn (
+        ctx: *anyopaque,
+        value: *anyopaque,
+        type: ParameterType,
+        module: [*:0]const u8,
+        parameter: [*:0]const u8,
+    ) callconv(.c) c.FimoResult,
+    write_parameter: *const fn (
         ctx: *anyopaque,
         value: *const anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
-    param_get_public: *const fn (
-        ctx: *anyopaque,
-        value: *anyopaque,
-        type: *ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
-    param_set_dependency: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        value: *const anyopaque,
-        type: ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
-    param_get_dependency: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        value: *anyopaque,
-        type: *ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
-    param_set_private: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        value: *const anyopaque,
-        type: ParameterType,
-        parameter: *OpaqueParameter,
-    ) callconv(.c) c.FimoResult,
-    param_get_private: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        value: *anyopaque,
-        type: *ParameterType,
-        parameter: *const OpaqueParameter,
-    ) callconv(.c) c.FimoResult,
-    param_set_inner: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        value: *const anyopaque,
-        type: ParameterType,
-        parameter: *OpaqueParameterData,
-    ) callconv(.c) c.FimoResult,
-    param_get_inner: *const fn (
-        ctx: *anyopaque,
-        instance: *const OpaqueInstance,
-        value: *anyopaque,
-        type: *ParameterType,
-        parameter: *const OpaqueParameterData,
     ) callconv(.c) c.FimoResult,
 };
 
 /// Checks for the presence of a namespace in the module subsystem.
 ///
-/// A namespace exists, if at least one loaded module exports
-/// one symbol in said namespace.
+/// A namespace exists, if at least one loaded module exports one symbol in said namespace.
 pub fn namespaceExists(
     self: Module,
     namespace: [:0]const u8,
@@ -1946,43 +1427,95 @@ pub fn pruneInstances(
 
 /// Queries the info of a module parameter.
 ///
-/// This function can be used to query the datatype, the read access,
-/// and the write access of a module parameter. This function fails,
-/// if the parameter can not be found.
+/// This function can be used to query the datatype, the read access, and the write access of a
+/// module parameter. This function fails, if the parameter can not be found.
 pub fn queryParameter(
     self: Module,
     module: [:0]const u8,
     parameter: [:0]const u8,
     err: *?AnyError,
 ) AnyError.Error!OpaqueParameter.Info {
-    return OpaqueParameter.query(self, module, parameter, err);
+    var tag: ParameterType = undefined;
+    var read_group: ParameterAccessGroup = undefined;
+    var write_group: ParameterAccessGroup = undefined;
+    const result = self.context.vtable.module_v0.query_parameter(
+        self.context.data,
+        module.ptr,
+        parameter.ptr,
+        &tag,
+        &read_group,
+        &write_group,
+    );
+    try AnyError.initChecked(err, result);
+    return .{
+        .tag = tag,
+        .read_group = read_group,
+        .write_group = write_group,
+    };
 }
 
 /// Reads a module parameter with public read access.
 ///
-/// Reads the value of a module parameter with public read access.
-/// The operation fails, if the parameter does not exist, or if
-/// the parameter does not allow reading with a public access.
+/// Reads the value of a module parameter with public read access. The operation fails, if the
+/// parameter does not exist, or if the parameter does not allow reading with a public access.
 pub fn readParameter(
     self: Module,
+    comptime T: type,
     module: [:0]const u8,
     parameter: [:0]const u8,
     err: *?AnyError,
-) AnyError.Error!OpaqueParameter.Value {
-    return OpaqueParameter.readPublic(self, module, parameter, err);
+) AnyError.Error!T {
+    std.debug.assert(std.mem.indexOfScalar(
+        u16,
+        &.{ 8, 16, 32, 64 },
+        @typeInfo(T).int.bits,
+    ) != null);
+    var value: T = undefined;
+    const value_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+        8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+        16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+        32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+        64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+    };
+    const result = self.context.vtable.module_v0.read_parameter(
+        self.context.data,
+        &value,
+        value_type,
+        module.ptr,
+        parameter.ptr,
+    );
+    try AnyError.initChecked(err, result);
 }
 
 /// Sets a module parameter with public write access.
 ///
-/// Sets the value of a module parameter with public write access.
-/// The operation fails, if the parameter does not exist, or if
-/// the parameter does not allow writing with a public access.
+/// Sets the value of a module parameter with public write access. The operation fails, if the
+/// parameter does not exist, or if the parameter does not allow writing with a public access.
 pub fn writeParameter(
     self: Module,
-    value: OpaqueParameter.Value,
+    comptime T: type,
+    value: T,
     module: [:0]const u8,
     parameter: [:0]const u8,
     err: *?AnyError,
 ) AnyError.Error!void {
-    return OpaqueParameter.writePublic(self, value, module, parameter, err);
+    std.debug.assert(std.mem.indexOfScalar(
+        u16,
+        &.{ 8, 16, 32, 64 },
+        @typeInfo(T).int.bits,
+    ) != null);
+    const value_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
+        8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
+        16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
+        32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
+        64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
+    };
+    const result = self.context.vtable.module_v0.write_parameter(
+        self.context.data,
+        &value,
+        value_type,
+        module.ptr,
+        parameter.ptr,
+    );
+    try AnyError.initChecked(err, result);
 }

@@ -85,7 +85,6 @@ unused_self = "warn"
 useless_transmute = "warn"
 verbose_file_reads = "warn"
 zero_sized_map_values = "warn"
-undocumented_unsafe_blocks = "deny"
 
 [patch.crates-io.zigcli]
 path = "tools/zigcli-rs"

@@ -1,7 +1,6 @@
 //! Module subsystem.
 
-use alloc::boxed::Box;
-use core::{ffi::CStr, mem::MaybeUninit};
+use std::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
     bindings,
@@ -521,47 +520,15 @@ macro_rules! export_module_private_parameter {
         $crate::bindings::FimoModuleParamAccessGroup::FIMO_MODULE_PARAM_ACCESS_GROUP_PRIVATE
     };
     (getter $mod_ident:ident;) => {
-        Some($crate::module::c_ffi::get_param_default as _)
+        None
     };
-    (getter $mod_ident:ident; $x:ident) => {{
-        extern "C" fn getter(
-            module: *const $crate::bindings::FimoModuleInstance,
-            value: *mut core::ffi::c_void,
-            type_: *mut $crate::bindings::FimoModuleParamType,
-            data: *const $crate::bindings::FimoModuleParamData,
-        ) {
-            // Safety:
-            unsafe {
-                $crate::module::c_ffi::get_param::<$mod_ident<'_>, _>(module, value, type_, data, $x)
-            }
-        }
-
-        Some(getter as _)
-    }};
     (setter $mod_ident:ident;) => {
-        Some($crate::module::c_ffi::set_param_default as _)
+        None
     };
-    (setter $mod_ident:ident; $x:ident) => {{
-        extern "C" fn setter(
-            module: *const $crate::bindings::FimoModuleInstance,
-            value: *const core::ffi::c_void,
-            type_: $crate::bindings::FimoModuleParamType,
-            data: *mut $crate::bindings::FimoModuleParamData,
-        ) {
-            // Safety:
-            unsafe {
-                $crate::module::c_ffi::set_param::<$mod_ident<'_>, _>(module, value, type_, data, $x)
-            }
-        }
-
-        Some(setter as _)
-    }};
     ($mod_ident:ident; $( $name:ident: {
         default: $default_ty:ident ( $default:literal ),
         $(read_group: $read:ident,)?
         $(write_group: $write:ident,)?
-        $(getter: $getter:ident,)?
-        $(setter: $setter:ident,)?
         $(override: $param_ty:ty,)?
     }),* $(,)?) => {
         &[
@@ -570,8 +537,8 @@ macro_rules! export_module_private_parameter {
                     type_: $crate::export_module_private_parameter!(default_type $default_ty),
                     read_group: $crate::export_module_private_parameter!(group $($read)?),
                     write_group: $crate::export_module_private_parameter!(group $($write)?),
-                    setter: $crate::export_module_private_parameter!(setter $mod_ident; $($setter)?),
-                    getter: $crate::export_module_private_parameter!(getter $mod_ident; $($getter)?),
+                    read: None,
+                    write: None,
                     name: {
                         let x: &'static str = core::concat!(core::stringify!($name), '\0');
                         x.as_ptr().cast()
@@ -585,8 +552,6 @@ macro_rules! export_module_private_parameter {
         default: $default_ty:ident ( $default:literal ),
         $(read_group: $read:ident,)?
         $(write_group: $write:ident,)?
-        $(getter: $getter:ident,)?
-        $(setter: $setter:ident,)?
         $(override: $param_ty:ty,)?
     }),* $(,)?) => {
         $crate::paste::paste! {
@@ -594,21 +559,19 @@ macro_rules! export_module_private_parameter {
             #[doc = "Parameter table for the `" $mod_ident "` module"]
             pub struct [<$mod_ident Parameters>] {
                 $(
-                    $name: $crate::module::Parameter<
-                        'static,
+                    $name: std::pin::Pin<&'static $crate::module::Parameter<
                         $crate::export_module_private_parameter!(param_type $default_ty $($param_ty)?)
-                    >,
+                    >>,
                 )*
             }
 
             impl [<$mod_ident Parameters>] {
                 $(
                     #[doc = "Fetches the `" $name "` parameter"]
-                    pub fn $name(&self) -> &$crate::module::Parameter<
-                        '_,
+                    pub fn $name(&self) -> std::pin::Pin<&$crate::module::Parameter<
                         $crate::export_module_private_parameter!(param_type $default_ty $($param_ty)?)
-                    > {
-                        &self.$name
+                    >> {
+                        self.$name
                     }
                 )*
             }
@@ -999,179 +962,17 @@ macro_rules! export_module_private_data {
 #[doc(hidden)]
 pub mod c_ffi {
     use crate::{
-        bindings, error,
+        bindings,
         error::Error,
         ffi::FFITransferable,
         module::{
-            DynamicExport, LoadingSetView, Module, ModuleConstructor, ParameterType,
-            ParameterValue, PartialModule, PreModule,
+            DynamicExport, LoadingSetView, Module, ModuleConstructor, PartialModule, PreModule,
         },
         version::Version,
     };
-    use core::cell::UnsafeCell;
 
     pub const fn extract_version(version: Version) -> bindings::FimoVersion {
         version.0
-    }
-
-    pub unsafe extern "C" fn get_param_default(
-        module: *const bindings::FimoModuleInstance,
-        value: *mut core::ffi::c_void,
-        type_: *mut bindings::FimoModuleParamType,
-        data: *const bindings::FimoModuleParamData,
-    ) -> bindings::FimoResult {
-        // Safety:
-        unsafe {
-            let f = (*(*module).context.vtable)
-                .module_v0
-                .param_get_inner
-                .unwrap_unchecked();
-            f((*module).context.data, module, value, type_, data)
-        }
-    }
-
-    pub unsafe extern "C" fn set_param_default(
-        module: *const bindings::FimoModuleInstance,
-        value: *const core::ffi::c_void,
-        type_: bindings::FimoModuleParamType,
-        data: *mut bindings::FimoModuleParamData,
-    ) -> bindings::FimoResult {
-        // Safety:
-        unsafe {
-            let f = (*(*module).context.vtable)
-                .module_v0
-                .param_set_inner
-                .unwrap_unchecked();
-            f((*module).context.data, module, value, type_, data)
-        }
-    }
-
-    pub unsafe extern "C" fn get_param<T, F>(
-        module: *const bindings::FimoModuleInstance,
-        value: *mut core::ffi::c_void,
-        type_: *mut bindings::FimoModuleParamType,
-        data: *mut bindings::FimoModuleParamData,
-        f: F,
-    ) -> bindings::FimoResult
-    where
-        T: Module,
-        F: FnOnce(&T, &UnsafeCell<bindings::FimoModuleParamData>) -> Result<ParameterValue, Error>,
-    {
-        crate::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // Safety:
-            unsafe {
-                let module: &T = &*module.cast();
-                let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
-                let context = module.context();
-                match crate::panic::with_panic_context(context, |_| f(module, data)) {
-                    Ok(x) => {
-                        use bindings::FimoModuleParamType;
-                        match x {
-                            ParameterValue::U8(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U8,
-                                );
-                            }
-                            ParameterValue::U16(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U16,
-                                );
-                            }
-                            ParameterValue::U32(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U32,
-                                );
-                            }
-                            ParameterValue::U64(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_U64,
-                                );
-                            }
-                            ParameterValue::I8(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I8,
-                                );
-                            }
-                            ParameterValue::I16(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I16,
-                                );
-                            }
-                            ParameterValue::I32(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I32,
-                                );
-                            }
-                            ParameterValue::I64(x) => {
-                                core::ptr::write(value.cast(), x);
-                                core::ptr::write(
-                                    type_,
-                                    FimoModuleParamType::FIMO_MODULE_PARAM_TYPE_I64,
-                                );
-                            }
-                        }
-                        Ok(())
-                    }
-                    Err(x) => Err(x),
-                }
-            }
-        }))
-        .map_err(Into::into)
-        .flatten()
-        .into_ffi()
-    }
-
-    pub unsafe extern "C" fn set_param<T, F>(
-        module: *const bindings::FimoModuleInstance,
-        value: *const core::ffi::c_void,
-        type_: bindings::FimoModuleParamType,
-        data: *mut bindings::FimoModuleParamData,
-        f: F,
-    ) -> bindings::FimoResult
-    where
-        T: Module,
-        F: FnOnce(&T, ParameterValue, &UnsafeCell<bindings::FimoModuleParamData>) -> error::Result,
-    {
-        crate::panic::catch_unwind(|| {
-            // Safety:
-            unsafe {
-                let module: &T = &*module.cast();
-                let data = &*data.cast::<UnsafeCell<bindings::FimoModuleParamData>>();
-                let type_ = match ParameterType::try_from(type_) {
-                    Ok(x) => x,
-                    Err(e) => return Err(e),
-                };
-                let value = match type_ {
-                    ParameterType::U8 => ParameterValue::U8(core::ptr::read(value.cast())),
-                    ParameterType::U16 => ParameterValue::U16(core::ptr::read(value.cast())),
-                    ParameterType::U32 => ParameterValue::U32(core::ptr::read(value.cast())),
-                    ParameterType::U64 => ParameterValue::U64(core::ptr::read(value.cast())),
-                    ParameterType::I8 => ParameterValue::I8(core::ptr::read(value.cast())),
-                    ParameterType::I16 => ParameterValue::I16(core::ptr::read(value.cast())),
-                    ParameterType::I32 => ParameterValue::I32(core::ptr::read(value.cast())),
-                    ParameterType::I64 => ParameterValue::I64(core::ptr::read(value.cast())),
-                };
-                let context = module.context();
-                crate::panic::with_panic_context(context, |_| f(module, value, data))
-            }
-        })
-        .map_err(Into::into)
-        .flatten()
-        .into_ffi()
     }
 
     pub unsafe fn construct_dynamic_symbol<T, S>(

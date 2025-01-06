@@ -1,7 +1,6 @@
 //! Fimo memory allocator.
 
-use alloc::alloc::handle_alloc_error;
-use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
+use std::alloc::{handle_alloc_error, AllocError, Allocator, GlobalAlloc, Layout};
 
 use crate::{bindings, error::to_result_indirect};
 

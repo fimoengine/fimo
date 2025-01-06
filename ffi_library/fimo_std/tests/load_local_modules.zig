@@ -41,29 +41,26 @@ fn initCModule(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !void
         @src(),
     );
 
-    var err: ?fimo_std.AnyError = null;
-    defer if (err) |e| e.deinit();
-
     const parameters = ctx.parameters;
-    try testing.expectEqual(0, try parameters.pub_pub.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(1, try parameters.pub_dep.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(2, try parameters.pub_pri.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(3, try parameters.dep_pub.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(4, try parameters.dep_dep.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(5, try parameters.dep_pri.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(6, try parameters.pri_pub.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(7, try parameters.pri_dep.read(ctx.castOpaque(), &err));
-    try testing.expectEqual(8, try parameters.pri_pri.read(ctx.castOpaque(), &err));
+    try testing.expectEqual(0, parameters.pub_pub.read());
+    try testing.expectEqual(1, parameters.pub_dep.read());
+    try testing.expectEqual(2, parameters.pub_pri.read());
+    try testing.expectEqual(3, parameters.dep_pub.read());
+    try testing.expectEqual(4, parameters.dep_dep.read());
+    try testing.expectEqual(5, parameters.dep_pri.read());
+    try testing.expectEqual(6, parameters.pri_pub.read());
+    try testing.expectEqual(7, parameters.pri_dep.read());
+    try testing.expectEqual(8, parameters.pri_pri.read());
 
-    try parameters.pub_pub.write(ctx.castOpaque(), 0, &err);
-    try parameters.pub_dep.write(ctx.castOpaque(), 1, &err);
-    try parameters.pub_pri.write(ctx.castOpaque(), 2, &err);
-    try parameters.dep_pub.write(ctx.castOpaque(), 3, &err);
-    try parameters.dep_dep.write(ctx.castOpaque(), 4, &err);
-    try parameters.dep_pri.write(ctx.castOpaque(), 5, &err);
-    try parameters.pri_pub.write(ctx.castOpaque(), 6, &err);
-    try parameters.pri_dep.write(ctx.castOpaque(), 7, &err);
-    try parameters.pri_pri.write(ctx.castOpaque(), 8, &err);
+    parameters.pub_pub.write(0);
+    parameters.pub_dep.write(1);
+    parameters.pub_pri.write(2);
+    parameters.dep_pub.write(3);
+    parameters.dep_dep.write(4);
+    parameters.dep_pri.write(5);
+    parameters.pri_pub.write(6);
+    parameters.pri_dep.write(7);
+    parameters.pri_pri.write(8);
 
     const resources = ctx.resources;
     ctx.context().tracing().emitTraceSimple("empty: '{s}'", .{resources.empty}, @src());

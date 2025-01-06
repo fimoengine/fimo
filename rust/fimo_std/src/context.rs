@@ -1,7 +1,6 @@
 //! Fimo context.
 
-use alloc::boxed::Box;
-use core::{marker::PhantomData, mem::ManuallyDrop, ops::Deref, pin::Pin};
+use std::{boxed::Box, marker::PhantomData, mem::ManuallyDrop, ops::Deref, pin::Pin};
 
 use crate::{
     allocator::FimoAllocator,

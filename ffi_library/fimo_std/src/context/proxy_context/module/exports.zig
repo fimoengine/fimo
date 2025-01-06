@@ -17,18 +17,14 @@ pub const Parameter = extern struct {
     type: Module.ParameterType,
     read_group: Module.ParameterAccessGroup = .private,
     write_group: Module.ParameterAccessGroup = .private,
-    setter: *const fn (
-        ctx: *const Module.OpaqueInstance,
-        value: *const anyopaque,
-        type: Module.ParameterType,
-        data: *Module.OpaqueParameterData,
-    ) callconv(.C) c.FimoResult = Module.OpaqueParameterData.writeFfi,
-    getter: *const fn (
-        ctx: *const Module.OpaqueInstance,
+    read: ?*const fn (
+        data: Module.OpaqueParameterData,
         value: *anyopaque,
-        type: *Module.ParameterType,
-        data: *const Module.OpaqueParameterData,
-    ) callconv(.C) c.FimoResult = Module.OpaqueParameterData.readFfi,
+    ) callconv(.C) void = null,
+    write: ?*const fn (
+        data: Module.OpaqueParameterData,
+        value: *const anyopaque,
+    ) callconv(.C) void = null,
     name: [*:0]const u8,
     default_value: extern union {
         u8: u8,
@@ -252,21 +248,26 @@ pub const Builder = struct {
     const Parameter = struct {
         name: []const u8,
         member_name: [:0]const u8,
-        default_value: Module.OpaqueParameter.Value,
+        default_value: union(enum) {
+            u8: u8,
+            u16: u16,
+            u32: u32,
+            u64: u64,
+            i8: i8,
+            i16: i16,
+            i32: i32,
+            i64: i64,
+        },
         read_group: Module.ParameterAccessGroup = .private,
         write_group: Module.ParameterAccessGroup = .private,
-        read: *const fn (
-            ctx: *const Module.OpaqueInstance,
+        read: ?*const fn (
+            data: Module.OpaqueParameterData,
             value: *anyopaque,
-            type: *Module.ParameterType,
-            data: *const Module.OpaqueParameterData,
-        ) callconv(.C) c.FimoResult = Module.OpaqueParameterData.readFfi,
-        write: *const fn (
-            ctx: *const Module.OpaqueInstance,
+        ) callconv(.c) void = null,
+        write: ?*const fn (
+            data: Module.OpaqueParameterData,
             value: *const anyopaque,
-            type: Module.ParameterType,
-            data: *Module.OpaqueParameterData,
-        ) callconv(.C) c.FimoResult = Module.OpaqueParameterData.writeFfi,
+        ) callconv(.c) void = null,
     };
 
     const Resource = struct {
@@ -696,7 +697,7 @@ pub const Builder = struct {
             };
             f.* = std.builtin.Type.StructField{
                 .name = p.member_name,
-                .type = *Module.Parameter(pType, Module.OpaqueInstance),
+                .type = *Module.Parameter(pType),
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*anyopaque),
@@ -803,8 +804,8 @@ pub const Builder = struct {
                 .name = src.name ++ "\x00",
                 .read_group = src.read_group,
                 .write_group = src.write_group,
-                .getter = src.read,
-                .setter = src.write,
+                .read = src.read,
+                .write = src.write,
                 .type = switch (src.default_value) {
                     .u8 => .u8,
                     .u16 => .u16,
