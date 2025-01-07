@@ -585,7 +585,7 @@ impl Drop for Span {
 
 /// A call stack.
 #[derive(Debug)]
-pub struct CallStack(Context, *mut bindings::FimoTracingCallStack);
+pub struct CallStack(bindings::FimoTracingCallStack);
 
 impl CallStack {
     /// Creates a new empty call stack.
@@ -593,17 +593,13 @@ impl CallStack {
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
     pub fn new(ctx: &ContextView<'_>) -> Result<Self, Error> {
-        // Safety: Is always set.
-        let f = unsafe { ctx.vtable().tracing_v0.call_stack_create.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
-        let stack = unsafe {
-            to_result_indirect_in_place(|error, stack| {
+        unsafe {
+            let f = ctx.vtable().tracing_v0.create_call_stack.unwrap_unchecked();
+            let stack = to_result_indirect_in_place(|error, stack| {
                 *error = f(ctx.data(), stack.as_mut_ptr());
-            })?
-        };
-
-        Ok(Self(ctx.to_context(), stack))
+            })?;
+            Ok(Self(stack))
+        }
     }
 
     /// Switches the call stack of the current thread.
@@ -613,53 +609,23 @@ impl CallStack {
     /// `self` must be in a suspended, but unblocked, state and not be active. The active call stack
     /// must also be in a suspended state, but may also be blocked. On error, this function returns
     /// `self`, along with an error.
-    pub fn switch(self) -> Result<Self, (Self, Error)> {
+    pub fn switch(self) -> Self {
         let this = ManuallyDrop::new(self);
-
-        // Safety: Is always set.
-        let f = unsafe {
-            this.0
-                .vtable()
-                .tracing_v0
-                .call_stack_switch
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
-        let stack = unsafe {
-            to_result_indirect_in_place(|error, stack| {
-                *error = f(this.0.data(), this.1, stack.as_mut_ptr());
-            })
-        };
-        let stack = match stack {
-            Ok(x) => x,
-            Err(e) => return Err((ManuallyDrop::into_inner(this), e)),
-        };
-
-        let mut new = ManuallyDrop::into_inner(this);
-        new.1 = stack;
-        Ok(new)
+        unsafe {
+            let f = (*this.0.vtable).replace_active.unwrap_unchecked();
+            let stack = f(this.0.handle);
+            Self(stack)
+        }
     }
 
     /// Unblocks the blocked call stack.
     ///
     /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
     /// marked as blocked.
-    pub fn unblock(&mut self) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.0
-                .vtable()
-                .tracing_v0
-                .call_stack_unblock
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
+    pub fn unblock(&mut self) {
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(self.0.data(), self.1);
-            })
+            let f = (*self.0.vtable).unblock.unwrap_unchecked();
+            f(self.0.handle);
         }
     }
 
@@ -668,20 +634,14 @@ impl CallStack {
     /// While suspended, the call stack can not be utilized for tracing messages. The call stack
     /// can optionally also be marked as blocked. In that case, the call stack must be unblocked
     /// prior to resumption.
-    pub fn suspend_current(ctx: &ContextView<'_>, block: bool) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            ctx.vtable()
-                .tracing_v0
-                .call_stack_suspend_current
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
+    pub fn suspend_current(ctx: &ContextView<'_>, block: bool) {
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(ctx.data(), block);
-            })
+            let f = ctx
+                .vtable()
+                .tracing_v0
+                .suspend_current_call_stack
+                .unwrap_unchecked();
+            f(ctx.data(), block);
         }
     }
 
@@ -689,20 +649,14 @@ impl CallStack {
     ///
     /// Once resumed, the call stack can be used to trace messages. To be successful, the current
     /// call stack must be suspended and unblocked.
-    pub fn resume_current(ctx: &ContextView<'_>) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            ctx.vtable()
-                .tracing_v0
-                .call_stack_resume_current
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
+    pub fn resume_current(ctx: &ContextView<'_>) {
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(ctx.data());
-            })
+            let f = ctx
+                .vtable()
+                .tracing_v0
+                .resume_current_call_stack
+                .unwrap_unchecked();
+            f(ctx.data());
         }
     }
 }
@@ -715,21 +669,9 @@ unsafe impl Sync for CallStack {}
 
 impl Drop for CallStack {
     fn drop(&mut self) {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.0
-                .vtable()
-                .tracing_v0
-                .call_stack_destroy
-                .unwrap_unchecked()
-        };
-
-        // Safety: FFI call is safe.
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(self.0.data(), self.1);
-            })
-            .expect("the call stack should be destroyable");
+            let f = (*self.0.vtable).drop.unwrap_unchecked();
+            f(self.0.handle);
         }
     }
 }

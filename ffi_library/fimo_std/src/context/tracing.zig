@@ -5,6 +5,7 @@ const AnyError = @import("../AnyError.zig");
 const time = @import("../time.zig");
 const tls = @import("tls.zig");
 
+const CallStack = @import("tracing/CallStack.zig");
 const StackFrame = @import("tracing/StackFrame.zig");
 
 const ProxyTracing = @import("proxy_context/tracing.zig");
@@ -18,9 +19,6 @@ buffer_size: usize,
 max_level: ProxyTracing.Level,
 thread_data: tls.Tls(ThreadData),
 thread_count: std.atomic.Value(usize),
-
-const dummy_call_stack_ptr: *ProxyTracing.CallStack = @ptrFromInt(1);
-const dummy_span = ProxyTracing.Span{};
 
 /// Errors of the tracing subsystem.
 pub const TracingError = error{
@@ -101,70 +99,10 @@ pub fn deinit(self: *Tracing) void {
 pub fn createCallStack(
     self: *const Tracing,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.CallStack {
-    if (!self.isEnabled()) return dummy_call_stack_ptr;
+) (TracingError || AnyError.Error)!ProxyTracing.CallStack {
+    if (!self.isEnabled()) return CallStack.dummy_call_stack;
     const call_stack = try CallStack.init(self, err);
-    return @ptrCast(call_stack);
-}
-
-/// Destroys an empty call stack.
-///
-/// Marks the completion of a task. Before calling this function, the
-/// call stack must be empty, i.e., there must be no active spans on
-/// the stack, and must not be active. If successful, the call stack
-/// may not be used afterwards. The active call stack of the thread
-/// is destroyed automatically, on thread exit or during destruction
-/// of the context. The caller must own the call stack uniquely.
-pub fn destroyCallStack(
-    self: *const Tracing,
-    call_stack: *ProxyTracing.CallStack,
-) TracingError!void {
-    if (!self.isEnabled()) {
-        std.debug.assert(call_stack == dummy_call_stack_ptr);
-        return;
-    }
-    const cs: *CallStack = @alignCast(@ptrCast(call_stack));
-    try cs.deinitUnbound();
-}
-
-/// Switches the call stack of the current thread.
-///
-/// If successful, this call stack will be used as the active call
-/// stack of the calling thread. The old call stack is returned,
-/// enabling the caller to switch back to it afterwards. This call
-/// stack must be in a suspended, but unblocked, state and not be
-/// active. The active call stack must also be in a suspended state,
-/// but may also be blocked.
-pub fn replaceCurrentCallStack(
-    self: *const Tracing,
-    call_stack: *ProxyTracing.CallStack,
-) TracingError!*ProxyTracing.CallStack {
-    if (!self.isEnabled()) {
-        std.debug.assert(call_stack == dummy_call_stack_ptr);
-        return dummy_call_stack_ptr;
-    }
-    if (!self.isEnabledForCurrentThread()) return error.ThreadNotRegistered;
-    const data = self.thread_data.get().?;
-    const cs: *CallStack = @alignCast(@ptrCast(call_stack));
-    if (data.call_stack == cs) return error.CallStackBound;
-    try cs.bind();
-    data.call_stack.unbind();
-    const old = data.call_stack;
-    data.call_stack = cs;
-    return @ptrCast(old);
-}
-
-/// Unblocks a blocked call stack.
-///
-/// Once unblocked, the call stack may be resumed. The call stack
-/// may not be active and must be marked as blocked.
-pub fn unblockCallStack(self: *const Tracing, call_stack: *ProxyTracing.CallStack) TracingError!void {
-    if (!self.isEnabled()) {
-        std.debug.assert(call_stack == dummy_call_stack_ptr);
-        return;
-    }
-    const cs: *CallStack = @alignCast(@ptrCast(call_stack));
-    return cs.unblock();
+    return call_stack.asProxy();
 }
 
 /// Marks the current call stack as being suspended.
@@ -176,9 +114,9 @@ pub fn unblockCallStack(self: *const Tracing, call_stack: *ProxyTracing.CallStac
 ///
 /// This function may return an error, if the current thread is not
 /// registered with the subsystem.
-pub fn suspendCurrentCallStack(self: *const Tracing, mark_blocked: bool) TracingError!void {
+pub fn suspendCurrentCallStack(self: *const Tracing, mark_blocked: bool) void {
     if (!self.isEnabled()) return;
-    if (!self.isEnabledForCurrentThread()) return error.ThreadNotRegistered;
+    if (!self.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
     const data = self.thread_data.get().?;
     return data.call_stack.@"suspend"(mark_blocked);
 }
@@ -190,9 +128,9 @@ pub fn suspendCurrentCallStack(self: *const Tracing, mark_blocked: bool) Tracing
 ///
 /// This function may return an error, if the current thread is not
 /// registered with the subsystem.
-pub fn resumeCurrentCallStack(self: *const Tracing) TracingError!void {
+pub fn resumeCurrentCallStack(self: *const Tracing) void {
     if (!self.isEnabled()) return;
-    if (!self.isEnabledForCurrentThread()) return error.ThreadNotRegistered;
+    if (!self.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
     const data = self.thread_data.get().?;
     return data.call_stack.@"resume"();
 }
@@ -917,10 +855,8 @@ const ThreadData = struct {
             .call_stack = try CallStack.init(owner, err),
             .owner = owner,
         };
-        errdefer data.call_stack.deinit() catch @panic("Unwind error");
-        try data.call_stack.bind();
-        errdefer data.call_stack.unbind();
-        try data.call_stack.@"resume"();
+        data.call_stack.bind();
+        data.call_stack.@"resume"();
 
         // Is a counter so it does not need any synchronization.
         _ = owner.thread_count.fetchAdd(1, .monotonic);
@@ -929,205 +865,15 @@ const ThreadData = struct {
 
     fn deinit(self: *ThreadData) TracingError!void {
         const owner = self.owner;
-        try self.call_stack.deinit();
+        self.call_stack.deinit();
         owner.allocator.destroy(self);
 
         // Synchronizes with the acquire on deinit of the context.
         _ = owner.thread_count.fetchSub(1, .release);
     }
 
-    fn deinitAssert(self: *ThreadData) callconv(.C) void {
+    fn deinitAssert(self: *ThreadData) callconv(.c) void {
         self.deinit() catch unreachable;
-    }
-};
-
-pub const CallStack = struct {
-    mutex: std.Thread.Mutex.Recursive = std.Thread.Mutex.Recursive.init,
-    state: packed struct(u8) {
-        suspended: bool = true,
-        blocked: bool = false,
-        _padding: u6 = 0,
-    } = .{},
-    buffer: []u8,
-    cursor: usize = 0,
-    max_level: ProxyTracing.Level,
-    call_stacks: std.ArrayListUnmanaged(*anyopaque),
-    start_frame: ?*StackFrame = null,
-    end_frame: ?*StackFrame = null,
-    owner: *const Tracing,
-
-    fn init(
-        owner: *const Tracing,
-        err: *?AnyError,
-    ) (TracingError || AnyError.Error)!*CallStack {
-        const call_stack = try owner.allocator.create(CallStack);
-        errdefer owner.allocator.destroy(call_stack);
-        call_stack.* = CallStack{
-            .buffer = undefined,
-            .max_level = owner.max_level,
-            .call_stacks = undefined,
-            .owner = owner,
-        };
-
-        call_stack.buffer = try owner.allocator.alloc(u8, owner.buffer_size);
-        errdefer owner.allocator.free(call_stack.buffer);
-
-        call_stack.call_stacks = try std.ArrayListUnmanaged(*anyopaque).initCapacity(
-            owner.allocator,
-            owner.subscribers.len,
-        );
-        errdefer {
-            call_stack.call_stacks.deinit(owner.allocator);
-            for (call_stack.call_stacks.items, owner.subscribers) |cs, subscriber| {
-                subscriber.dropCallStack(cs);
-            }
-        }
-
-        const now = time.Time.now();
-        for (owner.subscribers) |subscriber| {
-            const cs = try subscriber.createCallStack(now, err);
-            call_stack.call_stacks.appendAssumeCapacity(cs);
-        }
-
-        return call_stack;
-    }
-
-    fn deinit(self: *CallStack) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        errdefer self.mutex.unlock();
-        if (self.state.blocked) return error.CallStackBlocked;
-        if (self.end_frame != null) return error.CallStackNotEmpty;
-
-        const now = time.Time.now();
-        for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
-            subscriber.destroyCallStack(now, call_stack);
-        }
-
-        self.call_stacks.deinit(self.owner.allocator);
-        self.owner.allocator.free(self.buffer);
-        self.owner.allocator.destroy(self);
-    }
-
-    fn deinitUnbound(self: *CallStack) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        errdefer self.mutex.unlock();
-        if (self.mutex.lock_count != 1) return error.CallStackBound;
-        try self.deinit();
-    }
-
-    fn bind(self: *CallStack) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        errdefer self.mutex.unlock();
-        if (self.mutex.lock_count != 1) return error.CallStackBound;
-        if (self.state.blocked) return error.CallStackBlocked;
-        if (!self.state.suspended) return error.CallStackNotSuspended;
-    }
-
-    fn unbind(self: *CallStack) void {
-        std.debug.assert(self.mutex.lock_count == 1);
-        self.mutex.unlock();
-    }
-
-    fn unblock(self: *CallStack) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        defer self.mutex.unlock();
-        if (self.mutex.lock_count != 1) return error.CallStackBound;
-        if (!self.state.blocked) return error.CallStackNotBlocked;
-        std.debug.assert(self.state.suspended);
-
-        const now = time.Time.now();
-        for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
-            subscriber.unblockCallStack(now, call_stack);
-        }
-
-        self.state.blocked = false;
-    }
-
-    fn @"suspend"(self: *CallStack, mark_blocked: bool) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        defer self.mutex.unlock();
-        if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-        if (self.state.suspended) return error.CallStackSuspended;
-
-        const now = time.Time.now();
-        for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
-            subscriber.suspendCallStack(now, call_stack, mark_blocked);
-        }
-
-        self.state.suspended = true;
-        self.state.blocked = mark_blocked;
-    }
-
-    fn @"resume"(self: *CallStack) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        defer self.mutex.unlock();
-        if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-        if (self.state.blocked) return error.CallStackBlocked;
-        if (!self.state.suspended) return error.CallStackNotSuspended;
-
-        const now = time.Time.now();
-        for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
-            subscriber.resumeCallStack(now, call_stack);
-        }
-
-        self.state.suspended = false;
-    }
-
-    fn pushSpan(
-        self: *CallStack,
-        desc: *const ProxyTracing.SpanDesc,
-        formatter: *const ProxyTracing.Formatter,
-        data: ?*const anyopaque,
-        err: *?AnyError,
-    ) (TracingError || AnyError.Error)!ProxyTracing.Span {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        defer self.mutex.unlock();
-        if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-        if (self.state.blocked) return error.CallStackBlocked;
-        if (self.state.suspended) return error.CallStackSuspended;
-
-        const frame = try StackFrame.init(
-            self,
-            desc,
-            formatter,
-            data,
-            err,
-        );
-        return frame.asProxySpan();
-    }
-
-    fn emitEvent(
-        self: *CallStack,
-        event: *const ProxyTracing.Event,
-        formatter: *const ProxyTracing.Formatter,
-        data: ?*const anyopaque,
-        err: *?AnyError,
-    ) (TracingError || AnyError.Error)!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        defer self.mutex.unlock();
-        if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-        if (self.state.blocked) return error.CallStackBlocked;
-        if (self.state.suspended) return error.CallStackSuspended;
-
-        if (@intFromEnum(event.metadata.level) > @intFromEnum(self.max_level)) {
-            return;
-        }
-
-        var written_characters: usize = undefined;
-        const format_buffer = self.buffer[self.cursor..];
-        const result = formatter(
-            format_buffer.ptr,
-            format_buffer.len,
-            data,
-            &written_characters,
-        );
-        try AnyError.initChecked(err, result);
-        const message = format_buffer[0..written_characters];
-
-        const now = time.Time.now();
-        for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
-            subscriber.emitEvent(now, call_stack, event, message);
-        }
     }
 };
 
@@ -1138,7 +884,7 @@ pub const CallStack = struct {
 const VTableImpl = struct {
     const Context = @import("../context.zig");
 
-    fn createCallStack(ptr: *anyopaque, call_stack: **ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+    fn createCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?AnyError = null;
         if (ctx.tracing.createCallStack(&err)) |cs| {
@@ -1149,42 +895,13 @@ const VTableImpl = struct {
             else => return AnyError.initError(e).err,
         }
     }
-    fn destroyCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
+    fn suspendCurrentCallStack(ptr: *anyopaque, mark_blocked: bool) callconv(.c) void {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.destroyCallStack(
-            call_stack,
-        ) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        ctx.tracing.suspendCurrentCallStack(mark_blocked);
     }
-    fn replaceCurrentCallStack(
-        ptr: *anyopaque,
-        call_stack: *ProxyTracing.CallStack,
-        old: **ProxyTracing.CallStack,
-    ) callconv(.C) c.FimoResult {
+    fn resumeCurrentCallStack(ptr: *anyopaque) callconv(.c) void {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        old.* = ctx.tracing.replaceCurrentCallStack(
-            call_stack,
-        ) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
-    }
-    fn unblockCallStack(ptr: *anyopaque, call_stack: *ProxyTracing.CallStack) callconv(.C) c.FimoResult {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.unblockCallStack(
-            call_stack,
-        ) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
-    }
-    fn suspendCurrentCallStack(ptr: *anyopaque, mark_blocked: bool) callconv(.C) c.FimoResult {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.suspendCurrentCallStack(
-            mark_blocked,
-        ) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
-    }
-    fn resumeCurrentCallStack(ptr: *anyopaque) callconv(.C) c.FimoResult {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.resumeCurrentCallStack() catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        ctx.tracing.resumeCurrentCallStack();
     }
     fn pushSpan(
         ptr: *anyopaque,
@@ -1192,7 +909,7 @@ const VTableImpl = struct {
         span: *ProxyTracing.Span,
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
-    ) callconv(.C) c.FimoResult {
+    ) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?AnyError = null;
         if (ctx.tracing.pushSpanCustom(desc, formatter, data, &err)) |sp| {
@@ -1208,7 +925,7 @@ const VTableImpl = struct {
         event: *const ProxyTracing.Event,
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
-    ) callconv(.C) c.FimoResult {
+    ) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?AnyError = null;
         if (ctx.tracing.emitEventCustom(event, formatter, data, &err)) |_| {
@@ -1218,11 +935,11 @@ const VTableImpl = struct {
             else => return AnyError.initError(e).err,
         }
     }
-    fn isEnabled(ptr: *anyopaque) callconv(.C) bool {
+    fn isEnabled(ptr: *anyopaque) callconv(.c) bool {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         return ctx.tracing.isEnabled();
     }
-    fn registerThread(ptr: *anyopaque) callconv(.C) c.FimoResult {
+    fn registerThread(ptr: *anyopaque) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         var err: ?AnyError = null;
         if (ctx.tracing.registerThread(&err)) |_| {
@@ -1232,12 +949,12 @@ const VTableImpl = struct {
             else => return AnyError.initError(e).err,
         }
     }
-    fn unregisterThread(ptr: *anyopaque) callconv(.C) c.FimoResult {
+    fn unregisterThread(ptr: *anyopaque) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.unregisterThread() catch |err| return AnyError.initError(err).err;
         return AnyError.intoCResult(null);
     }
-    fn flush(ptr: *anyopaque) callconv(.C) c.FimoResult {
+    fn flush(ptr: *anyopaque) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         ctx.tracing.flush();
         return AnyError.intoCResult(null);
@@ -1245,12 +962,9 @@ const VTableImpl = struct {
 };
 
 pub const vtable = ProxyTracing.VTable{
-    .call_stack_create = &VTableImpl.createCallStack,
-    .call_stack_destroy = &VTableImpl.destroyCallStack,
-    .call_stack_switch = &VTableImpl.replaceCurrentCallStack,
-    .call_stack_unblock = &VTableImpl.unblockCallStack,
-    .call_stack_suspend_current = &VTableImpl.suspendCurrentCallStack,
-    .call_stack_resume_current = &VTableImpl.resumeCurrentCallStack,
+    .create_call_stack = &VTableImpl.createCallStack,
+    .suspend_current_call_stack = &VTableImpl.suspendCurrentCallStack,
+    .resume_current_call_stack = &VTableImpl.resumeCurrentCallStack,
     .span_create = &VTableImpl.pushSpan,
     .event_emit = &VTableImpl.emitEvent,
     .is_enabled = &VTableImpl.isEnabled,

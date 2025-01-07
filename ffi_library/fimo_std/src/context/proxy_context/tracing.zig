@@ -288,20 +288,30 @@ pub const Event = extern struct {
 
 /// A call stack.
 ///
-/// Each call stack represents a unit of computation, like a thread.
-/// A call stack is active on only one thread at any given time. The
-/// active call stack of a thread can be swapped, which is useful
-/// for tracing where a `M:N` threading model is used. In that case,
-/// one would create one stack for each task, and activate it when
-/// the task is resumed.
-pub const CallStack = opaque {
+/// Each call stack represents a unit of computation, like a thread. A call stack is active on only
+/// one thread at any given time. The active call stack of a thread can be swapped, which is useful
+/// for tracing where a `M:N` threading model is used. In that case, one would create one stack for
+/// each task, and activate it when the task is resumed.
+pub const CallStack = extern struct {
+    handle: *anyopaque,
+    vtable: *const CallStack.VTable,
+
+    /// VTable of a call stack.
+    ///
+    /// Adding fields to the vtable is not a breaking change.
+    pub const VTable = extern struct {
+        deinit: *const fn (handle: *anyopaque) callconv(.c) void,
+        replace_active: *const fn (handle: *anyopaque) callconv(.c) CallStack,
+        unblock: *const fn (handle: *anyopaque) callconv(.c) void,
+    };
+
     /// Creates a new empty call stack.
     ///
-    /// If successful, the new call stack is marked as suspended. The
-    /// new call stack is not set to be the active call stack.
-    pub fn init(ctx: Tracing, err: *?AnyError) AnyError.Error!*CallStack {
-        var cs: *CallStack = undefined;
-        const result = ctx.context.vtable.tracing_v0.call_stack_create(
+    /// If successful, the new call stack is marked as suspended. The new call stack is not set to
+    /// be the active call stack.
+    pub fn init(ctx: Tracing, err: *?AnyError) AnyError.Error!CallStack {
+        var cs: CallStack = undefined;
+        const result = ctx.context.vtable.tracing_v0.create_call_stack(
             ctx.context.data,
             &cs,
         );
@@ -311,93 +321,64 @@ pub const CallStack = opaque {
 
     /// Destroys an empty call stack.
     ///
-    /// Marks the completion of a task. Before calling this function, the
-    /// call stack must be empty, i.e., there must be no active spans on
-    /// the stack, and must not be active. If successful, the call stack
-    /// may not be used afterwards. The active call stack of the thread
-    /// is destroyed automatically, on thread exit or during destruction
-    /// of the context. The caller must own the call stack uniquely.
-    pub fn deinit(self: *CallStack, ctx: Tracing, err: *?AnyError) AnyError.Error!void {
-        const result = ctx.context.vtable.tracing_v0.call_stack_destroy(
-            ctx.context.data,
-            self,
-        );
-        try AnyError.initChecked(err, result);
+    /// Marks the completion of a task. Before calling this function, the call stack must be empty,
+    /// i.e., there must be no active spans on the stack, and must not be active. If successful,
+    /// the call stack may not be used afterwards. The active call stack of the thread is destroyed
+    /// automatically, on thread exit or during destruction of the context. The caller must own the
+    /// call stack uniquely.
+    pub fn deinit(self: CallStack) void {
+        self.vtable.deinit(self.handle);
     }
 
     /// Switches the call stack of the current thread.
     ///
-    /// If successful, this call stack will be used as the active call
-    /// stack of the calling thread. The old call stack is returned,
-    /// enabling the caller to switch back to it afterwards. This call
-    /// stack must be in a suspended, but unblocked, state and not be
-    /// active. The active call stack must also be in a suspended state,
-    /// but may also be blocked.
-    pub fn replaceActive(self: *CallStack, ctx: Tracing, err: *?AnyError) AnyError.Error!*CallStack {
-        var old: *CallStack = undefined;
-        const result = ctx.context.vtable.tracing_v0.call_stack_switch(
-            ctx.context.data,
-            self,
-            &old,
-        );
-        try AnyError.initChecked(err, result);
-        return old;
+    /// If successful, this call stack will be used as the active call stack of the calling thread.
+    /// The old call stack is returned, enabling the caller to switch back to it afterwards. This
+    /// call stack must be in a suspended, but unblocked, state and not be active. The active call
+    /// stack must also be in a suspended state, but may also be blocked.
+    pub fn replaceActive(self: CallStack) CallStack {
+        return self.vtable.replace_active(self.handle);
     }
 
     /// Unblocks a blocked call stack.
     ///
-    /// Once unblocked, the call stack may be resumed. The call stack
-    /// may not be active and must be marked as blocked.
-    pub fn unblock(self: *CallStack, ctx: Tracing, err: *?AnyError) AnyError.Error!void {
-        const result = ctx.context.vtable.tracing_v0.call_stack_unblock(
-            ctx.context.data,
-            self,
-        );
-        try AnyError.initChecked(err, result);
+    /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
+    /// marked as blocked.
+    pub fn unblock(self: CallStack) void {
+        self.vtable.unblock(self.handle);
     }
 
     /// Marks the current call stack as being suspended.
     ///
-    /// While suspended, the call stack can not be utilized for tracing
-    /// messages. The call stack optionally also be marked as being
-    /// blocked. In that case, the call stack must be unblocked prior
-    /// to resumption.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
-    pub fn suspendCurrent(ctx: Tracing, mark_blocked: bool, err: *?AnyError) AnyError.Error!void {
-        const result = ctx.context.vtable.tracing_v0.call_stack_suspend_current(
+    /// While suspended, the call stack can not be utilized for tracing messages. The call stack
+    /// optionally also be marked as being blocked. In that case, the call stack must be unblocked
+    /// prior to resumption.
+    pub fn suspendCurrent(ctx: Tracing, mark_blocked: bool) void {
+        ctx.context.vtable.tracing_v0.suspend_current_call_stack(
             ctx.context.data,
             mark_blocked,
         );
-        try AnyError.initChecked(err, result);
     }
 
     /// Marks the current call stack as being resumed.
     ///
-    /// Once resumed, the context can be used to trace messages. To be
-    /// successful, the current call stack must be suspended and unblocked.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
-    pub fn resumeCurrent(ctx: Tracing, err: *?AnyError) AnyError.Error!void {
-        const result = ctx.context.vtable.tracing_v0.call_stack_resume_current(
-            ctx.context.data,
-        );
-        try AnyError.initChecked(err, result);
+    /// Once resumed, the context can be used to trace messages. To be successful, the current call
+    /// stack must be suspended and unblocked.
+    pub fn resumeCurrent(ctx: Tracing) void {
+        ctx.context.vtable.tracing_v0.resume_current_call_stack(ctx.context.data);
     }
 };
 
 /// Type of a formatter function.
 ///
-/// The formatter function is allowed to format only part of the message,
-/// if it would not fit into the buffer.
+/// The formatter function is allowed to format only part of the message, if it would not fit into
+/// the buffer.
 pub const Formatter = fn (
     buffer: [*]u8,
     buffer_len: usize,
     data: ?*const anyopaque,
     written: *usize,
-) callconv(.C) c.FimoResult;
+) callconv(.c) c.FimoResult;
 
 /// Formatter of the zig standard library.
 pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
@@ -407,7 +388,7 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
             buffer_len: usize,
             data: ?*const anyopaque,
             written: *usize,
-        ) callconv(.C) c.FimoResult {
+        ) callconv(.c) c.FimoResult {
             const b = buffer[0..buffer_len];
             const args: *const ARGS = @alignCast(@ptrCast(data));
             if (std.fmt.bufPrint(b, fmt, args.*)) |out| {
@@ -424,7 +405,7 @@ pub fn stackTraceFormatter(
     buffer_len: usize,
     data: ?*const anyopaque,
     written: *usize,
-) callconv(.C) c.FimoResult {
+) callconv(.c) c.FimoResult {
     const buf = buffer[0..buffer_len];
     const stack_trace: *const std.builtin.StackTrace = @alignCast(@ptrCast(data));
     if (builtin.strip_debug_info) {
@@ -484,45 +465,45 @@ pub const Subscriber = extern struct {
     /// outside the library.
     pub const VTable = extern struct {
         /// Destroys the subscriber.
-        destroy: *const fn (ctx: ?*anyopaque) callconv(.C) void,
+        destroy: *const fn (ctx: ?*anyopaque) callconv(.c) void,
         /// Creates a new stack.
         call_stack_create: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: **anyopaque,
-        ) callconv(.C) c.FimoResult,
+        ) callconv(.c) c.FimoResult,
         /// Drops an empty call stack.
         ///
         /// Calling this function reverts the creation of the call stack.
         call_stack_drop: *const fn (
             ctx: ?*anyopaque,
             call_stack: *anyopaque,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Destroys a stack.
         call_stack_destroy: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Marks the stack as unblocked.
         call_stack_unblock: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Marks the stack as suspended/blocked.
         call_stack_suspend: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
             mark_blocked: bool,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Marks the stack as resumed.
         call_stack_resume: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Creates a new span.
         span_push: *const fn (
             ctx: ?*anyopaque,
@@ -531,17 +512,17 @@ pub const Subscriber = extern struct {
             msg: [*]const u8,
             msg_len: usize,
             call_stack: *anyopaque,
-        ) callconv(.C) c.FimoResult,
+        ) callconv(.c) c.FimoResult,
         /// Drops a newly created span.
         ///
         /// Calling this function reverts the creation of the span.
-        span_drop: *const fn (ctx: ?*anyopaque, call_stack: *anyopaque) callconv(.C) void,
+        span_drop: *const fn (ctx: ?*anyopaque, call_stack: *anyopaque) callconv(.c) void,
         /// Exits and destroys a span.
         span_pop: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Emits an event.
         event_emit: *const fn (
             ctx: ?*anyopaque,
@@ -550,9 +531,9 @@ pub const Subscriber = extern struct {
             event: *const Event,
             msg: [*]const u8,
             msg_len: usize,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         /// Flushes the messages of the subscriber.
-        flush: *const fn (ctx: ?*anyopaque) callconv(.C) void,
+        flush: *const fn (ctx: ?*anyopaque) callconv(.c) void,
     };
 
     /// Initializes the subscriber interface from an existing object.
@@ -611,7 +592,7 @@ pub const Subscriber = extern struct {
         std.debug.assert(@typeInfo(@typeInfo(Ptr).pointer.child) == .@"struct");
 
         const impl = struct {
-            fn destroy(ptr: ?*anyopaque) callconv(.C) void {
+            fn destroy(ptr: ?*anyopaque) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 destroy_fn(self);
             }
@@ -619,7 +600,7 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: **anyopaque,
-            ) callconv(.C) c.FimoResult {
+            ) callconv(.c) c.FimoResult {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 if (call_stack_create_fn(self, t)) |cs| {
@@ -632,7 +613,7 @@ pub const Subscriber = extern struct {
             fn callStackDrop(
                 ptr: ?*anyopaque,
                 call_stack: *anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 call_stack_drop_fn(self, cs);
@@ -641,7 +622,7 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
@@ -651,7 +632,7 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
@@ -662,7 +643,7 @@ pub const Subscriber = extern struct {
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
                 mark_blocked: bool,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
@@ -672,7 +653,7 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
@@ -685,7 +666,7 @@ pub const Subscriber = extern struct {
                 msg: [*]const u8,
                 msg_len: usize,
                 call_stack: *anyopaque,
-            ) callconv(.C) c.FimoResult {
+            ) callconv(.c) c.FimoResult {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const m = msg[0..msg_len];
@@ -702,7 +683,7 @@ pub const Subscriber = extern struct {
             fn spanDrop(
                 ptr: ?*anyopaque,
                 call_stack: *anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 span_drop_fn(self, cs);
@@ -711,7 +692,7 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
@@ -724,14 +705,14 @@ pub const Subscriber = extern struct {
                 event: *const Event,
                 msg: [*]const u8,
                 msg_len: usize,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(ptr.?));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
                 const m = msg[0..msg_len];
                 event_emit_fn(self, t, cs, event, m);
             }
-            fn flush(ptr: ?*anyopaque) callconv(.C) void {
+            fn flush(ptr: ?*anyopaque) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 flush_fn(self);
             }
@@ -896,39 +877,29 @@ pub const Config = extern struct {
 ///
 /// Changing the VTable is a breaking change.
 pub const VTable = extern struct {
-    call_stack_create: *const fn (ctx: *anyopaque, call_stack: **CallStack) callconv(.C) c.FimoResult,
-    call_stack_destroy: *const fn (ctx: *anyopaque, call_stack: *CallStack) callconv(.C) c.FimoResult,
-    call_stack_switch: *const fn (
-        ctx: *anyopaque,
-        new_call_stack: *CallStack,
-        old_call_stack: **CallStack,
-    ) callconv(.C) c.FimoResult,
-    call_stack_unblock: *const fn (
-        ctx: *anyopaque,
-        new_call_stack: *CallStack,
-    ) callconv(.C) c.FimoResult,
-    call_stack_suspend_current: *const fn (
+    create_call_stack: *const fn (ctx: *anyopaque, call_stack: *CallStack) callconv(.c) c.FimoResult,
+    suspend_current_call_stack: *const fn (
         ctx: *anyopaque,
         mark_blocked: bool,
-    ) callconv(.C) c.FimoResult,
-    call_stack_resume_current: *const fn (ctx: *anyopaque) callconv(.C) c.FimoResult,
+    ) callconv(.c) void,
+    resume_current_call_stack: *const fn (ctx: *anyopaque) callconv(.c) void,
     span_create: *const fn (
         ctx: *anyopaque,
         span_desc: *const SpanDesc,
         span: *Span,
         formatter: *const Formatter,
         data: ?*const anyopaque,
-    ) callconv(.C) c.FimoResult,
+    ) callconv(.c) c.FimoResult,
     event_emit: *const fn (
         ctx: *anyopaque,
         event: *const Event,
         formatter: *const Formatter,
         data: ?*const anyopaque,
-    ) callconv(.C) c.FimoResult,
-    is_enabled: *const fn (ctx: *anyopaque) callconv(.C) bool,
-    register_thread: *const fn (ctx: *anyopaque) callconv(.C) c.FimoResult,
-    unregister_thread: *const fn (ctx: *anyopaque) callconv(.C) c.FimoResult,
-    flush: *const fn (ctx: *anyopaque) callconv(.C) c.FimoResult,
+    ) callconv(.c) c.FimoResult,
+    is_enabled: *const fn (ctx: *anyopaque) callconv(.c) bool,
+    register_thread: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
+    unregister_thread: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
+    flush: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
 };
 
 /// Emits a new event with the standard formatter.

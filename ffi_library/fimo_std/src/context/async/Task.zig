@@ -19,7 +19,7 @@ const Node = TaskQueue.Node;
 
 sys: *System,
 refcount: RefCount = .{},
-call_stack: *ProxyTracing.CallStack,
+call_stack: ProxyTracing.CallStack,
 
 mutex: Mutex = .{},
 state: State = .{},
@@ -354,7 +354,7 @@ pub fn init(
     std.debug.assert(std.mem.isAligned(@intFromPtr(result_data), result_alignment));
 
     const call_stack = try sys.asContext().tracing.createCallStack(err);
-    errdefer sys.asContext().tracing.destroyCallStack(call_stack) catch unreachable;
+    errdefer call_stack.deinit();
 
     const node = try allocator.create(Node);
     errdefer allocator.destroy(node);
@@ -404,7 +404,7 @@ fn unref(self: *Self) void {
     std.debug.assert(!state.waiting);
     std.debug.assert(!state.waiter_locked);
     const ctx = self.sys.asContext();
-    ctx.tracing.destroyCallStack(self.call_stack) catch unreachable;
+    self.call_stack.deinit();
     const allocator = self.sys.allocator;
     allocator.free(self.buffer);
     const node = self.asNode();
@@ -495,15 +495,15 @@ fn enqueue(self: *Self) void {
 
 pub fn poll(self: *Self) void {
     const ctx = self.sys.asContext();
-    ctx.tracing.suspendCurrentCallStack(false) catch unreachable;
-    const main_stack = ctx.tracing.replaceCurrentCallStack(self.call_stack) catch unreachable;
-    ctx.tracing.resumeCurrentCallStack() catch unreachable;
+    ctx.tracing.suspendCurrentCallStack(false);
+    const main_stack = self.call_stack.replaceActive();
+    ctx.tracing.resumeCurrentCallStack();
 
     const completed = self.poll_fn(self.data, self.asWaker(), self.result);
 
-    ctx.tracing.suspendCurrentCallStack(false) catch unreachable;
-    self.call_stack = ctx.tracing.replaceCurrentCallStack(main_stack) catch unreachable;
-    ctx.tracing.resumeCurrentCallStack() catch unreachable;
+    ctx.tracing.suspendCurrentCallStack(false);
+    self.call_stack = main_stack.replaceActive();
+    ctx.tracing.resumeCurrentCallStack();
 
     switch (self.state.dequeue(completed)) {
         .noop => {},

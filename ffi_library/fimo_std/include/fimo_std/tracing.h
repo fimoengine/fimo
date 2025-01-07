@@ -15,17 +15,44 @@
 extern "C" {
 #endif // __cplusplus
 
-/**
- * A call stack.
- *
- * Each call stack represents a unit of computation, like a thread.
- * A call stack is active on only one thread at any given time. The
- * active call stack of a thread can be swapped, which is useful
- * for tracing where a `M:N` threading model is used. In that case,
- * one would create one stack for each task, and activate it when
- * the task is resumed.
- */
-typedef struct FimoTracingCallStack FimoTracingCallStack;
+struct FimoTracingCallStackVTable;
+
+/// A call stack.
+///
+/// Each call stack represents a unit of computation, like a thread. A call stack is active on only
+/// one thread at any given time. The active call stack of a thread can be swapped, which is useful
+/// for tracing where a `M:N` threading model is used. In that case, one would create one stack for
+/// each task, and activate it when the task is resumed.
+typedef struct FimoTracingCallStack {
+    void *handle;
+    const struct FimoTracingCallStackVTable *vtable;
+} FimoTracingCallStack;
+
+/// VTable of a call stack.
+///
+/// Adding fields to the vtable is not a breaking change.
+typedef struct FimoTracingCallStackVTable {
+    /// Destroys an empty call stack.
+    ///
+    /// Marks the completion of a task. Before calling this function, the call stack must be empty,
+    /// i.e., there must be no active spans on the stack, and must not be active. If successful,
+    /// the call stack may not be used afterwards. The active call stack of the thread is destroyed
+    /// automatically, on thread exit or during destruction of the context. The caller must own the
+    /// call stack uniquely.
+    void (*drop)(void *handle);
+    /// Switches the call stack of the current thread.
+    ///
+    /// If successful, this call stack will be used as the active call stack of the calling thread.
+    /// The old call stack is returned, enabling the caller to switch back to it afterwards. This
+    /// call stack must be in a suspended, but unblocked, state and not be active. The active call
+    /// stack must also be in a suspended state, but may also be blocked.
+    FimoTracingCallStack (*replace_active)(void *handle);
+    /// Unblocks a blocked call stack.
+    ///
+    /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
+    /// marked as blocked.
+    void (*unblock)(void *handle);
+} FimoTracingCallStackVTable;
 
 /**
  * Possible tracing levels.
@@ -323,55 +350,7 @@ typedef struct FimoTracingVTableV0 {
      *
      * @return Status code.
      */
-    FimoResult (*call_stack_create)(void *ctx, FimoTracingCallStack **call_stack);
-    /**
-     * Destroys an empty call stack.
-     *
-     * Marks the completion of a task. Before calling this function, the
-     * call stack must be empty, i.e., there must be no active spans on
-     * the stack, and must not be active. If successful, the call stack
-     * may not be used afterwards. The active call stack of the thread
-     * is destroyed automatically, on thread exit or during destruction
-     * of `context`. The caller must own the call stack uniquely.
-     *
-     * @param ctx the context
-     * @param call_stack the call stack to destroy
-     *
-     * @return Status code.
-     */
-    FimoResult (*call_stack_destroy)(void *ctx, FimoTracingCallStack *call_stack);
-    /**
-     * Switches the call stack of the current thread.
-     *
-     * If successful, `new_call_stack` will be used as the active call
-     * stack of the calling thread. The old call stack is written into
-     * `old_call_stack`, enabling the caller to switch back to it afterwards.
-     * `new_call_stack` must be in a suspended, but unblocked, state and not be
-     * active. The active call stack must also be in a suspended state, but may
-     * also be blocked.
-     *
-     * This function may return an error, if the current thread is not
-     * registered with the subsystem.
-     *
-     * @param ctx the context
-     * @param call_stack new call stack
-     * @param old location to store the old call stack into
-     *
-     * @return Status code.
-     */
-    FimoResult (*call_stack_switch)(void *ctx, FimoTracingCallStack *call_stack, FimoTracingCallStack **old);
-    /**
-     * Unblocks a blocked call stack.
-     *
-     * Once unblocked, the call stack may be resumed. The call stack
-     * may not be active and must be marked as blocked.
-     *
-     * @param ctx the context
-     * @param call_stack the call stack to unblock
-     *
-     * @return Status code.
-     */
-    FimoResult (*call_stack_unblock)(void *ctx, FimoTracingCallStack *call_stack);
+    FimoResult (*create_call_stack)(void *ctx, FimoTracingCallStack *call_stack);
     /**
      * Marks the current call stack as being suspended.
      *
@@ -380,29 +359,23 @@ typedef struct FimoTracingVTableV0 {
      * blocked. In that case, the call stack must be unblocked prior
      * to resumption.
      *
-     * This function may return an error, if the current thread is not
-     * registered with the subsystem.
-     *
      * @param ctx the context
      * @param block whether to mark the call stack as blocked
      *
      * @return Status code.
      */
-    FimoResult (*call_stack_suspend_current)(void *ctx, bool block);
+    void (*suspend_current_call_stack)(void *ctx, bool block);
     /**
      * Marks the current call stack as being resumed.
      *
      * Once resumed, the context can be used to trace messages. To be
      * successful, the current call stack must be suspended and unblocked.
      *
-     * This function may return an error, if the current thread is not
-     * registered with the subsystem.
-     *
      * @param ctx the context.
      *
      * @return Status code.
      */
-    FimoResult (*call_stack_resume_current)(void *ctx);
+    void (*resume_current_call_stack)(void *ctx);
     /**
      * Creates a new span with a custom formatter and enters it.
      *

@@ -7,7 +7,7 @@ const Tracing = @import("../tracing.zig");
 const ProxyTracing = @import("../proxy_context/tracing.zig");
 
 const TracingError = Tracing.TracingError;
-const CallStack = Tracing.CallStack;
+const CallStack = @import("CallStack.zig");
 
 const Self = @This();
 
