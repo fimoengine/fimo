@@ -404,7 +404,6 @@ impl Metadata {
         line_number: Option<u32>,
     ) -> Metadata {
         Self(bindings::FimoTracingMetadata {
-            type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_METADATA,
             next: core::ptr::null(),
             name: name.as_ptr().cast(),
             target: target.as_ptr().cast(),
@@ -482,7 +481,6 @@ impl Event {
     /// Constructs a new event.
     pub const fn new(metadata: &'static Metadata) -> Self {
         Self(bindings::FimoTracingEvent {
-            type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_EVENT,
             next: core::ptr::null(),
             metadata: &metadata.0,
         })
@@ -513,7 +511,6 @@ impl SpanDescriptor {
     /// Constructs a new `SpanDescriptor`.
     pub const fn new(metadata: &'static Metadata) -> Self {
         Self(bindings::FimoTracingSpanDesc {
-            type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_SPAN_DESC,
             next: core::ptr::null(),
             metadata: &metadata.0,
         })
@@ -874,7 +871,6 @@ impl OpaqueSubscriber {
 
         let vtable: &'static bindings::FimoTracingSubscriberVTable = &<T as VTableProvider>::TABLE;
         Self(bindings::FimoTracingSubscriber {
-            type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_SUBSCRIBER,
             next: core::ptr::null(),
             ptr: core::ptr::from_ref(subscriber).cast_mut().cast(),
             vtable: core::ptr::from_ref(vtable),
@@ -897,7 +893,6 @@ impl OpaqueSubscriber {
 
         let vtable: &'static bindings::FimoTracingSubscriberVTable = &<T as VTableProvider>::TABLE;
         Self(bindings::FimoTracingSubscriber {
-            type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_SUBSCRIBER,
             next: core::ptr::null(),
             ptr: Box::into_raw(subscriber).cast(),
             vtable: core::ptr::from_ref(vtable),
@@ -1118,7 +1113,7 @@ impl<const N: usize> Config<N> {
         let mut this = Box::pin_in(
             Self {
                 config: bindings::FimoTracingCreationConfig {
-                    type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG,
+                    type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_CONFIG,
                     next: core::ptr::null(),
                     format_buffer_size: format_buffer_len.map_or(0, |x| x.get()),
                     maximum_level: max_level.unwrap_or(Level::Off).to_ffi(),

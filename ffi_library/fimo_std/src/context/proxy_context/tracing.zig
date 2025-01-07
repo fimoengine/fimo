@@ -24,8 +24,7 @@ pub const Level = enum(i32) {
 
 /// Metadata for a span and event.
 pub const Metadata = extern struct {
-    id: Context.TypeId = .tracing_metadata,
-    next: ?*const Context.TaggedInStruct = null,
+    next: ?*const anyopaque = null,
     name: [*:0]const u8,
     target: [*:0]const u8,
     level: Level,
@@ -277,15 +276,13 @@ pub const Span = extern struct {
 
 /// Descriptor of a new span.
 pub const SpanDesc = extern struct {
-    id: Context.TypeId = .tracing_span_desc,
-    next: ?*const Context.TaggedInStruct = null,
+    next: ?*const anyopaque = null,
     metadata: *const Metadata,
 };
 
 /// An event to be traced.
 pub const Event = extern struct {
-    id: Context.TypeId = .tracing_event,
-    next: ?*const Context.TaggedInStruct = null,
+    next: ?*const anyopaque = null,
     metadata: *const Metadata,
 };
 
@@ -476,7 +473,6 @@ pub fn stackTraceFormatter(
 /// events on its own, which is the task of the subscribers. Subscribers
 /// may utilize the events in any way they deem fit.
 pub const Subscriber = extern struct {
-    id: Context.TypeId = .tracing_subscriber,
     next: ?*const anyopaque = null,
     data: ?*anyopaque,
     vtable: *const Subscriber.VTable,
@@ -871,8 +867,8 @@ pub const Subscriber = extern struct {
 
 /// Configuration for the tracing subsystem.
 pub const Config = extern struct {
-    id: Context.TypeId = .tracing_creation_config,
-    next: ?*Context.TaggedInStruct = null,
+    id: Context.TypeId = .tracing_config,
+    next: ?*const void = null,
     /// Length in characters of the per-call-stack buffer
     /// used when formatting mesasges.
     format_buffer_len: usize = 0,

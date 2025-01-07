@@ -31,11 +31,7 @@ pub const context_version = Version{
 
 /// Id of the fimo std interface types.
 pub const TypeId = enum(c.FimoStructType) {
-    tracing_creation_config = c.FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG,
-    tracing_metadata = c.FIMO_STRUCT_TYPE_TRACING_METADATA,
-    tracing_span_desc = c.FIMO_STRUCT_TYPE_TRACING_SPAN_DESC,
-    tracing_event = c.FIMO_STRUCT_TYPE_TRACING_EVENT,
-    tracing_subscriber = c.FIMO_STRUCT_TYPE_TRACING_SUBSCRIBER,
+    tracing_config = c.FIMO_STRUCT_TYPE_TRACING_CONFIG,
     module_export = c.FIMO_STRUCT_TYPE_MODULE_EXPORT,
     module_info = c.FIMO_STRUCT_TYPE_MODULE_INFO,
     _,

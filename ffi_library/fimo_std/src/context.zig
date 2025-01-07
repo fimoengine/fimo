@@ -31,7 +31,7 @@ pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
     errdefer if (cleanup_options) for (options) |opt| {
         const o = if (opt) |o| o else continue;
         switch (o.id) {
-            .tracing_creation_config => {
+            .tracing_config => {
                 const cfg: *const ProxyTracing.Config = @alignCast(@ptrCast(o));
                 cfg.deinit();
             },
@@ -43,7 +43,7 @@ pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
     for (options) |opt| {
         const o = if (opt) |o| o else return error.InvalidInput;
         switch (o.id) {
-            .tracing_creation_config => {
+            .tracing_config => {
                 if (tracing_cfg != null) return error.InvalidInput;
                 tracing_cfg = @alignCast(@ptrCast(o));
             },

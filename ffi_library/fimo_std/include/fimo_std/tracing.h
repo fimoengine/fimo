@@ -44,71 +44,39 @@ typedef enum FimoTracingLevel : FimoI32 {
     FIMO_TRACING_LEVEL_TRACE = 5,
 } FimoTracingLevel;
 
-/**
- * Metadata for a span/event.
- */
+/// Metadata for a span and event.
 typedef struct FimoTracingMetadata {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_TRACING_METADATA`.
-     */
-    FimoStructType type;
-    /**
-     * Pointer to a possible extension.
-     *
-     * Reserved for future use. Must be `NULL`.
-     */
+    /// Pointer to a possible extension.
+    ///
+    /// Reserved for future use. Must be `NULL`.
     const FimoBaseStructIn *next;
-    /**
-     * Name of the event.
-     *
-     * Must not be `NULL`.
-     */
+    /// Name of the event.
+    ///
+    /// Must not be `NULL`.
     const char *name;
-    /**
-     * Target of the event.
-     *
-     * Must not be `NULL`.
-     */
+    /// Target of the event.
+    ///
+    /// Must not be `NULL`.
     const char *target;
-    /**
-     * Level at which to trace the event.
-     */
+    /// Level at which to trace the event.
     FimoTracingLevel level;
-    /**
-     * Optional file name where the event took place.
-     */
+    /// Optional file name where the event took place.
     const char *file_name;
-    /**
-     * Optional line number where the event took place.
-     *
-     * Use a negative number to indicate no line number.
-     */
+    /// Optional line number where the event took place.
+    ///
+    /// Use a negative number to indicate no line number.
     FimoI32 line_number;
 } FimoTracingMetadata;
 
-/**
- * Descriptor of a new span.
- */
+/// Descriptor of a new span.
 typedef struct FimoTracingSpanDesc {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_TRACING_SPAN_DESC`.
-     */
-    FimoStructType type;
-    /**
-     * Pointer to a possible extension.
-     *
-     * Reserved for future use. Must be `NULL`.
-     */
-    const FimoBaseStructIn *next;
-    /**
-     * Metadata of the span.
-     *
-     * Must not be `NULL`.
-     */
+    /// Pointer to a possible extension.
+    ///
+    /// Reserved for future use. Must be `NULL`.
+    const void *next;
+    /// Metadata of the span.
+    ///
+    /// Must not be `NULL`.
     const FimoTracingMetadata *metadata;
 } FimoTracingSpanDesc;
 
@@ -134,27 +102,15 @@ typedef struct FimoTracingSpan {
     const FimoTracingSpanVTable *vtable;
 } FimoTracingSpan;
 
-/**
- * An event to be traced.
- */
+/// An event to be traced.
 typedef struct FimoTracingEvent {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_TRACING_EVENT`.
-     */
-    FimoStructType type;
-    /**
-     * Pointer to a possible extension.
-     *
-     * Reserved for future use. Must be `NULL`.
-     */
+    /// Pointer to a possible extension.
+    ///
+    /// Reserved for future use. Must be `NULL`.
     const FimoBaseStructIn *next;
-    /**
-     * Metadata of the event.
-     *
-     * Must not be `NULL`.
-     */
+    /// Metadata of the event.
+    ///
+    /// Must not be `NULL`.
     const FimoTracingMetadata *metadata;
 } FimoTracingEvent;
 
@@ -292,25 +248,13 @@ typedef struct FimoTracingSubscriberVTable {
  * may utilize the events in any way they deem fit.
  */
 typedef struct FimoTracingSubscriber {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_TRACING_SUBSCRIBER`.
-     */
-    FimoStructType type;
-    /**
-     * Pointer to a possible extension.
-     *
-     * Reserved for future use. Must be `NULL`.
-     */
-    const struct FimoBaseStructIn *next;
-    /**
-     * Pointer to the subscriber.
-     */
+    /// Pointer to a possible extension.
+    ///
+    /// Reserved for future use. Must be `NULL`.
+    const void *next;
+    /// Pointer to the subscriber.
     void *ptr;
-    /**
-     * Pointer to the vtable of the subscriber (not `Null`).
-     */
+    /// Pointer to the vtable of the subscriber (not `Null`).
     const FimoTracingSubscriberVTable *vtable;
 } FimoTracingSubscriber;
 
@@ -325,11 +269,11 @@ extern const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER;
  *
  * Can be passed when creating the context.
  */
-typedef struct FimoTracingCreationConfig {
+typedef struct FimoTracingConfig {
     /**
      * Type of the struct.
      *
-     * Must be `FIMO_STRUCT_TYPE_TRACING_CREATION_CONFIG`.
+     * Must be `FIMO_STRUCT_TYPE_TRACING_CONFIG`.
      */
     FimoStructType type;
     /**
@@ -337,7 +281,7 @@ typedef struct FimoTracingCreationConfig {
      *
      * Reserved for future use. Must be `NULL`.
      */
-    const struct FimoBaseStructIn *next;
+    const void *next;
     /**
      * Size of the per-call-stack buffer used for formatting messages.
      */
