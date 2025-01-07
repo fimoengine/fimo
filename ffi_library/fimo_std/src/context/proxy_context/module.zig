@@ -234,7 +234,7 @@ pub const Info = extern struct {
         unref: *const fn (ctx: *const Info) callconv(.c) void,
         mark_unloadable: *const fn (ctx: *const Info) callconv(.c) void,
         is_loaded: *const fn (ctx: *const Info) callconv(.c) bool,
-        ref_instance_strong: *const fn (ctx: *const Info) callconv(.c) c.FimoResult,
+        try_ref_instance_strong: *const fn (ctx: *const Info) callconv(.c) bool,
         unref_instance_strong: *const fn (ctx: *const Info) callconv(.c) void,
     };
 
@@ -260,18 +260,17 @@ pub const Info = extern struct {
         return self.vtable.is_loaded(self);
     }
 
-    /// Increases the strong reference count of the module instance.
+    /// Tries to increase the strong reference count of the module instance.
     ///
     /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
     /// between modules, without registering the dependency with the subsystem.
-    pub fn refInstanceStrong(self: *const Info, err: *?AnyError) AnyError.Error!void {
-        const result = self.vtable.ref_instance_strong(self);
-        try AnyError.initChecked(err, result);
+    pub fn tryRefInstanceStrong(self: *const Info) bool {
+        return self.vtable.try_ref_instance_strong(self);
     }
 
     /// Decreases the strong reference count of the module instance.
     ///
-    /// Should only be called after `acquire_module_strong`, when the dependency is no longer
+    /// Should only be called after `tryRefInstanceStrong`, when the dependency is no longer
     /// required.
     pub fn unrefInstanceStrong(self: *const Info) void {
         self.vtable.unref_instance_strong(self);
@@ -410,6 +409,8 @@ pub fn Instance(
         ///
         /// Adding fields to the VTable is not a breaking change.
         pub const VTable = extern struct {
+            ref: *const fn (ctx: *const OpaqueInstance) callconv(.c) void,
+            unref: *const fn (ctx: *const OpaqueInstance) callconv(.c) void,
             query_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
@@ -464,6 +465,22 @@ pub fn Instance(
         /// Returns the contained context without increasing the reference count.
         pub fn context(self: *const @This()) Context {
             return Context.initC(self.ctx);
+        }
+
+        /// Increases the strong reference count of the module instance.
+        ///
+        /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
+        /// between modules, without registering the dependency with the subsystem.
+        pub fn ref(self: *const @This()) void {
+            self.vtable.ref(self.castOpaque());
+        }
+
+        /// Decreases the strong reference count of the module instance.
+        ///
+        /// Should only be called after `ref`, when the dependency is no longer
+        /// required.
+        pub fn unref(self: *const @This()) void {
+            self.vtable.unref(self.castOpaque());
         }
 
         /// Checks the status of a namespace from the view of the module.

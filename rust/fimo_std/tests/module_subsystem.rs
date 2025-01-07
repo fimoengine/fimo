@@ -217,7 +217,9 @@ fn load_modules() -> Result<(), Error> {
         assert!(module.load_symbol::<b::BExport0>().is_ok());
 
         let info = module.module_info().to_owned();
-        let _guard = info.acquire_module_strong()?;
+        let _guard = info
+            .try_acquire_module_strong()
+            .ok_or(Error::new("failed to acquire module"))?;
 
         drop(module);
         assert!(a.is_loaded());

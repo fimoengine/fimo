@@ -1161,12 +1161,12 @@ const InfoVTableImpl = struct {
         defer inner.unlock();
         return !inner.isDetached();
     }
-    fn refInstanceStrong(info: *const ProxyModule.Info) callconv(.C) c.FimoResult {
+    fn tryRefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) bool {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
-        inner.refStrong() catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        inner.refStrong() catch return false;
+        return true;
     }
     fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) void {
         const x = Self.fromInfoPtr(info);
@@ -1181,7 +1181,7 @@ const info_vtable = ProxyModule.Info.VTable{
     .unref = &InfoVTableImpl.unref,
     .mark_unloadable = &InfoVTableImpl.markUnloadable,
     .is_loaded = &InfoVTableImpl.isLoaded,
-    .ref_instance_strong = &InfoVTableImpl.refInstanceStrong,
+    .try_ref_instance_strong = &InfoVTableImpl.tryRefInstanceStrong,
     .unref_instance_strong = &InfoVTableImpl.unrefInstanceStrong,
 };
 
@@ -1190,6 +1190,18 @@ const info_vtable = ProxyModule.Info.VTable{
 // ----------------------------------------------------
 
 const InstanceVTableImpl = struct {
+    fn ref(ctx: *const ProxyModule.OpaqueInstance) callconv(.C) void {
+        const x = Self.fromInstancePtr(ctx);
+        const inner = x.lock();
+        defer inner.unlock();
+        inner.refStrong() catch unreachable;
+    }
+    fn unref(ctx: *const ProxyModule.OpaqueInstance) callconv(.C) void {
+        const x = Self.fromInstancePtr(ctx);
+        const inner = x.lock();
+        defer inner.unlock();
+        inner.unrefStrong();
+    }
     fn queryNamespace(
         ctx: *const ProxyModule.OpaqueInstance,
         namespace: [*:0]const u8,
@@ -1354,6 +1366,8 @@ const InstanceVTableImpl = struct {
 };
 
 const instance_vtable = ProxyModule.OpaqueInstance.VTable{
+    .ref = &InstanceVTableImpl.ref,
+    .unref = &InstanceVTableImpl.unref,
     .query_namespace = &InstanceVTableImpl.queryNamespace,
     .add_namespace = &InstanceVTableImpl.addNamespace,
     .remove_namespace = &InstanceVTableImpl.removeNamespace,

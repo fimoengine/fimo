@@ -126,17 +126,17 @@ typedef struct FimoModuleInfoVTable {
      */
     bool (*is_loaded)(const struct FimoModuleInfo *info);
     /**
-     * Increases the strong reference count of the module instance.
+     * Tries to increase the strong reference count of the module instance.
      *
      * Will prevent the instance from being unloaded. This may be used to pass
      * data, like callbacks, between instances, without registering the
      * dependency with the subsystem.
      */
-    FimoResult (*acquire_module_strong)(const struct FimoModuleInfo *info);
+    bool (*try_acquire_module_strong)(const struct FimoModuleInfo *info);
     /**
      * Decreases the strong reference count of the module instance.
      *
-     * Should only be called after `acquire_module_strong`, when the dependency
+     * Should only be called after `try_acquire_module_strong`, when the dependency
      * is no longer required.
      */
     void (*release_module_strong)(const struct FimoModuleInfo *info);
@@ -194,6 +194,21 @@ typedef struct FimoModuleInstance FimoModuleInstance;
  * Adding fields to the vtable is not a breaking change.
  */
 typedef struct FimoModuleInstanceVTable {
+    /**
+     * Increases the strong reference count of the module instance.
+     *
+     * Will prevent the instance from being unloaded. This may be used to pass
+     * data, like callbacks, between instances, without registering the
+     * dependency with the subsystem.
+     */
+    void (*acquire)(struct FimoModuleInstance *ctx);
+    /**
+     * Decreases the strong reference count of the module instance.
+     *
+     * Should only be called after `acquire`, when the dependency
+     * is no longer required.
+     */
+    void (*release)(struct FimoModuleInstance *ctx);
     /**
      * Checks if a module includes a namespace.
      *

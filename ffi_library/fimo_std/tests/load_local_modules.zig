@@ -254,7 +254,7 @@ pub fn main() !void {
     info.ref();
     defer info.unref();
 
-    info.refInstanceStrong(&err) catch unreachable;
+    try testing.expect(info.tryRefInstanceStrong());
     defer info.unrefInstanceStrong();
 
     instance.deinit();

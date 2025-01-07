@@ -128,19 +128,19 @@ impl ModuleInfoView<'_> {
         unsafe { (is_loaded)(self.share_to_ffi()) }
     }
 
-    /// Increases the strong reference count of the module instance.
+    /// Tries to increase the strong reference count of the module instance.
     ///
     /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
     /// between modules, without registering the dependency with the subsystem.
-    pub fn acquire_module_strong(&self) -> Result<ModuleInfoGuard<'_>, Error> {
-        let acquire_module_strong = self.0.vtable.acquire_module_strong.unwrap();
+    pub fn try_acquire_module_strong(&self) -> Option<ModuleInfoGuard<'_>> {
+        let f = self.0.vtable.try_acquire_module_strong.unwrap();
         // Safety: The ffi call is safe.
         unsafe {
-            to_result_indirect(|error| {
-                *error = acquire_module_strong(self.share_to_ffi());
-            })?;
+            match f(self.share_to_ffi()) {
+                false => None,
+                true => Some(ModuleInfoGuard(*self)),
+            }
         }
-        Ok(ModuleInfoGuard(*self))
     }
 
     /// Unlocks the underlying module, allowing it to be unloaded again.
@@ -712,11 +712,9 @@ where
     Exp: Send + Sync + 'static,
     Data: Send + Sync + 'static,
 {
-    pub fn lock_module_strong(
-        &self,
-    ) -> Result<GenericLockedModule<Par, Res, Imp, Exp, Data>, Error> {
+    pub fn lock_module_strong(&self) -> Option<GenericLockedModule<Par, Res, Imp, Exp, Data>> {
         let info = self.module_info();
-        let guard = info.acquire_module_strong()?;
+        let guard = info.try_acquire_module_strong()?;
         #[allow(clippy::mem_forget)]
         std::mem::forget(guard);
 
@@ -724,7 +722,7 @@ where
         let module = unsafe {
             std::mem::transmute::<Self, GenericModule<'static, Par, Res, Imp, Exp, Data>>(*self)
         };
-        Ok(GenericLockedModule { module })
+        Some(GenericLockedModule { module })
     }
 }
 
