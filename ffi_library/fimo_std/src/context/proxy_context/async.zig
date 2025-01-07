@@ -648,8 +648,12 @@ pub fn FSMFuture(comptime T: type) type {
                                         if (next_state == num_states) self.state = i;
                                         continue :sm next_state;
                                     },
-                                    .yield => return .pending,
+                                    .yield => {
+                                        self.state = i;
+                                        return .pending;
+                                    },
                                     .ret => {
+                                        self.state = i;
                                         continue :sm num_states;
                                     },
                                 }
