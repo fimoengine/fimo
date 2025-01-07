@@ -3,8 +3,7 @@ use crate::{
     allocator::FimoAllocator,
     bindings,
     context::{private::SealedContext, Context, ContextView},
-    error,
-    error::{to_result_indirect, to_result_indirect_in_place, Error},
+    error::Error,
     ffi::{FFISharable, FFITransferable},
     time::Time,
 };
@@ -21,7 +20,7 @@ pub trait TracingSubsystem: SealedContext {
     /// Emits a new event.
     ///
     /// The message may be cut of, if the length exceeds the internal formatting buffer size.
-    fn emit_event(&self, event: &Event, arguments: Arguments<'_>) -> error::Result;
+    fn emit_event(&self, event: &Event, arguments: Arguments<'_>);
 
     /// Checks whether the tracing subsystem is enabled.
     ///
@@ -33,57 +32,47 @@ pub trait TracingSubsystem: SealedContext {
     /// Flushes the streams used for tracing.
     ///
     /// If successful, any unwritten data is written out by the individual subscribers.
-    fn flush(&self) -> error::Result;
+    fn flush(&self);
 }
 
 impl<T> TracingSubsystem for T
 where
     T: SealedContext,
 {
-    fn emit_event(&self, event: &Event, arguments: Arguments<'_>) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.view()
+    fn emit_event(&self, event: &Event, arguments: Arguments<'_>) {
+        unsafe {
+            let f = self
+                .view()
                 .vtable()
                 .tracing_v0
                 .event_emit
-                .unwrap_unchecked()
-        };
+                .unwrap_unchecked();
 
-        // Safety: FFI call is safe.
-        unsafe {
-            to_result_indirect(|error| {
-                *error = f(
-                    self.view().data(),
-                    event.share_to_ffi(),
-                    Some(Formatter::format_into_buffer as _),
-                    core::ptr::from_ref(&arguments).cast(),
-                );
-            })
+            f(
+                self.view().data(),
+                event.share_to_ffi(),
+                Some(Formatter::format_into_buffer as _),
+                core::ptr::from_ref(&arguments).cast(),
+            );
         }
     }
 
     fn is_enabled(&self) -> bool {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.view()
+        unsafe {
+            let f = self
+                .view()
                 .vtable()
                 .tracing_v0
                 .is_enabled
-                .unwrap_unchecked()
-        };
-        // Safety: FFI call is safe.
-        unsafe { f(self.view().data()) }
+                .unwrap_unchecked();
+            f(self.view().data())
+        }
     }
 
-    fn flush(&self) -> error::Result {
-        // Safety: Is always set.
-        let f = unsafe { self.view().vtable().tracing_v0.flush.unwrap_unchecked() };
-        // Safety: FFI call is safe.
+    fn flush(&self) {
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(self.view().data());
-            })
+            let f = self.view().vtable().tracing_v0.flush.unwrap_unchecked();
+            f(self.view().data());
         }
     }
 }
@@ -101,7 +90,6 @@ macro_rules! tracing_span {
             const DESCRIPTOR: &'static $crate::tracing::SpanDescriptor =
                 &$crate::tracing::SpanDescriptor::new(METADATA);
             $crate::tracing::Span::new($ctx, DESCRIPTOR, core::format_args!($($arg)+))
-                .expect("could not create span")
         }
     };
     ($ctx:expr, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
@@ -113,7 +101,6 @@ macro_rules! tracing_span {
             const DESCRIPTOR: &'static $crate::tracing::SpanDescriptor =
                 &$crate::tracing::SpanDescriptor::new(METADATA);
             $crate::tracing::Span::new($ctx, DESCRIPTOR, core::format_args!($($arg)+))
-                .expect("could not create span")
         };
     };
     ($ctx:expr, lvl: $lvl:expr, $($arg:tt)+) => {
@@ -132,7 +119,7 @@ macro_rules! tracing_emit {
             lvl: $lvl
         );
         const EVENT: &'static $crate::tracing::Event = &$crate::tracing::Event::new(METADATA);
-        $ctx.emit_event(EVENT, core::format_args!($($arg)+)).expect("could not emit event");
+        $ctx.emit_event(EVENT, core::format_args!($($arg)+));
     }};
     ($ctx:expr, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {{
         use $crate::tracing::TracingSubsystem;
@@ -141,7 +128,7 @@ macro_rules! tracing_emit {
             lvl: $lvl
         );
         const EVENT: &'static $crate::tracing::Event = &$crate::tracing::Event::new(METADATA);
-        $ctx.emit_event(EVENT, core::format_args!($($arg)+)).expect("could not emit event");
+        $ctx.emit_event(EVENT, core::format_args!($($arg)+));
     }};
     ($ctx:expr, lvl: $lvl:expr, $($arg:tt)+) => {
         $crate::tracing_emit!($ctx, target: "", lvl: $lvl, $($arg)+)
@@ -551,19 +538,16 @@ impl Span {
         ctx: ContextView<'_>,
         span_descriptor: &'static SpanDescriptor,
         arguments: Arguments<'_>,
-    ) -> Result<Self, Error> {
+    ) -> Self {
         unsafe {
             let f = ctx.vtable().tracing_v0.span_create.unwrap_unchecked();
-            let span = to_result_indirect_in_place(|error, span| {
-                *error = f(
-                    ctx.data(),
-                    span_descriptor.share_to_ffi(),
-                    span.as_mut_ptr(),
-                    Some(Formatter::format_into_buffer),
-                    core::ptr::from_ref(&arguments).cast(),
-                );
-            })?;
-            Ok(Self(span))
+            let span = f(
+                ctx.data(),
+                span_descriptor.share_to_ffi(),
+                Some(Formatter::format_into_buffer),
+                core::ptr::from_ref(&arguments).cast(),
+            );
+            Self(span)
         }
     }
 }
@@ -592,13 +576,11 @@ impl CallStack {
     ///
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
-    pub fn new(ctx: &ContextView<'_>) -> Result<Self, Error> {
+    pub fn new(ctx: &ContextView<'_>) -> Self {
         unsafe {
             let f = ctx.vtable().tracing_v0.create_call_stack.unwrap_unchecked();
-            let stack = to_result_indirect_in_place(|error, stack| {
-                *error = f(ctx.data(), stack.as_mut_ptr());
-            })?;
-            Ok(Self(stack))
+            let stack = f(ctx.data());
+            Self(stack)
         }
     }
 
@@ -686,60 +668,33 @@ impl ThreadAccess {
     /// The tracing of the subsystem is opt-in on a per-thread basis, where unregistered threads
     /// will behave as if the backend was disabled. Once registered, the calling thread gains access
     /// to the tracing subsystem and is assigned a new empty call stack.
-    pub fn new(ctx: &ContextView<'_>) -> Result<Self, Error> {
-        // Safety: Is always set.
-        let f = unsafe { ctx.vtable().tracing_v0.register_thread.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
+    pub fn new(ctx: &ContextView<'_>) -> Self {
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(ctx.data());
-            })?;
+            let f = ctx.vtable().tracing_v0.register_thread.unwrap_unchecked();
+            f(ctx.data());
+            Self(ctx.to_context())
         }
-
-        Ok(Self(ctx.to_context()))
     }
 
     /// Unregisters the calling thread from the tracing subsystem.
     ///
     /// Once unregistered, the calling thread looses access to the tracing subsystem until it is
     /// registered again. The thread can not be unregistered until the call stack is empty.
-    pub fn unregister(self) -> Result<(), (Self, Error)> {
-        let this = ManuallyDrop::new(self);
-        // Safety: Is always set.
-        let f = unsafe {
-            this.0
-                .vtable()
-                .tracing_v0
-                .unregister_thread
-                .unwrap_unchecked()
-        };
-        // Safety: FFI call is safe.
-        unsafe {
-            to_result_indirect(|error| {
-                *error = f(this.0.data());
-            })
-            .map_err(move |e| (ManuallyDrop::into_inner(this), e))
-        }
+    pub fn unregister(self) {
+        drop(self);
     }
 }
 
 impl Drop for ThreadAccess {
     fn drop(&mut self) {
-        // Safety: Is always set.
-        let f = unsafe {
-            self.0
+        unsafe {
+            let f = self
+                .0
                 .vtable()
                 .tracing_v0
                 .unregister_thread
-                .unwrap_unchecked()
-        };
-        // Safety: FFI call is safe.
-        unsafe {
-            to_result_indirect(|error| {
-                *error = f(self.0.data());
-            })
-            .expect("should be able to unregister a thread");
+                .unwrap_unchecked();
+            f(self.0.data());
         }
     }
 }
@@ -750,7 +705,7 @@ pub trait Subscriber: Send + Sync {
     type CallStack;
 
     /// Creates a new call stack.
-    fn create_call_stack(&self, time: Time) -> Result<Box<Self::CallStack>, Error>;
+    fn create_call_stack(&self, time: Time) -> Box<Self::CallStack>;
 
     /// Drops the call stack without tracing anything.
     fn drop_call_stack(&self, call_stack: Box<Self::CallStack>);
@@ -774,7 +729,7 @@ pub trait Subscriber: Send + Sync {
         span_descriptor: &SpanDescriptor,
         message: &[u8],
         call_stack: &mut Self::CallStack,
-    ) -> error::Result;
+    );
 
     /// Drops the span without tracing anything.
     fn drop_span(&self, call_stack: &mut Self::CallStack);
@@ -847,19 +802,13 @@ impl OpaqueSubscriber {
         unsafe extern "C" fn call_stack_create<T: Subscriber>(
             subscriber: *mut core::ffi::c_void,
             time: *const bindings::FimoTime,
-            stack: *mut *mut core::ffi::c_void,
-        ) -> bindings::FimoResult {
+        ) -> *mut core::ffi::c_void {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
                 let time = Time::from_ffi(*time);
-                match subscriber.create_call_stack(time) {
-                    Ok(x) => {
-                        core::ptr::write(stack, Box::into_raw(x).cast());
-                        Result::<_, Error>::Ok(()).into_ffi()
-                    }
-                    Err(e) => e.into_error(),
-                }
+                let cs = subscriber.create_call_stack(time);
+                Box::into_raw(cs).cast()
             }
         }
         unsafe extern "C" fn call_stack_drop<T: Subscriber>(
@@ -933,7 +882,7 @@ impl OpaqueSubscriber {
             message: *const core::ffi::c_char,
             message_length: usize,
             stack: *mut core::ffi::c_void,
-        ) -> bindings::FimoResult {
+        ) {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
@@ -941,9 +890,7 @@ impl OpaqueSubscriber {
                 let span_descriptor = SpanDescriptor::borrow_from_ffi(span_descriptor);
                 let message = core::slice::from_raw_parts(message.cast(), message_length);
                 let stack = &mut *stack.cast();
-                subscriber
-                    .create_span(time, span_descriptor, message, stack)
-                    .into_ffi()
+                subscriber.create_span(time, span_descriptor, message, stack)
             }
         }
         unsafe extern "C" fn span_drop<T: Subscriber>(
@@ -1111,13 +1058,12 @@ impl Formatter<'_> {
         buffer_len: usize,
         data: *const core::ffi::c_void,
         written: *mut usize,
-    ) -> bindings::FimoResult {
+    ) {
         // Safety: The buffer should be valid.
         unsafe {
             let mut f = Self::new(buffer, buffer_len);
             let _ = f.write_fmt(*data.cast::<core::fmt::Arguments<'_>>());
             core::ptr::write(written, f.pos.min(f.buffer.len()));
-            Result::<_, Error>::Ok(()).into_ffi()
         }
     }
 }

@@ -418,7 +418,7 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
         .build()
         .expect("could not build fimo context");
     {
-        let _access = ThreadAccess::new(&context).expect("could not register thread");
+        let _access = ThreadAccess::new(&context);
         let _event_loop = EventLoop::new(*context).expect("could not create event loop");
 
         let blocking = BlockingContext::new(*context).expect("could not create blocking context");
@@ -433,7 +433,7 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
                     })
                     .unwrap();
             }
-            set.view().commit().unwrap();
+            set.view().commit().await.unwrap();
 
             let module = fimo_std::module::PseudoModule::new(&*context)
                 .expect("could not create pseudo module");

@@ -23,43 +23,31 @@ pub fn init(
     desc: *const ProxyTracing.SpanDesc,
     formatter: *const ProxyTracing.Formatter,
     data: ?*const anyopaque,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!*Self {
+) *Self {
     const rest_buffer = owner.buffer[owner.cursor..];
 
     var written_characters: usize = undefined;
-    const result = formatter(
+    formatter(
         rest_buffer.ptr,
         rest_buffer.len,
         data,
         &written_characters,
     );
-    try AnyError.initChecked(err, result);
     const message = rest_buffer[0..written_characters];
-
     var num_created_spans: usize = 0;
-    errdefer {
-        const call_stacks = owner.call_stacks.items[0..num_created_spans];
-        const subscribers = owner.owner.subscribers[0..num_created_spans];
-        for (call_stacks, subscribers) |call_stack, subscriber| {
-            subscriber.dropSpan(call_stack);
-        }
-    }
 
     const now = time.Time.now();
     for (owner.call_stacks.items, owner.owner.subscribers) |call_stack, subscriber| {
-        try subscriber.createSpan(
+        subscriber.createSpan(
             now,
             desc,
             message,
             call_stack,
-            err,
         );
         num_created_spans += 1;
     }
 
-    const frame = try owner.owner.allocator.create(Self);
-    errdefer owner.owner.allocator.destroy(frame);
+    const frame = owner.owner.allocator.create(Self) catch |e| @panic(@errorName(e));
     frame.* = .{
         .metadata = desc.metadata,
         .parent_cursor = owner.cursor,

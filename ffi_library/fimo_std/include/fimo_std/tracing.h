@@ -150,9 +150,8 @@ typedef struct FimoTracingEvent {
  * @param arg1 destination buffer size
  * @param arg2 data to format
  * @param arg3 number of written bytes of the formatter
- * @return Status code.
  */
-typedef FimoResult (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
+typedef void (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
 
 /**
  * VTable of a tracing subscriber.
@@ -176,7 +175,7 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg2 pointer to the new stack
      * @return Status code.
      */
-    FimoResult (*call_stack_create)(void *, const FimoTime *, void **);
+    void* (*call_stack_create)(void *, const FimoTime *);
     /**
      * Drops an empty call stack.
      *
@@ -227,9 +226,8 @@ typedef struct FimoTracingSubscriberVTable {
      * @param arg3 formatted span message
      * @param arg4 length of the span message
      * @param arg5 the call stack
-     * @return Status code.
      */
-    FimoResult (*span_push)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *);
+    void (*span_push)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *);
     /**
      * Drops a newly created span.
      *
@@ -346,11 +344,8 @@ typedef struct FimoTracingVTableV0 {
      * stack.
      *
      * @param ctx the context
-     * @param call_stack pointer to the resulting call stack
-     *
-     * @return Status code.
      */
-    FimoResult (*create_call_stack)(void *ctx, FimoTracingCallStack *call_stack);
+    FimoTracingCallStack (*create_call_stack)(void *ctx);
     /**
      * Marks the current call stack as being suspended.
      *
@@ -390,14 +385,11 @@ typedef struct FimoTracingVTableV0 {
      *
      * @param ctx the context
      * @param span_desc descriptor of the new span
-     * @param span pointer to the resulting span
      * @param format custom formatting function
      * @param data custom formatting data
-     *
-     * @return Status code.
      */
-    FimoResult (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc,
-                              FimoTracingSpan *span, FimoTracingFormat format, const void *data);
+    FimoTracingSpan (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc,
+                                   FimoTracingFormat format, const void *data);
     /**
      * Emits a new event with a custom formatter.
      *
@@ -408,11 +400,9 @@ typedef struct FimoTracingVTableV0 {
      * @param event the event to emit
      * @param format custom formatting function
      * @param data custom data to format
-     *
-     * @return Status code.
      */
-    FimoResult (*event_emit)(void *ctx, const FimoTracingEvent *event, FimoTracingFormat format,
-                             const void * data);
+    void (*event_emit)(void *ctx, const FimoTracingEvent *event, FimoTracingFormat format,
+                       const void * data);
     /**
      * Checks whether the tracing subsystem is enabled.
      *
@@ -438,10 +428,8 @@ typedef struct FimoTracingVTableV0 {
      * calling `fimo_tracing_unregister_thread()`.
      *
      * @param ctx the context
-     *
-     * @return Status code.
      */
-    FimoResult (*register_thread)(void *ctx);
+    void (*register_thread)(void *ctx);
     /**
      * Unregisters the calling thread from the tracing subsystem.
      *
@@ -450,20 +438,16 @@ typedef struct FimoTracingVTableV0 {
      * until the call stack is empty.
      *
      * @param ctx the context.
-     *
-     * @return Status code.
      */
-    FimoResult (*unregister_thread)(void *ctx);
+    void (*unregister_thread)(void *ctx);
     /**
      * Flushes the streams used for tracing.
      *
      * If successful, any unwritten data is written out by the individual subscribers.
      *
      * @param ctx the context
-     *
-     * @return Status code.
      */
-    FimoResult (*flush)(void *ctx);
+    void (*flush)(void *ctx);
 } FimoTracingVTableV0;
 
 #ifdef __cplusplus

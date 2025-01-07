@@ -5,7 +5,6 @@ const builtin = @import("builtin");
 
 const c = @import("../../c.zig");
 const Context = @import("../proxy_context.zig");
-const AnyError = @import("../../AnyError.zig");
 const Time = @import("../../time.zig").Time;
 
 context: Context,
@@ -61,8 +60,7 @@ pub const Span = extern struct {
         location: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
+    ) Span {
         const desc = &struct {
             var desc = SpanDesc{
                 .metadata = &.{
@@ -79,7 +77,6 @@ pub const Span = extern struct {
             desc,
             stdFormatter(fmt, @TypeOf(args)),
             &args,
-            err,
         );
     }
 
@@ -98,18 +95,13 @@ pub const Span = extern struct {
         desc: *const SpanDesc,
         formatter: *const Formatter,
         data: ?*const anyopaque,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
-        var span: Span = undefined;
-        const result = ctx.context.vtable.tracing_v0.span_create(
+    ) Span {
+        return ctx.context.vtable.tracing_v0.span_create(
             ctx.context.data,
             desc,
-            &span,
             formatter,
             data,
         );
-        try AnyError.initChecked(err, result);
-        return span;
     }
 
     /// Creates a new error span with the default formatter and enters it.
@@ -128,8 +120,7 @@ pub const Span = extern struct {
         location: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
+    ) Span {
         return Span.init(
             ctx,
             name,
@@ -138,7 +129,6 @@ pub const Span = extern struct {
             location,
             fmt,
             args,
-            err,
         );
     }
 
@@ -158,8 +148,7 @@ pub const Span = extern struct {
         location: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
+    ) Span {
         return Span.init(
             ctx,
             name,
@@ -168,7 +157,6 @@ pub const Span = extern struct {
             location,
             fmt,
             args,
-            err,
         );
     }
 
@@ -188,8 +176,7 @@ pub const Span = extern struct {
         location: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
+    ) Span {
         return Span.init(
             ctx,
             name,
@@ -198,7 +185,6 @@ pub const Span = extern struct {
             location,
             fmt,
             args,
-            err,
         );
     }
 
@@ -218,8 +204,7 @@ pub const Span = extern struct {
         location: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
+    ) Span {
         return Span.init(
             ctx,
             name,
@@ -228,7 +213,6 @@ pub const Span = extern struct {
             location,
             fmt,
             args,
-            err,
         );
     }
 
@@ -248,8 +232,7 @@ pub const Span = extern struct {
         location: std.builtin.SourceLocation,
         comptime fmt: []const u8,
         args: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!Span {
+    ) Span {
         return Span.init(
             ctx,
             name,
@@ -258,7 +241,6 @@ pub const Span = extern struct {
             location,
             fmt,
             args,
-            err,
         );
     }
 
@@ -309,14 +291,8 @@ pub const CallStack = extern struct {
     ///
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
-    pub fn init(ctx: Tracing, err: *?AnyError) AnyError.Error!CallStack {
-        var cs: CallStack = undefined;
-        const result = ctx.context.vtable.tracing_v0.create_call_stack(
-            ctx.context.data,
-            &cs,
-        );
-        try AnyError.initChecked(err, result);
-        return cs;
+    pub fn init(ctx: Tracing) CallStack {
+        return ctx.context.vtable.tracing_v0.create_call_stack(ctx.context.data);
     }
 
     /// Destroys an empty call stack.
@@ -378,7 +354,7 @@ pub const Formatter = fn (
     buffer_len: usize,
     data: ?*const anyopaque,
     written: *usize,
-) callconv(.c) c.FimoResult;
+) callconv(.c) void;
 
 /// Formatter of the zig standard library.
 pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
@@ -388,13 +364,12 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
             buffer_len: usize,
             data: ?*const anyopaque,
             written: *usize,
-        ) callconv(.c) c.FimoResult {
+        ) callconv(.c) void {
             const b = buffer[0..buffer_len];
             const args: *const ARGS = @alignCast(@ptrCast(data));
             if (std.fmt.bufPrint(b, fmt, args.*)) |out| {
                 written.* = out.len;
             } else |_| written.* = buffer_len;
-            return AnyError.intoCResult(null);
         }
     }.format;
 }
@@ -405,7 +380,7 @@ pub fn stackTraceFormatter(
     buffer_len: usize,
     data: ?*const anyopaque,
     written: *usize,
-) callconv(.c) c.FimoResult {
+) callconv(.c) void {
     const buf = buffer[0..buffer_len];
     const stack_trace: *const std.builtin.StackTrace = @alignCast(@ptrCast(data));
     if (builtin.strip_debug_info) {
@@ -422,7 +397,7 @@ pub fn stackTraceFormatter(
         )) |out| {
             written.* = out.len;
         } else |_| written.* = buffer_len;
-        return AnyError.intoCResult(null);
+        return;
     };
     var stream = std.io.fixedBufferStream(buf);
     var writer = std.io.countingWriter(stream.writer());
@@ -444,7 +419,6 @@ pub fn stackTraceFormatter(
         },
     };
     written.* = @intCast(writer.bytes_written);
-    return AnyError.intoCResult(null);
 }
 
 /// A subscriber for tracing events.
@@ -470,8 +444,7 @@ pub const Subscriber = extern struct {
         call_stack_create: *const fn (
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
-            call_stack: **anyopaque,
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) *anyopaque,
         /// Drops an empty call stack.
         ///
         /// Calling this function reverts the creation of the call stack.
@@ -512,7 +485,7 @@ pub const Subscriber = extern struct {
             msg: [*]const u8,
             msg_len: usize,
             call_stack: *anyopaque,
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) void,
         /// Drops a newly created span.
         ///
         /// Calling this function reverts the creation of the span.
@@ -544,7 +517,7 @@ pub const Subscriber = extern struct {
         comptime CallStackT: type,
         obj: anytype,
         comptime destroy_fn: fn (ctx: @TypeOf(obj)) void,
-        comptime call_stack_create_fn: fn (ctx: @TypeOf(obj), time: Time) anyerror!*CallStackT,
+        comptime call_stack_create_fn: fn (ctx: @TypeOf(obj), time: Time) *CallStackT,
         comptime call_stack_drop_fn: fn (ctx: @TypeOf(obj), call_stack: *CallStackT) void,
         comptime call_stack_destroy_fn: fn (
             ctx: @TypeOf(obj),
@@ -573,7 +546,7 @@ pub const Subscriber = extern struct {
             span_desc: *const SpanDesc,
             msg: []const u8,
             call_stack: *CallStackT,
-        ) anyerror!void,
+        ) void,
         comptime span_drop_fn: fn (ctx: @TypeOf(obj), call_stack: *CallStackT) void,
         comptime span_pop_fn: fn (ctx: @TypeOf(obj), time: Time, call_stack: *CallStackT) void,
         comptime event_emit_fn: fn (
@@ -599,16 +572,10 @@ pub const Subscriber = extern struct {
             fn callStackCreate(
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
-                call_stack: **anyopaque,
-            ) callconv(.c) c.FimoResult {
+            ) callconv(.c) *anyopaque {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
-                if (call_stack_create_fn(self, t)) |cs| {
-                    call_stack.* = cs;
-                    return AnyError.intoCResult(null);
-                } else |err| {
-                    return AnyError.initError(err).err;
-                }
+                return call_stack_create_fn(self, t);
             }
             fn callStackDrop(
                 ptr: ?*anyopaque,
@@ -666,7 +633,7 @@ pub const Subscriber = extern struct {
                 msg: [*]const u8,
                 msg_len: usize,
                 call_stack: *anyopaque,
-            ) callconv(.c) c.FimoResult {
+            ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const m = msg[0..msg_len];
@@ -677,8 +644,7 @@ pub const Subscriber = extern struct {
                     span_desc,
                     m,
                     cs,
-                ) catch |err| return AnyError.initError(err).err;
-                return AnyError.intoCResult(null);
+                );
             }
             fn spanDrop(
                 ptr: ?*anyopaque,
@@ -744,16 +710,8 @@ pub const Subscriber = extern struct {
     pub fn createCallStack(
         self: Subscriber,
         timepoint: Time,
-        err: *?AnyError,
-    ) AnyError.Error!*anyopaque {
-        var call_stack: *anyopaque = undefined;
-        const result = self.vtable.call_stack_create(
-            self.data,
-            &timepoint.intoC(),
-            &call_stack,
-        );
-        try AnyError.initChecked(err, result);
-        return call_stack;
+    ) *anyopaque {
+        return self.vtable.call_stack_create(self.data, &timepoint.intoC());
     }
 
     pub fn dropCallStack(self: Subscriber, call_stack: *anyopaque) void {
@@ -803,9 +761,8 @@ pub const Subscriber = extern struct {
         span_desc: *const SpanDesc,
         message: []const u8,
         call_stack: *anyopaque,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        const result = self.vtable.span_push(
+    ) void {
+        self.vtable.span_push(
             self.data,
             &timepoint.intoC(),
             @ptrCast(span_desc),
@@ -813,7 +770,6 @@ pub const Subscriber = extern struct {
             message.len,
             call_stack,
         );
-        try AnyError.initChecked(err, result);
     }
 
     pub fn dropSpan(self: Subscriber, call_stack: *anyopaque) void {
@@ -877,7 +833,7 @@ pub const Config = extern struct {
 ///
 /// Changing the VTable is a breaking change.
 pub const VTable = extern struct {
-    create_call_stack: *const fn (ctx: *anyopaque, call_stack: *CallStack) callconv(.c) c.FimoResult,
+    create_call_stack: *const fn (ctx: *anyopaque) callconv(.c) CallStack,
     suspend_current_call_stack: *const fn (
         ctx: *anyopaque,
         mark_blocked: bool,
@@ -886,20 +842,19 @@ pub const VTable = extern struct {
     span_create: *const fn (
         ctx: *anyopaque,
         span_desc: *const SpanDesc,
-        span: *Span,
         formatter: *const Formatter,
         data: ?*const anyopaque,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) Span,
     event_emit: *const fn (
         ctx: *anyopaque,
         event: *const Event,
         formatter: *const Formatter,
         data: ?*const anyopaque,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) void,
     is_enabled: *const fn (ctx: *anyopaque) callconv(.c) bool,
-    register_thread: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
-    unregister_thread: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
-    flush: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
+    register_thread: *const fn (ctx: *anyopaque) callconv(.c) void,
+    unregister_thread: *const fn (ctx: *anyopaque) callconv(.c) void,
+    flush: *const fn (ctx: *anyopaque) callconv(.c) void,
 };
 
 /// Emits a new event with the standard formatter.
@@ -915,8 +870,7 @@ pub fn emitEvent(
     location: std.builtin.SourceLocation,
     comptime fmt: []const u8,
     args: anytype,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     const event = Event{
         .metadata = &.{
             .name = name orelse location.fn_name,
@@ -930,7 +884,6 @@ pub fn emitEvent(
         &event,
         stdFormatter(fmt, @TypeOf(args)),
         &args,
-        err,
     );
 }
 
@@ -944,8 +897,7 @@ pub fn emitStackTrace(
     target: ?[:0]const u8,
     stack_trace: std.builtin.StackTrace,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     const event = Event{
         .metadata = &.{
             .name = name orelse location.fn_name,
@@ -955,11 +907,10 @@ pub fn emitStackTrace(
             .line_number = @intCast(location.line),
         },
     };
-    try self.emitEventCustom(
+    self.emitEventCustom(
         &event,
         stackTraceFormatter,
         &stack_trace,
-        err,
     );
 }
 
@@ -972,14 +923,12 @@ pub fn emitStackTraceSimple(
     stack_trace: std.builtin.StackTrace,
     location: std.builtin.SourceLocation,
 ) void {
-    var err: ?AnyError = null;
     return self.emitStackTrace(
         null,
         null,
         stack_trace,
         location,
-        &err,
-    ) catch @panic("Trace failed");
+    );
 }
 
 /// Emits a new event with a custom formatter.
@@ -991,15 +940,13 @@ pub fn emitEventCustom(
     event: *const Event,
     formatter: *const Formatter,
     data: ?*const anyopaque,
-    err: *?AnyError,
-) AnyError.Error!void {
-    const result = self.context.vtable.tracing_v0.event_emit(
+) void {
+    return self.context.vtable.tracing_v0.event_emit(
         self.context.data,
         event,
         formatter,
         data,
     );
-    try AnyError.initChecked(err, result);
 }
 
 /// Emits a new error event with the standard formatter.
@@ -1014,8 +961,7 @@ pub fn emitErr(
     location: std.builtin.SourceLocation,
     comptime fmt: []const u8,
     args: anytype,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     return self.emitEvent(
         name,
         target,
@@ -1023,7 +969,6 @@ pub fn emitErr(
         location,
         fmt,
         args,
-        err,
     );
 }
 
@@ -1039,8 +984,7 @@ pub fn emitWarn(
     location: std.builtin.SourceLocation,
     comptime fmt: []const u8,
     args: anytype,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     return self.emitEvent(
         name,
         target,
@@ -1048,7 +992,6 @@ pub fn emitWarn(
         location,
         fmt,
         args,
-        err,
     );
 }
 
@@ -1064,8 +1007,7 @@ pub fn emitInfo(
     location: std.builtin.SourceLocation,
     comptime fmt: []const u8,
     args: anytype,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     return self.emitEvent(
         name,
         target,
@@ -1073,7 +1015,6 @@ pub fn emitInfo(
         location,
         fmt,
         args,
-        err,
     );
 }
 
@@ -1089,8 +1030,7 @@ pub fn emitDebug(
     location: std.builtin.SourceLocation,
     comptime fmt: []const u8,
     args: anytype,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     return self.emitEvent(
         name,
         target,
@@ -1098,7 +1038,6 @@ pub fn emitDebug(
         location,
         fmt,
         args,
-        err,
     );
 }
 
@@ -1114,8 +1053,7 @@ pub fn emitTrace(
     location: std.builtin.SourceLocation,
     comptime fmt: []const u8,
     args: anytype,
-    err: *?AnyError,
-) AnyError.Error!void {
+) void {
     return self.emitEvent(
         name,
         target,
@@ -1123,7 +1061,6 @@ pub fn emitTrace(
         location,
         fmt,
         args,
-        err,
     );
 }
 
@@ -1138,15 +1075,13 @@ pub fn emitErrSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    var err: ?AnyError = null;
     return self.emitErr(
         null,
         null,
         location,
         fmt,
         args,
-        &err,
-    ) catch @panic("Trace failed");
+    );
 }
 
 /// Emits a new warn event with the standard formatter.
@@ -1160,15 +1095,13 @@ pub fn emitWarnSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    var err: ?AnyError = null;
     return self.emitWarn(
         null,
         null,
         location,
         fmt,
         args,
-        &err,
-    ) catch @panic("Trace failed");
+    );
 }
 
 /// Emits a new info event with the standard formatter.
@@ -1182,15 +1115,13 @@ pub fn emitInfoSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    var err: ?AnyError = null;
     return self.emitInfo(
         null,
         null,
         location,
         fmt,
         args,
-        &err,
-    ) catch @panic("Trace failed");
+    );
 }
 
 /// Emits a new debug event with the standard formatter.
@@ -1204,15 +1135,13 @@ pub fn emitDebugSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    var err: ?AnyError = null;
     return self.emitDebug(
         null,
         null,
         location,
         fmt,
         args,
-        &err,
-    ) catch @panic("Trace failed");
+    );
 }
 
 /// Emits a new trace event with the standard formatter.
@@ -1226,15 +1155,13 @@ pub fn emitTraceSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    var err: ?AnyError = null;
     return self.emitTrace(
         null,
         null,
         location,
         fmt,
         args,
-        &err,
-    ) catch @panic("Trace failed");
+    );
 }
 
 /// Checks whether the tracing subsystem is enabled.
@@ -1256,9 +1183,8 @@ pub fn isEnabled(self: Tracing) bool {
 /// thread must be unregistered from the tracing subsystem before the
 /// context is destroyed, by terminating the tread, or by manually
 /// calling `unregisterThread()`.
-pub fn registerThread(self: Tracing, err: *?AnyError) AnyError.Error!void {
-    const result = self.context.vtable.tracing_v0.register_thread(self.context.data);
-    try AnyError.initChecked(err, result);
+pub fn registerThread(self: Tracing) void {
+    self.context.vtable.tracing_v0.register_thread(self.context.data);
 }
 
 /// Unregisters the calling thread from the tracing subsystem.
@@ -1266,17 +1192,15 @@ pub fn registerThread(self: Tracing, err: *?AnyError) AnyError.Error!void {
 /// Once unregistered, the calling thread looses access to the tracing
 /// subsystem until it is registered again. The thread can not be unregistered
 /// until the call stack is empty.
-pub fn unregisterThread(self: Tracing, err: *?AnyError) AnyError.Error!void {
-    const result = self.context.vtable.tracing_v0.unregister_thread(self.context.data);
-    try AnyError.initChecked(err, result);
+pub fn unregisterThread(self: Tracing) void {
+    self.context.vtable.tracing_v0.unregister_thread(self.context.data);
 }
 
 /// Flushes the streams used for tracing.
 ///
 /// If successful, any unwritten data is written out by the individual subscribers.
-pub fn flush(self: Tracing, err: *?AnyError) AnyError.Error!void {
-    const result = self.context.vtable.tracing_v0.flush(self.context.data);
-    try AnyError.initChecked(err, result);
+pub fn flush(self: Tracing) void {
+    self.context.vtable.tracing_v0.flush(self.context.data);
 }
 
 const DefaultSubscriber = struct {
@@ -1320,10 +1244,12 @@ const DefaultSubscriber = struct {
         _ = self;
     }
 
-    fn createCallStack(self: *const Self, time: Time) !*Self.CallStack {
+    fn createCallStack(self: *const Self, time: Time) *Self.CallStack {
         _ = self;
         _ = time;
-        const cs = try Self.allocator.create(Self.CallStack);
+        const cs = Self.allocator.create(
+            Self.CallStack,
+        ) catch |err| @panic(@errorName(err));
         cs.tail = null;
         return cs;
     }
@@ -1366,10 +1292,12 @@ const DefaultSubscriber = struct {
         desc: *const SpanDesc,
         message: []const u8,
         call_stack: *Self.CallStack,
-    ) !void {
+    ) void {
         _ = self;
         _ = time;
-        const span = try Self.allocator.create(Self.Span);
+        const span = Self.allocator.create(
+            Self.Span,
+        ) catch |err| @panic(@errorName(err));
         span.* = Self.Span{
             .previous = call_stack.tail,
             .desc = desc,

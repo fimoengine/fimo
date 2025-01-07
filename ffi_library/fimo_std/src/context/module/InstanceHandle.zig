@@ -1080,7 +1080,6 @@ const InfoRequestUnloadOp = FSMFuture(struct {
         );
         handle.ref();
 
-        var err: ?AnyError = null;
         const context = handle.sys.asContext();
         const f = InfoRequestUnloadOp.init(@This(){
             .handle = handle,
@@ -1089,7 +1088,6 @@ const InfoRequestUnloadOp = FSMFuture(struct {
             @TypeOf(f),
             &context.@"async".sys,
             &f,
-            &err,
         ) catch |e| @panic(@errorName(e));
 
         // Detaches the future.

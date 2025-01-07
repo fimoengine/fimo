@@ -91,7 +91,6 @@ const VTableImpl = struct {
         future: *ProxyAsync.OpaqueFuture,
     ) callconv(.c) c.FimoResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        var err: ?AnyError = null;
         future.* = Task.init(
             &ctx.@"async".sys,
             data,
@@ -102,11 +101,7 @@ const VTableImpl = struct {
             poll_fn,
             cleanup_data_fn,
             cleanup_result_fn,
-            &err,
-        ) catch |e| switch (e) {
-            error.FfiError => return AnyError.intoCResult(err),
-            else => return AnyError.initError(e).err,
-        };
+        ) catch |e| return AnyError.initError(e).err;
         return AnyError.intoCResult(null);
     }
 };

@@ -194,8 +194,8 @@ pub fn main() !void {
     var err: ?fimo_std.AnyError = null;
     defer if (err) |e| e.deinit();
 
-    try ctx.tracing().registerThread(&err);
-    defer ctx.tracing().unregisterThread(&err) catch unreachable;
+    ctx.tracing().registerThread();
+    defer ctx.tracing().unregisterThread();
 
     defer Async.EventLoop.flushWithCurrentThread(ctx.@"async"(), &err) catch unreachable;
     const event_loop = try Async.EventLoop.init(ctx.@"async"(), &err);

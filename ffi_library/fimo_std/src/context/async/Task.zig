@@ -252,7 +252,6 @@ pub fn initFuture(
     comptime T: type,
     sys: *System,
     future: *const T,
-    err: *?AnyError,
 ) !ProxyAsync.EnqueuedFuture(T.Result) {
     const Wrapper = struct {
         fn poll(
@@ -295,7 +294,6 @@ pub fn initFuture(
         Wrapper.poll,
         Wrapper.deinit_data,
         Wrapper.deinit_result,
-        err,
     );
     return @bitCast(f);
 }
@@ -314,7 +312,6 @@ pub fn init(
     ) callconv(.c) bool,
     cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
     cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-    err: *?AnyError,
 ) !ProxyAsync.OpaqueFuture {
     sys.asContext().ref();
     errdefer sys.asContext().unref();
@@ -353,7 +350,7 @@ pub fn init(
     std.debug.assert(std.mem.isAligned(@intFromPtr(buffer_data), data_alignment));
     std.debug.assert(std.mem.isAligned(@intFromPtr(result_data), result_alignment));
 
-    const call_stack = try sys.asContext().tracing.createCallStack(err);
+    const call_stack = sys.asContext().tracing.createCallStack();
     errdefer call_stack.deinit();
 
     const node = try allocator.create(Node);

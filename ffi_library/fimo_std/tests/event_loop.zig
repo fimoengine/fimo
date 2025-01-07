@@ -23,8 +23,8 @@ pub fn main() !void {
     defer if (err) |e| e.deinit();
     defer Async.EventLoop.flushWithCurrentThread(ctx.@"async"(), &err) catch unreachable;
 
-    try ctx.tracing().registerThread(&err);
-    defer ctx.tracing().unregisterThread(&err) catch unreachable;
+    ctx.tracing().registerThread();
+    defer ctx.tracing().unregisterThread();
 
     const event_loop = try Async.EventLoop.init(ctx.@"async"(), &err);
     defer event_loop.join();

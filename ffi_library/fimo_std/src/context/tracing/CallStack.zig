@@ -24,14 +24,13 @@ max_level: ProxyTracing.Level,
 call_stacks: std.ArrayListUnmanaged(*anyopaque),
 start_frame: ?*StackFrame = null,
 end_frame: ?*StackFrame = null,
-owner: *const Tracing,
+owner: *Tracing,
 
-pub fn init(
-    owner: *const Tracing,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!*Self {
-    const call_stack = try owner.allocator.create(Self);
-    errdefer owner.allocator.destroy(call_stack);
+pub fn init(owner: *Tracing) *Self {
+    owner.asContext().ref();
+    const call_stack = owner.allocator.create(
+        Self,
+    ) catch |err| @panic(@errorName(err));
     call_stack.* = Self{
         .buffer = undefined,
         .max_level = owner.max_level,
@@ -39,23 +38,18 @@ pub fn init(
         .owner = owner,
     };
 
-    call_stack.buffer = try owner.allocator.alloc(u8, owner.buffer_size);
-    errdefer owner.allocator.free(call_stack.buffer);
-
-    call_stack.call_stacks = try std.ArrayListUnmanaged(*anyopaque).initCapacity(
+    call_stack.buffer = owner.allocator.alloc(
+        u8,
+        owner.buffer_size,
+    ) catch |err| @panic(@errorName(err));
+    call_stack.call_stacks = std.ArrayListUnmanaged(*anyopaque).initCapacity(
         owner.allocator,
         owner.subscribers.len,
-    );
-    errdefer {
-        call_stack.call_stacks.deinit(owner.allocator);
-        for (call_stack.call_stacks.items, owner.subscribers) |cs, subscriber| {
-            subscriber.dropCallStack(cs);
-        }
-    }
+    ) catch |err| @panic(@errorName(err));
 
     const now = time.Time.now();
     for (owner.subscribers) |subscriber| {
-        const cs = try subscriber.createCallStack(now, err);
+        const cs = subscriber.createCallStack(now);
         call_stack.call_stacks.appendAssumeCapacity(cs);
     }
 
@@ -72,9 +66,11 @@ pub fn deinit(self: *Self) void {
         subscriber.destroyCallStack(now, call_stack);
     }
 
+    const owner = self.owner;
     self.call_stacks.deinit(self.owner.allocator);
-    self.owner.allocator.free(self.buffer);
-    self.owner.allocator.destroy(self);
+    owner.allocator.free(self.buffer);
+    owner.allocator.destroy(self);
+    owner.asContext().unref();
 }
 
 fn deinitUnbound(self: *Self) void {
@@ -146,20 +142,18 @@ pub fn pushSpan(
     desc: *const ProxyTracing.SpanDesc,
     formatter: *const ProxyTracing.Formatter,
     data: ?*const anyopaque,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
-    if (!self.mutex.tryLock()) return error.CallStackInUse;
+) ProxyTracing.Span {
+    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
     defer self.mutex.unlock();
-    if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-    if (self.state.blocked) return error.CallStackBlocked;
-    if (self.state.suspended) return error.CallStackSuspended;
+    if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
+    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
+    if (self.state.suspended) @panic(@errorName(error.CallStackSuspended));
 
-    const frame = try StackFrame.init(
+    const frame = StackFrame.init(
         self,
         desc,
         formatter,
         data,
-        err,
     );
     return frame.asProxySpan();
 }
@@ -169,13 +163,12 @@ pub fn emitEvent(
     event: *const ProxyTracing.Event,
     formatter: *const ProxyTracing.Formatter,
     data: ?*const anyopaque,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!void {
-    if (!self.mutex.tryLock()) return error.CallStackInUse;
+) void {
+    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
     defer self.mutex.unlock();
-    if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-    if (self.state.blocked) return error.CallStackBlocked;
-    if (self.state.suspended) return error.CallStackSuspended;
+    if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
+    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
+    if (self.state.suspended) @panic(@errorName(error.CallStackSuspended));
 
     if (@intFromEnum(event.metadata.level) > @intFromEnum(self.max_level)) {
         return;
@@ -183,13 +176,12 @@ pub fn emitEvent(
 
     var written_characters: usize = undefined;
     const format_buffer = self.buffer[self.cursor..];
-    const result = formatter(
+    formatter(
         format_buffer.ptr,
         format_buffer.len,
         data,
         &written_characters,
     );
-    try AnyError.initChecked(err, result);
     const message = format_buffer[0..written_characters];
 
     const now = time.Time.now();

@@ -67,11 +67,8 @@ pub fn startEventLoopThread(self: *Self) !Thread {
             this.asContext().ref();
             defer this.asContext().unref();
 
-            var err: ?AnyError = null;
-            defer if (err) |e| e.deinit();
-
-            this.asContext().tracing.registerThread(&err) catch |e| @panic(@errorName(e));
-            defer this.asContext().tracing.unregisterThread() catch |e| @panic(@errorName(e));
+            this.asContext().tracing.registerThread();
+            defer this.asContext().tracing.unregisterThread();
             this.executorEventLoop();
         }
     }.f;

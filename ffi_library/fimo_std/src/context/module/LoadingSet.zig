@@ -847,13 +847,10 @@ const LoadOp = FSMFuture(struct {
         };
         var f = LoadOp.init(data).intoFuture();
 
-        var err: ?AnyError = null;
-        defer if (err) |e| e.deinit();
         return Async.Task.initFuture(
             @TypeOf(f),
             &load_graph.set.context.@"async".sys,
             &f,
-            &err,
         );
     }
 
@@ -1066,13 +1063,10 @@ const CommitOp = FSMFuture(struct {
             Fallible(void).Wrapper(anyerror),
         );
 
-        var err: ?AnyError = null;
-        defer if (err) |e| e.deinit();
         return Async.Task.initFuture(
             @TypeOf(f),
             &set.context.@"async".sys,
             &f,
-            &err,
         ) catch |e| Async.initErrorFuture(void, e);
     }
 

@@ -184,7 +184,7 @@ fn load_modules() -> Result<(), Error> {
         ))
         .build()?;
 
-    let _access = ThreadAccess::new(&context)?;
+    let _access = ThreadAccess::new(&context);
     let _event_loop = EventLoop::new(*context)?;
 
     let blocking = BlockingContext::new(*context)?;

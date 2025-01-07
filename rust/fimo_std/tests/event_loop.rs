@@ -17,7 +17,7 @@ fn block_on_futures() -> Result<(), Error> {
         ))
         .build()?;
 
-    let _access = ThreadAccess::new(&context)?;
+    let _access = ThreadAccess::new(&context);
     let _event_loop = EventLoop::new(*context)?;
 
     let fut = new_nested(*context)?;
