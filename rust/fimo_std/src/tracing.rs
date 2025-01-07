@@ -543,7 +543,7 @@ impl FFISharable<*const bindings::FimoTracingSpanDesc> for SpanDescriptor {
 
 /// A tracing span.
 #[derive(Debug)]
-pub struct Span(Context, *mut bindings::FimoTracingSpan);
+pub struct Span(bindings::FimoTracingSpan);
 
 impl Span {
     /// Creates a new span and enters it.
@@ -555,12 +555,9 @@ impl Span {
         span_descriptor: &'static SpanDescriptor,
         arguments: Arguments<'_>,
     ) -> Result<Self, Error> {
-        // Safety: Is always set.
-        let f = unsafe { ctx.vtable().tracing_v0.span_create.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
-        let span = unsafe {
-            to_result_indirect_in_place(|error, span| {
+        unsafe {
+            let f = ctx.vtable().tracing_v0.span_create.unwrap_unchecked();
+            let span = to_result_indirect_in_place(|error, span| {
                 *error = f(
                     ctx.data(),
                     span_descriptor.share_to_ffi(),
@@ -568,10 +565,9 @@ impl Span {
                     Some(Formatter::format_into_buffer),
                     core::ptr::from_ref(&arguments).cast(),
                 );
-            })?
-        };
-
-        Ok(Self(ctx.to_context(), span))
+            })?;
+            Ok(Self(span))
+        }
     }
 }
 
@@ -583,15 +579,9 @@ unsafe impl Sync for Span {}
 
 impl Drop for Span {
     fn drop(&mut self) {
-        // Safety: Is always set.
-        let f = unsafe { self.0.vtable().tracing_v0.span_destroy.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
         unsafe {
-            to_result_indirect(|error| {
-                *error = f(self.0.data(), self.1);
-            })
-            .expect("the span should be destroyable");
+            let f = (*self.0.vtable).drop.unwrap_unchecked();
+            f(self.0.handle);
         }
     }
 }

@@ -35,7 +35,7 @@ typedef struct FimoTracingCallStack FimoTracingCallStack;
  * with level `lvl2` will be traced in a context where the
  * maximum tracing level is `lvl1`.
  */
-typedef enum FimoTracingLevel {
+typedef enum FimoTracingLevel : FimoI32 {
     FIMO_TRACING_LEVEL_OFF = 0,
     FIMO_TRACING_LEVEL_ERROR = 1,
     FIMO_TRACING_LEVEL_WARN = 2,
@@ -112,22 +112,26 @@ typedef struct FimoTracingSpanDesc {
     const FimoTracingMetadata *metadata;
 } FimoTracingSpanDesc;
 
+/// VTable of a span.
+///
+/// Adding fields to the vtable is not a breaking change.
+typedef struct FimoTracingSpanVTable {
+    /// Exits and destroys a span.
+    ///
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack. The span may not be in use prior to a call to
+    /// this function, and may not be used afterwards.
+    ///
+    /// This function must be called while the owning call stack is bound by the current thread.
+    void (*drop)(void *handle);
+} FimoTracingSpanVTable;
+
 /**
  * A period of time, during which events can occur.
  */
 typedef struct FimoTracingSpan {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_TRACING_SPAN`.
-     */
-    FimoStructType type;
-    /**
-     * Pointer to a possible extension.
-     *
-     * Reserved for future use.
-     */
-    FimoBaseStructOut *next;
+    void *handle;
+    const FimoTracingSpanVTable *vtable;
 } FimoTracingSpan;
 
 /**
@@ -476,24 +480,7 @@ typedef struct FimoTracingVTableV0 {
      * @return Status code.
      */
     FimoResult (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc,
-                              FimoTracingSpan **span, FimoTracingFormat format, const void *data);
-    /**
-     * Exits and destroys a span.
-     *
-     * If successful, succeeding events won't occur inside the context of the
-     * exited span anymore. `span` must be the span at the top of the current
-     * call stack. The span may not be in use prior to a call to this function,
-     * and may not be used afterwards.
-     *
-     * This function may return an error, if the current thread is not
-     * registered with the subsystem.
-     *
-     * @param ctx the context
-     * @param span the span to destroy
-     *
-     * @return Status code.
-     */
-    FimoResult (*span_destroy)(void *ctx, FimoTracingSpan *span);
+                              FimoTracingSpan *span, FimoTracingFormat format, const void *data);
     /**
      * Emits a new event with a custom formatter.
      *

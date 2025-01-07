@@ -5,6 +5,8 @@ const AnyError = @import("../AnyError.zig");
 const time = @import("../time.zig");
 const tls = @import("tls.zig");
 
+const StackFrame = @import("tracing/StackFrame.zig");
+
 const ProxyTracing = @import("proxy_context/tracing.zig");
 const Tracing = @This();
 
@@ -213,7 +215,7 @@ pub inline fn pushSpan(
     level: ProxyTracing.Level,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     const desc = &struct {
         var desc = ProxyTracing.SpanDesc{
             .metadata = &.{
@@ -250,7 +252,7 @@ pub inline fn pushSpanErr(
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -279,7 +281,7 @@ pub inline fn pushSpanWarn(
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -308,7 +310,7 @@ pub inline fn pushSpanInfo(
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -337,7 +339,7 @@ pub inline fn pushSpanDebug(
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -366,7 +368,7 @@ pub inline fn pushSpanTrace(
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -393,7 +395,7 @@ pub inline fn pushSpanErrSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpanErr(
         fmt,
         args,
@@ -419,7 +421,7 @@ pub inline fn pushSpanWarnSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpanWarn(
         fmt,
         args,
@@ -445,7 +447,7 @@ pub inline fn pushSpanInfoSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpanInfo(
         fmt,
         args,
@@ -471,7 +473,7 @@ pub inline fn pushSpanDebugSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpanDebug(
         fmt,
         args,
@@ -497,7 +499,7 @@ pub inline fn pushSpanTraceSimple(
     args: anytype,
     location: std.builtin.SourceLocation,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
     return self.pushSpanTrace(
         fmt,
         args,
@@ -524,30 +526,11 @@ pub fn pushSpanCustom(
     formatter: *const ProxyTracing.Formatter,
     data: ?*const anyopaque,
     err: *?AnyError,
-) (TracingError || AnyError.Error)!*ProxyTracing.Span {
-    if (!self.isEnabled()) return @constCast(&dummy_span);
+) (TracingError || AnyError.Error)!ProxyTracing.Span {
+    if (!self.isEnabled()) return StackFrame.dummy_span;
     if (!self.isEnabledForCurrentThread()) return error.ThreadNotRegistered;
     const d = self.thread_data.get().?;
     return d.call_stack.pushSpan(desc, formatter, data, err);
-}
-
-/// Removes the span from the top of the current call stack.
-///
-/// If successful, succeeding events won't occur inside the context of the
-/// exited span anymore. The span must be the span at the top of the current
-/// call stack. The span may not be in use prior to a call to this function,
-/// and may not be used afterwards.
-///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
-pub fn popSpan(self: *const Tracing, span: *ProxyTracing.Span) TracingError!void {
-    if (!self.isEnabled()) {
-        std.debug.assert(span == &dummy_span);
-        return;
-    }
-    if (!self.isEnabledForCurrentThread()) return error.ThreadNotRegistered;
-    const data = self.thread_data.get().?;
-    return data.call_stack.popSpan(span);
 }
 
 /// Emits a new event with the standard formatter.
@@ -958,7 +941,7 @@ const ThreadData = struct {
     }
 };
 
-const CallStack = struct {
+pub const CallStack = struct {
     mutex: std.Thread.Mutex.Recursive = std.Thread.Mutex.Recursive.init,
     state: packed struct(u8) {
         suspended: bool = true,
@@ -1096,7 +1079,7 @@ const CallStack = struct {
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
         err: *?AnyError,
-    ) (TracingError || AnyError.Error)!*ProxyTracing.Span {
+    ) (TracingError || AnyError.Error)!ProxyTracing.Span {
         if (!self.mutex.tryLock()) return error.CallStackInUse;
         defer self.mutex.unlock();
         if (self.mutex.lock_count == 1) return error.CallStackNotBound;
@@ -1110,23 +1093,7 @@ const CallStack = struct {
             data,
             err,
         );
-        return &frame.span;
-    }
-
-    fn popSpan(
-        self: *CallStack,
-        span: *ProxyTracing.Span,
-    ) TracingError!void {
-        if (!self.mutex.tryLock()) return error.CallStackInUse;
-        defer self.mutex.unlock();
-        if (self.mutex.lock_count == 1) return error.CallStackNotBound;
-        if (self.state.blocked) return error.CallStackBlocked;
-        if (self.state.suspended) return error.CallStackSuspended;
-        if (self.end_frame == null) return error.CallStackEmpty;
-
-        const frame = self.end_frame.?;
-        if (&frame.span != span) return error.CallStackSpanNotOnTop;
-        frame.deinit();
+        return frame.asProxySpan();
     }
 
     fn emitEvent(
@@ -1162,100 +1129,6 @@ const CallStack = struct {
             subscriber.emitEvent(now, call_stack, event, message);
         }
     }
-
-    const StackFrame = struct {
-        span: ProxyTracing.Span,
-        metadata: *const ProxyTracing.Metadata,
-        parent_cursor: usize,
-        parent_max_level: ProxyTracing.Level,
-        next: ?*StackFrame = null,
-        previous: ?*StackFrame,
-        owner: *CallStack,
-
-        fn init(
-            owner: *CallStack,
-            desc: *const ProxyTracing.SpanDesc,
-            formatter: *const ProxyTracing.Formatter,
-            data: ?*const anyopaque,
-            err: *?AnyError,
-        ) (TracingError || AnyError.Error)!*StackFrame {
-            const rest_buffer = owner.buffer[owner.cursor..];
-
-            var written_characters: usize = undefined;
-            const result = formatter(
-                rest_buffer.ptr,
-                rest_buffer.len,
-                data,
-                &written_characters,
-            );
-            try AnyError.initChecked(err, result);
-            const message = rest_buffer[0..written_characters];
-
-            var num_created_spans: usize = 0;
-            errdefer {
-                const call_stacks = owner.call_stacks.items[0..num_created_spans];
-                const subscribers = owner.owner.subscribers[0..num_created_spans];
-                for (call_stacks, subscribers) |call_stack, subscriber| {
-                    subscriber.dropSpan(call_stack);
-                }
-            }
-
-            const now = time.Time.now();
-            for (owner.call_stacks.items, owner.owner.subscribers) |call_stack, subscriber| {
-                try subscriber.createSpan(
-                    now,
-                    desc,
-                    message,
-                    call_stack,
-                    err,
-                );
-                num_created_spans += 1;
-            }
-
-            const frame = try owner.owner.allocator.create(StackFrame);
-            errdefer owner.owner.allocator.destroy(frame);
-            frame.* = .{
-                .span = .{},
-                .metadata = desc.metadata,
-                .parent_cursor = owner.cursor,
-                .parent_max_level = owner.max_level,
-                .previous = owner.end_frame,
-                .owner = owner,
-            };
-
-            owner.cursor += written_characters;
-            owner.max_level = @enumFromInt(@min(@intFromEnum(desc.metadata.level), @intFromEnum(owner.max_level)));
-
-            if (owner.end_frame) |end_frame| {
-                end_frame.next = frame;
-                owner.end_frame = frame;
-            } else {
-                owner.start_frame = frame;
-                owner.end_frame = frame;
-            }
-
-            return frame;
-        }
-
-        fn deinit(self: *StackFrame) void {
-            const now = time.Time.now();
-            for (self.owner.call_stacks.items, self.owner.owner.subscribers) |call_stack, subscriber| {
-                subscriber.destroySpan(now, call_stack);
-            }
-
-            self.owner.cursor = self.parent_cursor;
-            self.owner.max_level = self.parent_max_level;
-            if (self.previous) |previous| {
-                previous.next = null;
-                self.owner.end_frame = previous;
-            } else {
-                self.owner.start_frame = null;
-                self.owner.end_frame = null;
-            }
-
-            self.owner.owner.allocator.destroy(self);
-        }
-    };
 };
 
 // ----------------------------------------------------
@@ -1316,7 +1189,7 @@ const VTableImpl = struct {
     fn pushSpan(
         ptr: *anyopaque,
         desc: *const ProxyTracing.SpanDesc,
-        span: **ProxyTracing.Span,
+        span: *ProxyTracing.Span,
         formatter: *const ProxyTracing.Formatter,
         data: ?*const anyopaque,
     ) callconv(.C) c.FimoResult {
@@ -1329,14 +1202,6 @@ const VTableImpl = struct {
             error.FfiError => return err.?.err,
             else => return AnyError.initError(e).err,
         }
-    }
-    fn popSpan(
-        ptr: *anyopaque,
-        span: *ProxyTracing.Span,
-    ) callconv(.C) c.FimoResult {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.popSpan(span) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
     }
     fn emitEvent(
         ptr: *anyopaque,
@@ -1387,7 +1252,6 @@ pub const vtable = ProxyTracing.VTable{
     .call_stack_suspend_current = &VTableImpl.suspendCurrentCallStack,
     .call_stack_resume_current = &VTableImpl.resumeCurrentCallStack,
     .span_create = &VTableImpl.pushSpan,
-    .span_destroy = &VTableImpl.popSpan,
     .event_emit = &VTableImpl.emitEvent,
     .is_enabled = &VTableImpl.isEnabled,
     .register_thread = &VTableImpl.registerThread,

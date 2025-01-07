@@ -13,13 +13,13 @@ context: Context,
 const Tracing = @This();
 
 /// Tracing levels.
-pub const Level = enum(c.FimoTracingLevel) {
-    off = c.FIMO_TRACING_LEVEL_OFF,
-    err = c.FIMO_TRACING_LEVEL_ERROR,
-    warn = c.FIMO_TRACING_LEVEL_WARN,
-    info = c.FIMO_TRACING_LEVEL_INFO,
-    debug = c.FIMO_TRACING_LEVEL_DEBUG,
-    trace = c.FIMO_TRACING_LEVEL_TRACE,
+pub const Level = enum(i32) {
+    off,
+    err,
+    warn,
+    info,
+    debug,
+    trace,
 };
 
 /// Metadata for a span and event.
@@ -31,32 +31,19 @@ pub const Metadata = extern struct {
     level: Level,
     file_name: ?[*:0]const u8 = null,
     line_number: i32 = -1,
-
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: c.FimoTracingMetadata) @This() {
-        return @bitCast(obj);
-    }
-
-    /// Casts the object to a ffi object.
-    pub fn intoC(self: @This()) c.FimoTracingMetadata {
-        return @bitCast(self);
-    }
 };
 
 /// A period of time, during which events can occur.
 pub const Span = extern struct {
-    id: Context.TypeId = .tracing_span,
-    next: ?*Context.TaggedOutStruct = null,
+    handle: *anyopaque,
+    vtable: *const Span.VTable,
 
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: c.FimoTracingSpan) @This() {
-        return @bitCast(obj);
-    }
-
-    /// Casts the object to a ffi object.
-    pub fn intoC(self: @This()) c.FimoTracingSpan {
-        return @bitCast(self);
-    }
+    /// VTable of a span.
+    ///
+    /// Adding fields to the vtable is not a breaking change.
+    pub const VTable = extern struct {
+        deinit: *const fn (ptr: *anyopaque) callconv(.c) void,
+    };
 
     /// Creates a new span with the default formatter and enters it.
     ///
@@ -76,7 +63,7 @@ pub const Span = extern struct {
         comptime fmt: []const u8,
         args: anytype,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
+    ) AnyError.Error!Span {
         const desc = &struct {
             var desc = SpanDesc{
                 .metadata = &.{
@@ -113,8 +100,8 @@ pub const Span = extern struct {
         formatter: *const Formatter,
         data: ?*const anyopaque,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
-        var span: *Span = undefined;
+    ) AnyError.Error!Span {
+        var span: Span = undefined;
         const result = ctx.context.vtable.tracing_v0.span_create(
             ctx.context.data,
             desc,
@@ -143,7 +130,7 @@ pub const Span = extern struct {
         comptime fmt: []const u8,
         args: anytype,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
+    ) AnyError.Error!Span {
         return Span.init(
             ctx,
             name,
@@ -173,7 +160,7 @@ pub const Span = extern struct {
         comptime fmt: []const u8,
         args: anytype,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
+    ) AnyError.Error!Span {
         return Span.init(
             ctx,
             name,
@@ -203,7 +190,7 @@ pub const Span = extern struct {
         comptime fmt: []const u8,
         args: anytype,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
+    ) AnyError.Error!Span {
         return Span.init(
             ctx,
             name,
@@ -233,7 +220,7 @@ pub const Span = extern struct {
         comptime fmt: []const u8,
         args: anytype,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
+    ) AnyError.Error!Span {
         return Span.init(
             ctx,
             name,
@@ -263,7 +250,7 @@ pub const Span = extern struct {
         comptime fmt: []const u8,
         args: anytype,
         err: *?AnyError,
-    ) AnyError.Error!*Span {
+    ) AnyError.Error!Span {
         return Span.init(
             ctx,
             name,
@@ -278,19 +265,13 @@ pub const Span = extern struct {
 
     /// Exits and destroys a span.
     ///
-    /// If successful, succeeding events won't occur inside the context of the
-    /// exited span anymore. The span must be the span at the top of the current
-    /// call stack. The span may not be in use prior to a call to this function,
-    /// and may not be used afterwards.
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack. The span may not be in use prior to a call to
+    /// this function, and may not be used afterwards.
     ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
-    pub fn deinit(self: *Span, ctx: Tracing, err: *?AnyError) AnyError.Error!void {
-        const result = ctx.context.vtable.tracing_v0.span_destroy(
-            ctx.context.data,
-            self,
-        );
-        try AnyError.initChecked(err, result);
+    /// This function must be called while the owning call stack is bound by the current thread.
+    pub fn deinit(self: Span) void {
+        self.vtable.deinit(self.handle);
     }
 };
 
@@ -299,16 +280,6 @@ pub const SpanDesc = extern struct {
     id: Context.TypeId = .tracing_span_desc,
     next: ?*const Context.TaggedInStruct = null,
     metadata: *const Metadata,
-
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: c.FimoTracingSpanDesc) @This() {
-        return @bitCast(obj);
-    }
-
-    /// Casts the object to a ffi object.
-    pub fn intoC(self: @This()) c.FimoTracingSpanDesc {
-        return @bitCast(self);
-    }
 };
 
 /// An event to be traced.
@@ -316,16 +287,6 @@ pub const Event = extern struct {
     id: Context.TypeId = .tracing_event,
     next: ?*const Context.TaggedInStruct = null,
     metadata: *const Metadata,
-
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: c.FimoTracingEvent) @This() {
-        return @bitCast(obj);
-    }
-
-    /// Casts the object to a ffi object.
-    pub fn intoC(self: @This()) c.FimoTracingEvent {
-        return @bitCast(self);
-    }
 };
 
 /// A call stack.
@@ -597,16 +558,6 @@ pub const Subscriber = extern struct {
         /// Flushes the messages of the subscriber.
         flush: *const fn (ctx: ?*anyopaque) callconv(.C) void,
     };
-
-    /// Initializes the object from a ffi subscriber.
-    pub fn initC(subscriber: c.FimoTracingSubscriber) Subscriber {
-        return @bitCast(subscriber);
-    }
-
-    /// Casts the object to a ffi subscriber.
-    pub fn intoC(self: Subscriber) c.FimoTracingSubscriber {
-        return @bitCast(self);
-    }
 
     /// Initializes the subscriber interface from an existing object.
     ///
@@ -968,11 +919,10 @@ pub const VTable = extern struct {
     span_create: *const fn (
         ctx: *anyopaque,
         span_desc: *const SpanDesc,
-        span: **Span,
+        span: *Span,
         formatter: *const Formatter,
         data: ?*const anyopaque,
     ) callconv(.C) c.FimoResult,
-    span_destroy: *const fn (ctx: *anyopaque, span: *Span) callconv(.C) c.FimoResult,
     event_emit: *const fn (
         ctx: *anyopaque,
         event: *const Event,
