@@ -611,7 +611,7 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
 
 pub fn initExportedInstance(
     sys: *System,
-    set: *LoadingSet,
+    set: ProxyModule.LoadingSet,
     @"export": *const ProxyModule.Export,
     handle: *ModuleHandle,
     err: *?AnyError,
@@ -739,12 +739,10 @@ pub fn initExportedInstance(
     // Init instance data.
     if (@"export".constructor) |constructor| {
         inner.unlock();
-        set.unlock();
         sys.mutex.unlock();
         var data: ?*anyopaque = undefined;
-        const result = constructor(instance, set.asProxySet(), &data);
+        const result = constructor(instance, set, &data);
         sys.mutex.lock();
-        set.lock();
         _ = instance_handle.lock();
         instance.data = @ptrCast(data);
         try AnyError.initChecked(err, result);
@@ -768,12 +766,10 @@ pub fn initExportedInstance(
     }
     for (@"export".getDynamicSymbolExports()) |exp| {
         inner.unlock();
-        set.unlock();
         sys.mutex.unlock();
         var sym: *anyopaque = undefined;
         const result = exp.constructor(instance, &sym);
         sys.mutex.lock();
-        set.lock();
         _ = instance_handle.lock();
         try AnyError.initChecked(err, result);
         var skip_dtor = false;
@@ -1078,7 +1074,7 @@ const InfoRequestUnloadOp = FSMFuture(struct {
 
     fn init(handle: *const Self) void {
         handle.sys.logTrace(
-            "requesting unnload of instance, instance='{s}'",
+            "requesting unload of instance, instance='{s}'",
             .{handle.info.name},
             @src(),
         );

@@ -31,7 +31,9 @@ const Self = @This();
 mutex: Mutex = .{},
 refcount: RefCount = .{},
 context: *Context,
+active_commits: usize = 0,
 should_recreate_map: bool = false,
+active_load_graph: ?*LoadGraph = null,
 module_load_path: OwnedPathUnmanaged,
 modules: std.StringArrayHashMapUnmanaged(ModuleInfo) = .{},
 symbols: std.ArrayHashMapUnmanaged(
@@ -126,7 +128,240 @@ const ModuleInfo = struct {
     }
 };
 
-const Queue = std.ArrayListUnmanaged(*ModuleInfo);
+const LoadGraph = struct {
+    mutex: Mutex = .{},
+    set: *Self,
+    modules: std.StringArrayHashMapUnmanaged(graph.NodeId) = .{},
+    dependency_tree: graph.GraphUnmanaged(Node, void) = graph.GraphUnmanaged(Node, void).init(
+        null,
+        null,
+    ),
+    enqueue_count: usize = 0,
+    waiter: ?ProxyAsync.Waker = null,
+
+    const Node = struct {
+        module: []const u8,
+        waiter: ?ProxyAsync.Waker = null,
+        fut: ?ProxyAsync.EnqueuedFuture(void) = null,
+
+        fn deinit(self: *Node) void {
+            std.debug.assert(self.waiter == null);
+            if (self.fut) |*fut| fut.deinit();
+        }
+
+        fn signalWaiters(self: *Node, load_graph: *LoadGraph) void {
+            const node_id = load_graph.modules.get(self.module).?;
+            var it = load_graph.dependency_tree.neighborsIterator(
+                node_id,
+                .incoming,
+            ) catch unreachable;
+            while (it.next()) |e| {
+                const id = e.node_id;
+                const n = load_graph.dependency_tree.nodePtr(id).?;
+                if (n.waiter) |waiter| {
+                    n.waiter = null;
+                    waiter.wakeUnref();
+                }
+            }
+        }
+
+        fn spawn(self: *Node, node_id: graph.NodeId, load_graph: *LoadGraph) !void {
+            std.debug.assert(self.fut == null);
+            self.fut = try LoadOp.Data.init(node_id, load_graph);
+        }
+    };
+
+    fn init(set: *Self) !*LoadGraph {
+        set.ref();
+        errdefer set.unref();
+
+        const allocator = set.asSys().allocator;
+        const g = try allocator.create(LoadGraph);
+        g.* = .{ .set = set };
+        return g;
+    }
+
+    fn deinit(self: *LoadGraph) void {
+        const set = self.set;
+        defer set.unref();
+        const allocator = set.asSys().allocator;
+
+        var it = self.dependency_tree.nodesIterator();
+        while (it.next()) |node| node.data_ptr.deinit();
+
+        self.modules.deinit(allocator);
+        self.dependency_tree.deinit(allocator);
+        std.debug.assert(self.enqueue_count == 0);
+        std.debug.assert(self.waiter == null);
+
+        allocator.destroy(self);
+    }
+
+    fn spawnMissingTaks(self: *LoadGraph) !void {
+        const set = self.set;
+        if (!set.should_recreate_map) return;
+        set.should_recreate_map = false;
+
+        const sys = set.asSys();
+        var module_it = set.modules.iterator();
+        check: while (module_it.next()) |entry| {
+            const name = entry.key_ptr.*;
+            if (self.modules.contains(name)) continue;
+
+            const info = entry.value_ptr;
+            if (info.status != .unloaded) continue;
+            errdefer |e| {
+                sys.logWarn(
+                    "internal error loading instance, instance='{s}', error='{s}'",
+                    .{ name, @errorName(e) },
+                    @src(),
+                );
+                info.signalError();
+            }
+
+            // Check that no other module with the same name is already loaded.
+            if (sys.getInstance(name) != null) {
+                sys.logWarn(
+                    "instance with the same name already exists...skipping, instance='{s}'",
+                    .{name},
+                    @src(),
+                );
+                info.signalError();
+                continue;
+            }
+
+            // Check that all imported symbols are already exposed, or will be exposed.
+            for (info.@"export".getSymbolImports()) |imp| {
+                const imp_name = std.mem.span(imp.name);
+                const imp_ns = std.mem.span(imp.namespace);
+                const imp_ver = Version.initC(imp.version);
+                // Skip the module if a dependency could not be loaded.
+                if (set.getSymbol(imp_name, imp_ns, imp_ver)) |sym| {
+                    const owner = set.getModuleInfo(sym.owner).?;
+                    if (owner.status == .err) {
+                        sys.logWarn(
+                            "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
+                                " instance='{s}', dependency='{s}'",
+                            .{ name, sym.owner },
+                            @src(),
+                        );
+                        info.signalError();
+                        continue :check;
+                    }
+                } else if (sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
+                    sys.logWarn(
+                        "instance is missing required symbol...skipping," ++
+                            " instance='{s}', symbol='{s}', namespace='{s}, version='{long}'",
+                        .{ name, imp_name, imp_ns, imp_ver },
+                        @src(),
+                    );
+                    info.signalError();
+                    continue :check;
+                }
+            }
+
+            // Check that no exported symbols are already exposed.
+            for (info.@"export".getSymbolExports()) |e| {
+                const e_name = std.mem.span(e.name);
+                const e_ns = std.mem.span(e.namespace);
+                if (sys.getSymbol(e_name, e_ns) != null) {
+                    sys.logWarn(
+                        "instance exports duplicate symbol...skipping," ++
+                            " instance='{s}', symbol='{s}', namespace='{s}",
+                        .{ name, e_name, e_ns },
+                        @src(),
+                    );
+                    info.signalError();
+                    continue :check;
+                }
+            }
+            for (info.@"export".getDynamicSymbolExports()) |e| {
+                const e_name = std.mem.span(e.name);
+                const e_ns = std.mem.span(e.namespace);
+                if (sys.getSymbol(e_name, e_ns) != null) {
+                    sys.logWarn(
+                        "instance exports duplicate symbol...skipping," ++
+                            " instance='{s}', symbol='{s}', namespace='{s}",
+                        .{ name, e_name, e_ns },
+                        @src(),
+                    );
+                    info.signalError();
+                    continue :check;
+                }
+            }
+
+            // Create the node such that we can connect them in the next step.
+            const id = try self.dependency_tree.addNode(
+                sys.allocator,
+                .{ .module = name },
+            );
+            try self.modules.put(sys.allocator, name, id);
+        }
+
+        // Connect the nodes and spawn the task.
+        module_it.reset();
+        connect: while (module_it.next()) |entry| {
+            const name = entry.key_ptr.*;
+            const id = self.modules.get(name).?;
+            const node = self.dependency_tree.nodePtr(id).?;
+            if (node.fut != null) continue;
+
+            const info = entry.value_ptr;
+            if (info.status != .unloaded) continue;
+            errdefer |e| {
+                sys.logWarn(
+                    "internal error loading instance, instance='{s}', error='{s}'",
+                    .{ name, @errorName(e) },
+                    @src(),
+                );
+                info.signalError();
+            }
+
+            for (info.@"export".getSymbolImports()) |imp| {
+                const i_name = std.mem.span(imp.name);
+                const i_namespace = std.mem.span(imp.namespace);
+                const i_version = Version.initC(imp.version);
+                if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
+                    const owner_id = self.modules.get(sym.owner);
+                    const owner_info = set.getModuleInfo(sym.owner).?;
+                    if (owner_id == null or owner_info.status == .err) {
+                        sys.asContext().tracing.emitWarnSimple(
+                            "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
+                                " instance='{s}', dependency='{s}'",
+                            .{ name, sym.owner },
+                            @src(),
+                        );
+                        info.signalError();
+                        continue :connect;
+                    }
+                    _ = try self.dependency_tree.addEdge(sys.allocator, {}, id, owner_id.?);
+                }
+            }
+
+            try node.spawn(id, self);
+            self.enqueue_count += 1;
+        }
+    }
+
+    fn waitForCompletion(self: *LoadGraph, waker: ProxyAsync.Waker) enum { done, wait } {
+        if (self.enqueue_count == 0) return .done;
+        self.notify();
+        self.waiter = waker.ref();
+        return .wait;
+    }
+
+    fn notify(self: *LoadGraph) void {
+        if (self.waiter) |waiter| {
+            waiter.wakeUnref();
+            self.waiter = null;
+        }
+    }
+
+    fn dequeueModule(self: *LoadGraph) void {
+        self.enqueue_count -= 1;
+        self.notify();
+    }
+};
 
 pub fn init(context: *Context) !ProxyModule.LoadingSet {
     context.module.sys.logTrace("creating new loading set", .{}, @src());
@@ -159,6 +394,8 @@ fn ref(self: *@This()) void {
 
 fn unref(self: *@This()) void {
     if (self.refcount.unref() == .noop) return;
+    std.debug.assert(self.active_commits == 0);
+    std.debug.assert(self.active_load_graph == null);
     while (self.modules.popOrNull()) |*entry| {
         var value = entry.value;
         self.context.allocator.free(entry.key);
@@ -319,6 +556,7 @@ fn addModuleInner(
     errdefer module_info.deinit();
     try self.addModuleInfo(module_info);
     self.should_recreate_map = true;
+    if (self.active_load_graph) |g| g.notify();
 }
 
 fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{InvalidExport}!void {
@@ -591,158 +829,226 @@ fn addModulesFromLocal(
     try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
 }
 
-fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
-    var instances = graph.GraphUnmanaged(*ModuleInfo, void).init(null, null);
-    defer instances.deinit(self.context.allocator);
-    var instance_map = std.StringArrayHashMapUnmanaged(graph.NodeId){};
-    defer instance_map.deinit(self.context.allocator);
-
-    // Allocate a node for each loadable module.
-    var module_it = self.modules.iterator();
-    instance_check: while (module_it.next()) |entry| {
-        const name = entry.key_ptr;
-        const instance = entry.value_ptr;
-        if (instance.status != .unloaded) continue;
-
-        // Check that no other module with the same name is already loaded.
-        if (sys.getInstance(name.*) != null) {
-            sys.logWarn(
-                "instance with the same name already exists...skipping, instance='{s}'",
-                .{name.*},
-                @src(),
-            );
-            instance.signalError();
-            continue;
-        }
-
-        // Check that all imported symbols are already exposed, or will be exposed.
-        for (instance.@"export".getSymbolImports()) |imp| {
-            const imp_name = std.mem.span(imp.name);
-            const imp_ns = std.mem.span(imp.namespace);
-            const imp_ver = Version.initC(imp.version);
-            // Skip the module if a dependency could not be loaded.
-            if (self.getSymbol(imp_name, imp_ns, imp_ver)) |sym| {
-                const owner = self.getModuleInfo(sym.owner).?;
-                if (owner.status == .err) {
-                    sys.logWarn(
-                        "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
-                            " instance='{s}', dependency='{s}'",
-                        .{ name.*, sym.owner },
-                        @src(),
-                    );
-                    instance.signalError();
-                    continue :instance_check;
-                }
-            } else if (sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
-                sys.logWarn(
-                    "instance is missing required symbol...skipping," ++
-                        " instance='{s}', symbol='{s}', namespace='{s}, version='{long}'",
-                    .{ name.*, imp_name, imp_ns, imp_ver },
-                    @src(),
-                );
-                instance.signalError();
-                continue :instance_check;
-            }
-        }
-
-        // Check that no exported symbols are already exposed.
-        for (instance.@"export".getSymbolExports()) |e| {
-            const e_name = std.mem.span(e.name);
-            const e_ns = std.mem.span(e.namespace);
-            if (sys.getSymbol(e_name, e_ns) != null) {
-                sys.logWarn(
-                    "instance exports duplicate symbol...skipping," ++
-                        " instance='{s}', symbol='{s}', namespace='{s}",
-                    .{ name.*, e_name, e_ns },
-                    @src(),
-                );
-                instance.signalError();
-                continue :instance_check;
-            }
-        }
-        for (instance.@"export".getDynamicSymbolExports()) |e| {
-            const e_name = std.mem.span(e.name);
-            const e_ns = std.mem.span(e.namespace);
-            if (sys.getSymbol(e_name, e_ns) != null) {
-                sys.logWarn(
-                    "instance exports duplicate symbol...skipping," ++
-                        " instance='{s}', symbol='{s}', namespace='{s}",
-                    .{ name.*, e_name, e_ns },
-                    @src(),
-                );
-                instance.signalError();
-                continue :instance_check;
-            }
-        }
-
-        // Create a new node and insert it into the hashmap.
-        const node = try instances.addNode(self.context.allocator, instance);
-        try instance_map.put(self.context.allocator, name.*, node);
-    }
-
-    // Connect all nodes in the graph.
-    var instance_it = instance_map.iterator();
-    connect_graph: while (instance_it.next()) |entry| {
-        const name = entry.key_ptr.*;
-        const node = entry.value_ptr.*;
-        const instance = self.getModuleInfo(name).?;
-
-        for (instance.@"export".getSymbolImports()) |imp| {
-            const i_name = std.mem.span(imp.name);
-            const i_namespace = std.mem.span(imp.namespace);
-            const i_version = Version.initC(imp.version);
-            if (self.getSymbol(i_name, i_namespace, i_version)) |sym| {
-                const owner_entry = instance_map.get(sym.owner);
-                const owner = self.getModuleInfo(sym.owner).?;
-                if (owner_entry == null or owner.status == .err) {
-                    sys.asContext().tracing.emitWarnSimple(
-                        "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
-                            " instance='{s}', dependency='{s}'",
-                        .{ name, sym.owner },
-                        @src(),
-                    );
-                    instance.signalError();
-                    continue :connect_graph;
-                }
-
-                const to_node = owner_entry.?;
-                _ = instances.addEdge(
-                    self.context.allocator,
-                    {},
-                    node,
-                    to_node,
-                ) catch |err| switch (err) {
-                    Allocator.Error.OutOfMemory => return Allocator.Error.OutOfMemory,
-                    else => unreachable,
-                };
-            }
-        }
-    }
-
-    if (try instances.isCyclic(self.context.allocator)) return error.CyclicDependency;
-    const order = instances.sortTopological(self.context.allocator, .outgoing) catch |err|
-        switch (err) {
-        Allocator.Error.OutOfMemory => return Allocator.Error.OutOfMemory,
-        else => unreachable,
-    };
-    defer self.context.allocator.free(order);
-
-    var queue = Queue{};
-    errdefer queue.deinit(self.context.allocator);
-    for (order) |node| {
-        const instance = instances.nodePtr(node).?.*;
-        try queue.append(self.context.allocator, instance);
-    }
-
-    return queue;
-}
-
 // ----------------------------------------------------
 // Futures
 // ----------------------------------------------------
 
+const LoadOp = FSMFuture(struct {
+    node_id: graph.NodeId,
+    load_graph: *LoadGraph,
+    ret: void = {},
+
+    pub const __no_abort = true;
+
+    fn init(node_id: graph.NodeId, load_graph: *LoadGraph) !EnqueuedFuture(void) {
+        const data = @This(){
+            .node_id = node_id,
+            .load_graph = load_graph,
+        };
+        var f = LoadOp.init(data).intoFuture();
+
+        var err: ?AnyError = null;
+        defer if (err) |e| e.deinit();
+        return Async.Task.initFuture(
+            @TypeOf(f),
+            &load_graph.set.context.@"async".sys,
+            &f,
+            &err,
+        );
+    }
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
+        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) void {
+        return self.ret;
+    }
+
+    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+
+        self.load_graph.set.lock();
+        defer self.load_graph.set.unlock();
+
+        self.load_graph.mutex.lock();
+        defer self.load_graph.mutex.unlock();
+
+        const node = self.load_graph.dependency_tree.nodePtr(self.node_id).?;
+        node.signalWaiters(self.load_graph);
+        self.load_graph.dequeueModule();
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        const set = self.load_graph.set;
+        const sys = set.asSys();
+
+        set.lock();
+        defer set.unlock();
+
+        self.load_graph.mutex.lock();
+        defer self.load_graph.mutex.unlock();
+
+        const node = self.load_graph.dependency_tree.nodePtr(self.node_id).?;
+        const info = set.getModuleInfo(node.module).?;
+
+        // Check that it is not part of a cycle.
+        const is_cyclic = self.load_graph.dependency_tree.pathExists(
+            sys.allocator,
+            self.node_id,
+            self.node_id,
+        ) catch |err| {
+            sys.logWarn(
+                "internal error while verifying module dependencies...skipping," ++
+                    " instance='{s}', error='{s}'",
+                .{ node.module, @errorName(err) },
+                @src(),
+            );
+            info.signalError();
+            return .ret;
+        };
+        if (is_cyclic) {
+            sys.logWarn(
+                "module has a cyclic dependency...skipping, instance='{s}'",
+                .{node.module},
+                @src(),
+            );
+            info.signalError();
+            return .ret;
+        }
+
+        // Check all dependencies.
+        var it = self.load_graph.dependency_tree.neighborsIterator(
+            self.node_id,
+            .outgoing,
+        ) catch unreachable;
+        while (it.next()) |dep| {
+            const dep_id = dep.node_id;
+            const dep_node = self.load_graph.dependency_tree.nodePtr(dep_id) orelse continue;
+            const dep_name = dep_node.module;
+            const dep_info = set.getModuleInfo(dep_name).?;
+            var status = dep_info.status;
+            if (dep_node.fut == null) status = .err;
+
+            switch (status) {
+                .err => {
+                    sys.logWarn(
+                        "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
+                            " instance='{s}', dependency='{s}'",
+                        .{ node.module, dep_name },
+                        @src(),
+                    );
+                    info.signalError();
+                    return .ret;
+                },
+                .unloaded => {
+                    self.load_graph.waiter = waker.ref();
+                    return .yield;
+                },
+                .loaded => {},
+            }
+        }
+
+        return .next;
+    }
+
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+
+        const set = self.load_graph.set;
+        const sys = set.asSys();
+
+        sys.lock();
+        defer sys.unlock();
+
+        set.lock();
+        defer set.unlock();
+
+        const node = blk: {
+            self.load_graph.mutex.lock();
+            defer self.load_graph.mutex.unlock();
+            break :blk self.load_graph.dependency_tree.nodePtr(self.node_id).?;
+        };
+        const info = set.getModuleInfo(node.module).?;
+        const name = std.mem.span(info.@"export".name);
+        set.logTrace("loading instance, instance='{s}'", .{name}, @src());
+
+        // Recheck that all dependencies could be loaded.
+        for (info.@"export".getSymbolImports()) |i| {
+            const i_name = std.mem.span(i.name);
+            const i_namespace = std.mem.span(i.namespace);
+            const i_version = Version.initC(i.version);
+            if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
+                const owner = set.getModuleInfo(sym.owner).?;
+                std.debug.assert(owner.status != .unloaded);
+            }
+        }
+
+        // Construct the instance.
+        var err: ?AnyError = null;
+        set.unlock();
+        const instance = InstanceHandle.initExportedInstance(
+            sys,
+            set.asProxySet(),
+            info.@"export",
+            info.handle,
+            &err,
+        ) catch {
+            sys.logWarn(
+                "instance construction error...skipping," ++
+                    " instance='{s}', error='{dbg}:{}'",
+                .{ name, err.?, err.? },
+                @src(),
+            );
+            err.?.deinit();
+            set.lock();
+            set.getModuleInfo(name).?.signalError();
+            return;
+        };
+        set.lock();
+
+        const instance_handle = InstanceHandle.fromInstancePtr(instance);
+        const inner = instance_handle.lock();
+
+        inner.start(sys, &err) catch {
+            sys.logWarn(
+                "instance `on_start` error...skipping," ++
+                    " instance='{s}', error='{dbg}:{}'",
+                .{ name, err.?, err.? },
+                @src(),
+            );
+            inner.unrefStrong();
+            inner.deinit();
+
+            err.?.deinit();
+            set.getModuleInfo(name).?.signalError();
+            return;
+        };
+
+        sys.addInstance(inner) catch |e| {
+            sys.logWarn(
+                "internal error while adding instance...skipping," ++
+                    " instance='{s}', error='{s}'",
+                .{ name, @errorName(e) },
+                @src(),
+            );
+            inner.stop(sys);
+            inner.unrefStrong();
+            inner.deinit();
+            return;
+        };
+        defer inner.unlock();
+        defer inner.unrefStrong();
+
+        set.getModuleInfo(name).?.signalSuccess(instance.info);
+        set.logTrace("instance loaded, instance='{s}'", .{name}, @src());
+    }
+});
+
 const CommitOp = FSMFuture(struct {
     set: *Self,
+    load_graph: *LoadGraph = undefined,
     ret: anyerror!void = undefined,
 
     pub const __no_abort = true;
@@ -786,134 +1092,92 @@ const CommitOp = FSMFuture(struct {
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !ProxyAsync.FSMOp {
         self.set.asSys().lock();
-        errdefer self.set.asSys().unlock();
+        defer self.set.asSys().unlock();
 
         self.set.lock();
-        errdefer self.set.unlock();
+        defer self.set.unlock();
 
+        // Ensure that no two commit operations are running in parallel.
         if (self.set.asSys().state == .loading_set) {
             try self.set.asSys().loading_set_waiters.append(
                 self.set.asSys().allocator,
                 .{ .waiter = self, .waker = waker.ref() },
             );
-            self.set.unlock();
-            self.set.asSys().mutex.unlock();
             return .yield;
         }
         self.set.asSys().state = .loading_set;
+        errdefer self.set.asSys().state = .idle;
+
+        self.load_graph = try LoadGraph.init(self.set);
+        std.debug.assert(self.set.active_load_graph == null);
+        self.set.active_load_graph = self.load_graph;
+        self.set.active_commits += 1;
         return .next;
     }
 
     pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
         _ = reason;
-        self.set.unlock();
+        self.set.asSys().lock();
+        defer self.set.asSys().unlock();
+
+        self.set.lock();
+        defer self.set.unlock();
+
+        self.set.active_load_graph = null;
+        self.set.active_commits -= 1;
+
+        self.load_graph.deinit();
         self.set.asSys().state = .idle;
         if (self.set.asSys().loading_set_waiters.popOrNull()) |waiter| {
             waiter.waker.wakeUnref();
         }
-        self.set.asSys().unlock();
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) !void {
-        _ = waker;
-        const set = self.set;
-        const sys = set.asSys();
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        waker.wake();
 
-        set.should_recreate_map = false;
-        var queue = try set.createQueue(sys);
-        defer queue.deinit(sys.allocator);
-        outer: while (queue.items.len > 0 or set.should_recreate_map) {
-            if (set.should_recreate_map) {
-                set.should_recreate_map = false;
-                queue.deinit(sys.allocator);
-                queue = .{};
-                queue = try set.createQueue(sys);
-                continue;
-            }
-            const instance_info = queue.pop();
-            const instance_name = instance_info.@"export".name;
+        self.set.lock();
+        defer self.set.unlock();
 
-            // Recheck that all dependencies could be loaded.
-            for (instance_info.@"export".getSymbolImports()) |i| {
-                const i_name = std.mem.span(i.name);
-                const i_namespace = std.mem.span(i.namespace);
-                const i_version = Version.initC(i.version);
-                if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
-                    const owner = set.getModuleInfo(sym.owner).?;
-                    if (owner.status == .err) {
-                        sys.logWarn(
-                            "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
-                                " instance='{s}', dependency='{s}'",
-                            .{ instance_name, sym.owner },
-                            @src(),
-                        );
-                        instance_info.signalError();
-                        continue :outer;
-                    }
-                }
-            }
+        self.load_graph.mutex.lock();
+        defer self.load_graph.mutex.unlock();
 
-            // Check that the explicit dependencies exist.
-            for (instance_info.@"export".getModifiers()) |mod| {
-                if (mod.tag != .dependency) continue;
-                const dependency = mod.value.dependency;
-                if (sys.getInstance(std.mem.span(dependency.name)) == null) {
-                    sys.logWarn(
-                        "instance can not be loaded due to a missing dependency...skipping," ++
-                            " instance='{s}', dependency='{s}'",
-                        .{ instance_name, dependency.name },
-                        @src(),
-                    );
-                    instance_info.signalError();
-                    continue :outer;
-                }
-            }
+        // Spawn all tasks and wait.
+        self.load_graph.spawnMissingTaks() catch |err| {
+            self.ret = err;
+            return .next;
+        };
+        switch (self.load_graph.waitForCompletion(waker)) {
+            .done => return .ret,
+            .wait => return .yield,
+        }
+    }
 
-            // Construct the instance.
-            var err: ?AnyError = null;
-            const instance = InstanceHandle.initExportedInstance(
-                sys,
-                set,
-                instance_info.@"export",
-                instance_info.handle,
-                &err,
-            ) catch |e| switch (e) {
-                error.FfiError => {
-                    sys.logWarn(
-                        "instance construction error...skipping," ++
-                            " instance='{s}', error='{dbg}:{}'",
-                        .{ instance_name, err.?, err.? },
-                        @src(),
-                    );
-                    err.?.deinit();
-                    instance_info.signalError();
-                    continue :outer;
-                },
-                else => return e,
-            };
+    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        self.set.lock();
+        defer self.set.unlock();
 
-            const instance_handle = InstanceHandle.fromInstancePtr(instance);
-            const inner = instance_handle.lock();
-            errdefer inner.deinit();
-            errdefer inner.unrefStrong();
+        self.load_graph.mutex.lock();
+        defer self.load_graph.mutex.unlock();
 
-            inner.start(sys, &err) catch {
-                sys.logWarn(
-                    "instance `on_start` error...skipping," ++
-                        " instance='{s}', error='{dbg}:{}'",
-                    .{ instance_name, err.?, err.? },
+        const err: anyerror = if (self.ret) |_| unreachable else |e| e;
+
+        // Abort all not-spawned tasks and wait.
+        var it = self.set.modules.iterator();
+        while (it.next()) |entry| {
+            const name = entry.key_ptr.*;
+            if (!self.load_graph.modules.contains(name)) {
+                self.set.asSys().logWarn(
+                    "aborting load of instance due to internal error, instance='{s}', error='{s}'",
+                    .{ name, @errorName(err) },
                     @src(),
                 );
-                err.?.deinit();
-                instance_info.signalError();
-                continue :outer;
-            };
-            errdefer inner.stop(sys);
-
-            try sys.addInstance(inner);
-            defer inner.unlock();
-            defer inner.unrefStrong();
-            instance_info.signalSuccess(instance.info);
+                entry.value_ptr.signalError();
+            }
+        }
+        switch (self.load_graph.waitForCompletion(waker)) {
+            .done => return .ret,
+            .wait => return .yield,
         }
     }
 });
