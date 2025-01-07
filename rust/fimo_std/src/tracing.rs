@@ -330,7 +330,11 @@ macro_rules! span_trace {
     };
 }
 
-/// Available levels in the tracing subsystem.
+/// Tracing levels.
+///
+/// The levels are ordered such that given two levels `lvl1` and `lvl2`, where `lvl1 >= lvl2`, then
+/// an event with level `lvl2` will be traced in a context where the maximum tracing level is
+/// `lvl1`.
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum Level {
     Off,
@@ -378,6 +382,7 @@ impl TryFrom<bindings::FimoTracingLevel> for Level {
     }
 }
 
+/// Metadata for a span and event.
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Metadata(bindings::FimoTracingMetadata);
@@ -460,6 +465,7 @@ impl FFISharable<*const bindings::FimoTracingMetadata> for Metadata {
     }
 }
 
+/// An event to be traced.
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Event(bindings::FimoTracingEvent);
@@ -587,10 +593,9 @@ impl CallStack {
     /// Switches the call stack of the current thread.
     ///
     /// If successful, this call stack will be used as the active call stack of the calling thread.
-    /// The old call stack is then returned, enabling the caller to switch back to it afterward.
-    /// `self` must be in a suspended, but unblocked, state and not be active. The active call stack
-    /// must also be in a suspended state, but may also be blocked. On error, this function returns
-    /// `self`, along with an error.
+    /// The old call stack is returned, enabling the caller to switch back to it afterwards. This
+    /// call stack must be in a suspended, but unblocked, state and not be active. The active call
+    /// stack must also be in a suspended state, but may also be blocked.
     pub fn switch(self) -> Self {
         let this = ManuallyDrop::new(self);
         unsafe {
@@ -674,14 +679,6 @@ impl ThreadAccess {
             f(ctx.data());
             Self(ctx.to_context())
         }
-    }
-
-    /// Unregisters the calling thread from the tracing subsystem.
-    ///
-    /// Once unregistered, the calling thread looses access to the tracing subsystem until it is
-    /// registered again. The thread can not be unregistered until the call stack is empty.
-    pub fn unregister(self) {
-        drop(self);
     }
 }
 

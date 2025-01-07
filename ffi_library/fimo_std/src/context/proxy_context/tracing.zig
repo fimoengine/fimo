@@ -45,13 +45,9 @@ pub const Span = extern struct {
 
     /// Creates a new span with the default formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The message is formatted with the default
-    /// formatter of the zig standard library. The message may be cut of,
-    /// if the length exceeds the internal formatting buffer size.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// message is formatted with the default formatter of the zig standard library. The message
+    /// may be cut of, if the length exceeds the internal formatting buffer size.
     pub inline fn init(
         ctx: Tracing,
         name: ?[:0]const u8,
@@ -82,14 +78,10 @@ pub const Span = extern struct {
 
     /// Creates a new span with a custom formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The subsystem may use a formatting buffer of a
-    /// fixed size. The formatter is expected to cut-of the message after
-    /// reaching that specified size. The `desc` must remain valid until
-    /// the span is destroyed.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
+    /// the message after reaching that specified size. The `desc` must remain valid until the span
+    /// is destroyed.
     pub fn initCustom(
         ctx: Tracing,
         desc: *const SpanDesc,
@@ -106,13 +98,9 @@ pub const Span = extern struct {
 
     /// Creates a new error span with the default formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The message is formatted with the default
-    /// formatter of the zig standard library. The message may be cut of,
-    /// if the length exceeds the internal formatting buffer size.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// message is formatted with the default formatter of the zig standard library. The message
+    /// may be cut of, if the length exceeds the internal formatting buffer size.
     pub inline fn initErr(
         ctx: Tracing,
         name: ?[:0]const u8,
@@ -134,13 +122,9 @@ pub const Span = extern struct {
 
     /// Creates a new warn span with the default formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The message is formatted with the default
-    /// formatter of the zig standard library. The message may be cut of,
-    /// if the length exceeds the internal formatting buffer size.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// message is formatted with the default formatter of the zig standard library. The message
+    /// may be cut of, if the length exceeds the internal formatting buffer size.
     pub inline fn initWarn(
         ctx: Tracing,
         name: ?[:0]const u8,
@@ -162,13 +146,9 @@ pub const Span = extern struct {
 
     /// Creates a new info span with the default formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The message is formatted with the default
-    /// formatter of the zig standard library. The message may be cut of,
-    /// if the length exceeds the internal formatting buffer size.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// message is formatted with the default formatter of the zig standard library. The message
+    /// may be cut of, if the length exceeds the internal formatting buffer size.
     pub inline fn initInfo(
         ctx: Tracing,
         name: ?[:0]const u8,
@@ -190,13 +170,9 @@ pub const Span = extern struct {
 
     /// Creates a new debug span with the default formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The message is formatted with the default
-    /// formatter of the zig standard library. The message may be cut of,
-    /// if the length exceeds the internal formatting buffer size.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// message is formatted with the default formatter of the zig standard library. The message
+    /// may be cut of, if the length exceeds the internal formatting buffer size.
     pub inline fn initDebug(
         ctx: Tracing,
         name: ?[:0]const u8,
@@ -218,13 +194,9 @@ pub const Span = extern struct {
 
     /// Creates a new trace span with the default formatter and enters it.
     ///
-    /// If successful, the newly created span is used as the context for
-    /// succeeding events. The message is formatted with the default
-    /// formatter of the zig standard library. The message may be cut of,
-    /// if the length exceeds the internal formatting buffer size.
-    ///
-    /// This function may return an error, if the current thread is not
-    /// registered with the subsystem.
+    /// If successful, the newly created span is used as the context for succeeding events. The
+    /// message is formatted with the default formatter of the zig standard library. The message
+    /// may be cut of, if the length exceeds the internal formatting buffer size.
     pub inline fn initTrace(
         ctx: Tracing,
         name: ?[:0]const u8,
@@ -423,10 +395,9 @@ pub fn stackTraceFormatter(
 
 /// A subscriber for tracing events.
 ///
-/// The main function of the tracing subsystem is managing and routing
-/// tracing events to subscribers. Therefore it does not consume any
-/// events on its own, which is the task of the subscribers. Subscribers
-/// may utilize the events in any way they deem fit.
+/// The main function of the tracing subsystem is managing and routing tracing events to
+/// subscribers. Therefore it does not consume any events on its own, which is the task of the
+/// subscribers. Subscribers may utilize the events in any way they deem fit.
 pub const Subscriber = extern struct {
     next: ?*const anyopaque = null,
     data: ?*anyopaque,
@@ -434,9 +405,8 @@ pub const Subscriber = extern struct {
 
     /// VTable of a tracing subscriber.
     ///
-    /// Adding/removing functionality to a subscriber through this table
-    /// is a breaking change, as a subscriber may be implemented from
-    /// outside the library.
+    /// Adding/removing functionality to a subscriber through this table is a breaking change, as a
+    /// subscriber may be implemented from outside the library.
     pub const VTable = extern struct {
         /// Destroys the subscriber.
         destroy: *const fn (ctx: ?*anyopaque) callconv(.c) void,
@@ -511,8 +481,7 @@ pub const Subscriber = extern struct {
 
     /// Initializes the subscriber interface from an existing object.
     ///
-    /// The object must be kept alive for as long as the subscriber is
-    /// still in use.
+    /// The object must be kept alive for as long as the subscriber is still in use.
     pub fn init(
         comptime CallStackT: type,
         obj: anytype,
@@ -806,8 +775,7 @@ pub const Subscriber = extern struct {
 pub const Config = extern struct {
     id: Context.TypeId = .tracing_config,
     next: ?*const void = null,
-    /// Length in characters of the per-call-stack buffer
-    /// used when formatting mesasges.
+    /// Length in characters of the per-call-stack buffer used when formatting mesasges.
     format_buffer_len: usize = 0,
     /// Maximum level for which to consume tracing events.
     max_level: Level = switch (builtin.mode) {
@@ -859,9 +827,8 @@ pub const VTable = extern struct {
 
 /// Emits a new event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitEvent(
     self: Tracing,
     name: ?[:0]const u8,
@@ -889,8 +856,7 @@ pub fn emitEvent(
 
 /// Emits a new error event dumping the stack trace.
 ///
-/// The stack trace may be cut of, if the length exceeds the internal
-/// formatting buffer size.
+/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitStackTrace(
     self: Tracing,
     name: ?[:0]const u8,
@@ -916,8 +882,7 @@ pub fn emitStackTrace(
 
 /// Emits a new error event dumping the stack trace.
 ///
-/// The stack trace may be cut of, if the length exceeds the internal
-/// formatting buffer size.
+/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitStackTraceSimple(
     self: Tracing,
     stack_trace: std.builtin.StackTrace,
@@ -933,8 +898,8 @@ pub fn emitStackTraceSimple(
 
 /// Emits a new event with a custom formatter.
 ///
-/// The subsystem may use a formatting buffer of a fixed size. The formatter is
-/// expected to cut-of the message after reaching that specified size.
+/// The subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
+/// the message after reaching that specified size.
 pub fn emitEventCustom(
     self: Tracing,
     event: *const Event,
@@ -951,9 +916,8 @@ pub fn emitEventCustom(
 
 /// Emits a new error event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitErr(
     self: Tracing,
     name: ?[:0]const u8,
@@ -974,9 +938,8 @@ pub fn emitErr(
 
 /// Emits a new warn event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitWarn(
     self: Tracing,
     name: ?[:0]const u8,
@@ -997,9 +960,8 @@ pub fn emitWarn(
 
 /// Emits a new info event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitInfo(
     self: Tracing,
     name: ?[:0]const u8,
@@ -1020,9 +982,8 @@ pub fn emitInfo(
 
 /// Emits a new debug event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitDebug(
     self: Tracing,
     name: ?[:0]const u8,
@@ -1043,9 +1004,8 @@ pub fn emitDebug(
 
 /// Emits a new trace event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitTrace(
     self: Tracing,
     name: ?[:0]const u8,
@@ -1066,9 +1026,8 @@ pub fn emitTrace(
 
 /// Emits a new error event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitErrSimple(
     self: Tracing,
     comptime fmt: []const u8,
@@ -1086,9 +1045,8 @@ pub fn emitErrSimple(
 
 /// Emits a new warn event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitWarnSimple(
     self: Tracing,
     comptime fmt: []const u8,
@@ -1106,9 +1064,8 @@ pub fn emitWarnSimple(
 
 /// Emits a new info event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitInfoSimple(
     self: Tracing,
     comptime fmt: []const u8,
@@ -1126,9 +1083,8 @@ pub fn emitInfoSimple(
 
 /// Emits a new debug event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitDebugSimple(
     self: Tracing,
     comptime fmt: []const u8,
@@ -1146,9 +1102,8 @@ pub fn emitDebugSimple(
 
 /// Emits a new trace event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitTraceSimple(
     self: Tracing,
     comptime fmt: []const u8,
@@ -1166,32 +1121,28 @@ pub fn emitTraceSimple(
 
 /// Checks whether the tracing subsystem is enabled.
 ///
-/// This function can be used to check whether to call into the subsystem at all.
-/// Calling this function is not necessary, as the remaining functions of the
-/// subsystem are guaranteed to return default values, in case the subsystem is
-/// disabled.
+/// This function can be used to check whether to call into the subsystem at all. Calling this
+/// function is not necessary, as the remaining functions of the subsystem are guaranteed to return
+/// default values, in case the subsystem is disabled.
 pub fn isEnabled(self: Tracing) bool {
     return self.context.vtable.tracing_v0.is_enabled(self.context.data);
 }
 
 /// Registers the calling thread with the tracing subsystem.
 ///
-/// The tracing of the subsystem is opt-in on a per thread basis, where
-/// unregistered threads will behave as if the subsystem was disabled.
-/// Once registered, the calling thread gains access to the tracing
-/// subsystem and is assigned a new empty call stack. A registered
-/// thread must be unregistered from the tracing subsystem before the
-/// context is destroyed, by terminating the tread, or by manually
-/// calling `unregisterThread()`.
+/// The tracing of the subsystem is opt-in on a per thread basis, where unregistered threads will
+/// behave as if the subsystem was disabled. Once registered, the calling thread gains access to
+/// the tracing subsystem and is assigned a new empty call stack. A registered thread must be
+/// unregistered from the tracing subsystem before the context is destroyed, by terminating the
+/// tread, or by manually calling `unregisterThread()`.
 pub fn registerThread(self: Tracing) void {
     self.context.vtable.tracing_v0.register_thread(self.context.data);
 }
 
 /// Unregisters the calling thread from the tracing subsystem.
 ///
-/// Once unregistered, the calling thread looses access to the tracing
-/// subsystem until it is registered again. The thread can not be unregistered
-/// until the call stack is empty.
+/// Once unregistered, the calling thread looses access to the tracing subsystem until it is
+/// registered again. The thread can not be unregistered until the call stack is empty.
 pub fn unregisterThread(self: Tracing) void {
     self.context.vtable.tracing_v0.unregister_thread(self.context.data);
 }
