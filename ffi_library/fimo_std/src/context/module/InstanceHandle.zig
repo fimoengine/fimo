@@ -633,6 +633,9 @@ pub fn initExportedInstance(
     const inner = instance_handle.lock();
     defer inner.unlock();
 
+    inner.refStrong() catch unreachable;
+    errdefer inner.unrefStrong();
+
     const instance = try sys.allocator.create(ProxyModule.OpaqueInstance);
     instance.* = .{
         .vtable = &instance_vtable,
@@ -1069,7 +1072,6 @@ const param_data_vtable = ProxyModule.OpaqueParameterData.VTable{
 
 const InfoRequestUnloadOp = FSMFuture(struct {
     handle: *const Self,
-    lock_fut: Async.Mutex.LockOp = undefined,
     ret: void = undefined,
 
     pub const __no_abort = true;
@@ -1116,38 +1118,23 @@ const InfoRequestUnloadOp = FSMFuture(struct {
                 return .ret;
             },
             .wait => return .yield,
-            .unload => {
-                self.lock_fut = self.handle.sys.lockAsync();
-                return .next;
-            },
+            .unload => return .next,
         }
     }
 
     pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = self;
         _ = reason;
-        self.lock_fut.deinit();
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                v catch |err| @panic(@errorName(err));
-                return .next;
-            },
-        }
-    }
-
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.handle.sys.unlock();
-    }
-
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) void {
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) void {
         _ = waker;
-        const inner = self.handle.lock();
 
         const sys = self.handle.sys;
+        sys.lock();
+        defer sys.unlock();
+
+        const inner = self.handle.lock();
         sys.removeInstance(inner) catch |err| @panic(@errorName(err));
         inner.stop(sys);
         inner.deinit();

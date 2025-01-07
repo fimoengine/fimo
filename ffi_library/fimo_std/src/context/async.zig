@@ -10,7 +10,6 @@ const Self = @This();
 
 pub const BlockingContext = @import("async/BlockingContext.zig");
 pub const EventLoop = @import("async/EventLoop.zig");
-pub const Mutex = @import("async/Mutex.zig");
 const System = @import("async/System.zig");
 pub const Task = @import("async/Task.zig");
 

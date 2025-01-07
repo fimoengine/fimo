@@ -743,7 +743,6 @@ fn createQueue(self: *const Self, sys: *System) System.SystemError!Queue {
 
 const CommitOp = FSMFuture(struct {
     set: *Self,
-    lock_fut: Async.Mutex.LockOp = undefined,
     ret: anyerror!void = undefined,
 
     pub const __no_abort = true;
@@ -785,33 +784,19 @@ const CommitOp = FSMFuture(struct {
         self.set.unref();
     }
 
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) void {
-        _ = waker;
-        self.lock_fut = self.set.asSys().lockAsync();
-    }
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !ProxyAsync.FSMOp {
+        self.set.asSys().lock();
+        errdefer self.set.asSys().unlock();
 
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
-        _ = reason;
-        self.lock_fut.deinit();
-    }
-
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) !ProxyAsync.FSMOp {
-        switch (self.lock_fut.poll(waker)) {
-            .pending => return .yield,
-            .ready => |v| {
-                try v;
-            },
-        }
-        errdefer self.set.asSys().mutex.unlock();
         self.set.lock();
+        errdefer self.set.unlock();
 
         if (self.set.asSys().state == .loading_set) {
             try self.set.asSys().loading_set_waiters.append(
                 self.set.asSys().allocator,
                 .{ .waiter = self, .waker = waker.ref() },
             );
-            self.lock_fut.deinit();
-            self.lock_fut = self.set.asSys().lockAsync();
+            self.set.unlock();
             self.set.asSys().mutex.unlock();
             return .yield;
         }
@@ -819,17 +804,17 @@ const CommitOp = FSMFuture(struct {
         return .next;
     }
 
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
         _ = reason;
         self.set.unlock();
         self.set.asSys().state = .idle;
         if (self.set.asSys().loading_set_waiters.popOrNull()) |waiter| {
             waiter.waker.wakeUnref();
         }
-        self.set.asSys().mutex.unlock();
+        self.set.asSys().unlock();
     }
 
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) !void {
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) !void {
         _ = waker;
         const set = self.set;
         const sys = set.asSys();
@@ -910,6 +895,7 @@ const CommitOp = FSMFuture(struct {
             const instance_handle = InstanceHandle.fromInstancePtr(instance);
             const inner = instance_handle.lock();
             errdefer inner.deinit();
+            errdefer inner.unrefStrong();
 
             inner.start(sys, &err) catch {
                 sys.logWarn(
@@ -926,6 +912,7 @@ const CommitOp = FSMFuture(struct {
 
             try sys.addInstance(inner);
             defer inner.unlock();
+            defer inner.unrefStrong();
             instance_info.signalSuccess(instance.info);
         }
     }

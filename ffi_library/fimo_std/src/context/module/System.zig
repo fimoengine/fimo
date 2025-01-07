@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
 const Version = @import("../../Version.zig");
@@ -20,7 +21,7 @@ const SymbolRef = @import("SymbolRef.zig");
 pub const global_namespace = "";
 const Self = @This();
 
-mutex: Async.Mutex = .{},
+mutex: Mutex = .{},
 allocator: Allocator,
 tmp_dir: tmp_path.TmpDirUnmanaged,
 state: enum { idle, loading_set } = .idle,
@@ -97,10 +98,6 @@ pub fn deinit(self: *Self) void {
     self.instances.clearAndFree(self.allocator);
     self.namespaces.clearAndFree(self.allocator);
     self.symbols.clearAndFree(self.allocator);
-}
-
-pub fn lockAsync(self: *Self) Async.Mutex.LockOp {
-    return self.mutex.lockAsync(self.allocator);
 }
 
 pub fn lock(self: *Self) void {
