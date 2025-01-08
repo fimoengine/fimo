@@ -2,6 +2,7 @@ use fimo_std::{
     context::{Context, ContextBuilder, ContextView},
     emit_trace,
     error::Error,
+    ffi::Viewable,
     r#async::{BlockingContext, EventLoop},
     tracing::{default_subscriber, Config, Level, ThreadAccess},
 };
@@ -18,11 +19,11 @@ fn block_on_futures() -> Result<(), Error> {
         .build()?;
 
     let _access = ThreadAccess::new(&context);
-    let _event_loop = EventLoop::new(*context)?;
+    let _event_loop = EventLoop::new(&context)?;
 
-    let fut = new_nested(*context)?;
+    let fut = new_nested(context.view())?;
 
-    let blocking = BlockingContext::new(*context)?;
+    let blocking = BlockingContext::new(&context)?;
     let (a, b) = blocking.block_on(fut);
 
     assert_eq!(a, LOOP_1);

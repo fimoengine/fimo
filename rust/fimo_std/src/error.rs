@@ -10,6 +10,27 @@ use std::{
 };
 
 /// Generic error code.
+#[repr(transparent)]
+#[derive(PartialEq, Eq, Hash)]
+pub struct FFIResult<T: ?Sized = *const ()>(bindings::FimoResult, PhantomData<T>);
+
+impl<T: ?Sized> FFIResult<T> {
+    pub fn into_result(self) -> Result<(), Error<T>> {
+        if self.0.data.is_null() {
+            Ok(())
+        } else {
+            Err(Error(self.0, PhantomData))
+        }
+    }
+}
+
+impl<T: ?Sized> From<FFIResult<T>> for Result<(), Error<T>> {
+    fn from(value: FFIResult<T>) -> Self {
+        value.into_result()
+    }
+}
+
+/// Generic error code.
 #[derive(PartialEq, Eq, Hash)]
 pub struct Error<T: ?Sized = *const ()>(bindings::FimoResult, PhantomData<T>);
 

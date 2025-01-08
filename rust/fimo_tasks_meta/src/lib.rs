@@ -39,8 +39,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
     /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
@@ -78,8 +78,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
     /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
@@ -120,8 +120,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
     /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
@@ -163,8 +163,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
     /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
@@ -208,8 +208,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::WorkerGroupBuilder;
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::WorkerGroupBuilder;
     /// use std::num::NonZeroUsize;
     ///
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
@@ -244,8 +244,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::WorkerGroupBuilder;
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::WorkerGroupBuilder;
     /// use std::num::NonZeroUsize;
     ///
     /// let group = WorkerGroupBuilder::new(c"doctest", &[Default::default()], None)
@@ -282,8 +282,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
     /// use std::num::NonZeroUsize;
     ///
     /// // Outside a worker group.
@@ -320,8 +320,8 @@ impl Context {
     /// # Examples
     ///
     /// ```
-    /// # fimo_tasks::__private_with_context(|_module, context| {
-    /// use fimo_tasks::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
+    /// # fimo_tasks_meta::__private_with_context(|_module, context| {
+    /// use fimo_tasks_meta::{CommandBuffer, TaskStatus, WorkerGroupBuilder};
     /// use std::{num::NonZeroUsize, time};
     ///
     /// let ten_millis = time::Duration::from_millis(10);
@@ -419,12 +419,12 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
         .expect("could not build fimo context");
     {
         let _access = ThreadAccess::new(&context);
-        let _event_loop = EventLoop::new(*context).expect("could not create event loop");
+        let _event_loop = EventLoop::new(&context).expect("could not create event loop");
 
-        let blocking = BlockingContext::new(*context).expect("could not create blocking context");
+        let blocking = BlockingContext::new(&context).expect("could not create blocking context");
 
         blocking.block_on(async {
-            let set = LoadingSet::new(&*context).unwrap();
+            let set = LoadingSet::new(&context).unwrap();
             // Safety:
             unsafe {
                 set.view()
@@ -435,10 +435,10 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
             }
             set.view().commit().await.unwrap();
 
-            let module = fimo_std::module::PseudoModule::new(&*context)
+            let module = fimo_std::module::PseudoModule::new(&context)
                 .expect("could not create pseudo module");
             let tasks_module =
-                fimo_std::module::ModuleInfo::find_by_name(&*context, c"fimo_tasks_impl")
+                fimo_std::module::ModuleInfo::find_by_name(&context, c"fimo_tasks_impl")
                     .expect("could not find the tasks module");
 
             module

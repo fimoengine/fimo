@@ -1,9 +1,9 @@
-use super::{ModuleSubsystem, NamespaceItem, NoState, Symbol, SymbolItem};
+use super::{NamespaceItem, NoState, Symbol, SymbolItem};
 use crate::{
     bindings,
     context::ContextView,
     error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
-    ffi::{FFISharable, FFITransferable},
+    ffi::{FFISharable, FFITransferable, Viewable},
     version::Version,
 };
 use core::{
@@ -52,7 +52,10 @@ impl ModuleInfoView<'_> {
 
 impl ModuleInfoView<'_> {
     /// Searches for a module by its name.
-    pub fn find_by_name(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<ModuleInfo, Error> {
+    pub fn find_by_name<'a, T: Viewable<ContextView<'a>>>(
+        ctx: &T,
+        name: &CStr,
+    ) -> Result<ModuleInfo, Error> {
         // Safety: Is always set.
         let f = unsafe {
             ctx.view()
@@ -75,8 +78,8 @@ impl ModuleInfoView<'_> {
     }
 
     /// Searches for a module by a symbol it exports.
-    pub fn find_by_symbol(
-        ctx: &impl ModuleSubsystem,
+    pub fn find_by_symbol<'a, T: Viewable<ContextView<'a>>>(
+        ctx: &T,
         name: &CStr,
         namespace: &CStr,
         version: Version,
@@ -265,13 +268,16 @@ pub struct ModuleInfo(ModuleInfoView<'static>);
 
 impl ModuleInfo {
     /// Searches for a module by its name.
-    pub fn find_by_name(ctx: &impl ModuleSubsystem, name: &CStr) -> Result<Self, Error> {
+    pub fn find_by_name<'a, T: Viewable<ContextView<'a>>>(
+        ctx: &T,
+        name: &CStr,
+    ) -> Result<Self, Error> {
         ModuleInfoView::find_by_name(ctx, name)
     }
 
     /// Searches for a module by a symbol it exports.
-    pub fn find_by_symbol(
-        ctx: &impl ModuleSubsystem,
+    pub fn find_by_symbol<'a, T: Viewable<ContextView<'a>>>(
+        ctx: &T,
         name: &CStr,
         namespace: &CStr,
         version: Version,
@@ -1035,7 +1041,7 @@ pub struct PseudoModule(OpaqueModule<'static>);
 
 impl PseudoModule {
     /// Constructs a new `PseudoModule`.
-    pub fn new(ctx: &impl ModuleSubsystem) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
         // Safety: Is always set.
         let f = unsafe {
             ctx.view()

@@ -450,14 +450,22 @@ macro_rules! handle {
 }
 
 /// Helper trait for types that can be borrowed.
-pub trait Viewable {
-    /// View type.
-    type View<'a>: for<'v> Viewable<View<'v> = Self::View<'v>>
-    where
-        Self: 'a;
-
+pub trait Viewable<Output: View> {
     /// Borrows a view to the data.
-    fn view(&self) -> Self::View<'_>;
+    fn view(&self) -> Output;
+}
+
+/// Marker trait for all view types.
+pub trait View: Copy {}
+
+impl<T> Viewable<T> for T
+where
+    T: View,
+{
+    #[inline(always)]
+    fn view(&self) -> T {
+        *self
+    }
 }
 
 /// Used to transfer ownership to and from a ffi interface.

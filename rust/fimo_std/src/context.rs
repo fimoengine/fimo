@@ -1,23 +1,63 @@
 //! Fimo context.
 
-use std::{boxed::Box, marker::PhantomData, mem::ManuallyDrop, ops::Deref, pin::Pin};
-
 use crate::{
-    allocator::FimoAllocator,
-    bindings,
-    error::to_result,
-    ffi::{FFISharable, FFITransferable},
+    bindings, error,
+    error::{Error, FFIResult},
+    ffi::{FFISharable, VTablePtr, View, Viewable},
+    handle,
     version::Version,
 };
+use std::{
+    marker::PhantomData,
+    mem::{ManuallyDrop, MaybeUninit},
+    panic::{RefUnwindSafe, UnwindSafe},
+    pin::Pin,
+};
+
+handle!(pub handle ContextHandle: Send + Sync + UnwindSafe + RefUnwindSafe + Unpin);
+
+/// Virtual function table of a [`ContextView`].
+///
+/// Adding fields to the vtable is not a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct VTable {
+    pub header: VTableHeader,
+    pub core_v0: CoreVTableV0,
+    pub tracing_v0: crate::tracing::VTableV0,
+    pub module_v0: crate::module::VTableV0,
+    pub async_v0: crate::r#async::VTableV0,
+}
+
+/// Abi-stable header of the virtual function table of a [`ContextView`].
+#[repr(C)]
+#[derive(Debug)]
+pub struct VTableHeader {
+    pub check_version: unsafe extern "C" fn(handle: ContextHandle, version: &Version) -> FFIResult,
+}
+
+/// Core virtual function table of a [`ContextView`].
+///
+/// Adding fields to the vtable is a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct CoreVTableV0 {
+    pub acquire: unsafe extern "C" fn(handle: ContextHandle),
+    pub release: unsafe extern "C" fn(handle: ContextHandle),
+}
 
 /// View of the context of the fimo library.
 ///
-/// The context is a reference counted pointer, providing
-/// access to the different subsystems of the fimo library,
-/// like the tracing, or module subsystems. To avoid naming
-/// conflicts, each subsystem is exposed through an own trait.
-#[derive(Clone, Copy, Debug)]
-pub struct ContextView<'a>(pub(crate) bindings::FimoContext, PhantomData<&'a ()>);
+/// The context is a reference counted pointer, providing access to the different subsystems of the
+/// fimo library, like the tracing, or module subsystems. To avoid naming conflicts, each subsystem
+/// is exposed through an own trait.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ContextView<'a> {
+    pub handle: ContextHandle,
+    pub vtable: VTablePtr<VTable>,
+    pub _phantom: PhantomData<&'a ContextHandle>,
+}
 
 impl ContextView<'_> {
     /// Current `Context` version of the library.
@@ -29,115 +69,95 @@ impl ContextView<'_> {
     );
 
     pub(crate) fn data(&self) -> *mut std::ffi::c_void {
-        self.0.data
+        self.handle.as_ptr()
     }
 
     pub(crate) fn vtable(&self) -> &bindings::FimoContextVTable {
-        // Safety: Is always valid.
-        unsafe { &*self.0.vtable.cast() }
+        unsafe { &*(&raw const *self.vtable).cast() }
     }
 
     /// Checks that the version of the `Context` is compatible.
-    pub fn check_version(&self) -> crate::error::Result {
-        // Safety: Is always set.
-        let f = unsafe { self.vtable().header.check_version.unwrap_unchecked() };
-
-        // Safety: The call is safe, as we own a reference to the context.
-        unsafe { to_result(f(self.data(), &Self::CURRENT_VERSION.into_ffi())) }
+    pub fn check_version(&self) -> error::Result {
+        let f = self.vtable.header.check_version;
+        unsafe { f(self.handle, &Self::CURRENT_VERSION).into() }
     }
 
     /// Promotes the context view to a context, by increasing the reference count.
     pub fn to_context(&self) -> Context {
-        // Safety: Is always set.
-        let f = unsafe { self.vtable().core.acquire.unwrap_unchecked() };
-
-        // Safety: We own a valid reference to the context.
-        unsafe { f(self.data()) }
-        Context(ContextView(self.0, PhantomData))
+        let f = self.vtable.core_v0.acquire;
+        unsafe {
+            f(self.handle);
+        }
+        Context(ContextView {
+            handle: self.handle,
+            vtable: self.vtable,
+            _phantom: PhantomData,
+        })
     }
 }
 
-// Safety: A `FimoContext` can be sent to other threads
-unsafe impl Send for ContextView<'_> {}
-
-// Safety: A `FimoContext` is basically an Arc, so it is sync.
-unsafe impl Sync for ContextView<'_> {}
-
-impl PartialEq for ContextView<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        (self.0.data == other.0.data) && (self.0.vtable == other.0.vtable)
-    }
-}
-
-impl Eq for ContextView<'_> {}
+impl View for ContextView<'_> {}
 
 impl FFISharable<bindings::FimoContext> for ContextView<'_> {
     type BorrowedView<'a> = ContextView<'a>;
 
     fn share_to_ffi(&self) -> bindings::FimoContext {
-        self.into_ffi()
+        unsafe { std::mem::transmute::<ContextView<'_>, bindings::FimoContext>(*self) }
     }
 
     unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoContext) -> Self::BorrowedView<'a> {
-        // Safety: Is safe, as we are only a wrapper.
-        unsafe { ContextView::from_ffi(ffi) }
+        unsafe { std::mem::transmute::<bindings::FimoContext, ContextView<'_>>(ffi) }
     }
 }
 
-impl FFITransferable<bindings::FimoContext> for ContextView<'_> {
-    fn into_ffi(self) -> bindings::FimoContext {
-        self.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoContext) -> Self {
-        Self(ffi, PhantomData)
-    }
+#[link(name = "fimo_std", kind = "static")]
+unsafe extern "C" {
+    #[allow(clashing_extern_declarations)]
+    fn fimo_context_init(
+        options: *mut *const bindings::FimoBaseStructIn,
+        ctx: &mut MaybeUninit<Context>,
+    ) -> FFIResult;
 }
 
 /// Context of the fimo library.
 ///
-/// The context is a reference counted pointer, providing
-/// access to the different subsystems of the fimo library,
-/// like the tracing, or module subsystems. To avoid naming
-/// conflicts, each subsystem is exposed through an own trait.
+/// The context is a reference counted pointer, providing access to the different subsystems of the
+/// fimo library, like the tracing, or module subsystems. To avoid naming conflicts, each subsystem
+/// is exposed through an own trait.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct Context(ContextView<'static>);
 
 impl Context {
     /// Constructs a new `Context` with the default options.
-    pub fn new() -> Result<Self, crate::error::Error> {
-        // Safety: The context is either initialized, or the function returns an error.
-        let ctx = unsafe {
-            crate::error::to_result_indirect_in_place(|err, ctx| {
-                *err = bindings::fimo_context_init(core::ptr::null_mut(), ctx.as_mut_ptr());
-            })?
-        };
-        Ok(Self(ContextView(ctx, PhantomData)))
+    pub fn new() -> Result<Self, Error> {
+        let mut ctx = MaybeUninit::uninit();
+        unsafe {
+            fimo_context_init(std::ptr::null_mut(), &mut ctx).into_result()?;
+            Ok(ctx.assume_init())
+        }
     }
 }
 
 impl Clone for Context {
     fn clone(&self) -> Self {
-        self.to_context()
+        self.view().to_context()
     }
 }
 
-impl Deref for Context {
-    type Target = ContextView<'static>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl<'a> Viewable<ContextView<'a>> for Context {
+    fn view(&self) -> ContextView<'a> {
+        self.0
     }
 }
 
 impl Drop for Context {
     fn drop(&mut self) {
-        // Safety: Is always set.
-        let f = unsafe { self.vtable().core.release.unwrap_unchecked() };
-
-        // Safety: We own the reference to the context.
-        unsafe { f(self.data()) }
+        unsafe {
+            let view = self.view();
+            let f = view.vtable.core_v0.release;
+            f(view.handle);
+        }
     }
 }
 
@@ -145,30 +165,19 @@ impl FFISharable<bindings::FimoContext> for Context {
     type BorrowedView<'a> = ContextView<'a>;
 
     fn share_to_ffi(&self) -> bindings::FimoContext {
-        self.0.into_ffi()
+        self.0.share_to_ffi()
     }
 
     unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoContext) -> Self::BorrowedView<'a> {
         // Safety: `ContextView` is a wrapper around a `FimoContext`.
-        unsafe { ContextView::from_ffi(ffi) }
-    }
-}
-
-impl FFITransferable<bindings::FimoContext> for Context {
-    fn into_ffi(self) -> bindings::FimoContext {
-        let this = ManuallyDrop::new(self);
-        this.0 .0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoContext) -> Self {
-        Self(ContextView(ffi, PhantomData))
+        unsafe { ContextView::borrow_from_ffi(ffi) }
     }
 }
 
 /// A builder for a [`Context`].
 #[derive(Debug, Default)]
 pub struct ContextBuilder<const N: usize = 0> {
-    tracing: Option<Pin<Box<crate::tracing::Config<N>, FimoAllocator>>>,
+    tracing: Option<Pin<Box<crate::tracing::Config<N>>>>,
 }
 
 impl<const N: usize> ContextBuilder<N> {
@@ -180,7 +189,7 @@ impl<const N: usize> ContextBuilder<N> {
     /// Adds a config for the tracing subsystem.
     pub fn with_tracing_config<const M: usize>(
         self,
-        config: Pin<Box<crate::tracing::Config<M>, FimoAllocator>>,
+        config: Pin<Box<crate::tracing::Config<M>>>,
     ) -> ContextBuilder<M> {
         ContextBuilder {
             tracing: Some(config),
@@ -188,7 +197,7 @@ impl<const N: usize> ContextBuilder<N> {
     }
 
     /// Builds the context.
-    pub fn build(self) -> Result<Context, crate::error::Error> {
+    pub fn build(self) -> Result<Context, Error> {
         let tracing = ManuallyDrop::new(self.tracing);
 
         let mut counter = 0;
@@ -201,32 +210,11 @@ impl<const N: usize> ContextBuilder<N> {
         if counter == 0 {
             Context::new()
         } else {
-            // Safety: The context is either initialized, or the function returns an error.
-            let ctx = unsafe {
-                crate::error::to_result_indirect_in_place(|err, ctx| {
-                    *err = bindings::fimo_context_init(options.as_mut_ptr(), ctx.as_mut_ptr());
-                })?
-            };
-            Ok(Context(ContextView(ctx, PhantomData)))
-        }
-    }
-}
-
-pub(crate) mod private {
-    use super::ContextView;
-    use crate::{
-        bindings,
-        ffi::{FFISharable, FFITransferable},
-    };
-
-    pub trait SealedContext:
-        FFISharable<bindings::FimoContext> + FFITransferable<bindings::FimoContext>
-    {
-        fn view(&self) -> ContextView<'_>;
-    }
-    impl SealedContext for ContextView<'_> {
-        fn view(&self) -> ContextView<'_> {
-            *self
+            let mut ctx = MaybeUninit::uninit();
+            unsafe {
+                fimo_context_init(options.as_mut_ptr(), &mut ctx).into_result()?;
+                Ok(ctx.assume_init())
+            }
         }
     }
 }

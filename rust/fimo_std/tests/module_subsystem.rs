@@ -185,21 +185,21 @@ fn load_modules() -> Result<(), Error> {
         .build()?;
 
     let _access = ThreadAccess::new(&context);
-    let _event_loop = EventLoop::new(*context)?;
+    let _event_loop = EventLoop::new(&context)?;
 
-    let blocking = BlockingContext::new(*context)?;
+    let blocking = BlockingContext::new(&context)?;
     blocking.block_on(async move {
-        let _prune = PruneInstancesOnDrop::new(&*context);
+        let _prune = PruneInstancesOnDrop::new(&context);
 
-        let set = LoadingSet::new(&*context)?;
+        let set = LoadingSet::new(&context)?;
         set.view()
             .add_modules_from_local(|_| LoadingFilterRequest::Load)?;
         set.view().commit().await?;
 
-        let module = PseudoModule::new(&*context)?;
-        let a = ModuleInfo::find_by_name(&*context, c"a")?;
-        let b = ModuleInfo::find_by_name(&*context, c"b")?;
-        let c = ModuleInfo::find_by_name(&*context, c"c")?;
+        let module = PseudoModule::new(&context)?;
+        let a = ModuleInfo::find_by_name(&context, c"a")?;
+        let b = ModuleInfo::find_by_name(&context, c"b")?;
+        let c = ModuleInfo::find_by_name(&context, c"c")?;
         assert!(module.module_info().is_loaded());
         assert!(a.is_loaded());
         assert!(b.is_loaded());

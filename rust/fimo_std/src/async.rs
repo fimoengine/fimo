@@ -2,9 +2,9 @@
 
 use crate::{
     bindings,
-    context::{private::SealedContext, ContextView},
+    context::ContextView,
     error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
-    ffi::{FFISharable, FFITransferable},
+    ffi::{FFISharable, FFITransferable, Viewable},
 };
 use std::{
     marker::PhantomData,
@@ -12,6 +12,13 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+
+/// Virtual function table of the async subsystem.
+///
+/// Adding fields to the vtable is a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct VTableV0(bindings::FimoAsyncVTableV0);
 
 /// A handle to an event loop executing futures.
 #[derive(Debug)]
@@ -23,7 +30,8 @@ impl EventLoop {
     ///
     /// There can only be one event loop at a time, and it will keep
     /// the context alive until it completes its execution.
-    pub fn new(ctx: ContextView<'_>) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
+        let ctx = ctx.view();
         // Safety: Is always set.
         let f = unsafe { ctx.vtable().async_v0.start_event_loop.unwrap_unchecked() };
 
@@ -42,7 +50,10 @@ impl EventLoop {
     /// The intended purpose of this function is to complete all remaining tasks
     /// before cleanup, as the context can not be destroyed until the queue is empty.
     /// Upon the completion of all tasks, the function will return to the caller.
-    pub fn flush_with_current_thread(ctx: ContextView<'_>) -> Result<(), Error> {
+    pub fn flush_with_current_thread<'a, T: Viewable<ContextView<'a>>>(
+        ctx: &T,
+    ) -> Result<(), Error> {
+        let ctx = ctx.view();
         // Safety: Is always set.
         let f = unsafe { ctx.vtable().async_v0.run_to_completion.unwrap_unchecked() };
 
@@ -606,7 +617,8 @@ pub struct BlockingContext(bindings::FimoAsyncBlockingContext);
 
 impl BlockingContext {
     /// Constructs a new blocking context.
-    pub fn new(ctx: ContextView<'_>) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
+        let ctx = ctx.view();
         // Safety: Is always set.
         let f = unsafe {
             ctx.vtable()
@@ -678,7 +690,7 @@ impl FFITransferable<bindings::FimoAsyncBlockingContext> for BlockingContext {
 }
 
 /// Block the thread until the future is ready.
-pub fn block_on<F>(ctx: ContextView<'_>, fut: F) -> F::Output
+pub fn block_on<'a, T: Viewable<ContextView<'a>>, F>(ctx: &T, fut: F) -> F::Output
 where
     F: std::future::IntoFuture,
 {

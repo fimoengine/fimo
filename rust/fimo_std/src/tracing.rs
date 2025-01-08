@@ -1,10 +1,9 @@
 //! Tracing subsystem.
 use crate::{
-    allocator::FimoAllocator,
     bindings,
-    context::{private::SealedContext, Context, ContextView},
+    context::{Context, ContextView},
     error::Error,
-    ffi::{FFISharable, FFITransferable},
+    ffi::{FFISharable, FFITransferable, Viewable},
     time::Time,
 };
 use std::{
@@ -15,8 +14,15 @@ use std::{
     pin::Pin,
 };
 
+/// Virtual function table of the tracing subsystem.
+///
+/// Adding fields to the vtable is a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct VTableV0(bindings::FimoTracingVTableV0);
+
 /// Definition of the tracing subsystem.
-pub trait TracingSubsystem: SealedContext {
+pub trait TracingSubsystem {
     /// Emits a new event.
     ///
     /// The message may be cut of, if the length exceeds the internal formatting buffer size.
@@ -35,10 +41,11 @@ pub trait TracingSubsystem: SealedContext {
     fn flush(&self);
 }
 
-impl<T> TracingSubsystem for T
+impl<'a, T> TracingSubsystem for T
 where
-    T: SealedContext,
+    T: Viewable<ContextView<'a>>,
 {
+    #[inline(always)]
     fn emit_event(&self, event: &Event, arguments: Arguments<'_>) {
         unsafe {
             let f = self
@@ -57,6 +64,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn is_enabled(&self) -> bool {
         unsafe {
             let f = self
@@ -69,6 +77,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn flush(&self) {
         unsafe {
             let f = self.view().vtable().tracing_v0.flush.unwrap_unchecked();
@@ -582,6 +591,7 @@ impl CallStack {
     ///
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
+    #[inline(always)]
     pub fn new(ctx: &ContextView<'_>) -> Self {
         unsafe {
             let f = ctx.vtable().tracing_v0.create_call_stack.unwrap_unchecked();
@@ -593,9 +603,10 @@ impl CallStack {
     /// Switches the call stack of the current thread.
     ///
     /// If successful, this call stack will be used as the active call stack of the calling thread.
-    /// The old call stack is returned, enabling the caller to switch back to it afterwards. This
+    /// The old call stack is returned, enabling the caller to switch back to it afterward. This
     /// call stack must be in a suspended, but unblocked, state and not be active. The active call
     /// stack must also be in a suspended state, but may also be blocked.
+    #[inline(always)]
     pub fn switch(self) -> Self {
         let this = ManuallyDrop::new(self);
         unsafe {
@@ -609,6 +620,7 @@ impl CallStack {
     ///
     /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
     /// marked as blocked.
+    #[inline(always)]
     pub fn unblock(&mut self) {
         unsafe {
             let f = (*self.0.vtable).unblock.unwrap_unchecked();
@@ -621,6 +633,7 @@ impl CallStack {
     /// While suspended, the call stack can not be utilized for tracing messages. The call stack
     /// can optionally also be marked as blocked. In that case, the call stack must be unblocked
     /// prior to resumption.
+    #[inline(always)]
     pub fn suspend_current(ctx: &ContextView<'_>, block: bool) {
         unsafe {
             let f = ctx
@@ -636,6 +649,7 @@ impl CallStack {
     ///
     /// Once resumed, the call stack can be used to trace messages. To be successful, the current
     /// call stack must be suspended and unblocked.
+    #[inline(always)]
     pub fn resume_current(ctx: &ContextView<'_>) {
         unsafe {
             let f = ctx
@@ -673,8 +687,10 @@ impl ThreadAccess {
     /// The tracing of the subsystem is opt-in on a per-thread basis, where unregistered threads
     /// will behave as if the backend was disabled. Once registered, the calling thread gains access
     /// to the tracing subsystem and is assigned a new empty call stack.
-    pub fn new(ctx: &ContextView<'_>) -> Self {
+    #[inline(always)]
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Self {
         unsafe {
+            let ctx = ctx.view();
             let f = ctx.vtable().tracing_v0.register_thread.unwrap_unchecked();
             f(ctx.data());
             Self(ctx.to_context())
@@ -685,13 +701,13 @@ impl ThreadAccess {
 impl Drop for ThreadAccess {
     fn drop(&mut self) {
         unsafe {
-            let f = self
-                .0
+            let view = self.0.view();
+            let f = view
                 .vtable()
                 .tracing_v0
                 .unregister_thread
                 .unwrap_unchecked();
-            f(self.0.data());
+            f(view.data());
         }
     }
 }
@@ -887,7 +903,7 @@ impl OpaqueSubscriber {
                 let span_descriptor = SpanDescriptor::borrow_from_ffi(span_descriptor);
                 let message = core::slice::from_raw_parts(message.cast(), message_length);
                 let stack = &mut *stack.cast();
-                subscriber.create_span(time, span_descriptor, message, stack)
+                subscriber.create_span(time, span_descriptor, message, stack);
             }
         }
         unsafe extern "C" fn span_drop<T: Subscriber>(
@@ -995,22 +1011,19 @@ impl<const N: usize> Config<N> {
         format_buffer_len: Option<NonZeroUsize>,
         max_level: Option<Level>,
         subscribers: [OpaqueSubscriber; N],
-    ) -> Pin<Box<Self, FimoAllocator>> {
-        let mut this = Box::pin_in(
-            Self {
-                config: bindings::FimoTracingCreationConfig {
-                    type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_CONFIG,
-                    next: core::ptr::null(),
-                    format_buffer_size: format_buffer_len.map_or(0, |x| x.get()),
-                    maximum_level: max_level.unwrap_or(Level::Off).to_ffi(),
-                    subscribers: core::ptr::null_mut(),
-                    subscriber_count: 0,
-                },
-                subscribers,
-                _pinned: core::marker::PhantomPinned,
+    ) -> Pin<Box<Self>> {
+        let mut this = Box::pin(Self {
+            config: bindings::FimoTracingCreationConfig {
+                type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_CONFIG,
+                next: core::ptr::null(),
+                format_buffer_size: format_buffer_len.map_or(0, |x| x.get()),
+                maximum_level: max_level.unwrap_or(Level::Off).to_ffi(),
+                subscribers: core::ptr::null_mut(),
+                subscriber_count: 0,
             },
-            FimoAllocator,
-        );
+            subscribers,
+            _pinned: core::marker::PhantomPinned,
+        });
 
         if N > 0 {
             // Safety: We don't move the value.

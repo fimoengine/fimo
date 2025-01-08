@@ -1,12 +1,11 @@
 use core::{ffi::CStr, future::Future, marker::PhantomData};
 
-use super::{
-    Module, ModuleExport, ModuleInfo, ModuleInfoView, ModuleSubsystem, NamespaceItem, SymbolItem,
-};
+use super::{Module, ModuleExport, ModuleInfo, ModuleInfoView, NamespaceItem, SymbolItem};
 use crate::{
     bindings,
+    context::ContextView,
     error::{to_result_indirect, to_result_indirect_in_place, Error},
-    ffi::{FFISharable, FFITransferable},
+    ffi::{FFISharable, FFITransferable, Viewable},
     r#async::{EnqueuedFuture, Fallible},
     version::Version,
 };
@@ -357,7 +356,7 @@ pub struct LoadingSet(LoadingSetView<'static>);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new(ctx: &impl ModuleSubsystem) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
         unsafe {
             let f = ctx.view().vtable().module_v0.set_new.unwrap_unchecked();
             let set = to_result_indirect_in_place(|error, set| {

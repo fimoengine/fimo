@@ -4,7 +4,6 @@ use std::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
     bindings,
-    context::private::SealedContext,
     error::{to_result_indirect_in_place, Error},
 };
 
@@ -14,15 +13,22 @@ mod module_info;
 mod parameter;
 mod symbol;
 
-use crate::{context::ContextView, error::to_result_indirect};
+use crate::{context::ContextView, error::to_result_indirect, ffi::Viewable};
 pub use loading_set::*;
 pub use module_export::*;
 pub use module_info::*;
 pub use parameter::*;
 pub use symbol::*;
 
+/// Virtual function table of the module subsystem.
+///
+/// Adding fields to the vtable is a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct VTableV0(bindings::FimoModuleVTableV0);
+
 /// Definition of the module subsystem.
-pub trait ModuleSubsystem: SealedContext {
+pub trait ModuleSubsystem {
     /// Checks for the presence of a namespace in the module backend.
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
@@ -34,9 +40,9 @@ pub trait ModuleSubsystem: SealedContext {
     fn prune_instances(&self) -> Result<(), Error>;
 }
 
-impl<T> ModuleSubsystem for T
+impl<'a, T> ModuleSubsystem for T
 where
-    T: SealedContext,
+    T: Viewable<ContextView<'a>>,
 {
     fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error> {
         // Safety: Is always set.
@@ -78,9 +84,9 @@ where
 #[repr(transparent)]
 pub struct PruneInstancesOnDrop<'a>(ContextView<'a>);
 
-impl PruneInstancesOnDrop<'_> {
+impl<'a> PruneInstancesOnDrop<'a> {
     /// Constructs a new instance of the dropper.
-    pub fn new(ctx: &impl ModuleSubsystem) -> PruneInstancesOnDrop<'_> {
+    pub fn new<T: Viewable<ContextView<'a>>>(ctx: &T) -> Self {
         let view = ctx.view();
         PruneInstancesOnDrop(view)
     }
