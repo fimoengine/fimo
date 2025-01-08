@@ -256,7 +256,19 @@ impl<T: Send + Sync> Hash for VTablePtr<T> {
 #[repr(transparent)]
 pub struct OpaqueHandle<T: ?Sized = *mut ()>(NonNull<std::ffi::c_void>, PhantomData<T>);
 
-impl<T: ?Sized> OpaqueHandle<T> {
+const _: () = const {
+    if size_of::<OpaqueHandle<()>>() != size_of::<*mut ()>() {
+        panic!("OpaqueHandle must have the size of `*mut ()`")
+    }
+    if align_of::<OpaqueHandle<()>>() != align_of::<*mut ()>() {
+        panic!("OpaqueHandle must have the alignment of `*mut ()`")
+    }
+    if size_of::<Option<OpaqueHandle<()>>>() != size_of::<*mut ()>() {
+        panic!("Option<OpaqueHandle> must have the size of `*mut ()`")
+    }
+};
+
+impl<T: ?Sized> OpaqueHandle<T> {    
     /// Creates a new `OpaqueHandle` if `ptr` is non-null.
     ///
     /// # Examples
@@ -446,6 +458,18 @@ macro_rules! handle {
                 core::fmt::Pointer::fmt(&self.0, f)
             }
         }
+        
+        const _: () = const {
+            if size_of::<$ident>() != size_of::<*mut ()>() {
+                panic!(concat!(stringify!($ident), " must have the size of `*mut ()`"))
+            }
+            if align_of::<$ident>() != align_of::<*mut ()>() {
+                panic!(concat!(stringify!($ident), " must have the alignment of `*mut ()`"))
+            }
+            if size_of::<core::option::Option<$ident>>() != size_of::<*mut ()>() {
+                panic!(concat!("Option<", stringify!($ident), "> must have the size of `*mut ()`"))
+            }
+        };
     };
 }
 
