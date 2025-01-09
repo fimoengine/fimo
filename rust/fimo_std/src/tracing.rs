@@ -3,7 +3,7 @@ use crate::{
     bindings,
     context::{Context, ContextView},
     error::AnyError,
-    ffi::{FFISharable, FFITransferable, Viewable},
+    ffi::{FFISharable, Viewable},
     time::Time,
 };
 use std::{
@@ -819,7 +819,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let cs = subscriber.create_call_stack(time);
                 Box::into_raw(cs).cast()
             }
@@ -843,7 +843,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let stack = Box::from_raw(stack.cast());
                 subscriber.destroy_call_stack(time, stack);
             }
@@ -856,7 +856,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let stack = &mut *stack.cast();
                 subscriber.unblock_call_stack(time, stack);
             }
@@ -870,7 +870,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let stack = &mut *stack.cast();
                 subscriber.suspend_call_stack(time, stack, block);
             }
@@ -883,7 +883,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let stack = &mut *stack.cast();
                 subscriber.resume_call_stack(time, stack);
             }
@@ -899,7 +899,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let span_descriptor = SpanDescriptor::borrow_from_ffi(span_descriptor);
                 let message = core::slice::from_raw_parts(message.cast(), message_length);
                 let stack = &mut *stack.cast();
@@ -925,7 +925,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let stack = &mut *stack.cast();
                 subscriber.destroy_span(time, stack);
             }
@@ -941,7 +941,7 @@ impl OpaqueSubscriber {
             // Safety:
             unsafe {
                 let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = Time::from_ffi(*time);
+                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
                 let stack = &mut *stack.cast();
                 let event = Event::borrow_from_ffi(event);
                 let message = core::slice::from_raw_parts(message.cast(), message_length);

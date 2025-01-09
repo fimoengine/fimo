@@ -94,12 +94,11 @@ pub const PathBuffer = struct {
     ///
     /// On Windows:
     ///
-    /// - if `path` has a root but no prefix (e.g., `\windows`), it replaces
-    ///   everything except for the prefix (if any) of `buf`.
+    /// - if `path` has a root but no prefix (e.g., `\windows`), it replaces everything except for
+    ///   the prefix (if any) of `buf`.
     /// - if `path` has a prefix but no root, it replaces `buf`.
-    /// - if `buf` has a verbatim prefix (e.g. `\\?\C:\windows`) and `path`
-    ///   is not empty, the new path is normalized: all references to `.`
-    ///   and `..` are removed`.
+    /// - if `buf` has a verbatim prefix (e.g. `\\?\C:\windows`) and `path` is not empty, the new
+    ///   path is normalized: all references to `.` and `..` are removed`.
     pub fn pushPath(self: *Self, path: Path) Allocator.Error!void {
         return self.buffer.pushPath(self.allocator, path);
     }
@@ -133,8 +132,7 @@ pub const PathBuffer = struct {
 
     /// Truncates the path buffer to its parent.
     ///
-    /// Returns `false` and does nothing if there is no parent.
-    /// Otherwise, returns `true`.
+    /// Returns `false` and does nothing if there is no parent. Otherwise, returns `true`.
     pub fn pop(self: *Self) bool {
         return self.buffer.pop();
     }
@@ -225,6 +223,7 @@ pub const PathBufferUnmanaged = struct {
     }
 
     /// Convert the buffer into an analogous memory-managed one.
+    ///
     /// The returned buffer has ownership of the underlying memory.
     pub fn toManaged(self: Self, allocator: Allocator) PathBuffer {
         return PathBuffer{ .buffer = self, .allocator = allocator };
@@ -236,12 +235,11 @@ pub const PathBufferUnmanaged = struct {
     ///
     /// On Windows:
     ///
-    /// - if `path` has a root but no prefix (e.g., `\windows`), it replaces
-    ///   everything except for the prefix (if any) of `buf`.
+    /// - if `path` has a root but no prefix (e.g., `\windows`), it replaces everything except for
+    ///   the prefix (if any) of `buf`.
     /// - if `path` has a prefix but no root, it replaces `buf`.
-    /// - if `buf` has a verbatim prefix (e.g. `\\?\C:\windows`) and `path`
-    ///   is not empty, the new path is normalized: all references to `.`
-    ///   and `..` are removed`.
+    /// - if `buf` has a verbatim prefix (e.g. `\\?\C:\windows`) and `path` is not empty, the new
+    ///   path is normalized: all references to `.` and `..` are removed`.
     pub fn pushPath(self: *Self, allocator: Allocator, path: Path) Allocator.Error!void {
         var need_sep = if (self.buffer.getLastOrNull()) |ch|
             !isSeparator(ch)
@@ -319,8 +317,7 @@ pub const PathBufferUnmanaged = struct {
 
     /// Truncates the path buffer to its parent.
     ///
-    /// Returns `false` and does nothing if there is no parent.
-    /// Otherwise, returns `true`.
+    /// Returns `false` and does nothing if there is no parent. Otherwise, returns `true`.
     pub fn pop(self: *Self) bool {
         if (self.asPath().parent()) |parent| {
             self.buffer.shrinkRetainingCapacity(parent.raw.len);
@@ -401,8 +398,8 @@ pub const OwnedPath = struct {
 
     /// Constructs a new owned path from an os path.
     ///
-    /// On Windows the path will re-encode the os path string from UTF-16
-    /// to UTF-8. No other conversions will be performed.
+    /// On Windows the path will re-encode the os path string from UTF-16 to UTF-8. No other
+    /// conversions will be performed.
     pub fn initOsPath(
         allocator: Allocator,
         path: OsPath,
@@ -483,8 +480,8 @@ pub const OwnedPathUnmanaged = struct {
 
     /// Constructs a new owned path from an os path.
     ///
-    /// On Windows the path will re-encode the os path string from UTF-16
-    /// to UTF-8. No other conversions will be performed.
+    /// On Windows the path will re-encode the os path string from UTF-16 to UTF-8. No other
+    /// conversions will be performed.
     pub fn initOsPath(
         allocator: Allocator,
         path: OsPath,
@@ -509,6 +506,7 @@ pub const OwnedPathUnmanaged = struct {
     }
 
     /// Convert the path into an analogous memory-managed one.
+    ///
     /// The returned path has ownership of the underlying memory.
     pub fn toManaged(self: Self, allocator: Allocator) OwnedPath {
         return OwnedPath{ .path = self, .allocator = allocator };
@@ -645,6 +643,7 @@ pub const OwnedOsPathUnmanaged = struct {
     }
 
     /// Convert the path into an analogous memory-managed one.
+    ///
     /// The returned path has ownership of the underlying memory.
     pub fn toManaged(self: Self, allocator: Allocator) OwnedOsPath {
         return OwnedOsPath{ .path = self, .allocator = allocator };

@@ -100,7 +100,7 @@ impl ModuleInfoView<'_> {
                     ctx.view().data(),
                     name.as_ptr(),
                     namespace.as_ptr(),
-                    version.into_ffi(),
+                    std::mem::transmute::<Version, bindings::FimoVersion>(version),
                     module.as_mut_ptr(),
                 );
             })
@@ -655,7 +655,7 @@ unsafe impl Module for OpaqueModule<'_> {
                     self.share_to_ffi(),
                     name.as_ptr(),
                     namespace.as_ptr(),
-                    version.into_ffi(),
+                    std::mem::transmute::<Version, bindings::FimoVersion>(version),
                     fut.as_mut_ptr(),
                 );
             })?;

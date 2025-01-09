@@ -976,7 +976,7 @@ pub mod c_ffi {
     };
 
     pub const fn extract_version(version: Version) -> bindings::FimoVersion {
-        version.0
+        unsafe { std::mem::transmute::<Version, bindings::FimoVersion>(version) }
     }
 
     pub unsafe fn construct_dynamic_symbol<T, S>(

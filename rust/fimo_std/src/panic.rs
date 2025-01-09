@@ -1,6 +1,6 @@
 //! Panic utilities.
 
-use crate::{bindings, error::AnyError, ffi::FFISharable};
+use crate::error::AnyError;
 use std::{cell::Cell, panic::AssertUnwindSafe};
 
 /// Logs an error and aborts the process.
@@ -41,7 +41,7 @@ pub fn catch_unwind<R>(f: impl FnOnce() -> R) -> Result<R, AnyError<dyn Send>> {
 }
 
 #[thread_local]
-static CURRENT_CONTEXT: Cell<Option<bindings::FimoContext>> = Cell::new(None);
+static CURRENT_CONTEXT: Cell<Option<crate::context::ContextView<'static>>> = Cell::new(None);
 
 /// Replaces the current panic hook with a function that forwards the error to the tracing
 /// subsystem.
@@ -61,8 +61,7 @@ pub fn set_panic_hook() {
             return;
         }
 
-        // Safety: We controll `CURRENT_CONTEXT` and ensure that it is valid.
-        let context = unsafe { crate::context::Context::borrow_from_ffi(current.unwrap()) };
+        let context = current.unwrap();
 
         // We also utilize the fallback hook in case the tracing subsystem is disabled, as we would
         // not emit any event otherwise.
@@ -106,9 +105,16 @@ pub fn with_panic_context<'ctx, R>(
     context: crate::context::ContextView<'ctx>,
     f: impl FnOnce(&crate::context::ContextView<'ctx>) -> R,
 ) -> R {
+    // Shortly extend the lifetime of the context, such that we can store it globally.
+    let context = unsafe {
+        std::mem::transmute::<crate::context::ContextView<'ctx>, crate::context::ContextView<'static>>(
+            context,
+        )
+    };
+
     // Call the function in the new context.
-    let old = CURRENT_CONTEXT.replace(Some(context.share_to_ffi()));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&context)));
+    let old = CURRENT_CONTEXT.replace(Some(context));
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| f(&context)));
     CURRENT_CONTEXT.set(old);
 
     // Propagate any possible panic.

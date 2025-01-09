@@ -1,15 +1,42 @@
 //! Time utilities.
-use crate::{
-    bindings,
-    error::{AnyError, to_result_indirect_in_place},
-    ffi::{FFISharable, FFITransferable},
-};
+use crate::error::{AnyError, AnyResult};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
+use std::mem::MaybeUninit;
+
+#[allow(clashing_extern_declarations)]
+unsafe extern "C" {
+    fn fimo_duration_from_seconds(secs: u64) -> Duration;
+    fn fimo_duration_from_millis(millis: u64) -> Duration;
+    fn fimo_duration_from_nanos(nanos: u64) -> Duration;
+    fn fimo_duration_as_secs(duration: &Duration) -> u64;
+    fn fimo_duration_subsec_millis(duration: &Duration) -> u32;
+    fn fimo_duration_subsec_micros(duration: &Duration) -> u32;
+    fn fimo_duration_subsec_nanos(duration: &Duration) -> u32;
+    fn fimo_duration_as_millis(duration: &Duration, high: Option<&mut MaybeUninit<u32>>) -> u64;
+    fn fimo_duration_as_micros(duration: &Duration, high: Option<&mut MaybeUninit<u32>>) -> u64;
+    fn fimo_duration_as_nanos(duration: &Duration, high: Option<&mut MaybeUninit<u32>>) -> u64;
+    fn fimo_duration_add(
+        lhs: &Duration,
+        rhs: &Duration,
+        out: &mut MaybeUninit<Duration>,
+    ) -> AnyResult;
+    fn fimo_duration_saturating_add(lhs: &Duration, rhs: &Duration) -> Duration;
+    fn fimo_duration_sub(
+        lhs: &Duration,
+        rhs: &Duration,
+        out: &mut MaybeUninit<Duration>,
+    ) -> AnyResult;
+    fn fimo_duration_saturating_sub(lhs: &Duration, rhs: &Duration) -> Duration;
+}
 
 /// A span between to points in time.
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Duration(bindings::FimoDuration);
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Duration {
+    pub secs: u64,
+    // Must be in [0, 999999999]
+    pub nanos: u32,
+}
 
 impl Duration {
     /// The maximum duration.
@@ -42,119 +69,121 @@ impl Duration {
             panic!("overflow in Duration::new")
         }
 
-        Self(bindings::FimoDuration { secs, nanos })
+        Self { secs, nanos }
     }
 
     /// Constructs a `Duration` from seconds.
     pub fn from_seconds(seconds: u64) -> Self {
-        // Safety: FFI call is safe.
-        unsafe { Self(bindings::fimo_duration_from_seconds(seconds)) }
+        unsafe { fimo_duration_from_seconds(seconds) }
     }
 
     /// Constructs a `Duration` from milliseconds.
     pub fn from_millis(milliseconds: u64) -> Self {
-        // Safety: FFI call is safe.
-        unsafe { Self(bindings::fimo_duration_from_millis(milliseconds)) }
+        unsafe { fimo_duration_from_millis(milliseconds) }
     }
 
     /// Constructs a `Duration` from nanoseconds.
     pub fn from_nanos(nanoseconds: u64) -> Self {
-        // Safety: FFI call is safe.
-        unsafe { Self(bindings::fimo_duration_from_nanos(nanoseconds)) }
+        unsafe { fimo_duration_from_nanos(nanoseconds) }
     }
 
     /// Returns the number of whole seconds in the `Duration`.
     pub fn as_secs(&self) -> u64 {
-        // Safety: FFI call is safe.
-        unsafe { bindings::fimo_duration_as_secs(&self.0) }
+        unsafe { fimo_duration_as_secs(self) }
     }
 
     /// Returns the fractional part in whole milliseconds.
     pub fn subsec_millis(&self) -> u32 {
-        // Safety: FFI call is safe.
-        unsafe { bindings::fimo_duration_subsec_millis(&self.0) }
+        unsafe { fimo_duration_subsec_millis(self) }
     }
 
     /// Returns the fractional part in whole microseconds.
     pub fn subsec_micros(&self) -> u32 {
-        // Safety: FFI call is safe.
-        unsafe { bindings::fimo_duration_subsec_micros(&self.0) }
+        unsafe { fimo_duration_subsec_micros(self) }
     }
 
     /// Returns the fractional part in whole nanoseconds.
     pub fn subsec_nanos(&self) -> u32 {
-        // Safety: FFI call is safe.
-        unsafe { bindings::fimo_duration_subsec_nanos(&self.0) }
+        unsafe { fimo_duration_subsec_nanos(self) }
     }
 
     /// Returns the whole milliseconds in a duration.
     pub fn as_millis(&self) -> u128 {
-        let mut high = 0;
-        // Safety: FFI call is safe.
-        let low = unsafe { bindings::fimo_duration_as_millis(&self.0, &mut high) };
-        ((high as u128) << 64) | (low as u128)
+        let mut high = MaybeUninit::uninit();
+        unsafe {
+            let low = fimo_duration_as_millis(self, Some(&mut high));
+            let high = high.assume_init();
+            ((high as u128) << 64) | (low as u128)
+        }
     }
 
     /// Returns the whole microseconds in a duration.
     pub fn as_micros(&self) -> u128 {
-        let mut high = 0;
-        // Safety: FFI call is safe.
-        let low = unsafe { bindings::fimo_duration_as_micros(&self.0, &mut high) };
-        ((high as u128) << 64) | (low as u128)
+        let mut high = MaybeUninit::uninit();
+        unsafe {
+            let low = fimo_duration_as_micros(self, Some(&mut high));
+            let high = high.assume_init();
+            ((high as u128) << 64) | (low as u128)
+        }
     }
 
     /// Returns the whole nanoseconds in a duration.
     pub fn as_nanos(&self) -> u128 {
-        let mut high = 0;
-        // Safety: FFI call is safe.
-        let low = unsafe { bindings::fimo_duration_as_nanos(&self.0, &mut high) };
-        ((high as u128) << 64) | (low as u128)
+        let mut high = MaybeUninit::uninit();
+        unsafe {
+            let low = fimo_duration_as_nanos(self, Some(&mut high));
+            let high = high.assume_init();
+            ((high as u128) << 64) | (low as u128)
+        }
     }
 
+    /// Returns true if this `Duration` spans no time.
+    pub const fn is_zero(&self) -> bool {
+        self.secs == 0 && self.nanos == 0
+    }
+
+    /// Offsets the duration point forwards.
+    ///
     /// Returns `Some(d)` where `d` is the duration `self + duration` if `d` can be represented as
     /// `Duration`, `None` otherwise.
     pub fn checked_add(&self, duration: Self) -> Option<Self> {
-        // Safety: FFI call is safe.
-        let res = unsafe {
-            to_result_indirect_in_place(|error, time| {
-                *error = bindings::fimo_duration_add(&self.0, &duration.0, time.as_mut_ptr());
-            })
-        };
-        match res {
-            Ok(x) => Some(Self(x)),
-            Err(_) => None,
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_duration_add(self, &duration, &mut out)
+                .into_result()
+                .map(|_| out.assume_init())
+                .ok()
         }
     }
 
+    /// Offsets the duration point forwards.
+    ///
     /// Returns `d` where `d` is the duration `self + duration` if `d` can be represented as
     /// `Duration`, `MAX` otherwise.
     pub fn saturating_add(&self, duration: Self) -> Self {
-        // Safety: FFI call is safe.
-        let res = unsafe { bindings::fimo_duration_saturating_add(&self.0, &duration.0) };
-        Self(res)
+        unsafe { fimo_duration_saturating_add(self, &duration) }
     }
 
+    /// Offsets the duration point backwards.
+    ///
     /// Returns `Some(d)` where `d` is the duration `self - duration` if `d` can be represented as
     /// `Duration`, `None` otherwise.
     pub fn checked_sub(&self, duration: Self) -> Option<Self> {
-        // Safety: FFI call is safe.
-        let res = unsafe {
-            to_result_indirect_in_place(|error, time| {
-                *error = bindings::fimo_duration_sub(&self.0, &duration.0, time.as_mut_ptr());
-            })
-        };
-        match res {
-            Ok(x) => Some(Self(x)),
-            Err(_) => None,
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_duration_sub(self, &duration, &mut out)
+                .into_result()
+                .map(|_| out.assume_init())
+                .ok()
         }
     }
 
+    /// Offsets the duration point backwards.
+    ///
     /// Returns `d` where `d` is the duration `self - duration` if `d` can be represented as
     /// `Duration`, `ZERO` otherwise.
     pub fn saturating_sub(&self, duration: Self) -> Self {
-        // Safety: FFI call is safe.
-        let res = unsafe { bindings::fimo_duration_saturating_sub(&self.0, &duration.0) };
-        Self(res)
+        unsafe { fimo_duration_saturating_sub(self, &duration) }
     }
 }
 
@@ -186,120 +215,117 @@ impl SubAssign for Duration {
     }
 }
 
-impl FFISharable<bindings::FimoDuration> for Duration {
-    type BorrowedView<'a> = Duration;
-
-    fn share_to_ffi(&self) -> bindings::FimoDuration {
-        self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoDuration) -> Self::BorrowedView<'a> {
-        Self(ffi)
-    }
-}
-
-impl FFITransferable<bindings::FimoDuration> for Duration {
-    fn into_ffi(self) -> bindings::FimoDuration {
-        self.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoDuration) -> Self {
-        Self(ffi)
-    }
+#[allow(clashing_extern_declarations)]
+unsafe extern "C" {
+    fn fimo_time_now() -> Time;
+    fn fimo_time_elapsed(time: &Time, out: &mut MaybeUninit<Duration>) -> AnyResult;
+    fn fimo_time_duration_since(
+        time: &Time,
+        earlier: &Time,
+        out: &mut MaybeUninit<Duration>,
+    ) -> AnyResult;
+    fn fimo_time_add(time: &Time, duration: &Duration, out: &mut MaybeUninit<Time>) -> AnyResult;
+    fn fimo_time_saturating_add(time: &Time, duration: &Duration) -> Time;
+    fn fimo_time_sub(time: &Time, duration: &Duration, out: &mut MaybeUninit<Time>) -> AnyResult;
+    fn fimo_time_saturating_sub(time: &Time, duration: &Duration) -> Time;
 }
 
 /// A point in time since the unix epoch.
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Time(bindings::FimoTime);
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Time {
+    pub secs: u64,
+    // Must be in [0, 999999999]
+    pub nanos: u32,
+}
 
 impl Time {
     /// The unix epoch.
-    pub const UNIX_EPOCH: Self = Self(bindings::FimoTime { secs: 0, nanos: 0 });
+    pub const UNIX_EPOCH: Self = Self { secs: 0, nanos: 0 };
 
     /// Maximum time point.
-    pub const MAX_TIME_POINT: Self = Self(bindings::FimoTime {
+    pub const MAX_TIME_POINT: Self = Self {
         secs: u64::MAX,
         nanos: 999999999,
-    });
+    };
 
     /// Returns the current time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_std::time::Time;
+    ///
+    /// let time = Time::now();
+    /// ```
     pub fn now() -> Self {
-        // Safety: FFI call is safe.
-        unsafe { Self(bindings::fimo_time_now()) }
+        unsafe { fimo_time_now() }
     }
 
     /// Returns the duration elapsed since the time.
     ///
     /// May result in an error, if a time shift caused `self` to be in the future.
     pub fn elapsed(&self) -> Result<Duration, AnyError> {
-        // Safety: FFI call is safe.
-        let duration = unsafe {
-            to_result_indirect_in_place(|error, duration| {
-                *error = bindings::fimo_time_elapsed(&self.0, duration.as_mut_ptr());
-            })?
-        };
-        Ok(Duration(duration))
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_time_elapsed(self, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
     }
 
     /// Returns the difference between two time points.
     ///
     /// Returns an error if `self` is after `other`.
     pub fn duration_since(&self, other: &Self) -> Result<Duration, AnyError> {
-        // Safety: FFI call is safe.
-        let duration = unsafe {
-            to_result_indirect_in_place(|error, duration| {
-                *error =
-                    bindings::fimo_time_duration_since(&self.0, &other.0, duration.as_mut_ptr());
-            })?
-        };
-        Ok(Duration(duration))
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_time_duration_since(self, other, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
     }
 
+    /// Offsets the time point forwards.
+    ///
     /// Returns `Some(t)` where t is the time `self + duration` if `t` can be represented as `Time`,
     /// `None` otherwise.
     pub fn checked_add(&self, duration: Duration) -> Option<Self> {
-        // Safety: FFI call is safe.
-        let time = unsafe {
-            to_result_indirect_in_place(|error, time| {
-                *error = bindings::fimo_time_add(&self.0, &duration.0, time.as_mut_ptr());
-            })
-        };
-        match time {
-            Ok(x) => Some(Self(x)),
-            Err(_) => None,
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_time_add(self, &duration, &mut out)
+                .into_result()
+                .map(|_| out.assume_init())
+                .ok()
         }
     }
 
+    /// Offsets the time point forwards.
+    ///
     /// Returns `t` where t is the time `self + duration` if `t` can be represented as `Time`,
     /// `MAX_TIME_POINT` otherwise.
     pub fn saturating_add(&self, duration: Duration) -> Self {
-        // Safety: FFI call is safe.
-        let time = unsafe { bindings::fimo_time_saturating_add(&self.0, &duration.0) };
-        Self(time)
+        unsafe { fimo_time_saturating_add(self, &duration) }
     }
 
+    /// Offsets the time point backwards.
+    ///
     /// Returns `Some(t)` where t is the time `self - duration` if `t` can be represented as `Time`,
     /// `None` otherwise.
     pub fn checked_sub(&self, duration: Duration) -> Option<Self> {
-        // Safety: FFI call is safe.
-        let time = unsafe {
-            to_result_indirect_in_place(|error, time| {
-                *error = bindings::fimo_time_sub(&self.0, &duration.0, time.as_mut_ptr());
-            })
-        };
-        match time {
-            Ok(x) => Some(Self(x)),
-            Err(_) => None,
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_time_sub(self, &duration, &mut out)
+                .into_result()
+                .map(|_| out.assume_init())
+                .ok()
         }
     }
 
+    /// Offsets the time point backwards.
+    ///
     /// Returns `t` where t is the time `self - duration` if `t` can be represented as `Time`,
     /// `UNIX_EPOCH` otherwise.
     pub fn saturating_sub(&self, duration: Duration) -> Self {
-        // Safety: FFI call is safe.
-        let time = unsafe { bindings::fimo_time_saturating_sub(&self.0, &duration.0) };
-        Self(time)
+        unsafe { fimo_time_saturating_sub(self, &duration) }
     }
 }
 
@@ -328,27 +354,5 @@ impl Sub<Duration> for Time {
 impl SubAssign<Duration> for Time {
     fn sub_assign(&mut self, rhs: Duration) {
         *self = self.checked_sub(rhs).unwrap();
-    }
-}
-
-impl FFISharable<bindings::FimoTime> for Time {
-    type BorrowedView<'a> = Time;
-
-    fn share_to_ffi(&self) -> bindings::FimoTime {
-        self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoTime) -> Self::BorrowedView<'a> {
-        Self(ffi)
-    }
-}
-
-impl FFITransferable<bindings::FimoTime> for Time {
-    fn into_ffi(self) -> bindings::FimoTime {
-        self.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoTime) -> Self {
-        Self(ffi)
     }
 }

@@ -213,7 +213,7 @@ impl SymbolImport {
     /// Fetches the version of the symbol.
     pub fn version(&self) -> Version {
         // Safety: Is safe.
-        unsafe { Version::from_ffi(self.0.version) }
+        unsafe { std::mem::transmute::<bindings::FimoVersion, Version>(self.0.version) }
     }
 
     /// Fetches the name of the symbol.
@@ -280,7 +280,7 @@ impl SymbolExport {
     /// Fetches the version of the symbol.
     pub fn version(&self) -> Version {
         // Safety: Is safe.
-        unsafe { Version::from_ffi(self.0.version) }
+        unsafe { std::mem::transmute::<bindings::FimoVersion, Version>(self.0.version) }
     }
 
     /// Fetches the name of the symbol.
@@ -364,7 +364,7 @@ impl DynamicSymbolExport {
     /// Fetches the version of the symbol.
     pub fn version(&self) -> Version {
         // Safety: Is safe.
-        unsafe { Version::from_ffi(self.0.version) }
+        unsafe { std::mem::transmute::<bindings::FimoVersion, Version>(self.0.version) }
     }
 
     /// Fetches the name of the symbol.
@@ -499,7 +499,7 @@ pub struct ModuleExport<'a>(&'a bindings::FimoModuleExport);
 impl ModuleExport<'_> {
     /// Fetches the version of the context compiled against.
     pub fn version(&self) -> Version {
-        Version(self.0.version)
+        unsafe { std::mem::transmute::<bindings::FimoVersion, Version>(self.0.version) }
     }
 
     /// Fetches the name of the module declaration.
@@ -683,7 +683,7 @@ impl FFISharable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
                 (*ffi).type_,
                 bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT
             );
-            debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.0.major);
+            debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.major);
             ModuleExport(&*ffi)
         }
     }
@@ -701,7 +701,7 @@ impl FFITransferable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
                 (*ffi).type_,
                 bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT
             );
-            debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.0.major);
+            debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.major);
             Self(&*ffi)
         }
     }

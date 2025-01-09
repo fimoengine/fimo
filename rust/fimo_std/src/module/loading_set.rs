@@ -69,7 +69,7 @@ impl LoadingSetView<'_> {
                 self.data(),
                 name.as_ptr(),
                 namespace.as_ptr(),
-                version.into_ffi(),
+                std::mem::transmute::<Version, bindings::FimoVersion>(version),
             )
         }
     }

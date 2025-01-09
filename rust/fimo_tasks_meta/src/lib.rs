@@ -3,10 +3,7 @@
 
 use std::{marker::PhantomData, time::Duration};
 
-use fimo_std::{
-    error::{AnyError, to_result, to_result_indirect_in_place},
-    ffi::FFITransferable,
-};
+use fimo_std::error::{AnyError, to_result, to_result_indirect_in_place};
 
 pub mod bindings;
 pub mod symbols;
@@ -355,9 +352,11 @@ impl Context {
 
         // Safety: FFI call is safe
         unsafe {
-            to_result((self.vtable().v0.sleep.unwrap_unchecked())(
+            to_result(self.vtable().v0.sleep.unwrap_unchecked()(
                 self.data(),
-                duration.into_ffi(),
+                std::mem::transmute::<fimo_std::time::Duration, fimo_std::bindings::FimoDuration>(
+                    duration,
+                ),
             ))
         }
     }

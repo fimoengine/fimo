@@ -57,9 +57,9 @@ pub fn orderLong(lhs: Version, rhs: Version) std.math.Order {
 
 /// Checks for the compatibility of two versions.
 ///
-/// If `got` is compatible with `required` it indicated that an object which is
-/// versioned with the version `got` can be used instead of an object implementing
-/// the same interface carrying the version `required`.
+/// If `got` is compatible with `required` it indicated that an object which is versioned with the
+/// version `got` can be used instead of an object implementing the same interface carrying the
+/// version `required`.
 pub fn isCompatibleWith(got: Version, required: Version) bool {
     if (got.major != required.major) return false;
     if (got.major == 0 and got.minor != required.minor) return false;
