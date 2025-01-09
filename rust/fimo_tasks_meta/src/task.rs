@@ -1,4 +1,4 @@
-use crate::{bindings, Context};
+use crate::{Context, bindings};
 use std::{
     alloc::Allocator,
     any::Any,
@@ -7,8 +7,8 @@ use std::{
     marker::PhantomData,
     mem::MaybeUninit,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 

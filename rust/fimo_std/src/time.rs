@@ -1,7 +1,7 @@
 //! Time utilities.
 use crate::{
     bindings,
-    error::{to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result_indirect_in_place},
     ffi::{FFISharable, FFITransferable},
 };
 use core::ops::{Add, AddAssign, Sub, SubAssign};

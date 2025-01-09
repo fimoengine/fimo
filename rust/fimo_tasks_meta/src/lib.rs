@@ -4,7 +4,7 @@
 use std::{marker::PhantomData, time::Duration};
 
 use fimo_std::{
-    error::{to_result, to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result, to_result_indirect_in_place},
     ffi::FFITransferable,
 };
 
@@ -395,9 +395,9 @@ impl FFISharable<bindings::FiTasksContext> for Context {
 #[doc(hidden)]
 pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &Context)) {
     use fimo_std::{
+        r#async::{BlockingContext, EventLoop},
         context::ContextBuilder,
         module::{LoadingSet, Module, NamespaceItem},
-        r#async::{BlockingContext, EventLoop},
         tracing::default_subscriber,
     };
     use std::path::PathBuf;

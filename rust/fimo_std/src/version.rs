@@ -4,22 +4,16 @@ use core::fmt::Display;
 
 use crate::{
     bindings,
-    error::{to_result, to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result, to_result_indirect_in_place},
     ffi::FFITransferable,
 };
 
 /// Constructs a new [`Version`].
 #[macro_export]
 macro_rules! version {
-    ($major:literal, $minor:literal, $patch:literal $(,)?) => {{
-        $crate::version::Version::new($major, $minor, $patch)
-    }};
-    ($major:literal, $minor:literal, $patch:literal, $build:literal$(,)?) => {{
-        $crate::version::Version::new_long($major, $minor, $patch, $build)
-    }};
-    ($version:literal) => {{
-        $crate::version::Version::try_from($version)
-    }};
+    ($major:literal, $minor:literal, $patch:literal $(,)?) => {{ $crate::version::Version::new($major, $minor, $patch) }};
+    ($major:literal, $minor:literal, $patch:literal, $build:literal$(,)?) => {{ $crate::version::Version::new_long($major, $minor, $patch, $build) }};
+    ($version:literal) => {{ $crate::version::Version::try_from($version) }};
 }
 
 /// A version specifier.

@@ -1,11 +1,10 @@
 use crate::{
-    bindings,
+    Context, TaskHandle, TaskStatus, WorkerGroup, WorkerId, bindings,
     task::{RawTask, TaskHandleInner},
-    Context, TaskHandle, TaskStatus, WorkerGroup, WorkerId,
 };
 use fimo_std::{
     allocator::FimoAllocator,
-    error::{to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result_indirect_in_place},
     ffi::FFITransferable,
 };
 use std::{
@@ -16,8 +15,8 @@ use std::{
     mem::{ManuallyDrop, MaybeUninit},
     num::NonZeroUsize,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
@@ -557,11 +556,7 @@ where
                     value_ref.write(result);
                 }
 
-                if success {
-                    Ok(())
-                } else {
-                    Err(())
-                }
+                if success { Ok(()) } else { Err(()) }
             }
         };
 

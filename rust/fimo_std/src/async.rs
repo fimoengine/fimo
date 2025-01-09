@@ -3,7 +3,7 @@
 use crate::{
     bindings,
     context::ContextView,
-    error::{to_result_indirect, to_result_indirect_in_place, AnyError, AnyResult},
+    error::{AnyError, AnyResult, to_result_indirect, to_result_indirect_in_place},
     ffi::{FFISharable, FFITransferable, Viewable},
 };
 use std::{
@@ -177,10 +177,10 @@ impl Waker {
         let this = ManuallyDrop::new(self);
 
         // Safety: The VTable is initialized.
-        let f = unsafe { (*this.0 .0.vtable).wake_release.unwrap_unchecked() };
+        let f = unsafe { (*this.0.0.vtable).wake_release.unwrap_unchecked() };
 
         // Safety: Is sound, as we own the reference to the waker.
-        unsafe { f(this.0 .0.data) };
+        unsafe { f(this.0.0.data) };
     }
 
     /// Notifies the task bound to the waker.
@@ -198,10 +198,10 @@ impl Clone for Waker {
 impl Drop for Waker {
     fn drop(&mut self) {
         // Safety: The VTable is initialized.
-        let f = unsafe { (*self.0 .0.vtable).release.unwrap_unchecked() };
+        let f = unsafe { (*self.0.0.vtable).release.unwrap_unchecked() };
 
         // Safety: Is sound, as we own the reference to the waker.
-        unsafe { f(self.0 .0.data) };
+        unsafe { f(self.0.0.data) };
     }
 }
 
@@ -209,7 +209,7 @@ impl FFISharable<bindings::FimoAsyncWaker> for Waker {
     type BorrowedView<'a> = WakerView<'a>;
 
     fn share_to_ffi(&self) -> bindings::FimoAsyncWaker {
-        self.0 .0
+        self.0.0
     }
 
     unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoAsyncWaker) -> Self::BorrowedView<'a> {
@@ -220,7 +220,7 @@ impl FFISharable<bindings::FimoAsyncWaker> for Waker {
 impl FFITransferable<bindings::FimoAsyncWaker> for Waker {
     fn into_ffi(self) -> bindings::FimoAsyncWaker {
         let this = ManuallyDrop::new(self);
-        this.0 .0
+        this.0.0
     }
 
     unsafe fn from_ffi(ffi: bindings::FimoAsyncWaker) -> Self {

@@ -1,11 +1,11 @@
 use fimo_std::{
+    r#async::{BlockingContext, EventLoop},
     context::ContextBuilder,
     declare_items, emit_info,
     error::AnyError,
     export_module,
     module::*,
-    r#async::{BlockingContext, EventLoop},
-    tracing::{default_subscriber, Config, Level, ThreadAccess},
+    tracing::{Config, Level, ThreadAccess, default_subscriber},
 };
 
 declare_items! {

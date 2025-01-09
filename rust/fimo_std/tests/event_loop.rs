@@ -1,10 +1,10 @@
 use fimo_std::{
+    r#async::{BlockingContext, EventLoop},
     context::{Context, ContextBuilder, ContextView},
     emit_trace,
     error::AnyError,
     ffi::Viewable,
-    r#async::{BlockingContext, EventLoop},
-    tracing::{default_subscriber, Config, Level, ThreadAccess},
+    tracing::{Config, Level, ThreadAccess, default_subscriber},
 };
 use std::{future::Future, pin::Pin, task::Poll};
 

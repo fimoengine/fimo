@@ -2,11 +2,11 @@ use core::{ffi::CStr, future::Future, marker::PhantomData};
 
 use super::{Module, ModuleExport, ModuleInfo, ModuleInfoView, NamespaceItem, SymbolItem};
 use crate::{
+    r#async::{EnqueuedFuture, Fallible},
     bindings,
     context::ContextView,
-    error::{to_result_indirect, to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result_indirect, to_result_indirect_in_place},
     ffi::{FFISharable, FFITransferable, Viewable},
-    r#async::{EnqueuedFuture, Fallible},
     version::Version,
 };
 

@@ -1,7 +1,7 @@
-use crate::{bindings, Context};
+use crate::{Context, bindings};
 use fimo_std::{
     allocator::FimoAllocator,
-    error::{to_result_indirect, to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result_indirect, to_result_indirect_in_place},
 };
 use std::{ffi::CStr, fmt::Formatter, marker::PhantomData, num::NonZeroUsize};
 

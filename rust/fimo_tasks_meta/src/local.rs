@@ -1,8 +1,8 @@
 // Some of the documentation in this module was copied from the Rust std library, licensed under the
 // MIT and Apache 2.0 dual license.
 
-use crate::{bindings, Context};
-use fimo_std::error::{to_result_indirect, to_result_indirect_in_place, AnyError};
+use crate::{Context, bindings};
+use fimo_std::error::{AnyError, to_result_indirect, to_result_indirect_in_place};
 
 /// Declare a new task-specific storage key of type [`TssKey`].
 #[macro_export]
@@ -97,7 +97,11 @@ impl<T: 'static> TssKey<T> {
     ///
     /// This function will still `panic!()` if the key is uninitialized and the key’s initializer
     /// panics.
-    pub fn try_with<R>(&'static self, ctx: &Context, f: impl FnOnce(&T) -> R) -> Result<R, AnyError> {
+    pub fn try_with<R>(
+        &'static self,
+        ctx: &Context,
+        f: impl FnOnce(&T) -> R,
+    ) -> Result<R, AnyError> {
         self.try_with_inner(ctx, f, self.init)
     }
 

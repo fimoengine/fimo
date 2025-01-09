@@ -4,7 +4,7 @@ use std::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
     bindings,
-    error::{to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result_indirect_in_place},
 };
 
 mod loading_set;
@@ -417,9 +417,7 @@ macro_rules! export_module {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! optional_c_str {
-    () => {{
-        core::ptr::null()
-    }};
+    () => {{ core::ptr::null() }};
     ($literal:literal) => {{
         let x: &'static str = core::concat!($literal, '\0');
         x.as_ptr().cast()

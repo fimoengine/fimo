@@ -2,7 +2,7 @@ use super::{NamespaceItem, NoState, Symbol, SymbolItem};
 use crate::{
     bindings,
     context::ContextView,
-    error::{to_result, to_result_indirect, to_result_indirect_in_place, AnyError},
+    error::{AnyError, to_result, to_result_indirect, to_result_indirect_in_place},
     ffi::{FFISharable, FFITransferable, Viewable},
     version::Version,
 };
@@ -308,7 +308,7 @@ impl Clone for ModuleInfo {
 
 impl Drop for ModuleInfo {
     fn drop(&mut self) {
-        let release = self.0 .0.vtable.release.unwrap();
+        let release = self.0.0.vtable.release.unwrap();
         // Safety: The ffi call is safe.
         unsafe { (release)(self.share_to_ffi()) }
     }
