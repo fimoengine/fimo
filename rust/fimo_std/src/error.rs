@@ -301,7 +301,7 @@ pub struct VTable<T: ?Sized> {
     pub error_description: unsafe extern "C" fn(handle: Option<ErrorHandle<T>>) -> ErrorString,
 }
 
-extern "C" {
+unsafe extern "C" {
     static FIMO_IMPL_RESULT_ERROR_CODE_VTABLE: VTable<*mut ()>;
     static FIMO_IMPL_RESULT_STATIC_STRING_VTABLE: VTable<*mut ()>;
     static FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE: VTable<*mut ()>;

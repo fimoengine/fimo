@@ -391,12 +391,12 @@ macro_rules! export_module {
             unsafe impl Sync for Wrapper {}
 
             #[used]
-            #[cfg_attr(windows, link_section = "fi_mod$u")]
+            #[cfg_attr(windows, unsafe(link_section = "fi_mod$u"))]
             #[cfg_attr(
                 all(unix, target_vendor = "apple"),
-                link_section = "__DATA,fimo_module"
+                unsafe(link_section = "__DATA,fimo_module")
             )]
-            #[cfg_attr(all(unix, not(target_vendor = "apple")), link_section = "fimo_module")]
+            #[cfg_attr(all(unix, not(target_vendor = "apple")), unsafe(link_section = "fimo_module"))]
             static EXPORT: Wrapper = Wrapper(&build_export());
         };
 
@@ -1075,10 +1075,8 @@ pub mod c_ffi {
 
 // Reexport the module entry function.
 #[link(name = "fimo_std", kind = "static")]
-extern "C" {
-    #[no_mangle]
+unsafe extern "C" {
     #[doc(hidden)]
-    #[allow(unused_attributes)]
     pub fn fimo_impl_module_export_iterator(
         inspector: Option<
             unsafe extern "C" fn(*const bindings::FimoModuleExport, *mut std::ffi::c_void) -> bool,
