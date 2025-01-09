@@ -1,8 +1,36 @@
 //! Fimo memory allocator.
 
-use std::alloc::{AllocError, Allocator, GlobalAlloc, Layout, handle_alloc_error};
+use crate::error::AnyResult;
+use std::{
+    alloc::{AllocError, Allocator, GlobalAlloc, Layout, handle_alloc_error},
+    mem::MaybeUninit,
+    ptr::NonNull,
+};
 
-use crate::{bindings, error::to_result_indirect};
+unsafe extern "C" {
+    #[allow(clashing_extern_declarations)]
+    fn fimo_aligned_alloc(
+        alignment: usize,
+        size: usize,
+        error: Option<&mut MaybeUninit<AnyResult>>,
+    ) -> Option<NonNull<u8>>;
+
+    #[allow(clashing_extern_declarations)]
+    fn fimo_aligned_alloc_sized(
+        alignment: usize,
+        size: usize,
+        error: Option<&mut MaybeUninit<AnyResult>>,
+    ) -> AllocBuffer<u8>;
+
+    #[allow(clashing_extern_declarations)]
+    fn fimo_free_aligned_sized(ptr: Option<NonNull<u8>>, alignment: usize, size: usize);
+}
+
+#[repr(C)]
+struct AllocBuffer<T> {
+    ptr: Option<NonNull<T>>,
+    size: usize,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FimoAllocator;
@@ -19,39 +47,27 @@ impl FimoAllocator {
     pub(crate) const DEFAULT_ALIGNMENT: usize = core::mem::align_of::<libc::max_align_t>();
 }
 
-// Safety: We follow the specified contract
 unsafe impl GlobalAlloc for FimoAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size();
         let align = layout.align();
 
-        // Safety: error is a valid pointer.
-        match unsafe {
-            to_result_indirect(|error| bindings::fimo_aligned_alloc(align, size, error))
-        } {
-            Ok(ptr) => {
-                debug_assert!(
-                    !ptr.is_null(),
-                    "the allocation is null but no error was emitted"
-                );
-                ptr.cast()
-            }
-            Err(_) => handle_alloc_error(layout),
+        let ptr = unsafe { fimo_aligned_alloc(align, size, None) };
+        match ptr {
+            None => handle_alloc_error(layout),
+            Some(ptr) => ptr.as_ptr(),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size();
         let align = layout.align();
-
-        // Safety: By the contract of dealloc this is sound.
-        unsafe { bindings::fimo_free_aligned_sized(ptr.cast(), align, size) }
+        unsafe { fimo_free_aligned_sized(NonNull::new(ptr), align, size) }
     }
 }
 
-// Safety:
 unsafe impl Allocator for FimoAllocator {
-    fn allocate(&self, layout: Layout) -> Result<core::ptr::NonNull<[u8]>, AllocError> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let size = layout.size();
         let align = layout.align();
 
@@ -60,36 +76,28 @@ unsafe impl Allocator for FimoAllocator {
             return Err(AllocError);
         }
 
-        // Safety: error is a valid pointer.
-        match unsafe {
-            to_result_indirect(|error| bindings::fimo_aligned_alloc_sized(align, size, error))
-        } {
-            Ok(buffer) => {
-                debug_assert!(
-                    !buffer.ptr.is_null(),
-                    "the allocation is null but no error was emitted"
-                );
-                debug_assert!(
-                    !buffer.buff_size > 0,
-                    "the allocation is null but no error was emitted"
-                );
-
-                // Safety: We know that the allocation function returns an aligned pointer with a
-                // length of `buff_size` bytes.
+        let buffer = unsafe { fimo_aligned_alloc_sized(align, size, None) };
+        match buffer.ptr {
+            None => {
+                debug_assert!(buffer.size == 0);
+                handle_alloc_error(layout);
+            }
+            Some(ptr) => {
+                debug_assert!(buffer.size != 0);
                 unsafe {
-                    Ok(core::ptr::NonNull::new_unchecked(
-                        core::ptr::slice_from_raw_parts_mut(buffer.ptr.cast(), buffer.buff_size),
-                    ))
+                    Ok(NonNull::new_unchecked(core::ptr::slice_from_raw_parts_mut(
+                        ptr.as_ptr(),
+                        buffer.size,
+                    )))
                 }
             }
-            Err(_) => handle_alloc_error(layout),
         }
     }
 
-    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, _layout: Layout) {
-        // Safety: According to the contract of `deallocate` the pointer must have been allocated by
-        // `FimoAllocator`. Therefore we are allowed to free it,
-        unsafe { bindings::fimo_free(ptr.cast().as_ptr()) }
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        let size = layout.size();
+        let align = layout.align();
+        unsafe { fimo_free_aligned_sized(Some(ptr), align, size) }
     }
 }
 

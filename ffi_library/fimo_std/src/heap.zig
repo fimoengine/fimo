@@ -88,8 +88,7 @@ const FimoAllocator = struct {
 
 /// Default allocator of the fimo project.
 ///
-/// Uses a system allocator that works accross shared libraries
-/// and is thread safe.
+/// Uses a system allocator that works accross shared libraries and is thread safe.
 pub const fimo_allocator = Allocator{
     .ptr = undefined,
     .vtable = &fimo_allocator_vtable,
@@ -110,51 +109,51 @@ pub const fimo_allocator_alignment: usize = switch (builtin.os.tag) {
 
 /// Allocate memory.
 ///
-/// This function allocates at least `size` bytes and returns a pointer to the allocated
-/// memory. The memory is not initialized. If `size` is `0`, then `fimo_malloc()`
-/// returns `NULL`. If `error` is not a null pointer, `fimo_malloc()` writes the
-/// success status into the memory pointed to by `error`.
+/// This function allocates at least `size` bytes and returns a pointer to the allocated memory.
+/// The memory is not initialized. If `size` is `0`, then `fimo_malloc()` returns `NULL`. If
+/// `error` is not a null pointer, `fimo_malloc()` writes the success status into the memory
+/// pointed to by `error`.
 export fn fimo_malloc(size: usize, err: ?*c.FimoResult) ?*anyopaque {
     return fimo_malloc_sized(size, err).ptr;
 }
 
 /// Zero-allocate memory.
 ///
-/// This function allocates at least `size` bytes and returns a pointer to the allocated
-/// memory. The memory is zero-initialized. If `size` is `0`, then `fimo_malloc()`
-/// returns `NULL`. If `error` is not a null pointer, `fimo_calloc()` writes the
-/// success status into the memory pointed to by `error`.
+/// This function allocates at least `size` bytes and returns a pointer to the allocated memory.
+/// The memory is zero-initialized. If `size` is `0`, then `fimo_malloc()` returns `NULL`. If
+/// `error` is not a null pointer, `fimo_calloc()` writes the success status into the memory
+/// pointed to by `error`.
 export fn fimo_calloc(size: usize, err: ?*c.FimoResult) ?*anyopaque {
     return fimo_calloc_sized(size, err).ptr;
 }
 
 /// Allocate memory.
 ///
-/// This function allocates at least `size` bytes and returns a pointer to the allocated
-/// memory that is aligned at least as strictly as `alignment`. The memory is not initialized.
-/// If `size` is `0`, then `fimo_aligned_alloc()` returns `NULL` and `alignment` is ignored.
-/// `alignment` must be a power of two greater than `0`. If `error` is not a null pointer,
-/// `fimo_aligned_alloc()` writes the success status into the memory pointed to by `error`.
+/// This function allocates at least `size` bytes and returns a pointer to the allocated memory
+/// that is aligned at least as strictly as `alignment`. The memory is not initialized. If `size`
+/// is `0`, then `fimo_aligned_alloc()` returns `NULL` and `alignment` is ignored. `alignment` must
+/// be a power of two greater than `0`. If `error` is not a null pointer, `fimo_aligned_alloc()`
+/// writes the success status into the memory pointed to by `error`.
 export fn fimo_aligned_alloc(alignment: usize, size: usize, err: ?*c.FimoResult) ?*anyopaque {
     return fimo_aligned_alloc_sized(alignment, size, err).ptr;
 }
 
 /// Allocate memory.
 ///
-/// This function allocates at least `size` bytes and returns a pointer to the allocated
-/// memory, along with the usable size in bytes. The memory is not initialized. If `size`
-/// is `0`, then `fimo_malloc_sized()` returns `NULL`. If `error` is not a null pointer,
-/// `fimo_malloc_sized()` writes the success status into the memory pointed to by `error`.
+/// This function allocates at least `size` bytes and returns a pointer to the allocated memory,
+/// along with the usable size in bytes. The memory is not initialized. If `size` is `0`, then
+/// `fimo_malloc_sized()` returns `NULL`. If `error` is not a null pointer, `fimo_malloc_sized()`
+/// writes the success status into the memory pointed to by `error`.
 export fn fimo_malloc_sized(size: usize, err: ?*c.FimoResult) c.FimoMallocBuffer {
     return fimo_aligned_alloc_sized(fimo_allocator_alignment, size, err);
 }
 
 /// Zero-allocate memory.
 ///
-/// This function allocates at least `size` bytes and returns a pointer to the allocated
-/// memory, along with the usable size in bytes. The memory is zero-initialized. If `size`
-/// is `0`, then `fimo_calloc_sized()` returns `NULL`. If `error` is not a null pointer,
-/// `fimo_calloc_sized()` writes the success status into the memory pointed to by `error`.
+/// This function allocates at least `size` bytes and returns a pointer to the allocated memory,
+/// along with the usable size in bytes. The memory is zero-initialized. If `size` is `0`, then
+/// `fimo_calloc_sized()` returns `NULL`. If `error` is not a null pointer, `fimo_calloc_sized()`
+/// writes the success status into the memory pointed to by `error`.
 export fn fimo_calloc_sized(size: usize, err: ?*c.FimoResult) c.FimoMallocBuffer {
     const buffer = fimo_malloc_sized(size, err);
     if (buffer.ptr) |ptr| {
@@ -166,13 +165,12 @@ export fn fimo_calloc_sized(size: usize, err: ?*c.FimoResult) c.FimoMallocBuffer
 
 /// Allocate memory.
 ///
-/// This function allocates at least `size` bytes and returns a pointer to the allocated
-/// memory that is aligned at least as strictly as `alignment`, along with the usable size
-/// in bytes. The memory is not initialized. If `size` is `0`, then
-/// `fimo_aligned_alloc_sized()` returns `NULL` and `alignment` is ignored. `alignment`
-/// must be a power of two greater than `0`. If `error` is not a null pointer,
-/// `fimo_aligned_alloc_sized()` writes the success status into the memory pointed to
-/// by `error`.
+/// This function allocates at least `size` bytes and returns a pointer to the allocated memory
+/// that is aligned at least as strictly as `alignment`, along with the usable size in bytes. The
+/// memory is not initialized. If `size` is `0`, then `fimo_aligned_alloc_sized()` returns `NULL`
+/// and `alignment` is ignored. `alignment` must be a power of two greater than `0`. If `error` is
+/// not a null pointer, `fimo_aligned_alloc_sized()` writes the success status into the memory
+/// pointed to by `error`.
 export fn fimo_aligned_alloc_sized(alignment: usize, size: usize, err: ?*c.FimoResult) c.FimoMallocBuffer {
     const ok_error = AnyError.intoCResult(null);
     const inval_error = AnyError.initErrorCode(AnyError.ErrorCode.inval).?.err;
@@ -200,34 +198,33 @@ export fn fimo_aligned_alloc_sized(alignment: usize, size: usize, err: ?*c.FimoR
 
 /// Free allocated memory.
 ///
-/// Deallocates the memory allocated by an allocation function. If `ptr` is a null pointer,
-/// no action shall occur. Otherwise, if `ptr` does not match a pointer returned by the
-/// allocation function, or if the space has been deallocated by a call to `fimo_free()`,
-/// `fimo_free_sized()` or `fimo_free_aligned_sized()`, the behavior is undefined.
+/// Deallocates the memory allocated by an allocation function. If `ptr` is a null pointer, no
+/// action shall occur. Otherwise, if `ptr` does not match a pointer returned by the allocation
+/// function, or if the space has been deallocated by a call to `fimo_free()`, `fimo_free_sized()`
+/// or `fimo_free_aligned_sized()`, the behavior is undefined.
 export fn fimo_free(ptr: ?*anyopaque) void {
     rawFree(ptr);
 }
 
 /// Free allocated memory.
 ///
-/// Deallocates the memory allocated by an allocation function. If `ptr` is a null pointer,
-/// no action shall occur. Otherwise, if `ptr` does not match a pointer returned by the
-/// allocation function, or if the space has been deallocated by a call to `fimo_free()`,
-/// `fimo_free_sized()` or `fimo_free_aligned_sized()`, or if `size` does not match
-/// the size used to allocate the memory, the behavior is undefined.
+/// Deallocates the memory allocated by an allocation function. If `ptr` is a null pointer, no
+/// action shall occur. Otherwise, if `ptr` does not match a pointer returned by the allocation
+/// function, or if the space has been deallocated by a call to `fimo_free()`, `fimo_free_sized()`
+/// or `fimo_free_aligned_sized()`, or if `size` does not match the size used to allocate the
+/// memory, the behavior is undefined.
 export fn fimo_free_sized(ptr: ?*anyopaque, size: usize) void {
     _ = size;
     fimo_free(ptr);
 }
 
-///
 /// Free allocated memory.
 ///
-/// Deallocates the memory allocated by an allocation function. If `ptr` is a null pointer,
-/// no action shall occur. Otherwise, if `ptr` does not match a pointer returned by the
-/// allocation function, or if the space has been deallocated by a call to `fimo_free()`,
-/// `fimo_free_sized()` or `fimo_free_aligned_sized()`, or if `alignment` and `size`
-/// do not match the alignment and size used to allocate the memory, the behavior is undefined.
+/// Deallocates the memory allocated by an allocation function. If `ptr` is a null pointer, no
+/// action shall occur. Otherwise, if `ptr` does not match a pointer returned by the allocation
+/// function, or if the space has been deallocated by a call to `fimo_free()`, `fimo_free_sized()`
+/// or `fimo_free_aligned_sized()`, or if `alignment` and `size` do not match the alignment and
+/// size used to allocate the memory, the behavior is undefined.
 export fn fimo_free_aligned_sized(ptr: ?*anyopaque, alignment: usize, size: usize) void {
     _ = alignment;
     _ = size;
