@@ -145,8 +145,8 @@ impl Clone for Context {
     }
 }
 
-impl<'a> Viewable<ContextView<'a>> for Context {
-    fn view(&self) -> ContextView<'a> {
+impl<'a> Viewable<ContextView<'a>> for &'a Context {
+    fn view(self) -> ContextView<'a> {
         self.0
     }
 }

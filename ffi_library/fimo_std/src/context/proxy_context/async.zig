@@ -29,8 +29,8 @@ pub const EventLoop = extern struct {
 
     /// Initializes a new event loop.
     ///
-    /// There can only be one event loop at a time, and it will keep
-    /// the context alive until it completes its execution.
+    /// There can only be one event loop at a time, and it will keep/ the context alive until it
+    /// completes its execution.
     pub fn init(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!EventLoop {
         var loop: EventLoop = undefined;
         const result = ctx.context.vtable.async_v0.start_event_loop(
@@ -43,9 +43,9 @@ pub const EventLoop = extern struct {
 
     /// Utilize the current thread to complete all tasks in the event loop.
     ///
-    /// The intended purpose of this function is to complete all remaining tasks
-    /// before cleanup, as the context can not be destroyed until the queue is empty.
-    /// Upon the completion of all tasks, the funtion will return to the caller.
+    /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
+    /// the context can not be destroyed until the queue is empty. Upon the completion of all
+    /// tasks, the funtion will return to the caller.
     pub fn flushWithCurrentThread(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!void {
         const result = ctx.context.vtable.async_v0.run_to_completion(
             ctx.context.data,
@@ -94,14 +94,13 @@ pub const Waker = extern struct {
         self.vtable.unref(self.data);
     }
 
-    /// Wakes the task associated with the current waker and
-    /// decreases the wakers reference count.
+    /// Wakes the task associated with the current waker and decreases the wakers reference count.
     pub fn wakeUnref(self: Waker) void {
         self.vtable.wake_unref(self.data);
     }
 
-    /// Wakes the task associated with the current waker, without
-    /// decreasing the reference count of the waker.
+    /// Wakes the task associated with the current waker, without decreasing the reference count of
+    /// the waker.
     pub fn wake(self: Waker) void {
         self.vtable.wake(self.data);
     }
@@ -215,21 +214,20 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
 
         /// Polls the future.
         ///
-        /// The object may not be moved once it is polled.
-        /// Once the future returns `ready` it may not be polled again.
+        /// The object may not be moved once it is polled. Once the future returns `ready` it may
+        /// not be polled again.
         ///
-        /// The waker is not owned by the callee, and it may not decrease
-        /// it's reference count without increasing it first.
+        /// The waker is not owned by the callee, and it may not decrease it's reference count
+        /// without increasing it first.
         pub fn poll(self: *@This(), waker: Waker) Poll(U) {
             return poll_fn(&self.data, waker);
         }
 
         /// Awaits for the completion of the future using the specified context.
         ///
-        /// The context must provide a generic method called `awaitFuture`, that
-        /// takes the return type as the first parameter and a pointer to the
-        /// future as the second parameter, and blocks the current task until
-        /// the future polls as ready.
+        /// The context must provide a generic method called `awaitFuture`, that takes the return
+        /// type as the first parameter and a pointer to the future as the second parameter, and
+        /// blocks the current task until the future polls as ready.
         pub fn awaitBlockingBorrow(self: *@This(), ctx: anytype) U {
             return ctx.awaitFuture(U, self);
         }
@@ -365,11 +363,11 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
 
         /// Polls the future.
         ///
-        /// The object may not be moved once it is polled.
-        /// Once the future returns `ready` it may not be polled again.
+        /// The object may not be moved once it is polled. Once the future returns `ready` it may
+        /// not be polled again.
         ///
-        /// The waker is not owned by the callee, and it may not decrease
-        /// it's reference count without increasing it first.
+        /// The waker is not owned by the callee, and it may not decrease it's reference count
+        /// without increasing it first.
         pub fn poll(self: *@This(), waker: Waker) Poll(U) {
             var result: U = undefined;
             if (self.poll_fn(&self.data, waker, &result)) return .{ .ready = result };

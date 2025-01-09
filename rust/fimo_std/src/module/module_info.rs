@@ -53,7 +53,7 @@ impl ModuleInfoView<'_> {
 impl ModuleInfoView<'_> {
     /// Searches for a module by its name.
     pub fn find_by_name<'a, T: Viewable<ContextView<'a>>>(
-        ctx: &T,
+        ctx: T,
         name: &CStr,
     ) -> Result<ModuleInfo, AnyError> {
         // Safety: Is always set.
@@ -79,7 +79,7 @@ impl ModuleInfoView<'_> {
 
     /// Searches for a module by a symbol it exports.
     pub fn find_by_symbol<'a, T: Viewable<ContextView<'a>>>(
-        ctx: &T,
+        ctx: T,
         name: &CStr,
         namespace: &CStr,
         version: Version,
@@ -269,7 +269,7 @@ pub struct ModuleInfo(ModuleInfoView<'static>);
 impl ModuleInfo {
     /// Searches for a module by its name.
     pub fn find_by_name<'a, T: Viewable<ContextView<'a>>>(
-        ctx: &T,
+        ctx: T,
         name: &CStr,
     ) -> Result<Self, AnyError> {
         ModuleInfoView::find_by_name(ctx, name)
@@ -277,7 +277,7 @@ impl ModuleInfo {
 
     /// Searches for a module by a symbol it exports.
     pub fn find_by_symbol<'a, T: Viewable<ContextView<'a>>>(
-        ctx: &T,
+        ctx: T,
         name: &CStr,
         namespace: &CStr,
         version: Version,
@@ -1041,7 +1041,7 @@ pub struct PseudoModule(OpaqueModule<'static>);
 
 impl PseudoModule {
     /// Constructs a new `PseudoModule`.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
         // Safety: Is always set.
         let f = unsafe {
             ctx.view()

@@ -1,15 +1,16 @@
 //! Async subsystem.
 
 use crate::{
-    bindings,
-    context::ContextView,
-    error::{AnyError, AnyResult, to_result_indirect, to_result_indirect_in_place},
-    ffi::{FFISharable, FFITransferable, Viewable},
+    context::{ContextHandle, ContextView},
+    error::{AnyError, AnyResult},
+    ffi::{ConstNonNull, OpaqueHandle, VTablePtr, View, Viewable},
+    handle,
 };
 use std::{
     marker::PhantomData,
     mem::{ManuallyDrop, MaybeUninit},
     pin::Pin,
+    ptr::NonNull,
     task::{Context, Poll},
 };
 
@@ -18,148 +19,147 @@ use std::{
 /// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
-pub struct VTableV0(bindings::FimoAsyncVTableV0);
+pub struct VTableV0 {
+    pub run_to_completion: unsafe extern "C" fn(handle: ContextHandle) -> AnyResult,
+    pub start_event_loop: unsafe extern "C" fn(
+        handle: ContextHandle,
+        event_loop: &mut MaybeUninit<EventLoop>,
+    ) -> AnyResult,
+    pub new_blocking_context: unsafe extern "C" fn(
+        handle: ContextHandle,
+        context: &mut MaybeUninit<BlockingContext>,
+    ) -> AnyResult,
+    #[allow(clippy::type_complexity)]
+    pub enqueue_future: unsafe extern "C" fn(
+        handle: ContextHandle,
+        data: Option<ConstNonNull<u8>>,
+        data_len: usize,
+        data_alignment: usize,
+        result_len: usize,
+        result_alignment: usize,
+        poll: unsafe extern "C" fn(
+            data: Option<NonNull<()>>,
+            waker: WakerView<'_>,
+            result: Option<NonNull<()>>,
+        ) -> bool,
+        drop_data: Option<unsafe extern "C" fn(data: Option<NonNull<()>>)>,
+        drop_result: Option<unsafe extern "C" fn(data: Option<NonNull<()>>)>,
+        future: &mut MaybeUninit<EnqueuedFuture<()>>,
+    ) -> AnyResult,
+}
+
+handle!(pub handle EventLoopHandle: Send + Sync + Unpin);
+
+/// Virtual function table of an [`EventLoop`].
+///
+/// Adding fields to the vtable is not a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct EventLoopVTable {
+    join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+    detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+}
 
 /// A handle to an event loop executing futures.
+#[repr(C)]
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct EventLoop(bindings::FimoAsyncEventLoop);
+pub struct EventLoop {
+    pub handle: Option<EventLoopHandle>,
+    pub vtable: VTablePtr<EventLoopVTable>,
+}
 
 impl EventLoop {
     /// Initializes a new event loop.
     ///
-    /// There can only be one event loop at a time, and it will keep
-    /// the context alive until it completes its execution.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
+    /// There can only be one event loop at a time, and it will keep the context alive until it
+    /// completes its execution.
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
         let ctx = ctx.view();
-        // Safety: Is always set.
-        let f = unsafe { ctx.vtable().async_v0.start_event_loop.unwrap_unchecked() };
+        let f = ctx.vtable.async_v0.start_event_loop;
 
-        // Safety: FFI call is safe.
-        let event_loop = unsafe {
-            to_result_indirect_in_place(|error, event_loop| {
-                *error = f(ctx.data(), event_loop.as_mut_ptr());
-            })?
-        };
-
-        Ok(Self(event_loop))
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            f(ctx.handle, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
     }
 
     /// Utilize the current thread to complete all tasks in the event loop.
     ///
-    /// The intended purpose of this function is to complete all remaining tasks
-    /// before cleanup, as the context can not be destroyed until the queue is empty.
-    /// Upon the completion of all tasks, the function will return to the caller.
+    /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
+    /// the context can not be destroyed until the queue is empty. Upon the completion of all tasks,
+    /// the function will return to the caller.
     pub fn flush_with_current_thread<'a, T: Viewable<ContextView<'a>>>(
-        ctx: &T,
+        ctx: T,
     ) -> Result<(), AnyError> {
         let ctx = ctx.view();
-        // Safety: Is always set.
-        let f = unsafe { ctx.vtable().async_v0.run_to_completion.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
-        unsafe {
-            to_result_indirect(|error| {
-                *error = f(ctx.view().data());
-            })
-        }
+        let f = ctx.vtable.async_v0.run_to_completion;
+        unsafe { f(ctx.handle).into_result() }
     }
 
     /// Signals the event loop to complete the remaining jobs and exit afterward.
     ///
     /// The caller will block until the event loop has completed executing.
     pub fn join(self) {
-        let this = ManuallyDrop::new(self);
-
-        // Safety: The VTable is initialized.
-        let f = unsafe { (*this.0.vtable).join.unwrap_unchecked() };
-
-        // Safety: We own the value.
-        unsafe { f(this.0.data) }
+        drop(self);
     }
 
     /// Signals the event loop to complete the remaining jobs and exit afterward.
     ///
     /// The caller will exit immediately.
     pub fn detach(self) {
-        drop(self);
-    }
-}
-
-// Safety: The EventLoop is `Send` and `Sync`.
-unsafe impl Send for EventLoop {}
-
-// Safety: The EventLoop is `Send` and `Sync`.
-unsafe impl Sync for EventLoop {}
-
-impl FFITransferable<bindings::FimoAsyncEventLoop> for EventLoop {
-    fn into_ffi(self) -> bindings::FimoAsyncEventLoop {
         let this = ManuallyDrop::new(self);
-        this.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoAsyncEventLoop) -> Self {
-        Self(ffi)
+        let f = this.vtable.detach;
+        unsafe { f(this.handle) }
     }
 }
 
 impl Drop for EventLoop {
     fn drop(&mut self) {
-        // Safety: The VTable is initialized.
-        let f = unsafe { (*self.0.vtable).detach.unwrap_unchecked() };
-
-        // Safety: We own the value.
-        unsafe { f(self.0.data) }
+        let f = self.vtable.join;
+        unsafe { f(self.handle) }
     }
 }
 
+handle!(pub handle WakerHandle: Send + Sync + Unpin);
+
+/// Virtual function table of a [`WakerView`] and [`Waker`].
+///
+/// Adding fields to the vtable is a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct WakerVTable {
+    acquire: unsafe extern "C" fn(handle: Option<WakerHandle>) -> Waker,
+    release: unsafe extern "C" fn(handle: Option<WakerHandle>),
+    wake_release: unsafe extern "C" fn(handle: Option<WakerHandle>),
+    wake: unsafe extern "C" fn(handle: Option<WakerHandle>),
+    next: Option<OpaqueHandle<dyn Send + Sync + Unpin>>,
+}
+
 /// A non-owning reference to a waker.
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
-#[repr(transparent)]
-pub struct WakerView<'a>(bindings::FimoAsyncWaker, PhantomData<&'a ()>);
+pub struct WakerView<'a> {
+    pub handle: Option<WakerHandle>,
+    pub vtable: VTablePtr<WakerVTable>,
+    pub _phantom: PhantomData<&'a WakerHandle>,
+}
 
 impl WakerView<'_> {
     /// Acquires a strong reference to the waker.
     pub fn acquire(&self) -> Waker {
-        // Safety: The VTable is initialized.
-        let f = unsafe { (*self.0.vtable).acquire.unwrap_unchecked() };
-
-        // Safety: Is sound, as we own the reference to the waker.
-        let waker = unsafe { f(self.0.data) };
-        Waker(WakerView(waker, PhantomData))
+        let f = self.vtable.acquire;
+        unsafe { f(self.handle) }
     }
 
     /// Notifies the task bound to the waker.
     pub fn wake_by_ref(&self) {
-        // Safety: The VTable is initialized.
-        let f = unsafe { (*self.0.vtable).wake.unwrap_unchecked() };
-
-        // Safety: Is sound, as we own the reference to the waker.
-        unsafe { f(self.0.data) };
+        let f = self.vtable.wake;
+        unsafe { f(self.handle) }
     }
 }
 
-impl FFISharable<bindings::FimoAsyncWaker> for WakerView<'_> {
-    type BorrowedView<'a> = WakerView<'a>;
-
-    fn share_to_ffi(&self) -> bindings::FimoAsyncWaker {
-        self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoAsyncWaker) -> Self::BorrowedView<'a> {
-        WakerView(ffi, PhantomData)
-    }
-}
-
-impl FFITransferable<bindings::FimoAsyncWaker> for WakerView<'_> {
-    fn into_ffi(self) -> bindings::FimoAsyncWaker {
-        self.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoAsyncWaker) -> Self {
-        Self(ffi, PhantomData)
-    }
-}
+impl View for WakerView<'_> {}
 
 /// An owned reference to a waker.
 #[derive(Debug)]
@@ -167,25 +167,22 @@ impl FFITransferable<bindings::FimoAsyncWaker> for WakerView<'_> {
 pub struct Waker(WakerView<'static>);
 
 impl Waker {
-    /// Returns a view to the waker.
-    pub fn view(&self) -> WakerView<'_> {
-        self.0
-    }
-
     /// Notifies the task bound to the waker and drop the waker.
     pub fn wake(self) {
         let this = ManuallyDrop::new(self);
-
-        // Safety: The VTable is initialized.
-        let f = unsafe { (*this.0.0.vtable).wake_release.unwrap_unchecked() };
-
-        // Safety: Is sound, as we own the reference to the waker.
-        unsafe { f(this.0.0.data) };
+        let f = this.0.vtable.wake_release;
+        unsafe { f(this.0.handle) }
     }
 
     /// Notifies the task bound to the waker.
     pub fn wake_by_ref(&self) {
         self.0.wake_by_ref();
+    }
+}
+
+impl<'a> Viewable<WakerView<'a>> for &'a Waker {
+    fn view(self) -> WakerView<'a> {
+        self.0
     }
 }
 
@@ -197,49 +194,15 @@ impl Clone for Waker {
 
 impl Drop for Waker {
     fn drop(&mut self) {
-        // Safety: The VTable is initialized.
-        let f = unsafe { (*self.0.0.vtable).release.unwrap_unchecked() };
-
-        // Safety: Is sound, as we own the reference to the waker.
-        unsafe { f(self.0.0.data) };
+        let f = self.0.vtable.release;
+        unsafe { f(self.0.handle) }
     }
 }
 
-impl FFISharable<bindings::FimoAsyncWaker> for Waker {
-    type BorrowedView<'a> = WakerView<'a>;
-
-    fn share_to_ffi(&self) -> bindings::FimoAsyncWaker {
-        self.0.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoAsyncWaker) -> Self::BorrowedView<'a> {
-        WakerView(ffi, PhantomData)
-    }
-}
-
-impl FFITransferable<bindings::FimoAsyncWaker> for Waker {
-    fn into_ffi(self) -> bindings::FimoAsyncWaker {
-        let this = ManuallyDrop::new(self);
-        this.0.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoAsyncWaker) -> Self {
-        Self(WakerView(ffi, PhantomData))
-    }
-}
-
-/// State of an enqueued future.
-#[allow(dead_code)]
-pub struct OpaqueState(*mut std::ffi::c_void);
-
-// Safety:
-unsafe impl Send for OpaqueState {}
-
-// Safety:
-unsafe impl Sync for OpaqueState {}
+handle!(pub handle EnqueuedHandle: Send + Sync);
 
 /// Type of futures that have been enqueued.
-pub type EnqueuedFuture<R> = Future<OpaqueState, R>;
+pub type EnqueuedFuture<R> = Future<EnqueuedHandle, R>;
 
 /// Result of a fallible future.
 #[repr(C)]
@@ -281,10 +244,7 @@ impl<T> Fallible<T> {
     }
 }
 
-// Safety:
 unsafe impl<T: Send> Send for Fallible<T> {}
-
-// Safety:
 unsafe impl<T: Sync> Sync for Fallible<T> {}
 
 /// A future from the async subsystem.
@@ -298,7 +258,7 @@ pub struct Future<T, R> {
 
 impl<T, R> Future<T, R> {
     /// Constructs a new future from a Rust future.
-    pub fn new(fut: impl std::future::IntoFuture<Output = R, IntoFuture = T>) -> Self {
+    pub fn new(fut: impl IntoFuture<Output = R, IntoFuture = T>) -> Self {
         fut.into_future_spec()
     }
 
@@ -341,69 +301,63 @@ impl<T, R> Future<T, R> {
         R: Send + 'static,
     {
         extern "C" fn poll<T, R>(
-            data: *mut std::ffi::c_void,
-            waker: bindings::FimoAsyncWaker,
-            result: *mut std::ffi::c_void,
+            data: Option<NonNull<()>>,
+            waker: WakerView<'_>,
+            result: Option<NonNull<()>>,
         ) -> bool {
-            // Safety: The pointer is valid.
+            let data = data.map_or(std::ptr::null_mut(), |x| x.as_ptr());
+            let result = result.map_or(std::ptr::null_mut(), |x| x.as_ptr());
+
             let (f, state) = unsafe {
                 let this = data.cast::<Future<T, R>>();
                 ((*this).poll_fn, &raw mut *(*this).state)
             };
-            let waker = WakerView(waker, PhantomData);
             let result = result.cast::<R>();
 
-            // Safety: Is safe by contract.
             unsafe { f(state, waker, result) }
         }
 
-        extern "C" fn drop<T>(data: *mut std::ffi::c_void) {
-            let data = data.cast::<T>();
-
-            // Safety: We own the unique pointer.
+        extern "C" fn drop<T>(data: Option<NonNull<()>>) {
+            let data = data
+                .map_or(std::ptr::null_mut(), |x| x.as_ptr())
+                .cast::<T>();
             unsafe { std::ptr::drop_in_place(data) };
         }
 
-        // Safety: The VTable is initialized.
-        let f = unsafe { ctx.vtable().async_v0.future_enqueue.unwrap_unchecked() };
-
         let this = ManuallyDrop::new(self);
+        let f = ctx.vtable.async_v0.enqueue_future;
+        let mut out = MaybeUninit::uninit();
 
-        // Safety: FFI call is safe.
-        let fut = unsafe {
-            to_result_indirect_in_place(|error, fut| {
-                *error = f(
-                    ctx.data(),
-                    (&raw const this).cast(),
-                    size_of::<Self>(),
-                    align_of::<Self>(),
-                    size_of::<R>(),
-                    align_of::<R>(),
-                    Some(poll::<T, R>),
-                    if std::mem::needs_drop::<Self>() {
-                        Some(drop::<Self>)
-                    } else {
-                        None
-                    },
-                    if std::mem::needs_drop::<R>() {
-                        Some(drop::<R>)
-                    } else {
-                        None
-                    },
-                    fut.as_mut_ptr(),
-                );
-            })?
-        };
+        unsafe {
+            f(
+                ctx.handle,
+                Some(ConstNonNull::new_unchecked(&raw const this).cast()),
+                size_of::<Self>(),
+                align_of::<Self>(),
+                size_of::<R>(),
+                align_of::<R>(),
+                poll::<T, R>,
+                if std::mem::needs_drop::<Self>() {
+                    Some(drop::<Self>)
+                } else {
+                    None
+                },
+                if std::mem::needs_drop::<R>() {
+                    Some(drop::<R>)
+                } else {
+                    None
+                },
+                &mut out,
+            )
+            .into_result()?;
 
-        // Safety: They share the same layout.
-        let fut = unsafe {
-            std::mem::transmute::<bindings::FimoAsyncOpaqueFuture, Future<OpaqueState, R>>(fut)
-        };
-        Ok(fut)
+            let out = out.assume_init();
+            let out = std::mem::transmute::<EnqueuedFuture<()>, EnqueuedFuture<R>>(out);
+            Ok(out)
+        }
     }
 
     fn poll_ffi(self: Pin<&mut Self>, waker: WakerView<'_>) -> Poll<R> {
-        // Safety: The contract of the future ensures that this is safe.
         unsafe {
             let this = self.get_unchecked_mut();
             let mut result = MaybeUninit::uninit();
@@ -425,70 +379,67 @@ impl<T, R> std::future::Future for Future<T, R> {
             Owned(std::task::Waker),
         }
 
-        unsafe extern "C" fn ffi_waker_acquire(
-            data: *mut std::ffi::c_void,
-        ) -> bindings::FimoAsyncWaker {
-            // Safety: We control the waker datatype.
-            let wrapper: &WakerWrapper<'_> = unsafe { &*data.cast() };
+        unsafe extern "C" fn ffi_waker_acquire(handle: Option<WakerHandle>) -> Waker {
+            let handle = handle.map_or(std::ptr::null_mut(), |x| x.as_ptr::<WakerWrapper<'_>>());
+            let wrapper = unsafe { &*handle };
             let clone = match wrapper {
                 WakerWrapper::Ref(w) => (*w).clone(),
                 WakerWrapper::Owned(w) => w.clone(),
             };
             let wrapper = Box::new(WakerWrapper::Owned(clone));
-            bindings::FimoAsyncWaker {
-                data: Box::into_raw(wrapper).cast(),
-                vtable: &VTABLE,
+            Waker(WakerView {
+                handle: unsafe { Some(WakerHandle::new_unchecked(Box::into_raw(wrapper))) },
+                vtable: VTablePtr::new(&VTABLE),
+                _phantom: PhantomData,
+            })
+        }
+
+        unsafe extern "C" fn ffi_waker_release(handle: Option<WakerHandle>) {
+            unsafe {
+                let handle =
+                    handle.map_or(std::ptr::null_mut(), |x| x.as_ptr::<WakerWrapper<'_>>());
+                assert!(matches!(*handle, WakerWrapper::Owned(_)));
+                _ = Box::from_raw(handle);
             }
         }
 
-        unsafe extern "C" fn ffi_waker_release(data: *mut std::ffi::c_void) {
-            // Safety: We control the waker datatype.
+        unsafe extern "C" fn ffi_waker_wake(handle: Option<WakerHandle>) {
             unsafe {
-                let wrapper: *mut WakerWrapper<'_> = data.cast();
-                assert!(matches!(*wrapper, WakerWrapper::Owned(_)));
-                _ = Box::from_raw(wrapper);
-            }
-        }
-
-        unsafe extern "C" fn ffi_waker_wake(data: *mut std::ffi::c_void) {
-            // Safety: We control the waker datatype.
-            unsafe {
-                let wrapper: *mut WakerWrapper<'_> = data.cast();
-                assert!(matches!(*wrapper, WakerWrapper::Owned(_)));
-                let wrapper = Box::from_raw(wrapper);
-                match *wrapper {
+                let handle =
+                    handle.map_or(std::ptr::null_mut(), |x| x.as_ptr::<WakerWrapper<'_>>());
+                assert!(matches!(*handle, WakerWrapper::Owned(_)));
+                let handle = Box::from_raw(handle);
+                match *handle {
                     WakerWrapper::Ref(_) => std::hint::unreachable_unchecked(),
                     WakerWrapper::Owned(w) => w.wake(),
                 }
             }
         }
 
-        unsafe extern "C" fn ffi_waker_wake_by_ref(data: *mut std::ffi::c_void) {
-            // Safety: We control the waker datatype.
-            let wrapper: &WakerWrapper<'_> = unsafe { &*data.cast() };
-            match wrapper {
+        unsafe extern "C" fn ffi_waker_wake_by_ref(handle: Option<WakerHandle>) {
+            let handle = handle.map_or(std::ptr::null_mut(), |x| x.as_ptr::<WakerWrapper<'_>>());
+            let handle = unsafe { &*handle };
+            match handle {
                 WakerWrapper::Ref(w) => w.wake_by_ref(),
                 WakerWrapper::Owned(w) => w.wake_by_ref(),
             };
         }
 
-        const VTABLE: bindings::FimoAsyncWakerVTableV0 = bindings::FimoAsyncWakerVTableV0 {
-            acquire: Some(ffi_waker_acquire),
-            release: Some(ffi_waker_release),
-            wake_release: Some(ffi_waker_wake),
-            wake: Some(ffi_waker_wake_by_ref),
-            next: std::ptr::null(),
+        const VTABLE: WakerVTable = WakerVTable {
+            acquire: ffi_waker_acquire,
+            release: ffi_waker_release,
+            wake_release: ffi_waker_wake,
+            wake: ffi_waker_wake_by_ref,
+            next: None,
         };
 
         let waker = cx.waker();
         let wrapper = WakerWrapper::Ref(waker);
-        let waker = WakerView(
-            bindings::FimoAsyncWaker {
-                data: std::ptr::from_ref(&wrapper).cast_mut().cast(),
-                vtable: &VTABLE,
-            },
-            PhantomData,
-        );
+        let waker = WakerView {
+            handle: unsafe { Some(WakerHandle::new_unchecked((&raw const wrapper).cast_mut())) },
+            vtable: VTablePtr::new(&VTABLE),
+            _phantom: PhantomData,
+        };
         self.poll_ffi(waker)
     }
 }
@@ -496,7 +447,6 @@ impl<T, R> std::future::Future for Future<T, R> {
 impl<T, R> Drop for Future<T, R> {
     fn drop(&mut self) {
         if let Some(cleanup) = self.cleanup_fn {
-            // Safety: We own the future.
             unsafe {
                 cleanup(&mut *self.state);
             }
@@ -508,7 +458,7 @@ trait IntoFutureSpec<State, Output> {
     fn into_future_spec(self) -> Future<State, Output>;
 }
 
-impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T {
+impl<T: IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T {
     default fn into_future_spec(self) -> Future<T::IntoFuture, T::Output> {
         enum WakerWrapper<'a> {
             Ref(WakerView<'a>),
@@ -516,7 +466,6 @@ impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T 
         }
 
         fn waker_clone(waker: *const ()) -> std::task::RawWaker {
-            // Safety: We know that the type matches.
             let waker = unsafe { &*waker.cast::<WakerWrapper<'_>>() };
             let waker = match waker {
                 WakerWrapper::Ref(w) => w.acquire(),
@@ -527,7 +476,6 @@ impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T 
         }
 
         fn waker_wake(waker: *const ()) {
-            // Safety: We know that the type matches.
             unsafe {
                 let waker = waker.cast::<WakerWrapper<'_>>().cast_mut();
                 assert!(matches!(*waker, WakerWrapper::Owned(_)));
@@ -540,7 +488,6 @@ impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T 
         }
 
         fn waker_wake_by_ref(waker: *const ()) {
-            // Safety: We know that the type matches.
             let waker = unsafe { &*waker.cast::<WakerWrapper<'_>>() };
             match waker {
                 WakerWrapper::Ref(w) => w.wake_by_ref(),
@@ -549,7 +496,6 @@ impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T 
         }
 
         fn waker_drop(waker: *const ()) {
-            // Safety: We know that the type matches.
             unsafe {
                 let waker = waker.cast::<WakerWrapper<'_>>();
                 if matches!(*waker, WakerWrapper::Ref(_)) {
@@ -566,18 +512,15 @@ impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T 
         where
             T: std::future::Future<Output = R>,
         {
-            // Safety: The value is pinned by contract.
             let fut = unsafe { Pin::new_unchecked(&mut *data) };
 
             let waker = WakerWrapper::Ref(waker);
             let waker =
-                // Safety:
                 unsafe { std::task::Waker::new(std::ptr::from_ref(&waker).cast(), &VTABLE) };
 
             let mut cx = Context::from_waker(&waker);
             match <T as std::future::Future>::poll(fut, &mut cx) {
                 Poll::Ready(v) => {
-                    // Safety: The pointer is valid.
                     unsafe { result.write(v) };
                     true
                 }
@@ -586,7 +529,6 @@ impl<T: std::future::IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T 
         }
 
         extern "C" fn cleanup<T>(data: *mut T) {
-            // Safety: We have a unique reference to the value.
             unsafe { std::ptr::drop_in_place(data) }
         }
 
@@ -609,51 +551,53 @@ impl<T, R> IntoFutureSpec<T, R> for Future<T, R> {
     }
 }
 
+handle!(pub handle BlockingContextHandle);
+
+/// Virtual function table of a [`BlockingContext`].
+///
+/// Adding fields to the vtable is not a breaking change.
+#[repr(C)]
+#[derive(Debug)]
+pub struct BlockingContextVTable {
+    drop: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+    waker_ref: unsafe extern "C" fn(handle: Option<BlockingContextHandle>) -> WakerView<'static>,
+    block_until_notified: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+}
+
 /// A context that blocks the current thread until it is notified.
-pub struct BlockingContext(bindings::FimoAsyncBlockingContext);
+#[repr(C)]
+pub struct BlockingContext {
+    pub handle: Option<BlockingContextHandle>,
+    pub vtable: VTablePtr<BlockingContextVTable>,
+}
 
 impl BlockingContext {
     /// Constructs a new blocking context.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
         let ctx = ctx.view();
-        // Safety: Is always set.
-        let f = unsafe {
-            ctx.vtable()
-                .async_v0
-                .context_new_blocking
-                .unwrap_unchecked()
-        };
+        let f = ctx.vtable.async_v0.new_blocking_context;
 
-        // Safety: FFI call is safe.
-        let context = unsafe {
-            to_result_indirect_in_place(|error, context| {
-                *error = f(ctx.data(), context.as_mut_ptr());
-            })?
-        };
-        Ok(Self(context))
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            f(ctx.handle, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
     }
 
     /// Returns a reference to the contained waker.
     pub fn waker(&self) -> WakerView<'_> {
-        // Safety: Is always set.
-        let f = unsafe { (*self.0.vtable).waker_ref.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
-        let waker = unsafe { f(self.0.data) };
-        WakerView(waker, PhantomData)
+        let f = self.vtable.waker_ref;
+        unsafe { f(self.handle) }
     }
 
     /// Blocks the current thread until the waker has been notified.
     pub fn wait(&self) {
-        // Safety: Is always set.
-        let f = unsafe { (*self.0.vtable).block_until_notified.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
-        unsafe { f(self.0.data) };
+        let f = self.vtable.block_until_notified;
+        unsafe { f(self.handle) };
     }
 
     /// Block the thread until the future is ready.
-    pub fn block_on<R>(&self, fut: impl std::future::IntoFuture<Output = R>) -> R {
+    pub fn block_on<R>(&self, fut: impl IntoFuture<Output = R>) -> R {
         let waker = self.waker();
         let mut f = std::pin::pin!(Future::<_, R>::new(fut));
         loop {
@@ -667,29 +611,15 @@ impl BlockingContext {
 
 impl Drop for BlockingContext {
     fn drop(&mut self) {
-        // Safety: Is always set.
-        let f = unsafe { (*self.0.vtable).release.unwrap_unchecked() };
-
-        // Safety: FFI call is safe.
-        unsafe { f(self.0.data) };
-    }
-}
-
-impl FFITransferable<bindings::FimoAsyncBlockingContext> for BlockingContext {
-    fn into_ffi(self) -> bindings::FimoAsyncBlockingContext {
-        let this = ManuallyDrop::new(self);
-        this.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoAsyncBlockingContext) -> Self {
-        Self(ffi)
+        let f = self.vtable.drop;
+        unsafe { f(self.handle) };
     }
 }
 
 /// Block the thread until the future is ready.
-pub fn block_on<'a, T: Viewable<ContextView<'a>>, F>(ctx: &T, fut: F) -> F::Output
+pub fn block_on<'a, T: Viewable<ContextView<'a>>, F>(ctx: T, fut: F) -> F::Output
 where
-    F: std::future::IntoFuture,
+    F: IntoFuture,
 {
     let context = BlockingContext::new(ctx).expect("blocking context creation failed");
     context.block_on(fut)

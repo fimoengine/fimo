@@ -340,8 +340,8 @@ impl<T: ?Sized> OpaqueHandle<T> {
     }
 }
 
-unsafe impl<T: Send> Send for OpaqueHandle<T> {}
-unsafe impl<T: Sync> Sync for OpaqueHandle<T> {}
+unsafe impl<T: ?Sized + Send> Send for OpaqueHandle<T> {}
+unsafe impl<T: ?Sized + Sync> Sync for OpaqueHandle<T> {}
 
 impl<T: ?Sized> Debug for OpaqueHandle<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -477,9 +477,9 @@ macro_rules! handle {
 }
 
 /// Helper trait for types that can be borrowed.
-pub trait Viewable<Output: View> {
+pub trait Viewable<Output: View>: Copy {
     /// Borrows a view to the data.
-    fn view(&self) -> Output;
+    fn view(self) -> Output;
 }
 
 /// Marker trait for all view types.
@@ -490,8 +490,8 @@ where
     T: View,
 {
     #[inline(always)]
-    fn view(&self) -> T {
-        *self
+    fn view(self) -> T {
+        self
     }
 }
 

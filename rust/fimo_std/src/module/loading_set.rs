@@ -356,7 +356,7 @@ pub struct LoadingSet(LoadingSetView<'static>);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
         unsafe {
             let f = ctx.view().vtable().module_v0.set_new.unwrap_unchecked();
             let set = to_result_indirect_in_place(|error, set| {

@@ -22,23 +22,23 @@ use std::{
 pub struct VTableV0(bindings::FimoTracingVTableV0);
 
 /// Definition of the tracing subsystem.
-pub trait TracingSubsystem {
+pub trait TracingSubsystem: Copy {
     /// Emits a new event.
     ///
     /// The message may be cut of, if the length exceeds the internal formatting buffer size.
-    fn emit_event(&self, event: &Event, arguments: Arguments<'_>);
+    fn emit_event(self, event: &Event, arguments: Arguments<'_>);
 
     /// Checks whether the tracing subsystem is enabled.
     ///
     /// This function can be used to check whether to call into the subsystem at all. Calling this
     /// function is not necessary, as the remaining functions of the backend are guaranteed to
     /// return default values, in case the backend is disabled.
-    fn is_enabled(&self) -> bool;
+    fn is_enabled(self) -> bool;
 
     /// Flushes the streams used for tracing.
     ///
     /// If successful, any unwritten data is written out by the individual subscribers.
-    fn flush(&self);
+    fn flush(self);
 }
 
 impl<'a, T> TracingSubsystem for T
@@ -46,7 +46,7 @@ where
     T: Viewable<ContextView<'a>>,
 {
     #[inline(always)]
-    fn emit_event(&self, event: &Event, arguments: Arguments<'_>) {
+    fn emit_event(self, event: &Event, arguments: Arguments<'_>) {
         unsafe {
             let f = self
                 .view()
@@ -65,7 +65,7 @@ where
     }
 
     #[inline(always)]
-    fn is_enabled(&self) -> bool {
+    fn is_enabled(self) -> bool {
         unsafe {
             let f = self
                 .view()
@@ -78,7 +78,7 @@ where
     }
 
     #[inline(always)]
-    fn flush(&self) {
+    fn flush(self) {
         unsafe {
             let f = self.view().vtable().tracing_v0.flush.unwrap_unchecked();
             f(self.view().data());
@@ -688,7 +688,7 @@ impl ThreadAccess {
     /// will behave as if the backend was disabled. Once registered, the calling thread gains access
     /// to the tracing subsystem and is assigned a new empty call stack.
     #[inline(always)]
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Self {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Self {
         unsafe {
             let ctx = ctx.view();
             let f = ctx.vtable().tracing_v0.register_thread.unwrap_unchecked();

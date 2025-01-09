@@ -28,23 +28,23 @@ pub use symbol::*;
 pub struct VTableV0(bindings::FimoModuleVTableV0);
 
 /// Definition of the module subsystem.
-pub trait ModuleSubsystem {
+pub trait ModuleSubsystem: Copy {
     /// Checks for the presence of a namespace in the module backend.
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-    fn namespace_exists(&self, namespace: &CStr) -> Result<bool, AnyError>;
+    fn namespace_exists(self, namespace: &CStr) -> Result<bool, AnyError>;
 
     /// Unloads all unused instances.
     ///
     /// After calling this function, all unreferenced instances are unloaded.
-    fn prune_instances(&self) -> Result<(), AnyError>;
+    fn prune_instances(self) -> Result<(), AnyError>;
 }
 
 impl<'a, T> ModuleSubsystem for T
 where
     T: Viewable<ContextView<'a>>,
 {
-    fn namespace_exists(&self, namespace: &CStr) -> Result<bool, AnyError> {
+    fn namespace_exists(self, namespace: &CStr) -> Result<bool, AnyError> {
         // Safety: Is always set.
         let f = unsafe {
             self.view()
@@ -62,7 +62,7 @@ where
         }
     }
 
-    fn prune_instances(&self) -> Result<(), AnyError> {
+    fn prune_instances(self) -> Result<(), AnyError> {
         // Safety:
         unsafe {
             let f = self
@@ -86,7 +86,7 @@ pub struct PruneInstancesOnDrop<'a>(ContextView<'a>);
 
 impl<'a> PruneInstancesOnDrop<'a> {
     /// Constructs a new instance of the dropper.
-    pub fn new<T: Viewable<ContextView<'a>>>(ctx: &T) -> Self {
+    pub fn new<T: Viewable<ContextView<'a>>>(ctx: T) -> Self {
         let view = ctx.view();
         PruneInstancesOnDrop(view)
     }
