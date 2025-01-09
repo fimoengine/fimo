@@ -5,7 +5,7 @@ use crate::{
 };
 use fimo_std::{
     allocator::FimoAllocator,
-    error::{to_result_indirect_in_place, Error},
+    error::{to_result_indirect_in_place, AnyError},
     ffi::FFITransferable,
 };
 use std::{
@@ -233,7 +233,7 @@ where
         self,
         group: &WorkerGroup<'ctx>,
         on_complete: impl FnOnce(CommandBufferStatus) + Send + 'static,
-    ) -> Result<CommandBufferHandle<'ctx, A>, Error> {
+    ) -> Result<CommandBufferHandle<'ctx, A>, AnyError> {
         self.inner.enqueue(group, on_complete)
     }
 
@@ -250,7 +250,7 @@ where
         self,
         group: &WorkerGroup<'_>,
         on_complete: impl FnOnce(CommandBufferStatus) + Send + 'static,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AnyError> {
         self.inner.enqueue_detached(group, on_complete)
     }
 
@@ -268,7 +268,7 @@ where
     ///
     /// If the current thread is managed by the same [`WorkerGroup`], then this method will only
     /// block the current task instead of the entire thread.
-    pub fn block_on(self, group: &WorkerGroup<'_>) -> Result<CommandBufferStatus, Error> {
+    pub fn block_on(self, group: &WorkerGroup<'_>) -> Result<CommandBufferStatus, AnyError> {
         self.inner.block_on(group)
     }
 }
@@ -391,7 +391,7 @@ where
     pub fn enqueue(
         self,
         on_complete: impl FnOnce(CommandBufferStatus) + Send + 'scope,
-    ) -> Result<CommandBufferHandle<'env, A>, Error> {
+    ) -> Result<CommandBufferHandle<'env, A>, AnyError> {
         // Reserve additional space beforehand. Doing so ensures that no panic can
         // occur after enqueuing the buffer.
         // Safety: There can only be one reference at any time.
@@ -425,7 +425,7 @@ where
     pub fn enqueue_detached(
         self,
         on_complete: impl FnOnce(CommandBufferStatus) + Send + 'scope,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AnyError> {
         // We can not use `enqueue_detached` since it would not allow us to register
         // the handle to the inner command buffer. Instead, we let `enqueue` register
         // the handle for us and drop it after.
@@ -447,7 +447,7 @@ where
     ///
     /// If the current thread is managed by the same [`WorkerGroup`], then this method will only
     /// block the current task instead of the entire thread.
-    pub fn block_on(self) -> Result<CommandBufferStatus, Error> {
+    pub fn block_on(self) -> Result<CommandBufferStatus, AnyError> {
         let group = self.scope.worker_group;
         self.inner.block_on(group)
     }
@@ -798,7 +798,7 @@ where
         self,
         group: &WorkerGroup<'ctx>,
         on_complete: impl FnOnce(CommandBufferStatus) + Send,
-    ) -> Result<CommandBufferHandle<'ctx, A>, Error> {
+    ) -> Result<CommandBufferHandle<'ctx, A>, AnyError> {
         let status = Arc::new_in(AtomicUsize::new(0), self.allocator().clone());
         let raw = self.into_raw_command_buffer({
             let status = status.clone();
@@ -836,7 +836,7 @@ where
         self,
         group: &WorkerGroup<'ctx>,
         on_complete: impl FnOnce(CommandBufferStatus) + Send,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AnyError> {
         let raw = self.into_raw_command_buffer(on_complete);
 
         // Safety: FFI call is safe.
@@ -855,7 +855,7 @@ where
         Ok(())
     }
 
-    fn block_on(self, group: &WorkerGroup<'ctx>) -> Result<CommandBufferStatus, Error> {
+    fn block_on(self, group: &WorkerGroup<'ctx>) -> Result<CommandBufferStatus, AnyError> {
         if group.is_worker() {
             let handle = self.enqueue(group, |_| {})?;
             handle.join().map_err(|err| err.into_error())
@@ -907,7 +907,7 @@ impl<'ctx, A: Allocator> CommandBufferHandle<'ctx, A> {
     }
 
     /// Returns the [`WorkerGroup`] which executes the command buffer.
-    pub fn worker_group(&self) -> Result<WorkerGroup<'ctx>, Error> {
+    pub fn worker_group(&self) -> Result<WorkerGroup<'ctx>, AnyError> {
         self.handle.worker_group()
     }
 
@@ -944,7 +944,7 @@ struct CommandBufferHandleInner<'ctx> {
 }
 
 impl<'ctx> CommandBufferHandleInner<'ctx> {
-    fn worker_group(&self) -> Result<WorkerGroup<'ctx>, Error> {
+    fn worker_group(&self) -> Result<WorkerGroup<'ctx>, AnyError> {
         // Safety: FFI call is safe
         let group = unsafe {
             to_result_indirect_in_place(|err, group| {
@@ -1006,16 +1006,16 @@ unsafe impl Sync for CommandBufferHandleInner<'_> {}
 
 /// Error from the [`CommandBufferHandle::join`] operation.
 #[derive(Debug)]
-pub struct CommandBufferHandleError<'ctx, A: Allocator>(CommandBufferHandle<'ctx, A>, Error);
+pub struct CommandBufferHandleError<'ctx, A: Allocator>(CommandBufferHandle<'ctx, A>, AnyError);
 
 impl<'ctx, A: Allocator> CommandBufferHandleError<'ctx, A> {
     /// Returns the contained error.
-    pub fn error(&self) -> &Error {
+    pub fn error(&self) -> &AnyError {
         &self.1
     }
 
     /// Extracts the contained error.
-    pub fn into_error(self) -> Error {
+    pub fn into_error(self) -> AnyError {
         self.1
     }
 
@@ -1032,7 +1032,7 @@ impl<'ctx, A: Allocator> CommandBufferHandleError<'ctx, A> {
 
 impl<A: Allocator> std::fmt::Display for CommandBufferHandleError<'_, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <Error as std::fmt::Display>::fmt(&self.1, f)
+        <AnyError as std::fmt::Display>::fmt(&self.1, f)
     }
 }
 

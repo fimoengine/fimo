@@ -16,58 +16,28 @@
 extern "C" {
 #endif
 
-/**
- * Upper range (inclusive) of the valid error codes.
- */
+/// Upper range (inclusive) of the valid error codes.
 #define FIMO_ERROR_CODE_MAX FIMO_ERROR_CODE_XFULL
 
-/**
- * Ignores a `FimoResult` result.
- *
- * @param EXPR expression to ignore
- */
+/// Ignores a `FimoResult` result.
 #define FIMO_RESULT_IGNORE(EXPR) fimo_result_release((EXPR))
 
-/**
- * Checks whether a `FimoResult` contains an error.
- *
- * @param EXPR expression to check
- */
+/// Checks whether a `FimoResult` contains an error.
 #define FIMO_RESULT_IS_ERROR(EXPR) fimo_result_is_error((EXPR))
 
-/**
- * Checks whether a `FimoResult` does not contain an error.
- *
- * @param EXPR expression to check
- */
+/// Checks whether a `FimoResult` does not contain an error.
 #define FIMO_RESULT_IS_OK(EXPR) fimo_result_is_ok((EXPR))
 
-/**
- * Constructs a `FimoResult` from a static string.
- *
- * @param CODE error code
- */
+/// Constructs a `FimoResult` from a static string.
 #define FIMO_RESULT_FROM_STRING(ERROR) fimo_result_from_static_string(ERROR)
 
-/**
- * Constructs a `FimoResult` from a dynamic string.
- *
- * @param CODE error code
- */
+/// Constructs a `FimoResult` from a dynamic string.
 #define FIMO_RESULT_FROM_DYNAMIC_STRING(ERROR) fimo_result_from_dynamic_string(ERROR)
 
-/**
- * Constructs a `FimoResult` from a `FimoErrorCode`.
- *
- * @param CODE error code
- */
+/// Constructs a `FimoResult` from a `FimoErrorCode`.
 #define FIMO_RESULT_FROM_ERROR_CODE(CODE) fimo_result_from_error_code(CODE)
 
-/**
- * Constructs a `FimoResult` from a `FimoSystemErrorCode`.
- *
- * @param CODE error code
- */
+/// Constructs a `FimoResult` from a `FimoSystemErrorCode`.
 #define FIMO_RESULT_FROM_SYSTEM_ERROR_CODE(CODE) fimo_result_from_system_error_code(CODE)
 
 #define FIMO_EOK FIMO_RESULT_FROM_ERROR_CODE(FIMO_ERROR_CODE_OK)
@@ -199,143 +169,267 @@ extern "C" {
 #define FIMO_EXDEV FIMO_RESULT_FROM_ERROR_CODE(FIMO_ERROR_CODE_XDEV)
 #define FIMO_EXFULL FIMO_RESULT_FROM_ERROR_CODE(FIMO_ERROR_CODE_XFULL)
 
-/**
- * Posix error codes.
- */
-typedef enum FimoErrorCode {
-    FIMO_ERROR_CODE_OK = 0, /* Operation completed successfully */
-    FIMO_ERROR_CODE_2BIG, /* Argument list too long */
-    FIMO_ERROR_CODE_ACCES, /* Permission denied */
-    FIMO_ERROR_CODE_ADDRINUSE, /* Address already in use */
-    FIMO_ERROR_CODE_ADDRNOTAVAIL, /* Address not available */
-    FIMO_ERROR_CODE_AFNOSUPPORT, /* Address family not supported */
-    FIMO_ERROR_CODE_AGAIN, /* Resource temporarily unavailable */
-    FIMO_ERROR_CODE_ALREADY, /* Connection already in progress */
-    FIMO_ERROR_CODE_BADE, /* Invalid exchange */
-    FIMO_ERROR_CODE_BADF, /* Bad file descriptor */
-    FIMO_ERROR_CODE_BADFD, /* File descriptor in bad state */
-    FIMO_ERROR_CODE_BADMSG, /* Bad message */
-    FIMO_ERROR_CODE_BADR, /* Invalid request descriptor */
-    FIMO_ERROR_CODE_BADRQC, /* Invalid request code */
-    FIMO_ERROR_CODE_BADSLT, /* Invalid slot */
-    FIMO_ERROR_CODE_BUSY, /* Device or resource busy */
-    FIMO_ERROR_CODE_CANCELED, /* Operation canceled */
-    FIMO_ERROR_CODE_CHILD, /* No child processes */
-    FIMO_ERROR_CODE_CHRNG, /* Channel number out of range */
-    FIMO_ERROR_CODE_COMM, /* Communication error on send */
-    FIMO_ERROR_CODE_CONNABORTED, /* Connection aborted */
-    FIMO_ERROR_CODE_CONNREFUSED, /* Connection refused */
-    FIMO_ERROR_CODE_CONNRESET, /* Connection reset */
-    FIMO_ERROR_CODE_DEADLK, /* Resource deadlock avoided */
-    FIMO_ERROR_CODE_DEADLOCK, /* File locking deadlock error (or Resource deadlock avoided) */
-    FIMO_ERROR_CODE_DESTADDRREQ, /* Destination address required */
-    FIMO_ERROR_CODE_DOM, /* Mathematics argument out of domain of function */
-    FIMO_ERROR_CODE_DQUOT, /* Disk quota exceeded */
-    FIMO_ERROR_CODE_EXIST, /* File exists */
-    FIMO_ERROR_CODE_FAULT, /* Bad address */
-    FIMO_ERROR_CODE_FBIG, /* File too large */
-    FIMO_ERROR_CODE_HOSTDOWN, /* Host is down */
-    FIMO_ERROR_CODE_HOSTUNREACH, /* Host is unreachable */
-    FIMO_ERROR_CODE_HWPOISON, /* Memory page has hardware error */
-    FIMO_ERROR_CODE_IDRM, /* Identifier removed */
-    FIMO_ERROR_CODE_ILSEQ, /* Invalid or incomplete multibyte or wide character */
-    FIMO_ERROR_CODE_INPROGRESS, /* Operation in progress */
-    FIMO_ERROR_CODE_INTR, /* Interrupted function call */
-    FIMO_ERROR_CODE_INVAL, /* Invalid argument */
-    FIMO_ERROR_CODE_IO, /* Input/output error */
-    FIMO_ERROR_CODE_ISCONN, /* Socket is connected */
-    FIMO_ERROR_CODE_ISDIR, /* Is a directory */
-    FIMO_ERROR_CODE_ISNAM, /* Is a named type file */
-    FIMO_ERROR_CODE_KEYEXPIRED, /* Key has expired */
-    FIMO_ERROR_CODE_KEYREJECTED, /* Key was rejected by service */
-    FIMO_ERROR_CODE_KEYREVOKED, /* Key has been revoked */
-    FIMO_ERROR_CODE_L2HLT, /* Level 2 halted */
-    FIMO_ERROR_CODE_L2NSYNC, /* Level 2 not synchronized */
-    FIMO_ERROR_CODE_L3HLT, /* Level 3 halted */
-    FIMO_ERROR_CODE_L3RST, /* Level 3 reset */
-    FIMO_ERROR_CODE_LIBACC, /* Cannot access a needed shared library */
-    FIMO_ERROR_CODE_LIBBAD, /* Accessing a corrupted shared library */
-    FIMO_ERROR_CODE_LIBMAX, /* Attempting to link in too many shared libraries */
-    FIMO_ERROR_CODE_LIBSCN, /* .lib section in a.out corrupted */
-    FIMO_ERROR_CODE_LIBEXEC, /* Cannot exec a shared library directly */
-    FIMO_ERROR_CODE_LNRNG, /* Link number out of range */
-    FIMO_ERROR_CODE_LOOP, /* Too many levels of symbolic links */
-    FIMO_ERROR_CODE_MEDIUMTYPE, /* Wrong medium type */
-    FIMO_ERROR_CODE_MFILE, /* Too many open files */
-    FIMO_ERROR_CODE_MLINK, /* Too many links */
-    FIMO_ERROR_CODE_MSGSIZE, /* Message too long */
-    FIMO_ERROR_CODE_MULTIHOP, /* Multihop attempted */
-    FIMO_ERROR_CODE_NAMETOOLONG, /* Filename too long */
-    FIMO_ERROR_CODE_NETDOWN, /* Network is down */
-    FIMO_ERROR_CODE_NETRESET, /* Connection aborted by network */
-    FIMO_ERROR_CODE_NETUNREACH, /* Network unreachable */
-    FIMO_ERROR_CODE_NFILE, /* Too many open files in system */
-    FIMO_ERROR_CODE_NOANO, /* No anode */
-    FIMO_ERROR_CODE_NOBUFS, /* No buffer space available */
-    FIMO_ERROR_CODE_NODATA, /* The named attribute does not exist, or the process has no access to this attribute */
-    FIMO_ERROR_CODE_NODEV, /* No such device */
-    FIMO_ERROR_CODE_NOENT, /* No such file or directory */
-    FIMO_ERROR_CODE_NOEXEC, /* Exec format error */
-    FIMO_ERROR_CODE_NOKEY, /* Required key not available */
-    FIMO_ERROR_CODE_NOLCK, /* No locks available */
-    FIMO_ERROR_CODE_NOLINK, /* Link has been severed */
-    FIMO_ERROR_CODE_NOMEDIUM, /* No medium found */
-    FIMO_ERROR_CODE_NOMEM, /* Not enough space/cannot allocate memory */
-    FIMO_ERROR_CODE_NOMSG, /* No message of the desired type */
-    FIMO_ERROR_CODE_NONET, /* Machine is not on the network */
-    FIMO_ERROR_CODE_NOPKG, /* Package not installed */
-    FIMO_ERROR_CODE_NOPROTOOPT, /* Protocol not available */
-    FIMO_ERROR_CODE_NOSPC, /* No space left on device */
-    FIMO_ERROR_CODE_NOSR, /* No STREAM resources */
-    FIMO_ERROR_CODE_NOSTR, /* Not a STREAM */
-    FIMO_ERROR_CODE_NOSYS, /* Function not implemented */
-    FIMO_ERROR_CODE_NOTBLK, /* Block device required */
-    FIMO_ERROR_CODE_NOTCONN, /* The socket is not connected */
-    FIMO_ERROR_CODE_NOTDIR, /* Not a directory */
-    FIMO_ERROR_CODE_NOTEMPTY, /* Directory not empty */
-    FIMO_ERROR_CODE_NOTRECOVERABLE, /* State not recoverable */
-    FIMO_ERROR_CODE_NOTSOCK, /* Not a socket */
-    FIMO_ERROR_CODE_NOTSUP, /* Operation not supported */
-    FIMO_ERROR_CODE_NOTTY, /* Inappropriate I/O control operation */
-    FIMO_ERROR_CODE_NOTUNIQ, /* Name not unique on network */
-    FIMO_ERROR_CODE_NXIO, /* No such device or address */
-    FIMO_ERROR_CODE_OPNOTSUPP, /* Operation not supported on socket */
-    FIMO_ERROR_CODE_OVERFLOW, /* Value too large to be stored in data type */
-    FIMO_ERROR_CODE_OWNERDEAD, /* Owner died */
-    FIMO_ERROR_CODE_PERM, /* Operation not permitted */
-    FIMO_ERROR_CODE_PFNOSUPPORT, /* Protocol family not supported */
-    FIMO_ERROR_CODE_PIPE, /* Broken pipe */
-    FIMO_ERROR_CODE_PROTO, /* Protocol error */
-    FIMO_ERROR_CODE_PROTONOSUPPORT, /* Protocol not supported */
-    FIMO_ERROR_CODE_PROTOTYPE, /* Protocol wrong type for socket */
-    FIMO_ERROR_CODE_RANGE, /* Result too large */
-    FIMO_ERROR_CODE_REMCHG, /* Remote address changed */
-    FIMO_ERROR_CODE_REMOTE, /* Object is remote */
-    FIMO_ERROR_CODE_REMOTEIO, /* Remote I/O error */
-    FIMO_ERROR_CODE_RESTART, /* Interrupted system call should be restarted */
-    FIMO_ERROR_CODE_RFKILL, /* Operation not possible due to RF-kill */
-    FIMO_ERROR_CODE_ROFS, /* Read-only filesystem */
-    FIMO_ERROR_CODE_SHUTDOWN, /* Cannot send after transport endpoint shutdown */
-    FIMO_ERROR_CODE_SPIPE, /* Invalid seek */
-    FIMO_ERROR_CODE_SOCKTNOSUPPORT, /* Socket type not supported */
-    FIMO_ERROR_CODE_SRCH, /* No such process */
-    FIMO_ERROR_CODE_STALE, /* Stale file handle */
-    FIMO_ERROR_CODE_STRPIPE, /* Streams pipe error */
-    FIMO_ERROR_CODE_TIME, /* Timer expired */
-    FIMO_ERROR_CODE_TIMEDOUT, /* Connection timed out */
-    FIMO_ERROR_CODE_TOOMANYREFS, /* Too many references: cannot splice */
-    FIMO_ERROR_CODE_TXTBSY, /* Text file busy */
-    FIMO_ERROR_CODE_UCLEAN, /* Structure needs cleaning */
-    FIMO_ERROR_CODE_UNATCH, /* Protocol driver not attached */
-    FIMO_ERROR_CODE_USERS, /* Too many users */
-    FIMO_ERROR_CODE_WOULDBLOCK, /* Operation would block */
-    FIMO_ERROR_CODE_XDEV, /* Invalid cross-device link */
-    FIMO_ERROR_CODE_XFULL, /* Exchange full */
+/// Posix error codes.
+typedef enum FimoErrorCode: FimoI32 {
+    /// Operation completed successfully
+    FIMO_ERROR_CODE_OK,
+    /// Argument list too long 
+    FIMO_ERROR_CODE_2BIG,
+    /// Permission denied 
+    FIMO_ERROR_CODE_ACCES,
+    /// Address already in use 
+    FIMO_ERROR_CODE_ADDRINUSE,
+    /// Address not available 
+    FIMO_ERROR_CODE_ADDRNOTAVAIL,
+    /// Address family not supported 
+    FIMO_ERROR_CODE_AFNOSUPPORT,
+    /// Resource temporarily unavailable 
+    FIMO_ERROR_CODE_AGAIN,
+    /// Connection already in progress 
+    FIMO_ERROR_CODE_ALREADY,
+    /// Invalid exchange 
+    FIMO_ERROR_CODE_BADE,
+    /// Bad file descriptor 
+    FIMO_ERROR_CODE_BADF,
+    /// File descriptor in bad state 
+    FIMO_ERROR_CODE_BADFD,
+    /// Bad message 
+    FIMO_ERROR_CODE_BADMSG,
+    /// Invalid request descriptor 
+    FIMO_ERROR_CODE_BADR,
+    /// Invalid request code 
+    FIMO_ERROR_CODE_BADRQC,
+    /// Invalid slot 
+    FIMO_ERROR_CODE_BADSLT,
+    /// Device or resource busy 
+    FIMO_ERROR_CODE_BUSY,
+    /// Operation canceled 
+    FIMO_ERROR_CODE_CANCELED,
+    /// No child processes 
+    FIMO_ERROR_CODE_CHILD,
+    /// Channel number out of range 
+    FIMO_ERROR_CODE_CHRNG,
+    /// Communication error on send 
+    FIMO_ERROR_CODE_COMM,
+    /// Connection aborted 
+    FIMO_ERROR_CODE_CONNABORTED,
+    /// Connection refused 
+    FIMO_ERROR_CODE_CONNREFUSED,
+    /// Connection reset 
+    FIMO_ERROR_CODE_CONNRESET,
+    /// Resource deadlock avoided 
+    FIMO_ERROR_CODE_DEADLK,
+    /// File locking deadlock error (or Resource deadlock avoided) 
+    FIMO_ERROR_CODE_DEADLOCK,
+    /// Destination address required 
+    FIMO_ERROR_CODE_DESTADDRREQ,
+    /// Mathematics argument out of domain of function 
+    FIMO_ERROR_CODE_DOM,
+    /// Disk quota exceeded 
+    FIMO_ERROR_CODE_DQUOT,
+    /// File exists 
+    FIMO_ERROR_CODE_EXIST,
+    /// Bad address 
+    FIMO_ERROR_CODE_FAULT,
+    /// File too large 
+    FIMO_ERROR_CODE_FBIG,
+    /// Host is down 
+    FIMO_ERROR_CODE_HOSTDOWN,
+    /// Host is unreachable 
+    FIMO_ERROR_CODE_HOSTUNREACH,
+    /// Memory page has hardware error 
+    FIMO_ERROR_CODE_HWPOISON,
+    /// Identifier removed 
+    FIMO_ERROR_CODE_IDRM,
+    /// Invalid or incomplete multibyte or wide character 
+    FIMO_ERROR_CODE_ILSEQ,
+    /// Operation in progress 
+    FIMO_ERROR_CODE_INPROGRESS,
+    /// Interrupted function call 
+    FIMO_ERROR_CODE_INTR,
+    /// Invalid argument 
+    FIMO_ERROR_CODE_INVAL,
+    /// Input/output error 
+    FIMO_ERROR_CODE_IO,
+    /// Socket is connected 
+    FIMO_ERROR_CODE_ISCONN,
+    /// Is a directory 
+    FIMO_ERROR_CODE_ISDIR,
+    /// Is a named type file 
+    FIMO_ERROR_CODE_ISNAM,
+    /// Key has expired 
+    FIMO_ERROR_CODE_KEYEXPIRED,
+    /// Key was rejected by service 
+    FIMO_ERROR_CODE_KEYREJECTED,
+    /// Key has been revoked 
+    FIMO_ERROR_CODE_KEYREVOKED,
+    /// Level 2 halted 
+    FIMO_ERROR_CODE_L2HLT,
+    /// Level 2 not synchronized 
+    FIMO_ERROR_CODE_L2NSYNC,
+    /// Level 3 halted 
+    FIMO_ERROR_CODE_L3HLT,
+    /// Level 3 reset 
+    FIMO_ERROR_CODE_L3RST,
+    /// Cannot access a needed shared library 
+    FIMO_ERROR_CODE_LIBACC,
+    /// Accessing a corrupted shared library 
+    FIMO_ERROR_CODE_LIBBAD,
+    /// Attempting to link in too many shared libraries 
+    FIMO_ERROR_CODE_LIBMAX,
+    /// .lib section in a.out corrupted 
+    FIMO_ERROR_CODE_LIBSCN,
+    /// Cannot exec a shared library directly 
+    FIMO_ERROR_CODE_LIBEXEC,
+    /// Link number out of range 
+    FIMO_ERROR_CODE_LNRNG,
+    /// Too many levels of symbolic links 
+    FIMO_ERROR_CODE_LOOP,
+    /// Wrong medium type 
+    FIMO_ERROR_CODE_MEDIUMTYPE,
+    /// Too many open files 
+    FIMO_ERROR_CODE_MFILE,
+    /// Too many links 
+    FIMO_ERROR_CODE_MLINK,
+    /// Message too long 
+    FIMO_ERROR_CODE_MSGSIZE,
+    /// Multihop attempted 
+    FIMO_ERROR_CODE_MULTIHOP,
+    /// Filename too long 
+    FIMO_ERROR_CODE_NAMETOOLONG,
+    /// Network is down 
+    FIMO_ERROR_CODE_NETDOWN,
+    /// Connection aborted by network 
+    FIMO_ERROR_CODE_NETRESET,
+    /// Network unreachable 
+    FIMO_ERROR_CODE_NETUNREACH,
+    /// Too many open files in system 
+    FIMO_ERROR_CODE_NFILE,
+    /// No anode 
+    FIMO_ERROR_CODE_NOANO,
+    /// No buffer space available 
+    FIMO_ERROR_CODE_NOBUFS,
+    /// The named attribute does not exist, or the process has no access to this attribute 
+    FIMO_ERROR_CODE_NODATA,
+    /// No such device 
+    FIMO_ERROR_CODE_NODEV,
+    /// No such file or directory 
+    FIMO_ERROR_CODE_NOENT,
+    /// Exec format error 
+    FIMO_ERROR_CODE_NOEXEC,
+    /// Required key not available 
+    FIMO_ERROR_CODE_NOKEY,
+    /// No locks available 
+    FIMO_ERROR_CODE_NOLCK,
+    /// Link has been severed 
+    FIMO_ERROR_CODE_NOLINK,
+    /// No medium found 
+    FIMO_ERROR_CODE_NOMEDIUM,
+    /// Not enough space/cannot allocate memory 
+    FIMO_ERROR_CODE_NOMEM,
+    /// No message of the desired type 
+    FIMO_ERROR_CODE_NOMSG,
+    /// Machine is not on the network 
+    FIMO_ERROR_CODE_NONET,
+    /// Package not installed 
+    FIMO_ERROR_CODE_NOPKG,
+    /// Protocol not available 
+    FIMO_ERROR_CODE_NOPROTOOPT,
+    /// No space left on device 
+    FIMO_ERROR_CODE_NOSPC,
+    /// No STREAM resources 
+    FIMO_ERROR_CODE_NOSR,
+    /// Not a STREAM 
+    FIMO_ERROR_CODE_NOSTR,
+    /// Function not implemented 
+    FIMO_ERROR_CODE_NOSYS,
+    /// Block device required 
+    FIMO_ERROR_CODE_NOTBLK,
+    /// The socket is not connected 
+    FIMO_ERROR_CODE_NOTCONN,
+    /// Not a directory 
+    FIMO_ERROR_CODE_NOTDIR,
+    /// Directory not empty 
+    FIMO_ERROR_CODE_NOTEMPTY,
+    /// State not recoverable 
+    FIMO_ERROR_CODE_NOTRECOVERABLE,
+    /// Not a socket 
+    FIMO_ERROR_CODE_NOTSOCK,
+    /// Operation not supported 
+    FIMO_ERROR_CODE_NOTSUP,
+    /// Inappropriate I/O control operation 
+    FIMO_ERROR_CODE_NOTTY,
+    /// Name not unique on network 
+    FIMO_ERROR_CODE_NOTUNIQ,
+    /// No such device or address 
+    FIMO_ERROR_CODE_NXIO,
+    /// Operation not supported on socket 
+    FIMO_ERROR_CODE_OPNOTSUPP,
+    /// Value too large to be stored in data type 
+    FIMO_ERROR_CODE_OVERFLOW,
+    /// Owner died 
+    FIMO_ERROR_CODE_OWNERDEAD,
+    /// Operation not permitted 
+    FIMO_ERROR_CODE_PERM,
+    /// Protocol family not supported 
+    FIMO_ERROR_CODE_PFNOSUPPORT,
+    /// Broken pipe 
+    FIMO_ERROR_CODE_PIPE,
+    /// Protocol error 
+    FIMO_ERROR_CODE_PROTO,
+    /// Protocol not supported 
+    FIMO_ERROR_CODE_PROTONOSUPPORT,
+    /// Protocol wrong type for socket 
+    FIMO_ERROR_CODE_PROTOTYPE,
+    /// Result too large 
+    FIMO_ERROR_CODE_RANGE,
+    /// Remote address changed 
+    FIMO_ERROR_CODE_REMCHG,
+    /// Object is remote 
+    FIMO_ERROR_CODE_REMOTE,
+    /// Remote I/O error 
+    FIMO_ERROR_CODE_REMOTEIO,
+    /// Interrupted system call should be restarted 
+    FIMO_ERROR_CODE_RESTART,
+    /// Operation not possible due to RF-kill 
+    FIMO_ERROR_CODE_RFKILL,
+    /// Read-only filesystem 
+    FIMO_ERROR_CODE_ROFS,
+    /// Cannot send after transport endpoint shutdown 
+    FIMO_ERROR_CODE_SHUTDOWN,
+    /// Invalid seek 
+    FIMO_ERROR_CODE_SPIPE,
+    /// Socket type not supported 
+    FIMO_ERROR_CODE_SOCKTNOSUPPORT,
+    /// No such process 
+    FIMO_ERROR_CODE_SRCH,
+    /// Stale file handle 
+    FIMO_ERROR_CODE_STALE,
+    /// Streams pipe error 
+    FIMO_ERROR_CODE_STRPIPE,
+    /// Timer expired 
+    FIMO_ERROR_CODE_TIME,
+    /// Connection timed out 
+    FIMO_ERROR_CODE_TIMEDOUT,
+    /// Too many references: cannot splice 
+    FIMO_ERROR_CODE_TOOMANYREFS,
+    /// Text file busy 
+    FIMO_ERROR_CODE_TXTBSY,
+    /// Structure needs cleaning 
+    FIMO_ERROR_CODE_UCLEAN,
+    /// Protocol driver not attached 
+    FIMO_ERROR_CODE_UNATCH,
+    /// Too many users 
+    FIMO_ERROR_CODE_USERS,
+    /// Operation would block 
+    FIMO_ERROR_CODE_WOULDBLOCK,
+    /// Invalid cross-device link 
+    FIMO_ERROR_CODE_XDEV,
+    /// Exchange full 
+    FIMO_ERROR_CODE_XFULL,
 } FimoErrorCode;
 
-/**
- * A system error code.
- */
+/// A system error code.
 #ifdef _WIN32
 typedef DWORD FimoSystemErrorCode;
 #else
@@ -345,119 +439,79 @@ typedef int FimoSystemErrorCode;
 static_assert(sizeof(FimoSystemErrorCode) <= sizeof(void *), "FimoSystemErrorCode size too large");
 static_assert(alignof(FimoSystemErrorCode) <= alignof(void *), "FimoSystemErrorCode alignment too large");
 
-/**
- * An owned string returned from a `FimoResult`.
- */
+/// An owned string returned from a `FimoResult`.
 typedef struct FimoResultString {
     const char *str;
     void (*release)(const char *str);
 } FimoResultString;
 
-/**
- * Core VTable of a `FimoResult`.
- *
- * Changing the VTable is a breaking change.
- */
+/// Core VTable of a `FimoResult`.
+///
+/// Adding fields to the vtable is a breaking change.
 typedef struct FimoResultVTableV0 {
     void (*release)(void *);
     FimoResultString (*error_name)(void *);
     FimoResultString (*error_description)(void *);
 } FimoResultVTableV0;
 
-/**
- * VTable of a `FimoResult`.
- */
+/// VTable of a `FimoResult`.
 typedef struct FimoResultVTable {
     FimoResultVTableV0 v0;
 } FimoResultVTable;
 
-/**
- * Status of an operation.
- */
+/// Status of an operation.
 typedef struct FimoResult {
     void *data;
     const FimoResultVTable *vtable;
 } FimoResult;
 
-/**
- * VTable for a `FimoResult` containing a static string.
- */
+/// VTable for a `FimoResult` containing a static string.
 FIMO_EXPORT
 extern const FimoResultVTable FIMO_IMPL_RESULT_STATIC_STRING_VTABLE;
 
-/**
- * VTable for a `FimoResult` containing a dynamic string.
- */
+/// VTable for a `FimoResult` containing a dynamic string.
 FIMO_EXPORT
 extern const FimoResultVTable FIMO_IMPL_RESULT_DYNAMIC_STRING_VTABLE;
 
-/**
- * VTable for a `FimoResult` containing a `FimoErrorCode`.
- */
+/// VTable for a `FimoResult` containing a `FimoErrorCode`.
 FIMO_EXPORT
 extern const FimoResultVTable FIMO_IMPL_RESULT_ERROR_CODE_VTABLE;
 
-/**
- * VTable for a `FimoResult` containing a `FimoSystemErrorCode`.
- */
+/// VTable for a `FimoResult` containing a `FimoSystemErrorCode`.
 FIMO_EXPORT
 extern const FimoResultVTable FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE;
 
-/**
- * A result indicating that no error occurred.
- */
+/// A result indicating that no error occurred.
 FIMO_EXPORT
 extern const FimoResult FIMO_IMPL_RESULT_OK;
 
-/**
- * A result indicating the failed construction of a `FimoResult`.
- */
+/// A result indicating the failed construction of a `FimoResult`.
 FIMO_EXPORT
 extern const FimoResult FIMO_IMPL_RESULT_INVALID_ERROR;
 
-/**
- * Name of the `FIMO_IMPL_RESULT_OK` result.
- */
+/// Name of the `FIMO_IMPL_RESULT_OK` result.
 FIMO_EXPORT
 extern const FimoResultString FIMO_IMPL_RESULT_OK_NAME;
 
-/**
- * Description of the `FIMO_IMPL_RESULT_OK` result.
- */
+/// Description of the `FIMO_IMPL_RESULT_OK` result.
 FIMO_EXPORT
 extern const FimoResultString FIMO_IMPL_RESULT_OK_DESCRIPTION;
 
-/**
- * Get the name of the error code.
- *
- * In case of an unknown error this returns `"FIMO_ERROR_CODE_UNKNOWN"`.
- *
- * @param errnum the error code
- *
- * @return The name of the error.
- */
+/// Get the name of the error code.
+///
+/// In case of an unknown error this returns `"FIMO_ERROR_CODE_UNKNOWN"`.
 FIMO_EXPORT
 FIMO_MUST_USE
 const char *fimo_error_code_name(FimoErrorCode errnum);
 
-/**
- * Get the description of the error code.
- *
- * In case of an unknown error this returns `"unknown error code"`.
- *
- * @param errnum the error code
- *
- * @return The description of the error.
- */
+/// Get the description of the error code.
+///
+/// In case of an unknown error this returns `"unknown error code"`.
 FIMO_EXPORT
 FIMO_MUST_USE
 const char *fimo_error_code_description(FimoErrorCode errnum);
 
-/**
- * Releases a `FimoResultString`.
- *
- * @param str string to release
- */
+/// Releases a `FimoResultString`.
 static FIMO_INLINE_ALWAYS void fimo_result_string_release(FimoResultString str) {
     if (str.release) {
         str.release(str.str);
@@ -472,13 +526,7 @@ static FIMO_INLINE_ALWAYS void fimo_result_string_release(FimoResultString str) 
 #define FIMO_IMPL_RESULT_STRING_INITIALIZER (FimoResultString)
 #endif
 
-/**
- * Constructs a `FimoResult` from a static string.
- *
- * @param error error string
- *
- * @return Result instance.
- */
+/// Constructs a `FimoResult` from a static string.
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_static_string(const char *error) {
     if (!error) {
@@ -487,15 +535,9 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_static_string(const char *
     return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)error, .vtable = &FIMO_IMPL_RESULT_STATIC_STRING_VTABLE};
 }
 
-/**
- * Constructs a `FimoResult` from a dynamic string.
- *
- * The string must be allocated in a way that it can be freed with `fimo_free`.
- *
- * @param error error string
- *
- * @return Result instance.
- */
+/// Constructs a `FimoResult` from a dynamic string.
+///
+/// The string must be allocated in a way that it can be freed with `fimo_free`.
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_dynamic_string(const char *error) {
     if (!error) {
@@ -504,13 +546,7 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_dynamic_string(const char 
     return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)error, .vtable = &FIMO_IMPL_RESULT_DYNAMIC_STRING_VTABLE};
 }
 
-/**
- * Constructs a `FimoResult` from a `FimoErrorCode`.
- *
- * @param code error code
- *
- * @return Result instance.
- */
+/// Constructs a `FimoResult` from a `FimoErrorCode`.
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_error_code(FimoErrorCode code) {
     if (code == FIMO_ERROR_CODE_OK) {
@@ -522,59 +558,31 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_error_code(FimoErrorCode c
     return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)(intptr_t)code, .vtable = &FIMO_IMPL_RESULT_ERROR_CODE_VTABLE};
 }
 
-/**
- * Constructs a `FimoResult` from a `FimoSystemErrorCode`.
- *
- * @param code error code
- *
- * @return Result instace.
- */
+/// Constructs a `FimoResult` from a `FimoSystemErrorCode`.
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_system_error_code(FimoSystemErrorCode code) {
     return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)(intptr_t)code,
                                         .vtable = &FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE};
 }
 
-/**
- * Checks whether the `FimoResult` signifies an error.
- *
- * @param result result
- *
- * @return Whether the result is an error.
- */
+/// Checks whether the `FimoResult` signifies an error.
 static FIMO_INLINE_ALWAYS bool fimo_result_is_error(FimoResult result) { return result.vtable != NULL; }
 
-/**
- * Checks whether the `FimoResult` does not signify an error.
- *
- * @param result result
- *
- * @return Whether the result is not an error.
- */
+/// Checks whether the `FimoResult` does not signify an error.
 static FIMO_INLINE_ALWAYS bool fimo_result_is_ok(FimoResult result) { return result.vtable == NULL; }
 
-/**
- * Releases the `FimoResult`.
- *
- * The value may not be used again after releasing it.
- *
- * @param result result to release
- */
+/// Releases the `FimoResult`.
+///
+/// The value may not be used again after releasing it.
 static FIMO_INLINE_ALWAYS void fimo_result_release(FimoResult result) {
     if (fimo_result_is_error(result) && result.vtable->v0.release) {
         result.vtable->v0.release(result.data);
     }
 }
 
-/**
- * Get the error name contained in the `FimoResult`.
- *
- * In case `result` does not contain an error this returns `"FIMO_IMPL_RESULT_OK_NAME"`.
- *
- * @param result the result
- *
- * @return Error name.
- */
+/// Get the error name contained in the `FimoResult`.
+///
+/// In case `result` does not contain an error this returns `"FIMO_IMPL_RESULT_OK_NAME"`.
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResultString fimo_result_error_name(FimoResult result) {
     if (fimo_result_is_ok(result)) {
@@ -583,15 +591,9 @@ static FIMO_INLINE_ALWAYS FimoResultString fimo_result_error_name(FimoResult res
     return result.vtable->v0.error_name(result.data);
 }
 
-/**
- * Get the error description contained in the `FimoResult`.
- *
- * In case `result` does not contain an error this returns `FIMO_IMPL_RESULT_OK_DESCRIPTION`.
- *
- * @param result the result
- *
- * @return Error description.
- */
+/// Get the error description contained in the `FimoResult`.
+///
+/// In case `result` does not contain an error this returns `FIMO_IMPL_RESULT_OK_DESCRIPTION`.
 FIMO_MUST_USE
 static FIMO_INLINE_ALWAYS FimoResultString fimo_result_error_description(FimoResult result) {
     if (fimo_result_is_ok(result)) {

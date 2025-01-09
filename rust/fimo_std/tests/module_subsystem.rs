@@ -1,7 +1,7 @@
 use fimo_std::{
     context::ContextBuilder,
     declare_items, emit_info,
-    error::Error,
+    error::AnyError,
     export_module,
     module::*,
     r#async::{BlockingContext, EventLoop},
@@ -119,7 +119,7 @@ impl<'m> ModuleConstructor<C<'m>> for CConstructor {
     fn construct<'a>(
         module: ConstructorModule<'a, C<'m>>,
         set: LoadingSetView<'_>,
-    ) -> Result<&'a mut <C<'m> as Module>::Data, Error> {
+    ) -> Result<&'a mut <C<'m> as Module>::Data, AnyError> {
         let module = module.unwrap()?;
 
         let parameters = module.parameters();
@@ -175,7 +175,7 @@ impl<'m> ModuleConstructor<C<'m>> for CConstructor {
 }
 
 #[test]
-fn load_modules() -> Result<(), Error> {
+fn load_modules() -> Result<(), AnyError> {
     let context = <ContextBuilder>::new()
         .with_tracing_config(Config::new(
             None,
@@ -219,7 +219,7 @@ fn load_modules() -> Result<(), Error> {
         let info = module.module_info().to_owned();
         let _guard = info
             .try_acquire_module_strong()
-            .ok_or(Error::new("failed to acquire module"))?;
+            .ok_or(AnyError::new("failed to acquire module"))?;
 
         drop(module);
         assert!(a.is_loaded());

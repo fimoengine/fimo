@@ -1,7 +1,7 @@
 use crate::{bindings, Context};
 use fimo_std::{
     allocator::FimoAllocator,
-    error::{to_result_indirect, to_result_indirect_in_place, Error},
+    error::{to_result_indirect, to_result_indirect_in_place, AnyError},
 };
 use std::{ffi::CStr, fmt::Formatter, marker::PhantomData, num::NonZeroUsize};
 
@@ -60,7 +60,7 @@ impl WorkerGroup<'_> {
     ///
     /// If successful, the worker group will close its side of the channel and stop accepting new
     /// commands. The currently enqueued commands will be run to completion.
-    pub fn request_close(&self) -> Result<(), Error> {
+    pub fn request_close(&self) -> Result<(), AnyError> {
         // Safety: FFI call is safe
         unsafe {
             to_result_indirect(|err| {
@@ -70,7 +70,7 @@ impl WorkerGroup<'_> {
     }
 
     /// Fetches a list of worker ids available in the worker group.
-    pub fn workers(&self) -> Result<Box<[WorkerId], FimoAllocator>, Error> {
+    pub fn workers(&self) -> Result<Box<[WorkerId], FimoAllocator>, AnyError> {
         let mut num_workers = 0;
         // Safety: FFI call is safe
         let workers = unsafe {
@@ -99,7 +99,7 @@ impl WorkerGroup<'_> {
     ///
     /// When spawning new tasks, they will be assigned one stack which matches the requirements
     /// specified in the commands.
-    pub fn stack_sizes(&self) -> Result<Box<[usize], FimoAllocator>, Error> {
+    pub fn stack_sizes(&self) -> Result<Box<[usize], FimoAllocator>, AnyError> {
         let mut num_stacks = 0;
         // Safety: FFI call is safe
         let sizes = unsafe {
@@ -310,7 +310,7 @@ impl<'a> WorkerGroupBuilder<'a> {
     }
 
     /// Creates a new [`WorkerGroup`].
-    pub fn build(self, ctx: &Context) -> Result<WorkerGroup<'_>, Error> {
+    pub fn build(self, ctx: &Context) -> Result<WorkerGroup<'_>, AnyError> {
         // Safety: `WorkerGroupStackDescriptor` has a `transparent` layout.
         let stacks = unsafe {
             std::mem::transmute::<

@@ -1,7 +1,7 @@
 use core::{ffi::CStr, marker::PhantomData, ops::Deref};
 
 use crate::{
-    error::Error,
+    error::AnyError,
     module::{GenericModule, Module},
     version::Version,
 };
@@ -85,7 +85,7 @@ where
     /// Constructs a new instance of the symbol.
     fn construct(
         module: PartialModule<'_, T>,
-    ) -> Result<&mut <Self::Item as SymbolItem>::Type, Error>;
+    ) -> Result<&mut <Self::Item as SymbolItem>::Type, AnyError>;
 
     /// Destroys the symbol.
     fn destroy(symbol: &mut <Self::Item as SymbolItem>::Type);

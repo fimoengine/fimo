@@ -1,7 +1,7 @@
 //! Time utilities.
 use crate::{
     bindings,
-    error::{to_result_indirect_in_place, Error},
+    error::{to_result_indirect_in_place, AnyError},
     ffi::{FFISharable, FFITransferable},
 };
 use core::ops::{Add, AddAssign, Sub, SubAssign};
@@ -232,7 +232,7 @@ impl Time {
     /// Returns the duration elapsed since the time.
     ///
     /// May result in an error, if a time shift caused `self` to be in the future.
-    pub fn elapsed(&self) -> Result<Duration, Error> {
+    pub fn elapsed(&self) -> Result<Duration, AnyError> {
         // Safety: FFI call is safe.
         let duration = unsafe {
             to_result_indirect_in_place(|error, duration| {
@@ -245,7 +245,7 @@ impl Time {
     /// Returns the difference between two time points.
     ///
     /// Returns an error if `self` is after `other`.
-    pub fn duration_since(&self, other: &Self) -> Result<Duration, Error> {
+    pub fn duration_since(&self, other: &Self) -> Result<Duration, AnyError> {
         // Safety: FFI call is safe.
         let duration = unsafe {
             to_result_indirect_in_place(|error, duration| {

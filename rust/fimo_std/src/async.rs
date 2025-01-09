@@ -3,7 +3,7 @@
 use crate::{
     bindings,
     context::ContextView,
-    error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
+    error::{to_result_indirect, to_result_indirect_in_place, AnyError, AnyResult},
     ffi::{FFISharable, FFITransferable, Viewable},
 };
 use std::{
@@ -30,7 +30,7 @@ impl EventLoop {
     ///
     /// There can only be one event loop at a time, and it will keep
     /// the context alive until it completes its execution.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
         let ctx = ctx.view();
         // Safety: Is always set.
         let f = unsafe { ctx.vtable().async_v0.start_event_loop.unwrap_unchecked() };
@@ -52,7 +52,7 @@ impl EventLoop {
     /// Upon the completion of all tasks, the function will return to the caller.
     pub fn flush_with_current_thread<'a, T: Viewable<ContextView<'a>>>(
         ctx: &T,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AnyError> {
         let ctx = ctx.view();
         // Safety: Is always set.
         let f = unsafe { ctx.vtable().async_v0.run_to_completion.unwrap_unchecked() };
@@ -245,7 +245,7 @@ pub type EnqueuedFuture<R> = Future<OpaqueState, R>;
 #[repr(C)]
 #[derive(Debug)]
 pub struct Fallible<T> {
-    result: bindings::FimoResult,
+    result: AnyResult<dyn Send + Sync>,
     value: MaybeUninit<T>,
 }
 
@@ -253,33 +253,30 @@ impl<T> Fallible<T> {
     /// Constructs a new instance from a value.
     pub fn new(value: T) -> Self {
         Self {
-            result: Ok::<(), Error>(()).into_ffi(),
+            result: Default::default(),
             value: MaybeUninit::new(value),
         }
     }
 
     /// Constructs a new instance from a result.
-    pub fn new_result(res: Result<T, Error<dyn Send + Sync>>) -> Self {
+    pub fn new_result(res: Result<T, AnyError<dyn Send + Sync>>) -> Self {
         match res {
             Ok(v) => Self {
-                result: Ok::<(), Error>(()).into_ffi(),
+                result: Default::default(),
                 value: MaybeUninit::new(v),
             },
             Err(err) => Self {
-                result: err.into_ffi(),
+                result: err.into(),
                 value: MaybeUninit::uninit(),
             },
         }
     }
 
     /// Extracts the result.
-    pub fn unwrap(self) -> Result<T, Error<dyn Send + Sync>> {
-        // Safety: Is initialized.
-        match unsafe { to_result(self.result) } {
-            // Safety: Must be initialized.
+    pub fn unwrap(self) -> Result<T, AnyError<dyn Send + Sync>> {
+        match self.result.into_result() {
             Ok(_) => Ok(unsafe { self.value.assume_init() }),
-            // Safety: We know that the error is Send + Sync
-            Err(e) => Err(unsafe { std::mem::transmute::<Error, Error<dyn Send + Sync>>(e) }),
+            Err(e) => Err(e),
         }
     }
 }
@@ -338,7 +335,7 @@ impl<T, R> Future<T, R> {
     }
 
     /// Enqueues the future on the subsystem.
-    pub fn enqueue(self, ctx: ContextView<'_>) -> Result<EnqueuedFuture<R>, Error>
+    pub fn enqueue(self, ctx: ContextView<'_>) -> Result<EnqueuedFuture<R>, AnyError>
     where
         T: Send + 'static,
         R: Send + 'static,
@@ -617,7 +614,7 @@ pub struct BlockingContext(bindings::FimoAsyncBlockingContext);
 
 impl BlockingContext {
     /// Constructs a new blocking context.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
         let ctx = ctx.view();
         // Safety: Is always set.
         let f = unsafe {

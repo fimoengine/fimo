@@ -4,7 +4,7 @@ use super::{Module, ModuleExport, ModuleInfo, ModuleInfoView, NamespaceItem, Sym
 use crate::{
     bindings,
     context::ContextView,
-    error::{to_result_indirect, to_result_indirect_in_place, Error},
+    error::{to_result_indirect, to_result_indirect_in_place, AnyError},
     ffi::{FFISharable, FFITransferable, Viewable},
     r#async::{EnqueuedFuture, Fallible},
     version::Version,
@@ -82,7 +82,7 @@ impl LoadingSetView<'_> {
     /// can be in a partially loaded state at the time of calling this function, the error path
     /// may be invoked immediately. If the requested module does not exist, the function will return
     /// an error.
-    pub fn add_callback<F>(&self, module: &CStr, callback: F) -> Result<(), Error>
+    pub fn add_callback<F>(&self, module: &CStr, callback: F) -> Result<(), AnyError>
     where
         F: FnOnce(LoadingStatus<'_>) + Send + 'static,
     {
@@ -125,7 +125,7 @@ impl LoadingSetView<'_> {
         let on_success = Some(success_callback::<F> as _);
         let on_error = Some(error_callback::<F> as _);
         let on_abort = Some(drop_callback::<F> as _);
-        let callback = Box::try_new(callback).map_err(<Error>::new)?;
+        let callback = Box::try_new(callback).map_err(<AnyError>::new)?;
         let callback = Box::into_raw(callback);
 
         // Safety:
@@ -163,7 +163,7 @@ impl LoadingSetView<'_> {
         &self,
         owner: &impl Module,
         export: impl FFITransferable<*const bindings::FimoModuleExport>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), AnyError> {
         // Safety:
         unsafe {
             let f = self.vtable().add_module.unwrap_unchecked();
@@ -189,7 +189,7 @@ impl LoadingSetView<'_> {
     /// # Safety
     ///
     /// Loading a library may execute arbitrary code.
-    pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), Error>
+    pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), AnyError>
     where
         F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
     {
@@ -218,7 +218,7 @@ impl LoadingSetView<'_> {
 
         let filter_fn = Some(filter_func::<F> as _);
         let filter_drop_fn = Some(filter_drop::<F> as _);
-        let filter = Box::try_new(filter).map_err(<Error>::new)?;
+        let filter = Box::try_new(filter).map_err(<AnyError>::new)?;
         let filter = Box::into_raw(filter);
 
         // Safety:
@@ -249,7 +249,7 @@ impl LoadingSetView<'_> {
     /// not return an error, if it does not export any modules. The necessary symbols are set up
     /// automatically, if the binary was linked with the fimo library. In case of an error, no
     /// modules are appended to the set.
-    pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), Error>
+    pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), AnyError>
     where
         F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
     {
@@ -278,7 +278,7 @@ impl LoadingSetView<'_> {
 
         let filter_fn = Some(filter_func::<F> as _);
         let filter_drop_fn = Some(filter_drop::<F> as _);
-        let filter = Box::try_new(filter).map_err(<Error>::new)?;
+        let filter = Box::try_new(filter).map_err(<AnyError>::new)?;
         let filter = Box::into_raw(filter);
 
         let iterator = super::fimo_impl_module_export_iterator;
@@ -308,7 +308,7 @@ impl LoadingSetView<'_> {
     ///
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
-    pub fn commit(&self) -> impl Future<Output = Result<(), Error<dyn Send + Sync>>> {
+    pub fn commit(&self) -> impl Future<Output = Result<(), AnyError<dyn Send + Sync>>> {
         // Safety:
         unsafe {
             let f = self.vtable().commit.unwrap_unchecked();
@@ -356,7 +356,7 @@ pub struct LoadingSet(LoadingSetView<'static>);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
         unsafe {
             let f = ctx.view().vtable().module_v0.set_new.unwrap_unchecked();
             let set = to_result_indirect_in_place(|error, set| {

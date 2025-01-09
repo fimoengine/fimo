@@ -180,8 +180,8 @@ pub struct VTablePtr<T: Send + Sync>(ConstNonNull<T>);
 
 impl<T: Send + Sync> VTablePtr<T> {
     /// Constructs a new pointer from a static reference.
-    pub fn new(value: &'static T) -> Self {
-        Self(ConstNonNull::from(value))
+    pub const fn new(value: &'static T) -> Self {
+        unsafe { Self::new_unchecked(value) }
     }
 
     /// Constructs a new pointer.
@@ -190,7 +190,7 @@ impl<T: Send + Sync> VTablePtr<T> {
     ///
     /// The caller must ensure, that `value` can be dereferenced for the lifetime of the constructed
     /// instance.
-    pub unsafe fn new_unchecked(value: *const T) -> Self {
+    pub const unsafe fn new_unchecked(value: *const T) -> Self {
         unsafe { Self(ConstNonNull::new_unchecked(value.cast_mut())) }
     }
 }
@@ -254,7 +254,10 @@ impl<T: Send + Sync> Hash for VTablePtr<T> {
 
 /// Internal handle to some opaque data.
 #[repr(transparent)]
-pub struct OpaqueHandle<T: ?Sized = *mut ()>(NonNull<std::ffi::c_void>, PhantomData<T>);
+pub struct OpaqueHandle<T: ?Sized = *mut ()>(
+    NonNull<std::ffi::c_void>,
+    PhantomData<for<'a> fn(&'a ()) -> &'a T>,
+);
 
 const _: () = const {
     if size_of::<OpaqueHandle<()>>() != size_of::<*mut ()>() {
@@ -268,7 +271,7 @@ const _: () = const {
     }
 };
 
-impl<T: ?Sized> OpaqueHandle<T> {    
+impl<T: ?Sized> OpaqueHandle<T> {
     /// Creates a new `OpaqueHandle` if `ptr` is non-null.
     ///
     /// # Examples
@@ -433,7 +436,7 @@ macro_rules! handle {
             ///
             /// `ptr` must be non-null.
             pub const unsafe fn new_unchecked<T>(ptr: *mut T) -> Self $(where T: $bound $(+ $bound_rest)* )? {
-                unsafe { Self(core::ptr::NonNull::new_unchecked(ptr.cast()), core::marker::PhantomData) }
+                unsafe { Self(core::ptr::NonNull::new_unchecked(ptr.cast()) $(, core::marker::PhantomData::<dyn $bound $(+ $bound_rest)*>)?) }
             }
 
             /// Acquires the underlying `*mut` ptr.
@@ -458,7 +461,7 @@ macro_rules! handle {
                 core::fmt::Pointer::fmt(&self.0, f)
             }
         }
-        
+
         const _: () = const {
             if size_of::<$ident>() != size_of::<*mut ()>() {
                 panic!(concat!(stringify!($ident), " must have the size of `*mut ()`"))

@@ -1,7 +1,7 @@
 use fimo_std::{
     context::{Context, ContextBuilder, ContextView},
     emit_trace,
-    error::Error,
+    error::AnyError,
     ffi::Viewable,
     r#async::{BlockingContext, EventLoop},
     tracing::{default_subscriber, Config, Level, ThreadAccess},
@@ -9,7 +9,7 @@ use fimo_std::{
 use std::{future::Future, pin::Pin, task::Poll};
 
 #[test]
-fn block_on_futures() -> Result<(), Error> {
+fn block_on_futures() -> Result<(), AnyError> {
     let context = <ContextBuilder>::new()
         .with_tracing_config(Config::new(
             None,
@@ -35,7 +35,7 @@ fn block_on_futures() -> Result<(), Error> {
 const LOOP_1: usize = 5;
 const LOOP_2: usize = 10;
 
-fn new_nested(ctx: ContextView<'_>) -> Result<impl Future<Output = (usize, usize)>, Error> {
+fn new_nested(ctx: ContextView<'_>) -> Result<impl Future<Output = (usize, usize)>, AnyError> {
     let a = fimo_std::r#async::Future::new(LoopFuture::<LOOP_1>::new(ctx)).enqueue(ctx)?;
     let b = fimo_std::r#async::Future::new(LoopFuture::<LOOP_2>::new(ctx)).enqueue(ctx)?;
 

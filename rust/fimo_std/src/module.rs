@@ -4,7 +4,7 @@ use std::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
     bindings,
-    error::{to_result_indirect_in_place, Error},
+    error::{to_result_indirect_in_place, AnyError},
 };
 
 mod loading_set;
@@ -32,19 +32,19 @@ pub trait ModuleSubsystem {
     /// Checks for the presence of a namespace in the module backend.
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-    fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error>;
+    fn namespace_exists(&self, namespace: &CStr) -> Result<bool, AnyError>;
 
     /// Unloads all unused instances.
     ///
     /// After calling this function, all unreferenced instances are unloaded.
-    fn prune_instances(&self) -> Result<(), Error>;
+    fn prune_instances(&self) -> Result<(), AnyError>;
 }
 
 impl<'a, T> ModuleSubsystem for T
 where
     T: Viewable<ContextView<'a>>,
 {
-    fn namespace_exists(&self, namespace: &CStr) -> Result<bool, Error> {
+    fn namespace_exists(&self, namespace: &CStr) -> Result<bool, AnyError> {
         // Safety: Is always set.
         let f = unsafe {
             self.view()
@@ -62,7 +62,7 @@ where
         }
     }
 
-    fn prune_instances(&self) -> Result<(), Error> {
+    fn prune_instances(&self) -> Result<(), AnyError> {
         // Safety:
         unsafe {
             let f = self
@@ -107,7 +107,7 @@ where
 {
     /// Unwraps the handle, checking that the version of the context that loaded the module is
     /// compatible with the required version.
-    pub fn unwrap(self) -> Result<PreModule<'a, T>, Error> {
+    pub fn unwrap(self) -> Result<PreModule<'a, T>, AnyError> {
         self.0.context().check_version()?;
         Ok(self.0)
     }
@@ -152,7 +152,7 @@ pub trait ModuleConstructor<T: Module> {
     fn construct<'a>(
         module: ConstructorModule<'a, T>,
         set: LoadingSetView<'_>,
-    ) -> Result<&'a mut <T as Module>::Data, Error>;
+    ) -> Result<&'a mut <T as Module>::Data, AnyError>;
 
     /// Destroys the module data.
     ///
@@ -176,7 +176,7 @@ where
     fn construct<'a>(
         module: ConstructorModule<'a, T>,
         _set: LoadingSetView<'_>,
-    ) -> Result<&'a mut T::Data, Error> {
+    ) -> Result<&'a mut T::Data, AnyError> {
         // Check that the version is compatible.
         let _ = module.unwrap()?;
         // Safety: The pointer is valid.
@@ -794,10 +794,10 @@ macro_rules! export_module_private_exports {
         {
             let mut guard = match CURRENT.0.write() {
                 Ok(x) => x,
-                Err(e) => return $crate::error::Error::new(e).into_error(),
+                Err(e) => return $crate::error::AnyError::new(e).into_error(),
             };
             if guard.is_null() {
-                return <$crate::error::Error>::from_string(c"module pointer not set").into_error();
+                return <$crate::error::AnyError>::from_string(c"module pointer not set").into_error();
             }
 
             // Safety:
@@ -806,7 +806,7 @@ macro_rules! export_module_private_exports {
                     Ok(_) => {
                         use $crate::ffi::FFITransferable;
                         INIT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        Result::<_, $crate::error::Error>::Ok(()).into_ffi()
+                        $crate::error::AnyResult::<*mut ()>::default().into_error()
                     }
                     Err(e) => e.into_error()
                 }
@@ -918,10 +918,10 @@ macro_rules! export_module_private_data {
         {
             let mut guard = match CURRENT.0.write() {
                 Ok(x) => x,
-                Err(e) => return $crate::error::Error::new(e).into_error(),
+                Err(e) => return $crate::error::AnyError::new(e).into_error(),
             };
             if !guard.is_null() {
-                return <$crate::error::Error>::EBUSY.into_error();
+                return <$crate::error::AnyError>::EBUSY.into_error();
             }
 
             // Safety:
@@ -930,7 +930,7 @@ macro_rules! export_module_private_data {
                     Ok(_) => {
                         use $crate::ffi::FFITransferable;
                         *guard = module;
-                        Result::<_, $crate::error::Error>::Ok(()).into_ffi()
+                        $crate::error::AnyResult::<*mut ()>::default().into_error()
                     },
                     Err(e) => e.into_error(),
                 }
@@ -969,7 +969,7 @@ macro_rules! export_module_private_data {
 pub mod c_ffi {
     use crate::{
         bindings,
-        error::Error,
+        error::AnyError,
         ffi::FFITransferable,
         module::{
             DynamicExport, LoadingSetView, Module, ModuleConstructor, PartialModule, PreModule,
@@ -984,7 +984,7 @@ pub mod c_ffi {
     pub unsafe fn construct_dynamic_symbol<T, S>(
         module: *const bindings::FimoModuleInstance,
         symbol: *mut *mut core::ffi::c_void,
-    ) -> Result<(), Error>
+    ) -> Result<(), AnyError>
     where
         T: Module,
         S: DynamicExport<T>,
@@ -1026,7 +1026,7 @@ pub mod c_ffi {
         module: *const bindings::FimoModuleInstance,
         set: bindings::FimoModuleLoadingSet,
         data: *mut *mut core::ffi::c_void,
-    ) -> Result<(), Error>
+    ) -> Result<(), AnyError>
     where
         T: Module,
         C: ModuleConstructor<T>,

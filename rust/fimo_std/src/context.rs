@@ -2,7 +2,7 @@
 
 use crate::{
     bindings, error,
-    error::{Error, FFIResult},
+    error::{AnyError, AnyResult},
     ffi::{FFISharable, VTablePtr, View, Viewable},
     handle,
     version::Version,
@@ -33,7 +33,7 @@ pub struct VTable {
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableHeader {
-    pub check_version: unsafe extern "C" fn(handle: ContextHandle, version: &Version) -> FFIResult,
+    pub check_version: unsafe extern "C" fn(handle: ContextHandle, version: &Version) -> AnyResult,
 }
 
 /// Core virtual function table of a [`ContextView`].
@@ -116,7 +116,7 @@ unsafe extern "C" {
     fn fimo_context_init(
         options: *mut *const bindings::FimoBaseStructIn,
         ctx: &mut MaybeUninit<Context>,
-    ) -> FFIResult;
+    ) -> AnyResult;
 }
 
 /// Context of the fimo library.
@@ -130,7 +130,7 @@ pub struct Context(ContextView<'static>);
 
 impl Context {
     /// Constructs a new `Context` with the default options.
-    pub fn new() -> Result<Self, Error> {
+    pub fn new() -> Result<Self, AnyError> {
         let mut ctx = MaybeUninit::uninit();
         unsafe {
             fimo_context_init(std::ptr::null_mut(), &mut ctx).into_result()?;
@@ -197,7 +197,7 @@ impl<const N: usize> ContextBuilder<N> {
     }
 
     /// Builds the context.
-    pub fn build(self) -> Result<Context, Error> {
+    pub fn build(self) -> Result<Context, AnyError> {
         let tracing = ManuallyDrop::new(self.tracing);
 
         let mut counter = 0;

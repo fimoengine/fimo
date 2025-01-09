@@ -2,7 +2,7 @@
 // MIT and Apache 2.0 dual license.
 
 use crate::{bindings, Context};
-use fimo_std::error::{to_result_indirect, to_result_indirect_in_place, Error};
+use fimo_std::error::{to_result_indirect, to_result_indirect_in_place, AnyError};
 
 /// Declare a new task-specific storage key of type [`TssKey`].
 #[macro_export]
@@ -97,7 +97,7 @@ impl<T: 'static> TssKey<T> {
     ///
     /// This function will still `panic!()` if the key is uninitialized and the key’s initializer
     /// panics.
-    pub fn try_with<R>(&'static self, ctx: &Context, f: impl FnOnce(&T) -> R) -> Result<R, Error> {
+    pub fn try_with<R>(&'static self, ctx: &Context, f: impl FnOnce(&T) -> R) -> Result<R, AnyError> {
         self.try_with_inner(ctx, f, self.init)
     }
 
@@ -118,7 +118,7 @@ impl<T: 'static> TssKey<T> {
         ctx: &Context,
         f: impl FnOnce(&T) -> R,
         init: impl FnOnce() -> Box<T>,
-    ) -> Result<R, Error> {
+    ) -> Result<R, AnyError> {
         // `self` is static so it is guaranteed to be unique and outlive the task.
         let tss_key = std::ptr::from_ref(self).cast::<bindings::FiTasksTssKey_>();
 

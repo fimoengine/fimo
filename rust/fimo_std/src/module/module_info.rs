@@ -2,7 +2,7 @@ use super::{NamespaceItem, NoState, Symbol, SymbolItem};
 use crate::{
     bindings,
     context::ContextView,
-    error::{to_result, to_result_indirect, to_result_indirect_in_place, Error},
+    error::{to_result, to_result_indirect, to_result_indirect_in_place, AnyError},
     ffi::{FFISharable, FFITransferable, Viewable},
     version::Version,
 };
@@ -55,7 +55,7 @@ impl ModuleInfoView<'_> {
     pub fn find_by_name<'a, T: Viewable<ContextView<'a>>>(
         ctx: &T,
         name: &CStr,
-    ) -> Result<ModuleInfo, Error> {
+    ) -> Result<ModuleInfo, AnyError> {
         // Safety: Is always set.
         let f = unsafe {
             ctx.view()
@@ -83,7 +83,7 @@ impl ModuleInfoView<'_> {
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<ModuleInfo, Error> {
+    ) -> Result<ModuleInfo, AnyError> {
         // Safety: Is always set.
         let f = unsafe {
             ctx.view()
@@ -271,7 +271,7 @@ impl ModuleInfo {
     pub fn find_by_name<'a, T: Viewable<ContextView<'a>>>(
         ctx: &T,
         name: &CStr,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, AnyError> {
         ModuleInfoView::find_by_name(ctx, name)
     }
 
@@ -281,7 +281,7 @@ impl ModuleInfo {
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, AnyError> {
         ModuleInfoView::find_by_symbol(ctx, name, namespace, version)
     }
 }
@@ -402,13 +402,13 @@ pub unsafe trait Module:
     ///
     /// Checks if the module specified that it includes the namespace `namespace`. In that case, the
     /// module is allowed access to the symbols in the namespace.
-    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, Error>;
+    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, AnyError>;
 
     /// Includes a namespace by the module.
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are exposed
     /// in said namespace. A namespace can not be included multiple times.
-    fn add_namespace(&self, namespace: &CStr) -> Result<(), Error>;
+    fn add_namespace(&self, namespace: &CStr) -> Result<(), AnyError>;
 
     /// Removes a namespace from the module.
     ///
@@ -420,13 +420,13 @@ pub unsafe trait Module:
     ///
     /// The caller must ensure that they don't utilize and symbol from the namespace that will be
     /// excluded.
-    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), Error>;
+    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), AnyError>;
 
     /// Checks if a module depends on another module.
     ///
     /// Checks if `module` is a dependency of the current instance. In that case the instance is
     /// allowed to access the symbols exported by `module`.
-    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error>;
+    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, AnyError>;
 
     /// Acquires another module as a dependency.
     ///
@@ -434,7 +434,7 @@ pub unsafe trait Module:
     /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
     /// already a dependency, or to a module that would result in a circular dependency will result
     /// in an error.
-    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), Error>;
+    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), AnyError>;
 
     /// Removes a module as a dependency.
     ///
@@ -446,7 +446,7 @@ pub unsafe trait Module:
     /// # Safety
     ///
     /// Calling this method invalidates all loaded symbols from the dependency.
-    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), Error>;
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), AnyError>;
 
     /// Loads a symbol from the module subsystem.
     ///
@@ -456,7 +456,7 @@ pub unsafe trait Module:
     /// module that exported the symbol. This function fails, if the module containing the symbol is
     /// not a dependency of the module, or if the module has not included the required namespace.
     #[allow(clippy::type_complexity)]
-    fn load_symbol<T: SymbolItem>(&self) -> Result<Symbol<'_, T::Type>, Error>
+    fn load_symbol<T: SymbolItem>(&self) -> Result<Symbol<'_, T::Type>, AnyError>
     where
         T::Type: 'static,
     {
@@ -480,7 +480,7 @@ pub unsafe trait Module:
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Symbol<'_, T>, Error>;
+    ) -> Result<Symbol<'_, T>, AnyError>;
 }
 
 /// Reference to an unknown module.
@@ -550,7 +550,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, Error> {
+    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, AnyError> {
         let mut has_dependency = false;
         let mut is_static = false;
 
@@ -578,7 +578,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn add_namespace(&self, namespace: &CStr) -> Result<(), Error> {
+    fn add_namespace(&self, namespace: &CStr) -> Result<(), AnyError> {
         unsafe {
             let f = self.vtable().add_namespace.unwrap_unchecked();
             to_result_indirect(|error| {
@@ -587,7 +587,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), Error> {
+    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), AnyError> {
         // Safety:
         unsafe {
             let f = self.vtable().remove_namespace.unwrap_unchecked();
@@ -597,7 +597,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
+    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, AnyError> {
         // Safety:
         unsafe {
             let f = self.vtable().query_dependency.unwrap_unchecked();
@@ -621,7 +621,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), Error> {
+    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), AnyError> {
         // Safety:
         unsafe {
             let f = self.vtable().add_dependency.unwrap_unchecked();
@@ -631,7 +631,7 @@ unsafe impl Module for OpaqueModule<'_> {
         }
     }
 
-    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), Error> {
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), AnyError> {
         // Safety:
         unsafe {
             let f = self.vtable().remove_dependency.unwrap_unchecked();
@@ -646,7 +646,7 @@ unsafe impl Module for OpaqueModule<'_> {
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Symbol<'_, T>, Error> {
+    ) -> Result<Symbol<'_, T>, AnyError> {
         // Safety:
         unsafe {
             let f = self.vtable().load_symbol.unwrap_unchecked();
@@ -818,28 +818,28 @@ where
         unsafe { &*core::ptr::from_ref(self.module.data()).cast() }
     }
 
-    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, Error> {
+    fn query_namespace(&self, namespace: &CStr) -> Result<DependencyType, AnyError> {
         self.module.query_namespace(namespace)
     }
 
-    fn add_namespace(&self, namespace: &CStr) -> Result<(), Error> {
+    fn add_namespace(&self, namespace: &CStr) -> Result<(), AnyError> {
         self.module.add_namespace(namespace)
     }
 
-    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), Error> {
+    unsafe fn remove_namespace(&self, namespace: &CStr) -> Result<(), AnyError> {
         // Safety: The caller ensures that the contract is valid.
         unsafe { self.module.remove_namespace(namespace) }
     }
 
-    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, Error> {
+    fn query_dependency(&self, module: &ModuleInfoView<'_>) -> Result<DependencyType, AnyError> {
         self.module.query_dependency(module)
     }
 
-    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), Error> {
+    fn add_dependency(&self, dependency: &ModuleInfoView<'_>) -> Result<(), AnyError> {
         self.module.add_dependency(dependency)
     }
 
-    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), Error> {
+    unsafe fn remove_dependency(&self, dependency: ModuleInfoView<'_>) -> Result<(), AnyError> {
         // Safety: The caller ensures that the contract is valid.
         unsafe { self.module.remove_dependency(dependency) }
     }
@@ -849,7 +849,7 @@ where
         name: &CStr,
         namespace: &CStr,
         version: Version,
-    ) -> Result<Symbol<'_, T>, Error> {
+    ) -> Result<Symbol<'_, T>, AnyError> {
         // Safety: The caller ensures that the contract is valid.
         unsafe {
             self.module
@@ -1041,7 +1041,7 @@ pub struct PseudoModule(OpaqueModule<'static>);
 
 impl PseudoModule {
     /// Constructs a new `PseudoModule`.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, Error> {
+    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: &T) -> Result<Self, AnyError> {
         // Safety: Is always set.
         let f = unsafe {
             ctx.view()

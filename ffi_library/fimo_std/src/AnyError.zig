@@ -310,7 +310,7 @@ pub fn format(
 }
 
 /// Posix error codes.
-pub const ErrorCode = enum(c_int) {
+pub const ErrorCode = enum(i32) {
     ok = c.FIMO_ERROR_CODE_OK,
     toobig = c.FIMO_ERROR_CODE_2BIG,
     acces = c.FIMO_ERROR_CODE_ACCES,

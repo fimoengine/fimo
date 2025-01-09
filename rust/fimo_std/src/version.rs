@@ -4,7 +4,7 @@ use core::fmt::Display;
 
 use crate::{
     bindings,
-    error::{to_result, to_result_indirect_in_place, Error},
+    error::{to_result, to_result_indirect_in_place, AnyError},
     ffi::FFITransferable,
 };
 
@@ -83,7 +83,7 @@ impl Version {
     /// function. A size of at least [`Self::MAX_STR_LENGTH`]
     /// is guaranteed to work, regardless of the contents
     /// of the `Version`.
-    pub fn write_str<'a>(&self, buff: &'a mut [u8]) -> Result<&'a mut str, Error> {
+    pub fn write_str<'a>(&self, buff: &'a mut [u8]) -> Result<&'a mut str, AnyError> {
         let mut written = 0usize;
         // Safety: The pointers are valid.
         let error = unsafe {
@@ -115,7 +115,7 @@ impl Version {
     /// function. A size of at least [`Self::MAX_LONG_STR_LENGTH`]
     /// is guaranteed to work, regardless of the contents
     /// of the `Version`.
-    pub fn write_str_long<'a>(&self, buff: &'a mut [u8]) -> Result<&'a mut str, Error> {
+    pub fn write_str_long<'a>(&self, buff: &'a mut [u8]) -> Result<&'a mut str, AnyError> {
         let mut written = 0usize;
         // Safety: The pointers are valid.
         let error = unsafe {
@@ -209,7 +209,7 @@ impl Display for Version {
 }
 
 impl TryFrom<&str> for Version {
-    type Error = Error;
+    type Error = AnyError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         // Safety: The value is initialized when there is no error.

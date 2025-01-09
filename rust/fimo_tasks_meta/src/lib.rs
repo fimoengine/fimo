@@ -4,7 +4,7 @@
 use std::{marker::PhantomData, time::Duration};
 
 use fimo_std::{
-    error::{to_result, to_result_indirect_in_place, Error},
+    error::{to_result, to_result_indirect_in_place, AnyError},
     ffi::FFITransferable,
 };
 
@@ -102,7 +102,7 @@ impl Context {
     /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
     /// # });
     /// ```
-    pub fn task_id(&self) -> Result<TaskId, Error> {
+    pub fn task_id(&self) -> Result<TaskId, AnyError> {
         // Safety: FFI call is safe
         let id = unsafe {
             to_result_indirect_in_place(|err, id| {
@@ -144,7 +144,7 @@ impl Context {
     /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
     /// # });
     /// ```
-    pub fn worker_id(&self) -> Result<WorkerId, Error> {
+    pub fn worker_id(&self) -> Result<WorkerId, AnyError> {
         // Safety: FFI call is safe
         let id = unsafe {
             to_result_indirect_in_place(|err, id| {
@@ -189,7 +189,7 @@ impl Context {
     /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
     /// # });
     /// ```
-    pub fn worker_group(&self) -> Result<WorkerGroup<'_>, Error> {
+    pub fn worker_group(&self) -> Result<WorkerGroup<'_>, AnyError> {
         // Safety: FFI call is safe
         let group = unsafe {
             to_result_indirect_in_place(|err, group| {
@@ -224,7 +224,7 @@ impl Context {
     /// assert_eq!(group.id(), doctest_group.id());
     /// # });
     /// ```
-    pub fn worker_group_by_id(&self, id: WorkerGroupId) -> Result<WorkerGroup<'_>, Error> {
+    pub fn worker_group_by_id(&self, id: WorkerGroupId) -> Result<WorkerGroup<'_>, AnyError> {
         // Safety: FFI call is safe
         let group = unsafe {
             to_result_indirect_in_place(|err, group| {
@@ -259,7 +259,7 @@ impl Context {
     /// assert!(query.iter().any(|grp| grp.id() == group_id));
     /// # });
     /// ```
-    pub fn query_worker_groups(&self) -> Result<WorkerGroupQuery<'_>, Error> {
+    pub fn query_worker_groups(&self) -> Result<WorkerGroupQuery<'_>, AnyError> {
         // Safety: FFI call is safe
         let query = unsafe {
             to_result_indirect_in_place(|err, query| {
@@ -306,7 +306,7 @@ impl Context {
     /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
     /// # });
     /// ```
-    pub fn yield_now(&self) -> Result<(), Error> {
+    pub fn yield_now(&self) -> Result<(), AnyError> {
         // Safety: FFI call is safe
         unsafe { to_result((self.vtable().v0.yield_.unwrap_unchecked())(self.data())) }
     }
@@ -348,7 +348,7 @@ impl Context {
     /// assert_eq!(task.completion_status(), Some(TaskStatus::Completed));
     /// # });
     /// ```
-    pub fn sleep(&self, duration: Duration) -> Result<(), Error> {
+    pub fn sleep(&self, duration: Duration) -> Result<(), AnyError> {
         let secs = duration.as_secs();
         let nanos = duration.subsec_nanos();
         let duration = fimo_std::time::Duration::new(secs, nanos);

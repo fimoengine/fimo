@@ -2,7 +2,7 @@
 use crate::{
     bindings,
     context::{Context, ContextView},
-    error::Error,
+    error::AnyError,
     ffi::{FFISharable, FFITransferable, Viewable},
     time::Time,
 };
@@ -374,7 +374,7 @@ impl From<Level> for bindings::FimoTracingLevel {
 }
 
 impl TryFrom<bindings::FimoTracingLevel> for Level {
-    type Error = Error;
+    type Error = AnyError;
 
     fn try_from(
         value: bindings::FimoTracingLevel,
@@ -386,7 +386,7 @@ impl TryFrom<bindings::FimoTracingLevel> for Level {
             bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_INFO => Ok(Level::Info),
             bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_DEBUG => Ok(Level::Debug),
             bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_TRACE => Ok(Level::Trace),
-            bindings::FimoTracingLevel(_) => Err(Error::EINVAL),
+            bindings::FimoTracingLevel(_) => Err(AnyError::EINVAL),
         }
     }
 }

@@ -1,6 +1,6 @@
 //! Panic utilities.
 
-use crate::{bindings, error::Error, ffi::FFISharable};
+use crate::{bindings, error::AnyError, ffi::FFISharable};
 use std::{cell::Cell, panic::AssertUnwindSafe};
 
 /// Logs an error and aborts the process.
@@ -29,13 +29,13 @@ pub fn abort_on_panic<R>(f: impl FnOnce() -> R) -> R {
     std::panic::catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|_e| std::process::abort())
 }
 
-/// Invokes a closure, returning an [`Error`] if a panic occurs.
-pub fn catch_unwind<R>(f: impl FnOnce() -> R) -> Result<R, Error<dyn Send>> {
+/// Invokes a closure, returning an [`AnyError`] if a panic occurs.
+pub fn catch_unwind<R>(f: impl FnOnce() -> R) -> Result<R, AnyError<dyn Send>> {
     std::panic::catch_unwind(AssertUnwindSafe(f)).map_err(|e| match e.downcast::<&'static str>() {
-        Ok(e) => Error::new_send(e),
+        Ok(e) => AnyError::new_send(e),
         Err(e) => match e.downcast::<String>() {
-            Ok(e) => Error::new_send(e),
-            Err(_e) => Error::from_string(c"unknown error"),
+            Ok(e) => AnyError::new_send(e),
+            Err(_e) => AnyError::from_string(c"unknown error"),
         },
     })
 }
