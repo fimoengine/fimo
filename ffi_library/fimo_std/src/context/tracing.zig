@@ -39,12 +39,6 @@ pub const TracingError = error{
 
 /// Initializes the tracing subsystem.
 pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (TracingError || tls.TlsError)!Tracing {
-    errdefer {
-        if (config) |cfg| {
-            if (cfg.subscribers) |sl| for (sl[0..cfg.subscriber_count]) |s| s.deinit();
-        }
-    }
-
     var self = Tracing{
         .allocator = allocator,
         .subscribers = undefined,
@@ -60,6 +54,7 @@ pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (TracingE
             &.{},
         );
         self.subscribers = try allocator.dupe(ProxyTracing.Subscriber, subscribers);
+        for (self.subscribers) |sub| sub.ref();
         self.buffer_size = if (cfg.format_buffer_len != 0) cfg.format_buffer_len else 1024;
         self.max_level = cfg.max_level;
     } else {
@@ -67,7 +62,10 @@ pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (TracingE
         self.buffer_size = 0;
         self.max_level = .off;
     }
-    errdefer allocator.free(self.subscribers);
+    errdefer {
+        for (self.subscribers) |sub| sub.unref();
+        allocator.free(self.subscribers);
+    }
     self.thread_data = try tls.Tls(ThreadData).init(ThreadData.deinit);
     errdefer self.thread_data.deinit();
     self.thread_count.store(0, .unordered);
@@ -89,7 +87,7 @@ pub fn deinit(self: *Tracing) void {
     std.debug.assert(num_threads == 0);
 
     self.thread_data.deinit();
-    for (self.subscribers) |subs| subs.deinit();
+    for (self.subscribers) |subs| subs.unref();
     self.allocator.free(self.subscribers);
 }
 

@@ -22,14 +22,11 @@ typedef struct FimoContext {
     const FimoContextVTable *vtable;
 } FimoContext;
 
-/**
- * Fimo std structure types.
- */
-typedef enum FimoStructType {
+/// Id of the fimo std interface types.
+typedef enum FimoStructType : FimoI32 {
     FIMO_STRUCT_TYPE_TRACING_CONFIG,
     FIMO_STRUCT_TYPE_MODULE_EXPORT,
     FIMO_STRUCT_TYPE_MODULE_INFO,
-    FIMO_STRUCT_TYPE_FORCE32 = 0x7FFFFFFF
 } FimoStructType;
 
 /**

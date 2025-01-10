@@ -1,17 +1,18 @@
 //! Tracing subsystem.
 use crate::{
-    bindings,
-    context::{Context, ContextView},
-    error::AnyError,
-    ffi::{FFISharable, Viewable},
+    context::{Context, ContextHandle, ContextView, TypeId},
+    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, VTablePtr, Viewable},
+    handle,
     time::Time,
 };
 use std::{
     ffi::CStr,
-    fmt::{Arguments, Write},
-    mem::ManuallyDrop,
+    fmt::{Arguments, Debug, Write},
+    marker::PhantomData,
+    mem::{ManuallyDrop, MaybeUninit},
     num::NonZeroUsize,
-    pin::Pin,
+    ptr::NonNull,
+    sync::Arc,
 };
 
 /// Virtual function table of the tracing subsystem.
@@ -19,7 +20,37 @@ use std::{
 /// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
-pub struct VTableV0(bindings::FimoTracingVTableV0);
+pub struct VTableV0 {
+    pub create_call_stack: unsafe extern "C" fn(handle: ContextHandle) -> CallStack,
+    pub suspend_current_call_stack: unsafe extern "C" fn(handle: ContextHandle, block: bool),
+    pub resume_current_call_stack: unsafe extern "C" fn(handle: ContextHandle),
+    pub create_span: unsafe extern "C" fn(
+        handle: ContextHandle,
+        desc: &SpanDescriptor,
+        formatter: unsafe extern "C" fn(
+            buffer: NonNull<u8>,
+            len: usize,
+            data: Option<ConstNonNull<()>>,
+            written: &mut MaybeUninit<usize>,
+        ),
+        data: Option<ConstNonNull<()>>,
+    ) -> Span,
+    pub emit_event: unsafe extern "C" fn(
+        handle: ContextHandle,
+        event: &Event,
+        formatter: unsafe extern "C" fn(
+            buffer: NonNull<u8>,
+            len: usize,
+            data: Option<ConstNonNull<()>>,
+            written: &mut MaybeUninit<usize>,
+        ),
+        data: Option<ConstNonNull<()>>,
+    ),
+    pub is_enabled: unsafe extern "C" fn(handle: ContextHandle) -> bool,
+    pub register_thread: unsafe extern "C" fn(handle: ContextHandle),
+    pub unregister_thread: unsafe extern "C" fn(handle: ContextHandle),
+    pub flush: unsafe extern "C" fn(handle: ContextHandle),
+}
 
 /// Definition of the tracing subsystem.
 pub trait TracingSubsystem: Copy {
@@ -47,42 +78,30 @@ where
 {
     #[inline(always)]
     fn emit_event(self, event: &Event, arguments: Arguments<'_>) {
+        let ctx = self.view();
+        let f = ctx.vtable.tracing_v0.emit_event;
         unsafe {
-            let f = self
-                .view()
-                .vtable()
-                .tracing_v0
-                .event_emit
-                .unwrap_unchecked();
-
             f(
-                self.view().data(),
-                event.share_to_ffi(),
-                Some(Formatter::format_into_buffer as _),
-                core::ptr::from_ref(&arguments).cast(),
+                ctx.handle,
+                event,
+                Formatter::format_into_buffer,
+                Some(ConstNonNull::new_unchecked(&raw const arguments).cast()),
             );
         }
     }
 
     #[inline(always)]
     fn is_enabled(self) -> bool {
-        unsafe {
-            let f = self
-                .view()
-                .vtable()
-                .tracing_v0
-                .is_enabled
-                .unwrap_unchecked();
-            f(self.view().data())
-        }
+        let ctx = self.view();
+        let f = ctx.vtable.tracing_v0.is_enabled;
+        unsafe { f(ctx.handle) }
     }
 
     #[inline(always)]
     fn flush(self) {
-        unsafe {
-            let f = self.view().vtable().tracing_v0.flush.unwrap_unchecked();
-            f(self.view().data());
-        }
+        let ctx = self.view();
+        let f = ctx.vtable.tracing_v0.flush;
+        unsafe { f(ctx.handle) }
     }
 }
 
@@ -154,13 +173,10 @@ macro_rules! tracing_metadata {
         const LINE: u32 = core::line!() as u32;
 
         const NAME_CSTR: &'static core::ffi::CStr =
-            // Safety:
             unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(NAME.as_bytes()) };
         const TARGET_CSTR: &'static core::ffi::CStr =
-            // Safety:
             unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(TARGET.as_bytes()) };
         const FILE_CSTR: &'static core::ffi::CStr =
-            // Safety:
             unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(FILE.as_bytes()) };
 
         const METADATA: &'static $crate::tracing::Metadata = &$crate::tracing::Metadata::new(
@@ -179,13 +195,10 @@ macro_rules! tracing_metadata {
         const LINE: u32 = core::line!() as u32;
 
         const NAME_CSTR: &'static core::ffi::CStr =
-            // Safety:
             unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(NAME.as_bytes()) };
         const TARGET_CSTR: &'static core::ffi::CStr =
-            // Safety:
             unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(TARGET.as_bytes()) };
         const FILE_CSTR: &'static core::ffi::CStr =
-            // Safety:
             unsafe { core::ffi::CStr::from_bytes_with_nul_unchecked(FILE.as_bytes()) };
 
         const METADATA: &'static $crate::tracing::Metadata = &$crate::tracing::Metadata::new(
@@ -344,6 +357,7 @@ macro_rules! span_trace {
 /// The levels are ordered such that given two levels `lvl1` and `lvl2`, where `lvl1 >= lvl2`, then
 /// an event with level `lvl2` will be traced in a context where the maximum tracing level is
 /// `lvl1`.
+#[repr(i32)]
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum Level {
     Off,
@@ -354,47 +368,17 @@ pub enum Level {
     Trace,
 }
 
-impl Level {
-    const fn to_ffi(self) -> bindings::FimoTracingLevel {
-        match self {
-            Level::Off => bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_OFF,
-            Level::Error => bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_ERROR,
-            Level::Warn => bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_WARN,
-            Level::Info => bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_INFO,
-            Level::Debug => bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_DEBUG,
-            Level::Trace => bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_TRACE,
-        }
-    }
-}
-
-impl From<Level> for bindings::FimoTracingLevel {
-    fn from(value: Level) -> Self {
-        value.to_ffi()
-    }
-}
-
-impl TryFrom<bindings::FimoTracingLevel> for Level {
-    type Error = AnyError;
-
-    fn try_from(
-        value: bindings::FimoTracingLevel,
-    ) -> Result<Self, <Level as TryFrom<bindings::FimoTracingLevel>>::Error> {
-        match value {
-            bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_OFF => Ok(Level::Off),
-            bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_ERROR => Ok(Level::Error),
-            bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_WARN => Ok(Level::Warn),
-            bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_INFO => Ok(Level::Info),
-            bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_DEBUG => Ok(Level::Debug),
-            bindings::FimoTracingLevel::FIMO_TRACING_LEVEL_TRACE => Ok(Level::Trace),
-            bindings::FimoTracingLevel(_) => Err(AnyError::EINVAL),
-        }
-    }
-}
-
 /// Metadata for a span and event.
+#[repr(C)]
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct Metadata(bindings::FimoTracingMetadata);
+pub struct Metadata {
+    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub name: ConstCStr,
+    pub target: ConstCStr,
+    pub level: Level,
+    pub file_name: Option<ConstCStr>,
+    pub line_number: i32,
+}
 
 impl Metadata {
     pub const fn new(
@@ -404,145 +388,104 @@ impl Metadata {
         file_name: Option<&'static CStr>,
         line_number: Option<u32>,
     ) -> Metadata {
-        Self(bindings::FimoTracingMetadata {
-            next: core::ptr::null(),
-            name: name.as_ptr().cast(),
-            target: target.as_ptr().cast(),
-            level: level.to_ffi(),
+        Self {
+            next: None,
+            name: ConstCStr::new(name),
+            target: ConstCStr::new(target),
+            level,
             file_name: match file_name {
-                None => core::ptr::null(),
-                Some(x) => x.as_ptr().cast(),
+                None => None,
+                Some(x) => Some(ConstCStr::new(x)),
             },
             line_number: match line_number {
                 None => -1,
-                Some(x) => x as i32,
+                Some(x) => {
+                    assert!(x <= i32::MAX as u32);
+                    x as i32
+                }
             },
-        })
+        }
     }
 
     /// Returns the name contained in the `Metadata`.
     pub fn name(&self) -> &CStr {
-        // Safety: Must contain a valid string.
-        unsafe { CStr::from_ptr(self.0.name) }
+        unsafe { self.name.as_ref() }
     }
 
     /// Returns the target contained in the `Metadata`.
     pub fn target(&self) -> &CStr {
-        // Safety: Must contain a valid string.
-        unsafe { CStr::from_ptr(self.0.target) }
-    }
-
-    /// Returns the level contained in the `Metadata`.
-    pub fn level(&self) -> Level {
-        self.0.level.try_into().expect("must contain a valid level")
+        unsafe { self.target.as_ref() }
     }
 
     /// Returns the file name contained in the `Metadata`.
     pub fn file_name(&self) -> Option<&CStr> {
-        // Safety: Must contain a valid string or null.
-        unsafe { self.0.file_name.as_ref().map(|x| CStr::from_ptr(x)) }
+        unsafe { self.file_name.map(|x| x.as_ref()) }
     }
 
     /// Returns the file number contained in the `Metadata`.
     pub fn line_number(&self) -> Option<u32> {
-        if self.0.line_number < 0 {
+        if self.line_number < 0 {
             None
         } else {
-            Some(self.0.line_number as u32)
+            Some(self.line_number as u32)
         }
     }
 }
 
-// Safety: The metadata is `Send` and `Sync`.
-unsafe impl Send for Metadata {}
-
-// Safety: The metadata is `Send` and `Sync`.
-unsafe impl Sync for Metadata {}
-
-impl FFISharable<*const bindings::FimoTracingMetadata> for Metadata {
-    type BorrowedView<'a> = &'a Metadata;
-
-    fn share_to_ffi(&self) -> *const bindings::FimoTracingMetadata {
-        &self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(
-        ffi: *const bindings::FimoTracingMetadata,
-    ) -> Self::BorrowedView<'a> {
-        // Safety: `Metadata` is transparent.
-        unsafe { &*ffi.cast() }
-    }
-}
-
 /// An event to be traced.
+#[repr(C)]
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct Event(bindings::FimoTracingEvent);
+pub struct Event {
+    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub metadata: &'static Metadata,
+}
 
 impl Event {
     /// Constructs a new event.
     pub const fn new(metadata: &'static Metadata) -> Self {
-        Self(bindings::FimoTracingEvent {
-            next: core::ptr::null(),
-            metadata: &metadata.0,
-        })
-    }
-}
-
-impl FFISharable<*const bindings::FimoTracingEvent> for Event {
-    type BorrowedView<'a> = &'a Event;
-
-    fn share_to_ffi(&self) -> *const bindings::FimoTracingEvent {
-        &self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(
-        ffi: *const bindings::FimoTracingEvent,
-    ) -> Self::BorrowedView<'a> {
-        // Safety: `Event` is transparent.
-        unsafe { &*ffi.cast() }
+        Self {
+            next: None,
+            metadata,
+        }
     }
 }
 
 /// Descriptor of a new span.
+#[repr(C)]
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct SpanDescriptor(bindings::FimoTracingSpanDesc);
+pub struct SpanDescriptor {
+    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub metadata: &'static Metadata,
+}
 
 impl SpanDescriptor {
     /// Constructs a new `SpanDescriptor`.
     pub const fn new(metadata: &'static Metadata) -> Self {
-        Self(bindings::FimoTracingSpanDesc {
-            next: core::ptr::null(),
-            metadata: &metadata.0,
-        })
-    }
-
-    /// Returns a reference to the contained [`Metadata`].
-    pub fn metadata(&self) -> &Metadata {
-        // Safety: The pointer must be valid.
-        unsafe { Metadata::borrow_from_ffi(self.0.metadata) }
+        Self {
+            next: None,
+            metadata,
+        }
     }
 }
 
-impl FFISharable<*const bindings::FimoTracingSpanDesc> for SpanDescriptor {
-    type BorrowedView<'a> = &'a SpanDescriptor;
+handle!(pub handle SpanHandle: Send + Sync);
 
-    fn share_to_ffi(&self) -> *const bindings::FimoTracingSpanDesc {
-        &self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(
-        ffi: *const bindings::FimoTracingSpanDesc,
-    ) -> Self::BorrowedView<'a> {
-        // Safety: `SpanDescriptor` is transparent.
-        unsafe { &*ffi.cast() }
-    }
-}
-
-/// A tracing span.
+/// Virtual function table of a [`Span`].
+///
+/// Adding fields to the vtable is not a breaking change.
+#[repr(C)]
 #[derive(Debug)]
-pub struct Span(bindings::FimoTracingSpan);
+pub struct SpanVTable {
+    pub drop: unsafe extern "C" fn(handle: SpanHandle),
+}
+
+/// A period of time, during which events can occur.
+#[repr(C)]
+#[derive(Debug)]
+pub struct Span {
+    pub handle: SpanHandle,
+    pub vtable: VTablePtr<SpanVTable>,
+}
 
 impl Span {
     /// Creates a new span and enters it.
@@ -550,41 +493,55 @@ impl Span {
     /// If successful, the newly created span is used as the context for succeeding events. The
     /// message may be cut of, if the length exceeds the internal formatting buffer size.
     pub fn new(
-        ctx: ContextView<'_>,
+        ctx: impl Viewable<ContextView<'_>>,
         span_descriptor: &'static SpanDescriptor,
         arguments: Arguments<'_>,
     ) -> Self {
+        let ctx = ctx.view();
+        let f = ctx.vtable.tracing_v0.create_span;
         unsafe {
-            let f = ctx.vtable().tracing_v0.span_create.unwrap_unchecked();
-            let span = f(
-                ctx.data(),
-                span_descriptor.share_to_ffi(),
-                Some(Formatter::format_into_buffer),
-                core::ptr::from_ref(&arguments).cast(),
-            );
-            Self(span)
+            f(
+                ctx.handle,
+                span_descriptor,
+                Formatter::format_into_buffer,
+                Some(ConstNonNull::new_unchecked(&raw const arguments).cast()),
+            )
         }
     }
 }
-
-// Safety: `Span` is `Send` and `Sync`.
-unsafe impl Send for Span {}
-
-// Safety: `Span` is `Send` and `Sync`.
-unsafe impl Sync for Span {}
 
 impl Drop for Span {
     fn drop(&mut self) {
-        unsafe {
-            let f = (*self.0.vtable).drop.unwrap_unchecked();
-            f(self.0.handle);
-        }
+        let f = self.vtable.drop;
+        unsafe { f(self.handle) }
     }
 }
 
-/// A call stack.
+handle!(pub handle CallStackHandle: Send + Sync);
+
+/// Virtual function table of a [`CallStack`].
+///
+/// Adding fields to the vtable is not a breaking change.
+#[repr(C)]
 #[derive(Debug)]
-pub struct CallStack(bindings::FimoTracingCallStack);
+pub struct CallStackVTable {
+    pub drop: unsafe extern "C" fn(handle: CallStackHandle),
+    pub replace_active: unsafe extern "C" fn(handle: CallStackHandle) -> CallStack,
+    pub unblock: unsafe extern "C" fn(handle: CallStackHandle),
+}
+
+/// A call stack.
+///
+/// Each call stack represents a unit of computation, like a thread. A call stack is active on only
+/// one thread at any given time. The active call stack of a thread can be swapped, which is useful
+/// for tracing where a `M:N` threading model is used. In that case, one would create one stack for
+/// each task, and activate it when the task is resumed.
+#[repr(C)]
+#[derive(Debug)]
+pub struct CallStack {
+    pub handle: CallStackHandle,
+    pub vtable: VTablePtr<CallStackVTable>,
+}
 
 impl CallStack {
     /// Creates a new empty call stack.
@@ -592,12 +549,10 @@ impl CallStack {
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
     #[inline(always)]
-    pub fn new(ctx: &ContextView<'_>) -> Self {
-        unsafe {
-            let f = ctx.vtable().tracing_v0.create_call_stack.unwrap_unchecked();
-            let stack = f(ctx.data());
-            Self(stack)
-        }
+    pub fn new(ctx: impl Viewable<ContextView<'_>>) -> Self {
+        let ctx = ctx.view();
+        let f = ctx.vtable.tracing_v0.create_call_stack;
+        unsafe { f(ctx.handle) }
     }
 
     /// Switches the call stack of the current thread.
@@ -609,11 +564,8 @@ impl CallStack {
     #[inline(always)]
     pub fn switch(self) -> Self {
         let this = ManuallyDrop::new(self);
-        unsafe {
-            let f = (*this.0.vtable).replace_active.unwrap_unchecked();
-            let stack = f(this.0.handle);
-            Self(stack)
-        }
+        let f = this.vtable.replace_active;
+        unsafe { f(this.handle) }
     }
 
     /// Unblocks the blocked call stack.
@@ -622,10 +574,8 @@ impl CallStack {
     /// marked as blocked.
     #[inline(always)]
     pub fn unblock(&mut self) {
-        unsafe {
-            let f = (*self.0.vtable).unblock.unwrap_unchecked();
-            f(self.0.handle);
-        }
+        let f = self.vtable.unblock;
+        unsafe { f(self.handle) }
     }
 
     /// Marks the current call stack as being suspended.
@@ -634,15 +584,10 @@ impl CallStack {
     /// can optionally also be marked as blocked. In that case, the call stack must be unblocked
     /// prior to resumption.
     #[inline(always)]
-    pub fn suspend_current(ctx: &ContextView<'_>, block: bool) {
-        unsafe {
-            let f = ctx
-                .vtable()
-                .tracing_v0
-                .suspend_current_call_stack
-                .unwrap_unchecked();
-            f(ctx.data(), block);
-        }
+    pub fn suspend_current(ctx: impl Viewable<ContextView<'_>>, block: bool) {
+        let ctx = ctx.view();
+        let f = ctx.vtable.tracing_v0.suspend_current_call_stack;
+        unsafe { f(ctx.handle, block) }
     }
 
     /// Marks the current call stack as being resumed.
@@ -650,30 +595,17 @@ impl CallStack {
     /// Once resumed, the call stack can be used to trace messages. To be successful, the current
     /// call stack must be suspended and unblocked.
     #[inline(always)]
-    pub fn resume_current(ctx: &ContextView<'_>) {
-        unsafe {
-            let f = ctx
-                .vtable()
-                .tracing_v0
-                .resume_current_call_stack
-                .unwrap_unchecked();
-            f(ctx.data());
-        }
+    pub fn resume_current(ctx: impl Viewable<ContextView<'_>>) {
+        let ctx = ctx.view();
+        let f = ctx.vtable.tracing_v0.resume_current_call_stack;
+        unsafe { f(ctx.handle) }
     }
 }
 
-// Safety: A `CallStack` is `Send` and `Sync`.
-unsafe impl Send for CallStack {}
-
-// Safety: A `CallStack` is `Send` and `Sync`.
-unsafe impl Sync for CallStack {}
-
 impl Drop for CallStack {
     fn drop(&mut self) {
-        unsafe {
-            let f = (*self.0.vtable).drop.unwrap_unchecked();
-            f(self.0.handle);
-        }
+        let f = self.vtable.drop;
+        unsafe { f(self.handle) }
     }
 }
 
@@ -700,22 +632,20 @@ impl ThreadAccess {
 
 impl Drop for ThreadAccess {
     fn drop(&mut self) {
-        unsafe {
-            let view = self.0.view();
-            let f = view
-                .vtable()
-                .tracing_v0
-                .unregister_thread
-                .unwrap_unchecked();
-            f(view.data());
-        }
+        let ctx = self.0.view();
+        let f = ctx.vtable.tracing_v0.unregister_thread;
+        unsafe { f(ctx.handle) }
     }
 }
 
-/// Interface of a tracing subscriber.
+/// A subscriber for tracing events.
+///
+/// The main function of the tracing subsystem is managing and routing tracing events to
+/// subscribers. Therefore, it does not consume any events on its own, which is the task of the
+/// subscribers. Subscribers may utilize the events in any way they deem fit.
 pub trait Subscriber: Send + Sync {
     /// Type of the internal call stack.
-    type CallStack;
+    type CallStack: Send + Sync;
 
     /// Creates a new call stack.
     fn create_call_stack(&self, time: Time) -> Box<Self::CallStack>;
@@ -763,280 +693,424 @@ pub trait Subscriber: Send + Sync {
     fn flush(&self);
 }
 
-/// A type-erased [`Subscriber`].
+handle!(pub handle SubscriberHandle: Send + Sync);
+handle!(pub handle SubscriberCallStackHandle: Send + Sync);
+
+/// Virtual function table of a [`OpaqueSubscriber`].
+///
+/// Adding/removing functionality to a subscriber through this table is a breaking change, as a
+/// subscriber may be implemented from outside the library.
+#[repr(C)]
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct OpaqueSubscriber(bindings::FimoTracingSubscriber);
+pub struct SubscriberVTable {
+    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub acquire: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
+    pub release: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
+    pub create_call_stack: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+    ) -> SubscriberCallStackHandle,
+    pub drop_call_stack: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub destroy_call_stack: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub unblock_call_stack: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub suspend_call_stack: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        call_stack: SubscriberCallStackHandle,
+        block: bool,
+    ),
+    pub resume_call_stack: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub push_span: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        span_descriptor: &SpanDescriptor,
+        message: ConstNonNull<u8>,
+        message_length: usize,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub drop_span: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub pop_span: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        call_stack: SubscriberCallStackHandle,
+    ),
+    pub emit_event: unsafe extern "C" fn(
+        handle: Option<SubscriberHandle>,
+        time: &Time,
+        call_stack: SubscriberCallStackHandle,
+        event: &Event,
+        message: ConstNonNull<u8>,
+        message_length: usize,
+    ),
+    pub flush: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
+}
+
+/// A type-erased [`Subscriber`].
+#[repr(C)]
+#[derive(Debug)]
+pub struct OpaqueSubscriber {
+    pub handle: Option<SubscriberHandle>,
+    pub vtable: VTablePtr<SubscriberVTable>,
+}
 
 impl OpaqueSubscriber {
     /// Constructs a new `OpaqueSubscriber` from a reference to a [`Subscriber`].
     pub const fn from_ref<T: Subscriber>(subscriber: &'static T) -> Self {
         trait VTableProvider {
-            const TABLE: bindings::FimoTracingSubscriberVTable;
+            const TABLE: SubscriberVTable;
         }
         impl<T: Subscriber> VTableProvider for T {
-            const TABLE: bindings::FimoTracingSubscriberVTable =
-                OpaqueSubscriber::build_vtable::<T>(None);
+            const TABLE: SubscriberVTable =
+                OpaqueSubscriber::build_vtable::<T>(acquire_noop::<T>, release_noop::<T>);
         }
+        unsafe extern "C" fn acquire_noop<T: Subscriber>(_handle: Option<SubscriberHandle>) {}
+        unsafe extern "C" fn release_noop<T: Subscriber>(_handle: Option<SubscriberHandle>) {}
 
-        let vtable: &'static bindings::FimoTracingSubscriberVTable = &<T as VTableProvider>::TABLE;
-        Self(bindings::FimoTracingSubscriber {
-            next: core::ptr::null(),
-            ptr: core::ptr::from_ref(subscriber).cast_mut().cast(),
-            vtable: core::ptr::from_ref(vtable),
-        })
+        Self {
+            handle: unsafe {
+                Some(SubscriberHandle::new_unchecked(
+                    (&raw const *subscriber).cast_mut(),
+                ))
+            },
+            vtable: VTablePtr::new(&<T as VTableProvider>::TABLE),
+        }
     }
 
-    /// Constructs a new `OpaqueSubscriber` from a boxed [`Subscriber`].
-    pub fn from_box<T: Subscriber>(subscriber: Box<T>) -> Self {
+    /// Constructs a new `OpaqueSubscriber` from a [`Subscriber`] in an [`Arc`].
+    pub fn from_arc<T: Subscriber>(subscriber: Arc<T>) -> Self {
         trait VTableProvider {
-            const TABLE: bindings::FimoTracingSubscriberVTable;
+            const TABLE: SubscriberVTable;
         }
         impl<T: Subscriber> VTableProvider for T {
-            const TABLE: bindings::FimoTracingSubscriberVTable =
-                OpaqueSubscriber::build_vtable::<T>(Some(drop_box::<T>));
+            const TABLE: SubscriberVTable =
+                OpaqueSubscriber::build_vtable::<T>(acquire_arc::<T>, release_arc::<T>);
         }
-        unsafe extern "C" fn drop_box<T>(ptr: *mut core::ffi::c_void) {
-            // Safety: We know that the type is right.
-            unsafe { drop(Box::from_raw(ptr.cast::<T>())) }
+        unsafe extern "C" fn acquire_arc<T: Subscriber>(handle: Option<SubscriberHandle>) {
+            unsafe { Arc::increment_strong_count(handle.unwrap_unchecked().as_ptr::<T>()) }
+        }
+        unsafe extern "C" fn release_arc<T: Subscriber>(handle: Option<SubscriberHandle>) {
+            unsafe { Arc::decrement_strong_count(handle.unwrap_unchecked().as_ptr::<T>()) }
         }
 
-        let vtable: &'static bindings::FimoTracingSubscriberVTable = &<T as VTableProvider>::TABLE;
-        Self(bindings::FimoTracingSubscriber {
-            next: core::ptr::null(),
-            ptr: Box::into_raw(subscriber).cast(),
-            vtable: core::ptr::from_ref(vtable),
-        })
+        Self {
+            handle: unsafe {
+                Some(SubscriberHandle::new_unchecked(
+                    Arc::into_raw(subscriber).cast_mut(),
+                ))
+            },
+            vtable: VTablePtr::new(&<T as VTableProvider>::TABLE),
+        }
     }
 
     const fn build_vtable<T: Subscriber>(
-        drop_fn: Option<unsafe extern "C" fn(*mut core::ffi::c_void)>,
-    ) -> bindings::FimoTracingSubscriberVTable {
+        acquire_fn: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
+        release_fn: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
+    ) -> SubscriberVTable {
         unsafe extern "C" fn call_stack_create<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-        ) -> *mut core::ffi::c_void {
-            // Safety:
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+        ) -> SubscriberCallStackHandle {
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let cs = subscriber.create_call_stack(time);
-                Box::into_raw(cs).cast()
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let cs = subscriber.create_call_stack(*time);
+                SubscriberCallStackHandle::new_unchecked(Box::into_raw(cs))
             }
         }
         unsafe extern "C" fn call_stack_drop<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let stack = Box::from_raw(stack.cast());
-                subscriber.drop_call_stack(stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = Box::from_raw(call_stack.as_ptr());
+                subscriber.drop_call_stack(call_stack);
             }
         }
         unsafe extern "C" fn call_stack_destroy<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let stack = Box::from_raw(stack.cast());
-                subscriber.destroy_call_stack(time, stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = Box::from_raw(call_stack.as_ptr());
+                subscriber.destroy_call_stack(*time, call_stack);
             }
         }
         unsafe extern "C" fn call_stack_unblock<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let stack = &mut *stack.cast();
-                subscriber.unblock_call_stack(time, stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = &mut *call_stack.as_ptr();
+                subscriber.unblock_call_stack(*time, call_stack);
             }
         }
         unsafe extern "C" fn call_stack_suspend<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            call_stack: SubscriberCallStackHandle,
             block: bool,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let stack = &mut *stack.cast();
-                subscriber.suspend_call_stack(time, stack, block);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = &mut *call_stack.as_ptr();
+                subscriber.suspend_call_stack(*time, call_stack, block);
             }
         }
         unsafe extern "C" fn call_stack_resume<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let stack = &mut *stack.cast();
-                subscriber.resume_call_stack(time, stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = &mut *call_stack.as_ptr();
+                subscriber.resume_call_stack(*time, call_stack);
             }
         }
         unsafe extern "C" fn span_push<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            span_descriptor: *const bindings::FimoTracingSpanDesc,
-            message: *const core::ffi::c_char,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            span_descriptor: &SpanDescriptor,
+            message: ConstNonNull<u8>,
             message_length: usize,
-            stack: *mut core::ffi::c_void,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let span_descriptor = SpanDescriptor::borrow_from_ffi(span_descriptor);
-                let message = core::slice::from_raw_parts(message.cast(), message_length);
-                let stack = &mut *stack.cast();
-                subscriber.create_span(time, span_descriptor, message, stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let message = core::slice::from_raw_parts(message.as_ptr(), message_length);
+                let call_stack = &mut *call_stack.as_ptr();
+                subscriber.create_span(*time, span_descriptor, message, call_stack);
             }
         }
         unsafe extern "C" fn span_drop<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let stack = &mut *stack.cast();
-                subscriber.drop_span(stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = &mut *call_stack.as_ptr();
+                subscriber.drop_span(call_stack);
             }
         }
         unsafe extern "C" fn span_pop<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            stack: *mut core::ffi::c_void,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            call_stack: SubscriberCallStackHandle,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let stack = &mut *stack.cast();
-                subscriber.destroy_span(time, stack);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = &mut *call_stack.as_ptr();
+                subscriber.destroy_span(*time, call_stack);
             }
         }
         unsafe extern "C" fn event_emit<T: Subscriber>(
-            subscriber: *mut core::ffi::c_void,
-            time: *const bindings::FimoTime,
-            stack: *mut core::ffi::c_void,
-            event: *const bindings::FimoTracingEvent,
-            message: *const core::ffi::c_char,
+            handle: Option<SubscriberHandle>,
+            time: &Time,
+            call_stack: SubscriberCallStackHandle,
+            event: &Event,
+            message: ConstNonNull<u8>,
             message_length: usize,
         ) {
-            // Safety:
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
-                let time = std::mem::transmute::<bindings::FimoTime, Time>(*time);
-                let stack = &mut *stack.cast();
-                let event = Event::borrow_from_ffi(event);
-                let message = core::slice::from_raw_parts(message.cast(), message_length);
-                subscriber.emit_event(time, stack, event, message);
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
+                let call_stack = &mut *call_stack.as_ptr();
+                let message = core::slice::from_raw_parts(message.as_ptr(), message_length);
+                subscriber.emit_event(*time, call_stack, event, message);
             }
         }
-        unsafe extern "C" fn flush<T: Subscriber>(subscriber: *mut core::ffi::c_void) {
-            // Safety:
+        unsafe extern "C" fn flush<T: Subscriber>(handle: Option<SubscriberHandle>) {
             unsafe {
-                let subscriber: &T = &*subscriber.cast::<T>().cast_const();
+                let subscriber: &T =
+                    &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
                 subscriber.flush();
             }
         }
 
-        bindings::FimoTracingSubscriberVTable {
-            destroy: drop_fn,
-            call_stack_create: Some(call_stack_create::<T>),
-            call_stack_drop: Some(call_stack_drop::<T>),
-            call_stack_destroy: Some(call_stack_destroy::<T>),
-            call_stack_unblock: Some(call_stack_unblock::<T>),
-            call_stack_suspend: Some(call_stack_suspend::<T>),
-            call_stack_resume: Some(call_stack_resume::<T>),
-            span_push: Some(span_push::<T>),
-            span_drop: Some(span_drop::<T>),
-            span_pop: Some(span_pop::<T>),
-            event_emit: Some(event_emit::<T>),
-            flush: Some(flush::<T>),
+        SubscriberVTable {
+            next: None,
+            acquire: acquire_fn,
+            release: release_fn,
+            create_call_stack: call_stack_create::<T>,
+            drop_call_stack: call_stack_drop::<T>,
+            destroy_call_stack: call_stack_destroy::<T>,
+            unblock_call_stack: call_stack_unblock::<T>,
+            suspend_call_stack: call_stack_suspend::<T>,
+            resume_call_stack: call_stack_resume::<T>,
+            push_span: span_push::<T>,
+            drop_span: span_drop::<T>,
+            pop_span: span_pop::<T>,
+            emit_event: event_emit::<T>,
+            flush: flush::<T>,
         }
     }
 }
 
-// Safety: A `Subscriber` is `Send` and `Sync`.
-unsafe impl Send for OpaqueSubscriber {}
-
-// Safety: A `Subscriber` is `Send` and `Sync`.
-unsafe impl Sync for OpaqueSubscriber {}
+impl Clone for OpaqueSubscriber {
+    fn clone(&self) -> Self {
+        let f = self.vtable.acquire;
+        unsafe { f(self.handle) };
+        Self {
+            handle: self.handle,
+            vtable: self.vtable,
+        }
+    }
+}
 
 impl Drop for OpaqueSubscriber {
     fn drop(&mut self) {
-        // Safety: The pointers must all be valid.
+        let f = self.vtable.release;
+        unsafe { f(self.handle) }
+    }
+}
+
+unsafe extern "C" {
+    static FIMO_TRACING_DEFAULT_SUBSCRIBER: OpaqueSubscriber;
+}
+
+/// Returns the default subscriber.
+pub fn default_subscriber() -> OpaqueSubscriber {
+    unsafe { FIMO_TRACING_DEFAULT_SUBSCRIBER.clone() }
+}
+
+/// Configuration of the tracing subsystem.
+#[repr(C)]
+pub struct Config<'a> {
+    /// # Safety
+    ///
+    /// Must be [`TypeId::TracingConfig`].
+    pub unsafe id: TypeId,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
+    pub format_buffer_length: Option<NonZeroUsize>,
+    pub max_level: Level,
+    /// # Safety
+    ///
+    /// Represents an [`&[OpaqueSubscriber]`] and must therefore match with the length provided in
+    /// `subscriber_count`.
+    pub unsafe subscribers: Option<ConstNonNull<OpaqueSubscriber>>,
+    /// # Safety
+    ///
+    /// See `subscribers`.
+    pub unsafe subscriber_count: usize,
+    pub _phantom: PhantomData<&'a [OpaqueSubscriber]>,
+}
+
+impl<'a> Config<'a> {
+    /// Creates the default config.
+    pub const fn new() -> Self {
         unsafe {
-            let vtable = &*self.0.vtable;
-            if let Some(destroy) = vtable.destroy {
-                destroy(self.0.ptr);
+            Self {
+                id: TypeId::TracingConfig,
+                next: None,
+                format_buffer_length: None,
+                max_level: if cfg!(debug_assertions) {
+                    Level::Debug
+                } else {
+                    Level::Error
+                },
+                subscribers: None,
+                subscriber_count: 0,
+                _phantom: PhantomData,
+            }
+        }
+    }
+
+    /// Sets a custom buffer length.
+    pub const fn with_format_buffer_length(mut self, buffer_length: NonZeroUsize) -> Self {
+        self.format_buffer_length = Some(buffer_length);
+        self
+    }
+
+    /// Sets a custom tracing max level.
+    pub const fn with_max_level(mut self, max_level: Level) -> Self {
+        self.max_level = max_level;
+        self
+    }
+
+    pub const fn with_subscribers(mut self, subscribers: &'a [OpaqueSubscriber]) -> Self {
+        unsafe {
+            if subscribers.is_empty() {
+                self.subscribers = None;
+                self.subscriber_count = 0;
+                self
+            } else {
+                self.subscribers = Some(ConstNonNull::new_unchecked(subscribers.as_ptr()));
+                self.subscriber_count = subscribers.len();
+                self
+            }
+        }
+    }
+
+    /// Returns a slice of all subscribers.
+    pub const fn subscribers(&self) -> &[OpaqueSubscriber] {
+        unsafe {
+            match self.subscribers {
+                None => &[],
+                Some(subscribers) => {
+                    std::slice::from_raw_parts(subscribers.as_ptr(), self.subscriber_count)
+                }
             }
         }
     }
 }
 
-/// Returns the default subscriber.
-pub fn default_subscriber() -> OpaqueSubscriber {
-    // Safety: Is safe, as it is write-only.
-    unsafe { OpaqueSubscriber(bindings::FIMO_TRACING_DEFAULT_SUBSCRIBER) }
-}
-
-/// Configuration of the tracing subsystem.
-#[derive(Debug)]
-pub struct Config<const N: usize> {
-    config: bindings::FimoTracingCreationConfig,
-    subscribers: [OpaqueSubscriber; N],
-    _pinned: core::marker::PhantomPinned,
-}
-
-impl<const N: usize> Config<N> {
-    /// Constructs a new config.
-    pub fn new(
-        format_buffer_len: Option<NonZeroUsize>,
-        max_level: Option<Level>,
-        subscribers: [OpaqueSubscriber; N],
-    ) -> Pin<Box<Self>> {
-        let mut this = Box::pin(Self {
-            config: bindings::FimoTracingCreationConfig {
-                type_: bindings::FimoStructType::FIMO_STRUCT_TYPE_TRACING_CONFIG,
-                next: core::ptr::null(),
-                format_buffer_size: format_buffer_len.map_or(0, |x| x.get()),
-                maximum_level: max_level.unwrap_or(Level::Off).to_ffi(),
-                subscribers: core::ptr::null_mut(),
-                subscriber_count: 0,
-            },
-            subscribers,
-            _pinned: core::marker::PhantomPinned,
-        });
-
-        if N > 0 {
-            // Safety: We don't move the value.
-            let pin = unsafe { this.as_mut().get_unchecked_mut() };
-            pin.config.subscriber_count = N;
-            pin.config.subscribers = pin.subscribers.as_mut_ptr().cast();
-        }
-
-        this
+impl Default for Config<'_> {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
-    pub(crate) fn as_ffi_option_ptr(&self) -> *const bindings::FimoBaseStructIn {
-        core::ptr::from_ref(&self.config).cast()
+unsafe impl Copy for Config<'_> {}
+
+#[allow(clippy::expl_impl_clone_on_copy)]
+impl Clone for Config<'_> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl Debug for Config<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe {
+            f.debug_struct("Config")
+                .field("id", &self.id)
+                .field("next", &self.next)
+                .field("format_buffer_length", &self.format_buffer_length)
+                .field("max_level", &self.max_level)
+                .field("subscribers", &self.subscribers())
+                .finish()
+        }
     }
 }
 
@@ -1046,34 +1120,25 @@ struct Formatter<'a> {
 }
 
 impl Formatter<'_> {
-    unsafe fn new(buffer: *mut core::ffi::c_char, buffer_len: usize) -> Self {
-        if buffer.is_null() {
+    unsafe fn new(buffer: NonNull<u8>, buffer_len: usize) -> Self {
+        unsafe {
             Self {
-                buffer: &mut [],
+                buffer: core::slice::from_raw_parts_mut(buffer.as_ptr(), buffer_len),
                 pos: 0,
-            }
-        } else {
-            // Safety: The buffer must be valid.
-            unsafe {
-                Self {
-                    buffer: core::slice::from_raw_parts_mut(buffer.cast(), buffer_len),
-                    pos: 0,
-                }
             }
         }
     }
 
     unsafe extern "C" fn format_into_buffer(
-        buffer: *mut core::ffi::c_char,
-        buffer_len: usize,
-        data: *const core::ffi::c_void,
-        written: *mut usize,
+        buffer: NonNull<u8>,
+        len: usize,
+        data: Option<ConstNonNull<()>>,
+        written: &mut MaybeUninit<usize>,
     ) {
-        // Safety: The buffer should be valid.
         unsafe {
-            let mut f = Self::new(buffer, buffer_len);
-            let _ = f.write_fmt(*data.cast::<core::fmt::Arguments<'_>>());
-            core::ptr::write(written, f.pos.min(f.buffer.len()));
+            let mut f = Self::new(buffer, len);
+            let _ = f.write_fmt(*data.unwrap_unchecked().as_ptr().cast::<Arguments<'_>>());
+            core::ptr::write(written.as_mut_ptr(), f.pos.min(f.buffer.len()));
         }
     }
 }

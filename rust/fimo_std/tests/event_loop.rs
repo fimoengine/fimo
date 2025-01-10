@@ -10,12 +10,12 @@ use std::{future::Future, pin::Pin, task::Poll};
 
 #[test]
 fn block_on_futures() -> Result<(), AnyError> {
-    let context = <ContextBuilder>::new()
-        .with_tracing_config(Config::new(
-            None,
-            Some(Level::Trace),
-            [default_subscriber()],
-        ))
+    let context = ContextBuilder::new()
+        .with_tracing_config(
+            Config::default()
+                .with_max_level(Level::Trace)
+                .with_subscribers(&[default_subscriber()]),
+        )
         .build()?;
 
     let _access = ThreadAccess::new(&context);

@@ -408,12 +408,12 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
     tasks_dir.push("module.module");
     let tasks_dir = tasks_dir.into_os_string().into_string().unwrap();
 
-    let context = <ContextBuilder>::new()
-        .with_tracing_config(Config::new(
-            None,
-            Some(Level::Trace),
-            [default_subscriber()],
-        ))
+    let context = ContextBuilder::new()
+        .with_tracing_config(
+            Config::default()
+                .with_max_level(Level::Trace)
+                .with_subscribers(&[default_subscriber()]),
+        )
         .build()
         .expect("could not build fimo context");
     {

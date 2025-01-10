@@ -18,6 +18,7 @@ pub fn main() !void {
         .subscribers = &.{Tracing.default_subscriber},
         .subscriber_count = 1,
     };
+    defer tracing_cfg.deinit();
     const init_options: [:null]const ?*const Context.TaggedInStruct = &.{@ptrCast(&tracing_cfg)};
 
     const ctx = try Context.init(init_options);

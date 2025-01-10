@@ -396,10 +396,9 @@ pub fn stackTraceFormatter(
 /// A subscriber for tracing events.
 ///
 /// The main function of the tracing subsystem is managing and routing tracing events to
-/// subscribers. Therefore it does not consume any events on its own, which is the task of the
+/// subscribers. Therefore, it does not consume any events on its own, which is the task of the
 /// subscribers. Subscribers may utilize the events in any way they deem fit.
 pub const Subscriber = extern struct {
-    next: ?*const anyopaque = null,
     data: ?*anyopaque,
     vtable: *const Subscriber.VTable,
 
@@ -408,8 +407,12 @@ pub const Subscriber = extern struct {
     /// Adding/removing functionality to a subscriber through this table is a breaking change, as a
     /// subscriber may be implemented from outside the library.
     pub const VTable = extern struct {
-        /// Destroys the subscriber.
-        destroy: *const fn (ctx: ?*anyopaque) callconv(.c) void,
+        /// Reserved for future extensions.
+        next: ?*const anyopaque = null,
+        /// Increases the reference count of the subscriber.
+        ref: *const fn (ctx: ?*anyopaque) callconv(.c) void,
+        /// Decreases the reference count of the subsriber.
+        unref: *const fn (ctx: ?*anyopaque) callconv(.c) void,
         /// Creates a new stack.
         call_stack_create: *const fn (
             ctx: ?*anyopaque,
@@ -485,7 +488,8 @@ pub const Subscriber = extern struct {
     pub fn init(
         comptime CallStackT: type,
         obj: anytype,
-        comptime destroy_fn: fn (ctx: @TypeOf(obj)) void,
+        comptime ref_fn: fn (ctx: @TypeOf(obj)) void,
+        comptime unref_fn: fn (ctx: @TypeOf(obj)) void,
         comptime call_stack_create_fn: fn (ctx: @TypeOf(obj), time: Time) *CallStackT,
         comptime call_stack_drop_fn: fn (ctx: @TypeOf(obj), call_stack: *CallStackT) void,
         comptime call_stack_destroy_fn: fn (
@@ -534,9 +538,13 @@ pub const Subscriber = extern struct {
         std.debug.assert(@typeInfo(@typeInfo(Ptr).pointer.child) == .@"struct");
 
         const impl = struct {
-            fn destroy(ptr: ?*anyopaque) callconv(.c) void {
+            fn ref(ptr: ?*anyopaque) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                destroy_fn(self);
+                ref_fn(self);
+            }
+            fn unref(ptr: ?*anyopaque) callconv(.c) void {
+                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
+                unref_fn(self);
             }
             fn callStackCreate(
                 ptr: ?*anyopaque,
@@ -656,7 +664,8 @@ pub const Subscriber = extern struct {
         return Subscriber{
             .data = @constCast(obj),
             .vtable = &.{
-                .destroy = impl.destroy,
+                .ref = impl.ref,
+                .unref = impl.unref,
                 .call_stack_create = impl.callStackCreate,
                 .call_stack_drop = impl.callStackDrop,
                 .call_stack_destroy = impl.callStackDestroy,
@@ -672,8 +681,12 @@ pub const Subscriber = extern struct {
         };
     }
 
-    pub fn deinit(self: Subscriber) void {
-        self.vtable.destroy(self.data);
+    pub fn ref(self: Subscriber) void {
+        self.vtable.ref(self.data);
+    }
+
+    pub fn unref(self: Subscriber) void {
+        self.vtable.unref(self.data);
     }
 
     pub fn createCallStack(
@@ -784,15 +797,13 @@ pub const Config = extern struct {
         .ReleaseFast, .ReleaseSmall => .err,
     },
     /// Array of subscribers to register with the tracing subsystem.
-    ///
-    /// The ownership of the subscribers is transferred to the context.
     subscribers: ?[*]const Subscriber = null,
     /// Number of subscribers to register with the tracing subsystem.
     subscriber_count: usize = 0,
 
     pub fn deinit(self: *const Config) void {
         if (self.subscribers) |subscribers| {
-            for (subscribers[0..self.subscriber_count]) |s| s.deinit();
+            for (subscribers[0..self.subscriber_count]) |s| s.unref();
         }
     }
 };
@@ -1191,7 +1202,11 @@ const DefaultSubscriber = struct {
     const backtrace_fmt: []const u8 = "\t" ++ ansi_sgr_italic ++ "in" ++ ansi_sgr_reset ++ " {s}" ++ ansi_sgr_italic ++ " with" ++ ansi_sgr_reset ++ " {s}\n";
     const overlength_correction: []const u8 = "\t..." ++ ansi_color_reset ++ "\n";
 
-    fn deinit(self: *const Self) void {
+    fn ref(self: *const Self) void {
+        _ = self;
+    }
+
+    fn unref(self: *const Self) void {
         _ = self;
     }
 
@@ -1356,7 +1371,8 @@ const DefaultSubscriber = struct {
 pub const default_subscriber = Subscriber.init(
     DefaultSubscriber.CallStack,
     &DefaultSubscriber{},
-    DefaultSubscriber.deinit,
+    DefaultSubscriber.ref,
+    DefaultSubscriber.unref,
     DefaultSubscriber.createCallStack,
     DefaultSubscriber.dropCallStack,
     DefaultSubscriber.destroyCallStack,

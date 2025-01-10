@@ -9,9 +9,8 @@ use crate::{
 };
 use std::{
     marker::PhantomData,
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::MaybeUninit,
     panic::{RefUnwindSafe, UnwindSafe},
-    pin::Pin,
 };
 
 handle!(pub handle ContextHandle: Send + Sync + UnwindSafe + RefUnwindSafe + Unpin);
@@ -174,36 +173,38 @@ impl FFISharable<bindings::FimoContext> for Context {
     }
 }
 
-/// A builder for a [`Context`].
-#[derive(Debug, Default)]
-pub struct ContextBuilder<const N: usize = 0> {
-    tracing: Option<Pin<Box<crate::tracing::Config<N>>>>,
+/// ID of the fimo std interface types.
+#[repr(i32)]
+#[non_exhaustive]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub enum TypeId {
+    TracingConfig,
 }
 
-impl<const N: usize> ContextBuilder<N> {
+/// A builder for a [`Context`].
+#[derive(Debug, Default)]
+pub struct ContextBuilder<'a> {
+    tracing: Option<crate::tracing::Config<'a>>,
+}
+
+impl<'a> ContextBuilder<'a> {
     /// Constructs a new builder.
-    pub fn new() -> ContextBuilder<0> {
-        ContextBuilder { tracing: None }
+    pub fn new() -> Self {
+        Self { tracing: None }
     }
 
     /// Adds a config for the tracing subsystem.
-    pub fn with_tracing_config<const M: usize>(
-        self,
-        config: Pin<Box<crate::tracing::Config<M>>>,
-    ) -> ContextBuilder<M> {
-        ContextBuilder {
-            tracing: Some(config),
-        }
+    pub fn with_tracing_config(mut self, config: crate::tracing::Config<'a>) -> Self {
+        self.tracing = Some(config);
+        self
     }
 
     /// Builds the context.
     pub fn build(self) -> Result<Context, AnyError> {
-        let tracing = ManuallyDrop::new(self.tracing);
-
         let mut counter = 0;
         let mut options: [*const bindings::FimoBaseStructIn; 2] = [core::ptr::null(); 2];
-        if let Some(tracing) = &*tracing {
-            options[counter] = tracing.as_ffi_option_ptr();
+        if let Some(tracing) = self.tracing.as_ref() {
+            options[counter] = (&raw const *tracing).cast();
             counter += 1;
         }
 

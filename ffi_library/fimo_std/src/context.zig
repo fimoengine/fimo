@@ -27,18 +27,6 @@ module: Module,
 @"async": Async = undefined,
 
 pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
-    var cleanup_options: bool = true;
-    errdefer if (cleanup_options) for (options) |opt| {
-        const o = if (opt) |o| o else continue;
-        switch (o.id) {
-            .tracing_config => {
-                const cfg: *const ProxyTracing.Config = @alignCast(@ptrCast(o));
-                cfg.deinit();
-            },
-            else => {},
-        }
-    };
-
     var tracing_cfg: ?*const ProxyTracing.Config = null;
     for (options) |opt| {
         const o = if (opt) |o| o else return error.InvalidInput;
@@ -50,8 +38,6 @@ pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
             else => return error.InvalidInput,
         }
     }
-    cleanup_options = false;
-    errdefer if (tracing_cfg) |cfg| cfg.deinit();
 
     var gpa = GPA.init;
     errdefer if (gpa.deinit() == .leak) @panic("memory leak");

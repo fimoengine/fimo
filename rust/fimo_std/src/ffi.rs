@@ -2,12 +2,57 @@
 
 use std::{
     cmp::Ordering,
+    ffi::CStr,
     fmt::{Debug, Formatter, Pointer},
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::Deref,
     ptr::NonNull,
 };
+
+/// A null-terminated string pointer.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct ConstCStr(ConstNonNull<u8>);
+
+impl ConstCStr {
+    /// Constructs a new `ConstCStr` from a `CStr`.
+    pub const fn new(string: &CStr) -> Self {
+        unsafe { Self::new_unchecked(ConstNonNull::new_unchecked(string.as_ptr().cast())) }
+    }
+
+    /// Constructs a new `ConstCStr` from a raw ptr.
+    ///
+    /// # Safety
+    ///
+    /// The string must be null-terminated.
+    pub const unsafe fn new_unchecked(string: ConstNonNull<u8>) -> Self {
+        Self(string)
+    }
+
+    /// Returns the inner pointer to the string.
+    pub const fn as_ptr(&self) -> *const u8 {
+        self.0.as_ptr()
+    }
+
+    /// Returns a reference to the contained `CStr`.
+    ///
+    /// # Safety
+    ///
+    /// See [`CStr::from_ptr`].
+    pub const unsafe fn as_ref<'a>(&self) -> &'a CStr {
+        unsafe { CStr::from_ptr(self.as_ptr().cast()) }
+    }
+}
+
+unsafe impl Send for ConstCStr {}
+unsafe impl Sync for ConstCStr {}
+
+impl From<&'_ CStr> for ConstCStr {
+    fn from(value: &'_ CStr) -> Self {
+        Self::new(value)
+    }
+}
 
 /// A wrapper around a [`NonNull`] that only allows conversions from and to read-only pointers.
 #[repr(transparent)]

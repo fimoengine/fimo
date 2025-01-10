@@ -147,8 +147,14 @@ typedef void (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
 /// Adding/removing functionality to a subscriber through this table is a breaking change, as a
 /// subscriber may be implemented from outside the library.
 typedef struct FimoTracingSubscriberVTable {
-    /// Destroys the subscriber.
-    void (*destroy)(void *);
+    /// Pointer to a possible extension.
+    ///
+    /// Reserved for future use. Must be `NULL`.
+    const void *next;
+    /// Increases the reference count of the subscriber.
+    void (*acquire)(void *);
+    /// Decreases the reference count of the subscriber.
+    void (*release)(void *);
     /// Creates a new stack.
     void* (*call_stack_create)(void *, const FimoTime *);
     /// Drops an empty call stack.
@@ -183,10 +189,6 @@ typedef struct FimoTracingSubscriberVTable {
 /// subscribers. Therefore it does not consume any events on its own, which is the task of the
 /// subscribers. Subscribers may utilize the events in any way they deem fit.
 typedef struct FimoTracingSubscriber {
-    /// Pointer to a possible extension.
-    ///
-    /// Reserved for future use. Must be `NULL`.
-    const void *next;
     /// Pointer to the subscriber.
     void *ptr;
     /// Pointer to the vtable of the subscriber (not `Null`).
@@ -212,8 +214,6 @@ typedef struct FimoTracingConfig {
     /// Maximum level for which to consume tracing events.
     FimoTracingLevel maximum_level;
     /// Array of subscribers to register with the tracing subsystem.
-    ///
-    /// The ownership of the subscribers is transferred to the context.
     FimoTracingSubscriber *subscribers;
     /// Number of subscribers to register with the tracing subsystem.
     FimoUSize subscriber_count;
