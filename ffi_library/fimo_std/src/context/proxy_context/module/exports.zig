@@ -20,11 +20,11 @@ pub const Parameter = extern struct {
     read: ?*const fn (
         data: Module.OpaqueParameterData,
         value: *anyopaque,
-    ) callconv(.C) void = null,
+    ) callconv(.c) void = null,
     write: ?*const fn (
         data: Module.OpaqueParameterData,
         value: *const anyopaque,
-    ) callconv(.C) void = null,
+    ) callconv(.c) void = null,
     name: [*:0]const u8,
     default_value: extern union {
         u8: u8,
@@ -68,8 +68,8 @@ pub const DynamicSymbolExport = extern struct {
     constructor: *const fn (
         ctx: *const Module.OpaqueInstance,
         symbol: **anyopaque,
-    ) callconv(.C) c.FimoResult,
-    destructor: *const fn (symbol: *anyopaque) callconv(.C) void,
+    ) callconv(.c) c.FimoResult,
+    destructor: *const fn (symbol: *anyopaque) callconv(.c) void,
     version: c.FimoVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
@@ -77,7 +77,7 @@ pub const DynamicSymbolExport = extern struct {
 
 /// A modifier declaration for a module export.
 pub const Modifier = extern struct {
-    tag: enum(c.FimoModuleExportModifierKey) {
+    tag: enum(i32) {
         destructor = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR,
         dependency = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY,
         debug_info = c.FIMO_MODULE_EXPORT_MODIFIER_DEBUG_INFO,
@@ -86,7 +86,7 @@ pub const Modifier = extern struct {
     value: extern union {
         destructor: *const extern struct {
             data: ?*anyopaque,
-            destructor: *const fn (ptr: ?*anyopaque) callconv(.C) void,
+            destructor: *const fn (ptr: ?*anyopaque) callconv(.c) void,
         },
         dependency: *const Module.Info,
         debug_info: *const extern struct {
@@ -101,7 +101,6 @@ pub const Modifier = extern struct {
 
 /// Declaration of a module export.
 pub const Export = extern struct {
-    id: Context.TypeId = .module_export,
     next: ?*Context.TaggedInStruct = null,
     version: c.FimoVersion = Context.context_version.intoC(),
     name: [*:0]const u8,
@@ -126,13 +125,13 @@ pub const Export = extern struct {
         ctx: *const Module.OpaqueInstance,
         set: Module.LoadingSet,
         data: *?*anyopaque,
-    ) callconv(.C) c.FimoResult = null,
+    ) callconv(.c) c.FimoResult = null,
     destructor: ?*const fn (
         ctx: *const Module.OpaqueInstance,
         data: ?*anyopaque,
-    ) callconv(.C) void = null,
-    on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.C) c.FimoResult = null,
-    on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.C) void = null,
+    ) callconv(.c) void = null,
+    on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) c.FimoResult = null,
+    on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) void = null,
 
     /// Runs the registered cleanup routines.
     pub fn deinit(self: *const Export) void {
@@ -236,13 +235,13 @@ pub const Builder = struct {
         ctx: *const Module.OpaqueInstance,
         set: Module.LoadingSet,
         data: *?*anyopaque,
-    ) callconv(.C) c.FimoResult = null,
+    ) callconv(.c) c.FimoResult = null,
     destructor: ?*const fn (
         ctx: *const Module.OpaqueInstance,
         data: ?*anyopaque,
-    ) callconv(.C) void = null,
-    on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.C) c.FimoResult = null,
-    on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.C) void = null,
+    ) callconv(.c) void = null,
+    on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) c.FimoResult = null,
+    on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) void = null,
     debug_info: ?Module.DebugInfo.Builder = if (!builtin.strip_debug_info) .{} else null,
 
     const Parameter = struct {
@@ -289,8 +288,8 @@ pub const Builder = struct {
                 initFn: *const fn (
                     ctx: *const Module.OpaqueInstance,
                     symbol: **anyopaque,
-                ) callconv(.C) c.FimoResult,
-                deinitFn: *const fn (symbol: *anyopaque) callconv(.C) void,
+                ) callconv(.c) c.FimoResult,
+                deinitFn: *const fn (symbol: *anyopaque) callconv(.c) void,
             },
         },
     };
@@ -312,13 +311,13 @@ pub const Builder = struct {
                     ctx: *const Module.OpaqueInstance,
                     set: Module.LoadingSet,
                     data: *?*anyopaque,
-                ) callconv(.C) c.FimoResult {
+                ) callconv(.c) c.FimoResult {
                     return struct {
                         fn wrapper(
                             ctx: *const Module.OpaqueInstance,
                             set: Module.LoadingSet,
                             data: *?*anyopaque,
-                        ) callconv(.C) c.FimoResult {
+                        ) callconv(.c) c.FimoResult {
                             f(ctx, set) catch |err| {
                                 if (@errorReturnTrace()) |tr|
                                     ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
@@ -332,12 +331,12 @@ pub const Builder = struct {
                 fn wrapDeinit(comptime f: DeinitFn) fn (
                     ctx: *const Module.OpaqueInstance,
                     data: ?*anyopaque,
-                ) callconv(.C) void {
+                ) callconv(.c) void {
                     return struct {
                         fn wrapper(
                             ctx: *const Module.OpaqueInstance,
                             data: ?*anyopaque,
-                        ) callconv(.C) void {
+                        ) callconv(.c) void {
                             std.debug.assert(data == null);
                             f(ctx);
                         }
@@ -355,13 +354,13 @@ pub const Builder = struct {
                     ctx: *const Module.OpaqueInstance,
                     set: Module.LoadingSet,
                     data: *?*anyopaque,
-                ) callconv(.C) c.FimoResult {
+                ) callconv(.c) c.FimoResult {
                     return struct {
                         fn wrapper(
                             ctx: *const Module.OpaqueInstance,
                             set: Module.LoadingSet,
                             data: *?*anyopaque,
-                        ) callconv(.C) c.FimoResult {
+                        ) callconv(.c) c.FimoResult {
                             data.* = f(ctx, set) catch |err| {
                                 if (@errorReturnTrace()) |tr|
                                     ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
@@ -374,12 +373,12 @@ pub const Builder = struct {
                 fn wrapDeinit(comptime f: DeinitFn) fn (
                     ctx: *const Module.OpaqueInstance,
                     data: ?*anyopaque,
-                ) callconv(.C) void {
+                ) callconv(.c) void {
                     return struct {
                         fn wrapper(
                             ctx: *const Module.OpaqueInstance,
                             data: ?*anyopaque,
-                        ) callconv(.C) void {
+                        ) callconv(.c) void {
                             const state: ?*T = @alignCast(@ptrCast(data));
                             f(ctx, state.?);
                         }
@@ -566,13 +565,13 @@ pub const Builder = struct {
         comptime deinitFn: fn (symbol: *T.symbol) void,
     ) Builder {
         const initWrapped = struct {
-            fn f(ctx: *const Module.OpaqueInstance, out: **anyopaque) callconv(.C) c.FimoResult {
+            fn f(ctx: *const Module.OpaqueInstance, out: **anyopaque) callconv(.c) c.FimoResult {
                 out.* = initFn(ctx) catch |err| return AnyError.initError(err).err;
                 return AnyError.intoCResult(null);
             }
         }.f;
         const deinitWrapped = struct {
-            fn f(symbol: *anyopaque) callconv(.C) void {
+            fn f(symbol: *anyopaque) callconv(.c) void {
                 return deinitFn(@alignCast(@ptrCast(symbol)));
             }
         }.f;
@@ -647,7 +646,7 @@ pub const Builder = struct {
             @compileError("the `on_start` event is already defined");
 
         const wrapped = struct {
-            fn wrapper(ctx: *const Module.OpaqueInstance) callconv(.C) c.FimoResult {
+            fn wrapper(ctx: *const Module.OpaqueInstance) callconv(.c) c.FimoResult {
                 f(ctx) catch |err| {
                     if (@errorReturnTrace()) |tr|
                         ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
@@ -671,7 +670,7 @@ pub const Builder = struct {
             @compileError("the `on_stop` event is already defined");
 
         const wrapped = struct {
-            fn wrapper(ctx: *const Module.OpaqueInstance) callconv(.C) void {
+            fn wrapper(ctx: *const Module.OpaqueInstance) callconv(.c) void {
                 f(ctx);
             }
         }.wrapper;
@@ -1096,7 +1095,7 @@ pub const ExportIter = struct {
     }
 
     pub export fn fimo_impl_module_export_iterator(
-        inspector: *const fn (module: *const Export, data: ?*anyopaque) callconv(.C) bool,
+        inspector: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
         data: ?*anyopaque,
     ) void {
         var it = ExportIter.init();

@@ -54,6 +54,12 @@ impl From<&'_ CStr> for ConstCStr {
     }
 }
 
+impl Default for ConstCStr {
+    fn default() -> Self {
+        Self::new(c"")
+    }
+}
+
 /// A wrapper around a [`NonNull`] that only allows conversions from and to read-only pointers.
 #[repr(transparent)]
 pub struct ConstNonNull<T: ?Sized>(NonNull<T>);

@@ -217,7 +217,6 @@ pub const Symbol = struct {
 
 /// Info of a loaded module instance.
 pub const Info = extern struct {
-    id: Context.TypeId = .module_info,
     next: ?*Context.TaggedInStruct = null,
     name: [*:0]const u8,
     description: ?[*:0]const u8 = null,
@@ -250,7 +249,7 @@ pub const Info = extern struct {
 
     /// Signals that the owning instance may be unloaded.
     ///
-    /// The instance will be unladed once it is no longer actively used by another instance.
+    /// The instance will be unloaded once it is no longer actively used by another instance.
     pub fn markUnloadable(self: *const Info) void {
         self.vtable.mark_unloadable(self);
     }
@@ -276,7 +275,7 @@ pub const Info = extern struct {
         self.vtable.unref_instance_strong(self);
     }
 
-    /// Searches for a module by it's name.
+    /// Searches for a module by its name.
     ///
     /// Queries a module by its unique name. The returned `Info` instance will have its reference
     /// count increased.

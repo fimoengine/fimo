@@ -58,7 +58,7 @@ typedef struct FimoOSPath {
 
 /// A Windows path prefix.
 typedef struct FimoUTF8PathPrefix {
-    enum {
+    enum : FimoI32 {
         FIMO_UTF8_PATH_PREFIX_VERBATIM,
         FIMO_UTF8_PATH_PREFIX_VERBATIM_UNC,
         FIMO_UTF8_PATH_PREFIX_VERBATIM_DISK,
@@ -90,13 +90,13 @@ typedef struct FimoUTF8PathPrefix {
 
 /// Definition of all possible path components.
 typedef struct FimoUTF8PathComponent {
-    enum {
+    enum : FimoI32 {
         FIMO_UTF8_PATH_COMPONENT_PREFIX,
         FIMO_UTF8_PATH_COMPONENT_ROOT_DIR,
         FIMO_UTF8_PATH_COMPONENT_CUR_DIR,
         FIMO_UTF8_PATH_COMPONENT_PARENT_DIR,
         FIMO_UTF8_PATH_COMPONENT_NORMAL,
-    } type;
+    }  type;
     union {
         struct {
             FimoUTF8Path raw;
@@ -110,7 +110,7 @@ typedef struct FimoUTF8PathComponent {
 } FimoUTF8PathComponent;
 
 /// Internal state of a path component iterator.
-typedef enum FimoUTF8PathComponentIteratorState {
+typedef enum FimoUTF8PathComponentIteratorState : FimoI32 {
     FIMO_UTF8_PATH_COMPONENT_ITER_STATE_PREFIX,
     FIMO_UTF8_PATH_COMPONENT_ITER_STATE_START_DIR,
     FIMO_UTF8_PATH_COMPONENT_ITER_STATE_BODY,

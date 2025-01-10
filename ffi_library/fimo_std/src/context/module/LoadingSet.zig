@@ -560,10 +560,6 @@ fn addModuleInner(
 }
 
 fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{InvalidExport}!void {
-    if (@"export".id != .module_export) {
-        sys.logWarn("invalid struct id, id='{}'", .{@"export".id}, @src());
-        return error.InvalidExport;
-    }
     if (@"export".next != null) {
         sys.logWarn("the next field is reserved for future use", .{}, @src());
         return error.InvalidExport;

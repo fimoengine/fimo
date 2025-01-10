@@ -147,12 +147,6 @@ typedef struct FimoModuleInfoVTable {
  */
 typedef struct FimoModuleInfo {
     /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_MODULE_INFO`.
-     */
-    FimoStructType type;
-    /**
      * Pointer to a possible extension.
      *
      * Reserved for future use. Must be `NULL`.
@@ -1363,12 +1357,6 @@ typedef struct FimoModuleExportModifierDebugInfo {
  * Declaration of a module export.
  */
 struct FimoModuleExport {
-    /**
-     * Type of the struct.
-     *
-     * Must be `FIMO_STRUCT_TYPE_MODULE_EXPORT`.
-     */
-    FimoStructType type;
     /**
      * Pointer to a possible extension.
      *

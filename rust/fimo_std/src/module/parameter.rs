@@ -21,7 +21,7 @@ pub enum ParameterType {
 }
 
 impl core::fmt::Display for ParameterType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             ParameterType::U8 => write!(f, "u8"),
             ParameterType::U16 => write!(f, "u16"),
@@ -38,18 +38,18 @@ impl core::fmt::Display for ParameterType {
 /// Access group of a module parameter.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ParameterAccess {
+pub enum ParameterAccessGroup {
     Public,
     Dependency,
     Private,
 }
 
-impl core::fmt::Display for ParameterAccess {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl core::fmt::Display for ParameterAccessGroup {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            ParameterAccess::Public => write!(f, "Public"),
-            ParameterAccess::Dependency => write!(f, "Dependency"),
-            ParameterAccess::Private => write!(f, "Private"),
+            ParameterAccessGroup::Public => write!(f, "Public"),
+            ParameterAccessGroup::Dependency => write!(f, "Dependency"),
+            ParameterAccessGroup::Private => write!(f, "Private"),
         }
     }
 }
@@ -58,8 +58,8 @@ impl core::fmt::Display for ParameterAccess {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParameterInfo {
     type_: ParameterType,
-    read: ParameterAccess,
-    write: ParameterAccess,
+    read: ParameterAccessGroup,
+    write: ParameterAccessGroup,
 }
 
 /// Internal representation of a parameter.

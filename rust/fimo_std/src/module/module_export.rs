@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter};
 use std::{ffi::CStr, marker::PhantomData};
 
-use super::{ParameterAccess, ParameterType};
+use super::{ParameterAccessGroup, ParameterType};
 use crate::{
     bindings,
     context::ContextView,
@@ -48,12 +48,12 @@ impl ParameterDeclaration {
     }
 
     /// Fetches the access group specifier for the read permission.
-    pub fn read_group(&self) -> ParameterAccess {
+    pub fn read_group(&self) -> ParameterAccessGroup {
         unsafe { std::mem::transmute(self.0.read_group) }
     }
 
     /// Fetches the access group specifier for the write permission.
-    pub fn write_group(&self) -> ParameterAccess {
+    pub fn write_group(&self) -> ParameterAccessGroup {
         unsafe { std::mem::transmute(self.0.write_group) }
     }
 
@@ -679,10 +679,6 @@ impl FFISharable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
     ) -> Self::BorrowedView<'a> {
         // Safety: `ffi` can not be null.
         unsafe {
-            debug_assert_eq!(
-                (*ffi).type_,
-                bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT
-            );
             debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.major);
             ModuleExport(&*ffi)
         }
@@ -697,10 +693,6 @@ impl FFITransferable<*const bindings::FimoModuleExport> for ModuleExport<'_> {
     unsafe fn from_ffi(ffi: *const bindings::FimoModuleExport) -> Self {
         // Safety: `ffi` can not be null.
         unsafe {
-            debug_assert_eq!(
-                (*ffi).type_,
-                bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT
-            );
             debug_assert_eq!((*ffi).version.major, ContextView::CURRENT_VERSION.major);
             Self(&*ffi)
         }

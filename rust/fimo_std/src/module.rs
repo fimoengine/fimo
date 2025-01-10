@@ -1,11 +1,16 @@
 //! Module subsystem.
 
-use std::{ffi::CStr, mem::MaybeUninit};
-
 use crate::{
     bindings,
     error::{AnyError, to_result_indirect_in_place},
 };
+use std::{ffi::CStr, mem::MaybeUninit, ptr::NonNull};
+
+pub mod exports;
+
+mod info;
+
+pub use info::*;
 
 mod loading_set;
 mod module_export;
@@ -13,7 +18,12 @@ mod module_info;
 mod parameter;
 mod symbol;
 
-use crate::{context::ContextView, error::to_result_indirect, ffi::Viewable};
+use crate::{
+    context::{ContextHandle, ContextView},
+    error::{AnyResult, to_result_indirect},
+    ffi::{ConstCStr, ConstNonNull, Viewable},
+    version::Version,
+};
 pub use loading_set::*;
 pub use module_export::*;
 pub use module_info::*;
@@ -25,7 +35,50 @@ pub use symbol::*;
 /// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
-pub struct VTableV0(bindings::FimoModuleVTableV0);
+pub struct VTableV0 {
+    pub new_pseudo_instance: unsafe extern "C" fn(),
+    pub new_loading_set: unsafe extern "C" fn(),
+    pub find_instance_by_name: unsafe extern "C" fn(
+        handle: ContextHandle,
+        name: ConstCStr,
+        out: &mut MaybeUninit<Info>,
+    ) -> AnyResult,
+    pub find_instance_by_symbol: unsafe extern "C" fn(
+        handle: ContextHandle,
+        name: ConstCStr,
+        namespace: ConstCStr,
+        version: Version,
+        out: &mut MaybeUninit<Info>,
+    ) -> AnyResult,
+    pub namespace_exists: unsafe extern "C" fn(
+        handle: ContextHandle,
+        namespace: ConstCStr,
+        out: &mut MaybeUninit<bool>,
+    ) -> AnyResult,
+    pub prune_instances: unsafe extern "C" fn(handle: ContextHandle) -> AnyResult,
+    pub query_parameter: unsafe extern "C" fn(
+        handle: ContextHandle,
+        module: ConstCStr,
+        parameter: ConstCStr,
+        r#type: &mut MaybeUninit<ParameterType>,
+        read_group: &mut MaybeUninit<ParameterAccessGroup>,
+        write_group: &mut MaybeUninit<ParameterAccessGroup>,
+    ) -> AnyResult,
+    pub read_parameter: unsafe extern "C" fn(
+        handle: ContextHandle,
+        value: NonNull<()>,
+        r#type: ParameterType,
+        module: ConstCStr,
+        parameter: ConstCStr,
+    ) -> AnyResult,
+    pub write_parameter: unsafe extern "C" fn(
+        handle: ContextHandle,
+        value: ConstNonNull<()>,
+        r#type: ParameterType,
+        module: ConstCStr,
+        parameter: ConstCStr,
+    ) -> AnyResult,
+}
 
 /// Definition of the module subsystem.
 pub trait ModuleSubsystem: Copy {
@@ -349,7 +402,6 @@ macro_rules! export_module {
                 );
 
                 $crate::bindings::FimoModuleExport {
-                    type_: $crate::bindings::FimoStructType::FIMO_STRUCT_TYPE_MODULE_EXPORT,
                     next: core::ptr::null(),
                     version: $crate::bindings::FimoVersion {
                         major: $crate::bindings::FIMO_VERSION_MAJOR,
