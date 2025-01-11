@@ -214,9 +214,7 @@ impl FFISharable<*const bindings::FimoModuleInfo> for ModuleInfoView<'_> {
 
     unsafe fn borrow_from_ffi<'a>(ffi: *const bindings::FimoModuleInfo) -> Self::BorrowedView<'a> {
         // Safety: `ffi` can not be null.
-        unsafe {
-            ModuleInfoView(&*ffi)
-        }
+        unsafe { ModuleInfoView(&*ffi) }
     }
 }
 
@@ -227,9 +225,7 @@ impl FFITransferable<*const bindings::FimoModuleInfo> for ModuleInfoView<'_> {
 
     unsafe fn from_ffi(ffi: *const bindings::FimoModuleInfo) -> Self {
         // Safety: `ffi` can not be null.
-        unsafe {
-            Self(&*ffi)
-        }
+        unsafe { Self(&*ffi) }
     }
 }
 

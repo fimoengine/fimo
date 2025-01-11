@@ -9,7 +9,6 @@
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
 #![feature(anonymous_lifetime_in_impl_trait)]
-
 #![allow(incomplete_features)]
 
 #[doc(hidden)]

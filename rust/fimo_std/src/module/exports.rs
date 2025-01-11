@@ -4,7 +4,7 @@ use crate::{
     bindings,
     error::AnyResult,
     ffi::{ConstCStr, ConstNonNull, OpaqueHandle},
-    module::{Info, ParameterAccessGroup as ParameterAccessGroup, ParameterData, ParameterType},
+    module::{Info, ParameterAccessGroup, ParameterData, ParameterType},
     version::Version,
 };
 use std::{
