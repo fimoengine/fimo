@@ -48,8 +48,9 @@ pub struct Parameter<'a> {
     pub r#type: ParameterType,
     pub read_group: ParameterAccessGroup,
     pub write_group: ParameterAccessGroup,
-    pub read: Option<unsafe extern "C" fn(parameter: ParameterData<u8>, value: NonNull<()>)>,
-    pub write: Option<unsafe extern "C" fn(parameter: ParameterData<u8>, value: ConstNonNull<()>)>,
+    pub read: Option<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: NonNull<()>)>,
+    pub write:
+        Option<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: ConstNonNull<()>)>,
     pub name: ConstCStr,
     /// # Safety
     ///
@@ -120,7 +121,7 @@ impl<'a> Parameter<'a> {
     /// Sets a custom read function.
     pub const fn with_read(
         mut self,
-        read: Option<unsafe extern "C" fn(parameter: ParameterData<u8>, value: NonNull<()>)>,
+        read: Option<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: NonNull<()>)>,
     ) -> Self {
         self.read = read;
         self
@@ -129,7 +130,9 @@ impl<'a> Parameter<'a> {
     /// Sets a custom write function.
     pub const fn with_write(
         mut self,
-        write: Option<unsafe extern "C" fn(parameter: ParameterData<u8>, value: ConstNonNull<()>)>,
+        write: Option<
+            unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: ConstNonNull<()>),
+        >,
     ) -> Self {
         self.write = write;
         self
