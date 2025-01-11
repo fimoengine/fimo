@@ -776,7 +776,7 @@ macro_rules! instance {
 
         impl $view<'_> {
             #[inline(always)]
-            const fn view_inner(self: core::pin::Pin<&Self>) 
+            const fn view_inner(self: core::pin::Pin<&Self>)
                 -> core::pin::Pin<&$crate::module::InstanceView<'_, $p, $r, $i, $e, $s>> {
                 unsafe { std::mem::transmute(self) }
             }
@@ -807,7 +807,7 @@ macro_rules! instance {
 
             /// Returns a reference to the instance info.
             #[inline(always)]
-            pub const fn info(self: core::pin::Pin<&Self>) 
+            pub const fn info(self: core::pin::Pin<&Self>)
                 -> core::pin::Pin<&$crate::module::InfoView<'_>> {
                 self.view_inner().info()
             }
@@ -839,7 +839,7 @@ macro_rules! instance {
 
         impl<'a> $crate::ffi::Viewable<core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>>> for core::pin::Pin<&'a $view<'a>> {
             #[inline(always)]
-            fn view(self) 
+            fn view(self)
                 -> core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>> {
                 self.view_inner()
             }
@@ -913,7 +913,7 @@ macro_rules! instance {
 
         impl<'a, 'b: 'a> $crate::ffi::Viewable<core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>>> for &'a $owned<'a> {
             #[inline(always)]
-            fn view(self) 
+            fn view(self)
                 -> core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>> {
                 self.0.view()
             }

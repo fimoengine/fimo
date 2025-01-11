@@ -64,7 +64,7 @@ pub struct ParameterInfo {
 }
 
 /// Internal representation of a parameter.
-pub trait ParameterRepr: private::Sealed {
+pub trait ParameterRepr: Copy + private::Sealed {
     const TYPE: ParameterType;
 }
 
