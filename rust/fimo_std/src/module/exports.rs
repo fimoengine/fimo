@@ -3,7 +3,7 @@
 use crate::{
     bindings,
     error::AnyResult,
-    ffi::{ConstCStr, ConstNonNull, OpaqueHandle},
+    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, Unsafe},
     module::{Info, ParameterAccessGroup, ParameterData, ParameterType},
     version::Version,
 };
@@ -43,6 +43,7 @@ pub enum DefaultParameterValue {
 
 /// Declaration of a module parameter.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Parameter<'a> {
     pub r#type: ParameterType,
     pub read_group: ParameterAccessGroup,
@@ -53,7 +54,7 @@ pub struct Parameter<'a> {
     /// # Safety
     ///
     /// Must match the type provided in `type`.
-    pub unsafe default_value: DefaultParameterValueUnion,
+    pub default_value: Unsafe<DefaultParameterValueUnion>,
     pub _phantom: PhantomData<&'a ()>,
 }
 
@@ -96,7 +97,7 @@ impl<'a> Parameter<'a> {
                 read: None,
                 write: None,
                 name,
-                default_value,
+                default_value: Unsafe::new(default_value),
                 _phantom: PhantomData,
             }
         }
@@ -141,14 +142,14 @@ impl<'a> Parameter<'a> {
     pub const fn default_value(&self) -> DefaultParameterValue {
         unsafe {
             match self.r#type {
-                ParameterType::U8 => DefaultParameterValue::U8(self.default_value.u8),
-                ParameterType::U16 => DefaultParameterValue::U16(self.default_value.u16),
-                ParameterType::U32 => DefaultParameterValue::U32(self.default_value.u32),
-                ParameterType::U64 => DefaultParameterValue::U64(self.default_value.u64),
-                ParameterType::I8 => DefaultParameterValue::I8(self.default_value.i8),
-                ParameterType::I16 => DefaultParameterValue::I16(self.default_value.i16),
-                ParameterType::I32 => DefaultParameterValue::I32(self.default_value.i32),
-                ParameterType::I64 => DefaultParameterValue::I64(self.default_value.i64),
+                ParameterType::U8 => DefaultParameterValue::U8(self.default_value.get().u8),
+                ParameterType::U16 => DefaultParameterValue::U16(self.default_value.get().u16),
+                ParameterType::U32 => DefaultParameterValue::U32(self.default_value.get().u32),
+                ParameterType::U64 => DefaultParameterValue::U64(self.default_value.get().u64),
+                ParameterType::I8 => DefaultParameterValue::I8(self.default_value.get().i8),
+                ParameterType::I16 => DefaultParameterValue::I16(self.default_value.get().i16),
+                ParameterType::I32 => DefaultParameterValue::I32(self.default_value.get().i32),
+                ParameterType::I64 => DefaultParameterValue::I64(self.default_value.get().i64),
             }
         }
     }
@@ -165,26 +166,17 @@ impl Debug for Parameter<'_> {
                 .field("write", &self.write)
                 .field("name", &self.name.as_ref())
                 .field("default_value", match self.r#type {
-                    ParameterType::U8 => &self.default_value.u8 as &dyn Debug,
-                    ParameterType::U16 => &self.default_value.u16 as &dyn Debug,
-                    ParameterType::U32 => &self.default_value.u32 as &dyn Debug,
-                    ParameterType::U64 => &self.default_value.u64 as &dyn Debug,
-                    ParameterType::I8 => &self.default_value.i8 as &dyn Debug,
-                    ParameterType::I16 => &self.default_value.i16 as &dyn Debug,
-                    ParameterType::I32 => &self.default_value.i32 as &dyn Debug,
-                    ParameterType::I64 => &self.default_value.i64 as &dyn Debug,
+                    ParameterType::U8 => &self.default_value.as_ref().u8 as &dyn Debug,
+                    ParameterType::U16 => &self.default_value.as_ref().u16 as &dyn Debug,
+                    ParameterType::U32 => &self.default_value.as_ref().u32 as &dyn Debug,
+                    ParameterType::U64 => &self.default_value.as_ref().u64 as &dyn Debug,
+                    ParameterType::I8 => &self.default_value.as_ref().i8 as &dyn Debug,
+                    ParameterType::I16 => &self.default_value.as_ref().i16 as &dyn Debug,
+                    ParameterType::I32 => &self.default_value.as_ref().i32 as &dyn Debug,
+                    ParameterType::I64 => &self.default_value.as_ref().i64 as &dyn Debug,
                 })
                 .finish()
         }
-    }
-}
-
-unsafe impl Copy for Parameter<'_> {}
-
-#[allow(clippy::expl_impl_clone_on_copy)]
-impl Clone for Parameter<'_> {
-    fn clone(&self) -> Self {
-        *self
     }
 }
 
@@ -425,6 +417,7 @@ pub struct DestructorModifier {
 
 /// Declaration of a module export.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Export<'a> {
     pub next: Option<OpaqueHandle<dyn Send + Sync>>,
     pub version: Version,
@@ -432,41 +425,41 @@ pub struct Export<'a> {
     pub description: ConstCStr,
     pub author: ConstCStr,
     pub license: ConstCStr,
-    pub parameters: Option<ConstNonNull<Parameter<'a>>>,
     /// # Safety
     ///
     /// Must match the number of parameters pointed to by `parameters`.
-    pub unsafe parameters_count: u32,
-    pub resources: Option<ConstNonNull<Resource<'a>>>,
+    pub parameters: Unsafe<Option<ConstNonNull<Parameter<'a>>>>,
+    pub parameters_count: Unsafe<u32>,
     /// # Safety
     ///
     /// Must match the number of resources pointed to by `resources`.
-    pub unsafe resources_count: u32,
-    pub namespace_imports: Option<ConstNonNull<Namespace<'a>>>,
+    pub resources: Unsafe<Option<ConstNonNull<Resource<'a>>>>,
+    pub resources_count: Unsafe<u32>,
     /// # Safety
     ///
     /// Must match the number of namespace imports pointed to by `namespace_imports`.
-    pub unsafe namespace_imports_count: u32,
-    pub symbol_imports: Option<ConstNonNull<SymbolImport<'a>>>,
+    pub namespace_imports: Unsafe<Option<ConstNonNull<Namespace<'a>>>>,
+    pub namespace_imports_count: Unsafe<u32>,
     /// # Safety
     ///
     /// Must match the number of symbol imports pointed to by `symbol_imports`.
-    pub unsafe symbol_imports_count: u32,
-    pub symbol_exports: Option<ConstNonNull<SymbolExport<'a>>>,
+    pub symbol_imports: Unsafe<Option<ConstNonNull<SymbolImport<'a>>>>,
+    pub symbol_imports_count: Unsafe<u32>,
     /// # Safety
     ///
     /// Must match the number of symbol exports pointed to by `symbol_exports`.
-    pub unsafe symbol_exports_count: u32,
-    pub dynamic_symbol_exports: Option<ConstNonNull<DynamicSymbolExport<'a>>>,
+    pub symbol_exports: Unsafe<Option<ConstNonNull<SymbolExport<'a>>>>,
+    pub symbol_exports_count: Unsafe<u32>,
     /// # Safety
     ///
     /// Must match the number of symbol exports pointed to by `dynamic_symbol_exports`.
-    pub unsafe dynamic_symbol_exports_count: u32,
-    pub modifiers: Option<ConstNonNull<Modifier<'a>>>,
+    pub dynamic_symbol_exports: Unsafe<Option<ConstNonNull<DynamicSymbolExport<'a>>>>,
+    pub dynamic_symbol_exports_count: Unsafe<u32>,
     /// # Safety
     ///
     /// Must match the number of modifiers pointed to by `modifiers`.
-    pub unsafe modifiers_count: u32,
+    pub modifiers: Unsafe<Option<ConstNonNull<Modifier<'a>>>>,
+    pub modifiers_count: Unsafe<u32>,
     pub constructor: Option<
         unsafe extern "C" fn(
             instance: &bindings::FimoModuleInstance,

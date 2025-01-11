@@ -1,7 +1,7 @@
 //! Tracing subsystem.
 use crate::{
     context::{Context, ContextHandle, ContextView, TypeId},
-    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, VTablePtr, Viewable},
+    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, Unsafe, VTablePtr, Viewable},
     handle,
     time::Time,
 };
@@ -1045,11 +1045,12 @@ pub fn default_subscriber() -> OpaqueSubscriber {
 
 /// Configuration of the tracing subsystem.
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Config<'a> {
     /// # Safety
     ///
     /// Must be [`TypeId::TracingConfig`].
-    pub unsafe id: TypeId,
+    pub id: Unsafe<TypeId>,
     pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
     pub format_buffer_length: Option<NonZeroUsize>,
     pub max_level: Level,
@@ -1057,11 +1058,8 @@ pub struct Config<'a> {
     ///
     /// Represents an [`&[OpaqueSubscriber]`] and must therefore match with the length provided in
     /// `subscriber_count`.
-    pub unsafe subscribers: Option<ConstNonNull<OpaqueSubscriber>>,
-    /// # Safety
-    ///
-    /// See `subscribers`.
-    pub unsafe subscriber_count: usize,
+    pub subscribers: Unsafe<Option<ConstNonNull<OpaqueSubscriber>>>,
+    pub subscriber_count: Unsafe<usize>,
     pub _phantom: PhantomData<&'a [OpaqueSubscriber]>,
 }
 
@@ -1070,7 +1068,7 @@ impl<'a> Config<'a> {
     pub const fn new() -> Self {
         unsafe {
             Self {
-                id: TypeId::TracingConfig,
+                id: Unsafe::new(TypeId::TracingConfig),
                 next: None,
                 format_buffer_length: None,
                 max_level: if cfg!(debug_assertions) {
@@ -1078,8 +1076,8 @@ impl<'a> Config<'a> {
                 } else {
                     Level::Error
                 },
-                subscribers: None,
-                subscriber_count: 0,
+                subscribers: Unsafe::new(None),
+                subscriber_count: Unsafe::new(0),
                 _phantom: PhantomData,
             }
         }
@@ -1100,12 +1098,13 @@ impl<'a> Config<'a> {
     pub const fn with_subscribers(mut self, subscribers: &'a [OpaqueSubscriber]) -> Self {
         unsafe {
             if subscribers.is_empty() {
-                self.subscribers = None;
-                self.subscriber_count = 0;
+                self.subscribers = Unsafe::new(None);
+                self.subscriber_count = Unsafe::new(0);
                 self
             } else {
-                self.subscribers = Some(ConstNonNull::new_unchecked(subscribers.as_ptr()));
-                self.subscriber_count = subscribers.len();
+                self.subscribers =
+                    Unsafe::new(Some(ConstNonNull::new_unchecked(subscribers.as_ptr())));
+                self.subscriber_count = Unsafe::new(subscribers.len());
                 self
             }
         }
@@ -1114,10 +1113,10 @@ impl<'a> Config<'a> {
     /// Returns a slice of all subscribers.
     pub const fn subscribers(&self) -> &[OpaqueSubscriber] {
         unsafe {
-            match self.subscribers {
+            match self.subscribers.get() {
                 None => &[],
                 Some(subscribers) => {
-                    std::slice::from_raw_parts(subscribers.as_ptr(), self.subscriber_count)
+                    std::slice::from_raw_parts(subscribers.as_ptr(), self.subscriber_count.get())
                 }
             }
         }
@@ -1130,26 +1129,15 @@ impl Default for Config<'_> {
     }
 }
 
-unsafe impl Copy for Config<'_> {}
-
-#[allow(clippy::expl_impl_clone_on_copy)]
-impl Clone for Config<'_> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
 impl Debug for Config<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            f.debug_struct("Config")
-                .field("id", &self.id)
-                .field("next", &self.next)
-                .field("format_buffer_length", &self.format_buffer_length)
-                .field("max_level", &self.max_level)
-                .field("subscribers", &self.subscribers())
-                .finish()
-        }
+        f.debug_struct("Config")
+            .field("id", &self.id)
+            .field("next", &self.next)
+            .field("format_buffer_length", &self.format_buffer_length)
+            .field("max_level", &self.max_level)
+            .field("subscribers", &self.subscribers())
+            .finish()
     }
 }
 

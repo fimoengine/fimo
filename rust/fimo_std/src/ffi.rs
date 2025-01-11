@@ -3,12 +3,94 @@
 use std::{
     cmp::Ordering,
     ffi::CStr,
-    fmt::{Debug, Formatter, Pointer},
+    fmt::{Debug, Display, Formatter, Pointer},
     hash::{Hash, Hasher},
     marker::PhantomData,
     ops::Deref,
     ptr::NonNull,
 };
+
+/// A helper for an unsafe field.
+#[repr(transparent)]
+#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct Unsafe<T>(T);
+
+impl<T> Unsafe<T> {
+    /// Constructs a new `Unsafe`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that any imposed invariants are met.
+    pub const unsafe fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    /// Copies the contained value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that any imposed invariants are met.
+    pub const unsafe fn get(&self) -> T
+    where
+        T: Copy,
+    {
+        self.0
+    }
+
+    /// Extracts a reference to the value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that any imposed invariants are met.
+    pub const unsafe fn as_ref(&self) -> &T {
+        &self.0
+    }
+
+    /// Extracts a mutable reference to the value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that any imposed invariants are met.
+    pub const unsafe fn as_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+
+    /// Extracts a pointer to the value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that any imposed invariants are met.
+    pub const unsafe fn as_ptr(&self) -> *const T {
+        &raw const self.0
+    }
+
+    /// Extracts a mutable reference to the value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that any imposed invariants are met.
+    pub const unsafe fn as_ptr_mut(&mut self) -> *mut T {
+        &raw mut self.0
+    }
+}
+
+impl<T: Debug> Debug for Unsafe<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl<T: Display> Display for Unsafe<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl<T: Pointer> Pointer for Unsafe<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Pointer::fmt(&self.0, f)
+    }
+}
 
 /// A null-terminated string pointer.
 #[repr(transparent)]
