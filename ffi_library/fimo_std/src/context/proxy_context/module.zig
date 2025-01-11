@@ -317,7 +317,7 @@ pub const Info = extern struct {
 /// State of a loaded module.
 ///
 /// A module is self-contained, and may not be passed to other modules. An instance is valid for
-/// as long as the owning module remains loaded. Modules must not leak any resources outside it's
+/// as long as the owning module remains loaded. Modules must not leak any resources outside its
 /// own module, ensuring that they are destroyed upon module unloading.
 pub fn Instance(
     comptime ParametersT: type,
@@ -486,7 +486,7 @@ pub fn Instance(
         ///
         /// Checks if the module includes the namespace. In that case, the module is allowed access
         /// to the symbols in the namespace. Additionally, this function also queries whether the
-        /// include is static, i.e., the include was specified by the module at load time.
+        /// include is static, i.e., it was specified by the module at load time.
         pub fn queryNamespace(
             self: *const @This(),
             namespace: [:0]const u8,

@@ -507,7 +507,7 @@ impl SpanVTable {
 #[derive(Debug)]
 pub struct Span {
     pub handle: SpanHandle,
-    pub vtable: VTablePtr<SpanVTable>,
+    pub vtable: VTablePtr<'static, SpanVTable>,
 }
 
 sa::assert_impl_all!(Span: Send, Sync);
@@ -590,7 +590,7 @@ impl CallStackVTable {
 #[derive(Debug)]
 pub struct CallStack {
     pub handle: CallStackHandle,
-    pub vtable: VTablePtr<CallStackVTable>,
+    pub vtable: VTablePtr<'static, CallStackVTable>,
 }
 
 sa::assert_impl_all!(CallStack: Send, Sync);
@@ -819,7 +819,7 @@ pub struct SubscriberVTable {
 #[derive(Debug)]
 pub struct OpaqueSubscriber {
     pub handle: Option<SubscriberHandle>,
-    pub vtable: VTablePtr<SubscriberVTable>,
+    pub vtable: VTablePtr<'static, SubscriberVTable>,
 }
 
 sa::assert_impl_all!(OpaqueSubscriber: Send, Sync);

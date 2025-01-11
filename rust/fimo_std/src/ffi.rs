@@ -309,11 +309,11 @@ impl<T: ?Sized> From<&'_ T> for ConstNonNull<T> {
 
 /// A pointer to a virtual function table.
 #[repr(transparent)]
-pub struct VTablePtr<T: Send + Sync>(ConstNonNull<T>);
+pub struct VTablePtr<'a, T: Send + Sync>(ConstNonNull<T>, PhantomData<&'a T>);
 
-impl<T: Send + Sync> VTablePtr<T> {
-    /// Constructs a new pointer from a static reference.
-    pub const fn new(value: &'static T) -> Self {
+impl<'a, T: Send + Sync> VTablePtr<'a, T> {
+    /// Constructs a new pointer from a reference.
+    pub const fn new(value: &'a T) -> Self {
         unsafe { Self::new_unchecked(value) }
     }
 
@@ -324,11 +324,11 @@ impl<T: Send + Sync> VTablePtr<T> {
     /// The caller must ensure, that `value` can be dereferenced for the lifetime of the constructed
     /// instance.
     pub const unsafe fn new_unchecked(value: *const T) -> Self {
-        unsafe { Self(ConstNonNull::new_unchecked(value.cast_mut())) }
+        unsafe { Self(ConstNonNull::new_unchecked(value.cast_mut()), PhantomData) }
     }
 }
 
-impl<T: Send + Sync> Deref for VTablePtr<T> {
+impl<T: Send + Sync> Deref for VTablePtr<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -336,50 +336,50 @@ impl<T: Send + Sync> Deref for VTablePtr<T> {
     }
 }
 
-unsafe impl<T: Send + Sync> Send for VTablePtr<T> {}
-unsafe impl<T: Send + Sync> Sync for VTablePtr<T> {}
+unsafe impl<T: Send + Sync> Send for VTablePtr<'_, T> {}
+unsafe impl<T: Send + Sync> Sync for VTablePtr<'_, T> {}
 
-impl<T: Send + Sync> Debug for VTablePtr<T> {
+impl<T: Send + Sync> Debug for VTablePtr<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("VTablePtr").field(&self.0).finish()
     }
 }
 
-impl<T: Send + Sync> Pointer for VTablePtr<T> {
+impl<T: Send + Sync> Pointer for VTablePtr<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Pointer::fmt(&self.0, f)
     }
 }
 
-impl<T: Send + Sync> Copy for VTablePtr<T> {}
+impl<T: Send + Sync> Copy for VTablePtr<'_, T> {}
 
-impl<T: Send + Sync> Clone for VTablePtr<T> {
+impl<T: Send + Sync> Clone for VTablePtr<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Send + Sync> PartialEq for VTablePtr<T> {
+impl<T: Send + Sync> PartialEq for VTablePtr<'_, T> {
     fn eq(&self, other: &Self) -> bool {
         self.0.eq(&other.0)
     }
 }
 
-impl<T: Send + Sync> Eq for VTablePtr<T> {}
+impl<T: Send + Sync> Eq for VTablePtr<'_, T> {}
 
-impl<T: Send + Sync> PartialOrd for VTablePtr<T> {
+impl<T: Send + Sync> PartialOrd for VTablePtr<'_, T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T: Send + Sync> Ord for VTablePtr<T> {
+impl<T: Send + Sync> Ord for VTablePtr<'_, T> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl<T: Send + Sync> Hash for VTablePtr<T> {
+impl<T: Send + Sync> Hash for VTablePtr<'_, T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }

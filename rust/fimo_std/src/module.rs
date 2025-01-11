@@ -9,8 +9,10 @@ use std::{ffi::CStr, mem::MaybeUninit, ptr::NonNull};
 pub mod exports;
 
 mod info;
+mod instance;
 
 pub use info::*;
+pub use instance::*;
 
 mod loading_set;
 mod module_export;

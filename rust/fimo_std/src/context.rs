@@ -81,7 +81,7 @@ pub struct CoreVTableV0 {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ContextView<'a> {
     pub handle: ContextHandle,
-    pub vtable: VTablePtr<VTable>,
+    pub vtable: VTablePtr<'a, VTable>,
     pub _phantom: PhantomData<&'a ContextHandle>,
 }
 
@@ -118,7 +118,9 @@ impl ContextView<'_> {
         }
         Context(ContextView {
             handle: self.handle,
-            vtable: self.vtable,
+            vtable: unsafe {
+                std::mem::transmute::<VTablePtr<'_, _>, VTablePtr<'static, _>>(self.vtable)
+            },
             _phantom: PhantomData,
         })
     }

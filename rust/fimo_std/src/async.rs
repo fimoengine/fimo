@@ -86,7 +86,7 @@ impl EventLoopVTable {
 #[derive(Debug)]
 pub struct EventLoop {
     pub handle: Option<EventLoopHandle>,
-    pub vtable: VTablePtr<EventLoopVTable>,
+    pub vtable: VTablePtr<'static, EventLoopVTable>,
 }
 
 sa::assert_impl_all!(EventLoop: Send, Sync);
@@ -162,7 +162,7 @@ pub struct WakerVTable {
 #[derive(Debug, Copy, Clone)]
 pub struct WakerView<'a> {
     pub handle: Option<WakerHandle>,
-    pub vtable: VTablePtr<WakerVTable>,
+    pub vtable: VTablePtr<'a, WakerVTable>,
     pub _phantom: PhantomData<&'a WakerHandle>,
 }
 
@@ -621,7 +621,7 @@ impl BlockingContextVTable {
 #[repr(C)]
 pub struct BlockingContext {
     pub handle: Option<BlockingContextHandle>,
-    pub vtable: VTablePtr<BlockingContextVTable>,
+    pub vtable: VTablePtr<'static, BlockingContextVTable>,
 }
 
 sa::assert_impl_all!(BlockingContext: Send);

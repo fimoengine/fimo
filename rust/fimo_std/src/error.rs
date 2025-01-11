@@ -312,12 +312,12 @@ unsafe extern "C" {
 
 /// FFI equivalent of a `Result<(), AnyError>`.
 #[repr(C)]
-pub struct AnyResult<T: ?Sized = *mut ()> {
+pub struct AnyResult<T: ?Sized + 'static = *mut ()> {
     pub handle: Option<ErrorHandle<T>>,
-    pub vtable: Option<VTablePtr<VTable<T>>>,
+    pub vtable: Option<VTablePtr<'static, VTable<T>>>,
 }
 
-impl<T: ?Sized> AnyResult<T> {
+impl<T: ?Sized + 'static> AnyResult<T> {
     /// An `AnyResult` equivalent of an Ok(()).
     pub const OK: Self = Self {
         handle: None,
@@ -531,9 +531,9 @@ impl<T: ?Sized> Drop for AnyResult<T> {
 /// Generic error value.
 #[repr(C)]
 #[derive(PartialEq, Eq, Hash)]
-pub struct AnyError<T: ?Sized = *mut ()> {
+pub struct AnyError<T: ?Sized + 'static = *mut ()> {
     pub handle: Option<ErrorHandle<T>>,
-    pub vtable: VTablePtr<VTable<T>>,
+    pub vtable: VTablePtr<'static, VTable<T>>,
 }
 
 mod __private {
@@ -859,26 +859,26 @@ impl From<AnyError<dyn Send + Sync>> for AnyError<dyn Sync> {
     }
 }
 
-trait VTableHelper<E: ?Sized> {
-    const VTABLE: VTablePtr<VTable<E>>;
+trait VTableHelper<E: ?Sized + 'static> {
+    const VTABLE: VTablePtr<'static, VTable<E>>;
 }
 
-impl<E: ?Sized> VTableHelper<E> for &'static CStr {
-    const VTABLE: VTablePtr<VTable<E>> = const {
+impl<E: ?Sized + 'static> VTableHelper<E> for &'static CStr {
+    const VTABLE: VTablePtr<'static, VTable<E>> = const {
         unsafe {
             VTablePtr::new_unchecked((&raw const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE).cast())
         }
     };
 }
 
-impl<E: ?Sized> VTableHelper<E> for ErrorCode {
-    const VTABLE: VTablePtr<VTable<E>> = const {
+impl<E: ?Sized + 'static> VTableHelper<E> for ErrorCode {
+    const VTABLE: VTablePtr<'static, VTable<E>> = const {
         unsafe { VTablePtr::new_unchecked((&raw const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE).cast()) }
     };
 }
 
-impl<E: ?Sized> VTableHelper<E> for SystemErrorCode {
-    const VTABLE: VTablePtr<VTable<E>> = const {
+impl<E: ?Sized + 'static> VTableHelper<E> for SystemErrorCode {
+    const VTABLE: VTablePtr<'static, VTable<E>> = const {
         unsafe {
             VTablePtr::new_unchecked((&raw const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE).cast())
         }

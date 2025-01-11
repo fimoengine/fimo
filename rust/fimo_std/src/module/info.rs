@@ -1,7 +1,7 @@
 use crate::{
     context::ContextView,
     error::AnyError,
-    ffi::{ConstCStr, OpaqueHandle, VTablePtr, View, Viewable},
+    ffi::{ConstCStr, OpaqueHandle, View, Viewable},
     version::Version,
 };
 use std::{
@@ -12,7 +12,7 @@ use std::{
     pin::Pin,
 };
 
-/// Virtual function table of an [`Info`].
+/// Virtual function table of an [`InfoView`] and [`Info`].
 #[repr(C)]
 #[derive(Debug)]
 pub struct InfoVTable {
@@ -66,9 +66,9 @@ pub struct InfoView<'a> {
     pub author: Option<ConstCStr>,
     pub license: Option<ConstCStr>,
     pub module_path: Option<ConstCStr>,
-    pub vtable: VTablePtr<InfoVTable>,
+    pub vtable: InfoVTable,
     // Using PhantomPinned directly makes it not FFI-Safe.
-    pub _phantom: PhantomData<PhantomPinned>,
+    pub(crate) _phantom: PhantomData<PhantomPinned>,
     pub(crate) _private: PhantomData<&'a ()>,
 }
 
@@ -96,7 +96,7 @@ impl<'a> InfoView<'a> {
             author: Option<&'a CStr>,
             license: Option<&'a CStr>,
             module_path: Option<&'a CStr>,
-            vtable: &'static InfoVTable,
+            vtable: InfoVTable,
         ) {
             let description = match description {
                 None => None,
@@ -122,7 +122,7 @@ impl<'a> InfoView<'a> {
                 author,
                 license,
                 module_path,
-                vtable: VTablePtr::new(vtable),
+                vtable,
                 _phantom: PhantomData,
                 _private: PhantomData,
             };

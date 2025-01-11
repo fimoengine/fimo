@@ -195,9 +195,9 @@ pub struct ParameterDataVTable<T: ParameterRepr> {
 /// Internal parameter data.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct ParameterData<T: ParameterRepr> {
+pub struct ParameterData<T: ParameterRepr + 'static> {
     pub handle: OpaqueHandle<dyn Send + Sync>,
-    pub vtable: VTablePtr<ParameterDataVTable<T>>,
+    pub vtable: VTablePtr<'static, ParameterDataVTable<T>>,
 }
 
 impl<T: ParameterRepr> ParameterData<T> {
