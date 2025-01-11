@@ -58,6 +58,8 @@ pub struct Parameter<'a> {
     pub _phantom: PhantomData<&'a ()>,
 }
 
+sa::assert_impl_all!(Parameter<'_>: Send, Sync);
+
 impl<'a> Parameter<'a> {
     /// Constructs a new `Parameter`.
     pub const fn new(default_value: DefaultParameterValue, name: &'a CStr) -> Self {
@@ -188,6 +190,8 @@ pub struct Resource<'a> {
     pub _phantom: PhantomData<&'a [u8]>,
 }
 
+sa::assert_impl_all!(Resource<'_>: Send, Sync);
+
 impl<'a> Resource<'a> {
     /// Constructs a new `Resource`.
     pub const fn new(path: &'a CStr) -> Self {
@@ -218,6 +222,8 @@ pub struct Namespace<'a> {
     pub name: ConstCStr,
     pub _phantom: PhantomData<&'a [u8]>,
 }
+
+sa::assert_impl_all!(Namespace<'_>: Send, Sync);
 
 impl<'a> Namespace<'a> {
     /// Constructs a new `Namespace`.
@@ -251,6 +257,8 @@ pub struct SymbolImport<'a> {
     pub namespace: ConstCStr,
     pub _phantom: PhantomData<&'a [u8]>,
 }
+
+sa::assert_impl_all!(SymbolImport<'_>: Send, Sync);
 
 impl<'a> SymbolImport<'a> {
     /// Constructs a new `SymbolImport`.
@@ -300,6 +308,11 @@ pub struct SymbolExport<'a> {
     pub namespace: ConstCStr,
     pub _phantom: PhantomData<&'a [u8]>,
 }
+
+sa::assert_impl_all!(SymbolExport<'_>: Send, Sync);
+
+unsafe impl Send for SymbolExport<'_> {}
+unsafe impl Sync for SymbolExport<'_> {}
 
 impl<'a> SymbolExport<'a> {
     /// Constructs a new `SymbolExport`.
@@ -356,6 +369,8 @@ pub struct DynamicSymbolExport<'a> {
     pub _phantom: PhantomData<&'a [u8]>,
 }
 
+sa::assert_impl_all!(DynamicSymbolExport<'_>: Send, Sync);
+
 impl<'a> DynamicSymbolExport<'a> {
     // /// Constructs a new `DynamicSymbolExport`.
     // pub const fn new<T>(symbol: &'a T, version: Version, name: &'a CStr) -> Self {
@@ -406,6 +421,8 @@ pub enum Modifier<'a> {
     Dependency(Info),
     DebugInfo,
 }
+
+sa::assert_impl_all!(Modifier<'_>: Send, Sync);
 
 /// A modifier for an export destructor.
 #[repr(C)]
@@ -471,3 +488,8 @@ pub struct Export<'a> {
         unsafe extern "C" fn(instance: &bindings::FimoModuleInstance, state: Option<NonNull<()>>),
     >,
 }
+
+sa::assert_impl_all!(Export<'_>: Send, Sync);
+
+unsafe impl Send for Export<'_> {}
+unsafe impl Sync for Export<'_> {}

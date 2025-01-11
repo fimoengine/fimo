@@ -85,6 +85,8 @@ pub struct ContextView<'a> {
     pub _phantom: PhantomData<&'a ContextHandle>,
 }
 
+sa::assert_impl_all!(ContextView<'_>: Send, Sync);
+
 impl ContextView<'_> {
     /// Current `Context` version of the library.
     pub const CURRENT_VERSION: Version = Version::new_long(
@@ -152,6 +154,8 @@ unsafe extern "C" {
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct Context(ContextView<'static>);
+
+sa::assert_impl_all!(Context: Send, Sync);
 
 impl Context {
     /// Constructs a new `Context` with the default options.

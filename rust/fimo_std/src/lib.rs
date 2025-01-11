@@ -49,6 +49,7 @@
 
 #[doc(hidden)]
 pub use paste;
+extern crate static_assertions as sa;
 
 #[macro_use]
 mod macros;

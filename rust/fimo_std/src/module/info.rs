@@ -72,6 +72,8 @@ pub struct InfoView<'a> {
     pub(crate) _private: PhantomData<&'a ()>,
 }
 
+sa::assert_impl_all!(InfoView<'_>: Send, Sync);
+
 impl<'a> InfoView<'a> {
     cfg_internal! {
         /// Constructs a new `InfoView`.
@@ -257,6 +259,8 @@ impl Debug for InfoView<'_> {
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Info(Pin<&'static InfoView<'static>>);
+
+sa::assert_impl_all!(Info: Send, Sync);
 
 impl Info {
     /// Searches for a module by its name.

@@ -89,6 +89,8 @@ pub struct EventLoop {
     pub vtable: VTablePtr<EventLoopVTable>,
 }
 
+sa::assert_impl_all!(EventLoop: Send, Sync);
+
 impl EventLoop {
     /// Initializes a new event loop.
     ///
@@ -164,6 +166,8 @@ pub struct WakerView<'a> {
     pub _phantom: PhantomData<&'a WakerHandle>,
 }
 
+sa::assert_impl_all!(WakerView<'_>: Send, Sync, Unpin);
+
 impl WakerView<'_> {
     /// Acquires a strong reference to the waker.
     pub fn acquire(&self) -> Waker {
@@ -184,6 +188,8 @@ impl View for WakerView<'_> {}
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Waker(WakerView<'static>);
+
+sa::assert_impl_all!(Waker: Send, Sync);
 
 impl Waker {
     /// Notifies the task bound to the waker and drop the waker.
@@ -570,7 +576,7 @@ impl<T, R> IntoFutureSpec<T, R> for Future<T, R> {
     }
 }
 
-handle!(pub handle BlockingContextHandle);
+handle!(pub handle BlockingContextHandle: Send);
 
 /// Virtual function table of a [`BlockingContext`].
 #[repr(C)]
@@ -617,6 +623,8 @@ pub struct BlockingContext {
     pub handle: Option<BlockingContextHandle>,
     pub vtable: VTablePtr<BlockingContextVTable>,
 }
+
+sa::assert_impl_all!(BlockingContext: Send);
 
 impl BlockingContext {
     /// Constructs a new blocking context.

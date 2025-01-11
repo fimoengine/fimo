@@ -378,6 +378,8 @@ pub struct Metadata {
     pub line_number: i32,
 }
 
+sa::assert_impl_all!(Metadata: Send, Sync);
+
 impl Metadata {
     pub const fn new(
         name: &'static CStr,
@@ -438,6 +440,8 @@ pub struct Event {
     pub metadata: &'static Metadata,
 }
 
+sa::assert_impl_all!(Event: Send, Sync);
+
 impl Event {
     /// Constructs a new event.
     pub const fn new(metadata: &'static Metadata) -> Self {
@@ -455,6 +459,8 @@ pub struct SpanDescriptor {
     pub next: Option<OpaqueHandle<dyn Send + Sync>>,
     pub metadata: &'static Metadata,
 }
+
+sa::assert_impl_all!(SpanDescriptor: Send, Sync);
 
 impl SpanDescriptor {
     /// Constructs a new `SpanDescriptor`.
@@ -503,6 +509,8 @@ pub struct Span {
     pub handle: SpanHandle,
     pub vtable: VTablePtr<SpanVTable>,
 }
+
+sa::assert_impl_all!(Span: Send, Sync);
 
 impl Span {
     /// Creates a new span and enters it.
@@ -585,6 +593,8 @@ pub struct CallStack {
     pub vtable: VTablePtr<CallStackVTable>,
 }
 
+sa::assert_impl_all!(CallStack: Send, Sync);
+
 impl CallStack {
     /// Creates a new empty call stack.
     ///
@@ -654,6 +664,8 @@ impl Drop for CallStack {
 /// RAII access provider to the [`TracingSubsystem`] for a thread.
 #[derive(Debug)]
 pub struct ThreadAccess(Context);
+
+sa::assert_impl_all!(ThreadAccess: Send, Sync);
 
 impl ThreadAccess {
     /// Registers the calling thread with the tracing subsystem.
@@ -809,6 +821,8 @@ pub struct OpaqueSubscriber {
     pub handle: Option<SubscriberHandle>,
     pub vtable: VTablePtr<SubscriberVTable>,
 }
+
+sa::assert_impl_all!(OpaqueSubscriber: Send, Sync);
 
 impl OpaqueSubscriber {
     /// Constructs a new `OpaqueSubscriber` from a reference to a [`Subscriber`].
@@ -1063,6 +1077,8 @@ pub struct Config<'a> {
     pub _phantom: PhantomData<&'a [OpaqueSubscriber]>,
 }
 
+sa::assert_impl_all!(Config<'_>: Send, Sync);
+
 impl<'a> Config<'a> {
     /// Creates the default config.
     pub const fn new() -> Self {
@@ -1122,6 +1138,9 @@ impl<'a> Config<'a> {
         }
     }
 }
+
+unsafe impl Send for Config<'_> {}
+unsafe impl Sync for Config<'_> {}
 
 impl Default for Config<'_> {
     fn default() -> Self {
