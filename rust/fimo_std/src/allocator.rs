@@ -8,21 +8,16 @@ use std::{
 };
 
 unsafe extern "C" {
-    #[allow(clashing_extern_declarations)]
     fn fimo_aligned_alloc(
         alignment: usize,
         size: usize,
         error: Option<&mut MaybeUninit<AnyResult>>,
     ) -> Option<NonNull<u8>>;
-
-    #[allow(clashing_extern_declarations)]
     fn fimo_aligned_alloc_sized(
         alignment: usize,
         size: usize,
         error: Option<&mut MaybeUninit<AnyResult>>,
     ) -> AllocBuffer<u8>;
-
-    #[allow(clashing_extern_declarations)]
     fn fimo_free_aligned_sized(ptr: Option<NonNull<u8>>, alignment: usize, size: usize);
 }
 

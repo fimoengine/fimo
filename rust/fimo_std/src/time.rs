@@ -3,7 +3,6 @@ use crate::error::{AnyError, AnyResult};
 use core::ops::{Add, AddAssign, Sub, SubAssign};
 use std::mem::MaybeUninit;
 
-#[allow(clashing_extern_declarations)]
 unsafe extern "C" {
     fn fimo_duration_from_seconds(secs: u64) -> Duration;
     fn fimo_duration_from_millis(millis: u64) -> Duration;
@@ -215,7 +214,6 @@ impl SubAssign for Duration {
     }
 }
 
-#[allow(clashing_extern_declarations)]
 unsafe extern "C" {
     fn fimo_time_now() -> Time;
     fn fimo_time_elapsed(time: &Time, out: &mut MaybeUninit<Duration>) -> AnyResult;

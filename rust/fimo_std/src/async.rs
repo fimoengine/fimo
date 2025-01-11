@@ -15,8 +15,6 @@ use std::{
 };
 
 /// Virtual function table of the async subsystem.
-///
-/// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
@@ -51,13 +49,36 @@ pub struct VTableV0 {
 handle!(pub handle EventLoopHandle: Send + Sync + Unpin);
 
 /// Virtual function table of an [`EventLoop`].
-///
-/// Adding fields to the vtable is not a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct EventLoopVTable {
-    join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
-    detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+    pub join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+    pub detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+    pub(crate) _private: PhantomData<()>,
+}
+
+impl EventLoopVTable {
+    cfg_internal! {
+        /// Constructs a new `EventLoopVTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const fn new(
+            join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+            detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
+        ) -> Self {
+            Self {
+                join,
+                detach,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// A handle to an event loop executing futures.
@@ -124,16 +145,14 @@ impl Drop for EventLoop {
 handle!(pub handle WakerHandle: Send + Sync + Unpin);
 
 /// Virtual function table of a [`WakerView`] and [`Waker`].
-///
-/// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct WakerVTable {
-    acquire: unsafe extern "C" fn(handle: Option<WakerHandle>) -> Waker,
-    release: unsafe extern "C" fn(handle: Option<WakerHandle>),
-    wake_release: unsafe extern "C" fn(handle: Option<WakerHandle>),
-    wake: unsafe extern "C" fn(handle: Option<WakerHandle>),
-    next: Option<OpaqueHandle<dyn Send + Sync + Unpin>>,
+    pub acquire: unsafe extern "C" fn(handle: Option<WakerHandle>) -> Waker,
+    pub release: unsafe extern "C" fn(handle: Option<WakerHandle>),
+    pub wake_release: unsafe extern "C" fn(handle: Option<WakerHandle>),
+    pub wake: unsafe extern "C" fn(handle: Option<WakerHandle>),
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Unpin>>,
 }
 
 /// A non-owning reference to a waker.
@@ -208,8 +227,8 @@ pub type EnqueuedFuture<R> = Future<EnqueuedHandle, R>;
 #[repr(C)]
 #[derive(Debug)]
 pub struct Fallible<T> {
-    result: AnyResult<dyn Send + Sync>,
-    value: MaybeUninit<T>,
+    pub result: AnyResult<dyn Send + Sync>,
+    pub value: MaybeUninit<T>,
 }
 
 impl<T> Fallible<T> {
@@ -251,9 +270,9 @@ unsafe impl<T: Sync> Sync for Fallible<T> {}
 #[repr(C)]
 #[derive(Debug)]
 pub struct Future<T, R> {
-    state: ManuallyDrop<T>,
-    poll_fn: unsafe extern "C" fn(*mut T, WakerView<'_>, *mut R) -> bool,
-    cleanup_fn: Option<unsafe extern "C" fn(*mut T)>,
+    pub state: ManuallyDrop<T>,
+    pub poll_fn: unsafe extern "C" fn(*mut T, WakerView<'_>, *mut R) -> bool,
+    pub cleanup_fn: Option<unsafe extern "C" fn(*mut T)>,
 }
 
 impl<T, R> Future<T, R> {
@@ -554,14 +573,42 @@ impl<T, R> IntoFutureSpec<T, R> for Future<T, R> {
 handle!(pub handle BlockingContextHandle);
 
 /// Virtual function table of a [`BlockingContext`].
-///
-/// Adding fields to the vtable is not a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct BlockingContextVTable {
-    drop: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
-    waker_ref: unsafe extern "C" fn(handle: Option<BlockingContextHandle>) -> WakerView<'static>,
-    block_until_notified: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+    pub drop: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+    pub waker_ref:
+        unsafe extern "C" fn(handle: Option<BlockingContextHandle>) -> WakerView<'static>,
+    pub block_until_notified: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+    pub(crate) _private: PhantomData<()>,
+}
+
+impl BlockingContextVTable {
+    cfg_internal! {
+        /// Constructs a new `BlockingContextVTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const fn new(
+            drop: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+            waker_ref: unsafe extern "C" fn(
+                handle: Option<BlockingContextHandle>,
+            ) -> WakerView<'static>,
+            block_until_notified: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
+        ) -> Self {
+            Self {
+                drop,
+                waker_ref,
+                block_until_notified,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// A context that blocks the current thread until it is notified.

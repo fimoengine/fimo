@@ -16,8 +16,6 @@ use std::{
 };
 
 /// Virtual function table of the tracing subsystem.
-///
-/// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
@@ -471,12 +469,31 @@ impl SpanDescriptor {
 handle!(pub handle SpanHandle: Send + Sync);
 
 /// Virtual function table of a [`Span`].
-///
-/// Adding fields to the vtable is not a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct SpanVTable {
     pub drop: unsafe extern "C" fn(handle: SpanHandle),
+    pub(crate) _private: PhantomData<()>,
+}
+
+impl SpanVTable {
+    cfg_internal! {
+        /// Constructs a new `SpanVTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const fn new(drop: unsafe extern "C" fn(handle: SpanHandle)) -> Self {
+            Self {
+                drop,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// A period of time, during which events can occur.
@@ -520,14 +537,39 @@ impl Drop for Span {
 handle!(pub handle CallStackHandle: Send + Sync);
 
 /// Virtual function table of a [`CallStack`].
-///
-/// Adding fields to the vtable is not a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct CallStackVTable {
     pub drop: unsafe extern "C" fn(handle: CallStackHandle),
     pub replace_active: unsafe extern "C" fn(handle: CallStackHandle) -> CallStack,
     pub unblock: unsafe extern "C" fn(handle: CallStackHandle),
+    pub(crate) _private: PhantomData<()>,
+}
+
+impl CallStackVTable {
+    cfg_internal! {
+        /// Constructs a new `CallStackVTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const fn new(
+            drop: unsafe extern "C" fn(handle: CallStackHandle),
+            replace_active: unsafe extern "C" fn(handle: CallStackHandle) -> CallStack,
+            unblock: unsafe extern "C" fn(handle: CallStackHandle),
+        ) -> Self {
+            Self {
+                drop,
+                replace_active,
+                unblock,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// A call stack.
@@ -697,9 +739,6 @@ handle!(pub handle SubscriberHandle: Send + Sync);
 handle!(pub handle SubscriberCallStackHandle: Send + Sync);
 
 /// Virtual function table of a [`OpaqueSubscriber`].
-///
-/// Adding/removing functionality to a subscriber through this table is a breaking change, as a
-/// subscriber may be implemented from outside the library.
 #[repr(C)]
 #[derive(Debug)]
 pub struct SubscriberVTable {

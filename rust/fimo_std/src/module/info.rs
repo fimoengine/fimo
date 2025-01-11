@@ -13,17 +13,48 @@ use std::{
 };
 
 /// Virtual function table of an [`Info`].
-///
-/// Adding fields to the vtable is not a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct InfoVTable {
-    acquire: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
-    release: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
-    mark_unloadable: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
-    is_loaded: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
-    try_ref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
-    unref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+    pub acquire: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
+    pub release: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
+    pub mark_unloadable: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
+    pub is_loaded: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+    pub try_ref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+    pub unref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+    pub(crate) _private: PhantomData<()>,
+}
+
+impl InfoVTable {
+    cfg_internal! {
+        /// Constructs a new `InfoVTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const fn new(
+            acquire: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
+            release: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
+            mark_unloadable: unsafe extern "C" fn(info: Pin<&InfoView<'_>>),
+            is_loaded: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+            try_ref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+            unref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
+        ) -> Self {
+            Self {
+                acquire,
+                release,
+                mark_unloadable,
+                is_loaded,
+                try_ref_instance_strong,
+                unref_instance_strong,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// Borrowed info of a module instance.
@@ -38,9 +69,68 @@ pub struct InfoView<'a> {
     pub vtable: VTablePtr<InfoVTable>,
     // Using PhantomPinned directly makes it not FFI-Safe.
     pub _phantom: PhantomData<PhantomPinned>,
+    pub(crate) _private: PhantomData<&'a ()>,
 }
 
-impl InfoView<'_> {
+impl<'a> InfoView<'a> {
+    cfg_internal! {
+        /// Constructs a new `InfoView`.
+        ///
+        /// # Safety
+        ///
+        /// Is only safely constructible by the implementation.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const unsafe fn new_in(
+            out: Pin<&mut MaybeUninit<Self>>,
+            name: &'a CStr,
+            description: Option<&'a CStr>,
+            author: Option<&'a CStr>,
+            license: Option<&'a CStr>,
+            module_path: Option<&'a CStr>,
+            vtable: &'static InfoVTable,
+        ) {
+            let description = match description {
+                None => None,
+                Some(x) => Some(ConstCStr::new(x)),
+            };
+            let author = match author {
+                None => None,
+                Some(x) => Some(ConstCStr::new(x)),
+            };
+            let license = match license {
+                None => None,
+                Some(x) => Some(ConstCStr::new(x)),
+            };
+            let module_path = match module_path {
+                None => None,
+                Some(x) => Some(ConstCStr::new(x)),
+            };
+
+            let this = Self {
+                next: None,
+                name: ConstCStr::new(name),
+                description,
+                author,
+                license,
+                module_path,
+                vtable: VTablePtr::new(vtable),
+                _phantom: PhantomData,
+                _private: PhantomData,
+            };
+            unsafe {
+                let inner = Pin::get_unchecked_mut(out);
+                inner.write(this);
+            }
+        }
+    }
+
     /// Returns the name of the instance.
     pub const fn name(self: Pin<&Self>) -> &CStr {
         unsafe { Pin::into_inner_unchecked(self).name.as_ref() }

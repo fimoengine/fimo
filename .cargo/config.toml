@@ -3,4 +3,7 @@ xtask = "run --package xtask --"
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
-rustflags = ["-Zshare-generics=n"]
+rustflags = ["-Zshare-generics=n", "--cfg", "fimo_internals"]
+
+[build]
+rustflags = ["--cfg", "fimo_internals"]

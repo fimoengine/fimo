@@ -7,7 +7,6 @@ use crate::{
 use core::fmt::Display;
 use std::{mem::MaybeUninit, ptr::NonNull};
 
-#[allow(clashing_extern_declarations)]
 unsafe extern "C" {
     fn fimo_version_parse_str(
         str: ConstNonNull<u8>,

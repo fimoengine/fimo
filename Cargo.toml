@@ -14,7 +14,7 @@ unsafe_op_in_unsafe_fn = { level = "deny", priority = -3 }
 future_incompatible = { level = "warn", priority = -2 }
 nonstandard_style = { level = "warn", priority = -1 }
 rust_2018_idioms = "warn"
-unexpected_cfgs = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fimo_internals)'] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

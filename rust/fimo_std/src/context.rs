@@ -16,8 +16,6 @@ use std::{
 handle!(pub handle ContextHandle: Send + Sync + UnwindSafe + RefUnwindSafe + Unpin);
 
 /// Virtual function table of a [`ContextView`].
-///
-/// Adding fields to the vtable is not a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTable {
@@ -26,6 +24,37 @@ pub struct VTable {
     pub tracing_v0: crate::tracing::VTableV0,
     pub module_v0: crate::module::VTableV0,
     pub async_v0: crate::r#async::VTableV0,
+    pub(crate) _private: PhantomData<()>,
+}
+
+impl VTable {
+    cfg_internal! {
+        /// Constructs a new `VTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        pub const fn new(
+            header: VTableHeader,
+            core_v0: CoreVTableV0,
+            tracing_v0: crate::tracing::VTableV0,
+            module_v0: crate::module::VTableV0,
+            async_v0: crate::r#async::VTableV0
+        ) -> Self {
+            Self {
+                header,
+                core_v0,
+                tracing_v0,
+                module_v0,
+                async_v0,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// Abi-stable header of the virtual function table of a [`ContextView`].
@@ -36,8 +65,6 @@ pub struct VTableHeader {
 }
 
 /// Core virtual function table of a [`ContextView`].
-///
-/// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
 pub struct CoreVTableV0 {
@@ -111,7 +138,6 @@ impl FFISharable<bindings::FimoContext> for ContextView<'_> {
 
 #[link(name = "fimo_std", kind = "static")]
 unsafe extern "C" {
-    #[allow(clashing_extern_declarations)]
     fn fimo_context_init(
         options: *mut *const bindings::FimoBaseStructIn,
         ctx: &mut MaybeUninit<Context>,
