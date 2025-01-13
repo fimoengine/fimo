@@ -25,32 +25,32 @@ pub enum DependencyInfo {
 }
 
 /// Shared API of all instances.
-pub trait GenericInstance<
-    'a,
-    P: Send + Sync + 'a,
-    R: Send + Sync + 'a,
-    I: Send + Sync + 'a,
-    E: Send + Sync + 'a,
-    S: Send + Sync + 'a,
->: Viewable<Pin<&'a InstanceView<'a, P, R, I, E, S>>>
-{
+pub trait GenericInstance: Sized {
+    /// Type of the parameter table.
+    type Parameters: Send + Sync + 'static;
+
+    /// Type of the resource table.
+    type Resources: Send + Sync + 'static;
+
+    /// Type of the imports table.
+    type Imports: Send + Sync + 'static;
+
+    /// Type of the exports table.
+    type Exports: Send + Sync + 'static;
+
+    /// Type of the instance state.
+    type State: Send + Sync + 'static;
+
     /// Owned instance type.
-    type Owned<'o>
-    where
-        P: 'o,
-        R: 'o,
-        I: 'o,
-        E: 'o,
-        S: 'o;
+    type Owned;
 
     /// Constructs an owned handle to the instance, possibly prolonging its lifetime.
-    fn to_owned_instance<'o>(self) -> Self::Owned<'o>
+    fn to_owned_instance(self) -> Self::Owned;
+
+    /// Constructs a borrowed opaque instance handle from the typed handle.
+    fn to_opaque_instance_view<'o>(self) -> Pin<&'o OpaqueInstanceView<'o>>
     where
-        P: 'o,
-        R: 'o,
-        I: 'o,
-        E: 'o,
-        S: 'o;
+        Self: 'o;
 
     /// Checks the status of a namespace from the view of the module.
     ///
@@ -58,14 +58,14 @@ pub trait GenericInstance<
     /// to the symbols in the namespace. Additionally, this function also queries whether the
     /// include is static, i.e., it was specified by the module at load time.
     fn query_namespace(self, namespace: &CStr) -> Result<DependencyInfo, AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.query_namespace;
             let mut has_dependency = MaybeUninit::uninit();
             let mut is_static = MaybeUninit::uninit();
             f(
-                this.view(),
+                this,
                 ConstCStr::new(namespace),
                 &mut has_dependency,
                 &mut is_static,
@@ -90,11 +90,11 @@ pub trait GenericInstance<
     /// Once included, the module gains access to the symbols of its dependencies that are
     /// exposed in said namespace. A namespace can not be included multiple times.
     fn add_namespace(self, namespace: &CStr) -> Result<(), AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.add_namespace;
-            f(this.view(), ConstCStr::new(namespace)).into_result()
+            f(this, ConstCStr::new(namespace)).into_result()
         }
     }
 
@@ -104,11 +104,11 @@ pub trait GenericInstance<
     /// said namespace. It is only possible to exclude namespaces that were manually added,
     /// whereas static namespace includes remain valid until the module is unloaded.
     fn remove_namespace(self, namespace: &CStr) -> Result<(), AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.remove_namespace;
-            f(this.view(), ConstCStr::new(namespace)).into_result()
+            f(this, ConstCStr::new(namespace)).into_result()
         }
     }
 
@@ -122,19 +122,13 @@ pub trait GenericInstance<
         self,
         info: impl Viewable<Pin<&'i InfoView<'i>>>,
     ) -> Result<DependencyInfo, AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.query_dependency;
             let mut has_dependency = MaybeUninit::uninit();
             let mut is_static = MaybeUninit::uninit();
-            f(
-                this.view(),
-                info.view(),
-                &mut has_dependency,
-                &mut is_static,
-            )
-            .into_result()?;
+            f(this, info.view(), &mut has_dependency, &mut is_static).into_result()?;
 
             let has_dependency = has_dependency.assume_init();
             if !has_dependency {
@@ -159,11 +153,11 @@ pub trait GenericInstance<
         self,
         info: impl Viewable<Pin<&'i InfoView<'i>>>,
     ) -> Result<(), AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.add_dependency;
-            f(this.view(), info.view()).into_result()
+            f(this, info.view()).into_result()
         }
     }
 
@@ -177,11 +171,11 @@ pub trait GenericInstance<
         self,
         info: impl Viewable<Pin<&'i InfoView<'i>>>,
     ) -> Result<(), AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.remove_dependency;
-            f(this.view(), info.view()).into_result()
+            f(this, info.view()).into_result()
         }
     }
 
@@ -198,14 +192,14 @@ pub trait GenericInstance<
         namespace: &CStr,
         version: Version,
     ) -> Result<ConstNonNull<()>, AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         let name = ConstCStr::new(name);
         let namespace = ConstCStr::new(namespace);
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.load_symbol;
             let mut out = MaybeUninit::uninit();
-            f(this.view(), name, namespace, version, &mut out).into_result()?;
+            f(this, name, namespace, version, &mut out).into_result()?;
             Ok(out.assume_init())
         }
     }
@@ -220,7 +214,7 @@ pub trait GenericInstance<
         module: &CStr,
         parameter: &CStr,
     ) -> Result<U, AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         let module = ConstCStr::new(module);
         let parameter = ConstCStr::new(parameter);
         let r#type = <U::Repr as ParameterRepr>::TYPE;
@@ -229,7 +223,7 @@ pub trait GenericInstance<
             let f = inner.vtable.read_parameter;
             let mut out = MaybeUninit::<U::Repr>::uninit();
             f(
-                this.view(),
+                this,
                 NonNull::new_unchecked(&raw mut out).cast(),
                 r#type,
                 module,
@@ -253,7 +247,7 @@ pub trait GenericInstance<
         module: &CStr,
         parameter: &CStr,
     ) -> Result<(), AnyError> {
-        let this = self.view();
+        let this = self.to_opaque_instance_view();
         let module = ConstCStr::new(module);
         let parameter = ConstCStr::new(parameter);
         let value = value.into_repr();
@@ -262,7 +256,7 @@ pub trait GenericInstance<
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.write_parameter;
             f(
-                this.view(),
+                this,
                 ConstNonNull::new_unchecked(&raw const value).cast(),
                 r#type,
                 module,
@@ -338,14 +332,14 @@ pub struct InstanceVTable {
 /// own module, ensuring that they are destroyed upon module unloading.
 #[repr(C)]
 #[derive(Debug)]
-pub struct InstanceView<
-    'a,
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
-> {
+pub struct InstanceView<'a, P, R, I, E, S>
+where
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
+{
     pub vtable: VTablePtr<'a, InstanceVTable>,
     pub parameters: Option<&'a P>,
     pub resources: Option<&'a R>,
@@ -359,11 +353,11 @@ pub struct InstanceView<
 
 impl<'a, P, R, I, E, S> InstanceView<'a, P, R, I, E, S>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
     cfg_internal! {
         /// Constructs a new `InstanceView`.
@@ -497,68 +491,52 @@ where
     }
 }
 
-impl<'a, P, R, I, E, S> GenericInstance<'a, P, R, I, E, S>
-    for Pin<&'a InstanceView<'a, P, R, I, E, S>>
+impl<P, R, I, E, S> GenericInstance for Pin<&'_ InstanceView<'_, P, R, I, E, S>>
 where
-    P: Send + Sync + 'a,
-    R: Send + Sync + 'a,
-    I: Send + Sync + 'a,
-    E: Send + Sync + 'a,
-    S: Send + Sync + 'a,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
-    type Owned<'o>
-        = Instance<'o, P, R, I, E, S>
-    where
-        P: 'o,
-        R: 'o,
-        I: 'o,
-        E: 'o,
-        S: 'o;
+    type Parameters = P;
+    type Resources = R;
+    type Imports = I;
+    type Exports = E;
+    type State = S;
+
+    type Owned = Instance<P, R, I, E, S>;
 
     #[inline(always)]
-    fn to_owned_instance<'o>(self) -> Self::Owned<'o>
-    where
-        P: 'o,
-        R: 'o,
-        I: 'o,
-        E: 'o,
-        S: 'o,
-    {
+    fn to_owned_instance(self) -> Self::Owned {
         unsafe {
             let inner = Pin::into_inner_unchecked(self);
             let f = inner.vtable.acquire;
-            f(self.view());
+            f(self.to_opaque_instance_view());
             Instance(std::mem::transmute::<
                 Self,
                 Pin<&'_ InstanceView<'_, P, R, I, E, S>>,
             >(self))
         }
     }
+
+    #[inline(always)]
+    fn to_opaque_instance_view<'o>(self) -> Pin<&'o OpaqueInstanceView<'o>>
+    where
+        Self: 'o,
+    {
+        unsafe { std::mem::transmute(self) }
+    }
 }
 
 impl<P, R, I, E, S> View for Pin<&InstanceView<'_, P, R, I, E, S>>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
-}
-
-impl<'a, P, R, I, E, S> Viewable<Pin<&'a OpaqueInstanceView<'a>>>
-    for Pin<&'a InstanceView<'a, P, R, I, E, S>>
-where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
-{
-    #[inline(always)]
-    fn view(self) -> Pin<&'a OpaqueInstanceView<'a>> {
-        unsafe { std::mem::transmute(self) }
-    }
 }
 
 /// A view to an unknown instance.
@@ -566,23 +544,29 @@ where
 #[derive(Debug)]
 pub struct OpaqueInstanceView<'a>(pub InstanceView<'a, (), (), (), (), ()>);
 
-impl<'a> GenericInstance<'a, (), (), (), (), ()> for Pin<&'a OpaqueInstanceView<'a>> {
-    type Owned<'o> = Instance<'o, (), (), (), (), ()>;
+impl GenericInstance for Pin<&'_ OpaqueInstanceView<'_>> {
+    type Parameters = ();
+    type Resources = ();
+    type Imports = ();
+    type Exports = ();
+    type State = ();
 
-    fn to_owned_instance<'o>(self) -> Self::Owned<'o> {
-        let view: Pin<&InstanceView<'_, (), (), (), (), ()>> = self.view();
+    type Owned = Instance<(), (), (), (), ()>;
+
+    #[inline(always)]
+    fn to_owned_instance(self) -> Self::Owned {
+        let view = unsafe {
+            std::mem::transmute::<Self, Pin<&InstanceView<'_, (), (), (), (), ()>>>(self)
+        };
         view.to_owned_instance()
     }
-}
 
-impl View for Pin<&OpaqueInstanceView<'_>> {}
-
-impl<'a> Viewable<Pin<&'a InstanceView<'a, (), (), (), (), ()>>>
-    for Pin<&'a OpaqueInstanceView<'a>>
-{
     #[inline(always)]
-    fn view(self) -> Pin<&'a InstanceView<'a, (), (), (), (), ()>> {
-        unsafe { std::mem::transmute(self) }
+    fn to_opaque_instance_view<'o>(self) -> Pin<&'o OpaqueInstanceView<'o>>
+    where
+        Self: 'o,
+    {
+        self
     }
 }
 
@@ -602,21 +586,21 @@ impl<'a> Deref for OpaqueInstanceView<'a> {
 /// own module, ensuring that they are destroyed upon module unloading.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Instance<'a, P, R, I, E, S>(Pin<&'a InstanceView<'a, P, R, I, E, S>>)
+pub struct Instance<P, R, I, E, S>(Pin<&'static InstanceView<'static, P, R, I, E, S>>)
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync;
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static;
 
-impl<P, R, I, E, S> Instance<'_, P, R, I, E, S>
+impl<P, R, I, E, S> Instance<P, R, I, E, S>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
     /// Returns a reference to the parameter table of the instance.
     #[inline(always)]
@@ -655,37 +639,44 @@ where
     }
 }
 
-impl<'a, P, R, I, E, S> GenericInstance<'a, P, R, I, E, S> for &'a Instance<'a, P, R, I, E, S>
+impl<P, R, I, E, S> GenericInstance for &'_ Instance<P, R, I, E, S>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
-    type Owned<'o>
-        = Instance<'o, P, R, I, E, S>
-    where
-        P: 'o,
-        R: 'o,
-        I: 'o,
-        E: 'o,
-        S: 'o;
+    type Parameters = P;
+    type Resources = R;
+    type Imports = I;
+    type Exports = E;
+    type State = S;
+
+    type Owned = Instance<P, R, I, E, S>;
 
     #[inline(always)]
-    fn to_owned_instance<'o>(self) -> Self::Owned<'o> {
+    fn to_owned_instance(self) -> Self::Owned {
         self.view().to_owned_instance()
+    }
+
+    #[inline(always)]
+    fn to_opaque_instance_view<'o>(self) -> Pin<&'o OpaqueInstanceView<'o>>
+    where
+        Self: 'o,
+    {
+        self.view().to_opaque_instance_view()
     }
 }
 
-impl<'a, 'b: 'a, P, R, I, E, S> Viewable<Pin<&'a InstanceView<'a, P, R, I, E, S>>>
-    for &'b Instance<'b, P, R, I, E, S>
+impl<'a, P, R, I, E, S> Viewable<Pin<&'a InstanceView<'a, P, R, I, E, S>>>
+    for &'a Instance<P, R, I, E, S>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
     #[inline(always)]
     fn view(self) -> Pin<&'a InstanceView<'a, P, R, I, E, S>> {
@@ -693,33 +684,33 @@ where
     }
 }
 
-impl<P, R, I, E, S> Clone for Instance<'_, P, R, I, E, S>
+impl<P, R, I, E, S> Clone for Instance<P, R, I, E, S>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
         self.to_owned_instance()
     }
 }
 
-impl<P, R, I, E, S> Drop for Instance<'_, P, R, I, E, S>
+impl<P, R, I, E, S> Drop for Instance<P, R, I, E, S>
 where
-    P: Send + Sync,
-    R: Send + Sync,
-    I: Send + Sync,
-    E: Send + Sync,
-    S: Send + Sync,
+    P: Send + Sync + 'static,
+    R: Send + Sync + 'static,
+    I: Send + Sync + 'static,
+    E: Send + Sync + 'static,
+    S: Send + Sync + 'static,
 {
     fn drop(&mut self) {
-        let view = self.view();
+        let view = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(view);
             let f = inner.vtable.release;
-            f(view.view());
+            f(view);
         }
     }
 }
@@ -819,38 +810,36 @@ macro_rules! instance {
             }
         }
 
-        impl<'a> $crate::module::GenericInstance<'a, $p, $r, $i, $e, $s> for core::pin::Pin<&'a $view<'a>> {
-            type Owned<'o>
-                = $owned<'o>
-            where
-                $p: 'o,
-                $r: 'o,
-                $i: 'o,
-                $e: 'o,
-                $s: 'o;
+        impl $crate::module::GenericInstance for core::pin::Pin<&'_ $view<'_>> {
+            type Parameters = $p;
+            type Resources = $r;
+            type Imports = $i;
+            type Exports = $e;
+            type State = $s;
+            type Owned = $owned;
 
             #[inline(always)]
-            fn to_owned_instance<'o>(self) -> Self::Owned<'o> {
+            fn to_owned_instance(self) -> Self::Owned {
                 $owned(self.view_inner().to_owned_instance())
+            }
+
+            #[inline(always)]
+            fn to_opaque_instance_view<'o>(self) -> core::pin::Pin<&'o $crate::module::OpaqueInstanceView<'o>>
+            where
+                Self: 'o,
+            {
+                self.view_inner().to_opaque_instance_view()
             }
         }
 
         impl $crate::ffi::View for core::pin::Pin<&'_ $view<'_>> {}
 
-        impl<'a> $crate::ffi::Viewable<core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>>> for core::pin::Pin<&'a $view<'a>> {
-            #[inline(always)]
-            fn view(self)
-                -> core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>> {
-                self.view_inner()
-            }
-        }
-
         /// Owned handle to an instance.
         #[repr(transparent)]
         #[derive(Debug, Clone)]
-        $owned_vis struct $owned<'a>($crate::module::Instance<'a, $p, $r, $i, $e, $s>);
+        $owned_vis struct $owned($crate::module::Instance<$p, $r, $i, $e, $s>);
 
-        impl $owned<'_> {
+        impl $owned {
             /// Returns a reference to the parameter table of the instance.
             #[inline(always)]
             pub const fn parameters(&self) -> &$p {
@@ -888,34 +877,32 @@ macro_rules! instance {
             }
         }
 
-        impl<'a> $crate::module::GenericInstance<'a, $p, $r, $i, $e, $s> for &'a $owned<'a> {
-            type Owned<'o>
-                = $owned<'o>
-            where
-                $p: 'o,
-                $r: 'o,
-                $i: 'o,
-                $e: 'o,
-                $s: 'o;
+        impl $crate::module::GenericInstance for &'_ $owned {
+            type Parameters = $p;
+            type Resources = $r;
+            type Imports = $i;
+            type Exports = $e;
+            type State = $s;
+            type Owned = $owned;
 
             #[inline(always)]
-            fn to_owned_instance<'o>(self) -> Self::Owned<'o> {
+            fn to_owned_instance(self) -> Self::Owned {
                 $owned(self.0.to_owned_instance())
+            }
+
+            #[inline(always)]
+            fn to_opaque_instance_view<'o>(self) -> core::pin::Pin<&'o $crate::module::OpaqueInstanceView<'o>>
+            where
+                Self: 'o,
+            {
+                self.0.to_opaque_instance_view()
             }
         }
 
-        impl<'a, 'b: 'a> $crate::ffi::Viewable<core::pin::Pin<&'a $view<'a>>> for &'a $owned<'a> {
+        impl<'a> $crate::ffi::Viewable<core::pin::Pin<&'a $view<'a>>> for &'a $owned {
             #[inline(always)]
             fn view(self) -> core::pin::Pin<&'a $view<'a>> {
                 unsafe { std::mem::transmute(self) }
-            }
-        }
-
-        impl<'a, 'b: 'a> $crate::ffi::Viewable<core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>>> for &'a $owned<'a> {
-            #[inline(always)]
-            fn view(self)
-                -> core::pin::Pin<&'a $crate::module::InstanceView<'a, $p, $r, $i, $e, $s>> {
-                self.0.view()
             }
         }
     };
