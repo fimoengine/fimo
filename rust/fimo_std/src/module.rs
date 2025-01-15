@@ -7,6 +7,7 @@ use crate::{
 use std::{ffi::CStr, mem::MaybeUninit, ptr::NonNull};
 
 pub mod exports;
+pub mod symbols;
 
 mod info;
 mod instance;

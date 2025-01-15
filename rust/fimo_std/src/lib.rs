@@ -37,8 +37,10 @@
 //! ```
 #![feature(doc_cfg)]
 #![feature(extend_one)]
+#![feature(auto_traits)]
 #![feature(thread_local)]
 #![feature(allocator_api)]
+#![feature(negative_impls)]
 #![feature(panic_update_hook)]
 #![feature(result_flattening)]
 #![feature(maybe_uninit_slice)]
