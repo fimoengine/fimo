@@ -41,6 +41,7 @@
 #![feature(thread_local)]
 #![feature(allocator_api)]
 #![feature(negative_impls)]
+#![feature(const_trait_impl)]
 #![feature(panic_update_hook)]
 #![feature(result_flattening)]
 #![feature(maybe_uninit_slice)]
