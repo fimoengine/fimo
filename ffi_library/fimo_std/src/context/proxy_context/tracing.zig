@@ -4,8 +4,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const c = @import("../../c.zig");
-const Context = @import("../proxy_context.zig");
 const Time = @import("../../time.zig").Time;
+const Context = @import("../proxy_context.zig");
 
 context: Context,
 
@@ -534,7 +534,7 @@ pub const Subscriber = extern struct {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         // std.debug.assert(@typeInfo(Ptr).pointer.is_const == false);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
+        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         std.debug.assert(@typeInfo(@typeInfo(Ptr).pointer.child) == .@"struct");
 
         const impl = struct {

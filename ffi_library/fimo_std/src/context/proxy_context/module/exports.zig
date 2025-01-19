@@ -6,7 +6,6 @@ const AnyError = @import("../../../AnyError.zig");
 const c = @import("../../../c.zig");
 const Path = @import("../../../path.zig").Path;
 const Version = @import("../../../Version.zig");
-
 const Context = @import("../../proxy_context.zig");
 const Module = @import("../module.zig");
 
@@ -697,7 +696,7 @@ pub const Builder = struct {
             f.* = std.builtin.Type.StructField{
                 .name = p.member_name,
                 .type = *Module.Parameter(pType),
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*anyopaque),
             };
@@ -720,7 +719,7 @@ pub const Builder = struct {
             f.* = std.builtin.Type.StructField{
                 .name = x.name,
                 .type = [*:0]const u8,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf([*:0]const u8),
             };
@@ -743,7 +742,7 @@ pub const Builder = struct {
             f.* = std.builtin.Type.StructField{
                 .name = x.name,
                 .type = *const x.symbol.symbol,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*const anyopaque),
             };
@@ -768,7 +767,7 @@ pub const Builder = struct {
             fields[i] = std.builtin.Type.StructField{
                 .name = x.name,
                 .type = *const x.symbol.symbol,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*const anyopaque),
             };
@@ -779,7 +778,7 @@ pub const Builder = struct {
             fields[i] = std.builtin.Type.StructField{
                 .name = x.name,
                 .type = *const x.symbol.symbol,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*const anyopaque),
             };

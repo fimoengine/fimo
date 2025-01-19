@@ -8,19 +8,16 @@ const c = @import("../../c.zig");
 const Path = @import("../../path.zig").Path;
 const Version = @import("../../Version.zig");
 const Context = @import("../proxy_context.zig");
-
+const Async = @import("async.zig");
 const EnqueuedFuture = Async.EnqueuedFuture;
 const Fallible = Async.Fallible;
-
-context: Context,
-
-const Module = @This();
-const Async = @import("async.zig");
-
 pub const DebugInfo = @import("module/DebugInfo.zig");
 pub const exports = @import("module/exports.zig");
 pub const Export = exports.Export;
 
+context: Context,
+
+const Module = @This();
 /// Data type of a module parameter.
 pub const ParameterType = enum(i32) {
     u8,
@@ -358,7 +355,7 @@ pub fn Instance(
             std.debug.assert(@alignOf(ImportsT) <= @alignOf(*const anyopaque));
             std.debug.assert(@sizeOf(ImportsT) % @sizeOf(*const anyopaque) == 0);
             for (@typeInfo(ImportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size != .Slice);
+                std.debug.assert(@typeInfo(field.type).pointer.size != .slice);
                 std.debug.assert(@typeInfo(field.type).pointer.is_const);
                 std.debug.assert(field.alignment == @alignOf([*:0]const u8));
             }
@@ -372,7 +369,7 @@ pub fn Instance(
             std.debug.assert(@alignOf(ExportsT) <= @alignOf(*const anyopaque));
             std.debug.assert(@sizeOf(ExportsT) % @sizeOf(*const anyopaque) == 0);
             for (@typeInfo(ExportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size != .Slice);
+                std.debug.assert(@typeInfo(field.type).pointer.size != .slice);
                 std.debug.assert(@typeInfo(field.type).pointer.is_const);
                 std.debug.assert(field.alignment == @alignOf([*:0]const u8));
             }
@@ -1073,7 +1070,7 @@ pub const LoadingSet = extern struct {
     ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
+        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         const Callbacks = struct {
             fn onOk(info: *const Info, data: ?*anyopaque) callconv(.c) void {
                 const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
@@ -1177,7 +1174,7 @@ pub const LoadingSet = extern struct {
     ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
+        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         const Callbacks = struct {
             fn f(module: *const Export, data: ?*anyopaque) callconv(.c) bool {
                 const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
@@ -1248,7 +1245,7 @@ pub const LoadingSet = extern struct {
     ) AnyError.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .One);
+        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         const Callbacks = struct {
             fn f(module: *const Export, data: ?*anyopaque) callconv(.c) bool {
                 const o: Ptr = @alignCast(@ptrCast(@constCast(data)));

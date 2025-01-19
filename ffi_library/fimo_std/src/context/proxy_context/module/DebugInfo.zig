@@ -1,10 +1,10 @@
 //! Cross-platform and language-agnostic interface of a module debug info.
 const std = @import("std");
 
+const c = @import("../../../c.zig");
+
 data: ?*anyopaque,
 vtable: *const VTable,
-
-const c = @import("../../../c.zig");
 
 const Self = @This();
 
@@ -1233,7 +1233,7 @@ pub const Builder = struct {
                 };
             },
             .pointer => |v| blk: {
-                if (v.size == .Slice) break :blk .{ .@"opaque" = .{} };
+                if (v.size == .slice) break :blk .{ .@"opaque" = .{} };
                 if (v.address_space != .generic) break :blk .{ .@"opaque" = .{} };
 
                 const size: usize = @sizeOf(T);
