@@ -104,6 +104,12 @@ fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) c.FimoResultStri
     const code: SystemErrorCode = @intCast(@intFromPtr(ptr));
     switch (builtin.target.os.tag) {
         .windows => {
+            const FreeImpl = struct {
+                fn free(p: [*c]const u8) callconv(.c) void {
+                    std.os.windows.LocalFree(@constCast(p));
+                }
+            };
+
             var error_description: ?std.os.windows.LPSTR = null;
             const format_result = FormatMessageA(
                 std.os.windows.FORMAT_MESSAGE_ALLOCATE_BUFFER | std.os.windows.FORMAT_MESSAGE_FROM_SYSTEM | std.os.windows.FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -121,7 +127,7 @@ fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) c.FimoResultStri
             error_description.?[format_result - 2] = 0;
             return c.FimoResultString{
                 .str = @ptrCast(@constCast(error_description)),
-                .release = @ptrCast(&std.os.windows.LocalFree),
+                .release = FreeImpl.free,
             };
         },
         else => {
