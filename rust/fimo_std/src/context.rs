@@ -3,7 +3,7 @@
 use crate::{
     bindings, error,
     error::{AnyError, AnyResult},
-    ffi::{FFISharable, VTablePtr, View, Viewable},
+    utils::{FFISharable, VTablePtr, View, Viewable},
     handle,
     version::Version,
 };

@@ -3,7 +3,7 @@
 use crate::{
     context::{ContextHandle, ContextView},
     error::{AnyError, AnyResult},
-    ffi::{ConstNonNull, OpaqueHandle, VTablePtr, View, Viewable},
+    utils::{ConstNonNull, OpaqueHandle, VTablePtr, View, Viewable},
     handle,
 };
 use std::{

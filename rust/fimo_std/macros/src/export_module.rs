@@ -536,7 +536,7 @@ fn generate_export(
 
                 const WRITE: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>, Repr)> = #write;
                 if let Some(x) = WRITE {
-                    extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::ffi::ConstNonNull<()>) {
+                    extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::utils::ConstNonNull<()>) {
                         unsafe {
                             type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<

@@ -5,7 +5,7 @@ use crate::{
 use fimo_std::{
     allocator::FimoAllocator,
     error::{AnyError, to_result_indirect_in_place},
-    ffi::FFITransferable,
+    utils::FFITransferable,
 };
 use std::{
     alloc::Allocator,

@@ -1,4 +1,4 @@
-//! FFI helpers.
+//! Helper utilities.
 
 use std::{
     cmp::Ordering,
@@ -152,7 +152,7 @@ impl<T: ?Sized> ConstNonNull<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::ConstNonNull;
+    /// use fimo_std::utils::ConstNonNull;
     ///
     /// let x = 0u32;
     /// let ptr = ConstNonNull::<u32>::new(&raw const x).expect("ptr is null");
@@ -178,7 +178,7 @@ impl<T: ?Sized> ConstNonNull<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::ConstNonNull;
+    /// use fimo_std::utils::ConstNonNull;
     ///
     /// let x = 0u32;
     /// let ptr = unsafe { ConstNonNull::new_unchecked(&raw const x) };
@@ -187,7 +187,7 @@ impl<T: ?Sized> ConstNonNull<T> {
     /// Incorrect usage of this function:
     ///
     /// ```rust,no_run
-    /// use fimo_std::ffi::ConstNonNull;
+    /// use fimo_std::utils::ConstNonNull;
     ///
     /// // NEVER DO THAT!!! This is undefined behavior. ⚠️
     /// let ptr = unsafe { ConstNonNull::<u32>::new_unchecked(std::ptr::null()) };
@@ -201,7 +201,7 @@ impl<T: ?Sized> ConstNonNull<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::ConstNonNull;
+    /// use fimo_std::utils::ConstNonNull;
     ///
     /// let x = 0u32;
     /// let ptr = ConstNonNull::<u32>::new(&raw const x).expect("ptr is null");
@@ -222,7 +222,7 @@ impl<T: ?Sized> ConstNonNull<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::ConstNonNull;
+    /// use fimo_std::utils::ConstNonNull;
     ///
     /// let x = 0u32;
     /// let ptr = ConstNonNull::<u32>::new(&raw const x).expect("ptr is null");
@@ -239,7 +239,7 @@ impl<T: ?Sized> ConstNonNull<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::ConstNonNull;
+    /// use fimo_std::utils::ConstNonNull;
     ///
     /// let x = 0u32;
     /// let ptr = ConstNonNull::<u32>::new(&raw const x).expect("ptr is null");
@@ -410,7 +410,7 @@ impl<T: ?Sized> OpaqueHandle<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::OpaqueHandle;
+    /// use fimo_std::utils::OpaqueHandle;
     ///
     /// let mut x = 0u32;
     /// let ptr = <OpaqueHandle>::new(&raw mut x).expect("ptr is null");
@@ -437,7 +437,7 @@ impl<T: ?Sized> OpaqueHandle<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::OpaqueHandle;
+    /// use fimo_std::utils::OpaqueHandle;
     ///
     /// let mut x = 0u32;
     /// let ptr = unsafe { <OpaqueHandle>::new_unchecked(&raw mut x) };
@@ -446,7 +446,7 @@ impl<T: ?Sized> OpaqueHandle<T> {
     /// Incorrect usage of this function:
     ///
     /// ```rust,no_run
-    /// use fimo_std::ffi::OpaqueHandle;
+    /// use fimo_std::utils::OpaqueHandle;
     ///
     /// // NEVER DO THAT!!! This is undefined behavior. ⚠️
     /// let ptr = unsafe { <OpaqueHandle>::new_unchecked(std::ptr::null_mut::<u32>()) };
@@ -460,7 +460,7 @@ impl<T: ?Sized> OpaqueHandle<T> {
     /// # Examples
     ///
     /// ```
-    /// use fimo_std::ffi::OpaqueHandle;
+    /// use fimo_std::utils::OpaqueHandle;
     ///
     /// let mut x = 0u32;
     /// let ptr = <OpaqueHandle>::new(&raw mut x).expect("ptr is null");
@@ -579,8 +579,8 @@ macro_rules! handle {
         }
 
         $(
-        unsafe impl Send for $ident where $crate::ffi::SendSyncHelper<&'static (dyn $bound $(+ $bound_rest)*)>: Send {}
-        unsafe impl Sync for $ident where $crate::ffi::SendSyncHelper<&'static (dyn $bound $(+ $bound_rest)*)>: Sync {}
+        unsafe impl Send for $ident where $crate::utils::SendSyncHelper<&'static (dyn $bound $(+ $bound_rest)*)>: Send {}
+        unsafe impl Sync for $ident where $crate::utils::SendSyncHelper<&'static (dyn $bound $(+ $bound_rest)*)>: Sync {}
         )?
 
         impl core::fmt::Debug for $ident {

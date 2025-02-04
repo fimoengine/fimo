@@ -2,7 +2,7 @@
 
 use crate::{
     bindings,
-    ffi::{FFITransferable, OpaqueHandle, VTablePtr},
+    utils::{FFITransferable, OpaqueHandle, VTablePtr},
     handle,
 };
 use std::{

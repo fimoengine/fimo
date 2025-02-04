@@ -3,7 +3,7 @@ use fimo_std::{
     context::{Context, ContextBuilder, ContextView},
     emit_trace,
     error::AnyError,
-    ffi::Viewable,
+    utils::Viewable,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
 };
 use std::{future::Future, pin::Pin, task::Poll};

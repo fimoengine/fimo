@@ -3,12 +3,12 @@
 use crate::{
     context::ContextView,
     error::{AnyError, AnyResult},
-    ffi::{ConstCStr, ConstNonNull, VTablePtr, View, Viewable},
     module::{
         info::InfoView,
         parameters::{ParameterCast, ParameterRepr, ParameterType},
         symbols::{SymbolInfo, SymbolPointer, SymbolRef},
     },
+    utils::{ConstCStr, ConstNonNull, VTablePtr, View, Viewable},
     version::Version,
 };
 use std::{
@@ -1086,7 +1086,7 @@ macro_rules! instance {
             }
         }
 
-        impl $crate::ffi::View for core::pin::Pin<&'_ $view<'_>> {}
+        impl $crate::utils::View for core::pin::Pin<&'_ $view<'_>> {}
 
         /// Owned handle to an instance.
         #[repr(transparent)]
@@ -1160,7 +1160,7 @@ macro_rules! instance {
             }
         }
 
-        impl<'a> $crate::ffi::Viewable<core::pin::Pin<&'a $view<'a>>> for &'a $owned {
+        impl<'a> $crate::utils::Viewable<core::pin::Pin<&'a $view<'a>>> for &'a $owned {
             #[inline(always)]
             fn view(self) -> core::pin::Pin<&'a $view<'a>> {
                 unsafe { std::mem::transmute(self) }

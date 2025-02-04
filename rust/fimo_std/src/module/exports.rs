@@ -3,7 +3,7 @@
 use crate::{
     context::ContextView,
     error::AnyResult,
-    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, View},
+    utils::{ConstCStr, ConstNonNull, OpaqueHandle, View},
     module::{
         info::Info,
         instance::{GenericInstance, OpaqueInstanceView, UninitInstanceView},

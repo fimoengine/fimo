@@ -2,7 +2,7 @@
 
 use crate::{
     error::{AnyError, AnyResult},
-    ffi::ConstNonNull,
+    utils::ConstNonNull,
 };
 use core::fmt::Display;
 use std::{mem::MaybeUninit, ptr::NonNull};

@@ -65,9 +65,9 @@ pub mod bindings;
 pub mod allocator;
 pub mod context;
 pub mod error;
-pub mod ffi;
 pub mod panic;
 pub mod time;
+pub mod utils;
 pub mod version;
 
 pub mod r#async;

@@ -1,6 +1,6 @@
 //! Definition of module parameters.
 
-use crate::ffi::{ConstNonNull, OpaqueHandle};
+use crate::utils::{ConstNonNull, OpaqueHandle};
 use std::{
     fmt::{Debug, Display, Formatter},
     marker::{PhantomData, PhantomPinned},

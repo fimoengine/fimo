@@ -8,7 +8,7 @@ use crate::{
     bindings,
     context::ContextView,
     error::{AnyError, AnyResult},
-    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, Viewable},
+    utils::{ConstCStr, ConstNonNull, OpaqueHandle, Viewable},
     handle,
     module::{
         exports::Export,

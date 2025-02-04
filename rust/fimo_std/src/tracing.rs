@@ -1,7 +1,7 @@
 //! Tracing subsystem.
 use crate::{
     context::{Context, ContextHandle, ContextView, TypeId},
-    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, Unsafe, VTablePtr, Viewable},
+    utils::{ConstCStr, ConstNonNull, OpaqueHandle, Unsafe, VTablePtr, Viewable},
     handle,
     time::Time,
 };

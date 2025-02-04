@@ -8,7 +8,7 @@ use fimo_std::{
     context::ContextBuilder,
     emit_info,
     error::AnyError,
-    ffi::Viewable,
+    utils::Viewable,
     module::{
         exports::Builder,
         info::Info,
