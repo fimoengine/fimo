@@ -4,27 +4,23 @@ const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
 const c = @import("../../c.zig");
+const Context = @import("../../context.zig");
 const heap = @import("../../heap.zig");
 const Path = @import("../../path.zig").Path;
 const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
 const Version = @import("../../Version.zig");
-
+const Async = @import("../async.zig");
 const graph = @import("../graph.zig");
+const ProxyAsync = @import("../proxy_context/async.zig");
+const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
+const FSMFuture = ProxyAsync.FSMFuture;
+const Fallible = ProxyAsync.Fallible;
+const ProxyModule = @import("../proxy_context/module.zig");
 const RefCount = @import("../RefCount.zig");
-
 const InstanceHandle = @import("InstanceHandle.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
 const SymbolRef = @import("SymbolRef.zig");
 const System = @import("System.zig");
-
-const Context = @import("../../context.zig");
-const Async = @import("../async.zig");
-const ProxyAsync = @import("../proxy_context/async.zig");
-const ProxyModule = @import("../proxy_context/module.zig");
-
-const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
-const FSMFuture = ProxyAsync.FSMFuture;
-const Fallible = ProxyAsync.Fallible;
 
 const Self = @This();
 
@@ -251,7 +247,7 @@ const LoadGraph = struct {
                 } else if (sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
                     sys.logWarn(
                         "instance is missing required symbol...skipping," ++
-                            " instance='{s}', symbol='{s}', namespace='{s}, version='{long}'",
+                            " instance='{s}', symbol='{s}', namespace='{s}', version='{long}'",
                         .{ name, imp_name, imp_ns, imp_ver },
                         @src(),
                     );
@@ -267,7 +263,7 @@ const LoadGraph = struct {
                 if (sys.getSymbol(e_name, e_ns) != null) {
                     sys.logWarn(
                         "instance exports duplicate symbol...skipping," ++
-                            " instance='{s}', symbol='{s}', namespace='{s}",
+                            " instance='{s}', symbol='{s}', namespace='{s}'",
                         .{ name, e_name, e_ns },
                         @src(),
                     );
@@ -281,7 +277,7 @@ const LoadGraph = struct {
                 if (sys.getSymbol(e_name, e_ns) != null) {
                     sys.logWarn(
                         "instance exports duplicate symbol...skipping," ++
-                            " instance='{s}', symbol='{s}', namespace='{s}",
+                            " instance='{s}', symbol='{s}', namespace='{s}'",
                         .{ name, e_name, e_ns },
                         @src(),
                     );
@@ -987,14 +983,25 @@ const LoadOp = FSMFuture(struct {
             info.@"export",
             info.handle,
             &err,
-        ) catch {
-            sys.logWarn(
-                "instance construction error...skipping," ++
-                    " instance='{s}', error='{dbg}:{}'",
-                .{ name, err.?, err.? },
-                @src(),
-            );
-            err.?.deinit();
+        ) catch |e_| {
+            if (@errorReturnTrace()) |tr|
+                sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (err) |*e| {
+                sys.logWarn(
+                    "instance construction error...skipping," ++
+                        " instance='{s}', error='{dbg}:{}'",
+                    .{ name, e.*, e.* },
+                    @src(),
+                );
+                e.deinit();
+            } else {
+                sys.logWarn(
+                    "instance construction error...skipping," ++
+                        " instance='{s}', error='{s}'",
+                    .{ name, @errorName(e_) },
+                    @src(),
+                );
+            }
             set.lock();
             set.getModuleInfo(name).?.signalError();
             return;
@@ -1004,22 +1011,36 @@ const LoadOp = FSMFuture(struct {
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
 
-        inner.start(sys, &err) catch {
-            sys.logWarn(
-                "instance `on_start` error...skipping," ++
-                    " instance='{s}', error='{dbg}:{}'",
-                .{ name, err.?, err.? },
-                @src(),
-            );
+        inner.start(sys, &err) catch |e_| {
+            if (@errorReturnTrace()) |tr|
+                sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (err) |*e| {
+                sys.logWarn(
+                    "instance `on_start` error...skipping," ++
+                        " instance='{s}', error='{dbg}:{}'",
+                    .{ name, e.*, e.* },
+                    @src(),
+                );
+                e.deinit();
+            } else {
+                sys.logWarn(
+                    "instance `on_start` error...skipping," ++
+                        " instance='{s}', error='{s}'",
+                    .{ name, @errorName(e_) },
+                    @src(),
+                );
+            }
+
             inner.unrefStrong();
             inner.deinit();
 
-            err.?.deinit();
             set.getModuleInfo(name).?.signalError();
             return;
         };
 
         sys.addInstance(inner) catch |e| {
+            if (@errorReturnTrace()) |tr|
+                sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
             sys.logWarn(
                 "internal error while adding instance...skipping," ++
                     " instance='{s}', error='{s}'",

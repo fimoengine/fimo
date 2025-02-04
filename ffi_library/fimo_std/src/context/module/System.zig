@@ -3,17 +3,14 @@ const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
-const Version = @import("../../Version.zig");
-
-const graph = @import("../graph.zig");
-const tmp_path = @import("../tmp_path.zig");
-
 const Context = @import("../../context.zig");
+const Version = @import("../../Version.zig");
 const Async = @import("../async.zig");
+const graph = @import("../graph.zig");
 const Module = @import("../module.zig");
 const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyModule = @import("../proxy_context/module.zig");
-
+const tmp_path = @import("../tmp_path.zig");
 const InstanceHandle = @import("InstanceHandle.zig");
 const LoadingSet = @import("LoadingSet.zig");
 const SymbolRef = @import("SymbolRef.zig");

@@ -2,28 +2,24 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 
+const AnyError = @import("../../AnyError.zig");
 const c = @import("../../c.zig");
 const heap = @import("../../heap.zig");
-const AnyError = @import("../../AnyError.zig");
-const Version = @import("../../Version.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
-
-const RefCount = @import("../RefCount.zig");
-
-const System = @import("System.zig");
-const LoadingSet = @import("LoadingSet.zig");
-const SymbolRef = @import("SymbolRef.zig");
-const ModuleHandle = @import("ModuleHandle.zig");
-
+const Version = @import("../../Version.zig");
 const Async = @import("../async.zig");
-const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyContext = @import("../proxy_context.zig");
-const ProxyModule = @import("../proxy_context/module.zig");
-
+const ProxyAsync = @import("../proxy_context/async.zig");
 const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
 const FSMFuture = ProxyAsync.FSMFuture;
 const Fallible = ProxyAsync.Fallible;
+const ProxyModule = @import("../proxy_context/module.zig");
+const RefCount = @import("../RefCount.zig");
+const LoadingSet = @import("LoadingSet.zig");
+const ModuleHandle = @import("ModuleHandle.zig");
+const SymbolRef = @import("SymbolRef.zig");
+const System = @import("System.zig");
 
 const Self = @This();
 
@@ -702,7 +698,7 @@ pub fn initExportedInstance(
     // Init namespaces.
     for (@"export".getNamespaceImports()) |imp| {
         const name = std.mem.span(imp.name);
-        if (sys.getNamespace(std.mem.span(imp.name)) == null) return error.NotFound;
+        if (sys.getNamespace(name) == null) return error.NotFound;
         try inner.addNamespace(name, .static);
     }
 
