@@ -1,9 +1,12 @@
+//! Definition of module instances.
+
 use crate::{
     context::ContextView,
     error::{AnyError, AnyResult},
     ffi::{ConstCStr, ConstNonNull, VTablePtr, View, Viewable},
     module::{
-        InfoView, ParameterCast, ParameterRepr, ParameterType,
+        info::InfoView,
+        parameters::{ParameterCast, ParameterRepr, ParameterType},
         symbols::{SymbolInfo, SymbolPointer, SymbolRef},
     },
     version::Version,
@@ -991,6 +994,7 @@ pub type UninitInstance<T> = Instance<
 ///         State = i32,
 /// }
 /// ```
+#[doc(hidden)]
 #[macro_export]
 macro_rules! instance {
     (
@@ -1006,13 +1010,13 @@ macro_rules! instance {
         /// Borrowed handle to an instance.
         #[derive(Debug)]
         #[repr(transparent)]
-        $view_vis struct $view<'a>($crate::module::InstanceView<'a, $p, $r, $i, $e, $s>);
+        $view_vis struct $view<'a>($crate::module::instance::InstanceView<'a, $p, $r, $i, $e, $s>);
 
         #[allow(unused)]
         impl $view<'_> {
             #[inline(always)]
             const fn view_inner(self: core::pin::Pin<&Self>)
-                -> core::pin::Pin<&$crate::module::InstanceView<'_, $p, $r, $i, $e, $s>> {
+                -> core::pin::Pin<&$crate::module::instance::InstanceView<'_, $p, $r, $i, $e, $s>> {
                 unsafe { std::mem::transmute(self) }
             }
 
@@ -1043,7 +1047,7 @@ macro_rules! instance {
             /// Returns a reference to the instance info.
             #[inline(always)]
             pub const fn info(self: core::pin::Pin<&Self>)
-                -> core::pin::Pin<&$crate::module::InfoView<'_>> {
+                -> core::pin::Pin<&$crate::module::info::InfoView<'_>> {
                 self.view_inner().info()
             }
 
@@ -1060,7 +1064,7 @@ macro_rules! instance {
             }
         }
 
-        impl $crate::module::GenericInstance for core::pin::Pin<&'_ $view<'_>> {
+        impl $crate::module::instance::GenericInstance for core::pin::Pin<&'_ $view<'_>> {
             type Parameters = $p;
             type Resources = $r;
             type Imports = $i;
@@ -1074,7 +1078,7 @@ macro_rules! instance {
             }
 
             #[inline(always)]
-            fn to_opaque_instance_view<'o>(self) -> core::pin::Pin<&'o $crate::module::OpaqueInstanceView<'o>>
+            fn to_opaque_instance_view<'o>(self) -> core::pin::Pin<&'o $crate::module::instance::OpaqueInstanceView<'o>>
             where
                 Self: 'o,
             {
@@ -1087,7 +1091,7 @@ macro_rules! instance {
         /// Owned handle to an instance.
         #[repr(transparent)]
         #[derive(Debug, Clone)]
-        $owned_vis struct $owned($crate::module::Instance<$p, $r, $i, $e, $s>);
+        $owned_vis struct $owned($crate::module::instance::Instance<$p, $r, $i, $e, $s>);
 
         #[allow(unused)]
         impl $owned {
@@ -1117,7 +1121,7 @@ macro_rules! instance {
 
             /// Returns a reference to the instance info.
             #[inline(always)]
-            pub const fn info(&self) -> core::pin::Pin<&$crate::module::InfoView<'_>> {
+            pub const fn info(&self) -> core::pin::Pin<&$crate::module::info::InfoView<'_>> {
                 self.0.info()
             }
 
@@ -1134,7 +1138,7 @@ macro_rules! instance {
             }
         }
 
-        impl $crate::module::GenericInstance for &'_ $owned {
+        impl $crate::module::instance::GenericInstance for &'_ $owned {
             type Parameters = $p;
             type Resources = $r;
             type Imports = $i;
@@ -1148,7 +1152,7 @@ macro_rules! instance {
             }
 
             #[inline(always)]
-            fn to_opaque_instance_view<'o>(self) -> core::pin::Pin<&'o $crate::module::OpaqueInstanceView<'o>>
+            fn to_opaque_instance_view<'o>(self) -> core::pin::Pin<&'o $crate::module::instance::OpaqueInstanceView<'o>>
             where
                 Self: 'o,
             {

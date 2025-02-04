@@ -143,7 +143,7 @@ impl ToTokens for ItemExport {
             let ty = &self.ty;
             let exprs = &self.exprs;
             tokens.append_all(quote! {
-                const _: ::fimo_std::module::__PrivateBuildToken = #(#exprs)*;
+                const _: ::fimo_std::module::exports::__PrivateBuildToken = #(#exprs)*;
                 ::fimo_std::__private_sa::assert_type_eq_all!(#ty, &'static ::fimo_std::module::exports::Export<'static>);
             });
         }
@@ -153,7 +153,7 @@ impl ToTokens for ItemExport {
         let view_ident = &init_expr.path.view_ident;
         let owned_ident = &init_expr.path.owned_ident;
         tokens.append_all(quote! {
-            ::fimo_std::__private_sa::assert_type_eq_all!(#path, ::fimo_std::module::Builder::<#view_ident<'_>, #owned_ident>);
+            ::fimo_std::__private_sa::assert_type_eq_all!(#path, ::fimo_std::module::exports::Builder::<#view_ident<'_>, #owned_ident>);
         });
 
         let module_ident = Ident::new(&format!("__private_export_{view_ident}"), Span::call_site());
@@ -269,10 +269,10 @@ fn generate_parameters(parameters: &[&BuilderExprParameter]) -> TokenStream {
         let ident = param.table_name();
         let ty = &param.0.t_arg;
         fields.push(quote! {
-            #ident: ::core::pin::Pin<&'static ::fimo_std::module::Parameter<#ty>>
+            #ident: ::core::pin::Pin<&'static ::fimo_std::module::parameters::Parameter<#ty>>
         });
         accessors.push(quote! {
-            pub const fn #ident(&self) -> ::core::pin::Pin<&'_ ::fimo_std::module::Parameter<#ty>> {
+            pub const fn #ident(&self) -> ::core::pin::Pin<&'_ ::fimo_std::module::parameters::Parameter<#ty>> {
                 self.#ident
             }
         });
@@ -515,15 +515,15 @@ fn generate_export(
                     p = p.with_write_group(x);
                 }
 
-                type Repr = <#ty as ::fimo_std::module::ParameterCast>::Repr;
-                const READ: Option<fn(::fimo_std::module::ParameterData<'_, Repr>) -> Repr> = #read;
+                type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
+                const READ: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>) -> Repr> = #read;
                 if let Some(x) = READ {
-                    extern "C" fn __private_read(parameter: ::fimo_std::module::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
+                    extern "C" fn __private_read(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
                         unsafe {
-                            type Repr = <#ty as ::fimo_std::module::ParameterCast>::Repr;
+                            type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<
-                                ::fimo_std::module::ParameterData<'_, ()>,
-                                ::fimo_std::module::ParameterData<'_, Repr>,
+                                ::fimo_std::module::parameters::ParameterData<'_, ()>,
+                                ::fimo_std::module::parameters::ParameterData<'_, Repr>,
                             >(parameter);
                             let value = value.cast::<Repr>();
 
@@ -534,14 +534,14 @@ fn generate_export(
                     p = p.with_read(Some(__private_read));
                 }
 
-                const WRITE: Option<fn(::fimo_std::module::ParameterData<'_, Repr>, Repr)> = #write;
+                const WRITE: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>, Repr)> = #write;
                 if let Some(x) = WRITE {
-                    extern "C" fn __private_write(parameter: ::fimo_std::module::ParameterData<'_, ()>, value: ::fimo_std::ffi::ConstNonNull<()>) {
+                    extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::ffi::ConstNonNull<()>) {
                         unsafe {
-                            type Repr = <#ty as ::fimo_std::module::ParameterCast>::Repr;
+                            type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<
-                                ::fimo_std::module::ParameterData<'_, ()>,
-                                ::fimo_std::module::ParameterData<'_, Repr>,
+                                ::fimo_std::module::parameters::ParameterData<'_, ()>,
+                                ::fimo_std::module::parameters::ParameterData<'_, Repr>,
                             >(parameter);
                             let value = value.cast::<Repr>();
 
@@ -637,7 +637,7 @@ fn generate_export(
             quote! {
                 const {
                     extern "C" fn constructor(
-                        instance: ::core::pin::Pin<& ::fimo_std::module::OpaqueInstanceView<'_>>,
+                        instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                         symbol: &mut ::core::ptr::NonNull<()>,
                     ) -> ::fimo_std::error::AnyResult {
                         let f = const { #init };
@@ -687,8 +687,8 @@ fn generate_export(
         let constructor = quote! {
             {
                 extern "C" fn __private_init(
-                    instance: ::core::pin::Pin<& ::fimo_std::module::OpaqueInstanceView<'_>>,
-                    set: ::fimo_std::module::LoadingSetView<'_>,
+                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                    set: ::fimo_std::module::loading_set::LoadingSetView<'_>,
                     state: &mut ::core::option::Option<::core::ptr::NonNull<()>>,
                 ) -> ::fimo_std::error::AnyResult {
                     let f = const { #init };
@@ -712,7 +712,7 @@ fn generate_export(
         let destructor = quote! {
             {
                 extern "C" fn __private_deinit(
-                    instance: ::core::pin::Pin<& ::fimo_std::module::OpaqueInstanceView<'_>>,
+                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                     state: ::core::option::Option<::core::ptr::NonNull<()>>,
                 ) {
                     let f = const { #deinit };

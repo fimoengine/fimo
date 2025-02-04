@@ -1,3 +1,5 @@
+//! Definition of module parameters.
+
 use crate::ffi::{ConstNonNull, OpaqueHandle};
 use std::{
     fmt::{Debug, Display, Formatter},

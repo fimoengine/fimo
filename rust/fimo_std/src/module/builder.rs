@@ -12,12 +12,12 @@ use std::{
 use crate::{
     ffi::View,
     module::{
-        GenericInstance, LoadingSetView, ParameterAccessGroup, ParameterCast, ParameterData,
+        ParameterAccessGroup, ParameterCast, ParameterData,
+        instance::{GenericInstance, UninitInstanceView},
+        loading_set::LoadingSetView,
         symbols::SymbolInfo,
     },
 };
-
-use super::UninitInstanceView;
 
 /// Builder for an [`Export`](crate::module::exports::Export).
 pub struct Builder<InstanceView, OwnedInstance>(PhantomData<fn(InstanceView, OwnedInstance)>)
@@ -122,7 +122,7 @@ where
         _deinit: fn(Pin<&UninitInstanceView<'_, InstanceView>>, NonNull<T>),
     ) -> &mut Self
     where
-        T: 'static,
+        T: Send + Sync + 'static,
         E: Debug + Display,
     {
         self

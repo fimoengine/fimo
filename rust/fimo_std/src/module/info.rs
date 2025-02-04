@@ -1,3 +1,5 @@
+//! Definition of module infos.
+
 use crate::{
     context::ContextView,
     error::AnyError,

@@ -24,8 +24,8 @@ use std::{
 /// assumption of isolation. Notably, this can not be guaranteed for pointer-like types, like
 /// references and functions, as they potentially point to data owned by the instance.
 ///
-/// [to_owned_instance]: crate::module::GenericInstance::to_owned_instance
-/// [try_ref_instance_strong]: crate::module::InfoView::try_ref_instance_strong
+/// [to_owned_instance]: crate::module::instance::GenericInstance::to_owned_instance
+/// [try_ref_instance_strong]: crate::module::info::InfoView::try_ref_instance_strong
 ///
 /// # Safety
 ///
@@ -100,7 +100,7 @@ impl<T> DerefMut for AssertSharable<T> {
 ///
 /// This trait has the same safety requirements like the [`Share`] trait, but additionally function
 /// pointers where the parameters and the return types implement [`Share`].
-pub unsafe trait SymbolSafe: Sync {}
+pub unsafe trait SymbolSafe: Send + Sync {}
 
 macro_rules! impl_symbol_safe_fn_peel {
     () => {};
@@ -122,7 +122,7 @@ impl_symbol_safe_fn!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
 );
 
-unsafe impl<T> SymbolSafe for T where T: Share + Sync + 'static {}
+unsafe impl<T> SymbolSafe for T where T: Share + Send + Sync + 'static {}
 
 /// Marker trait for `*const T` and `fn(...) -> ...`.
 #[const_trait]

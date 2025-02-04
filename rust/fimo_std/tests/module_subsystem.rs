@@ -9,7 +9,15 @@ use fimo_std::{
     emit_info,
     error::AnyError,
     ffi::Viewable,
-    module::{symbols::SymbolInfo, *},
+    module::{
+        exports::Builder,
+        info::Info,
+        instance::{GenericInstance, PseudoInstance, UninitInstanceView},
+        loading_set::{LoadingFilterRequest, LoadingSet, LoadingSetView},
+        parameters::ParameterAccessGroup,
+        symbols::SymbolInfo,
+        *,
+    },
     symbol,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
 };
@@ -21,7 +29,7 @@ symbol! {
     symbol B1 @ (0, 1, 0) = "b"::b_export_1: *const i32;
 }
 
-#[fimo_std::module::export_module]
+#[fimo_std::module::exports::export_module]
 const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_description(c"Test module a")
     .with_author(c"fimo")
@@ -29,7 +37,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_export::<crate::A1>("a1", &10 as *const _)
     .build();
 
-#[fimo_std::module::export_module]
+#[fimo_std::module::exports::export_module]
 const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
     .with_description(c"Test module b")
     .with_author(c"fimo")
@@ -37,7 +45,7 @@ const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
     .with_export::<crate::B1>("b1", &77 as *const _)
     .build();
 
-#[fimo_std::module::export_module]
+#[fimo_std::module::exports::export_module]
 const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
     .with_description(c"Test module c")
     .with_author(c"fimo")

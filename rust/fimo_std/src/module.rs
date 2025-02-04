@@ -13,22 +13,19 @@ use std::{
 };
 
 pub mod exports;
+pub mod info;
+pub mod instance;
+pub mod loading_set;
+pub mod parameters;
 pub mod symbols;
 
-mod builder;
-mod info;
-mod instance;
-mod loading_set;
-mod parameter;
-
-pub use builder::*;
 use exports::Export;
-pub use info::*;
-pub use instance::*;
-pub use loading_set::*;
-pub use parameter::*;
-
-pub use fimo_std_macros::export_module;
+use info::Info;
+use instance::PseudoInstance;
+use loading_set::LoadingSet;
+use parameters::{
+    ParameterAccessGroup, ParameterCast, ParameterInfo, ParameterRepr, ParameterType,
+};
 
 /// Virtual function table of the module subsystem.
 ///

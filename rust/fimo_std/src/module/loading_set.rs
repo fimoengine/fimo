@@ -1,3 +1,5 @@
+//! Definition of a module loading set.
+
 use core::{ffi::CStr, future::Future, marker::PhantomData};
 use std::{mem::MaybeUninit, pin::Pin};
 
@@ -8,10 +10,14 @@ use crate::{
     error::{AnyError, AnyResult},
     ffi::{ConstCStr, ConstNonNull, OpaqueHandle, Viewable},
     handle,
+    module::{
+        exports::Export,
+        info::InfoView,
+        instance::{GenericInstance, OpaqueInstanceView},
+        symbols::SymbolInfo,
+    },
     version::Version,
 };
-
-use super::{GenericInstance, InfoView, OpaqueInstanceView, exports::Export, symbols::SymbolInfo};
 
 /// Result of the filter operation of a [`LoadingSet`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

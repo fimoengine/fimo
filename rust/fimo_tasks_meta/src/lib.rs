@@ -392,11 +392,13 @@ impl FFISharable<bindings::FiTasksContext> for Context {
 }
 
 #[doc(hidden)]
-pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoInstance, &Context)) {
+pub fn __private_with_context(
+    f: impl FnOnce(&fimo_std::module::instance::PseudoInstance, &Context),
+) {
     use fimo_std::{
         r#async::{BlockingContext, EventLoop},
         context::ContextBuilder,
-        module::{GenericInstance, LoadingSet, symbols::SymbolInfo},
+        module::{instance::GenericInstance, loading_set::LoadingSet, symbols::SymbolInfo},
         tracing::default_subscriber,
     };
     use std::path::PathBuf;
@@ -428,16 +430,17 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoInstance, 
             unsafe {
                 set.view()
                     .add_modules_from_path(&tasks_dir, |_| {
-                        fimo_std::module::LoadingFilterRequest::Load
+                        fimo_std::module::loading_set::LoadingFilterRequest::Load
                     })
                     .unwrap();
             }
             set.view().commit().await.unwrap();
 
-            let instance = fimo_std::module::PseudoInstance::new(&context)
+            let instance = fimo_std::module::instance::PseudoInstance::new(&context)
                 .expect("could not create pseudo module");
-            let tasks_module = fimo_std::module::Info::find_by_name(&context, c"fimo_tasks_impl")
-                .expect("could not find the tasks module");
+            let tasks_module =
+                fimo_std::module::info::Info::find_by_name(&context, c"fimo_tasks_impl")
+                    .expect("could not find the tasks module");
 
             instance
                 .add_namespace(symbols::Context::NAMESPACE)
