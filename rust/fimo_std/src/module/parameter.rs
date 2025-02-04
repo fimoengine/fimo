@@ -58,9 +58,9 @@ impl Display for ParameterAccessGroup {
 /// Information of a parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParameterInfo {
-    type_: ParameterType,
-    read: ParameterAccessGroup,
-    write: ParameterAccessGroup,
+    pub type_: ParameterType,
+    pub read: ParameterAccessGroup,
+    pub write: ParameterAccessGroup,
 }
 
 /// Internal representation of a parameter.
@@ -115,6 +115,7 @@ mod private {
 }
 
 /// Helper trait for all types that can be used as module parameters.
+#[const_trait]
 pub trait ParameterCast {
     /// Internal representation of the parameter.
     type Repr: ParameterRepr;
@@ -126,7 +127,7 @@ pub trait ParameterCast {
     fn into_repr(self) -> Self::Repr;
 }
 
-impl<T: ParameterRepr> ParameterCast for T {
+impl<T: ParameterRepr> const ParameterCast for T {
     type Repr = T;
 
     fn from_repr(repr: Self::Repr) -> Self {

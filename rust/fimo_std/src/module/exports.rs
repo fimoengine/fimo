@@ -1,7 +1,6 @@
 //! Utilities for defining and working with module exports.
 
 use crate::{
-    bindings,
     context::ContextView,
     error::AnyResult,
     ffi::{ConstCStr, ConstNonNull, OpaqueHandle},
@@ -17,6 +16,8 @@ use std::{
     pin::Pin,
     ptr::NonNull,
 };
+
+use super::{LoadingSetView, symbols::SymbolPointer};
 
 /// Type able to contain all parameter types.
 #[repr(C)]
@@ -173,16 +174,19 @@ impl Debug for Parameter<'_> {
                 .field("read", &self.read)
                 .field("write", &self.write)
                 .field("name", &self.name.as_ref())
-                .field("default_value", match self.r#type {
-                    ParameterType::U8 => &self.default_value.u8 as &dyn Debug,
-                    ParameterType::U16 => &self.default_value.u16 as &dyn Debug,
-                    ParameterType::U32 => &self.default_value.u32 as &dyn Debug,
-                    ParameterType::U64 => &self.default_value.u64 as &dyn Debug,
-                    ParameterType::I8 => &self.default_value.i8 as &dyn Debug,
-                    ParameterType::I16 => &self.default_value.i16 as &dyn Debug,
-                    ParameterType::I32 => &self.default_value.i32 as &dyn Debug,
-                    ParameterType::I64 => &self.default_value.i64 as &dyn Debug,
-                })
+                .field(
+                    "default_value",
+                    match self.r#type {
+                        ParameterType::U8 => &self.default_value.u8 as &dyn Debug,
+                        ParameterType::U16 => &self.default_value.u16 as &dyn Debug,
+                        ParameterType::U32 => &self.default_value.u32 as &dyn Debug,
+                        ParameterType::U64 => &self.default_value.u64 as &dyn Debug,
+                        ParameterType::I8 => &self.default_value.i8 as &dyn Debug,
+                        ParameterType::I16 => &self.default_value.i16 as &dyn Debug,
+                        ParameterType::I32 => &self.default_value.i32 as &dyn Debug,
+                        ParameterType::I64 => &self.default_value.i64 as &dyn Debug,
+                    },
+                )
                 .finish()
         }
     }
@@ -322,9 +326,13 @@ unsafe impl Sync for SymbolExport<'_> {}
 
 impl<'a> SymbolExport<'a> {
     /// Constructs a new `SymbolExport`.
-    pub const fn new<T>(symbol: &'a T, version: Version, name: &'a CStr) -> Self {
+    pub const fn new<T: ~const SymbolPointer + 'a>(
+        symbol: T,
+        version: Version,
+        name: &'a CStr,
+    ) -> Self {
         Self {
-            symbol: unsafe { ConstNonNull::new_unchecked(symbol).cast() },
+            symbol: ConstNonNull::new(symbol.into_opaque_ptr()).unwrap(),
             version,
             name: ConstCStr::new(name),
             namespace: ConstCStr::new(c""),
@@ -378,16 +386,30 @@ pub struct DynamicSymbolExport<'a> {
 sa::assert_impl_all!(DynamicSymbolExport<'_>: Send, Sync);
 
 impl<'a> DynamicSymbolExport<'a> {
-    // /// Constructs a new `DynamicSymbolExport`.
-    // pub const fn new<T>(symbol: &'a T, version: Version, name: &'a CStr) -> Self {
-    //     Self {
-    //         symbol: unsafe { ConstNonNull::new_unchecked(symbol).cast() },
-    //         version,
-    //         name: ConstCStr::new(name),
-    //         namespace: ConstCStr::new(c""),
-    //         _private: PhantomData,
-    //     }
-    // }
+    /// Constructs a new `DynamicSymbolExport`.
+    ///
+    /// # Safety
+    ///
+    /// `constructor` must construct an instance of a type that implements [`SymbolPointer`] and
+    /// `destructor` must release the instance of the same type.
+    pub const unsafe fn new(
+        constructor: unsafe extern "C" fn(
+            instance: Pin<&OpaqueInstanceView<'_>>,
+            symbol: &mut NonNull<()>,
+        ) -> AnyResult,
+        destructor: unsafe extern "C" fn(symbol: NonNull<()>),
+        version: Version,
+        name: &'a CStr,
+    ) -> Self {
+        Self {
+            constructor,
+            destructor,
+            version,
+            name: ConstCStr::new(name),
+            namespace: ConstCStr::new(c""),
+            _private: PhantomData,
+        }
+    }
 
     /// Sets the namespace of the symbol.
     pub const fn with_namespace(mut self, namespace: &'a CStr) -> Self {
@@ -443,7 +465,7 @@ sa::assert_impl_all!(DestructorModifier<'_>: Send, Sync);
 
 /// Declaration of a module export.
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct Export<'a> {
     pub next: Option<OpaqueHandle<dyn Send + Sync>>,
     pub version: Version,
@@ -475,7 +497,7 @@ pub struct Export<'a> {
     pub constructor: Option<
         unsafe extern "C" fn(
             instance: Pin<&OpaqueInstanceView<'_>>,
-            loading_set: bindings::FimoModuleLoadingSet,
+            loading_set: LoadingSetView<'_>,
             state: &mut Option<NonNull<()>>,
         ) -> AnyResult,
     >,
@@ -522,7 +544,7 @@ impl<'a> Export<'a> {
             constructor: Option<
                 unsafe extern "C" fn(
                     instance: Pin<&OpaqueInstanceView<'_>>,
-                    loading_set: bindings::FimoModuleLoadingSet,
+                    loading_set: LoadingSetView<'_>,
                     state: &mut Option<NonNull<()>>,
                 ) -> AnyResult,
             >,
@@ -576,7 +598,7 @@ impl<'a> Export<'a> {
         constructor: Option<
             unsafe extern "C" fn(
                 instance: Pin<&OpaqueInstanceView<'_>>,
-                loading_set: bindings::FimoModuleLoadingSet,
+                loading_set: LoadingSetView<'_>,
                 state: &mut Option<NonNull<()>>,
             ) -> AnyResult,
         >,

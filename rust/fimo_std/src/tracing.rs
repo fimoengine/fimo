@@ -677,8 +677,8 @@ impl ThreadAccess {
     pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Self {
         unsafe {
             let ctx = ctx.view();
-            let f = ctx.vtable().tracing_v0.register_thread.unwrap_unchecked();
-            f(ctx.data());
+            let f = ctx.vtable.tracing_v0.register_thread;
+            f(ctx.handle);
             Self(ctx.to_context())
         }
     }

@@ -96,14 +96,6 @@ impl ContextView<'_> {
         bindings::FIMO_VERSION_BUILD_NUMBER as u64,
     );
 
-    pub(crate) fn data(&self) -> *mut std::ffi::c_void {
-        self.handle.as_ptr()
-    }
-
-    pub(crate) fn vtable(&self) -> &bindings::FimoContextVTable {
-        unsafe { &*(&raw const *self.vtable).cast() }
-    }
-
     /// Checks that the version of the `Context` is compatible.
     pub fn check_version(&self) -> error::Result {
         let f = self.vtable.header.check_version;

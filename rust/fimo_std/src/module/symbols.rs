@@ -355,6 +355,20 @@ where
     }
 }
 
+unsafe impl<T> Send for SymbolRef<'_, T>
+where
+    T: SymbolInfo,
+    <T::Type as SymbolPointer>::Target: Send,
+{
+}
+
+unsafe impl<T> Sync for SymbolRef<'_, T>
+where
+    T: SymbolInfo,
+    <T::Type as SymbolPointer>::Target: Sync,
+{
+}
+
 impl<T> Debug for SymbolRef<'_, T>
 where
     T: SymbolInfo,

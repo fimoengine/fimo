@@ -392,11 +392,11 @@ impl FFISharable<bindings::FiTasksContext> for Context {
 }
 
 #[doc(hidden)]
-pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &Context)) {
+pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoInstance, &Context)) {
     use fimo_std::{
         r#async::{BlockingContext, EventLoop},
         context::ContextBuilder,
-        module::{LoadingSet, Module, NamespaceItem},
+        module::{GenericInstance, LoadingSet, symbols::SymbolInfo},
         tracing::default_subscriber,
     };
     use std::path::PathBuf;
@@ -434,24 +434,23 @@ pub fn __private_with_context(f: impl FnOnce(&fimo_std::module::PseudoModule, &C
             }
             set.view().commit().await.unwrap();
 
-            let module = fimo_std::module::PseudoModule::new(&context)
+            let instance = fimo_std::module::PseudoInstance::new(&context)
                 .expect("could not create pseudo module");
-            let tasks_module =
-                fimo_std::module::ModuleInfo::find_by_name(&context, c"fimo_tasks_impl")
-                    .expect("could not find the tasks module");
+            let tasks_module = fimo_std::module::Info::find_by_name(&context, c"fimo_tasks_impl")
+                .expect("could not find the tasks module");
 
-            module
-                .add_namespace(symbols::fimo_tasks::NamespaceItem::NAME)
+            instance
+                .add_namespace(symbols::Context::NAMESPACE)
                 .expect("could not include the tasks namespace");
-            module
+            instance
                 .add_dependency(&tasks_module)
                 .expect("could not acquire the dependency to the tasks module");
 
-            let context = module
-                .load_symbol::<symbols::fimo_tasks::Context>()
+            let context = instance
+                .load_symbol::<symbols::Context>()
                 .expect("could not load context symbol");
 
-            f(&module, &context);
+            f(&instance, &context);
         });
     }
     drop(context);

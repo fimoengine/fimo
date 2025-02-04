@@ -1,14 +1,17 @@
 use core::{ffi::CStr, future::Future, marker::PhantomData};
+use std::{mem::MaybeUninit, pin::Pin};
 
-use super::{Module, ModuleExport, ModuleInfo, ModuleInfoView, NamespaceItem, SymbolItem};
 use crate::{
     r#async::{EnqueuedFuture, Fallible},
     bindings,
     context::ContextView,
-    error::{AnyError, to_result_indirect, to_result_indirect_in_place},
-    ffi::{FFISharable, FFITransferable, Viewable},
+    error::{AnyError, AnyResult},
+    ffi::{ConstCStr, ConstNonNull, OpaqueHandle, Viewable},
+    handle,
     version::Version,
 };
+
+use super::{GenericInstance, InfoView, OpaqueInstanceView, exports::Export, symbols::SymbolInfo};
 
 /// Result of the filter operation of a [`LoadingSet`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,56 +23,118 @@ pub enum LoadingFilterRequest {
 /// Status of a module loading operation.
 #[derive(Debug)]
 pub enum LoadingStatus<'a> {
-    Success { info: ModuleInfoView<'a> },
-    Error { export: ModuleExport<'a> },
+    Success { info: Pin<&'a InfoView<'a>> },
+    Error { export: &'a Export<'a> },
+}
+
+handle!(pub handle LoadingSetHandle: Send + Sync);
+
+/// Virtual function table of a [`LoadingSetView`] and [`LoadingSet`].
+#[repr(C)]
+#[derive(Debug)]
+#[allow(clippy::type_complexity)]
+pub struct LoadingSetVTable {
+    pub acquire: unsafe extern "C" fn(handle: LoadingSetHandle),
+    pub release: unsafe extern "C" fn(handle: LoadingSetHandle),
+    pub query_module: unsafe extern "C" fn(handle: LoadingSetHandle, module: ConstCStr) -> bool,
+    pub query_symbol: unsafe extern "C" fn(
+        handle: LoadingSetHandle,
+        name: ConstCStr,
+        namespace: ConstCStr,
+        version: Version,
+    ) -> bool,
+    pub add_callback: unsafe extern "C" fn(
+        handle: LoadingSetHandle,
+        module: ConstCStr,
+        on_success: unsafe extern "C" fn(
+            info: Pin<&InfoView<'_>>,
+            handle: Option<OpaqueHandle<dyn Send>>,
+        ),
+        on_error: for<'export> unsafe extern "C" fn(
+            export: &'export Export<'export>,
+            handle: Option<OpaqueHandle<dyn Send>>,
+        ),
+        on_abort: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
+        callback_handle: Option<OpaqueHandle<dyn Send>>,
+    ) -> AnyResult,
+    pub add_module: unsafe extern "C" fn(
+        handle: LoadingSetHandle,
+        owner: Pin<&OpaqueInstanceView<'_>>,
+        export: ConstNonNull<Export<'static>>,
+    ) -> AnyResult,
+    pub add_modules_from_path: unsafe extern "C" fn(
+        handle: LoadingSetHandle,
+        path: bindings::FimoUTF8Path,
+        filter: unsafe extern "C" fn(
+            export: &Export<'_>,
+            handle: Option<OpaqueHandle<dyn Send>>,
+        ) -> bool,
+        filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
+        filter_handle: Option<OpaqueHandle<dyn Send>>,
+    ) -> AnyResult,
+    pub add_modules_from_local: unsafe extern "C" fn(
+        handle: LoadingSetHandle,
+        filter: unsafe extern "C" fn(
+            export: &Export<'_>,
+            handle: Option<OpaqueHandle<dyn Send>>,
+        ) -> bool,
+        filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
+        filter_handle: Option<OpaqueHandle<dyn Send>>,
+        iterator: unsafe extern "C" fn(
+            f: unsafe extern "C" fn(export: &Export<'_>, handle: Option<OpaqueHandle>) -> bool,
+            handle: Option<OpaqueHandle>,
+        ),
+        bin_ptr: OpaqueHandle,
+    ) -> AnyResult,
+    pub commit: unsafe extern "C" fn(handle: LoadingSetHandle) -> EnqueuedFuture<Fallible<()>>,
+    pub(crate) _private: PhantomData<()>,
 }
 
 /// View of a loading set.
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct LoadingSetView<'a>(bindings::FimoModuleLoadingSet, PhantomData<&'a mut ()>);
+pub struct LoadingSetView<'a> {
+    pub handle: LoadingSetHandle,
+    pub vtable: &'a LoadingSetVTable,
+    pub(crate) _private: PhantomData<()>,
+}
 
 impl LoadingSetView<'_> {
-    pub(crate) fn data(&self) -> *mut std::ffi::c_void {
-        self.0.data
-    }
-
-    pub(crate) fn vtable(&self) -> &bindings::FimoModuleLoadingSetVTable {
-        // Safety: Is always valid.
-        unsafe { &*self.0.vtable.cast() }
-    }
-
     /// Promotes the view to an owned set.
     pub fn to_loading_set(&self) -> LoadingSet {
         unsafe {
-            let f = self.vtable().acquire.unwrap_unchecked();
-            f(self.data());
-            LoadingSet(LoadingSetView(self.0, PhantomData))
+            let f = self.vtable.acquire;
+            f(self.handle);
+            LoadingSet(LoadingSetView {
+                handle: self.handle,
+                vtable: &*(self.vtable as *const _),
+                _private: PhantomData,
+            })
         }
     }
 
     /// Checks whether the set contains a specific module.
     pub fn query_module(&self, module: &CStr) -> bool {
         unsafe {
-            let f = self.vtable().query_module.unwrap_unchecked();
-            f(self.data(), module.as_ptr())
+            let f = self.vtable.query_module;
+            f(self.handle, ConstCStr::from(module))
         }
     }
 
     /// Checks whether the set contains a specific symbol.
-    pub fn query_symbol<T: SymbolItem>(&self) -> bool {
-        self.query_symbol_raw(T::NAME, T::Namespace::NAME, T::VERSION)
+    pub fn query_symbol<T: SymbolInfo>(&self) -> bool {
+        self.query_symbol_raw(T::NAME, T::NAMESPACE, T::VERSION)
     }
 
     /// Checks whether the set contains a specific symbol.
     pub fn query_symbol_raw(&self, name: &CStr, namespace: &CStr, version: Version) -> bool {
         unsafe {
-            let f = self.vtable().query_symbol.unwrap_unchecked();
+            let f = self.vtable.query_symbol;
             f(
-                self.data(),
-                name.as_ptr(),
-                namespace.as_ptr(),
-                std::mem::transmute::<Version, bindings::FimoVersion>(version),
+                self.handle,
+                ConstCStr::new(name),
+                ConstCStr::new(namespace),
+                version,
             )
         }
     }
@@ -86,72 +151,70 @@ impl LoadingSetView<'_> {
     where
         F: FnOnce(LoadingStatus<'_>) + Send + 'static,
     {
-        unsafe extern "C" fn success_callback<F>(
-            module: *const bindings::FimoModuleInfo,
-            data: *mut core::ffi::c_void,
+        unsafe extern "C" fn on_success<F>(
+            info: Pin<&InfoView<'_>>,
+            handle: Option<OpaqueHandle<dyn Send>>,
         ) where
             F: FnOnce(LoadingStatus<'_>),
         {
-            // Safety: `data` is a `Box<F>`.
-            let func = unsafe { Box::from_raw(data.cast::<F>()) };
+            unsafe {
+                let handle = handle.unwrap_unchecked().as_ptr::<F>();
+                let f = Box::from_raw(handle);
 
-            // Safety: Is safe.
-            let module = unsafe { ModuleInfo::borrow_from_ffi(module) };
-            let status = LoadingStatus::Success { info: module };
-            func(status);
+                let status = LoadingStatus::Success { info };
+                f(status);
+            }
         }
-        unsafe extern "C" fn error_callback<F>(
-            export: *const bindings::FimoModuleExport,
-            data: *mut core::ffi::c_void,
+        unsafe extern "C" fn on_error<'a, F>(
+            export: &'a Export<'a>,
+            handle: Option<OpaqueHandle<dyn Send>>,
         ) where
             F: FnOnce(LoadingStatus<'_>),
         {
-            // Safety: `data` is a `Box<F>`.
-            let func = unsafe { Box::from_raw(data.cast::<F>()) };
+            unsafe {
+                let handle = handle.unwrap_unchecked().as_ptr::<F>();
+                let f = Box::from_raw(handle);
 
-            // Safety: Is safe.
-            let export = unsafe { ModuleExport::borrow_from_ffi(export) };
-            let status = LoadingStatus::Error { export };
-            func(status);
+                let status = LoadingStatus::Error { export };
+                f(status);
+            }
         }
-        unsafe extern "C" fn drop_callback<F>(data: *mut core::ffi::c_void)
+        unsafe extern "C" fn on_abort<F>(handle: Option<OpaqueHandle<dyn Send>>)
         where
             F: FnOnce(LoadingStatus<'_>),
         {
-            // Safety: `data` is a `Box<F>`.
-            let _ = unsafe { Box::from_raw(data.cast::<F>()) };
+            unsafe {
+                let handle = handle.unwrap_unchecked().as_ptr::<F>();
+                _ = Box::from_raw(handle);
+            }
         }
 
-        let on_success = Some(success_callback::<F> as _);
-        let on_error = Some(error_callback::<F> as _);
-        let on_abort = Some(drop_callback::<F> as _);
-        let callback = Box::try_new(callback).map_err(<AnyError>::new)?;
-        let callback = Box::into_raw(callback);
-
-        // Safety:
         unsafe {
-            let f = self.vtable().add_callback.unwrap_unchecked();
-            to_result_indirect(|error| {
-                *error = f(
-                    self.data(),
-                    module.as_ptr(),
-                    on_success,
-                    on_error,
-                    on_abort,
-                    callback.cast(),
-                );
-            })
+            let callback_handle = Box::try_new(callback).map_err(<AnyError>::new)?;
+            let callback_handle = OpaqueHandle::new(Box::into_raw(callback_handle));
+
+            let f = self.vtable.add_callback;
+            f(
+                self.handle,
+                ConstCStr::new(module),
+                on_success::<F>,
+                on_error::<F>,
+                Some(on_abort::<F> as _),
+                callback_handle,
+            )
+            .into_result()
         }
     }
 
     /// Adds a module to the set.
     ///
-    /// Adds a module to the set, so that it may be loaded by a future call to [`commit`]. Trying to
-    /// include an invalid module, a module with duplicate exports or duplicate name will result in
-    /// an error. Unlike [`add_modules_from_path`], this function allows for the loading of dynamic
-    /// modules, i.e. modules that are created at runtime, like non-native modules, which may
-    /// require a runtime to be executed in. The new module inherits a strong reference to the same
-    /// binary as the caller's module.
+    /// Adds a module to the set, so that it may be loaded by a future call to
+    /// [`commit`](LoadingSetView::commit). Trying to include an invalid module, a module with
+    /// duplicate exports or duplicate name will result in an error. Unlike
+    /// [`add_modules_from_path`](LoadingSetView::add_modules_from_path), this function allows for
+    /// the loading of dynamic modules, i.e. modules that are created at runtime, like
+    /// non-native modules, which may require a runtime to be executed in. The new module
+    /// inherits a strong reference to the same binary as the caller's module.
     ///
     /// Note that the new module is not setup to automatically depend on the owner, but may prevent
     /// it from being unloaded while the set exists.
@@ -161,15 +224,17 @@ impl LoadingSetView<'_> {
     /// The export must outlive the set.
     pub unsafe fn add_module(
         &self,
-        owner: &impl Module,
-        export: impl FFITransferable<*const bindings::FimoModuleExport>,
+        owner: impl GenericInstance,
+        export: &Export<'_>,
     ) -> Result<(), AnyError> {
-        // Safety:
         unsafe {
-            let f = self.vtable().add_module.unwrap_unchecked();
-            to_result_indirect(|error| {
-                *error = f(self.data(), owner.share_to_ffi(), export.into_ffi());
-            })
+            let f = self.vtable.add_module;
+            f(
+                self.handle,
+                owner.to_opaque_instance_view(),
+                ConstNonNull::from(export).cast(),
+            )
+            .into_result()
         }
     }
 
@@ -191,51 +256,47 @@ impl LoadingSetView<'_> {
     /// Loading a library may execute arbitrary code.
     pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), AnyError>
     where
-        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+        F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
     {
-        unsafe extern "C" fn filter_func<F>(
-            export: *const bindings::FimoModuleExport,
-            data: *mut core::ffi::c_void,
+        unsafe extern "C" fn filter_wrapper<F>(
+            export: &Export<'_>,
+            handle: Option<OpaqueHandle<dyn Send>>,
         ) -> bool
         where
-            F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
         {
-            // Safety: `data` is a mutable reference to `F`.
-            let func = unsafe { &mut *data.cast::<F>() };
-
-            // Safety: Is safe.
-            let export = unsafe { ModuleExport::borrow_from_ffi(export) };
-            let request = (func)(export);
-            matches!(request, LoadingFilterRequest::Load)
+            unsafe {
+                let f = &mut *handle.unwrap_unchecked().as_ptr::<F>();
+                let request = f(export);
+                matches!(request, LoadingFilterRequest::Load)
+            }
         }
-        unsafe extern "C" fn filter_drop<F>(data: *mut core::ffi::c_void)
+        unsafe extern "C" fn filter_drop<F>(handle: Option<OpaqueHandle<dyn Send>>)
         where
-            F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
         {
-            // Safety: `data` is a `Box<F>`.
-            let _ = unsafe { Box::from_raw(data.cast::<F>()) };
+            unsafe {
+                let handle = handle.unwrap_unchecked().as_ptr::<F>();
+                let _ = Box::from_raw(handle);
+            }
         }
 
-        let filter_fn = Some(filter_func::<F> as _);
-        let filter_drop_fn = Some(filter_drop::<F> as _);
-        let filter = Box::try_new(filter).map_err(<AnyError>::new)?;
-        let filter = Box::into_raw(filter);
-
-        // Safety:
         unsafe {
-            let f = self.vtable().add_modules_from_path.unwrap_unchecked();
-            to_result_indirect(|error| {
-                *error = f(
-                    self.data(),
-                    bindings::FimoUTF8Path {
-                        path: path.as_ptr().cast(),
-                        length: path.len(),
-                    },
-                    filter_fn,
-                    filter_drop_fn,
-                    filter.cast(),
-                );
-            })
+            let filter_handle = Box::try_new(filter).map_err(<AnyError>::new)?;
+            let filter_handle = OpaqueHandle::new(Box::into_raw(filter_handle));
+
+            let f = self.vtable.add_modules_from_path;
+            f(
+                self.handle,
+                bindings::FimoUTF8Path {
+                    path: path.as_ptr().cast(),
+                    length: path.len(),
+                },
+                filter_wrapper::<F>,
+                Some(filter_drop::<F> as _),
+                filter_handle,
+            )
+            .into_result()
         }
     }
 
@@ -251,51 +312,47 @@ impl LoadingSetView<'_> {
     /// modules are appended to the set.
     pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), AnyError>
     where
-        F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+        F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
     {
-        unsafe extern "C" fn filter_func<F>(
-            export: *const bindings::FimoModuleExport,
-            data: *mut core::ffi::c_void,
+        unsafe extern "C" fn filter_wrapper<F>(
+            export: &Export<'_>,
+            handle: Option<OpaqueHandle<dyn Send>>,
         ) -> bool
         where
-            F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
         {
-            // Safety: `data` is a mutable reference to `F`.
-            let func = unsafe { &mut *data.cast::<F>() };
-
-            // Safety: Is safe.
-            let export = unsafe { ModuleExport::borrow_from_ffi(export) };
-            let request = (func)(export);
-            matches!(request, LoadingFilterRequest::Load)
+            unsafe {
+                let f = &mut *handle.unwrap_unchecked().as_ptr::<F>();
+                let request = f(export);
+                matches!(request, LoadingFilterRequest::Load)
+            }
         }
-        unsafe extern "C" fn filter_drop<F>(data: *mut core::ffi::c_void)
+        unsafe extern "C" fn filter_drop<F>(handle: Option<OpaqueHandle<dyn Send>>)
         where
-            F: FnMut(ModuleExport<'_>) -> LoadingFilterRequest,
+            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
         {
-            // Safety: `data` is a `Box<F>`.
-            let _ = unsafe { Box::from_raw(data.cast::<F>()) };
+            unsafe {
+                let handle = handle.unwrap_unchecked().as_ptr::<F>();
+                let _ = Box::from_raw(handle);
+            }
         }
 
-        let filter_fn = Some(filter_func::<F> as _);
-        let filter_drop_fn = Some(filter_drop::<F> as _);
-        let filter = Box::try_new(filter).map_err(<AnyError>::new)?;
-        let filter = Box::into_raw(filter);
-
-        let iterator = super::fimo_impl_module_export_iterator;
-
-        // Safety:
         unsafe {
-            let f = self.vtable().add_modules_from_local.unwrap_unchecked();
-            to_result_indirect(|error| {
-                *error = f(
-                    self.data(),
-                    filter_fn,
-                    filter_drop_fn,
-                    filter.cast(),
-                    Some(iterator),
-                    iterator as _,
-                );
-            })
+            let filter_handle = Box::try_new(filter).map_err(<AnyError>::new)?;
+            let filter_handle = OpaqueHandle::new(Box::into_raw(filter_handle));
+
+            let f = self.vtable.add_modules_from_local;
+            f(
+                self.handle,
+                filter_wrapper::<F>,
+                Some(filter_drop::<F> as _),
+                filter_handle,
+                super::fimo_impl_module_export_iterator,
+                OpaqueHandle::new_unchecked(
+                    (super::fimo_impl_module_export_iterator as *const ()).cast_mut(),
+                ),
+            )
+            .into_result()
         }
     }
 
@@ -309,14 +366,9 @@ impl LoadingSetView<'_> {
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
     pub fn commit(&self) -> impl Future<Output = Result<(), AnyError<dyn Send + Sync>>> {
-        // Safety:
         unsafe {
-            let f = self.vtable().commit.unwrap_unchecked();
-            let fut = f(self.data());
-            let fut = std::mem::transmute::<
-                bindings::FimoModuleLoadingSetCommitFuture,
-                EnqueuedFuture<Fallible<()>>,
-            >(fut);
+            let f = self.vtable.commit;
+            let fut = f(self.handle);
             async move { fut.await.unwrap() }
         }
     }
@@ -328,41 +380,19 @@ unsafe impl Send for LoadingSetView<'_> {}
 // Safety: `FimoModuleLoadingSet` is always `Send + Sync`.
 unsafe impl Sync for LoadingSetView<'_> {}
 
-impl FFISharable<bindings::FimoModuleLoadingSet> for LoadingSetView<'_> {
-    type BorrowedView<'a> = LoadingSetView<'a>;
-
-    fn share_to_ffi(&self) -> bindings::FimoModuleLoadingSet {
-        self.0
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoModuleLoadingSet) -> Self::BorrowedView<'a> {
-        LoadingSetView(ffi, PhantomData)
-    }
-}
-
-impl FFITransferable<bindings::FimoModuleLoadingSet> for LoadingSetView<'_> {
-    fn into_ffi(self) -> bindings::FimoModuleLoadingSet {
-        self.0
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoModuleLoadingSet) -> Self {
-        Self(ffi, PhantomData)
-    }
-}
-
 /// A loading set.
 #[repr(transparent)]
 pub struct LoadingSet(LoadingSetView<'static>);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
+    pub fn new(ctx: impl Viewable<ContextView<'_>>) -> Result<Self, AnyError> {
         unsafe {
-            let f = ctx.view().vtable().module_v0.set_new.unwrap_unchecked();
-            let set = to_result_indirect_in_place(|error, set| {
-                *error = f(ctx.view().data(), set.as_mut_ptr());
-            })?;
-            Ok(Self(LoadingSetView::from_ffi(set)))
+            let mut out = MaybeUninit::uninit();
+            let ctx = ctx.view();
+            let f = ctx.vtable.module_v0.new_loading_set;
+            f(ctx.handle, &mut out).into_result()?;
+            Ok(out.assume_init())
         }
     }
 
@@ -380,34 +410,9 @@ impl Clone for LoadingSet {
 
 impl Drop for LoadingSet {
     fn drop(&mut self) {
-        // Safety:
         unsafe {
-            let f = self.view().vtable().release.unwrap_unchecked();
-            f(self.view().data());
+            let f = self.view().vtable.release;
+            f(self.view().handle);
         }
-    }
-}
-
-impl FFISharable<bindings::FimoModuleLoadingSet> for LoadingSet {
-    type BorrowedView<'a> = LoadingSetView<'a>;
-
-    fn share_to_ffi(&self) -> bindings::FimoModuleLoadingSet {
-        self.view().share_to_ffi()
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoModuleLoadingSet) -> Self::BorrowedView<'a> {
-        // Safety:
-        unsafe { LoadingSetView::borrow_from_ffi(ffi) }
-    }
-}
-
-impl FFITransferable<bindings::FimoModuleLoadingSet> for LoadingSet {
-    fn into_ffi(self) -> bindings::FimoModuleLoadingSet {
-        self.view().into_ffi()
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoModuleLoadingSet) -> Self {
-        // Safety:
-        unsafe { Self(LoadingSetView::from_ffi(ffi)) }
     }
 }

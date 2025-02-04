@@ -1,7 +1,11 @@
 use crate::{
+    context::ContextView,
     error::{AnyError, AnyResult},
     ffi::{ConstCStr, ConstNonNull, VTablePtr, View, Viewable},
-    module::{InfoView, ParameterCast, ParameterRepr, ParameterType},
+    module::{
+        InfoView, ParameterCast, ParameterRepr, ParameterType,
+        symbols::{SymbolInfo, SymbolPointer, SymbolRef},
+    },
     version::Version,
 };
 use std::{
@@ -204,6 +208,22 @@ pub trait GenericInstance: Sized {
         }
     }
 
+    /// Loads a symbol from the module subsystem.
+    ///
+    /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+    /// loading optional symbols, or for loading symbols after the creation of a module. The
+    /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+    /// dependency to the module that exported the symbol. This function fails, if the module
+    /// containing the symbol is not a dependency of the module.
+    fn load_symbol<T>(self) -> Result<SymbolRef<'static, T>, AnyError>
+    where
+        T: SymbolInfo,
+        T::Type: const SymbolPointer,
+    {
+        let sym = self.load_symbol_raw(T::NAME, T::NAMESPACE, T::VERSION)?;
+        unsafe { Ok(SymbolRef::from_opaque_ptr(sym.as_ptr())) }
+    }
+
     /// Reads a module parameter with dependency read access.
     ///
     /// Reads the value of a module parameter with dependency read access. The operation fails,
@@ -346,6 +366,7 @@ where
     pub imports: Option<&'a I>,
     pub exports: Option<&'a E>,
     pub info: Pin<&'a InfoView<'a>>,
+    pub context: ContextView<'a>,
     pub state: Option<Pin<&'a S>>,
     pub(crate) _pinned: PhantomData<PhantomPinned>,
     pub(crate) _private: PhantomData<&'a ()>,
@@ -382,6 +403,7 @@ where
             imports: Option<&'a I>,
             exports: Option<&'a E>,
             info: Pin<&'a InfoView<'a>>,
+            context: ContextView<'a>,
             state: Option<Pin<&'a S>>,
         ) {
             let this = Self {
@@ -391,6 +413,7 @@ where
                 imports,
                 exports,
                 info,
+                context,
                 state,
                 _pinned: PhantomData,
                 _private: PhantomData,
@@ -404,6 +427,7 @@ where
 
     /// Returns a reference to the parameter table of the instance.
     // noinspection RsReplaceMatchExpr
+    #[inline(always)]
     pub const fn parameters(self: Pin<&Self>) -> &P {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
@@ -420,6 +444,7 @@ where
 
     /// Returns a reference to the resource table of the instance.
     // noinspection RsReplaceMatchExpr
+    #[inline(always)]
     pub const fn resources(self: Pin<&Self>) -> &R {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
@@ -436,6 +461,7 @@ where
 
     /// Returns a reference to the imports table of the instance.
     // noinspection RsReplaceMatchExpr
+    #[inline(always)]
     pub const fn imports(self: Pin<&Self>) -> &I {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
@@ -452,6 +478,7 @@ where
 
     /// Returns a reference to the exports table of the instance.
     // noinspection RsReplaceMatchExpr
+    #[inline(always)]
     pub const fn exports(self: Pin<&Self>) -> &E {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
@@ -467,6 +494,7 @@ where
     }
 
     /// Returns a reference to the instance info.
+    #[inline(always)]
     pub const fn info(self: Pin<&Self>) -> Pin<&InfoView<'_>> {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
@@ -474,8 +502,18 @@ where
         }
     }
 
+    /// Returns a view to the context.
+    #[inline(always)]
+    pub const fn context(self: Pin<&Self>) -> ContextView<'_> {
+        unsafe {
+            let this = Pin::into_inner_unchecked(self);
+            this.context
+        }
+    }
+
     /// Returns a reference to the state of the instance.
     // noinspection RsReplaceMatchExpr
+    #[inline(always)]
     pub const fn state(self: Pin<&Self>) -> Pin<&S> {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
@@ -544,6 +582,78 @@ where
 #[derive(Debug)]
 pub struct OpaqueInstanceView<'a>(pub InstanceView<'a, (), (), (), (), ()>);
 
+impl OpaqueInstanceView<'_> {
+    /// Returns a reference to the parameter table of the instance.
+    #[inline(always)]
+    pub const fn parameters(self: Pin<&Self>) -> &() {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.parameters()
+        }
+    }
+
+    /// Returns a reference to the resource table of the instance.
+    #[inline(always)]
+    pub const fn resources(self: Pin<&Self>) -> &() {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.resources()
+        }
+    }
+
+    /// Returns a reference to the imports table of the instance.
+    #[inline(always)]
+    pub const fn imports(self: Pin<&Self>) -> &() {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.imports()
+        }
+    }
+
+    /// Returns a reference to the exports table of the instance.
+    #[inline(always)]
+    pub const fn exports(self: Pin<&Self>) -> &() {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.exports()
+        }
+    }
+
+    /// Returns a reference to the instance info.
+    #[inline(always)]
+    pub const fn info(self: Pin<&Self>) -> Pin<&InfoView<'_>> {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.info()
+        }
+    }
+
+    /// Returns a view to the context.
+    #[inline(always)]
+    pub const fn context(self: Pin<&Self>) -> ContextView<'_> {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.context()
+        }
+    }
+
+    /// Returns a reference to the state of the instance.
+    #[inline(always)]
+    pub const fn state(self: Pin<&Self>) -> Pin<&()> {
+        unsafe {
+            let inner = Pin::into_inner_unchecked(self);
+            let inner = Pin::new_unchecked(&inner.0);
+            inner.state()
+        }
+    }
+}
+
 impl GenericInstance for Pin<&'_ OpaqueInstanceView<'_>> {
     type Parameters = ();
     type Resources = ();
@@ -569,6 +679,8 @@ impl GenericInstance for Pin<&'_ OpaqueInstanceView<'_>> {
         self
     }
 }
+
+impl View for Pin<&OpaqueInstanceView<'_>> {}
 
 impl<'a> Deref for OpaqueInstanceView<'a> {
     type Target = InstanceView<'a, (), (), (), (), ()>;
@@ -630,6 +742,12 @@ where
     #[inline(always)]
     pub const fn info(&self) -> Pin<&InfoView<'_>> {
         self.0.info()
+    }
+
+    /// Returns a view to the context.
+    #[inline(always)]
+    pub const fn context(&self) -> ContextView<'_> {
+        self.0.context()
     }
 
     /// Returns a reference to the state of the instance.
@@ -715,6 +833,131 @@ where
     }
 }
 
+/// A module instance that can be created to gain access to the module subsystem.
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct PseudoInstance(Pin<&'static OpaqueInstanceView<'static>>);
+
+impl PseudoInstance {
+    /// Constructs a new `PseudoInstance`.
+    ///
+    /// The functions of the module subsystem require that the caller owns a reference to their own
+    /// module. This is a problem, as the constructor of the context won't be assigned a module
+    /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
+    /// instances, i.e., module handles without an associated module.
+    pub fn new(ctx: impl Viewable<ContextView<'_>>) -> Result<Self, AnyError> {
+        unsafe {
+            let mut out = MaybeUninit::uninit();
+            let ctx = ctx.view();
+            let f = ctx.vtable.module_v0.new_pseudo_instance;
+            f(ctx.handle, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
+    }
+
+    /// Returns a reference to the parameter table of the instance.
+    #[inline(always)]
+    pub const fn parameters(&self) -> &() {
+        self.0.parameters()
+    }
+
+    /// Returns a reference to the resource table of the instance.
+    #[inline(always)]
+    pub const fn resources(&self) -> &() {
+        self.0.resources()
+    }
+
+    /// Returns a reference to the imports table of the instance.
+    #[inline(always)]
+    pub const fn imports(&self) -> &() {
+        self.0.imports()
+    }
+
+    /// Returns a reference to the exports table of the instance.
+    #[inline(always)]
+    pub const fn exports(&self) -> &() {
+        self.0.exports()
+    }
+
+    /// Returns a reference to the instance info.
+    #[inline(always)]
+    pub const fn info(&self) -> Pin<&InfoView<'_>> {
+        self.0.info()
+    }
+
+    /// Returns a view to the context.
+    #[inline(always)]
+    pub const fn context(&self) -> ContextView<'_> {
+        self.0.context()
+    }
+
+    /// Returns a reference to the state of the instance.
+    #[inline(always)]
+    pub const fn state(&self) -> Pin<&()> {
+        self.0.state()
+    }
+}
+
+impl GenericInstance for &'_ PseudoInstance {
+    type Parameters = ();
+
+    type Resources = ();
+
+    type Imports = ();
+
+    type Exports = ();
+
+    type State = ();
+
+    type Owned = Instance<(), (), (), (), ()>;
+
+    #[inline(always)]
+    fn to_owned_instance(self) -> Self::Owned {
+        self.0.to_owned_instance()
+    }
+
+    #[inline(always)]
+    fn to_opaque_instance_view<'o>(self) -> Pin<&'o OpaqueInstanceView<'o>>
+    where
+        Self: 'o,
+    {
+        self.0
+    }
+}
+
+impl<'a> Viewable<Pin<&'a OpaqueInstanceView<'a>>> for &'a PseudoInstance {
+    #[inline(always)]
+    fn view(self) -> Pin<&'a OpaqueInstanceView<'a>> {
+        self.0
+    }
+}
+
+impl Drop for PseudoInstance {
+    fn drop(&mut self) {
+        let info = self.info();
+        info.mark_unloadable();
+    }
+}
+
+/// A view to an instance that is being initialized.
+pub type UninitInstanceView<'a, T> = InstanceView<
+    'a,
+    <Pin<&'a T> as GenericInstance>::Parameters,
+    <Pin<&'a T> as GenericInstance>::Resources,
+    <Pin<&'a T> as GenericInstance>::Imports,
+    MaybeUninit<<Pin<&'a T> as GenericInstance>::Exports>,
+    MaybeUninit<<Pin<&'a T> as GenericInstance>::State>,
+>;
+
+/// An instance that is being initialized.
+pub type UninitInstance<T> = Instance<
+    <&'static T as GenericInstance>::Parameters,
+    <&'static T as GenericInstance>::Resources,
+    <&'static T as GenericInstance>::Imports,
+    MaybeUninit<<&'static T as GenericInstance>::Exports>,
+    MaybeUninit<<&'static T as GenericInstance>::State>,
+>;
+
 /// Defines two new instance newtypes, one for borrowed instances and one for owned instances.
 ///
 /// # Examples
@@ -765,6 +1008,7 @@ macro_rules! instance {
         #[repr(transparent)]
         $view_vis struct $view<'a>($crate::module::InstanceView<'a, $p, $r, $i, $e, $s>);
 
+        #[allow(unused)]
         impl $view<'_> {
             #[inline(always)]
             const fn view_inner(self: core::pin::Pin<&Self>)
@@ -803,6 +1047,12 @@ macro_rules! instance {
                 self.view_inner().info()
             }
 
+            /// Returns a view to the context.
+            #[inline(always)]
+            pub const fn context(self: core::pin::Pin<&Self>) -> $crate::context::ContextView<'_> {
+                self.view_inner().context()
+            }
+
             /// Returns a reference to the state of the instance.
             #[inline(always)]
             pub const fn state(self: core::pin::Pin<&Self>) -> core::pin::Pin<&$s> {
@@ -839,6 +1089,7 @@ macro_rules! instance {
         #[derive(Debug, Clone)]
         $owned_vis struct $owned($crate::module::Instance<$p, $r, $i, $e, $s>);
 
+        #[allow(unused)]
         impl $owned {
             /// Returns a reference to the parameter table of the instance.
             #[inline(always)]
@@ -868,6 +1119,12 @@ macro_rules! instance {
             #[inline(always)]
             pub const fn info(&self) -> core::pin::Pin<&$crate::module::InfoView<'_>> {
                 self.0.info()
+            }
+
+            /// Returns a view to the context.
+            #[inline(always)]
+            pub const fn context(&self) -> $crate::context::ContextView<'_> {
+                self.0.context()
             }
 
             /// Returns a reference to the state of the instance.

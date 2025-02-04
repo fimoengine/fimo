@@ -52,6 +52,9 @@
 
 #[doc(hidden)]
 pub use paste;
+#[doc(hidden)]
+pub use static_assertions as __private_sa;
+
 extern crate static_assertions as sa;
 
 #[macro_use]

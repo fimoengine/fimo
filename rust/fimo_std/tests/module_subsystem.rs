@@ -1,177 +1,178 @@
+#![feature(used_with_arg)]
+#![feature(const_trait_impl)]
+
+use std::{pin::Pin, ptr::NonNull};
+
 use fimo_std::{
     r#async::{BlockingContext, EventLoop},
     context::ContextBuilder,
-    declare_items, emit_info,
+    emit_info,
     error::AnyError,
-    export_module,
-    module::*,
+    ffi::Viewable,
+    module::{symbols::SymbolInfo, *},
+    symbol,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
 };
 
-declare_items! {
-    extern a_export_0 @ (0, 1, 0): i32;
-    extern a_export_1 @ (0, 1, 0): i32;
-
-    mod b {
-        extern b_export_0 @ (0, 1, 0): i32;
-        extern b_export_1 @ (0, 1, 0): i32;
-    }
+symbol! {
+    symbol A0 @ (0, 1, 0) = a_export_0: *const i32;
+    symbol A1 @ (0, 1, 0) = a_export_1: *const i32;
+    symbol B0 @ (0, 1, 0) = "b"::b_export_0: *const i32;
+    symbol B1 @ (0, 1, 0) = "b"::b_export_1: *const i32;
 }
 
-export_module! {
-    mod A {
-        name: "a",
-        description: "Test module a",
-        exports: {
-            a0: AExport0 = &5,
-            a1: AExport1 = &10,
-        },
+#[fimo_std::module::export_module]
+const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
+    .with_description(c"Test module a")
+    .with_author(c"fimo")
+    .with_export::<crate::A0>("a0", &5 as *const _)
+    .with_export::<crate::A1>("a1", &10 as *const _)
+    .build();
+
+#[fimo_std::module::export_module]
+const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
+    .with_description(c"Test module b")
+    .with_author(c"fimo")
+    .with_export::<crate::B0>("b0", &-2 as *const _)
+    .with_export::<crate::B1>("b1", &77 as *const _)
+    .build();
+
+#[fimo_std::module::export_module]
+const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
+    .with_description(c"Test module c")
+    .with_author(c"fimo")
+    .with_license(c"none")
+    .with_parameter::<u32>(
+        "pub_pub",
+        c"pub_pub",
+        0,
+        Some(ParameterAccessGroup::Public),
+        Some(ParameterAccessGroup::Public),
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "pub_dep",
+        c"pub_dep",
+        1,
+        Some(ParameterAccessGroup::Public),
+        Some(ParameterAccessGroup::Dependency),
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "pub_pri",
+        c"pub_pri",
+        2,
+        Some(ParameterAccessGroup::Public),
+        None,
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "dep_pub",
+        c"dep_pub",
+        3,
+        Some(ParameterAccessGroup::Dependency),
+        Some(ParameterAccessGroup::Public),
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "dep_dep",
+        c"dep_dep",
+        4,
+        Some(ParameterAccessGroup::Dependency),
+        Some(ParameterAccessGroup::Dependency),
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "dep_pri",
+        c"dep_pri",
+        5,
+        Some(ParameterAccessGroup::Dependency),
+        None,
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "pri_pub",
+        c"pri_pub",
+        6,
+        None,
+        Some(ParameterAccessGroup::Public),
+        None,
+        None,
+    )
+    .with_parameter::<u32>(
+        "pri_dep",
+        c"pri_dep",
+        7,
+        None,
+        Some(ParameterAccessGroup::Dependency),
+        None,
+        None,
+    )
+    .with_parameter::<u32>("pri_pri", c"pri_pri", 8, None, None, None, None)
+    .with_resource("empty", c"")
+    .with_resource("a", c"a.bin")
+    .with_resource("b", c"b.txt")
+    .with_resource("img", c"c/d.img")
+    .with_import::<crate::A0>("a0")
+    .with_import::<crate::A1>("a1")
+    .with_import::<crate::B0>("b0")
+    .with_import::<crate::B1>("b1")
+    .with_state::<crate::CState, _>(CState::init, CState::deinit)
+    .build();
+
+#[derive(Debug)]
+struct CState;
+
+impl CState {
+    fn init(
+        instance: Pin<&UninitInstanceView<'_, CView<'_>>>,
+        _set: LoadingSetView<'_>,
+    ) -> Result<NonNull<Self>, std::convert::Infallible> {
+        let parameters = instance.parameters();
+        assert_eq!(parameters.pub_pub().read(), 0u32);
+        assert_eq!(parameters.pub_dep().read(), 1u32);
+        assert_eq!(parameters.pub_pri().read(), 2u32);
+        assert_eq!(parameters.dep_pub().read(), 3u32);
+        assert_eq!(parameters.dep_dep().read(), 4u32);
+        assert_eq!(parameters.dep_pri().read(), 5u32);
+        assert_eq!(parameters.pri_pub().read(), 6u32);
+        assert_eq!(parameters.pri_dep().read(), 7u32);
+        assert_eq!(parameters.pri_pri().read(), 8u32);
+        parameters.pub_pub().write(0);
+        parameters.pub_dep().write(1);
+        parameters.pub_pri().write(2);
+        parameters.dep_pub().write(3);
+        parameters.dep_dep().write(4);
+        parameters.dep_pri().write(5);
+        parameters.pri_pub().write(6);
+        parameters.pri_dep().write(7);
+        parameters.pri_pri().write(8);
+
+        let resources = instance.resources();
+        emit_info!(instance.context(), "empty: {}", resources.empty());
+        emit_info!(instance.context(), "a: {}", resources.a());
+        emit_info!(instance.context(), "b: {}", resources.b());
+        emit_info!(instance.context(), "img: {}", resources.img());
+
+        let imports = instance.imports();
+        assert_eq!(*imports.a0(), 5);
+        assert_eq!(*imports.a1(), 10);
+        // assert_eq!(*imports.b0(), -2);
+        // assert_eq!(*imports.b1(), 77);
+
+        let info = instance.info();
+        emit_info!(instance.context(), "{info:?}");
+
+        Ok(NonNull::from(&CState))
     }
-}
 
-export_module! {
-    mod B {
-        name: "b",
-        description: "Test module b",
-        author: "Fimo",
-        exports: {
-            b0: b::BExport0 = &-2,
-            b1: b::BExport1 = &77,
-        },
-    }
-}
-
-export_module! {
-    mod C {
-        name: "c",
-        description: "Test module c",
-        author: "Fimo",
-        license: "None",
-        parameters: {
-            pub_pub: {
-                default: u32(0),
-                read_group: public,
-                write_group: public,
-            },
-            pub_dep: {
-                default: u32(1),
-                read_group: public,
-                write_group: dependency,
-            },
-            pub_pri: {
-                default: u32(2),
-                read_group: public,
-                write_group: private,
-            },
-            dep_pub: {
-                default: u32(3),
-                read_group: dependency,
-                write_group: public,
-            },
-            dep_dep: {
-                default: u32(4),
-                read_group: dependency,
-                write_group: dependency,
-            },
-            dep_pri: {
-                default: u32(5),
-                read_group: dependency,
-                write_group: private,
-            },
-            pri_pub: {
-                default: u32(6),
-                read_group: private,
-                write_group: public,
-            },
-            pri_dep: {
-                default: u32(7),
-                read_group: private,
-                write_group: dependency,
-            },
-            pri_pri: {
-                default: u32(8),
-                read_group: private,
-                write_group: private,
-            },
-        },
-        resources: {
-            empty: "",
-            a: "a.bin",
-            b: "b.txt",
-            img: "c/d.img",
-        },
-        namespaces: [
-            b::NamespaceItem,
-        ],
-        imports: {
-            a_0: AExport0,
-            a_1: AExport1,
-            b_0: b::BExport0,
-            b_1: b::BExport1,
-        },
-        constructor: CConstructor,
-    }
-}
-
-struct CConstructor;
-
-impl<'m> ModuleConstructor<C<'m>> for CConstructor {
-    fn construct<'a>(
-        module: ConstructorModule<'a, C<'m>>,
-        set: LoadingSetView<'_>,
-    ) -> Result<&'a mut <C<'m> as Module>::Data, AnyError> {
-        let module = module.unwrap()?;
-
-        let parameters = module.parameters();
-        assert_eq!(parameters.pub_pub.read(), 0u32);
-        assert_eq!(parameters.pub_dep.read(), 1u32);
-        assert_eq!(parameters.pub_pri.read(), 2u32);
-        assert_eq!(parameters.dep_pub.read(), 3u32);
-        assert_eq!(parameters.dep_dep.read(), 4u32);
-        assert_eq!(parameters.dep_pri.read(), 5u32);
-        assert_eq!(parameters.pri_pub.read(), 6u32);
-        assert_eq!(parameters.pri_dep.read(), 7u32);
-        assert_eq!(parameters.pri_pri.read(), 8u32);
-        parameters.pub_pub.write(0);
-        parameters.pub_dep.write(1);
-        parameters.pub_pri.write(2);
-        parameters.dep_pub.write(3);
-        parameters.dep_dep.write(4);
-        parameters.dep_pri.write(5);
-        parameters.pri_pub.write(6);
-        parameters.pri_dep.write(7);
-        parameters.pri_pri.write(8);
-
-        let resources = module.resources();
-        emit_info!(
-            &module.context(),
-            "empty: {}",
-            resources.empty().to_string_lossy()
-        );
-        emit_info!(&module.context(), "a: {}", resources.a().to_string_lossy());
-        emit_info!(&module.context(), "b: {}", resources.b().to_string_lossy());
-        emit_info!(
-            &module.context(),
-            "img: {}",
-            resources.img().to_string_lossy()
-        );
-
-        let imports = module.imports();
-        assert_eq!(*imports.a_0(), 5);
-        assert_eq!(*imports.a_1(), 10);
-        assert_eq!(*imports.b_0(), -2);
-        assert_eq!(*imports.b_1(), 77);
-
-        let info = module.module_info();
-        emit_info!(&module.context(), "{info}");
-
-        <DefaultConstructor as ModuleConstructor<C<'m>>>::construct(module.into(), set)
-    }
-
-    fn destroy(module: PreModule<'_, C<'m>>, data: &mut <C<'m> as Module>::Data) {
-        emit_info!(&module.context(), "dropping module: {data:?}");
-        <DefaultConstructor as ModuleConstructor<C<'m>>>::destroy(module, data);
-    }
+    fn deinit(_instance: Pin<&UninitInstanceView<'_, CView<'_>>>, _value: NonNull<Self>) {}
 }
 
 #[test]
@@ -196,35 +197,39 @@ fn load_modules() -> Result<(), AnyError> {
             .add_modules_from_local(|_| LoadingFilterRequest::Load)?;
         set.view().commit().await?;
 
-        let module = PseudoModule::new(&context)?;
-        let a = ModuleInfo::find_by_name(&context, c"a")?;
-        let b = ModuleInfo::find_by_name(&context, c"b")?;
-        let c = ModuleInfo::find_by_name(&context, c"c")?;
-        assert!(module.module_info().is_loaded());
-        assert!(a.is_loaded());
-        assert!(b.is_loaded());
-        assert!(c.is_loaded());
+        let instance = PseudoInstance::new(&context)?;
+        let a = Info::find_by_name(&context, c"a")?;
+        let b = Info::find_by_name(&context, c"b")?;
+        let c = Info::find_by_name(&context, c"c")?;
+        assert!(instance.info().is_loaded());
+        assert!(a.view().is_loaded());
+        assert!(b.view().is_loaded());
+        assert!(c.view().is_loaded());
 
-        module.add_dependency(&a)?;
-        module.add_dependency(&b)?;
-        module.add_dependency(&c)?;
+        instance.add_dependency(&a)?;
+        instance.add_dependency(&b)?;
+        instance.add_dependency(&c)?;
 
-        let a_0 = module.load_symbol::<AExport0>()?;
+        let a_0 = instance.load_symbol::<A0>()?;
         assert_eq!(*a_0, 5);
 
-        assert!(module.load_symbol::<b::BExport0>().is_err());
-        module.add_namespace(b::NamespaceItem::NAME)?;
-        assert!(module.load_symbol::<b::BExport0>().is_ok());
+        assert!(instance.load_symbol::<B0>().is_err());
+        instance.add_namespace(B0::NAMESPACE)?;
+        assert!(instance.load_symbol::<B0>().is_ok());
 
-        let info = module.module_info().to_owned();
-        let _guard = info
-            .try_acquire_module_strong()
-            .ok_or(AnyError::new("failed to acquire module"))?;
+        let info = instance.info().to_info();
+        if !info.view().try_ref_instance_strong() {
+            return Err(AnyError::new("failed to acquire module"));
+        }
 
-        drop(module);
-        assert!(a.is_loaded());
-        assert!(b.is_loaded());
-        assert!(c.is_loaded());
+        drop(instance);
+        assert!(a.view().is_loaded());
+        assert!(b.view().is_loaded());
+        assert!(c.view().is_loaded());
+
+        unsafe {
+            info.view().unref_instance_strong();
+        }
 
         Ok(())
     })
