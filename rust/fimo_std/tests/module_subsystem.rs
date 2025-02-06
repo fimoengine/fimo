@@ -8,7 +8,6 @@ use fimo_std::{
     context::ContextBuilder,
     emit_info,
     error::AnyError,
-    utils::Viewable,
     module::{
         exports::Builder,
         info::Info,
@@ -20,11 +19,13 @@ use fimo_std::{
     },
     symbol,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
+    utils::Viewable,
 };
 
 symbol! {
     symbol A0 @ (0, 1, 0) = a_export_0: *const i32;
     symbol A1 @ (0, 1, 0) = a_export_1: *const i32;
+    symbol A2 @ (0, 1, 0) = add: extern "C" fn(i32, i32) -> i32;
     symbol B0 @ (0, 1, 0) = "b"::b_export_0: *const i32;
     symbol B1 @ (0, 1, 0) = "b"::b_export_1: *const i32;
 }
@@ -33,16 +34,28 @@ symbol! {
 const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_description(c"Test module a")
     .with_author(c"fimo")
-    .with_export::<crate::A0>("a0", &5 as *const _)
-    .with_export::<crate::A1>("a1", &10 as *const _)
+    .with_export::<A0>("a0", &5)
+    .with_export::<A1>("a1", &10)
+    .with_dynamic_export::<A2, _>(
+        "a2",
+        |_inst: Pin<&UninitInstanceView<'_, AView<'_>>>| -> Result<_, std::convert::Infallible> {
+            extern "C" fn add(a: i32, b: i32) -> i32 {
+                a + b
+            }
+            Ok(fimo_std::module::symbols::FunctionPtr::<
+                extern "C" fn(_, _) -> _,
+            >::new(add))
+        },
+        |_f| {},
+    )
     .build();
 
 #[fimo_std::module::exports::export_module]
 const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
     .with_description(c"Test module b")
     .with_author(c"fimo")
-    .with_export::<crate::B0>("b0", &-2 as *const _)
-    .with_export::<crate::B1>("b1", &77 as *const _)
+    .with_export::<B0>("b0", &-2)
+    .with_export::<B1>("b1", &77)
     .build();
 
 #[fimo_std::module::exports::export_module]
@@ -127,11 +140,11 @@ const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
     .with_resource("a", c"a.bin")
     .with_resource("b", c"b.txt")
     .with_resource("img", c"c/d.img")
-    .with_import::<crate::A0>("a0")
-    .with_import::<crate::A1>("a1")
-    .with_import::<crate::B0>("b0")
-    .with_import::<crate::B1>("b1")
-    .with_state::<crate::CState, _>(CState::init, CState::deinit)
+    .with_import::<A0>("a0")
+    .with_import::<A1>("a1")
+    .with_import::<B0>("b0")
+    .with_import::<B1>("b1")
+    .with_state::<CState, _>(CState::init, CState::deinit)
     .build();
 
 #[derive(Debug)]
@@ -169,8 +182,8 @@ impl CState {
         emit_info!(instance.context(), "img: {}", resources.img());
 
         let imports = instance.imports();
-        assert_eq!(*imports.a0(), 5);
-        assert_eq!(*imports.a1(), 10);
+        assert_eq!(**imports.a0(), 5);
+        assert_eq!(**imports.a1(), 10);
         // assert_eq!(*imports.b0(), -2);
         // assert_eq!(*imports.b1(), 77);
 
@@ -219,7 +232,10 @@ fn load_modules() -> Result<(), AnyError> {
         instance.add_dependency(&c)?;
 
         let a_0 = instance.load_symbol::<A0>()?;
-        assert_eq!(*a_0, 5);
+        assert_eq!(**a_0, 5);
+
+        let a_2 = instance.load_symbol::<A2>()?;
+        assert_eq!(a_2.call(2, 3), 5);
 
         assert!(instance.load_symbol::<B0>().is_err());
         instance.add_namespace(B0::NAMESPACE)?;

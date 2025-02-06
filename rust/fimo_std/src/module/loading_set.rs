@@ -8,16 +8,18 @@ use crate::{
     bindings,
     context::ContextView,
     error::{AnyError, AnyResult},
-    utils::{ConstCStr, ConstNonNull, OpaqueHandle, Viewable},
     handle,
     module::{
         exports::Export,
         info::InfoView,
         instance::{GenericInstance, OpaqueInstanceView},
-        symbols::SymbolInfo,
+        symbols::{StrRef, SymbolInfo},
     },
+    utils::{ConstNonNull, OpaqueHandle, Viewable},
     version::Version,
 };
+
+use super::symbols::{AssertSharable, Share};
 
 /// Result of the filter operation of a [`LoadingSet`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,7 +35,7 @@ pub enum LoadingStatus<'a> {
     Error { export: &'a Export<'a> },
 }
 
-handle!(pub handle LoadingSetHandle: Send + Sync);
+handle!(pub handle LoadingSetHandle: Send + Sync + Share);
 
 /// Virtual function table of a [`LoadingSetView`] and [`LoadingSet`].
 #[repr(C)]
@@ -42,16 +44,16 @@ handle!(pub handle LoadingSetHandle: Send + Sync);
 pub struct LoadingSetVTable {
     pub acquire: unsafe extern "C" fn(handle: LoadingSetHandle),
     pub release: unsafe extern "C" fn(handle: LoadingSetHandle),
-    pub query_module: unsafe extern "C" fn(handle: LoadingSetHandle, module: ConstCStr) -> bool,
+    pub query_module: unsafe extern "C" fn(handle: LoadingSetHandle, module: StrRef<'_>) -> bool,
     pub query_symbol: unsafe extern "C" fn(
         handle: LoadingSetHandle,
-        name: ConstCStr,
-        namespace: ConstCStr,
+        name: StrRef<'_>,
+        namespace: StrRef<'_>,
         version: Version,
     ) -> bool,
     pub add_callback: unsafe extern "C" fn(
         handle: LoadingSetHandle,
-        module: ConstCStr,
+        module: StrRef<'_>,
         on_success: unsafe extern "C" fn(
             info: Pin<&InfoView<'_>>,
             handle: Option<OpaqueHandle<dyn Send>>,
@@ -93,7 +95,90 @@ pub struct LoadingSetVTable {
         bin_ptr: OpaqueHandle,
     ) -> AnyResult,
     pub commit: unsafe extern "C" fn(handle: LoadingSetHandle) -> EnqueuedFuture<Fallible<()>>,
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
+}
+
+impl LoadingSetVTable {
+    cfg_internal! {
+        /// Constructs a new `LoadingSetVTable`.
+        ///
+        /// # Unstable
+        ///
+        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
+        /// with any semver compatible release. See
+        /// [the documentation on unstable features][unstable] for details.
+        ///
+        /// [unstable]: crate#unstable-features
+        #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+        pub const fn new(
+            acquire: unsafe extern "C" fn(handle: LoadingSetHandle),
+            release: unsafe extern "C" fn(handle: LoadingSetHandle),
+            query_module: unsafe extern "C" fn(handle: LoadingSetHandle, module: StrRef<'_>) -> bool,
+            query_symbol: unsafe extern "C" fn(
+                handle: LoadingSetHandle,
+                name: StrRef<'_>,
+                namespace: StrRef<'_>,
+                version: Version,
+            ) -> bool,
+            add_callback: unsafe extern "C" fn(
+                handle: LoadingSetHandle,
+                module: StrRef<'_>,
+                on_success: unsafe extern "C" fn(
+                    info: Pin<&InfoView<'_>>,
+                    handle: Option<OpaqueHandle<dyn Send>>,
+                ),
+                on_error: for<'export> unsafe extern "C" fn(
+                    export: &'export Export<'export>,
+                    handle: Option<OpaqueHandle<dyn Send>>,
+                ),
+                on_abort: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
+                callback_handle: Option<OpaqueHandle<dyn Send>>,
+            ) -> AnyResult,
+            add_module: unsafe extern "C" fn(
+                handle: LoadingSetHandle,
+                owner: Pin<&OpaqueInstanceView<'_>>,
+                export: ConstNonNull<Export<'static>>,
+            ) -> AnyResult,
+            add_modules_from_path: unsafe extern "C" fn(
+                handle: LoadingSetHandle,
+                path: bindings::FimoUTF8Path,
+                filter: unsafe extern "C" fn(
+                    export: &Export<'_>,
+                    handle: Option<OpaqueHandle<dyn Send>>,
+                ) -> bool,
+                filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
+                filter_handle: Option<OpaqueHandle<dyn Send>>,
+            ) -> AnyResult,
+            add_modules_from_local: unsafe extern "C" fn(
+                handle: LoadingSetHandle,
+                filter: unsafe extern "C" fn(
+                    export: &Export<'_>,
+                    handle: Option<OpaqueHandle<dyn Send>>,
+                ) -> bool,
+                filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
+                filter_handle: Option<OpaqueHandle<dyn Send>>,
+                iterator: unsafe extern "C" fn(
+                    f: unsafe extern "C" fn(export: &Export<'_>, handle: Option<OpaqueHandle>) -> bool,
+                    handle: Option<OpaqueHandle>,
+                ),
+                bin_ptr: OpaqueHandle,
+            ) -> AnyResult,
+            commit: unsafe extern "C" fn(handle: LoadingSetHandle) -> EnqueuedFuture<Fallible<()>>,
+        ) -> Self {
+            Self {
+                acquire,
+                release,
+                query_module,
+                query_symbol,
+                add_callback,
+                add_module,
+                add_modules_from_path,
+                add_modules_from_local,
+                commit,
+                _private: PhantomData,
+            }
+        }
+    }
 }
 
 /// View of a loading set.
@@ -101,9 +186,12 @@ pub struct LoadingSetVTable {
 #[derive(Debug, Clone, Copy)]
 pub struct LoadingSetView<'a> {
     pub handle: LoadingSetHandle,
-    pub vtable: &'a LoadingSetVTable,
-    pub(crate) _private: PhantomData<()>,
+    pub vtable: &'a AssertSharable<LoadingSetVTable>,
+    _private: PhantomData<()>,
 }
+
+sa::assert_impl_all!(LoadingSetView<'_>: Send, Sync);
+sa::assert_impl_all!(LoadingSetView<'static>: Share);
 
 impl LoadingSetView<'_> {
     /// Promotes the view to an owned set.
@@ -123,7 +211,7 @@ impl LoadingSetView<'_> {
     pub fn query_module(&self, module: &CStr) -> bool {
         unsafe {
             let f = self.vtable.query_module;
-            f(self.handle, ConstCStr::from(module))
+            f(self.handle, StrRef::new(module))
         }
     }
 
@@ -138,8 +226,8 @@ impl LoadingSetView<'_> {
             let f = self.vtable.query_symbol;
             f(
                 self.handle,
-                ConstCStr::new(name),
-                ConstCStr::new(namespace),
+                StrRef::new(name),
+                StrRef::new(namespace),
                 version,
             )
         }
@@ -202,7 +290,7 @@ impl LoadingSetView<'_> {
             let f = self.vtable.add_callback;
             f(
                 self.handle,
-                ConstCStr::new(module),
+                StrRef::new(module),
                 on_success::<F>,
                 on_error::<F>,
                 Some(on_abort::<F> as _),
@@ -371,7 +459,7 @@ impl LoadingSetView<'_> {
     ///
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
-    pub fn commit(&self) -> impl Future<Output = Result<(), AnyError<dyn Send + Sync>>> {
+    pub fn commit(&self) -> impl Future<Output = Result<(), AnyError<dyn Send + Sync + Share>>> {
         unsafe {
             let f = self.vtable.commit;
             let fut = f(self.handle);
@@ -389,6 +477,8 @@ unsafe impl Sync for LoadingSetView<'_> {}
 /// A loading set.
 #[repr(transparent)]
 pub struct LoadingSet(LoadingSetView<'static>);
+
+sa::assert_impl_all!(LoadingSet: Send, Sync, Share);
 
 impl LoadingSet {
     /// Constructs a new loading set.

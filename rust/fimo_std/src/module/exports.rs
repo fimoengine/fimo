@@ -3,7 +3,6 @@
 use crate::{
     context::ContextView,
     error::AnyResult,
-    utils::{ConstCStr, ConstNonNull, OpaqueHandle, View},
     module::{
         info::Info,
         instance::{GenericInstance, OpaqueInstanceView, UninitInstanceView},
@@ -11,8 +10,9 @@ use crate::{
         parameters::{
             ParameterAccessGroup, ParameterCast, ParameterData, ParameterRepr, ParameterType,
         },
-        symbols::{SymbolInfo, SymbolPointer},
+        symbols::{Share, SymbolInfo, SymbolPointer},
     },
+    utils::{ConstNonNull, OpaqueHandle, View},
     version::Version,
 };
 use std::{
@@ -24,6 +24,8 @@ use std::{
 };
 
 pub use fimo_std_macros::export_module;
+
+use super::symbols::{AssertSharable, SliceRef, StrRef};
 
 /// Type able to contain all parameter types.
 #[repr(C)]
@@ -59,21 +61,27 @@ pub struct Parameter<'a> {
     pub r#type: ParameterType,
     pub read_group: ParameterAccessGroup,
     pub write_group: ParameterAccessGroup,
-    pub read: Option<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: NonNull<()>)>,
-    pub write:
-        Option<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: ConstNonNull<()>)>,
-    pub name: ConstCStr,
+    pub read: Option<
+        AssertSharable<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: NonNull<()>)>,
+    >,
+    pub write: Option<
+        AssertSharable<
+            unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: ConstNonNull<()>),
+        >,
+    >,
+    pub name: StrRef<'a>,
     // Safety: Must match the type provided in `type`.
     pub default_value: DefaultParameterValueUnion,
-    pub(crate) _private: PhantomData<&'a ()>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(Parameter<'_>: Send, Sync);
+sa::assert_impl_all!(Parameter<'static>: Share);
 
 impl<'a> Parameter<'a> {
     /// Constructs a new `Parameter`.
     pub const fn new<T: ParameterRepr>(default_value: T, name: &'a CStr) -> Self {
-        let name = ConstCStr::new(name);
+        let name = StrRef::new(name);
         let r#type = T::TYPE;
         let value = unsafe {
             match r#type {
@@ -131,20 +139,22 @@ impl<'a> Parameter<'a> {
     /// Sets a custom read function.
     pub const fn with_read(
         mut self,
-        read: Option<unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: NonNull<()>)>,
+        read: AssertSharable<
+            unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: NonNull<()>),
+        >,
     ) -> Self {
-        self.read = read;
+        self.read = Some(read);
         self
     }
 
     /// Sets a custom write function.
     pub const fn with_write(
         mut self,
-        write: Option<
+        write: AssertSharable<
             unsafe extern "C" fn(parameter: ParameterData<'_, ()>, value: ConstNonNull<()>),
         >,
     ) -> Self {
-        self.write = write;
+        self.write = Some(write);
         self
     }
 
@@ -202,17 +212,18 @@ impl Debug for Parameter<'_> {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Resource<'a> {
-    pub path: ConstCStr,
-    pub(crate) _private: PhantomData<&'a [u8]>,
+    pub path: StrRef<'a>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(Resource<'_>: Send, Sync);
+sa::assert_impl_all!(Resource<'static>: Share);
 
 impl<'a> Resource<'a> {
     /// Constructs a new `Resource`.
     pub const fn new(path: &'a CStr) -> Self {
         Self {
-            path: ConstCStr::new(path),
+            path: StrRef::new(path),
             _private: PhantomData,
         }
     }
@@ -235,17 +246,18 @@ impl Debug for Resource<'_> {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Namespace<'a> {
-    pub name: ConstCStr,
-    pub(crate) _private: PhantomData<&'a [u8]>,
+    pub name: StrRef<'a>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(Namespace<'_>: Send, Sync);
+sa::assert_impl_all!(Namespace<'static>: Share);
 
 impl<'a> Namespace<'a> {
     /// Constructs a new `Namespace`.
     pub const fn new(name: &'a CStr) -> Self {
         Self {
-            name: ConstCStr::new(name),
+            name: StrRef::new(name),
             _private: PhantomData,
         }
     }
@@ -269,27 +281,28 @@ impl Debug for Namespace<'_> {
 #[derive(Copy, Clone)]
 pub struct SymbolImport<'a> {
     pub version: Version,
-    pub name: ConstCStr,
-    pub namespace: ConstCStr,
-    pub(crate) _private: PhantomData<&'a [u8]>,
+    pub name: StrRef<'a>,
+    pub namespace: StrRef<'a>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(SymbolImport<'_>: Send, Sync);
+sa::assert_impl_all!(SymbolImport<'static>: Share);
 
 impl<'a> SymbolImport<'a> {
     /// Constructs a new `SymbolImport`.
     pub const fn new(version: Version, name: &'a CStr) -> Self {
         Self {
             version,
-            name: ConstCStr::new(name),
-            namespace: ConstCStr::new(c""),
+            name: StrRef::new(name),
+            namespace: StrRef::new(c""),
             _private: PhantomData,
         }
     }
 
     /// Sets the namespace of the symbol.
     pub const fn with_namespace(mut self, namespace: &'a CStr) -> Self {
-        self.namespace = ConstCStr::new(namespace);
+        self.namespace = StrRef::new(namespace);
         self
     }
 
@@ -318,14 +331,15 @@ impl Debug for SymbolImport<'_> {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct SymbolExport<'a> {
-    pub symbol: ConstNonNull<()>,
+    pub symbol: AssertSharable<ConstNonNull<()>>,
     pub version: Version,
-    pub name: ConstCStr,
-    pub namespace: ConstCStr,
-    pub(crate) _private: PhantomData<&'a [u8]>,
+    pub name: StrRef<'a>,
+    pub namespace: StrRef<'a>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(SymbolExport<'_>: Send, Sync);
+sa::assert_impl_all!(SymbolExport<'static>: Share);
 
 unsafe impl Send for SymbolExport<'_> {}
 unsafe impl Sync for SymbolExport<'_> {}
@@ -333,22 +347,22 @@ unsafe impl Sync for SymbolExport<'_> {}
 impl<'a> SymbolExport<'a> {
     /// Constructs a new `SymbolExport`.
     pub const fn new<T: ~const SymbolPointer + 'a>(
-        symbol: T,
+        symbol: T::Target<'a>,
         version: Version,
         name: &'a CStr,
     ) -> Self {
         Self {
-            symbol: ConstNonNull::new(symbol.into_opaque_ptr()).unwrap(),
+            symbol: unsafe { AssertSharable::new(T::ptr_from_target(symbol)) },
             version,
-            name: ConstCStr::new(name),
-            namespace: ConstCStr::new(c""),
+            name: StrRef::new(name),
+            namespace: StrRef::new(c""),
             _private: PhantomData,
         }
     }
 
     /// Sets the namespace of the symbol.
     pub const fn with_namespace(mut self, namespace: &'a CStr) -> Self {
-        self.namespace = ConstCStr::new(namespace);
+        self.namespace = StrRef::new(namespace);
         self
     }
 
@@ -378,18 +392,21 @@ impl Debug for SymbolExport<'_> {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct DynamicSymbolExport<'a> {
-    pub constructor: unsafe extern "C" fn(
-        instance: Pin<&OpaqueInstanceView<'_>>,
-        symbol: &mut NonNull<()>,
-    ) -> AnyResult,
-    pub destructor: unsafe extern "C" fn(symbol: NonNull<()>),
+    pub constructor: AssertSharable<
+        unsafe extern "C" fn(
+            instance: Pin<&OpaqueInstanceView<'_>>,
+            symbol: &mut NonNull<()>,
+        ) -> AnyResult,
+    >,
+    pub destructor: AssertSharable<unsafe extern "C" fn(symbol: NonNull<()>)>,
     pub version: Version,
-    pub name: ConstCStr,
-    pub namespace: ConstCStr,
-    pub(crate) _private: PhantomData<&'a [u8]>,
+    pub name: StrRef<'a>,
+    pub namespace: StrRef<'a>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(DynamicSymbolExport<'_>: Send, Sync);
+sa::assert_impl_all!(DynamicSymbolExport<'static>: Share);
 
 impl<'a> DynamicSymbolExport<'a> {
     /// Constructs a new `DynamicSymbolExport`.
@@ -399,11 +416,13 @@ impl<'a> DynamicSymbolExport<'a> {
     /// `constructor` must construct an instance of a type that implements [`SymbolPointer`] and
     /// `destructor` must release the instance of the same type.
     pub const unsafe fn new(
-        constructor: unsafe extern "C" fn(
-            instance: Pin<&OpaqueInstanceView<'_>>,
-            symbol: &mut NonNull<()>,
-        ) -> AnyResult,
-        destructor: unsafe extern "C" fn(symbol: NonNull<()>),
+        constructor: AssertSharable<
+            unsafe extern "C" fn(
+                instance: Pin<&OpaqueInstanceView<'_>>,
+                symbol: &mut NonNull<()>,
+            ) -> AnyResult,
+        >,
+        destructor: AssertSharable<unsafe extern "C" fn(symbol: NonNull<()>)>,
         version: Version,
         name: &'a CStr,
     ) -> Self {
@@ -411,15 +430,15 @@ impl<'a> DynamicSymbolExport<'a> {
             constructor,
             destructor,
             version,
-            name: ConstCStr::new(name),
-            namespace: ConstCStr::new(c""),
+            name: StrRef::new(name),
+            namespace: StrRef::new(c""),
             _private: PhantomData,
         }
     }
 
     /// Sets the namespace of the symbol.
     pub const fn with_namespace(mut self, namespace: &'a CStr) -> Self {
-        self.namespace = ConstCStr::new(namespace);
+        self.namespace = StrRef::new(namespace);
         self
     }
 
@@ -449,7 +468,7 @@ impl Debug for DynamicSymbolExport<'_> {
 /// A modifier declaration for a module export.
 #[repr(C, i32)]
 #[non_exhaustive]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Modifier<'a> {
     Destructor(&'a DestructorModifier<'a>),
     Dependency(Info),
@@ -457,63 +476,62 @@ pub enum Modifier<'a> {
 }
 
 sa::assert_impl_all!(Modifier<'_>: Send, Sync);
+sa::assert_impl_all!(Modifier<'static>: Share);
 
 /// A modifier for an export destructor.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct DestructorModifier<'a> {
-    pub handle: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
-    pub destructor: unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send + Sync + 'a>>),
-    pub(crate) _private: PhantomData<()>,
+    pub handle: Option<OpaqueHandle<dyn Send + Sync + Share + 'a>>,
+    pub destructor:
+        unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send + Sync + Share + 'a>>),
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(DestructorModifier<'_>: Send, Sync);
+sa::assert_impl_all!(DestructorModifier<'static>: Share);
 
 /// Declaration of a module export.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+#[allow(clippy::type_complexity)]
 pub struct Export<'a> {
-    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Share>>,
     pub version: Version,
-    pub name: ConstCStr,
-    pub description: Option<ConstCStr>,
-    pub author: Option<ConstCStr>,
-    pub license: Option<ConstCStr>,
-    // Safety: Must match the number of parameters pointed to by `parameters`.
-    pub parameters: Option<ConstNonNull<Parameter<'a>>>,
-    pub parameters_count: u32,
-    // Safety: Must match the number of resources pointed to by `resources`.
-    pub resources: Option<ConstNonNull<Resource<'a>>>,
-    pub resources_count: u32,
-    // Safety: Must match the number of namespace imports pointed to by `namespace_imports`.
-    pub namespace_imports: Option<ConstNonNull<Namespace<'a>>>,
-    pub namespace_imports_count: u32,
-    // Safety: Must match the number of symbol imports pointed to by `symbol_imports`.
-    pub symbol_imports: Option<ConstNonNull<SymbolImport<'a>>>,
-    pub symbol_imports_count: u32,
-    // Safety: Must match the number of symbol exports pointed to by `symbol_exports`.
-    pub symbol_exports: Option<ConstNonNull<SymbolExport<'a>>>,
-    pub symbol_exports_count: u32,
-    // Safety: Must match the number of symbol exports pointed to by `dynamic_symbol_exports`.
-    pub dynamic_symbol_exports: Option<ConstNonNull<DynamicSymbolExport<'a>>>,
-    pub dynamic_symbol_exports_count: u32,
-    // Safety: Must match the number of modifiers pointed to by `modifiers`.
-    pub modifiers: Option<ConstNonNull<Modifier<'a>>>,
-    pub modifiers_count: u32,
+    pub name: StrRef<'a>,
+    pub description: Option<StrRef<'a>>,
+    pub author: Option<StrRef<'a>>,
+    pub license: Option<StrRef<'a>>,
+    pub parameters: SliceRef<'a, Parameter<'a>, u32>,
+    pub resources: SliceRef<'a, Resource<'a>, u32>,
+    pub namespace_imports: SliceRef<'a, Namespace<'a>, u32>,
+    pub symbol_imports: SliceRef<'a, SymbolImport<'a>, u32>,
+    pub symbol_exports: SliceRef<'a, SymbolExport<'a>, u32>,
+    pub dynamic_symbol_exports: SliceRef<'a, DynamicSymbolExport<'a>, u32>,
+    pub modifiers: SliceRef<'a, Modifier<'a>, u32>,
     pub constructor: Option<
-        unsafe extern "C" fn(
-            instance: Pin<&OpaqueInstanceView<'_>>,
-            loading_set: LoadingSetView<'_>,
-            state: &mut Option<NonNull<()>>,
-        ) -> AnyResult,
+        AssertSharable<
+            unsafe extern "C" fn(
+                instance: Pin<&OpaqueInstanceView<'_>>,
+                loading_set: LoadingSetView<'_>,
+                state: &mut Option<NonNull<()>>,
+            ) -> AnyResult,
+        >,
     >,
     pub destructor: Option<
-        unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, state: Option<NonNull<()>>),
+        AssertSharable<
+            unsafe extern "C" fn(
+                instance: Pin<&OpaqueInstanceView<'_>>,
+                state: Option<NonNull<()>>,
+            ),
+        >,
     >,
-    pub on_start_event:
-        Option<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult>,
-    pub on_stop_event: Option<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
-    pub(crate) _private: PhantomData<&'a ()>,
+    pub on_start_event: Option<
+        AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult>,
+    >,
+    pub on_stop_event:
+        Option<AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>>,
+    _private: PhantomData<&'a ()>,
 }
 
 impl<'a> Export<'a> {
@@ -534,9 +552,9 @@ impl<'a> Export<'a> {
         /// [the documentation on unstable features][unstable] for details.
         ///
         /// [unstable]: crate#unstable-features
-        #[allow(clippy::too_many_arguments)]
+        #[allow(clippy::too_many_arguments, clippy::type_complexity)]
         pub const unsafe fn new(
-            name: &CStr,
+            name: &'a CStr,
             description: Option<&'a CStr>,
             author: Option<&'a CStr>,
             license: Option<&'a CStr>,
@@ -548,22 +566,30 @@ impl<'a> Export<'a> {
             dynamic_symbol_exports: &'a [DynamicSymbolExport<'a>],
             modifiers: &'a [Modifier<'a>],
             constructor: Option<
-                unsafe extern "C" fn(
-                    instance: Pin<&OpaqueInstanceView<'_>>,
-                    loading_set: LoadingSetView<'_>,
-                    state: &mut Option<NonNull<()>>,
-                ) -> AnyResult,
+                AssertSharable<
+                    unsafe extern "C" fn(
+                        instance: Pin<&OpaqueInstanceView<'_>>,
+                        loading_set: LoadingSetView<'_>,
+                        state: &mut Option<NonNull<()>>,
+                    ) -> AnyResult,
+                >,
             >,
             destructor: Option<
-                unsafe extern "C" fn(
-                    instance: Pin<&OpaqueInstanceView<'_>>,
-                    state: Option<NonNull<()>>,
-                ),
+                AssertSharable<
+                    unsafe extern "C" fn(
+                        instance: Pin<&OpaqueInstanceView<'_>>,
+                        state: Option<NonNull<()>>,
+                    ),
+                >,
             >,
             on_start_event: Option<
-                unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
+                AssertSharable<
+                    unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
+                >,
             >,
-            on_stop_event: Option<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
+            on_stop_event: Option<
+                AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
+            >,
         ) -> Self {
             unsafe {
                 Self::__new_private(
@@ -588,9 +614,9 @@ impl<'a> Export<'a> {
     }
 
     #[doc(hidden)]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub const unsafe fn __new_private(
-        name: &CStr,
+        name: &'a CStr,
         description: Option<&'a CStr>,
         author: Option<&'a CStr>,
         license: Option<&'a CStr>,
@@ -602,65 +628,65 @@ impl<'a> Export<'a> {
         dynamic_symbol_exports: &'a [DynamicSymbolExport<'a>],
         modifiers: &'a [Modifier<'a>],
         constructor: Option<
-            unsafe extern "C" fn(
-                instance: Pin<&OpaqueInstanceView<'_>>,
-                loading_set: LoadingSetView<'_>,
-                state: &mut Option<NonNull<()>>,
-            ) -> AnyResult,
+            AssertSharable<
+                unsafe extern "C" fn(
+                    instance: Pin<&OpaqueInstanceView<'_>>,
+                    loading_set: LoadingSetView<'_>,
+                    state: &mut Option<NonNull<()>>,
+                ) -> AnyResult,
+            >,
         >,
         destructor: Option<
-            unsafe extern "C" fn(
-                instance: Pin<&OpaqueInstanceView<'_>>,
-                state: Option<NonNull<()>>,
-            ),
+            AssertSharable<
+                unsafe extern "C" fn(
+                    instance: Pin<&OpaqueInstanceView<'_>>,
+                    state: Option<NonNull<()>>,
+                ),
+            >,
         >,
         on_start_event: Option<
-            unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
+            AssertSharable<
+                unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
+            >,
         >,
-        on_stop_event: Option<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
+        on_stop_event: Option<
+            AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
+        >,
     ) -> Self {
         let description = match description {
             None => None,
-            Some(x) => Some(ConstCStr::new(x)),
+            Some(x) => Some(StrRef::new(x)),
         };
         let author = match author {
             None => None,
-            Some(x) => Some(ConstCStr::new(x)),
+            Some(x) => Some(StrRef::new(x)),
         };
         let license = match license {
             None => None,
-            Some(x) => Some(ConstCStr::new(x)),
+            Some(x) => Some(StrRef::new(x)),
         };
-        let (parameters, parameters_count) = slice_to_raw_parts(parameters);
-        let (resources, resources_count) = slice_to_raw_parts(resources);
-        let (namespace_imports, namespace_imports_count) = slice_to_raw_parts(namespace_imports);
-        let (symbol_imports, symbol_imports_count) = slice_to_raw_parts(symbol_imports);
-        let (symbol_exports, symbol_exports_count) = slice_to_raw_parts(symbol_exports);
-        let (dynamic_symbol_exports, dynamic_symbol_exports_count) =
-            slice_to_raw_parts(dynamic_symbol_exports);
-        let (modifiers, modifiers_count) = slice_to_raw_parts(modifiers);
+        let parameters = SliceRef::new(parameters);
+        let resources = SliceRef::new(resources);
+        let namespace_imports = SliceRef::new(namespace_imports);
+        let symbol_imports = SliceRef::new(symbol_imports);
+        let symbol_exports = SliceRef::new(symbol_exports);
+        let dynamic_symbol_exports = SliceRef::new(dynamic_symbol_exports);
+        let modifiers = SliceRef::new(modifiers);
 
         Self {
             next: None,
             version: ContextView::CURRENT_VERSION,
-            name: ConstCStr::new(name),
+            name: StrRef::new(name),
             description,
             author,
             license,
             parameters,
-            parameters_count,
             resources,
-            resources_count,
             namespace_imports,
-            namespace_imports_count,
             symbol_imports,
-            symbol_imports_count,
             symbol_exports,
-            symbol_exports_count,
             dynamic_symbol_exports,
-            dynamic_symbol_exports_count,
             modifiers,
-            modifiers_count,
             constructor,
             destructor,
             on_start_event,
@@ -670,18 +696,8 @@ impl<'a> Export<'a> {
     }
 }
 
-const fn slice_to_raw_parts<T>(slice: &[T]) -> (Option<ConstNonNull<T>>, u32) {
-    assert!(slice.len() <= u32::MAX as usize);
-    match slice.is_empty() {
-        true => (None, 0),
-        false => (
-            unsafe { Some(ConstNonNull::new_unchecked(slice.as_ptr())) },
-            slice.len() as u32,
-        ),
-    }
-}
-
 sa::assert_impl_all!(Export<'_>: Send, Sync);
+sa::assert_impl_all!(Export<'static>: Share);
 
 unsafe impl Send for Export<'_> {}
 unsafe impl Sync for Export<'_> {}
@@ -758,7 +774,7 @@ where
     pub const fn with_export<T: SymbolInfo>(
         &mut self,
         _table_name: &str,
-        _value: T::Type,
+        _value: <T::Type as SymbolPointer>::Target<'static>,
     ) -> &mut Self {
         self
     }
@@ -768,8 +784,10 @@ where
     pub const fn with_dynamic_export<T, E>(
         &mut self,
         _table_name: &str,
-        _init: fn(Pin<&UninitInstanceView<'_, InstanceView>>) -> Result<T::Type, E>,
-        _deinit: fn(T::Type),
+        _init: for<'a> fn(
+            Pin<&'a UninitInstanceView<'_, InstanceView>>,
+        ) -> Result<<T::Type as SymbolPointer>::Target<'a>, E>,
+        _deinit: fn(<T::Type as SymbolPointer>::Target<'_>),
     ) -> &mut Self
     where
         T: SymbolInfo,

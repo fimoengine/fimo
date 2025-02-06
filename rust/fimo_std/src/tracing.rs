@@ -1,9 +1,10 @@
 //! Tracing subsystem.
 use crate::{
     context::{Context, ContextHandle, ContextView, TypeId},
-    utils::{ConstCStr, ConstNonNull, OpaqueHandle, Unsafe, VTablePtr, Viewable},
     handle,
+    module::symbols::{AssertSharable, Share, SliceRef, StrRef},
     time::Time,
+    utils::{ConstNonNull, OpaqueHandle, Unsafe, Viewable},
 };
 use std::{
     ffi::CStr,
@@ -370,15 +371,16 @@ pub enum Level {
 #[repr(C)]
 #[derive(Debug)]
 pub struct Metadata {
-    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
-    pub name: ConstCStr,
-    pub target: ConstCStr,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Share>>,
+    pub name: StrRef<'static>,
+    pub target: StrRef<'static>,
     pub level: Level,
-    pub file_name: Option<ConstCStr>,
+    pub file_name: Option<StrRef<'static>>,
     pub line_number: i32,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(Metadata: Send, Sync);
+sa::assert_impl_all!(Metadata: Send, Sync, Share);
 
 impl Metadata {
     pub const fn new(
@@ -390,12 +392,12 @@ impl Metadata {
     ) -> Metadata {
         Self {
             next: None,
-            name: ConstCStr::new(name),
-            target: ConstCStr::new(target),
+            name: StrRef::new(name),
+            target: StrRef::new(target),
             level,
             file_name: match file_name {
                 None => None,
-                Some(x) => Some(ConstCStr::new(x)),
+                Some(x) => Some(StrRef::new(x)),
             },
             line_number: match line_number {
                 None => -1,
@@ -404,6 +406,7 @@ impl Metadata {
                     x as i32
                 }
             },
+            _private: PhantomData,
         }
     }
 
@@ -436,11 +439,12 @@ impl Metadata {
 #[repr(C)]
 #[derive(Debug)]
 pub struct Event {
-    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Share>>,
     pub metadata: &'static Metadata,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(Event: Send, Sync);
+sa::assert_impl_all!(Event: Send, Sync, Share);
 
 impl Event {
     /// Constructs a new event.
@@ -448,6 +452,7 @@ impl Event {
         Self {
             next: None,
             metadata,
+            _private: PhantomData,
         }
     }
 }
@@ -456,11 +461,12 @@ impl Event {
 #[repr(C)]
 #[derive(Debug)]
 pub struct SpanDescriptor {
-    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Share>>,
     pub metadata: &'static Metadata,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(SpanDescriptor: Send, Sync);
+sa::assert_impl_all!(SpanDescriptor: Send, Sync, Share);
 
 impl SpanDescriptor {
     /// Constructs a new `SpanDescriptor`.
@@ -468,18 +474,19 @@ impl SpanDescriptor {
         Self {
             next: None,
             metadata,
+            _private: PhantomData,
         }
     }
 }
 
-handle!(pub handle SpanHandle: Send + Sync);
+handle!(pub handle SpanHandle: Send + Sync + Share);
 
 /// Virtual function table of a [`Span`].
 #[repr(C)]
 #[derive(Debug)]
 pub struct SpanVTable {
     pub drop: unsafe extern "C" fn(handle: SpanHandle),
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl SpanVTable {
@@ -507,10 +514,11 @@ impl SpanVTable {
 #[derive(Debug)]
 pub struct Span {
     pub handle: SpanHandle,
-    pub vtable: VTablePtr<'static, SpanVTable>,
+    pub vtable: &'static AssertSharable<SpanVTable>,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(Span: Send, Sync);
+sa::assert_impl_all!(Span: Send, Sync, Share);
 
 impl Span {
     /// Creates a new span and enters it.
@@ -542,7 +550,7 @@ impl Drop for Span {
     }
 }
 
-handle!(pub handle CallStackHandle: Send + Sync);
+handle!(pub handle CallStackHandle: Send + Sync + Share);
 
 /// Virtual function table of a [`CallStack`].
 #[repr(C)]
@@ -551,7 +559,7 @@ pub struct CallStackVTable {
     pub drop: unsafe extern "C" fn(handle: CallStackHandle),
     pub replace_active: unsafe extern "C" fn(handle: CallStackHandle) -> CallStack,
     pub unblock: unsafe extern "C" fn(handle: CallStackHandle),
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl CallStackVTable {
@@ -590,10 +598,11 @@ impl CallStackVTable {
 #[derive(Debug)]
 pub struct CallStack {
     pub handle: CallStackHandle,
-    pub vtable: VTablePtr<'static, CallStackVTable>,
+    pub vtable: &'static AssertSharable<CallStackVTable>,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(CallStack: Send, Sync);
+sa::assert_impl_all!(CallStack: Send, Sync, Share);
 
 impl CallStack {
     /// Creates a new empty call stack.
@@ -665,7 +674,7 @@ impl Drop for CallStack {
 #[derive(Debug)]
 pub struct ThreadAccess(Context);
 
-sa::assert_impl_all!(ThreadAccess: Send, Sync);
+sa::assert_impl_all!(ThreadAccess: Send, Sync, Share);
 
 impl ThreadAccess {
     /// Registers the calling thread with the tracing subsystem.
@@ -697,9 +706,9 @@ impl Drop for ThreadAccess {
 /// The main function of the tracing subsystem is managing and routing tracing events to
 /// subscribers. Therefore, it does not consume any events on its own, which is the task of the
 /// subscribers. Subscribers may utilize the events in any way they deem fit.
-pub trait Subscriber: Send + Sync {
+pub trait Subscriber: Send + Sync + Share {
     /// Type of the internal call stack.
-    type CallStack: Send + Sync;
+    type CallStack: Send + Sync + Share;
 
     /// Creates a new call stack.
     fn create_call_stack(&self, time: Time) -> Box<Self::CallStack>;
@@ -747,14 +756,14 @@ pub trait Subscriber: Send + Sync {
     fn flush(&self);
 }
 
-handle!(pub handle SubscriberHandle: Send + Sync);
-handle!(pub handle SubscriberCallStackHandle: Send + Sync);
+handle!(pub handle SubscriberHandle: Send + Sync + Share);
+handle!(pub handle SubscriberCallStackHandle: Send + Sync + Share);
 
 /// Virtual function table of a [`OpaqueSubscriber`].
 #[repr(C)]
 #[derive(Debug)]
 pub struct SubscriberVTable {
-    pub next: Option<OpaqueHandle<dyn Send + Sync>>,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Share>>,
     pub acquire: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
     pub release: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
     pub create_call_stack: unsafe extern "C" fn(
@@ -819,19 +828,20 @@ pub struct SubscriberVTable {
 #[derive(Debug)]
 pub struct OpaqueSubscriber {
     pub handle: Option<SubscriberHandle>,
-    pub vtable: VTablePtr<'static, SubscriberVTable>,
+    pub vtable: &'static AssertSharable<SubscriberVTable>,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(OpaqueSubscriber: Send, Sync);
+sa::assert_impl_all!(OpaqueSubscriber: Send, Sync, Share);
 
 impl OpaqueSubscriber {
     /// Constructs a new `OpaqueSubscriber` from a reference to a [`Subscriber`].
     pub const fn from_ref<T: Subscriber>(subscriber: &'static T) -> Self {
         trait VTableProvider {
-            const TABLE: SubscriberVTable;
+            const TABLE: AssertSharable<SubscriberVTable>;
         }
         impl<T: Subscriber> VTableProvider for T {
-            const TABLE: SubscriberVTable =
+            const TABLE: AssertSharable<SubscriberVTable> =
                 OpaqueSubscriber::build_vtable::<T>(acquire_noop::<T>, release_noop::<T>);
         }
         unsafe extern "C" fn acquire_noop<T: Subscriber>(_handle: Option<SubscriberHandle>) {}
@@ -843,17 +853,18 @@ impl OpaqueSubscriber {
                     (&raw const *subscriber).cast_mut(),
                 ))
             },
-            vtable: VTablePtr::new(&<T as VTableProvider>::TABLE),
+            vtable: &<T as VTableProvider>::TABLE,
+            _private: PhantomData,
         }
     }
 
     /// Constructs a new `OpaqueSubscriber` from a [`Subscriber`] in an [`Arc`].
     pub fn from_arc<T: Subscriber>(subscriber: Arc<T>) -> Self {
         trait VTableProvider {
-            const TABLE: SubscriberVTable;
+            const TABLE: AssertSharable<SubscriberVTable>;
         }
         impl<T: Subscriber> VTableProvider for T {
-            const TABLE: SubscriberVTable =
+            const TABLE: AssertSharable<SubscriberVTable> =
                 OpaqueSubscriber::build_vtable::<T>(acquire_arc::<T>, release_arc::<T>);
         }
         unsafe extern "C" fn acquire_arc<T: Subscriber>(handle: Option<SubscriberHandle>) {
@@ -869,14 +880,15 @@ impl OpaqueSubscriber {
                     Arc::into_raw(subscriber).cast_mut(),
                 ))
             },
-            vtable: VTablePtr::new(&<T as VTableProvider>::TABLE),
+            vtable: &<T as VTableProvider>::TABLE,
+            _private: PhantomData,
         }
     }
 
     const fn build_vtable<T: Subscriber>(
         acquire_fn: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
         release_fn: unsafe extern "C" fn(handle: Option<SubscriberHandle>),
-    ) -> SubscriberVTable {
+    ) -> AssertSharable<SubscriberVTable> {
         unsafe extern "C" fn call_stack_create<T: Subscriber>(
             handle: Option<SubscriberHandle>,
             time: &Time,
@@ -1011,21 +1023,23 @@ impl OpaqueSubscriber {
             }
         }
 
-        SubscriberVTable {
-            next: None,
-            acquire: acquire_fn,
-            release: release_fn,
-            create_call_stack: call_stack_create::<T>,
-            drop_call_stack: call_stack_drop::<T>,
-            destroy_call_stack: call_stack_destroy::<T>,
-            unblock_call_stack: call_stack_unblock::<T>,
-            suspend_call_stack: call_stack_suspend::<T>,
-            resume_call_stack: call_stack_resume::<T>,
-            push_span: span_push::<T>,
-            drop_span: span_drop::<T>,
-            pop_span: span_pop::<T>,
-            emit_event: event_emit::<T>,
-            flush: flush::<T>,
+        unsafe {
+            AssertSharable::new(SubscriberVTable {
+                next: None,
+                acquire: acquire_fn,
+                release: release_fn,
+                create_call_stack: call_stack_create::<T>,
+                drop_call_stack: call_stack_drop::<T>,
+                destroy_call_stack: call_stack_destroy::<T>,
+                unblock_call_stack: call_stack_unblock::<T>,
+                suspend_call_stack: call_stack_suspend::<T>,
+                resume_call_stack: call_stack_resume::<T>,
+                push_span: span_push::<T>,
+                drop_span: span_drop::<T>,
+                pop_span: span_pop::<T>,
+                emit_event: event_emit::<T>,
+                flush: flush::<T>,
+            })
         }
     }
 }
@@ -1037,6 +1051,7 @@ impl Clone for OpaqueSubscriber {
         Self {
             handle: self.handle,
             vtable: self.vtable,
+            _private: PhantomData,
         }
     }
 }
@@ -1068,13 +1083,7 @@ pub struct Config<'a> {
     pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
     pub format_buffer_length: Option<NonZeroUsize>,
     pub max_level: Level,
-    /// # Safety
-    ///
-    /// Represents an [`&[OpaqueSubscriber]`] and must therefore match with the length provided in
-    /// `subscriber_count`.
-    pub subscribers: Unsafe<Option<ConstNonNull<OpaqueSubscriber>>>,
-    pub subscriber_count: Unsafe<usize>,
-    pub _phantom: PhantomData<&'a [OpaqueSubscriber]>,
+    pub subscribers: SliceRef<'a, OpaqueSubscriber>,
 }
 
 sa::assert_impl_all!(Config<'_>: Send, Sync);
@@ -1092,9 +1101,7 @@ impl<'a> Config<'a> {
                 } else {
                     Level::Error
                 },
-                subscribers: Unsafe::new(None),
-                subscriber_count: Unsafe::new(0),
-                _phantom: PhantomData,
+                subscribers: SliceRef::new(&[]),
             }
         }
     }
@@ -1112,30 +1119,13 @@ impl<'a> Config<'a> {
     }
 
     pub const fn with_subscribers(mut self, subscribers: &'a [OpaqueSubscriber]) -> Self {
-        unsafe {
-            if subscribers.is_empty() {
-                self.subscribers = Unsafe::new(None);
-                self.subscriber_count = Unsafe::new(0);
-                self
-            } else {
-                self.subscribers =
-                    Unsafe::new(Some(ConstNonNull::new_unchecked(subscribers.as_ptr())));
-                self.subscriber_count = Unsafe::new(subscribers.len());
-                self
-            }
-        }
+        self.subscribers = SliceRef::new(subscribers);
+        self
     }
 
     /// Returns a slice of all subscribers.
     pub const fn subscribers(&self) -> &[OpaqueSubscriber] {
-        unsafe {
-            match self.subscribers.get() {
-                None => &[],
-                Some(subscribers) => {
-                    std::slice::from_raw_parts(subscribers.as_ptr(), self.subscriber_count.get())
-                }
-            }
-        }
+        self.subscribers.as_slice()
     }
 }
 

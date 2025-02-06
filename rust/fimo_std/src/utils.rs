@@ -2,13 +2,13 @@
 
 use std::{
     cmp::Ordering,
-    ffi::CStr,
     fmt::{Debug, Display, Formatter, Pointer},
     hash::{Hash, Hasher},
-    marker::PhantomData,
-    ops::Deref,
+    marker::{PhantomData, Unsize},
     ptr::NonNull,
 };
+
+use crate::module::symbols::Share;
 
 /// A helper for an unsafe field.
 #[repr(transparent)]
@@ -89,56 +89,6 @@ impl<T: Display> Display for Unsafe<T> {
 impl<T: Pointer> Pointer for Unsafe<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Pointer::fmt(&self.0, f)
-    }
-}
-
-/// A null-terminated string pointer.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct ConstCStr(ConstNonNull<u8>);
-
-impl ConstCStr {
-    /// Constructs a new `ConstCStr` from a `CStr`.
-    pub const fn new(string: &CStr) -> Self {
-        unsafe { Self::new_unchecked(ConstNonNull::new_unchecked(string.as_ptr().cast())) }
-    }
-
-    /// Constructs a new `ConstCStr` from a raw ptr.
-    ///
-    /// # Safety
-    ///
-    /// The string must be null-terminated.
-    pub const unsafe fn new_unchecked(string: ConstNonNull<u8>) -> Self {
-        Self(string)
-    }
-
-    /// Returns the inner pointer to the string.
-    pub const fn as_ptr(&self) -> *const u8 {
-        self.0.as_ptr()
-    }
-
-    /// Returns a reference to the contained `CStr`.
-    ///
-    /// # Safety
-    ///
-    /// See [`CStr::from_ptr`].
-    pub const unsafe fn as_ref<'a>(&self) -> &'a CStr {
-        unsafe { CStr::from_ptr(self.as_ptr().cast()) }
-    }
-}
-
-unsafe impl Send for ConstCStr {}
-unsafe impl Sync for ConstCStr {}
-
-impl From<&'_ CStr> for ConstCStr {
-    fn from(value: &'_ CStr) -> Self {
-        Self::new(value)
-    }
-}
-
-impl Default for ConstCStr {
-    fn default() -> Self {
-        Self::new(c"")
     }
 }
 
@@ -307,87 +257,14 @@ impl<T: ?Sized> From<&'_ T> for ConstNonNull<T> {
     }
 }
 
-/// A pointer to a virtual function table.
-#[repr(transparent)]
-pub struct VTablePtr<'a, T: Send + Sync>(ConstNonNull<T>, PhantomData<&'a T>);
+#[doc(hidden)]
+pub trait Opaque {}
 
-impl<'a, T: Send + Sync> VTablePtr<'a, T> {
-    /// Constructs a new pointer from a reference.
-    pub const fn new(value: &'a T) -> Self {
-        unsafe { Self::new_unchecked(value) }
-    }
-
-    /// Constructs a new pointer.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure, that `value` can be dereferenced for the lifetime of the constructed
-    /// instance.
-    pub const unsafe fn new_unchecked(value: *const T) -> Self {
-        unsafe { Self(ConstNonNull::new_unchecked(value.cast_mut()), PhantomData) }
-    }
-}
-
-impl<T: Send + Sync> Deref for VTablePtr<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.0.as_ref() }
-    }
-}
-
-unsafe impl<T: Send + Sync> Send for VTablePtr<'_, T> {}
-unsafe impl<T: Send + Sync> Sync for VTablePtr<'_, T> {}
-
-impl<T: Send + Sync> Debug for VTablePtr<'_, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("VTablePtr").field(&self.0).finish()
-    }
-}
-
-impl<T: Send + Sync> Pointer for VTablePtr<'_, T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Pointer::fmt(&self.0, f)
-    }
-}
-
-impl<T: Send + Sync> Copy for VTablePtr<'_, T> {}
-
-impl<T: Send + Sync> Clone for VTablePtr<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T: Send + Sync> PartialEq for VTablePtr<'_, T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-
-impl<T: Send + Sync> Eq for VTablePtr<'_, T> {}
-
-impl<T: Send + Sync> PartialOrd for VTablePtr<'_, T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T: Send + Sync> Ord for VTablePtr<'_, T> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl<T: Send + Sync> Hash for VTablePtr<'_, T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
+impl<T: ?Sized> Opaque for T {}
 
 /// Internal handle to some opaque data.
 #[repr(transparent)]
-pub struct OpaqueHandle<T: ?Sized = *mut ()>(
+pub struct OpaqueHandle<T: ?Sized = dyn Opaque>(
     NonNull<std::ffi::c_void>,
     PhantomData<for<'a> fn(&'a ()) -> &'a T>,
 );
@@ -407,20 +284,23 @@ const _: () = const {
 impl<T: ?Sized> OpaqueHandle<T> {
     /// Creates a new `OpaqueHandle` if `ptr` is non-null.
     ///
+    /// # Safety
+    ///
+    /// - `U` must be compatible with `T`.
+    ///
     /// # Examples
     ///
     /// ```
     /// use fimo_std::utils::OpaqueHandle;
     ///
     /// let mut x = 0u32;
-    /// let ptr = <OpaqueHandle>::new(&raw mut x).expect("ptr is null");
+    /// let ptr = unsafe { <OpaqueHandle>::new(&raw mut x).expect("ptr is null") };
     ///
-    /// if let Some(ptr) = <OpaqueHandle>::new::<u32>(std::ptr::null_mut::<u32>()) {
+    /// if let Some(ptr) = unsafe { <OpaqueHandle>::new::<u32>(std::ptr::null_mut::<u32>()) } {
     ///     unreachable!();
     /// }
     /// ```
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub const fn new<U>(ptr: *mut U) -> Option<Self> {
+    pub const unsafe fn new<U>(ptr: *mut U) -> Option<Self> {
         if !ptr.is_null() {
             unsafe { Some(Self::new_unchecked(ptr)) }
         } else {
@@ -432,7 +312,8 @@ impl<T: ?Sized> OpaqueHandle<T> {
     ///
     /// # Safety
     ///
-    /// `ptr` must be non-null.
+    /// - `U` must be compatible with `T`.
+    /// - `ptr` must be non-null.
     ///
     /// # Examples
     ///
@@ -463,7 +344,7 @@ impl<T: ?Sized> OpaqueHandle<T> {
     /// use fimo_std::utils::OpaqueHandle;
     ///
     /// let mut x = 0u32;
-    /// let ptr = <OpaqueHandle>::new(&raw mut x).expect("ptr is null");
+    /// let ptr = unsafe { <OpaqueHandle>::new(&raw mut x).expect("ptr is null") };
     ///
     /// let x_value = unsafe { *ptr.as_ptr::<u32>() };
     /// assert_eq!(x_value, 0);
@@ -471,10 +352,19 @@ impl<T: ?Sized> OpaqueHandle<T> {
     pub const fn as_ptr<U>(&self) -> *mut U {
         self.0.as_ptr().cast()
     }
+
+    /// Coerces the handle to another type.
+    pub const fn coerce<U: ?Sized>(self) -> OpaqueHandle<U>
+    where
+        T: Unsize<U>,
+    {
+        OpaqueHandle(self.0, PhantomData)
+    }
 }
 
 unsafe impl<T: ?Sized + Send> Send for OpaqueHandle<T> {}
 unsafe impl<T: ?Sized + Sync> Sync for OpaqueHandle<T> {}
+unsafe impl<T: ?Sized + Share> Share for OpaqueHandle<T> {}
 
 impl<T: ?Sized> Debug for OpaqueHandle<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -522,17 +412,12 @@ impl<T: ?Sized> Hash for OpaqueHandle<T> {
     }
 }
 
-#[doc(hidden)]
-pub struct SendSyncHelper<T>(PhantomData<T>);
-
-unsafe impl<T> Send for SendSyncHelper<T> {}
-unsafe impl<T> Sync for SendSyncHelper<T> {}
-
 /// Creates a new handle type.
 ///
 /// # Examples
 ///
 /// ```
+/// #![feature(trivial_bounds)]
 /// use fimo_std::handle;
 ///
 /// handle!(handle Foo: Sync);
@@ -579,8 +464,12 @@ macro_rules! handle {
         }
 
         $(
-        unsafe impl Send for $ident where $crate::utils::SendSyncHelper<&'static (dyn $bound $(+ $bound_rest)*)>: Send {}
-        unsafe impl Sync for $ident where $crate::utils::SendSyncHelper<&'static (dyn $bound $(+ $bound_rest)*)>: Sync {}
+        #[allow(trivial_bounds)]
+        unsafe impl Send for $ident where dyn $bound $(+ $bound_rest)*: Send {}
+        #[allow(trivial_bounds)]
+        unsafe impl Sync for $ident where dyn $bound $(+ $bound_rest)*: Sync {}
+        #[allow(trivial_bounds)]
+        unsafe impl $crate::module::symbols::Share for $ident where dyn $bound $(+ $bound_rest)*: $crate::module::symbols::Share {}
         )?
 
         impl core::fmt::Debug for $ident {

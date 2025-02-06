@@ -6,9 +6,9 @@ use crate::{
     module::{
         info::InfoView,
         parameters::{ParameterCast, ParameterRepr, ParameterType},
-        symbols::{SymbolInfo, SymbolPointer, SymbolRef},
+        symbols::{StrRef, SymbolInfo, SymbolPointer, SymbolRef},
     },
-    utils::{ConstCStr, ConstNonNull, VTablePtr, View, Viewable},
+    utils::{ConstNonNull, View, Viewable},
     version::Version,
 };
 use std::{
@@ -19,6 +19,8 @@ use std::{
     pin::Pin,
     ptr::NonNull,
 };
+
+use super::symbols::AssertSharable;
 
 /// Information about an instance dependency.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -73,7 +75,7 @@ pub trait GenericInstance: Sized {
             let mut is_static = MaybeUninit::uninit();
             f(
                 this,
-                ConstCStr::new(namespace),
+                StrRef::new(namespace),
                 &mut has_dependency,
                 &mut is_static,
             )
@@ -101,7 +103,7 @@ pub trait GenericInstance: Sized {
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.add_namespace;
-            f(this, ConstCStr::new(namespace)).into_result()
+            f(this, StrRef::new(namespace)).into_result()
         }
     }
 
@@ -115,7 +117,7 @@ pub trait GenericInstance: Sized {
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.remove_namespace;
-            f(this, ConstCStr::new(namespace)).into_result()
+            f(this, StrRef::new(namespace)).into_result()
         }
     }
 
@@ -200,8 +202,8 @@ pub trait GenericInstance: Sized {
         version: Version,
     ) -> Result<ConstNonNull<()>, AnyError> {
         let this = self.to_opaque_instance_view();
-        let name = ConstCStr::new(name);
-        let namespace = ConstCStr::new(namespace);
+        let name = StrRef::new(name);
+        let namespace = StrRef::new(namespace);
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
             let f = inner.vtable.load_symbol;
@@ -218,13 +220,14 @@ pub trait GenericInstance: Sized {
     /// symbol, if it exists, is returned, and can be used until the module relinquishes the
     /// dependency to the module that exported the symbol. This function fails, if the module
     /// containing the symbol is not a dependency of the module.
-    fn load_symbol<T>(self) -> Result<SymbolRef<'static, T>, AnyError>
+    fn load_symbol<'a, T>(self) -> Result<SymbolRef<'a, T>, AnyError>
     where
+        Self: 'a,
         T: SymbolInfo,
         T::Type: const SymbolPointer,
     {
         let sym = self.load_symbol_raw(T::NAME, T::NAMESPACE, T::VERSION)?;
-        unsafe { Ok(SymbolRef::from_opaque_ptr(sym.as_ptr())) }
+        unsafe { Ok(SymbolRef::from_opaque_ptr(sym)) }
     }
 
     /// Reads a module parameter with dependency read access.
@@ -238,8 +241,8 @@ pub trait GenericInstance: Sized {
         parameter: &CStr,
     ) -> Result<U, AnyError> {
         let this = self.to_opaque_instance_view();
-        let module = ConstCStr::new(module);
-        let parameter = ConstCStr::new(parameter);
+        let module = StrRef::new(module);
+        let parameter = StrRef::new(parameter);
         let r#type = <U::Repr as ParameterRepr>::TYPE;
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -271,8 +274,8 @@ pub trait GenericInstance: Sized {
         parameter: &CStr,
     ) -> Result<(), AnyError> {
         let this = self.to_opaque_instance_view();
-        let module = ConstCStr::new(module);
-        let parameter = ConstCStr::new(parameter);
+        let module = StrRef::new(module);
+        let parameter = StrRef::new(parameter);
         let value = value.into_repr();
         let r#type = <U::Repr as ParameterRepr>::TYPE;
         unsafe {
@@ -298,17 +301,17 @@ pub struct InstanceVTable {
     pub release: unsafe extern "C" fn(handle: Pin<&OpaqueInstanceView<'_>>),
     pub query_namespace: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
-        namespace: ConstCStr,
+        namespace: StrRef<'_>,
         has_dependency: &mut MaybeUninit<bool>,
         is_static: &mut MaybeUninit<bool>,
     ) -> AnyResult,
     pub add_namespace: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
-        namespace: ConstCStr,
+        namespace: StrRef<'_>,
     ) -> AnyResult,
     pub remove_namespace: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
-        namespace: ConstCStr,
+        namespace: StrRef<'_>,
     ) -> AnyResult,
     pub query_dependency: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
@@ -326,8 +329,8 @@ pub struct InstanceVTable {
     ) -> AnyResult,
     pub load_symbol: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
-        name: ConstCStr,
-        namespace: ConstCStr,
+        name: StrRef<'_>,
+        namespace: StrRef<'_>,
         version: Version,
         out: &mut MaybeUninit<ConstNonNull<()>>,
     ) -> AnyResult,
@@ -335,17 +338,17 @@ pub struct InstanceVTable {
         handle: Pin<&OpaqueInstanceView<'_>>,
         value: NonNull<()>,
         r#type: ParameterType,
-        module: ConstCStr,
-        parameter: ConstCStr,
+        module: StrRef<'_>,
+        parameter: StrRef<'_>,
     ) -> AnyResult,
     pub write_parameter: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         value: ConstNonNull<()>,
         r#type: ParameterType,
-        module: ConstCStr,
-        parameter: ConstCStr,
+        module: StrRef<'_>,
+        parameter: StrRef<'_>,
     ) -> AnyResult,
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 /// Borrowed handle of a loaded module.
@@ -363,7 +366,7 @@ where
     E: Send + Sync + 'static,
     S: Send + Sync + 'static,
 {
-    pub vtable: VTablePtr<'a, InstanceVTable>,
+    pub vtable: &'a AssertSharable<InstanceVTable>,
     pub parameters: Option<&'a P>,
     pub resources: Option<&'a R>,
     pub imports: Option<&'a I>,
@@ -371,8 +374,8 @@ where
     pub info: Pin<&'a InfoView<'a>>,
     pub context: ContextView<'a>,
     pub state: Option<Pin<&'a S>>,
-    pub(crate) _pinned: PhantomData<PhantomPinned>,
-    pub(crate) _private: PhantomData<&'a ()>,
+    _pinned: PhantomData<PhantomPinned>,
+    _private: PhantomData<&'a ()>,
 }
 
 impl<'a, P, R, I, E, S> InstanceView<'a, P, R, I, E, S>
@@ -400,7 +403,7 @@ where
         #[allow(clippy::too_many_arguments)]
         pub const unsafe fn new_in(
             out: Pin<&mut MaybeUninit<Self>>,
-            vtable: &'a InstanceVTable,
+            vtable: &'a AssertSharable<InstanceVTable>,
             parameters: Option<&'a P>,
             resources: Option<&'a R>,
             imports: Option<&'a I>,
@@ -410,7 +413,7 @@ where
             state: Option<Pin<&'a S>>,
         ) {
             let this = Self {
-                vtable: VTablePtr::new(vtable),
+                vtable,
                 parameters,
                 resources,
                 imports,

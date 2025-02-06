@@ -9,6 +9,8 @@ use std::{
     ptr::NonNull,
 };
 
+use super::symbols::{AssertSharable, Share};
+
 /// Type of module parameter.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -148,7 +150,7 @@ pub struct ParameterVTable {
     pub r#type: extern "C" fn(data: Pin<&'_ Parameter<()>>) -> ParameterType,
     pub read: extern "C" fn(data: Pin<&'_ Parameter<()>>, out: NonNull<()>),
     pub write: extern "C" fn(data: Pin<&'_ Parameter<()>>, value: ConstNonNull<()>),
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl ParameterVTable {
@@ -181,9 +183,9 @@ impl ParameterVTable {
 #[repr(C)]
 #[derive(Debug)]
 pub struct Parameter<T> {
-    pub vtable: ParameterVTable,
-    pub(crate) _pinned: PhantomData<PhantomPinned>,
-    pub(crate) _private: PhantomData<fn(T) -> T>,
+    pub vtable: AssertSharable<ParameterVTable>,
+    _pinned: PhantomData<PhantomPinned>,
+    _private: PhantomData<unsafe extern "C" fn(T) -> T>,
 }
 
 impl<T> Parameter<T> {
@@ -201,7 +203,7 @@ impl<T> Parameter<T> {
         /// [the documentation on unstable features][unstable] for details.
         ///
         /// [unstable]: crate#unstable-features
-        pub const unsafe fn new_in(out: Pin<&mut MaybeUninit<Self>>, vtable: ParameterVTable) {
+        pub const unsafe fn new_in(out: Pin<&mut MaybeUninit<Self>>, vtable: AssertSharable<ParameterVTable>) {
             let this = Self {
                 vtable,
                 _pinned: PhantomData,
@@ -271,11 +273,15 @@ impl<T> Parameter<T> {
 #[repr(C)]
 #[derive(Debug)]
 pub struct ParameterDataVTable {
-    pub r#type: unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + '_>) -> ParameterType,
-    pub read: unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + '_>, out: NonNull<()>),
-    pub write:
-        unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + '_>, value: ConstNonNull<()>),
-    pub(crate) _private: PhantomData<()>,
+    pub r#type:
+        unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + Share + '_>) -> ParameterType,
+    pub read:
+        unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + Share + '_>, out: NonNull<()>),
+    pub write: unsafe extern "C" fn(
+        handle: OpaqueHandle<dyn Send + Sync + Share + '_>,
+        value: ConstNonNull<()>,
+    ),
+    _private: PhantomData<()>,
 }
 
 impl ParameterDataVTable {
@@ -290,10 +296,10 @@ impl ParameterDataVTable {
         ///
         /// [unstable]: crate#unstable-features
         pub const fn new(
-            r#type: unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + '_>) -> ParameterType,
-            read: unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + '_>, out: NonNull<()>),
+            r#type: unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + Share + '_>) -> ParameterType,
+            read: unsafe extern "C" fn(handle: OpaqueHandle<dyn Send + Sync + Share + '_>, out: NonNull<()>),
             write: unsafe extern "C" fn(
-                handle: OpaqueHandle<dyn Send + Sync + '_>,
+                handle: OpaqueHandle<dyn Send + Sync + Share + '_>,
                 value: ConstNonNull<()>,
             ),
         ) -> Self {
@@ -311,9 +317,9 @@ impl ParameterDataVTable {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ParameterData<'a, T> {
-    pub handle: OpaqueHandle<dyn Send + Sync + 'a>,
-    pub vtable: &'a ParameterDataVTable,
-    pub(crate) _phantom: PhantomData<fn(T) -> T>,
+    pub handle: OpaqueHandle<dyn Send + Sync + Share + 'a>,
+    pub vtable: &'a AssertSharable<ParameterDataVTable>,
+    _phantom: PhantomData<unsafe extern "C" fn(T) -> T>,
 }
 
 impl<'a, T> ParameterData<'a, T> {
@@ -323,8 +329,8 @@ impl<'a, T> ParameterData<'a, T> {
     ///
     /// Is only safely constructible by the implementation.
     pub const unsafe fn new(
-        handle: OpaqueHandle<dyn Send + Sync + 'a>,
-        vtable: &'a ParameterDataVTable,
+        handle: OpaqueHandle<dyn Send + Sync + Share + 'a>,
+        vtable: &'a AssertSharable<ParameterDataVTable>,
     ) -> Self {
         Self {
             handle,

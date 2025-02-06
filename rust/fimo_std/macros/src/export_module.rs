@@ -196,6 +196,8 @@ impl ToTokens for ItemExport {
         let export_ident = &self._ident;
         tokens.append_all(quote! {
             mod #module_ident {
+                use super::*;
+
                 #parameters_table
                 #resources_table
                 #import_table
@@ -518,7 +520,7 @@ fn generate_export(
                 type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                 const READ: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>) -> Repr> = #read;
                 if let Some(x) = READ {
-                    extern "C" fn __private_read(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
+                    unsafe extern "C" fn __private_read(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
                         unsafe {
                             type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<
@@ -531,12 +533,13 @@ fn generate_export(
                             value.write(f(parameter));
                         }
                     }
-                    p = p.with_read(Some(__private_read));
+                    let __private_read = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_read as _) };
+                    p = p.with_read(__private_read);
                 }
 
                 const WRITE: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>, Repr)> = #write;
                 if let Some(x) = WRITE {
-                    extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::utils::ConstNonNull<()>) {
+                    unsafe extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::utils::ConstNonNull<()>) {
                         unsafe {
                             type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<
@@ -549,7 +552,8 @@ fn generate_export(
                             f(parameter, *value.as_ref());
                         }
                     }
-                    p = p.with_write(Some(__private_write));
+                    let __private_write = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_write as _) };
+                    p = p.with_write(__private_write);
                 }
                 p
             }
@@ -615,10 +619,11 @@ fn generate_export(
             let value = &exp.0.args[1];
             quote! {
                 const {
+                    type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
                     let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
                     let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
                     let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
-                    ::fimo_std::module::exports::SymbolExport::new(
+                    ::fimo_std::module::exports::SymbolExport::new::<T>(
                         #value,
                         version,
                         name
@@ -636,7 +641,7 @@ fn generate_export(
             let deinit = &exp.0.args[2];
             quote! {
                 const {
-                    extern "C" fn constructor(
+                    unsafe extern "C" fn __private_constructor(
                         instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                         symbol: &mut ::core::ptr::NonNull<()>,
                     ) -> ::fimo_std::error::AnyResult {
@@ -646,7 +651,8 @@ fn generate_export(
                             type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
                             match f(instance) {
                                 ::core::result::Result::Ok(x) => {
-                                    let opaque = ::fimo_std::module::symbols::SymbolPointer::into_opaque_ptr(x).cast_mut();
+                                    let opaque = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::ptr_from_target(x) };
+                                    let opaque = opaque.as_ptr().cast_mut();
                                     *symbol = ::core::ptr::NonNull::new(opaque).expect("null pointers are not allowed");
                                     ::fimo_std::error::AnyResult::new_ok()
                                 }
@@ -657,20 +663,23 @@ fn generate_export(
                             }
                         }
                     }
-                    extern "C" fn destructor(symbol: ::core::ptr::NonNull<()>) {
+                    unsafe extern "C" fn __private_destructor(symbol: ::core::ptr::NonNull<()>) {
                         let f = const { #deinit };
                         type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
-                        let symbol = <T as ::fimo_std::module::symbols::SymbolPointer>::from_opaque_ptr(symbol.as_ptr());
+                        let symbol = ::fimo_std::utils::ConstNonNull::new(symbol.as_ptr()).expect("should not be null");
+                        let symbol = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::target_from_ptr(symbol) };
                         f(symbol)
                     }
+                    let __private_constructor = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_constructor as _) };
+                    let __private_destructor = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_destructor as _) };
 
                     let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
                     let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
                     let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
                     unsafe {
                         ::fimo_std::module::exports::DynamicSymbolExport::new(
-                            constructor,
-                            destructor,
+                            __private_constructor,
+                            __private_destructor,
                             version,
                             name
                         ).with_namespace(namespace)
@@ -686,7 +695,7 @@ fn generate_export(
 
         let constructor = quote! {
             {
-                extern "C" fn __private_init(
+                unsafe extern "C" fn __private_init(
                     instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                     set: ::fimo_std::module::loading_set::LoadingSetView<'_>,
                     state: &mut ::core::option::Option<::core::ptr::NonNull<()>>,
@@ -706,12 +715,13 @@ fn generate_export(
                         }
                     }
                 }
+                let __private_init = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_init as _) };
                 Some(__private_init)
             }
         };
         let destructor = quote! {
             {
-                extern "C" fn __private_deinit(
+                unsafe extern "C" fn __private_deinit(
                     instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                     state: ::core::option::Option<::core::ptr::NonNull<()>>,
                 ) {
@@ -722,6 +732,7 @@ fn generate_export(
                         f(instance, state)
                     }
                 }
+                let __private_deinit = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_deinit as _) };
                 Some(__private_deinit)
             }
         };

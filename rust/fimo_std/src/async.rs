@@ -3,8 +3,9 @@
 use crate::{
     context::{ContextHandle, ContextView},
     error::{AnyError, AnyResult},
-    utils::{ConstNonNull, OpaqueHandle, VTablePtr, View, Viewable},
     handle,
+    module::symbols::{AssertSharable, Share},
+    utils::{ConstNonNull, OpaqueHandle, View, Viewable},
 };
 use std::{
     marker::PhantomData,
@@ -46,7 +47,7 @@ pub struct VTableV0 {
     ) -> AnyResult,
 }
 
-handle!(pub handle EventLoopHandle: Send + Sync + Unpin);
+handle!(pub handle EventLoopHandle: Send + Sync + Share + Unpin);
 
 /// Virtual function table of an [`EventLoop`].
 #[repr(C)]
@@ -54,7 +55,7 @@ handle!(pub handle EventLoopHandle: Send + Sync + Unpin);
 pub struct EventLoopVTable {
     pub join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
     pub detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl EventLoopVTable {
@@ -86,10 +87,11 @@ impl EventLoopVTable {
 #[derive(Debug)]
 pub struct EventLoop {
     pub handle: Option<EventLoopHandle>,
-    pub vtable: VTablePtr<'static, EventLoopVTable>,
+    pub vtable: &'static AssertSharable<EventLoopVTable>,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(EventLoop: Send, Sync);
+sa::assert_impl_all!(EventLoop: Send, Sync, Share, Unpin);
 
 impl EventLoop {
     /// Initializes a new event loop.
@@ -144,7 +146,7 @@ impl Drop for EventLoop {
     }
 }
 
-handle!(pub handle WakerHandle: Send + Sync + Unpin);
+handle!(pub handle WakerHandle: Send + Sync + Share + Unpin);
 
 /// Virtual function table of a [`WakerView`] and [`Waker`].
 #[repr(C)]
@@ -162,11 +164,11 @@ pub struct WakerVTable {
 #[derive(Debug, Copy, Clone)]
 pub struct WakerView<'a> {
     pub handle: Option<WakerHandle>,
-    pub vtable: VTablePtr<'a, WakerVTable>,
-    pub _phantom: PhantomData<&'a WakerHandle>,
+    pub vtable: &'a AssertSharable<WakerVTable>,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(WakerView<'_>: Send, Sync, Unpin);
+sa::assert_impl_all!(WakerView<'_>: Send, Sync, Share, Unpin);
 
 impl WakerView<'_> {
     /// Acquires a strong reference to the waker.
@@ -189,7 +191,7 @@ impl View for WakerView<'_> {}
 #[repr(transparent)]
 pub struct Waker(WakerView<'static>);
 
-sa::assert_impl_all!(Waker: Send, Sync);
+sa::assert_impl_all!(Waker: Send, Sync, Share);
 
 impl Waker {
     /// Notifies the task bound to the waker and drop the waker.
@@ -233,8 +235,8 @@ pub type EnqueuedFuture<R> = Future<EnqueuedHandle, R>;
 #[repr(C)]
 #[derive(Debug)]
 pub struct Fallible<T> {
-    pub result: AnyResult<dyn Send + Sync>,
-    pub value: MaybeUninit<T>,
+    result: AnyResult<dyn Send + Sync + Share>,
+    value: MaybeUninit<T>,
 }
 
 impl<T> Fallible<T> {
@@ -247,7 +249,7 @@ impl<T> Fallible<T> {
     }
 
     /// Constructs a new instance from a result.
-    pub fn new_result(res: Result<T, AnyError<dyn Send + Sync>>) -> Self {
+    pub fn new_result(res: Result<T, AnyError<dyn Send + Sync + Share>>) -> Self {
         match res {
             Ok(v) => Self {
                 result: Default::default(),
@@ -261,7 +263,7 @@ impl<T> Fallible<T> {
     }
 
     /// Extracts the result.
-    pub fn unwrap(self) -> Result<T, AnyError<dyn Send + Sync>> {
+    pub fn unwrap(self) -> Result<T, AnyError<dyn Send + Sync + Share>> {
         match self.result.into_result() {
             Ok(_) => Ok(unsafe { self.value.assume_init() }),
             Err(e) => Err(e),
@@ -279,6 +281,7 @@ pub struct Future<T, R> {
     pub state: ManuallyDrop<T>,
     pub poll_fn: unsafe extern "C" fn(*mut T, WakerView<'_>, *mut R) -> bool,
     pub cleanup_fn: Option<unsafe extern "C" fn(*mut T)>,
+    _private: PhantomData<()>,
 }
 
 impl<T, R> Future<T, R> {
@@ -316,6 +319,7 @@ impl<T, R> Future<T, R> {
             state: ManuallyDrop::new(state),
             poll_fn: poll,
             cleanup_fn: cleanup,
+            _private: PhantomData,
         }
     }
 
@@ -400,22 +404,22 @@ impl<T, R> std::future::Future for Future<T, R> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         enum WakerWrapper<'a> {
-            Ref(&'a std::task::Waker),
-            Owned(std::task::Waker),
+            Ref(AssertSharable<&'a std::task::Waker>),
+            Owned(AssertSharable<std::task::Waker>),
         }
 
         unsafe extern "C" fn ffi_waker_acquire(handle: Option<WakerHandle>) -> Waker {
             let handle = handle.map_or(std::ptr::null_mut(), |x| x.as_ptr::<WakerWrapper<'_>>());
             let wrapper = unsafe { &*handle };
             let clone = match wrapper {
-                WakerWrapper::Ref(w) => (*w).clone(),
+                WakerWrapper::Ref(w) => unsafe { AssertSharable::new((**w).clone()) },
                 WakerWrapper::Owned(w) => w.clone(),
             };
             let wrapper = Box::new(WakerWrapper::Owned(clone));
             Waker(WakerView {
                 handle: unsafe { Some(WakerHandle::new_unchecked(Box::into_raw(wrapper))) },
-                vtable: VTablePtr::new(&VTABLE),
-                _phantom: PhantomData,
+                vtable: &VTABLE,
+                _private: PhantomData,
             })
         }
 
@@ -436,7 +440,7 @@ impl<T, R> std::future::Future for Future<T, R> {
                 let handle = Box::from_raw(handle);
                 match *handle {
                     WakerWrapper::Ref(_) => std::hint::unreachable_unchecked(),
-                    WakerWrapper::Owned(w) => w.wake(),
+                    WakerWrapper::Owned(w) => w.into_inner().wake(),
                 }
             }
         }
@@ -450,20 +454,22 @@ impl<T, R> std::future::Future for Future<T, R> {
             };
         }
 
-        const VTABLE: WakerVTable = WakerVTable {
-            acquire: ffi_waker_acquire,
-            release: ffi_waker_release,
-            wake_release: ffi_waker_wake,
-            wake: ffi_waker_wake_by_ref,
-            next: None,
+        const VTABLE: AssertSharable<WakerVTable> = unsafe {
+            AssertSharable::new(WakerVTable {
+                acquire: ffi_waker_acquire,
+                release: ffi_waker_release,
+                wake_release: ffi_waker_wake,
+                wake: ffi_waker_wake_by_ref,
+                next: None,
+            })
         };
 
         let waker = cx.waker();
-        let wrapper = WakerWrapper::Ref(waker);
+        let wrapper = WakerWrapper::Ref(unsafe { AssertSharable::new(waker) });
         let waker = WakerView {
             handle: unsafe { Some(WakerHandle::new_unchecked((&raw const wrapper).cast_mut())) },
-            vtable: VTablePtr::new(&VTABLE),
-            _phantom: PhantomData,
+            vtable: &VTABLE,
+            _private: PhantomData,
         };
         self.poll_ffi(waker)
     }
@@ -566,6 +572,7 @@ impl<T: IntoFuture> IntoFutureSpec<T::IntoFuture, T::Output> for T {
             } else {
                 None
             },
+            _private: PhantomData,
         }
     }
 }
@@ -576,7 +583,7 @@ impl<T, R> IntoFutureSpec<T, R> for Future<T, R> {
     }
 }
 
-handle!(pub handle BlockingContextHandle: Send);
+handle!(pub handle BlockingContextHandle: Send + Share);
 
 /// Virtual function table of a [`BlockingContext`].
 #[repr(C)]
@@ -586,7 +593,7 @@ pub struct BlockingContextVTable {
     pub waker_ref:
         unsafe extern "C" fn(handle: Option<BlockingContextHandle>) -> WakerView<'static>,
     pub block_until_notified: unsafe extern "C" fn(handle: Option<BlockingContextHandle>),
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl BlockingContextVTable {
@@ -621,10 +628,11 @@ impl BlockingContextVTable {
 #[repr(C)]
 pub struct BlockingContext {
     pub handle: Option<BlockingContextHandle>,
-    pub vtable: VTablePtr<'static, BlockingContextVTable>,
+    pub vtable: &'static AssertSharable<BlockingContextVTable>,
+    _private: PhantomData<()>,
 }
 
-sa::assert_impl_all!(BlockingContext: Send);
+sa::assert_impl_all!(BlockingContext: Send, Share);
 
 impl BlockingContext {
     /// Constructs a new blocking context.

@@ -35,12 +35,15 @@
 //! $Env:RUSTFLAGS="--cfg fimo_internals"
 //! cargo build
 //! ```
+#![feature(unsize)]
 #![feature(doc_cfg)]
 #![feature(extend_one)]
 #![feature(auto_traits)]
 #![feature(thread_local)]
 #![feature(allocator_api)]
+#![feature(coerce_unsized)]
 #![feature(negative_impls)]
+#![feature(trivial_bounds)]
 #![feature(const_trait_impl)]
 #![feature(panic_update_hook)]
 #![feature(result_flattening)]
@@ -48,7 +51,7 @@
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
 #![feature(anonymous_lifetime_in_impl_trait)]
-#![allow(incomplete_features, clashing_extern_declarations)]
+#![allow(clashing_extern_declarations)]
 
 #[doc(hidden)]
 pub use paste;

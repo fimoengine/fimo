@@ -3,7 +3,8 @@
 use crate::{
     context::ContextView,
     error::AnyError,
-    utils::{ConstCStr, OpaqueHandle, View, Viewable},
+    module::symbols::{AssertSharable, Share, StrRef},
+    utils::{OpaqueHandle, View, Viewable},
     version::Version,
 };
 use std::{
@@ -24,7 +25,7 @@ pub struct InfoVTable {
     pub is_loaded: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
     pub try_ref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
     pub unref_instance_strong: unsafe extern "C" fn(info: Pin<&InfoView<'_>>) -> bool,
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl InfoVTable {
@@ -62,19 +63,19 @@ impl InfoVTable {
 /// Borrowed info of a module instance.
 #[repr(C)]
 pub struct InfoView<'a> {
-    pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
-    pub name: ConstCStr,
-    pub description: Option<ConstCStr>,
-    pub author: Option<ConstCStr>,
-    pub license: Option<ConstCStr>,
-    pub module_path: Option<ConstCStr>,
-    pub vtable: InfoVTable,
-    // Using PhantomPinned directly makes it not FFI-Safe.
-    pub(crate) _phantom: PhantomData<PhantomPinned>,
-    pub(crate) _private: PhantomData<&'a ()>,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + Share + 'a>>,
+    pub name: StrRef<'a>,
+    pub description: Option<StrRef<'a>>,
+    pub author: Option<StrRef<'a>>,
+    pub license: Option<StrRef<'a>>,
+    pub module_path: Option<StrRef<'a>>,
+    pub vtable: AssertSharable<InfoVTable>,
+    _phantom: PhantomData<PhantomPinned>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(InfoView<'_>: Send, Sync);
+sa::assert_impl_all!(InfoView<'static>: Share);
 
 impl<'a> InfoView<'a> {
     cfg_internal! {
@@ -98,28 +99,28 @@ impl<'a> InfoView<'a> {
             author: Option<&'a CStr>,
             license: Option<&'a CStr>,
             module_path: Option<&'a CStr>,
-            vtable: InfoVTable,
+            vtable: AssertSharable<InfoVTable>,
         ) {
             let description = match description {
                 None => None,
-                Some(x) => Some(ConstCStr::new(x)),
+                Some(x) => Some(StrRef::new(x)),
             };
             let author = match author {
                 None => None,
-                Some(x) => Some(ConstCStr::new(x)),
+                Some(x) => Some(StrRef::new(x)),
             };
             let license = match license {
                 None => None,
-                Some(x) => Some(ConstCStr::new(x)),
+                Some(x) => Some(StrRef::new(x)),
             };
             let module_path = match module_path {
                 None => None,
-                Some(x) => Some(ConstCStr::new(x)),
+                Some(x) => Some(StrRef::new(x)),
             };
 
             let this = Self {
                 next: None,
-                name: ConstCStr::new(name),
+                name: StrRef::new(name),
                 description,
                 author,
                 license,
@@ -262,7 +263,7 @@ impl Debug for InfoView<'_> {
 #[repr(transparent)]
 pub struct Info(Pin<&'static InfoView<'static>>);
 
-sa::assert_impl_all!(Info: Send, Sync);
+sa::assert_impl_all!(Info: Send, Sync, Share);
 
 impl Info {
     /// Searches for a module by its name.
@@ -277,7 +278,7 @@ impl Info {
         let mut out = MaybeUninit::uninit();
         let f = ctx.vtable.module_v0.find_instance_by_name;
         unsafe {
-            f(ctx.handle, ConstCStr::new(name), &mut out).into_result()?;
+            f(ctx.handle, StrRef::new(name), &mut out).into_result()?;
             Ok(out.assume_init())
         }
     }
@@ -296,8 +297,8 @@ impl Info {
         let mut out = MaybeUninit::uninit();
         let f = ctx.vtable.module_v0.find_instance_by_symbol;
         unsafe {
-            let name = ConstCStr::new(name);
-            let namespace = ConstCStr::new(namespace);
+            let name = StrRef::new(name);
+            let namespace = StrRef::new(namespace);
             f(ctx.handle, name, namespace, version, &mut out).into_result()?;
             Ok(out.assume_init())
         }

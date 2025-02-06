@@ -3,7 +3,7 @@
 use crate::{
     context::{ContextHandle, ContextView},
     error::{AnyError, AnyResult},
-    utils::{ConstCStr, ConstNonNull, OpaqueHandle, Viewable},
+    utils::{ConstNonNull, OpaqueHandle, Viewable},
     version::Version,
 };
 use std::{
@@ -26,6 +26,7 @@ use loading_set::LoadingSet;
 use parameters::{
     ParameterAccessGroup, ParameterCast, ParameterInfo, ParameterRepr, ParameterType,
 };
+use symbols::StrRef;
 
 /// Virtual function table of the module subsystem.
 ///
@@ -41,26 +42,26 @@ pub struct VTableV0 {
         unsafe extern "C" fn(handle: ContextHandle, out: &mut MaybeUninit<LoadingSet>) -> AnyResult,
     pub find_instance_by_name: unsafe extern "C" fn(
         handle: ContextHandle,
-        name: ConstCStr,
+        name: StrRef<'_>,
         out: &mut MaybeUninit<Info>,
     ) -> AnyResult,
     pub find_instance_by_symbol: unsafe extern "C" fn(
         handle: ContextHandle,
-        name: ConstCStr,
-        namespace: ConstCStr,
+        name: StrRef<'_>,
+        namespace: StrRef<'_>,
         version: Version,
         out: &mut MaybeUninit<Info>,
     ) -> AnyResult,
     pub namespace_exists: unsafe extern "C" fn(
         handle: ContextHandle,
-        namespace: ConstCStr,
+        namespace: StrRef<'_>,
         out: &mut MaybeUninit<bool>,
     ) -> AnyResult,
     pub prune_instances: unsafe extern "C" fn(handle: ContextHandle) -> AnyResult,
     pub query_parameter: unsafe extern "C" fn(
         handle: ContextHandle,
-        module: ConstCStr,
-        parameter: ConstCStr,
+        module: StrRef<'_>,
+        parameter: StrRef<'_>,
         r#type: &mut MaybeUninit<ParameterType>,
         read_group: &mut MaybeUninit<ParameterAccessGroup>,
         write_group: &mut MaybeUninit<ParameterAccessGroup>,
@@ -69,15 +70,15 @@ pub struct VTableV0 {
         handle: ContextHandle,
         value: NonNull<()>,
         r#type: ParameterType,
-        module: ConstCStr,
-        parameter: ConstCStr,
+        module: StrRef<'_>,
+        parameter: StrRef<'_>,
     ) -> AnyResult,
     pub write_parameter: unsafe extern "C" fn(
         handle: ContextHandle,
         value: ConstNonNull<()>,
         r#type: ParameterType,
-        module: ConstCStr,
-        parameter: ConstCStr,
+        module: StrRef<'_>,
+        parameter: StrRef<'_>,
     ) -> AnyResult,
 }
 

@@ -3,8 +3,8 @@ use fimo_std::{
     context::{Context, ContextBuilder, ContextView},
     emit_trace,
     error::AnyError,
-    utils::Viewable,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
+    utils::Viewable,
 };
 use std::{future::Future, pin::Pin, task::Poll};
 
@@ -67,20 +67,16 @@ impl<const N: usize> LoopFuture<N> {
 impl<const N: usize> Future for LoopFuture<N> {
     type Output = usize;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        emit_trace!(
-            &self.ctx,
-            "Iteration i='{}', data=`{:p}`",
-            self.i,
-            Pin::into_inner(self.as_ref())
-        );
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let inner = unsafe { Pin::into_inner_unchecked(self) };
+        emit_trace!(&inner.ctx, "Iteration i='{}', data=`{:p}`", inner.i, inner);
 
-        self.i += 1;
-        if self.i < N {
+        inner.i += 1;
+        if inner.i < N {
             cx.waker().wake_by_ref();
             Poll::Pending
         } else {
-            Poll::Ready(self.i)
+            Poll::Ready(inner.i)
         }
     }
 }

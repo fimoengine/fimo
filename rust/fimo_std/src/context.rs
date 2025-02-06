@@ -1,19 +1,16 @@
 //! Fimo context.
 
 use crate::{
-    bindings, error,
-    error::{AnyError, AnyResult},
-    utils::{FFISharable, VTablePtr, View, Viewable},
+    bindings,
+    error::{self, AnyError, AnyResult},
     handle,
+    module::symbols::{AssertSharable, Share},
+    utils::{View, Viewable},
     version::Version,
 };
-use std::{
-    marker::PhantomData,
-    mem::MaybeUninit,
-    panic::{RefUnwindSafe, UnwindSafe},
-};
+use std::{marker::PhantomData, mem::MaybeUninit};
 
-handle!(pub handle ContextHandle: Send + Sync + UnwindSafe + RefUnwindSafe + Unpin);
+handle!(pub handle ContextHandle: Send + Sync + Share);
 
 /// Virtual function table of a [`ContextView`].
 #[repr(C)]
@@ -24,7 +21,7 @@ pub struct VTable {
     pub tracing_v0: crate::tracing::VTableV0,
     pub module_v0: crate::module::VTableV0,
     pub async_v0: crate::r#async::VTableV0,
-    pub(crate) _private: PhantomData<()>,
+    _private: PhantomData<()>,
 }
 
 impl VTable {
@@ -78,14 +75,15 @@ pub struct CoreVTableV0 {
 /// fimo library, like the tracing, or module subsystems. To avoid naming conflicts, each subsystem
 /// is exposed through an own trait.
 #[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone)]
 pub struct ContextView<'a> {
     pub handle: ContextHandle,
-    pub vtable: VTablePtr<'a, VTable>,
-    pub _phantom: PhantomData<&'a ContextHandle>,
+    pub vtable: &'a AssertSharable<VTable>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(ContextView<'_>: Send, Sync);
+sa::assert_impl_all!(ContextView<'static>: Share);
 
 impl ContextView<'_> {
     /// Current `Context` version of the library.
@@ -111,26 +109,14 @@ impl ContextView<'_> {
         Context(ContextView {
             handle: self.handle,
             vtable: unsafe {
-                std::mem::transmute::<VTablePtr<'_, _>, VTablePtr<'static, _>>(self.vtable)
+                std::mem::transmute::<&AssertSharable<_>, &'static AssertSharable<_>>(self.vtable)
             },
-            _phantom: PhantomData,
+            _private: PhantomData,
         })
     }
 }
 
 impl View for ContextView<'_> {}
-
-impl FFISharable<bindings::FimoContext> for ContextView<'_> {
-    type BorrowedView<'a> = ContextView<'a>;
-
-    fn share_to_ffi(&self) -> bindings::FimoContext {
-        unsafe { std::mem::transmute::<ContextView<'_>, bindings::FimoContext>(*self) }
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoContext) -> Self::BorrowedView<'a> {
-        unsafe { std::mem::transmute::<bindings::FimoContext, ContextView<'_>>(ffi) }
-    }
-}
 
 #[link(name = "fimo_std", kind = "static")]
 unsafe extern "C" {
@@ -149,7 +135,7 @@ unsafe extern "C" {
 #[derive(Debug)]
 pub struct Context(ContextView<'static>);
 
-sa::assert_impl_all!(Context: Send, Sync);
+sa::assert_impl_all!(Context: Send, Sync, Share);
 
 impl Context {
     /// Constructs a new `Context` with the default options.
@@ -181,19 +167,6 @@ impl Drop for Context {
             let f = view.vtable.core_v0.release;
             f(view.handle);
         }
-    }
-}
-
-impl FFISharable<bindings::FimoContext> for Context {
-    type BorrowedView<'a> = ContextView<'a>;
-
-    fn share_to_ffi(&self) -> bindings::FimoContext {
-        self.0.share_to_ffi()
-    }
-
-    unsafe fn borrow_from_ffi<'a>(ffi: bindings::FimoContext) -> Self::BorrowedView<'a> {
-        // Safety: `ContextView` is a wrapper around a `FimoContext`.
-        unsafe { ContextView::borrow_from_ffi(ffi) }
     }
 }
 

@@ -1,14 +1,14 @@
 //! Fimo error codes.
 
 use crate::{
-    bindings,
-    utils::{FFITransferable, OpaqueHandle, VTablePtr},
-    handle,
+    bindings, handle,
+    module::symbols::{AssertSharable, Share},
+    utils::OpaqueHandle,
 };
 use std::{
     ffi::{CStr, CString},
     fmt::{Debug, Display, Formatter},
-    hash::{Hash, Hasher},
+    marker::{PhantomData, Unsize},
     mem::{ManuallyDrop, MaybeUninit},
     ops::Deref,
 };
@@ -295,16 +295,17 @@ pub type ErrorHandle<T> = OpaqueHandle<T>;
 /// Adding fields to the vtable is a breaking change.
 #[repr(C)]
 #[derive(Debug)]
-pub struct VTable<T: ?Sized> {
-    pub drop: Option<unsafe extern "C" fn(handle: Option<ErrorHandle<T>>)>,
-    pub error_name: unsafe extern "C" fn(handle: Option<ErrorHandle<T>>) -> ErrorString,
-    pub error_description: unsafe extern "C" fn(handle: Option<ErrorHandle<T>>) -> ErrorString,
+pub struct VTable {
+    pub drop: Option<unsafe extern "C" fn(handle: Option<ErrorHandle<dyn Share>>)>,
+    pub error_name: unsafe extern "C" fn(handle: Option<ErrorHandle<dyn Share>>) -> ErrorString,
+    pub error_description:
+        unsafe extern "C" fn(handle: Option<ErrorHandle<dyn Share>>) -> ErrorString,
 }
 
 unsafe extern "C" {
-    static FIMO_IMPL_RESULT_ERROR_CODE_VTABLE: VTable<*mut ()>;
-    static FIMO_IMPL_RESULT_STATIC_STRING_VTABLE: VTable<*mut ()>;
-    static FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE: VTable<*mut ()>;
+    static FIMO_IMPL_RESULT_ERROR_CODE_VTABLE: AssertSharable<VTable>;
+    static FIMO_IMPL_RESULT_STATIC_STRING_VTABLE: AssertSharable<VTable>;
+    static FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE: AssertSharable<VTable>;
 
     static FIMO_IMPL_RESULT_OK_NAME: ErrorString;
     static FIMO_IMPL_RESULT_OK_DESCRIPTION: ErrorString;
@@ -312,16 +313,18 @@ unsafe extern "C" {
 
 /// FFI equivalent of a `Result<(), AnyError>`.
 #[repr(C)]
-pub struct AnyResult<T: ?Sized + 'static = *mut ()> {
+pub struct AnyResult<T: private::Sealed + ?Sized = dyn Share> {
     pub handle: Option<ErrorHandle<T>>,
-    pub vtable: Option<VTablePtr<'static, VTable<T>>>,
+    pub vtable: Option<&'static AssertSharable<VTable>>,
+    _private: PhantomData<()>,
 }
 
-impl<T: ?Sized + 'static> AnyResult<T> {
+impl<T: private::Sealed + ?Sized> AnyResult<T> {
     /// An `AnyResult` equivalent of an Ok(()).
     pub const OK: Self = Self {
         handle: None,
         vtable: None,
+        _private: PhantomData,
     };
 
     /// Constructs an `Ok` value.
@@ -356,7 +359,11 @@ impl<T: ?Sized + 'static> AnyResult<T> {
         let vtable = Some(error.vtable);
         _ = ManuallyDrop::new(error);
 
-        Self { handle, vtable }
+        Self {
+            handle,
+            vtable,
+            _private: PhantomData,
+        }
     }
 
     /// Returns whether the result is not an error.
@@ -409,7 +416,7 @@ impl<T: ?Sized + 'static> AnyResult<T> {
     pub fn name(&self) -> ErrorString {
         match self.vtable {
             None => unsafe { (&raw const FIMO_IMPL_RESULT_OK_NAME).read() },
-            Some(vtable) => unsafe { (vtable.error_name)(self.handle) },
+            Some(vtable) => unsafe { (vtable.error_name)(self.handle.map(OpaqueHandle::coerce)) },
         }
     }
 
@@ -427,7 +434,9 @@ impl<T: ?Sized + 'static> AnyResult<T> {
     pub fn description(&self) -> ErrorString {
         match self.vtable {
             None => unsafe { (&raw const FIMO_IMPL_RESULT_OK_DESCRIPTION).read() },
-            Some(vtable) => unsafe { (vtable.error_description)(self.handle) },
+            Some(vtable) => unsafe {
+                (vtable.error_description)(self.handle.map(OpaqueHandle::coerce))
+            },
         }
     }
 
@@ -462,54 +471,39 @@ impl<T: ?Sized + 'static> AnyResult<T> {
     }
 }
 
-impl<T: ?Sized> Debug for AnyResult<T> {
+impl<T: private::Sealed + ?Sized> Debug for AnyResult<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let name = self.name();
         f.debug_tuple("AnyResult").field(&&*name).finish()
     }
 }
 
-impl<T: ?Sized> Display for AnyResult<T> {
+impl<T: private::Sealed + ?Sized> Display for AnyResult<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let description = self.description();
         write!(f, "{}", description.to_string_lossy())
     }
 }
 
-impl<T: ?Sized> Default for AnyResult<T> {
+impl<T: private::Sealed + ?Sized> Default for AnyResult<T> {
     fn default() -> Self {
         Self::OK
     }
 }
 
-impl<T: ?Sized> PartialEq for AnyResult<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.handle == other.handle && self.vtable == other.vtable
-    }
-}
-
-impl<T: ?Sized> Eq for AnyResult<T> {}
-
-impl<T: ?Sized> Hash for AnyResult<T> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.handle.hash(state);
-        self.vtable.hash(state);
-    }
-}
-
-impl<T: ?Sized> From<AnyResult<T>> for Result<(), AnyError<T>> {
+impl<T: private::Sealed + ?Sized> From<AnyResult<T>> for Result<(), AnyError<T>> {
     fn from(value: AnyResult<T>) -> Self {
         value.into_result()
     }
 }
 
-impl<T: ?Sized> From<AnyError<T>> for AnyResult<T> {
+impl<T: private::Sealed + ?Sized> From<AnyError<T>> for AnyResult<T> {
     fn from(value: AnyError<T>) -> Self {
         Self::new_err(value)
     }
 }
 
-impl<T: ?Sized> From<Result<(), AnyError<T>>> for AnyResult<T> {
+impl<T: private::Sealed + ?Sized> From<Result<(), AnyError<T>>> for AnyResult<T> {
     fn from(value: Result<(), AnyError<T>>) -> Self {
         match value {
             Ok(_) => Default::default(),
@@ -518,22 +512,22 @@ impl<T: ?Sized> From<Result<(), AnyError<T>>> for AnyResult<T> {
     }
 }
 
-impl<T: ?Sized> Drop for AnyResult<T> {
+impl<T: private::Sealed + ?Sized> Drop for AnyResult<T> {
     fn drop(&mut self) {
         let Some(vtable) = self.vtable else { return };
         unsafe {
             let Some(drop) = vtable.drop else { return };
-            drop(self.handle);
+            drop(self.handle.map(OpaqueHandle::coerce));
         }
     }
 }
 
 /// Generic error value.
 #[repr(C)]
-#[derive(PartialEq, Eq, Hash)]
-pub struct AnyError<T: ?Sized + 'static = *mut ()> {
+pub struct AnyError<T: private::Sealed + ?Sized = dyn Share> {
     pub handle: Option<ErrorHandle<T>>,
-    pub vtable: VTablePtr<'static, VTable<T>>,
+    pub vtable: &'static AssertSharable<VTable>,
+    _private: PhantomData<()>,
 }
 
 mod __private {
@@ -543,19 +537,25 @@ mod __private {
     macro_rules! new_error {
         ($code:ident, $($doc:literal),+) => {
             paste! {
-                impl<T: ?Sized> AnyError<T> {
+                impl<T: private::Sealed + ?Sized> AnyError<T> {
                     $(
                         #[doc = $doc]
                     )+
-                    pub const $code: Self = unsafe {
-                        Self::from_error_code_unchecked(ErrorCode::$code)
-                    };
+                    #[allow(non_snake_case)]
+                    pub fn $code() -> Self
+                    where
+                        AssertSharable<ErrorCode>: Unsize<T>
+                    {
+                        unsafe {
+                            Self::from_error_code_unchecked(ErrorCode::$code)
+                        }
+                    }
                 }
             }
         };
     }
 
-    impl<T: ?Sized> AnyError<T> {
+    impl<T: private::Sealed + ?Sized> AnyError<T> {
         pub(super) const FFI_OK_RESULT: bindings::FimoResult = bindings::FimoResult {
             data: std::ptr::null_mut(),
             vtable: std::ptr::null_mut(),
@@ -703,28 +703,28 @@ impl AnyError {
     }
 }
 
-impl AnyError<dyn Send> {
+impl AnyError<dyn Send + Share> {
     /// Creates an [`AnyError`] from an arbitrary value that can be formatted.
     pub fn new_send(value: impl Display + Debug + Send + 'static) -> Self {
         unsafe { Self::new_error(value) }
     }
 }
 
-impl AnyError<dyn Sync> {
+impl AnyError<dyn Sync + Share> {
     /// Creates an [`AnyError`] from an arbitrary value that can be formatted.
     pub fn new_sync(value: impl Display + Debug + Sync + 'static) -> Self {
         unsafe { Self::new_error(value) }
     }
 }
 
-impl AnyError<dyn Send + Sync> {
+impl AnyError<dyn Send + Sync + Share> {
     /// Creates an [`AnyError`] from an arbitrary value that can be formatted.
     pub fn new_send_sync(value: impl Display + Debug + Send + Sync + 'static) -> Self {
         unsafe { Self::new_error(value) }
     }
 }
 
-impl<T: ?Sized> AnyError<T> {
+impl<T: private::Sealed + ?Sized> AnyError<T> {
     /// Checks whether creating a new `AnyError` with a `U` requires an allocation.
     ///
     /// As an optimization, `AnyError` supports construction without allocation under some
@@ -746,17 +746,20 @@ impl<T: ?Sized> AnyError<T> {
     }
 
     /// Creates an [`AnyError`] from a string.
-    pub const fn from_string(error: &'static CStr) -> Self {
-        Self {
-            handle: ErrorHandle::new(error.as_ptr().cast_mut()),
-            vtable: <&'static CStr as VTableHelper<T>>::VTABLE,
-        }
+    pub fn from_string(error: &'static CStr) -> Self
+    where
+        AssertSharable<&'static CStr>: Unsize<T>,
+    {
+        error.into_error()
     }
 
     /// Creates an [`AnyError`] from an error code.
     ///
     /// In case of an invalid error code, this returns `Err`.
-    pub const fn from_error_code(error: ErrorCode) -> Result<Self, ErrorCode> {
+    pub fn from_error_code(error: ErrorCode) -> Result<Self, ErrorCode>
+    where
+        AssertSharable<ErrorCode>: Unsize<T>,
+    {
         match error {
             ErrorCode::Ok => Err(error),
             _ => unsafe { Ok(Self::from_error_code_unchecked(error)) },
@@ -768,26 +771,26 @@ impl<T: ?Sized> AnyError<T> {
     /// # Safety
     ///
     /// `error` must be a valid error code and not [`Ok`](ErrorCode::Ok).
-    pub const unsafe fn from_error_code_unchecked(error: ErrorCode) -> Self {
-        Self {
-            handle: ErrorHandle::new::<()>(std::ptr::without_provenance_mut(error as usize)),
-            vtable: <ErrorCode as VTableHelper<T>>::VTABLE,
-        }
+    pub unsafe fn from_error_code_unchecked(error: ErrorCode) -> Self
+    where
+        AssertSharable<ErrorCode>: Unsize<T>,
+    {
+        error.into_error()
     }
 
     /// Creates an [`AnyError`] from a system error code.
-    pub const fn from_system_error(error: SystemErrorCode) -> Self {
-        Self {
-            handle: ErrorHandle::new::<()>(std::ptr::without_provenance_mut(error.0 as usize)),
-            vtable: <SystemErrorCode as VTableHelper<T>>::VTABLE,
-        }
+    pub fn from_system_error(error: SystemErrorCode) -> Self
+    where
+        AssertSharable<SystemErrorCode>: Unsize<T>,
+    {
+        error.into_error()
     }
 
     /// Returns a string representing the error.
     pub fn name(&self) -> ErrorString {
         unsafe {
             let f = self.vtable.error_name;
-            f(self.handle)
+            f(self.handle.map(OpaqueHandle::coerce))
         }
     }
 
@@ -795,7 +798,7 @@ impl<T: ?Sized> AnyError<T> {
     pub fn description(&self) -> ErrorString {
         unsafe {
             let f = self.vtable.error_description;
-            f(self.handle)
+            f(self.handle.map(OpaqueHandle::coerce))
         }
     }
 
@@ -806,83 +809,123 @@ impl<T: ?Sized> AnyError<T> {
     }
 }
 
-impl<T: ?Sized> Debug for AnyError<T> {
+impl<T: private::Sealed + ?Sized> Debug for AnyError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let name = self.name();
         f.debug_tuple("AnyError").field(&&*name).finish()
     }
 }
 
-impl<T: ?Sized> Display for AnyError<T> {
+impl<T: private::Sealed + ?Sized> Display for AnyError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let description = self.description();
         write!(f, "{}", description.to_string_lossy())
     }
 }
 
-impl<T: ?Sized> Drop for AnyError<T> {
+impl<T: private::Sealed + ?Sized> Drop for AnyError<T> {
     fn drop(&mut self) {
         unsafe {
             let Some(f) = self.vtable.drop else { return };
-            f(self.handle);
+            f(self.handle.map(|x| x.coerce()));
         }
     }
 }
 
-impl From<AnyError<dyn Send>> for AnyError {
-    fn from(value: AnyError<dyn Send>) -> Self {
-        unsafe { std::mem::transmute::<AnyError<dyn Send>, Self>(value) }
+impl From<AnyError<dyn Send + Share>> for AnyError {
+    fn from(value: AnyError<dyn Send + Share>) -> Self {
+        unsafe { std::mem::transmute::<AnyError<dyn Send + Share>, Self>(value) }
     }
 }
 
-impl From<AnyError<dyn Sync>> for AnyError {
-    fn from(value: AnyError<dyn Sync>) -> Self {
-        unsafe { std::mem::transmute::<AnyError<dyn Sync>, Self>(value) }
+impl From<AnyError<dyn Sync + Share>> for AnyError {
+    fn from(value: AnyError<dyn Sync + Share>) -> Self {
+        unsafe { std::mem::transmute::<AnyError<dyn Sync + Share>, Self>(value) }
     }
 }
 
-impl From<AnyError<dyn Send + Sync>> for AnyError {
-    fn from(value: AnyError<dyn Send + Sync>) -> Self {
-        unsafe { std::mem::transmute::<AnyError<dyn Send + Sync>, Self>(value) }
+impl From<AnyError<dyn Send + Sync + Share>> for AnyError {
+    fn from(value: AnyError<dyn Send + Sync + Share>) -> Self {
+        unsafe { std::mem::transmute::<AnyError<dyn Send + Sync + Share>, Self>(value) }
     }
 }
 
-impl From<AnyError<dyn Send + Sync>> for AnyError<dyn Send> {
-    fn from(value: AnyError<dyn Send + Sync>) -> Self {
-        unsafe { std::mem::transmute::<AnyError<dyn Send + Sync>, AnyError<dyn Send>>(value) }
+impl From<AnyError<dyn Send + Sync + Share>> for AnyError<dyn Send + Share> {
+    fn from(value: AnyError<dyn Send + Sync + Share>) -> Self {
+        unsafe { std::mem::transmute::<AnyError<dyn Send + Sync + Share>, Self>(value) }
     }
 }
 
-impl From<AnyError<dyn Send + Sync>> for AnyError<dyn Sync> {
-    fn from(value: AnyError<dyn Send + Sync>) -> Self {
-        unsafe { std::mem::transmute::<AnyError<dyn Send + Sync>, AnyError<dyn Sync>>(value) }
+impl From<AnyError<dyn Send + Sync + Share>> for AnyError<dyn Sync + Share> {
+    fn from(value: AnyError<dyn Send + Sync + Share>) -> Self {
+        unsafe { std::mem::transmute::<AnyError<dyn Send + Sync + Share>, Self>(value) }
     }
 }
 
-trait VTableHelper<E: ?Sized + 'static> {
-    const VTABLE: VTablePtr<'static, VTable<E>>;
+mod private {
+    use std::marker::Unsize;
+
+    use crate::module::symbols::Share;
+
+    pub trait Sealed: Unsize<dyn Share> + Share + 'static {}
+
+    impl Sealed for dyn Share {}
+    impl Sealed for dyn Send + Share {}
+    impl Sealed for dyn Sync + Share {}
+    impl Sealed for dyn Send + Sync + Share {}
 }
 
-impl<E: ?Sized + 'static> VTableHelper<E> for &'static CStr {
-    const VTABLE: VTablePtr<'static, VTable<E>> = const {
-        unsafe {
-            VTablePtr::new_unchecked((&raw const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE).cast())
+trait ErrorSpec<E: private::Sealed + ?Sized>: Sized + 'static
+where
+    AssertSharable<Self>: Unsize<E>,
+{
+    fn into_error(self) -> AnyError<E>;
+}
+
+impl<E: private::Sealed + ?Sized> ErrorSpec<E> for &'static CStr
+where
+    AssertSharable<Self>: Unsize<E>,
+{
+    fn into_error(self) -> AnyError<E> {
+        let vtable = unsafe { &*(&raw const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE).cast() };
+        AnyError {
+            handle: unsafe { ErrorHandle::new(self.as_ptr().cast_mut()) },
+            vtable,
+            _private: PhantomData,
         }
-    };
+    }
 }
 
-impl<E: ?Sized + 'static> VTableHelper<E> for ErrorCode {
-    const VTABLE: VTablePtr<'static, VTable<E>> = const {
-        unsafe { VTablePtr::new_unchecked((&raw const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE).cast()) }
-    };
-}
-
-impl<E: ?Sized + 'static> VTableHelper<E> for SystemErrorCode {
-    const VTABLE: VTablePtr<'static, VTable<E>> = const {
-        unsafe {
-            VTablePtr::new_unchecked((&raw const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE).cast())
+impl<E: private::Sealed + ?Sized> ErrorSpec<E> for ErrorCode
+where
+    AssertSharable<Self>: Unsize<E>,
+{
+    fn into_error(self) -> AnyError<E> {
+        let vtable = unsafe { &*(&raw const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE).cast() };
+        AnyError {
+            handle: unsafe {
+                ErrorHandle::new::<()>(std::ptr::without_provenance_mut(self as usize))
+            },
+            vtable,
+            _private: PhantomData,
         }
-    };
+    }
+}
+
+impl<E: private::Sealed + ?Sized> ErrorSpec<E> for SystemErrorCode
+where
+    AssertSharable<Self>: Unsize<E>,
+{
+    fn into_error(self) -> AnyError<E> {
+        let vtable = unsafe { &*(&raw const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE).cast() };
+        AnyError {
+            handle: unsafe {
+                ErrorHandle::new::<()>(std::ptr::without_provenance_mut(self.0 as usize))
+            },
+            vtable,
+            _private: PhantomData,
+        }
+    }
 }
 
 trait NewErrorSpec<T>
@@ -895,7 +938,7 @@ where
 impl<T, E> NewErrorSpec<T> for AnyError<E>
 where
     T: Debug + Display + 'static,
-    E: ?Sized + 'static,
+    E: private::Sealed + ?Sized,
 {
     default unsafe fn new_error(value: T) -> Self {
         fn new_string(string: String) -> ErrorString {
@@ -914,12 +957,12 @@ where
             }
         }
 
-        extern "C" fn drop_inline<T, E: ?Sized>(mut handle: Option<ErrorHandle<E>>) {
+        extern "C" fn drop_inline<T>(mut handle: Option<ErrorHandle<dyn Share>>) {
             let value_ptr = (&raw mut handle).cast();
             unsafe { std::ptr::drop_in_place::<T>(value_ptr) };
         }
-        extern "C" fn debug_inline<T: Debug, E: ?Sized>(
-            handle: Option<ErrorHandle<E>>,
+        extern "C" fn debug_inline<T: Debug>(
+            handle: Option<ErrorHandle<dyn Share>>,
         ) -> ErrorString {
             let value_ptr: *const T = (&raw const handle).cast::<T>();
             unsafe {
@@ -927,8 +970,8 @@ where
                 new_string(format!("{:?}", *value))
             }
         }
-        extern "C" fn display_inline<T: Display, E: ?Sized>(
-            handle: Option<ErrorHandle<E>>,
+        extern "C" fn display_inline<T: Display>(
+            handle: Option<ErrorHandle<dyn Share>>,
         ) -> ErrorString {
             let value_ptr: *const T = (&raw const handle).cast::<T>();
             unsafe {
@@ -942,15 +985,16 @@ where
             && align_of::<T>() <= align_of::<*mut std::ffi::c_void>()
         {
             let vtable = &const {
-                VTable {
+                let vtable = VTable {
                     drop: if std::mem::needs_drop::<T>() {
-                        Some(drop_inline::<T, E>)
+                        Some(drop_inline::<T>)
                     } else {
                         None
                     },
-                    error_name: debug_inline::<T, E>,
-                    error_description: display_inline::<T, E>,
-                }
+                    error_name: debug_inline::<T>,
+                    error_description: display_inline::<T>,
+                };
+                unsafe { AssertSharable::new(vtable) }
             };
 
             // Pack a `T` into a `*mut ()`.
@@ -959,25 +1003,26 @@ where
                 (&raw mut data).cast::<T>().write(value);
                 ErrorHandle::new(data)
             };
-            let vtable = VTablePtr::new(vtable);
-            return Self { handle, vtable };
+            return Self {
+                handle,
+                vtable,
+                _private: PhantomData,
+            };
         }
 
-        extern "C" fn drop_boxed<T, E: ?Sized>(handle: Option<ErrorHandle<E>>) {
+        extern "C" fn drop_boxed<T>(handle: Option<ErrorHandle<dyn Share>>) {
             let value_ptr = handle.map_or_else(std::ptr::null_mut, |h| h.as_ptr());
             unsafe { drop(Box::<T>::from_raw(value_ptr)) };
         }
-        extern "C" fn debug_boxed<T: Debug, E: ?Sized>(
-            handle: Option<ErrorHandle<E>>,
-        ) -> ErrorString {
+        extern "C" fn debug_boxed<T: Debug>(handle: Option<ErrorHandle<dyn Share>>) -> ErrorString {
             let value_ptr = handle.map_or_else(std::ptr::null, |h| h.as_ptr::<T>().cast_const());
             unsafe {
                 let value = &*value_ptr;
                 new_string(format!("{:?}", *value))
             }
         }
-        extern "C" fn display_boxed<T: Display, E: ?Sized>(
-            handle: Option<ErrorHandle<E>>,
+        extern "C" fn display_boxed<T: Display>(
+            handle: Option<ErrorHandle<dyn Share>>,
         ) -> ErrorString {
             let value_ptr = handle.map_or_else(std::ptr::null, |h| h.as_ptr::<T>().cast_const());
             unsafe {
@@ -988,16 +1033,20 @@ where
 
         // Fall back to boxing the error.
         let vtable = &const {
-            VTable {
-                drop: Some(drop_boxed::<T, E>),
-                error_name: debug_boxed::<T, E>,
-                error_description: display_boxed::<T, E>,
-            }
+            let vtable = VTable {
+                drop: Some(drop_boxed::<T>),
+                error_name: debug_boxed::<T>,
+                error_description: display_boxed::<T>,
+            };
+            unsafe { AssertSharable::new(vtable) }
         };
 
-        let handle = ErrorHandle::new(Box::into_raw(Box::new(value)));
-        let vtable = VTablePtr::new(vtable);
-        Self { handle, vtable }
+        let handle = unsafe { ErrorHandle::new(Box::into_raw(Box::new(value))) };
+        Self {
+            handle,
+            vtable,
+            _private: PhantomData,
+        }
     }
 }
 
@@ -1068,16 +1117,6 @@ impl Drop for ErrorString {
         if let Some(drop) = self.drop {
             unsafe { drop(self.handle) };
         }
-    }
-}
-
-impl FFITransferable<bindings::FimoResultString> for ErrorString {
-    fn into_ffi(self) -> bindings::FimoResultString {
-        unsafe { std::mem::transmute::<Self, bindings::FimoResultString>(self) }
-    }
-
-    unsafe fn from_ffi(ffi: bindings::FimoResultString) -> Self {
-        unsafe { std::mem::transmute::<bindings::FimoResultString, Self>(ffi) }
     }
 }
 
