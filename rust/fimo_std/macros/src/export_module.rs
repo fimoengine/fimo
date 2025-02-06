@@ -325,7 +325,7 @@ fn generate_resources(resources: &[&BuilderExprResource]) -> TokenStream {
                     #[cfg(not(debug_assertions))]
                     {
                         let len = cstr.count_bytes();
-                        ::core::str::from_utf8_unchecked(::core::slice::from_raw_parts(self.0, len))
+                        ::core::str::from_utf8_unchecked(::core::slice::from_raw_parts(self.0.cast(), len))
                     }
                 }
             }
