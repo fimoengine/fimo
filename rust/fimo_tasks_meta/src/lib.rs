@@ -15,8 +15,8 @@ mod worker_group;
 
 pub use command_buffer::*;
 use fimo_std::{
-    utils::FFISharable,
     tracing::{Config, Level, ThreadAccess},
+    utils::FFISharable,
 };
 pub use local::*;
 pub use task::*;
