@@ -268,10 +268,8 @@ pub const Time = struct {
                 };
             },
             else => {
-                var ts: std.posix.timespec = undefined;
-                std.posix.clock_gettime(
+                const ts = std.posix.clock_gettime(
                     .REALTIME,
-                    &ts,
                 ) catch @panic("REALTIME clock not supported");
                 return Time{
                     .secs = @intCast(ts.sec),
