@@ -5,7 +5,6 @@ const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
 const c = @import("../../c.zig");
-const heap = @import("../../heap.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
 const Version = @import("../../Version.zig");

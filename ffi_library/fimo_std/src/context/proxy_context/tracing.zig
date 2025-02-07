@@ -1176,7 +1176,7 @@ const DefaultSubscriber = struct {
     const CallStack = struct {
         tail: ?*Self.Span = null,
     };
-    const allocator = @import("../../heap.zig").fimo_allocator;
+    const allocator = std.heap.c_allocator;
     threadlocal var print_buffer = std.mem.zeroes([Self.print_buffer_len + overlength_correction.len:0]u8);
     const print_buffer_len = 1024;
     var mutex: std.Thread.Mutex = .{};

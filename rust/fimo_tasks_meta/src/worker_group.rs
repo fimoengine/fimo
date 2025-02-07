@@ -1,8 +1,5 @@
 use crate::{Context, bindings};
-use fimo_std::{
-    allocator::FimoAllocator,
-    error::{AnyError, to_result_indirect, to_result_indirect_in_place},
-};
+use fimo_std::error::{AnyError, to_result_indirect, to_result_indirect_in_place};
 use std::{ffi::CStr, fmt::Formatter, marker::PhantomData, num::NonZeroUsize};
 
 /// A unique identifier for a [`WorkerGroup`].
@@ -70,7 +67,7 @@ impl WorkerGroup<'_> {
     }
 
     /// Fetches a list of worker ids available in the worker group.
-    pub fn workers(&self) -> Result<Box<[WorkerId], FimoAllocator>, AnyError> {
+    pub fn workers(&self) -> Result<Box<[WorkerId], GlobalAlloc>, AnyError> {
         let mut num_workers = 0;
         // Safety: FFI call is safe
         let workers = unsafe {
@@ -92,14 +89,14 @@ impl WorkerGroup<'_> {
 
         // Safety: According to the API, the slice has been allocated with the fimo allocator,
         // therefore we are allowed to construct a box with the same allocator.
-        unsafe { Ok(Box::from_raw_in(workers, FimoAllocator)) }
+        unsafe { Ok(Box::from_raw(workers)) }
     }
 
     /// Fetches a list of stack sizes available in the worker group.
     ///
     /// When spawning new tasks, they will be assigned one stack which matches the requirements
     /// specified in the commands.
-    pub fn stack_sizes(&self) -> Result<Box<[usize], FimoAllocator>, AnyError> {
+    pub fn stack_sizes(&self) -> Result<Box<[usize], GlobalAlloc>, AnyError> {
         let mut num_stacks = 0;
         // Safety: FFI call is safe
         let sizes = unsafe {
@@ -118,7 +115,7 @@ impl WorkerGroup<'_> {
 
         // Safety: According to the API, the slice has been allocated with the fimo allocator,
         // therefore we are allowed to construct a box with the same allocator.
-        unsafe { Ok(Box::from_raw_in(sizes, FimoAllocator)) }
+        unsafe { Ok(Box::from_raw(sizes)) }
     }
 
     #[inline(always)]

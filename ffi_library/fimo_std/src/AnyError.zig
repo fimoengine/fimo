@@ -4,7 +4,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const c = @import("c.zig");
-const heap = @import("heap.zig");
 
 const Self = @This();
 
@@ -41,30 +40,6 @@ fn static_string_string(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
 }
 
 // Declared in the C header.
-export const FIMO_IMPL_RESULT_DYNAMIC_STRING_VTABLE = c.FimoResultVTable{
-    .v0 = .{
-        .release = dynamic_string_release,
-        .error_name = dynamic_string_string,
-        .error_description = dynamic_string_string,
-    },
-};
-fn dynamic_string_release(ptr: ?*anyopaque) callconv(.C) void {
-    const err_c: [*:0]const u8 = @constCast(@alignCast(@ptrCast(ptr.?)));
-    const err = std.mem.span(err_c);
-    heap.fimo_allocator.free(err);
-}
-fn dynamic_string_string(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
-    const err_c: [*:0]const u8 = @constCast(@alignCast(@ptrCast(ptr.?)));
-    const err = std.mem.span(err_c);
-
-    const string = ErrorString.initDupe(
-        heap.fimo_allocator,
-        err,
-    ) catch |e| Self.initError(e).name();
-    return string.str;
-}
-
-// Declared in the C header.
 export const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE = c.FimoResultVTable{
     .v0 = .{
         .release = null,
@@ -94,7 +69,7 @@ export const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE = c.FimoResultVTable{
 fn system_error_code_name(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
     const code: SystemErrorCode = @intCast(@intFromPtr(ptr));
     const string = ErrorString.initFmt(
-        heap.fimo_allocator,
+        std.heap.c_allocator,
         "SystemError({})",
         .{code},
     ) catch |e| Self.initError(e).name();
@@ -638,7 +613,6 @@ pub const ErrorString = struct {
 
     // List of known allocators that we specialize against.
     const known_allocators = .{
-        heap.fimo_allocator,
         std.heap.c_allocator,
         std.heap.raw_c_allocator,
         std.heap.page_allocator,

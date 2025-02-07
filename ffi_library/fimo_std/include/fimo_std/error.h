@@ -173,259 +173,259 @@ extern "C" {
 typedef enum FimoErrorCode: FimoI32 {
     /// Operation completed successfully
     FIMO_ERROR_CODE_OK,
-    /// Argument list too long 
+    /// Argument list too long
     FIMO_ERROR_CODE_2BIG,
-    /// Permission denied 
+    /// Permission denied
     FIMO_ERROR_CODE_ACCES,
-    /// Address already in use 
+    /// Address already in use
     FIMO_ERROR_CODE_ADDRINUSE,
-    /// Address not available 
+    /// Address not available
     FIMO_ERROR_CODE_ADDRNOTAVAIL,
-    /// Address family not supported 
+    /// Address family not supported
     FIMO_ERROR_CODE_AFNOSUPPORT,
-    /// Resource temporarily unavailable 
+    /// Resource temporarily unavailable
     FIMO_ERROR_CODE_AGAIN,
-    /// Connection already in progress 
+    /// Connection already in progress
     FIMO_ERROR_CODE_ALREADY,
-    /// Invalid exchange 
+    /// Invalid exchange
     FIMO_ERROR_CODE_BADE,
-    /// Bad file descriptor 
+    /// Bad file descriptor
     FIMO_ERROR_CODE_BADF,
-    /// File descriptor in bad state 
+    /// File descriptor in bad state
     FIMO_ERROR_CODE_BADFD,
-    /// Bad message 
+    /// Bad message
     FIMO_ERROR_CODE_BADMSG,
-    /// Invalid request descriptor 
+    /// Invalid request descriptor
     FIMO_ERROR_CODE_BADR,
-    /// Invalid request code 
+    /// Invalid request code
     FIMO_ERROR_CODE_BADRQC,
-    /// Invalid slot 
+    /// Invalid slot
     FIMO_ERROR_CODE_BADSLT,
-    /// Device or resource busy 
+    /// Device or resource busy
     FIMO_ERROR_CODE_BUSY,
-    /// Operation canceled 
+    /// Operation canceled
     FIMO_ERROR_CODE_CANCELED,
-    /// No child processes 
+    /// No child processes
     FIMO_ERROR_CODE_CHILD,
-    /// Channel number out of range 
+    /// Channel number out of range
     FIMO_ERROR_CODE_CHRNG,
-    /// Communication error on send 
+    /// Communication error on send
     FIMO_ERROR_CODE_COMM,
-    /// Connection aborted 
+    /// Connection aborted
     FIMO_ERROR_CODE_CONNABORTED,
-    /// Connection refused 
+    /// Connection refused
     FIMO_ERROR_CODE_CONNREFUSED,
-    /// Connection reset 
+    /// Connection reset
     FIMO_ERROR_CODE_CONNRESET,
-    /// Resource deadlock avoided 
+    /// Resource deadlock avoided
     FIMO_ERROR_CODE_DEADLK,
-    /// File locking deadlock error (or Resource deadlock avoided) 
+    /// File locking deadlock error (or Resource deadlock avoided)
     FIMO_ERROR_CODE_DEADLOCK,
-    /// Destination address required 
+    /// Destination address required
     FIMO_ERROR_CODE_DESTADDRREQ,
-    /// Mathematics argument out of domain of function 
+    /// Mathematics argument out of domain of function
     FIMO_ERROR_CODE_DOM,
-    /// Disk quota exceeded 
+    /// Disk quota exceeded
     FIMO_ERROR_CODE_DQUOT,
-    /// File exists 
+    /// File exists
     FIMO_ERROR_CODE_EXIST,
-    /// Bad address 
+    /// Bad address
     FIMO_ERROR_CODE_FAULT,
-    /// File too large 
+    /// File too large
     FIMO_ERROR_CODE_FBIG,
-    /// Host is down 
+    /// Host is down
     FIMO_ERROR_CODE_HOSTDOWN,
-    /// Host is unreachable 
+    /// Host is unreachable
     FIMO_ERROR_CODE_HOSTUNREACH,
-    /// Memory page has hardware error 
+    /// Memory page has hardware error
     FIMO_ERROR_CODE_HWPOISON,
-    /// Identifier removed 
+    /// Identifier removed
     FIMO_ERROR_CODE_IDRM,
-    /// Invalid or incomplete multibyte or wide character 
+    /// Invalid or incomplete multibyte or wide character
     FIMO_ERROR_CODE_ILSEQ,
-    /// Operation in progress 
+    /// Operation in progress
     FIMO_ERROR_CODE_INPROGRESS,
-    /// Interrupted function call 
+    /// Interrupted function call
     FIMO_ERROR_CODE_INTR,
-    /// Invalid argument 
+    /// Invalid argument
     FIMO_ERROR_CODE_INVAL,
-    /// Input/output error 
+    /// Input/output error
     FIMO_ERROR_CODE_IO,
-    /// Socket is connected 
+    /// Socket is connected
     FIMO_ERROR_CODE_ISCONN,
-    /// Is a directory 
+    /// Is a directory
     FIMO_ERROR_CODE_ISDIR,
-    /// Is a named type file 
+    /// Is a named type file
     FIMO_ERROR_CODE_ISNAM,
-    /// Key has expired 
+    /// Key has expired
     FIMO_ERROR_CODE_KEYEXPIRED,
-    /// Key was rejected by service 
+    /// Key was rejected by service
     FIMO_ERROR_CODE_KEYREJECTED,
-    /// Key has been revoked 
+    /// Key has been revoked
     FIMO_ERROR_CODE_KEYREVOKED,
-    /// Level 2 halted 
+    /// Level 2 halted
     FIMO_ERROR_CODE_L2HLT,
-    /// Level 2 not synchronized 
+    /// Level 2 not synchronized
     FIMO_ERROR_CODE_L2NSYNC,
-    /// Level 3 halted 
+    /// Level 3 halted
     FIMO_ERROR_CODE_L3HLT,
-    /// Level 3 reset 
+    /// Level 3 reset
     FIMO_ERROR_CODE_L3RST,
-    /// Cannot access a needed shared library 
+    /// Cannot access a needed shared library
     FIMO_ERROR_CODE_LIBACC,
-    /// Accessing a corrupted shared library 
+    /// Accessing a corrupted shared library
     FIMO_ERROR_CODE_LIBBAD,
-    /// Attempting to link in too many shared libraries 
+    /// Attempting to link in too many shared libraries
     FIMO_ERROR_CODE_LIBMAX,
-    /// .lib section in a.out corrupted 
+    /// .lib section in a.out corrupted
     FIMO_ERROR_CODE_LIBSCN,
-    /// Cannot exec a shared library directly 
+    /// Cannot exec a shared library directly
     FIMO_ERROR_CODE_LIBEXEC,
-    /// Link number out of range 
+    /// Link number out of range
     FIMO_ERROR_CODE_LNRNG,
-    /// Too many levels of symbolic links 
+    /// Too many levels of symbolic links
     FIMO_ERROR_CODE_LOOP,
-    /// Wrong medium type 
+    /// Wrong medium type
     FIMO_ERROR_CODE_MEDIUMTYPE,
-    /// Too many open files 
+    /// Too many open files
     FIMO_ERROR_CODE_MFILE,
-    /// Too many links 
+    /// Too many links
     FIMO_ERROR_CODE_MLINK,
-    /// Message too long 
+    /// Message too long
     FIMO_ERROR_CODE_MSGSIZE,
-    /// Multihop attempted 
+    /// Multihop attempted
     FIMO_ERROR_CODE_MULTIHOP,
-    /// Filename too long 
+    /// Filename too long
     FIMO_ERROR_CODE_NAMETOOLONG,
-    /// Network is down 
+    /// Network is down
     FIMO_ERROR_CODE_NETDOWN,
-    /// Connection aborted by network 
+    /// Connection aborted by network
     FIMO_ERROR_CODE_NETRESET,
-    /// Network unreachable 
+    /// Network unreachable
     FIMO_ERROR_CODE_NETUNREACH,
-    /// Too many open files in system 
+    /// Too many open files in system
     FIMO_ERROR_CODE_NFILE,
-    /// No anode 
+    /// No anode
     FIMO_ERROR_CODE_NOANO,
-    /// No buffer space available 
+    /// No buffer space available
     FIMO_ERROR_CODE_NOBUFS,
-    /// The named attribute does not exist, or the process has no access to this attribute 
+    /// The named attribute does not exist, or the process has no access to this attribute
     FIMO_ERROR_CODE_NODATA,
-    /// No such device 
+    /// No such device
     FIMO_ERROR_CODE_NODEV,
-    /// No such file or directory 
+    /// No such file or directory
     FIMO_ERROR_CODE_NOENT,
-    /// Exec format error 
+    /// Exec format error
     FIMO_ERROR_CODE_NOEXEC,
-    /// Required key not available 
+    /// Required key not available
     FIMO_ERROR_CODE_NOKEY,
-    /// No locks available 
+    /// No locks available
     FIMO_ERROR_CODE_NOLCK,
-    /// Link has been severed 
+    /// Link has been severed
     FIMO_ERROR_CODE_NOLINK,
-    /// No medium found 
+    /// No medium found
     FIMO_ERROR_CODE_NOMEDIUM,
-    /// Not enough space/cannot allocate memory 
+    /// Not enough space/cannot allocate memory
     FIMO_ERROR_CODE_NOMEM,
-    /// No message of the desired type 
+    /// No message of the desired type
     FIMO_ERROR_CODE_NOMSG,
-    /// Machine is not on the network 
+    /// Machine is not on the network
     FIMO_ERROR_CODE_NONET,
-    /// Package not installed 
+    /// Package not installed
     FIMO_ERROR_CODE_NOPKG,
-    /// Protocol not available 
+    /// Protocol not available
     FIMO_ERROR_CODE_NOPROTOOPT,
-    /// No space left on device 
+    /// No space left on device
     FIMO_ERROR_CODE_NOSPC,
-    /// No STREAM resources 
+    /// No STREAM resources
     FIMO_ERROR_CODE_NOSR,
-    /// Not a STREAM 
+    /// Not a STREAM
     FIMO_ERROR_CODE_NOSTR,
-    /// Function not implemented 
+    /// Function not implemented
     FIMO_ERROR_CODE_NOSYS,
-    /// Block device required 
+    /// Block device required
     FIMO_ERROR_CODE_NOTBLK,
-    /// The socket is not connected 
+    /// The socket is not connected
     FIMO_ERROR_CODE_NOTCONN,
-    /// Not a directory 
+    /// Not a directory
     FIMO_ERROR_CODE_NOTDIR,
-    /// Directory not empty 
+    /// Directory not empty
     FIMO_ERROR_CODE_NOTEMPTY,
-    /// State not recoverable 
+    /// State not recoverable
     FIMO_ERROR_CODE_NOTRECOVERABLE,
-    /// Not a socket 
+    /// Not a socket
     FIMO_ERROR_CODE_NOTSOCK,
-    /// Operation not supported 
+    /// Operation not supported
     FIMO_ERROR_CODE_NOTSUP,
-    /// Inappropriate I/O control operation 
+    /// Inappropriate I/O control operation
     FIMO_ERROR_CODE_NOTTY,
-    /// Name not unique on network 
+    /// Name not unique on network
     FIMO_ERROR_CODE_NOTUNIQ,
-    /// No such device or address 
+    /// No such device or address
     FIMO_ERROR_CODE_NXIO,
-    /// Operation not supported on socket 
+    /// Operation not supported on socket
     FIMO_ERROR_CODE_OPNOTSUPP,
-    /// Value too large to be stored in data type 
+    /// Value too large to be stored in data type
     FIMO_ERROR_CODE_OVERFLOW,
-    /// Owner died 
+    /// Owner died
     FIMO_ERROR_CODE_OWNERDEAD,
-    /// Operation not permitted 
+    /// Operation not permitted
     FIMO_ERROR_CODE_PERM,
-    /// Protocol family not supported 
+    /// Protocol family not supported
     FIMO_ERROR_CODE_PFNOSUPPORT,
-    /// Broken pipe 
+    /// Broken pipe
     FIMO_ERROR_CODE_PIPE,
-    /// Protocol error 
+    /// Protocol error
     FIMO_ERROR_CODE_PROTO,
-    /// Protocol not supported 
+    /// Protocol not supported
     FIMO_ERROR_CODE_PROTONOSUPPORT,
-    /// Protocol wrong type for socket 
+    /// Protocol wrong type for socket
     FIMO_ERROR_CODE_PROTOTYPE,
-    /// Result too large 
+    /// Result too large
     FIMO_ERROR_CODE_RANGE,
-    /// Remote address changed 
+    /// Remote address changed
     FIMO_ERROR_CODE_REMCHG,
-    /// Object is remote 
+    /// Object is remote
     FIMO_ERROR_CODE_REMOTE,
-    /// Remote I/O error 
+    /// Remote I/O error
     FIMO_ERROR_CODE_REMOTEIO,
-    /// Interrupted system call should be restarted 
+    /// Interrupted system call should be restarted
     FIMO_ERROR_CODE_RESTART,
-    /// Operation not possible due to RF-kill 
+    /// Operation not possible due to RF-kill
     FIMO_ERROR_CODE_RFKILL,
-    /// Read-only filesystem 
+    /// Read-only filesystem
     FIMO_ERROR_CODE_ROFS,
-    /// Cannot send after transport endpoint shutdown 
+    /// Cannot send after transport endpoint shutdown
     FIMO_ERROR_CODE_SHUTDOWN,
-    /// Invalid seek 
+    /// Invalid seek
     FIMO_ERROR_CODE_SPIPE,
-    /// Socket type not supported 
+    /// Socket type not supported
     FIMO_ERROR_CODE_SOCKTNOSUPPORT,
-    /// No such process 
+    /// No such process
     FIMO_ERROR_CODE_SRCH,
-    /// Stale file handle 
+    /// Stale file handle
     FIMO_ERROR_CODE_STALE,
-    /// Streams pipe error 
+    /// Streams pipe error
     FIMO_ERROR_CODE_STRPIPE,
-    /// Timer expired 
+    /// Timer expired
     FIMO_ERROR_CODE_TIME,
-    /// Connection timed out 
+    /// Connection timed out
     FIMO_ERROR_CODE_TIMEDOUT,
-    /// Too many references: cannot splice 
+    /// Too many references: cannot splice
     FIMO_ERROR_CODE_TOOMANYREFS,
-    /// Text file busy 
+    /// Text file busy
     FIMO_ERROR_CODE_TXTBSY,
-    /// Structure needs cleaning 
+    /// Structure needs cleaning
     FIMO_ERROR_CODE_UCLEAN,
-    /// Protocol driver not attached 
+    /// Protocol driver not attached
     FIMO_ERROR_CODE_UNATCH,
-    /// Too many users 
+    /// Too many users
     FIMO_ERROR_CODE_USERS,
-    /// Operation would block 
+    /// Operation would block
     FIMO_ERROR_CODE_WOULDBLOCK,
-    /// Invalid cross-device link 
+    /// Invalid cross-device link
     FIMO_ERROR_CODE_XDEV,
-    /// Exchange full 
+    /// Exchange full
     FIMO_ERROR_CODE_XFULL,
 } FimoErrorCode;
 
@@ -468,10 +468,6 @@ typedef struct FimoResult {
 /// VTable for a `FimoResult` containing a static string.
 FIMO_EXPORT
 extern const FimoResultVTable FIMO_IMPL_RESULT_STATIC_STRING_VTABLE;
-
-/// VTable for a `FimoResult` containing a dynamic string.
-FIMO_EXPORT
-extern const FimoResultVTable FIMO_IMPL_RESULT_DYNAMIC_STRING_VTABLE;
 
 /// VTable for a `FimoResult` containing a `FimoErrorCode`.
 FIMO_EXPORT
@@ -533,17 +529,6 @@ static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_static_string(const char *
         return FIMO_IMPL_RESULT_INVALID_ERROR;
     }
     return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)error, .vtable = &FIMO_IMPL_RESULT_STATIC_STRING_VTABLE};
-}
-
-/// Constructs a `FimoResult` from a dynamic string.
-///
-/// The string must be allocated in a way that it can be freed with `fimo_free`.
-FIMO_MUST_USE
-static FIMO_INLINE_ALWAYS FimoResult fimo_result_from_dynamic_string(const char *error) {
-    if (!error) {
-        return FIMO_IMPL_RESULT_INVALID_ERROR;
-    }
-    return FIMO_IMPL_RESULT_INITIALIZER{.data = (void *)error, .vtable = &FIMO_IMPL_RESULT_DYNAMIC_STRING_VTABLE};
 }
 
 /// Constructs a `FimoResult` from a `FimoErrorCode`.

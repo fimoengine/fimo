@@ -65,7 +65,6 @@ mod macros;
 
 pub mod bindings;
 
-pub mod allocator;
 pub mod context;
 pub mod error;
 pub mod panic;

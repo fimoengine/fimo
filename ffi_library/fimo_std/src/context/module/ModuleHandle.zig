@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const windows = std.os.windows;
 const Allocator = std.mem.Allocator;
 
-const heap = @import("../../heap.zig");
 const RefCount = @import("../RefCount.zig");
 const Path = @import("../../path.zig").Path;
 const PathError = @import("../../path.zig").PathError;

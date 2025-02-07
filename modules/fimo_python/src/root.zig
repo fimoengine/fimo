@@ -81,8 +81,8 @@ const State = struct {
         ctx.context().tracing().emitTraceSimple("initializing fimo_python", .{}, @src());
         _ = set;
 
-        const self = try heap.fimo_allocator.create(State);
-        errdefer heap.fimo_allocator.destroy(self);
+        const self = try std.heap.c_allocator.create(State);
+        errdefer std.heap.c_allocator.destroy(self);
         self.* = .{
             .thread = undefined,
             .mutex = .{},
@@ -121,7 +121,7 @@ const State = struct {
         }
 
         self.thread.join();
-        heap.fimo_allocator.destroy(self);
+        std.heap.c_allocator.destroy(self);
     }
 
     fn initDeinitSubThread(self: *State, ctx: *const Instance) void {
@@ -192,8 +192,8 @@ const State = struct {
 
     fn initRunString(octx: *const Module.OpaqueInstance) !*fimo_python_meta.RunString {
         const ctx: *const Instance = @alignCast(@ptrCast(octx));
-        const sym = try heap.fimo_allocator.create(fimo_python_meta.RunString);
-        errdefer heap.fimo_allocator.destroy(sym);
+        const sym = try std.heap.c_allocator.create(fimo_python_meta.RunString);
+        errdefer std.heap.c_allocator.destroy(sym);
 
         sym.* = fimo_python_meta.RunString{
             .data = @constCast(ctx),
@@ -216,7 +216,7 @@ const State = struct {
     }
 
     fn deinitRunString(sym: *fimo_python_meta.RunString) void {
-        heap.fimo_allocator.destroy(sym);
+        std.heap.c_allocator.destroy(sym);
     }
 
     fn runString(ctx: *const Instance, code: [:0]const u8, home: ?[:0]const u8) !void {

@@ -1,7 +1,6 @@
 #include <fimo_std/context.h>
 #include <fimo_std/error.h>
 #include <fimo_std/integers.h>
-#include <fimo_std/memory.h>
 #include <fimo_std/module.h>
 #include <fimo_std/time.h>
 #include <fimo_std/tracing.h>

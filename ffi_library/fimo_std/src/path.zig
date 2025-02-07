@@ -1,11 +1,10 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const testing = std.testing;
 const unicode = std.unicode;
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
 
 const c = @import("c.zig");
-const heap = @import("heap.zig");
 
 const separator = if (builtin.os.tag == .windows) '\\' else '/';
 
@@ -48,14 +47,14 @@ pub const PathBuffer = struct {
     /// Initializes the object from a ffi object.
     pub fn initC(obj: c.FimoUTF8PathBuf) Self {
         const p = PathBufferUnmanaged.initC(obj);
-        return p.toManaged(heap.fimo_allocator);
+        return p.toManaged(std.heap.c_allocator);
     }
 
     /// Casts the object to a ffi object.
     ///
-    /// The memory must have been allocated with the fimo allocator.
+    /// The memory must have been allocated with the c allocator.
     pub fn intoC(self: Self) c.FimoUTF8PathBuf {
-        std.debug.assert(self.allocator.vtable == heap.fimo_allocator.vtable);
+        std.debug.assert(self.allocator.vtable == std.heap.c_allocator.vtable);
         return self.buffer.intoC();
     }
 
@@ -348,14 +347,14 @@ pub const OwnedPath = struct {
     /// Initializes the object from a ffi object.
     pub fn initC(obj: c.FimoOwnedUTF8Path) Self {
         const p = OwnedPathUnmanaged.initC(obj);
-        return p.toManaged(heap.fimo_allocator);
+        return p.toManaged(std.heap.c_allocator);
     }
 
     /// Casts the object to a ffi object.
     ///
-    /// The memory must have been allocated with the fimo allocator.
+    /// The memory must have been allocated with the c allocator.
     pub fn intoC(self: Self) c.FimoOwnedUTF8Path {
-        std.debug.assert(self.allocator.vtable == heap.fimo_allocator.vtable);
+        std.debug.assert(self.allocator.vtable == std.heap.c_allocator);
         return self.path.intoC();
     }
 
@@ -544,14 +543,14 @@ pub const OwnedOsPath = struct {
     /// Initializes the object from a ffi object.
     pub fn initC(obj: c.FimoOwnedOSPath) Self {
         const p = OwnedOsPathUnmanaged.initC(obj);
-        return p.toManaged(heap.fimo_allocator);
+        return p.toManaged(std.heap.c_allocator);
     }
 
     /// Casts the object to a ffi object.
     ///
-    /// The memory must have been allocated with the fimo allocator.
+    /// The memory must have been allocated with the c allocator.
     pub fn intoC(self: Self) c.FimoOwnedOSPath {
-        std.debug.assert(self.allocator.vtable == heap.fimo_allocator.vtable);
+        std.debug.assert(self.allocator.vtable == std.heap.c_allocator);
         return self.path.intoC();
     }
 
@@ -1476,7 +1475,7 @@ const ffi = struct {
         buf: *c.FimoUTF8PathBuf,
     ) c.FimoResult {
         const p = PathBufferUnmanaged.initCapacity(
-            heap.fimo_allocator,
+            std.heap.c_allocator,
             capacity,
         ) catch |err| return AnyError.initError(err).err;
         buf.* = p.intoC();
@@ -1485,7 +1484,7 @@ const ffi = struct {
 
     export fn fimo_utf8_path_buf_free(buf: *c.FimoUTF8PathBuf) void {
         var p = PathBufferUnmanaged.initC(buf.*);
-        p.deinit(heap.fimo_allocator);
+        p.deinit(std.heap.c_allocator);
     }
 
     export fn fimo_utf8_path_buf_as_path(buf: *const c.FimoUTF8PathBuf) c.FimoUTF8Path {
@@ -1498,7 +1497,7 @@ const ffi = struct {
         owned: *c.FimoOwnedUTF8Path,
     ) c.FimoResult {
         var p = PathBufferUnmanaged.initC(buf.*);
-        const o = p.toOwnedPath(heap.fimo_allocator) catch |err| return AnyError.initError(err).err;
+        const o = p.toOwnedPath(std.heap.c_allocator) catch |err| return AnyError.initError(err).err;
         owned.* = o.intoC();
         return AnyError.intoCResult(null);
     }
@@ -1509,7 +1508,7 @@ const ffi = struct {
     ) c.FimoResult {
         var b = PathBufferUnmanaged.initC(buf.*);
         const p = Path.initC(path);
-        b.pushPath(heap.fimo_allocator, p) catch |err| return AnyError.initError(err).err;
+        b.pushPath(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).err;
         return AnyError.intoCResult(null);
     }
 
@@ -1519,7 +1518,7 @@ const ffi = struct {
     ) c.FimoResult {
         var b = PathBufferUnmanaged.initC(buf.*);
         const p = std.mem.span(path);
-        b.pushString(heap.fimo_allocator, p) catch |err| return AnyError.initError(err).err;
+        b.pushString(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).err;
         return AnyError.intoCResult(null);
     }
 
@@ -1534,7 +1533,7 @@ const ffi = struct {
     ) c.FimoResult {
         const p = std.mem.span(path);
         const o = OwnedPathUnmanaged.initString(
-            heap.fimo_allocator,
+            std.heap.c_allocator,
             p,
         ) catch |err| return AnyError.initError(err).err;
         owned.* = o.intoC();
@@ -1547,7 +1546,7 @@ const ffi = struct {
     ) c.FimoResult {
         const p = Path.initC(path);
         const o = OwnedPathUnmanaged.initPath(
-            heap.fimo_allocator,
+            std.heap.c_allocator,
             p,
         ) catch |err| return AnyError.initError(err).err;
         owned.* = o.intoC();
@@ -1560,7 +1559,7 @@ const ffi = struct {
     ) c.FimoResult {
         const p = OsPath.initC(path);
         const o = OwnedPathUnmanaged.initOsPath(
-            heap.fimo_allocator,
+            std.heap.c_allocator,
             p,
         ) catch |err| return AnyError.initError(err).err;
         owned.* = o.intoC();
@@ -1569,7 +1568,7 @@ const ffi = struct {
 
     export fn fimo_owned_utf8_path_free(path: c.FimoOwnedUTF8Path) void {
         var o = OwnedPathUnmanaged.initC(path);
-        o.deinit(heap.fimo_allocator);
+        o.deinit(std.heap.c_allocator);
     }
 
     export fn fimo_owned_utf8_path_as_path(path: c.FimoOwnedUTF8Path) c.FimoUTF8Path {
@@ -1625,7 +1624,7 @@ const ffi = struct {
     ) c.FimoResult {
         const p = Path.initC(path);
         const o = OwnedOsPathUnmanaged.initPath(
-            heap.fimo_allocator,
+            std.heap.c_allocator,
             p,
         ) catch |err| return AnyError.initError(err).err;
         os_path.* = o.intoC();
@@ -1634,7 +1633,7 @@ const ffi = struct {
 
     export fn fimo_owned_os_path_free(path: c.FimoOwnedOSPath) void {
         const o = OwnedOsPathUnmanaged.initC(path);
-        o.deinit(heap.fimo_allocator);
+        o.deinit(std.heap.c_allocator);
     }
 
     export fn fimo_owned_os_path_as_os_path(path: c.FimoOwnedOSPath) c.FimoOSPath {
