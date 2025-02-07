@@ -964,6 +964,25 @@ pub type UninitInstance<T> = Instance<
     MaybeUninit<<&'static T as GenericInstance>::State>,
 >;
 
+/// A view to an instance that is being unloaded.
+pub type UnloadingInstanceView<'a, T> = InstanceView<
+    'a,
+    <Pin<&'a T> as GenericInstance>::Parameters,
+    <Pin<&'a T> as GenericInstance>::Resources,
+    <Pin<&'a T> as GenericInstance>::Imports,
+    MaybeUninit<<Pin<&'a T> as GenericInstance>::Exports>,
+    <Pin<&'a T> as GenericInstance>::State,
+>;
+
+/// An instance that is being unloaded.
+pub type UnloadingInstance<T> = Instance<
+    <&'static T as GenericInstance>::Parameters,
+    <&'static T as GenericInstance>::Resources,
+    <&'static T as GenericInstance>::Imports,
+    MaybeUninit<<&'static T as GenericInstance>::Exports>,
+    <&'static T as GenericInstance>::State,
+>;
+
 /// Defines two new instance newtypes, one for borrowed instances and one for owned instances.
 ///
 /// # Examples

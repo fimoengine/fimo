@@ -215,7 +215,8 @@ const State = struct {
         return sym;
     }
 
-    fn deinitRunString(sym: *fimo_python_meta.RunString) void {
+    fn deinitRunString(octx: *const Module.OpaqueInstance, sym: *fimo_python_meta.RunString) void {
+        _ = octx;
         std.heap.c_allocator.destroy(sym);
     }
 

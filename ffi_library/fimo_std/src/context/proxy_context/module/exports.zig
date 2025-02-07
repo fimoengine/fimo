@@ -68,7 +68,10 @@ pub const DynamicSymbolExport = extern struct {
         ctx: *const Module.OpaqueInstance,
         symbol: **anyopaque,
     ) callconv(.c) c.FimoResult,
-    destructor: *const fn (symbol: *anyopaque) callconv(.c) void,
+    destructor: *const fn (
+        ctx: *const Module.OpaqueInstance,
+        symbol: *anyopaque,
+    ) callconv(.c) void,
     version: c.FimoVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
@@ -288,7 +291,10 @@ pub const Builder = struct {
                     ctx: *const Module.OpaqueInstance,
                     symbol: **anyopaque,
                 ) callconv(.c) c.FimoResult,
-                deinitFn: *const fn (symbol: *anyopaque) callconv(.c) void,
+                deinitFn: *const fn (
+                    ctx: *const Module.OpaqueInstance,
+                    symbol: *anyopaque,
+                ) callconv(.c) void,
             },
         },
     };
@@ -561,7 +567,7 @@ pub const Builder = struct {
         comptime T: Module.Symbol,
         comptime name: [:0]const u8,
         comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*T.symbol,
-        comptime deinitFn: fn (symbol: *T.symbol) void,
+        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *T.symbol) void,
     ) Builder {
         const initWrapped = struct {
             fn f(ctx: *const Module.OpaqueInstance, out: **anyopaque) callconv(.c) c.FimoResult {
@@ -570,8 +576,8 @@ pub const Builder = struct {
             }
         }.f;
         const deinitWrapped = struct {
-            fn f(symbol: *anyopaque) callconv(.c) void {
-                return deinitFn(@alignCast(@ptrCast(symbol)));
+            fn f(ctx: *const Module.OpaqueInstance, symbol: *anyopaque) callconv(.c) void {
+                return deinitFn(ctx, @alignCast(@ptrCast(symbol)));
             }
         }.f;
         const exp = Builder.SymbolExport{

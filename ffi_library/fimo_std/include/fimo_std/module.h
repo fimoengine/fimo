@@ -1272,9 +1272,10 @@ typedef struct FimoModuleDynamicSymbolExport {
      * used by any other module. During its destruction, a symbol is
      * not allowed to access the module subsystem.
      *
+     * @param module pointer to the module
      * @param symbol symbol to destroy
      */
-    void (*destructor)(void *symbol);
+    void (*destructor)(const FimoModuleInstance *module, void *symbol);
     /**
      * Symbol version.
      */

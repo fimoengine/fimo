@@ -41,11 +41,14 @@ pub const InstanceDependency = struct {
 pub const Symbol = struct {
     version: Version,
     symbol: *const anyopaque,
-    dtor: ?*const fn (symbol: *anyopaque) callconv(.C) void,
+    dtor: ?*const fn (
+        ctx: *const ProxyModule.OpaqueInstance,
+        symbol: *anyopaque,
+    ) callconv(.C) void,
 
-    fn destroySymbol(self: *const Symbol) void {
+    fn destroySymbol(self: *const Symbol, ctx: *const ProxyModule.OpaqueInstance) void {
         if (self.dtor) |dtor| {
-            dtor(@constCast(self.symbol));
+            dtor(ctx, @constCast(self.symbol));
         }
     }
 };
@@ -453,7 +456,7 @@ pub const Inner = struct {
             exp.deinit();
         }
 
-        for (self.symbols.values()) |sym| sym.destroySymbol();
+        for (self.symbols.values()) |sym| sym.destroySymbol(instance);
 
         self.symbols.clearRetainingCapacity();
         self.parameters.clearRetainingCapacity();
@@ -708,7 +711,7 @@ pub fn initExportedInstance(
         _ = instance_handle.lock();
         try AnyError.initChecked(err, result);
         var skip_dtor = false;
-        errdefer if (!skip_dtor) src.destructor(sym);
+        errdefer if (!skip_dtor) src.destructor(instance, sym);
 
         const src_name = std.mem.span(src.name);
         const src_namespace = std.mem.span(src.namespace);

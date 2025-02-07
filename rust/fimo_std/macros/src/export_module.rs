@@ -663,12 +663,16 @@ fn generate_export(
                             }
                         }
                     }
-                    unsafe extern "C" fn __private_destructor(symbol: ::core::ptr::NonNull<()>) {
+                    unsafe extern "C" fn __private_destructor(
+                        instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                        symbol: ::core::ptr::NonNull<()>,
+                    ) {
                         let f = const { #deinit };
+                        let instance = unsafe { ::core::mem::transmute(instance) };
                         type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
                         let symbol = ::fimo_std::utils::ConstNonNull::new(symbol.as_ptr()).expect("should not be null");
                         let symbol = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::target_from_ptr(symbol) };
-                        f(symbol)
+                        f(instance, symbol)
                     }
                     let __private_constructor = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_constructor as _) };
                     let __private_destructor = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_destructor as _) };

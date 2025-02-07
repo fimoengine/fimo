@@ -5,7 +5,9 @@ use crate::{
     error::AnyResult,
     module::{
         info::Info,
-        instance::{GenericInstance, OpaqueInstanceView, UninitInstanceView},
+        instance::{
+            GenericInstance, OpaqueInstanceView, UninitInstanceView, UnloadingInstanceView,
+        },
         loading_set::LoadingSetView,
         parameters::{
             ParameterAccessGroup, ParameterCast, ParameterData, ParameterRepr, ParameterType,
@@ -398,7 +400,9 @@ pub struct DynamicSymbolExport<'a> {
             symbol: &mut NonNull<()>,
         ) -> AnyResult,
     >,
-    pub destructor: AssertSharable<unsafe extern "C" fn(symbol: NonNull<()>)>,
+    pub destructor: AssertSharable<
+        unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
+    >,
     pub version: Version,
     pub name: StrRef<'a>,
     pub namespace: StrRef<'a>,
@@ -422,7 +426,9 @@ impl<'a> DynamicSymbolExport<'a> {
                 symbol: &mut NonNull<()>,
             ) -> AnyResult,
         >,
-        destructor: AssertSharable<unsafe extern "C" fn(symbol: NonNull<()>)>,
+        destructor: AssertSharable<
+            unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
+        >,
         version: Version,
         name: &'a CStr,
     ) -> Self {
@@ -787,7 +793,10 @@ where
         _init: for<'a> fn(
             Pin<&'a UninitInstanceView<'_, InstanceView>>,
         ) -> Result<<T::Type as SymbolPointer>::Target<'a>, E>,
-        _deinit: fn(<T::Type as SymbolPointer>::Target<'_>),
+        _deinit: fn(
+            Pin<&UnloadingInstanceView<'_, InstanceView>>,
+            <T::Type as SymbolPointer>::Target<'_>,
+        ),
     ) -> &mut Self
     where
         T: SymbolInfo,

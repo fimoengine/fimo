@@ -11,7 +11,7 @@ use fimo_std::{
     module::{
         exports::Builder,
         info::Info,
-        instance::{GenericInstance, PseudoInstance, UninitInstanceView},
+        instance::{GenericInstance, PseudoInstance, UninitInstanceView, UnloadingInstanceView},
         loading_set::{LoadingFilterRequest, LoadingSet, LoadingSetView},
         parameters::ParameterAccessGroup,
         symbols::SymbolInfo,
@@ -46,7 +46,9 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
                 extern "C" fn(_, _) -> _,
             >::new(add))
         },
-        |_f| {},
+        |instance: Pin<&UnloadingInstanceView<'_, AView<'_>>>, _f| {
+            emit_info!(instance.context(), "dropping \"a2\"");
+        },
     )
     .build();
 
