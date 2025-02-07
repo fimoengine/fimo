@@ -628,6 +628,23 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
     for (exports, 0..) |exp, i| {
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
+        if (std.mem.startsWith(u8, name, "__")) {
+            sys.logWarn(
+                "can not export a symbol with a reserved name, export='{s}', symbol='{s}', ns='{s}', index='{}'",
+                .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+        if (std.mem.startsWith(u8, name, "__")) {
+            sys.logWarn(
+                "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
+                .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+
         for (imports) |imp| {
             const imp_name = std.mem.span(imp.name);
             const imp_namespace = std.mem.span(imp.namespace);
@@ -665,6 +682,23 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
     for (dynamic_exports, 0..) |exp, i| {
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
+        if (std.mem.startsWith(u8, name, "__")) {
+            sys.logWarn(
+                "can not export a symbol with a reserved name, export='{s}', symbol='{s}', ns='{s}', index='{}'",
+                .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+        if (std.mem.startsWith(u8, name, "__")) {
+            sys.logWarn(
+                "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
+                .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+
         for (imports) |imp| {
             const imp_name = std.mem.span(imp.name);
             const imp_namespace = std.mem.span(imp.namespace);
