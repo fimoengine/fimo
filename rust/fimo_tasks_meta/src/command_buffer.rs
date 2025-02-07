@@ -7,7 +7,7 @@ use fimo_std::{
     utils::FFITransferable,
 };
 use std::{
-    alloc::{Allocator, GlobalAlloc},
+    alloc::{Allocator, Global},
     cell::UnsafeCell,
     ffi::CString,
     marker::PhantomData,
@@ -21,14 +21,14 @@ use std::{
 
 /// A list of commands to be executed by a [`WorkerGroup`].
 #[derive(Debug)]
-pub struct CommandBuffer<'ctx, A: Allocator = GlobalAlloc> {
+pub struct CommandBuffer<'ctx, A: Allocator = Global> {
     inner: RawCommandBuffer<'static, 'ctx, A>,
 }
 
 impl CommandBuffer<'_> {
     /// Builds a new empty command buffer.
     pub fn new() -> Self {
-        Self::new()
+        Self::new_in(Global)
     }
 
     /// Create a scope for enqueuing scoped command buffers.
@@ -38,7 +38,7 @@ impl CommandBuffer<'_> {
     where
         F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
     {
-        Self::scope_in(group, f, GlobalAlloc)
+        Self::scope_in(group, f, Global)
     }
 }
 
@@ -282,7 +282,7 @@ where
 
 /// A list of commands to be executed by a [`WorkerGroup`].
 #[derive(Debug)]
-pub struct ScopedCommandBuffer<'scope, 'env, A: Allocator = GlobalAlloc> {
+pub struct ScopedCommandBuffer<'scope, 'env, A: Allocator = Global> {
     scope: &'scope Scope<'scope, 'env, A>,
     inner: RawCommandBuffer<'scope, 'env, A>,
 }
@@ -455,7 +455,7 @@ where
 ///
 /// See [`CommandBuffer::scope_in`] for details.
 #[derive(Debug)]
-pub struct Scope<'scope, 'env, A: Allocator = GlobalAlloc> {
+pub struct Scope<'scope, 'env, A: Allocator = Global> {
     command_buffer: *mut CommandBuffer<'scope, A>,
     // Implicitly requires 'env: 'scope.
     worker_group: &'scope WorkerGroup<'env>,
@@ -497,7 +497,7 @@ pub enum CommandBufferStatus {
 }
 
 #[derive(Debug)]
-struct RawCommandBuffer<'scope, 'ctx, A: Allocator = GlobalAlloc> {
+struct RawCommandBuffer<'scope, 'ctx, A: Allocator = Global> {
     label: Option<CString>,
     commands: Vec<Command<'scope, 'ctx, A>, A>,
 }

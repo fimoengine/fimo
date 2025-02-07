@@ -67,7 +67,7 @@ impl WorkerGroup<'_> {
     }
 
     /// Fetches a list of worker ids available in the worker group.
-    pub fn workers(&self) -> Result<Box<[WorkerId], GlobalAlloc>, AnyError> {
+    pub fn workers(&self) -> Result<Box<[WorkerId]>, AnyError> {
         let mut num_workers = 0;
         // Safety: FFI call is safe
         let workers = unsafe {
@@ -96,7 +96,7 @@ impl WorkerGroup<'_> {
     ///
     /// When spawning new tasks, they will be assigned one stack which matches the requirements
     /// specified in the commands.
-    pub fn stack_sizes(&self) -> Result<Box<[usize], GlobalAlloc>, AnyError> {
+    pub fn stack_sizes(&self) -> Result<Box<[usize]>, AnyError> {
         let mut num_stacks = 0;
         // Safety: FFI call is safe
         let sizes = unsafe {
