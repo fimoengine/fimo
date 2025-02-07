@@ -5,12 +5,12 @@ const Version = @import("../../Version.zig");
 
 const Self = @This();
 
-owner: []u8,
+owner: []const u8,
 version: Version,
 
 pub const Id = struct {
-    name: []u8,
-    namespace: []u8,
+    name: []const u8,
+    namespace: []const u8,
 
     pub const HashContext = struct {
         pub fn eql(self: HashContext, a: Id, b: Id, b_index: usize) bool {
@@ -26,25 +26,4 @@ pub const Id = struct {
             return @truncate(hasher.final());
         }
     };
-
-    pub fn init(allocator: Allocator, name: []const u8, namespace: []const u8) Allocator.Error!Id {
-        const n = try allocator.dupe(u8, name);
-        errdefer allocator.free(n);
-        const ns = try allocator.dupe(u8, namespace);
-        return Id{ .name = n, .namespace = ns };
-    }
-
-    pub fn deinit(self: Id, allocator: Allocator) void {
-        allocator.free(self.name);
-        allocator.free(self.namespace);
-    }
 };
-
-pub fn init(allocator: Allocator, owner: []const u8, version: Version) Allocator.Error!Self {
-    const o = try allocator.dupe(u8, owner);
-    return Self{ .owner = o, .version = version };
-}
-
-pub fn deinit(self: Self, allocator: Allocator) void {
-    allocator.free(self.owner);
-}

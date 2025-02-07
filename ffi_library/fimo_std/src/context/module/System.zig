@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
@@ -20,18 +21,15 @@ const Self = @This();
 
 mutex: Mutex = .{},
 allocator: Allocator,
+arena: ArenaAllocator,
 tmp_dir: tmp_path.TmpDirUnmanaged,
 state: enum { idle, loading_set } = .idle,
 loading_set_waiters: std.ArrayListUnmanaged(LoadingSetWaiter) = .{},
 dep_graph: graph.GraphUnmanaged(*const ProxyModule.OpaqueInstance, void),
+string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
 instances: std.StringArrayHashMapUnmanaged(InstanceRef) = .{},
 namespaces: std.StringArrayHashMapUnmanaged(NamespaceInfo) = .{},
-symbols: std.ArrayHashMapUnmanaged(
-    SymbolRef.Id,
-    SymbolRef,
-    SymbolRef.Id.HashContext,
-    false,
-) = .{},
+symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashContext, false) = .{},
 
 pub const SystemError = error{
     InUse,
@@ -61,6 +59,7 @@ const NamespaceInfo = struct {
 pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
     var module = Self{
         .allocator = ctx.allocator,
+        .arena = ArenaAllocator.init(ctx.allocator),
         .tmp_dir = undefined,
         .dep_graph = graph.GraphUnmanaged(
             *const ProxyModule.OpaqueInstance,
@@ -85,16 +84,13 @@ pub fn deinit(self: *Self) void {
     self.tmp_dir.deinit(self.allocator);
     self.loading_set_waiters.deinit(self.allocator);
     self.dep_graph.deinit(self.allocator);
-    while (self.instances.popOrNull()) |entry| self.allocator.free(entry.key);
-    while (self.namespaces.popOrNull()) |entry| self.allocator.free(entry.key);
-    while (self.symbols.popOrNull()) |*entry| {
-        entry.key.deinit(self.allocator);
-        entry.value.deinit(self.allocator);
-    }
 
-    self.instances.clearAndFree(self.allocator);
-    self.namespaces.clearAndFree(self.allocator);
-    self.symbols.clearAndFree(self.allocator);
+    self.string_cache.clearRetainingCapacity();
+    self.instances.clearRetainingCapacity();
+    self.namespaces.clearRetainingCapacity();
+    self.symbols.clearRetainingCapacity();
+
+    self.arena.deinit();
 }
 
 pub fn lock(self: *Self) void {
@@ -120,6 +116,15 @@ pub fn logWarn(self: *Self, comptime fmt: []const u8, args: anytype, location: s
 
 pub fn logError(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
     self.asContext().tracing.emitErrSimple(fmt, args, location);
+}
+
+fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
+    if (self.string_cache.getKey(value)) |v| return v;
+    const alloc = self.arena.allocator();
+    const cached = try alloc.dupe(u8, value);
+    errdefer alloc.free(cached);
+    try self.string_cache.put(alloc, cached, {});
+    return cached;
 }
 
 pub fn getInstance(self: *Self, name: []const u8) ?*InstanceRef {
@@ -200,9 +205,8 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
     }
 
     const data = InstanceRef{ .id = node, .instance = instance };
-    const key = try self.allocator.dupe(u8, std.mem.span(instance.info.name));
-    errdefer self.allocator.free(key);
-    try self.instances.put(self.allocator, key, data);
+    const key = try self.cacheString(std.mem.span(instance.info.name));
+    try self.instances.put(self.arena.allocator(), key, data);
 }
 
 pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
@@ -233,10 +237,8 @@ pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!voi
     }
     inner.clearDependencies();
 
-    const instance = self.instances.fetchSwapRemove(std.mem.span(handle.info.name)).?;
-    self.allocator.free(instance.key);
-    _ = self.dep_graph.removeNode(self.allocator, instance.value.id) catch |err|
-        @panic(@errorName(err));
+    const instance_id = self.instances.fetchSwapRemove(std.mem.span(handle.info.name)).?.value.id;
+    _ = self.dep_graph.removeNode(self.allocator, instance_id) catch |err| @panic(@errorName(err));
 }
 
 pub fn linkInstances(
@@ -331,17 +333,16 @@ fn ensureInitNamespace(self: *Self, name: []const u8) SystemError!void {
     if (std.mem.eql(u8, name, global_namespace)) return;
     if (self.namespaces.contains(name)) return;
 
-    const key = try self.allocator.dupe(u8, name);
+    const key = try self.cacheString(name);
     const ns = NamespaceInfo{ .num_symbols = 0, .num_references = 0 };
-    try self.namespaces.put(self.allocator, key, ns);
+    try self.namespaces.put(self.arena.allocator(), key, ns);
 }
 
 fn cleanupUnusedNamespace(self: *Self, namespace: []const u8) void {
     if (std.mem.eql(u8, namespace, global_namespace)) return;
     if (self.getNamespace(namespace)) |ns| {
         if (ns.num_symbols == 0 and ns.num_references == 0) {
-            const kv = self.namespaces.fetchSwapRemove(namespace).?;
-            self.allocator.free(kv.key);
+            if (!self.namespaces.swapRemove(namespace)) unreachable;
         }
     }
 }
@@ -360,7 +361,7 @@ pub fn unrefNamespace(self: *Self, name: []const u8) void {
 }
 
 pub fn getSymbol(self: *Self, name: []const u8, namespace: []const u8) ?*SymbolRef {
-    return self.symbols.getPtr(.{ .name = @constCast(name), .namespace = @constCast(namespace) });
+    return self.symbols.getPtr(.{ .name = name, .namespace = namespace });
 }
 
 pub fn getSymbolCompatible(self: *Self, name: []const u8, namespace: []const u8, version: Version) ?*SymbolRef {
@@ -377,11 +378,15 @@ fn addSymbol(
     owner: []const u8,
 ) SystemError!void {
     if (self.getSymbol(name, namespace) != null) return error.Duplicate;
-    const key = try SymbolRef.Id.init(self.allocator, name, namespace);
-    errdefer key.deinit(self.allocator);
-    const symbol = try SymbolRef.init(self.allocator, owner, version);
-    errdefer symbol.deinit(self.allocator);
-    try self.symbols.put(self.allocator, key, symbol);
+    const key = SymbolRef.Id{
+        .name = try self.cacheString(name),
+        .namespace = try self.cacheString(namespace),
+    };
+    const symbol = SymbolRef{
+        .owner = try self.cacheString(owner),
+        .version = version,
+    };
+    try self.symbols.put(self.arena.allocator(), key, symbol);
     errdefer _ = self.symbols.swapRemove(key);
 
     if (std.mem.eql(u8, namespace, global_namespace)) return;
@@ -390,13 +395,7 @@ fn addSymbol(
 }
 
 fn removeSymbol(self: *Self, name: []const u8, namespace: []const u8) void {
-    var entry = self.symbols.fetchSwapRemove(.{
-        .name = @constCast(name),
-        .namespace = @constCast(namespace),
-    }).?;
-    entry.key.deinit(self.allocator);
-    entry.value.deinit(self.allocator);
-
+    if (!self.symbols.swapRemove(.{ .name = name, .namespace = namespace })) unreachable;
     if (std.mem.eql(u8, namespace, global_namespace)) return;
     const ns = self.getNamespace(namespace) orelse unreachable;
     ns.num_symbols -= 1;

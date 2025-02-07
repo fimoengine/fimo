@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAlloactor = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
@@ -27,17 +28,14 @@ const Self = @This();
 mutex: Mutex = .{},
 refcount: RefCount = .{},
 context: *Context,
+arena: ArenaAlloactor,
 active_commits: usize = 0,
 should_recreate_map: bool = false,
 active_load_graph: ?*LoadGraph = null,
 module_load_path: OwnedPathUnmanaged,
+string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
 modules: std.StringArrayHashMapUnmanaged(ModuleInfo) = .{},
-symbols: std.ArrayHashMapUnmanaged(
-    SymbolRef.Id,
-    SymbolRef,
-    SymbolRef.Id.HashContext,
-    false,
-) = .{},
+symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashContext, false) = .{},
 
 pub const Callback = struct {
     data: ?*anyopaque,
@@ -85,7 +83,7 @@ const ModuleInfo = struct {
             std.debug.assert(self.status != .loaded);
             callback.on_error(self.@"export", callback.data);
         }
-        self.callbacks.clearAndFree(self.allocator);
+        self.callbacks.clearRetainingCapacity();
         if (self.status != .loaded) self.@"export".deinit();
         if (self.owner) |owner| {
             const handle = InstanceHandle.fromInstancePtr(owner);
@@ -369,18 +367,22 @@ pub fn init(context: *Context) !ProxyModule.LoadingSet {
     context.ref();
     errdefer context.unref();
 
-    const allocator = sys.allocator;
+    var arena = ArenaAlloactor.init(sys.allocator);
+    errdefer arena.deinit();
+    const allocator = arena.allocator();
+
     const module_load_path = try OwnedPathUnmanaged.initPath(
         allocator,
         sys.tmp_dir.path.asPath(),
     );
-    errdefer module_load_path.deinit(allocator);
-
     const set = try allocator.create(Self);
     set.* = .{
+        .arena = undefined,
         .context = context,
         .module_load_path = module_load_path,
     };
+    set.arena = arena;
+
     return set.asProxySet();
 }
 
@@ -392,20 +394,14 @@ fn unref(self: *@This()) void {
     if (self.refcount.unref() == .noop) return;
     std.debug.assert(self.active_commits == 0);
     std.debug.assert(self.active_load_graph == null);
-    while (self.modules.popOrNull()) |*entry| {
-        var value = entry.value;
-        self.context.allocator.free(entry.key);
-        value.deinit();
-    }
-    self.modules.clearAndFree(self.context.allocator);
-    while (self.symbols.popOrNull()) |*entry| {
-        entry.key.deinit(self.context.allocator);
-        entry.value.deinit(self.context.allocator);
-    }
-    self.symbols.clearAndFree(self.context.allocator);
-    self.module_load_path.deinit(self.context.allocator);
+
+    for (self.modules.values()) |*module| module.deinit();
+    self.modules.clearRetainingCapacity();
+    self.symbols.clearRetainingCapacity();
+
+    var arena = self.arena;
     const context = self.context;
-    self.context.allocator.destroy(self);
+    arena.deinit();
     context.unref();
 }
 
@@ -432,10 +428,18 @@ fn logTrace(self: *Self, comptime fmt: []const u8, args: anytype, location: std.
     self.asSys().logTrace(fmt, args, location);
 }
 
+fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
+    if (self.string_cache.getKey(value)) |v| return v;
+    const alloc = self.arena.allocator();
+    const cached = try alloc.dupe(u8, value);
+    errdefer alloc.free(cached);
+    try self.string_cache.put(alloc, cached, {});
+    return cached;
+}
+
 fn addModuleInfo(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
-    const name = try self.context.allocator.dupe(u8, module_info.@"export".getName());
-    errdefer self.context.allocator.free(name);
-    try self.modules.put(self.context.allocator, name, module_info);
+    const name = try self.cacheString(module_info.@"export".getName());
+    try self.modules.put(self.arena.allocator(), name, module_info);
 }
 
 fn getModuleInfo(self: *const Self, name: []const u8) ?*ModuleInfo {
@@ -449,21 +453,19 @@ fn addSymbol(
     version: Version,
     owner: []const u8,
 ) Allocator.Error!void {
-    const key = try SymbolRef.Id.init(self.context.allocator, name, namespace);
-    errdefer key.deinit(self.context.allocator);
-    const symbol = try SymbolRef.init(self.context.allocator, owner, version);
-    errdefer symbol.deinit(self.context.allocator);
-    try self.symbols.put(self.context.allocator, key, symbol);
-    errdefer _ = self.symbols.swapRemove(key);
+    const key = SymbolRef.Id{
+        .name = try self.cacheString(name),
+        .namespace = try self.cacheString(namespace),
+    };
+    const symbol = SymbolRef{
+        .owner = try self.cacheString(owner),
+        .version = version,
+    };
+    try self.symbols.put(self.arena.allocator(), key, symbol);
 }
 
 fn removeSymbol(self: *Self, name: []const u8, namespace: []const u8) void {
-    var entry = self.symbols.fetchSwapRemove(.{
-        .name = @constCast(name),
-        .namespace = @constCast(namespace),
-    }).?;
-    entry.key.deinit(self.context.allocator);
-    entry.value.deinit(self.context.allocator);
+    if (!self.symbols.swapRemove(.{ .name = name, .namespace = namespace })) unreachable;
 }
 
 fn getSymbolAny(self: *const Self, name: []const u8, ns: []const u8) ?*SymbolRef {

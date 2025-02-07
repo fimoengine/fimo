@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
@@ -162,11 +163,7 @@ pub const Parameter = struct {
             }
         };
 
-        owner.ref();
-        errdefer owner.unref();
-
-        const allocator = owner.sys.allocator;
-        const p = try allocator.create(Parameter);
+        const p = try owner.inner.arena.allocator().create(Parameter);
         p.* = .{
             .inner = inner,
             .owner = owner,
@@ -179,12 +176,6 @@ pub const Parameter = struct {
             .write_fn = write_fn orelse &Wrapper.write,
         };
         return p;
-    }
-
-    fn deinit(self: *Parameter) void {
-        const owner = self.owner;
-        owner.sys.allocator.destroy(self);
-        owner.unref();
     }
 
     pub fn checkType(
@@ -232,6 +223,7 @@ pub const Parameter = struct {
 pub const Inner = struct {
     mutex: Mutex = .{},
     state: State = .uninit,
+    arena: ArenaAllocator,
     strong_count: usize = 0,
     dependents_count: usize = 0,
     is_detached: bool = false,
@@ -240,12 +232,8 @@ pub const Inner = struct {
     handle: ?*ModuleHandle = null,
     @"export": ?*const ProxyModule.Export = null,
     instance: ?*const ProxyModule.OpaqueInstance = null,
-    symbols: std.ArrayHashMapUnmanaged(
-        SymbolRef.Id,
-        Symbol,
-        SymbolRef.Id.HashContext,
-        false,
-    ) = .{},
+    string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
+    symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, Symbol, SymbolRef.Id.HashContext, false) = .{},
     parameters: std.StringArrayHashMapUnmanaged(*Parameter) = .{},
     namespaces: std.StringArrayHashMapUnmanaged(DependencyType) = .{},
     dependencies: std.StringArrayHashMapUnmanaged(InstanceDependency) = .{},
@@ -314,15 +302,20 @@ pub const Inner = struct {
         self.unblockUnload();
     }
 
-    fn allocator(self: *Inner) Allocator {
-        return Self.fromInnerPtr(self).sys.allocator;
+    fn cacheString(self: *Inner, value: []const u8) Allocator.Error![]const u8 {
+        if (self.string_cache.getKey(value)) |v| return v;
+        const alloc = self.arena.allocator();
+        const cached = try alloc.dupe(u8, value);
+        errdefer alloc.free(cached);
+        try self.string_cache.put(alloc, cached, {});
+        return cached;
     }
 
     pub fn getSymbol(self: *Inner, name: []const u8, namespace: []const u8, version: Version) ?*Symbol {
         if (self.isDetached()) return null;
         const sym = self.symbols.getPtr(.{
-            .name = @constCast(name),
-            .namespace = @constCast(namespace),
+            .name = name,
+            .namespace = namespace,
         }) orelse return null;
         if (!sym.version.isCompatibleWith(version)) return null;
         return sym;
@@ -330,9 +323,11 @@ pub const Inner = struct {
 
     fn addSymbol(self: *Inner, name: []const u8, namespace: []const u8, sym: Symbol) InstanceHandleError!void {
         if (self.isDetached()) return error.Detached;
-        var key = try SymbolRef.Id.init(self.allocator(), name, namespace);
-        errdefer key.deinit(self.allocator());
-        try self.symbols.put(self.allocator(), key, sym);
+        const key = SymbolRef.Id{
+            .name = try self.cacheString(name),
+            .namespace = try self.cacheString(namespace),
+        };
+        try self.symbols.put(self.arena.allocator(), key, sym);
     }
 
     pub fn getParameter(self: *Inner, name: []const u8) ?*Parameter {
@@ -342,9 +337,8 @@ pub const Inner = struct {
 
     fn addParameter(self: *Inner, name: []const u8, param: *Parameter) InstanceHandleError!void {
         if (self.isDetached()) return error.Detached;
-        const n = try self.allocator().dupe(u8, name);
-        errdefer self.allocator().free(n);
-        try self.parameters.put(self.allocator(), n, param);
+        const n = try self.cacheString(name);
+        try self.parameters.put(self.arena.allocator(), n, param);
     }
 
     pub fn getNamespace(self: *Inner, name: []const u8) ?*DependencyType {
@@ -354,15 +348,13 @@ pub const Inner = struct {
 
     pub fn addNamespace(self: *Inner, name: []const u8, @"type": DependencyType) InstanceHandleError!void {
         if (self.isDetached()) return error.Detached;
-        const n = try self.allocator().dupe(u8, name);
-        errdefer self.allocator().free(n);
-        try self.namespaces.put(self.allocator(), n, @"type");
+        const n = try self.cacheString(name);
+        try self.namespaces.put(self.arena.allocator(), n, @"type");
     }
 
     pub fn removeNamespace(self: *Inner, name: []const u8) InstanceHandleError!void {
         if (self.isDetached()) return error.Detached;
-        const dependency = self.namespaces.fetchSwapRemove(name) orelse return error.NotFound;
-        self.allocator().free(@constCast(dependency.key));
+        if (!self.namespaces.swapRemove(name)) return error.NotFound;
     }
 
     pub fn getDependency(self: *Inner, name: []const u8) ?*InstanceDependency {
@@ -384,9 +376,8 @@ pub const Inner = struct {
         handle.ref();
         errdefer handle.unref();
 
-        const n = try self.allocator().dupe(u8, name);
-        errdefer self.allocator().free(n);
-        try self.dependencies.put(self.allocator(), n, dep);
+        const n = try self.cacheString(name);
+        try self.dependencies.put(self.arena.allocator(), n, dep);
         other.dependents_count += 1;
     }
 
@@ -397,8 +388,7 @@ pub const Inner = struct {
 
         const handle = Self.fromInnerPtr(other);
         const name = std.mem.span(handle.info.name);
-        const dependency = self.dependencies.fetchSwapRemove(name) orelse return error.NotFound;
-        self.allocator().free(@constCast(dependency.key));
+        if (!self.dependencies.swapRemove(name)) return error.NotFound;
         other.dependents_count -= 1;
         other.unblockUnload();
         handle.unref();
@@ -406,17 +396,15 @@ pub const Inner = struct {
 
     pub fn clearDependencies(self: *Inner) void {
         std.debug.assert(!self.isDetached());
-        while (self.dependencies.popOrNull()) |dep| {
-            const handle = dep.value.instance;
-            {
-                const inner = handle.lock();
-                defer inner.unlock();
-                self.allocator().free(@constCast(dep.key));
-                inner.dependents_count -= 1;
-                inner.unblockUnload();
-            }
+        for (self.dependencies.values()) |dep| {
+            const handle = dep.instance;
+            const inner = handle.lock();
+            defer inner.unlock();
+            inner.dependents_count -= 1;
+            inner.unblockUnload();
             handle.unref();
         }
+        self.dependencies.clearRetainingCapacity();
     }
 
     pub fn start(self: *Inner, sys: *System, err: *?AnyError) AnyError.Error!void {
@@ -456,6 +444,7 @@ pub const Inner = struct {
     fn detach(self: *Inner) void {
         std.debug.assert(self.canUnload());
         std.debug.assert(self.state != .started);
+        std.debug.assert(self.dependencies.count() == 0);
         const instance = self.instance.?;
 
         self.is_detached = true;
@@ -465,47 +454,12 @@ pub const Inner = struct {
             exp.deinit();
         }
 
-        if (instance.parameters) |p| {
-            const parameters: [*:null]?*Parameter = @alignCast(@ptrCast(@constCast(p)));
-            self.allocator().free(std.mem.span(parameters));
-        }
-        if (instance.resources) |res| {
-            const resources_ptr: [*:null]?[*:0]u8 = @alignCast(@ptrCast(@constCast(res)));
-            const resources = std.mem.span(resources_ptr);
-            for (resources) |r| if (r) |r_| self.allocator().free(std.mem.span(r_));
-            self.allocator().free(resources);
-        }
-        if (instance.imports) |imp| {
-            const imports: [*:null]?*const anyopaque = @alignCast(@ptrCast(@constCast(imp)));
-            self.allocator().free(std.mem.span(imports));
-        }
-        if (instance.exports) |exp| {
-            const exports: [*:null]?*const anyopaque = @alignCast(@ptrCast(@constCast(exp)));
-            self.allocator().free(std.mem.span(exports));
-        }
-        self.allocator().destroy(instance);
+        for (self.symbols.values()) |sym| sym.destroySymbol();
 
-        var dependencies = self.dependencies.iterator();
-        while (dependencies.next()) |dep| self.allocator().free(dep.key_ptr.*);
-        self.dependencies.clearAndFree(self.allocator());
-
-        var parameters = self.parameters.iterator();
-        while (parameters.next()) |entry| {
-            self.allocator().free(entry.key_ptr.*);
-            entry.value_ptr.*.deinit();
-        }
-        self.parameters.clearAndFree(self.allocator());
-
-        var namespaces_it = self.namespaces.iterator();
-        while (namespaces_it.next()) |entry| self.allocator().free(entry.key_ptr.*);
-        self.namespaces.clearAndFree(self.allocator());
-
-        var symbols = self.symbols.iterator();
-        while (symbols.next()) |sym| {
-            sym.key_ptr.deinit(self.allocator());
-            sym.value_ptr.destroySymbol();
-        }
-        self.symbols.clearAndFree(self.allocator());
+        self.symbols.clearRetainingCapacity();
+        self.parameters.clearRetainingCapacity();
+        self.namespaces.clearRetainingCapacity();
+        self.dependencies.clearRetainingCapacity();
 
         self.handle.?.unref();
 
@@ -526,40 +480,33 @@ fn init(
     @"export": ?*const ProxyModule.Export,
     @"type": InstanceType,
 ) InstanceHandleError!*Self {
-    const allocator = sys.allocator;
     sys.asContext().ref();
     errdefer sys.asContext().unref();
 
-    const self = try allocator.create(Self);
-    errdefer allocator.destroy(self);
+    var arena = ArenaAllocator.init(sys.allocator);
+    errdefer arena.deinit();
+    const allocator = arena.allocator();
 
+    const self = try allocator.create(Self);
     self.* = .{
         .sys = sys,
         .inner = .{
+            .arena = undefined,
             .handle = handle,
             .@"export" = @"export",
         },
         .type = @"type",
         .info = .{
-            .name = undefined,
-            .description = undefined,
-            .author = undefined,
-            .license = undefined,
-            .module_path = undefined,
+            .name = (try allocator.dupeZ(u8, name)).ptr,
+            .description = if (description) |str| (try allocator.dupeZ(u8, str)).ptr else null,
+            .author = if (author) |str| (try allocator.dupeZ(u8, str)).ptr else null,
+            .license = if (license) |str| (try allocator.dupeZ(u8, str)).ptr else null,
+            .module_path = if (module_path) |str| (try allocator.dupeZ(u8, str)).ptr else null,
             .vtable = info_vtable,
         },
     };
-
-    self.info.name = (try self.sys.allocator.dupeZ(u8, name)).ptr;
-    errdefer self.sys.allocator.free(std.mem.span(self.info.name));
-    self.info.description = if (description) |str| (try self.sys.allocator.dupeZ(u8, str)).ptr else null;
-    errdefer if (self.info.description) |str| self.sys.allocator.free(std.mem.span(str));
-    self.info.author = if (author) |str| (try self.sys.allocator.dupeZ(u8, str)).ptr else null;
-    errdefer if (self.info.author) |str| self.sys.allocator.free(std.mem.span(str));
-    self.info.license = if (license) |str| (try self.sys.allocator.dupeZ(u8, str)).ptr else null;
-    errdefer if (self.info.license) |str| self.sys.allocator.free(std.mem.span(str));
-    self.info.module_path = if (module_path) |str| (try self.sys.allocator.dupeZ(u8, str)).ptr else null;
-    errdefer if (self.info.module_path) |str| self.sys.allocator.free(std.mem.span(str));
+    // Move the new state of the arena into the allocated handle.
+    self.inner.arena = arena;
 
     return self;
 }
@@ -582,7 +529,7 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
     );
     errdefer instance_handle.unref();
 
-    const instance = try sys.allocator.create(ProxyModule.PseudoInstance);
+    const instance = try instance_handle.inner.arena.allocator().create(ProxyModule.PseudoInstance);
     comptime {
         std.debug.assert(@sizeOf(ProxyModule.PseudoInstance) == @sizeOf(ProxyModule.OpaqueInstance));
         std.debug.assert(@alignOf(ProxyModule.PseudoInstance) == @alignOf(ProxyModule.OpaqueInstance));
@@ -632,7 +579,7 @@ pub fn initExportedInstance(
     inner.refStrong() catch unreachable;
     errdefer inner.unrefStrong();
 
-    const instance = try sys.allocator.create(ProxyModule.OpaqueInstance);
+    const instance = try instance_handle.inner.arena.allocator().create(ProxyModule.OpaqueInstance);
     instance.* = .{
         .vtable = &instance_vtable,
         .parameters = null,
@@ -644,56 +591,49 @@ pub fn initExportedInstance(
         .data = null,
     };
     inner.instance = instance;
+    const allocator = inner.arena.allocator();
 
     // Init parameters.
-    var parameters = std.ArrayListUnmanaged(?*ProxyModule.OpaqueParameter){};
-    errdefer parameters.deinit(sys.allocator);
-    for (@"export".getParameters()) |p| {
+    const exp_parameters = @"export".getParameters();
+    const parameters = try allocator.alloc(*ProxyModule.OpaqueParameter, exp_parameters.len);
+    instance.parameters = @ptrCast(parameters.ptr);
+    for (exp_parameters, parameters) |src, *dst| {
         const data = Parameter.Data{
-            .value = switch (p.type) {
-                .u8 => .{ .u8 = std.atomic.Value(u8).init(p.default_value.u8) },
-                .u16 => .{ .u16 = std.atomic.Value(u16).init(p.default_value.u16) },
-                .u32 => .{ .u32 = std.atomic.Value(u32).init(p.default_value.u32) },
-                .u64 => .{ .u64 = std.atomic.Value(u64).init(p.default_value.u64) },
-                .i8 => .{ .i8 = std.atomic.Value(i8).init(p.default_value.i8) },
-                .i16 => .{ .i16 = std.atomic.Value(i16).init(p.default_value.i16) },
-                .i32 => .{ .i32 = std.atomic.Value(i32).init(p.default_value.i32) },
-                .i64 => .{ .i64 = std.atomic.Value(i64).init(p.default_value.i64) },
+            .value = switch (src.type) {
+                .u8 => .{ .u8 = std.atomic.Value(u8).init(src.default_value.u8) },
+                .u16 => .{ .u16 = std.atomic.Value(u16).init(src.default_value.u16) },
+                .u32 => .{ .u32 = std.atomic.Value(u32).init(src.default_value.u32) },
+                .u64 => .{ .u64 = std.atomic.Value(u64).init(src.default_value.u64) },
+                .i8 => .{ .i8 = std.atomic.Value(i8).init(src.default_value.i8) },
+                .i16 => .{ .i16 = std.atomic.Value(i16).init(src.default_value.i16) },
+                .i32 => .{ .i32 = std.atomic.Value(i32).init(src.default_value.i32) },
+                .i64 => .{ .i64 = std.atomic.Value(i64).init(src.default_value.i64) },
                 else => return error.InvalidParameterType,
             },
         };
-        var param: ?*Parameter = try Parameter.init(
+        var param: *Parameter = try Parameter.init(
             instance_handle,
             data,
-            p.read_group,
-            p.write_group,
-            p.read,
-            p.write,
+            src.read_group,
+            src.write_group,
+            src.read,
+            src.write,
         );
-        errdefer if (param) |pa| pa.deinit();
-        try inner.addParameter(std.mem.span(p.name), param.?);
-        const param_copy = &param.?.proxy;
-        param = null;
-        try parameters.append(sys.allocator, param_copy);
+        try inner.addParameter(std.mem.span(src.name), param);
+        dst.* = &param.proxy;
     }
-    try parameters.append(sys.allocator, null);
-    instance.parameters = @ptrCast((try parameters.toOwnedSlice(sys.allocator)).ptr);
 
     // Init resources.
-    var resources = std.ArrayListUnmanaged(?[*:0]u8){};
-    errdefer resources.deinit(sys.allocator);
-    errdefer for (resources.items) |x| if (x) |r| sys.allocator.free(std.mem.span(r));
-    for (@"export".getResources()) |res| {
+    const exp_resources = @"export".getResources();
+    const resources = try allocator.alloc([*:0]u8, exp_resources.len);
+    instance.resources = @ptrCast(resources.ptr);
+    for (exp_resources, resources) |src, *dst| {
         var buf = PathBufferUnmanaged{};
         defer buf.deinit(sys.allocator);
         try buf.pushPath(sys.allocator, handle.path.asPath());
-        try buf.pushString(sys.allocator, std.mem.span(res.path));
-        const p = try sys.allocator.dupeZ(u8, buf.asPath().raw);
-        errdefer sys.allocator.free(p);
-        try resources.append(sys.allocator, p);
+        try buf.pushString(sys.allocator, std.mem.span(src.path));
+        dst.* = try inner.arena.allocator().dupeZ(u8, buf.asPath().raw);
     }
-    try resources.append(sys.allocator, null);
-    instance.resources = @ptrCast((try resources.toOwnedSlice(sys.allocator)).ptr);
 
     // Init namespaces.
     for (@"export".getNamespaceImports()) |imp| {
@@ -703,17 +643,17 @@ pub fn initExportedInstance(
     }
 
     // Init imports.
-    var imports = std.ArrayListUnmanaged(?*const anyopaque){};
-    errdefer imports.deinit(sys.allocator);
-    errdefer inner.clearDependencies();
-    for (@"export".getSymbolImports()) |imp| {
-        const imp_name = std.mem.span(imp.name);
-        const imp_namespace = std.mem.span(imp.namespace);
-        const imp_version = Version.initC(imp.version);
+    const exp_imports = @"export".getSymbolImports();
+    const imports = try allocator.alloc(*const anyopaque, exp_imports.len);
+    instance.imports = @ptrCast(imports.ptr);
+    for (exp_imports, imports) |src, *dst| {
+        const src_name = std.mem.span(src.name);
+        const src_namespace = std.mem.span(src.namespace);
+        const src_version = Version.initC(src.version);
         const sym = sys.getSymbolCompatible(
-            imp_name,
-            imp_namespace,
-            imp_version,
+            src_name,
+            src_namespace,
+            src_version,
         ) orelse return error.NotFound;
 
         const owner = sys.getInstance(sym.owner).?;
@@ -722,15 +662,13 @@ pub fn initExportedInstance(
         defer owner_inner.unlock();
 
         const owner_sym = owner_inner.getSymbol(
-            imp_name,
-            imp_namespace,
-            imp_version,
+            src_name,
+            src_namespace,
+            src_version,
         ).?;
-        try imports.append(sys.allocator, owner_sym.symbol);
         if (inner.getDependency(sym.owner) == null) try inner.addDependency(owner_inner, .static);
+        dst.* = owner_sym.symbol;
     }
-    try imports.append(sys.allocator, null);
-    instance.imports = @ptrCast((try imports.toOwnedSlice(sys.allocator)).ptr);
 
     // Init instance data.
     if (@"export".constructor) |constructor| {
@@ -746,44 +684,44 @@ pub fn initExportedInstance(
     inner.state = .init;
 
     // Init exports.
-    var exports = std.ArrayListUnmanaged(?*const anyopaque){};
-    errdefer exports.deinit(sys.allocator);
-    for (@"export".getSymbolExports()) |exp| {
-        const sym = exp.symbol;
-        const exp_name = std.mem.span(exp.name);
-        const exp_namespace = std.mem.span(exp.namespace);
-        const exp_version = Version.initC(exp.version);
-        try inner.addSymbol(exp_name, exp_namespace, .{
+    const exp_exports = @"export".getSymbolExports();
+    const exp_dyn_exports = @"export".getDynamicSymbolExports();
+    const exports = try allocator.alloc(*const anyopaque, exp_exports.len + exp_dyn_exports.len);
+    instance.exports = @ptrCast(exports.ptr);
+    for (exp_exports, exports[0..exp_exports.len]) |src, *dst| {
+        const sym = src.symbol;
+        const src_name = std.mem.span(src.name);
+        const src_namespace = std.mem.span(src.namespace);
+        const src_version = Version.initC(src.version);
+        try inner.addSymbol(src_name, src_namespace, .{
             .symbol = sym,
-            .version = exp_version,
+            .version = src_version,
             .dtor = null,
         });
-        try exports.append(sys.allocator, sym);
+        dst.* = sym;
     }
-    for (@"export".getDynamicSymbolExports()) |exp| {
+    for (exp_dyn_exports, exports[exp_exports.len..]) |src, *dst| {
         inner.unlock();
         sys.mutex.unlock();
         var sym: *anyopaque = undefined;
-        const result = exp.constructor(instance, &sym);
+        const result = src.constructor(instance, &sym);
         sys.mutex.lock();
         _ = instance_handle.lock();
         try AnyError.initChecked(err, result);
         var skip_dtor = false;
-        errdefer if (!skip_dtor) exp.destructor(sym);
+        errdefer if (!skip_dtor) src.destructor(sym);
 
-        const exp_name = std.mem.span(exp.name);
-        const exp_namespace = std.mem.span(exp.namespace);
-        const exp_version = Version.initC(exp.version);
-        try inner.addSymbol(exp_name, exp_namespace, .{
+        const src_name = std.mem.span(src.name);
+        const src_namespace = std.mem.span(src.namespace);
+        const src_version = Version.initC(src.version);
+        try inner.addSymbol(src_name, src_namespace, .{
             .symbol = sym,
-            .version = exp_version,
-            .dtor = exp.destructor,
+            .version = src_version,
+            .dtor = src.destructor,
         });
         skip_dtor = true;
-        try exports.append(sys.allocator, sym);
+        dst.* = sym;
     }
-    try exports.append(sys.allocator, null);
-    instance.exports = @ptrCast((try exports.toOwnedSlice(sys.allocator)).ptr);
 
     return instance;
 }
@@ -818,14 +756,7 @@ fn unref(self: *const Self) void {
     if (!inner.isDetached()) inner.detach();
 
     const sys = this.sys;
-    const allocator = sys.allocator;
-
-    allocator.free(std.mem.span(this.info.name));
-    if (this.info.description) |str| allocator.free(std.mem.span(str));
-    if (this.info.author) |str| allocator.free(std.mem.span(str));
-    if (this.info.license) |str| allocator.free(std.mem.span(str));
-    if (this.info.module_path) |str| allocator.free(std.mem.span(str));
-    allocator.destroy(this);
+    inner.arena.deinit();
     sys.asContext().unref();
 }
 
