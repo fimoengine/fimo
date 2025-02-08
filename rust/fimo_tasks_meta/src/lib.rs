@@ -430,7 +430,7 @@ pub fn __private_with_context(
             unsafe {
                 set.view()
                     .add_modules_from_path(&tasks_dir, |_| {
-                        fimo_std::module::loading_set::LoadingFilterRequest::Load
+                        fimo_std::module::loading_set::FilterRequest::Load
                     })
                     .unwrap();
             }

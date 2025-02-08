@@ -264,6 +264,14 @@ typedef struct FimoModuleExport FimoModuleExport;
 
 typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleLoadingSetCommitFuture;
 
+/// Operation of the loading set filter function.
+typedef enum FimoModuleLoadingSetFilterRequest : FimoI32 {
+    /// Skip the specific module.
+    FIMO_MODULE_LOADING_SET_FILTER_SKIP,
+    /// Try loading the specific module.
+    FIMO_MODULE_LOADING_SET_FILTER_LOAD,
+} FimoModuleLoadingSetFilterRequest;
+
 /// VTable of a loading set.
 ///
 /// Adding fields to the VTable is not a breaking change.
@@ -316,7 +324,8 @@ typedef struct FimoModuleLoadingSetVTable {
     /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
     /// In case of an error, no modules are appended to the set.
     FimoResult (*add_modules_from_path)(void *ctx, FimoUTF8Path path,
-                                        bool (*filter_fn)(const FimoModuleExport *exp, void *data),
+                                        FimoModuleLoadingSetFilterRequest (*filter_fn)(
+                                            const FimoModuleExport *exp, void *data),
                                         void (*filter_deinit)(void *data),
                                         void *filter_data);
     /// Adds modules to the set.
@@ -330,13 +339,14 @@ typedef struct FimoModuleLoadingSetVTable {
     /// set up automatically, if the binary was linked with the fimo library. In case of an error,
     /// no modules are appended to the set.
     FimoResult (*add_modules_from_local)(void *ctx,
-                                        bool (*filter_fn)(const FimoModuleExport *exp, void *data),
+                                        FimoModuleLoadingSetFilterRequest (*filter_fn)(
+                                            const FimoModuleExport *exp, void *data),
                                         void (*filter_deinit)(void *data),
                                         void *filter_data,
                                         void (*iterator_fn)(
-                                                bool (*filter_fn)(const FimoModuleExport *exp,
-                                                                  void *data),
+                                            bool (*filter_fn)(const FimoModuleExport *exp,
                                                 void *data),
+                                            void *data),
                                         const void *bin_ptr);
     /// Loads the modules contained in the set.
     ///

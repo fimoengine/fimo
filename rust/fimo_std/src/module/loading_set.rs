@@ -13,19 +13,18 @@ use crate::{
         exports::Export,
         info::InfoView,
         instance::{GenericInstance, OpaqueInstanceView},
-        symbols::{StrRef, SymbolInfo},
+        symbols::{AssertSharable, Share, StrRef, SymbolInfo},
     },
     utils::{ConstNonNull, OpaqueHandle, Viewable},
     version::Version,
 };
 
-use super::symbols::{AssertSharable, Share};
-
 /// Result of the filter operation of a [`LoadingSet`].
+#[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum LoadingFilterRequest {
-    Load,
+pub enum FilterRequest {
     Skip,
+    Load,
 }
 
 /// Status of a module loading operation.
@@ -76,7 +75,7 @@ pub struct LoadingSetVTable {
         filter: unsafe extern "C" fn(
             export: &Export<'_>,
             handle: Option<OpaqueHandle<dyn Send>>,
-        ) -> bool,
+        ) -> FilterRequest,
         filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
         filter_handle: Option<OpaqueHandle<dyn Send>>,
     ) -> AnyResult,
@@ -85,7 +84,7 @@ pub struct LoadingSetVTable {
         filter: unsafe extern "C" fn(
             export: &Export<'_>,
             handle: Option<OpaqueHandle<dyn Send>>,
-        ) -> bool,
+        ) -> FilterRequest,
         filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
         filter_handle: Option<OpaqueHandle<dyn Send>>,
         iterator: unsafe extern "C" fn(
@@ -145,7 +144,7 @@ impl LoadingSetVTable {
                 filter: unsafe extern "C" fn(
                     export: &Export<'_>,
                     handle: Option<OpaqueHandle<dyn Send>>,
-                ) -> bool,
+                ) -> FilterRequest,
                 filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
                 filter_handle: Option<OpaqueHandle<dyn Send>>,
             ) -> AnyResult,
@@ -154,7 +153,7 @@ impl LoadingSetVTable {
                 filter: unsafe extern "C" fn(
                     export: &Export<'_>,
                     handle: Option<OpaqueHandle<dyn Send>>,
-                ) -> bool,
+                ) -> FilterRequest,
                 filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
                 filter_handle: Option<OpaqueHandle<dyn Send>>,
                 iterator: unsafe extern "C" fn(
@@ -350,24 +349,23 @@ impl LoadingSetView<'_> {
     /// Loading a library may execute arbitrary code.
     pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), AnyError>
     where
-        F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
+        F: FnMut(&Export<'_>) -> FilterRequest + Send,
     {
         unsafe extern "C" fn filter_wrapper<F>(
             export: &Export<'_>,
             handle: Option<OpaqueHandle<dyn Send>>,
-        ) -> bool
+        ) -> FilterRequest
         where
-            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
+            F: FnMut(&Export<'_>) -> FilterRequest + Send,
         {
             unsafe {
                 let f = &mut *handle.unwrap_unchecked().as_ptr::<F>();
-                let request = f(export);
-                matches!(request, LoadingFilterRequest::Load)
+                f(export)
             }
         }
         unsafe extern "C" fn filter_drop<F>(handle: Option<OpaqueHandle<dyn Send>>)
         where
-            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
+            F: FnMut(&Export<'_>) -> FilterRequest + Send,
         {
             unsafe {
                 let handle = handle.unwrap_unchecked().as_ptr::<F>();
@@ -406,24 +404,23 @@ impl LoadingSetView<'_> {
     /// modules are appended to the set.
     pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), AnyError>
     where
-        F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
+        F: FnMut(&Export<'_>) -> FilterRequest + Send,
     {
         unsafe extern "C" fn filter_wrapper<F>(
             export: &Export<'_>,
             handle: Option<OpaqueHandle<dyn Send>>,
-        ) -> bool
+        ) -> FilterRequest
         where
-            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
+            F: FnMut(&Export<'_>) -> FilterRequest + Send,
         {
             unsafe {
                 let f = &mut *handle.unwrap_unchecked().as_ptr::<F>();
-                let request = f(export);
-                matches!(request, LoadingFilterRequest::Load)
+                f(export)
             }
         }
         unsafe extern "C" fn filter_drop<F>(handle: Option<OpaqueHandle<dyn Send>>)
         where
-            F: FnMut(&Export<'_>) -> LoadingFilterRequest + Send,
+            F: FnMut(&Export<'_>) -> FilterRequest + Send,
         {
             unsafe {
                 let handle = handle.unwrap_unchecked().as_ptr::<F>();

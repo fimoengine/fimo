@@ -213,7 +213,7 @@ pub fn main() !void {
     try set.addModulesFromLocal(
         &{},
         struct {
-            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
+            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterRequest {
                 _ = @"export";
                 _ = data;
                 return .load;

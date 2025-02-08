@@ -789,18 +789,21 @@ const AppendModulesData = struct {
     sys: *System,
     err: ?Allocator.Error = null,
     filter_data: ?*anyopaque,
-    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_fn: *const fn (
+        @"export": *const ProxyModule.Export,
+        data: ?*anyopaque,
+    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
     exports: std.ArrayListUnmanaged(*const ProxyModule.Export) = .{},
 };
 
-fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) callconv(.C) bool {
+fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) callconv(.c) bool {
     const data: *AppendModulesData = @alignCast(@ptrCast(o_data));
     validate_export(data.sys, @"export") catch {
         data.sys.logWarn("skipping export", .{}, @src());
         return true;
     };
 
-    if (data.filter_fn == null or data.filter_fn.?(@"export", data.filter_data)) {
+    if (data.filter_fn(@"export", data.filter_data) == .load) {
         data.exports.append(data.sys.allocator, @"export") catch |err| {
             @"export".deinit();
             data.err = err;
@@ -823,7 +826,10 @@ fn addModule(
 fn addModulesFromHandle(
     self: *Self,
     module_handle: *ModuleHandle,
-    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_fn: *const fn (
+        @"export": *const ProxyModule.Export,
+        data: ?*anyopaque,
+    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
 ) !void {
     var append_data = AppendModulesData{
@@ -844,7 +850,10 @@ fn addModulesFromHandle(
 fn addModulesFromPath(
     self: *Self,
     path: Path,
-    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_fn: *const fn (
+        @"export": *const ProxyModule.Export,
+        data: ?*anyopaque,
+    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
 ) !void {
     const module_handle = try ModuleHandle.initPath(
@@ -859,7 +868,10 @@ fn addModulesFromPath(
 fn addModulesFromLocal(
     self: *Self,
     iterator_fn: ModuleHandle.IteratorFn,
-    filter_fn: ?*const fn (@"export": *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+    filter_fn: *const fn (
+        @"export": *const ProxyModule.Export,
+        data: ?*anyopaque,
+    ) callconv(.C) ProxyModule.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
     bin_ptr: *const anyopaque,
 ) !void {
@@ -1362,7 +1374,10 @@ const VTableImpl = struct {
     fn addModulesFromPath(
         this: *anyopaque,
         path: c.FimoUTF8Path,
-        filter_fn: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+        filter_fn: *const fn (
+            module: *const ProxyModule.Export,
+            data: ?*anyopaque,
+        ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
     ) callconv(.c) AnyResult {
@@ -1388,11 +1403,14 @@ const VTableImpl = struct {
     }
     fn addModulesFromLocal(
         this: *anyopaque,
-        filter_fn: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+        filter_fn: *const fn (
+            module: *const ProxyModule.Export,
+            data: ?*anyopaque,
+        ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
         iterator_fn: *const fn (
-            f: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
+            f: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) bool,
             data: ?*anyopaque,
         ) callconv(.C) void,
         bin_ptr: *const anyopaque,

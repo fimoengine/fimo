@@ -28,9 +28,9 @@ pub const IteratorFn = *const fn (
     f: *const fn (
         @"export": *const ProxyModule.Export,
         data: ?*anyopaque,
-    ) callconv(.C) bool,
+    ) callconv(.c) bool,
     data: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 const Inner = if (builtin.os.tag == .windows)
     struct {

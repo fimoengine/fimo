@@ -1,8 +1,7 @@
 const std = @import("std");
 
-const fimo_std = @import("fimo_std");
 const fimo_python_meta = @import("fimo_python_meta");
-
+const fimo_std = @import("fimo_std");
 const Context = fimo_std.Context;
 const Async = Context.Async;
 const Tracing = Context.Tracing;
@@ -49,7 +48,7 @@ pub fn main() !void {
         module_path.asPath(),
         &{},
         struct {
-            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterOp {
+            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterRequest {
                 _ = @"export";
                 _ = data;
                 return .load;

@@ -12,7 +12,7 @@ use fimo_std::{
         exports::{Builder, SymbolLinkage},
         info::Info,
         instance::{GenericInstance, PseudoInstance, UninitInstanceView, UnloadingInstanceView},
-        loading_set::{LoadingFilterRequest, LoadingSet, LoadingSetView},
+        loading_set::{FilterRequest, LoadingSet, LoadingSetView},
         parameters::ParameterAccessGroup,
         symbols::SymbolInfo,
         *,
@@ -218,7 +218,7 @@ fn load_modules() -> Result<(), AnyError> {
 
         let set = LoadingSet::new(&context)?;
         set.view()
-            .add_modules_from_local(|_| LoadingFilterRequest::Load)?;
+            .add_modules_from_local(|_| FilterRequest::Load)?;
         set.view().commit().await?;
 
         let instance = PseudoInstance::new(&context)?;

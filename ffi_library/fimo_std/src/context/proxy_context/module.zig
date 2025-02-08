@@ -875,7 +875,8 @@ pub const LoadingSet = extern struct {
     data: *anyopaque,
     vtable: *const LoadingSet.VTable,
 
-    pub const FilterOp = enum(u32) {
+    /// Operation of the filter function.
+    pub const FilterRequest = enum(i32) {
         skip,
         load,
     };
@@ -912,13 +913,13 @@ pub const LoadingSet = extern struct {
         add_modules_from_path: *const fn (
             ctx: *anyopaque,
             path: c.FimoUTF8Path,
-            filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
+            filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
             filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             filter_data: ?*anyopaque,
         ) callconv(.c) AnyResult,
         add_modules_from_local: *const fn (
             ctx: *anyopaque,
-            filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
+            filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
             filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             filter_data: ?*anyopaque,
             iterator_fn: *const fn (
@@ -1091,7 +1092,7 @@ pub const LoadingSet = extern struct {
         self: LoadingSet,
         path: Path,
         obj: anytype,
-        comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterOp,
+        comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterRequest,
         comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
         err: *?AnyError,
     ) AnyError.Error!void {
@@ -1099,9 +1100,9 @@ pub const LoadingSet = extern struct {
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         const Callbacks = struct {
-            fn f(module: *const Export, data: ?*anyopaque) callconv(.c) bool {
+            fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
                 const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
-                return filter(module, o) == .load;
+                return filter(module, o);
             }
             fn deinit(data: ?*anyopaque) callconv(.c) void {
                 if (filter_deinit) {
@@ -1135,7 +1136,7 @@ pub const LoadingSet = extern struct {
         self: LoadingSet,
         path: Path,
         filter_data: ?*anyopaque,
-        filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
+        filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
     ) AnyError.Error!void {
@@ -1161,7 +1162,7 @@ pub const LoadingSet = extern struct {
     pub fn addModulesFromLocal(
         self: LoadingSet,
         obj: anytype,
-        comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterOp,
+        comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterRequest,
         comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
         err: *?AnyError,
     ) AnyError.Error!void {
@@ -1169,9 +1170,9 @@ pub const LoadingSet = extern struct {
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         const Callbacks = struct {
-            fn f(module: *const Export, data: ?*anyopaque) callconv(.c) bool {
+            fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
                 const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
-                return filter(module, o) == .load;
+                return filter(module, o);
             }
             fn deinit(data: ?*anyopaque) callconv(.c) void {
                 if (filter_deinit) {
@@ -1201,7 +1202,7 @@ pub const LoadingSet = extern struct {
     pub fn addModulesFromLocalCustom(
         self: LoadingSet,
         filter_data: ?*anyopaque,
-        filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
+        filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
     ) AnyError.Error!void {
