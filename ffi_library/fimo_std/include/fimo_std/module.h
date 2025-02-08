@@ -790,10 +790,18 @@ typedef struct FimoModuleSymbolImport {
     const char *ns;
 } FimoModuleSymbolImport;
 
+/// Linkage of an symbol export.
+typedef enum FimoModuleSymbolLinkage : FimoI32 {
+    /// The symbol is visible to other instances and is unique.
+    FIMO_MODULE_SYMBOL_LINKAGE_GLOBAL,
+} FimoModuleSymbolLinkage;
+
 /// Declaration of a static module symbol export.
 typedef struct FimoModuleSymbolExport {
     /// Pointer to the symbol.
     const void *symbol;
+    /// Symbol linkage.
+    FimoModuleSymbolLinkage linkage;
     /// Symbol version.
     FimoVersion version;
     /// Symbol name.
@@ -818,6 +826,8 @@ typedef struct FimoModuleDynamicSymbolExport {
     /// The destructor is safe to assume, that the symbol is no longer used by any other module.
     /// During its destruction, a symbol is not allowed to access the module subsystem.
     void (*destructor)(const FimoModuleInstance *module, void *symbol);
+    /// Symbol linkage.
+    FimoModuleSymbolLinkage linkage;
     /// Symbol version.
     FimoVersion version;
     /// Symbol name.

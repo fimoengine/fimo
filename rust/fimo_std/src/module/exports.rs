@@ -330,11 +330,21 @@ impl Debug for SymbolImport<'_> {
     }
 }
 
+/// Linkage of an symbol export.
+#[repr(i32)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SymbolLinkage {
+    /// The symbol is visible to other instances and is unique.
+    Global,
+}
+
 /// Declaration of a static module symbol export.
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct SymbolExport<'a> {
     pub symbol: AssertSharable<ConstNonNull<()>>,
+    pub linkage: SymbolLinkage,
     pub version: Version,
     pub name: StrRef<'a>,
     pub namespace: StrRef<'a>,
@@ -353,9 +363,11 @@ impl<'a> SymbolExport<'a> {
         symbol: T::Target<'a>,
         version: Version,
         name: &'a CStr,
+        linkage: SymbolLinkage,
     ) -> Self {
         Self {
             symbol: unsafe { AssertSharable::new(T::ptr_from_target(symbol)) },
+            linkage,
             version,
             name: StrRef::new(name),
             namespace: StrRef::new(c""),
@@ -384,6 +396,7 @@ impl Debug for SymbolExport<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SymbolExport")
             .field("symbol", &self.symbol)
+            .field("linkage", &self.linkage)
             .field("version", &self.version)
             .field("name", &self.name())
             .field("namespace", &self.namespace())
@@ -404,6 +417,7 @@ pub struct DynamicSymbolExport<'a> {
     pub destructor: AssertSharable<
         unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
     >,
+    pub linkage: SymbolLinkage,
     pub version: Version,
     pub name: StrRef<'a>,
     pub namespace: StrRef<'a>,
@@ -432,10 +446,12 @@ impl<'a> DynamicSymbolExport<'a> {
         >,
         version: Version,
         name: &'a CStr,
+        linkage: SymbolLinkage,
     ) -> Self {
         Self {
             constructor,
             destructor,
+            linkage,
             version,
             name: StrRef::new(name),
             namespace: StrRef::new(c""),
@@ -823,6 +839,7 @@ where
     pub const fn with_export<T: SymbolInfo>(
         &mut self,
         _table_name: &str,
+        _linkage: SymbolLinkage,
         _value: <T::Type as SymbolPointer>::Target<'static>,
     ) -> &mut Self {
         self
@@ -833,6 +850,7 @@ where
     pub const fn with_dynamic_export<T, E>(
         &mut self,
         _table_name: &str,
+        _linkage: SymbolLinkage,
         _init: for<'a> fn(
             Pin<&'a UninitInstanceView<'_, InstanceView>>,
         ) -> Result<<T::Type as SymbolPointer>::Target<'a>, E>,

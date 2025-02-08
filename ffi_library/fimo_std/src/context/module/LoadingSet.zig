@@ -645,6 +645,14 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
             );
             has_error = true;
         }
+        if (exp.linkage != .global) {
+            sys.logWarn(
+                "unknown symbol linkage specified, export='{s}', symbol='{s}', ns='{s}', linkage='{}', index='{}'",
+                .{ @"export".getName(), name, namespace, @intFromEnum(exp.linkage), i },
+                @src(),
+            );
+            has_error = true;
+        }
 
         for (imports) |imp| {
             const imp_name = std.mem.span(imp.name);
@@ -695,6 +703,14 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
             sys.logWarn(
                 "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
+                @src(),
+            );
+            has_error = true;
+        }
+        if (exp.linkage != .global) {
+            sys.logWarn(
+                "unknown symbol linkage specified, export='{s}', symbol='{s}', ns='{s}', linkage='{}', index='{}'",
+                .{ @"export".getName(), name, namespace, @intFromEnum(exp.linkage), i },
                 @src(),
             );
             has_error = true;

@@ -616,17 +616,20 @@ fn generate_export(
         .iter()
         .map(|&exp| {
             let t = &exp.0.t_arg;
-            let value = &exp.0.args[1];
+            let linkage = &exp.0.args[1];
+            let value = &exp.0.args[2];
             quote! {
                 const {
                     type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
                     let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
                     let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
                     let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
+                    let linkage = const { #linkage };
                     ::fimo_std::module::exports::SymbolExport::new::<T>(
                         #value,
                         version,
-                        name
+                        name,
+                        linkage,
                     ).with_namespace(namespace)
                 }
             }
@@ -637,8 +640,9 @@ fn generate_export(
         .iter()
         .map(|&exp| {
             let t = &exp.0.t_arg;
-            let init = &exp.0.args[1];
-            let deinit = &exp.0.args[2];
+            let linkage = &exp.0.args[1];
+            let init = &exp.0.args[2];
+            let deinit = &exp.0.args[3];
             quote! {
                 const {
                     unsafe extern "C" fn __private_constructor(
@@ -680,12 +684,14 @@ fn generate_export(
                     let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
                     let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
                     let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
+                    let linkage = const { #linkage };
                     unsafe {
                         ::fimo_std::module::exports::DynamicSymbolExport::new(
                             __private_constructor,
                             __private_destructor,
                             version,
-                            name
+                            name,
+                            linkage,
                         ).with_namespace(namespace)
                     }
                 }

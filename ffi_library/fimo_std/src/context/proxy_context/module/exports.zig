@@ -55,9 +55,17 @@ pub const SymbolImport = extern struct {
     namespace: [*:0]const u8 = "",
 };
 
+/// Linkage of an symbol export.
+pub const SymbolLinkage = enum(i32) {
+    /// The symbol is visible to other instances and is unique.
+    global,
+    _,
+};
+
 /// Declaration of a static module symbol export.
 pub const SymbolExport = extern struct {
     symbol: *const anyopaque,
+    linkage: SymbolLinkage,
     version: c.FimoVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
@@ -73,6 +81,7 @@ pub const DynamicSymbolExport = extern struct {
         ctx: *const Module.OpaqueInstance,
         symbol: *anyopaque,
     ) callconv(.c) void,
+    linkage: SymbolLinkage,
     version: c.FimoVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
@@ -351,8 +360,9 @@ pub const Builder = struct {
     };
 
     const SymbolExport = struct {
-        name: [:0]const u8,
         symbol: Module.Symbol,
+        name: [:0]const u8,
+        linkage: SymbolLinkage,
         value: union(enum) {
             static: *const anyopaque,
             dynamic: struct {
@@ -623,11 +633,13 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime T: Module.Symbol,
         comptime name: [:0]const u8,
+        comptime linkage: SymbolLinkage,
         comptime value: *const T.symbol,
     ) Builder {
         const exp = Builder.SymbolExport{
-            .name = name,
             .symbol = T,
+            .name = name,
+            .linkage = linkage,
             .value = .{ .static = value },
         };
         return self.withExportInner(exp);
@@ -638,6 +650,7 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime T: Module.Symbol,
         comptime name: [:0]const u8,
+        comptime linkage: SymbolLinkage,
         comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*T.symbol,
         comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *T.symbol) void,
     ) Builder {
@@ -653,8 +666,9 @@ pub const Builder = struct {
             }
         }.f;
         const exp = Builder.SymbolExport{
-            .name = name,
             .symbol = T,
+            .name = name,
+            .linkage = linkage,
             .value = .{
                 .dynamic = .{
                     .initFn = &initWrapped,
@@ -959,9 +973,10 @@ pub const Builder = struct {
             if (src.value != .static) continue;
             exports[i] = Self.SymbolExport{
                 .symbol = src.value.static,
+                .linkage = src.linkage,
+                .version = src.symbol.version.intoC(),
                 .name = src.symbol.name,
                 .namespace = src.symbol.namespace,
-                .version = src.symbol.version.intoC(),
             };
             i += 1;
         }
@@ -981,11 +996,12 @@ pub const Builder = struct {
         for (self.exports) |src| {
             if (src.value != .dynamic) continue;
             exports[i] = DynamicSymbolExport{
-                .name = src.symbol.name,
-                .namespace = src.symbol.namespace,
-                .version = src.symbol.version.intoC(),
                 .constructor = src.value.dynamic.initFn,
                 .destructor = src.value.dynamic.deinitFn,
+                .linkage = src.linkage,
+                .version = src.symbol.version.intoC(),
+                .name = src.symbol.name,
+                .namespace = src.symbol.namespace,
             };
             i += 1;
         }

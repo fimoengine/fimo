@@ -9,7 +9,7 @@ use fimo_std::{
     emit_info,
     error::AnyError,
     module::{
-        exports::Builder,
+        exports::{Builder, SymbolLinkage},
         info::Info,
         instance::{GenericInstance, PseudoInstance, UninitInstanceView, UnloadingInstanceView},
         loading_set::{LoadingFilterRequest, LoadingSet, LoadingSetView},
@@ -34,10 +34,11 @@ symbol! {
 const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_description(c"Test module a")
     .with_author(c"fimo")
-    .with_export::<A0>("a0", &5)
-    .with_export::<A1>("a1", &10)
+    .with_export::<A0>("a0", SymbolLinkage::Global, &5)
+    .with_export::<A1>("a1", SymbolLinkage::Global, &10)
     .with_dynamic_export::<A2, _>(
         "a2",
+        SymbolLinkage::Global,
         |_inst: Pin<&UninitInstanceView<'_, AView<'_>>>| -> Result<_, std::convert::Infallible> {
             extern "C" fn add(a: i32, b: i32) -> i32 {
                 a + b
@@ -56,8 +57,8 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
 const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
     .with_description(c"Test module b")
     .with_author(c"fimo")
-    .with_export::<B0>("b0", &-2)
-    .with_export::<B1>("b1", &77)
+    .with_export::<B0>("b0", SymbolLinkage::Global, &-2)
+    .with_export::<B1>("b1", SymbolLinkage::Global, &77)
     .build();
 
 #[fimo_std::module::exports::export_module]

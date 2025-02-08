@@ -29,6 +29,7 @@ const Instance = Module.exports.Builder
     .withDynamicExport(
     fimo_python_meta.symbols.RunString,
     "run_string",
+    .global,
     State.initRunString,
     State.deinitRunString,
 )
