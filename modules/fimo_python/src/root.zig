@@ -7,7 +7,6 @@ const builtin = @import("builtin");
 
 const fimo_python_meta = @import("fimo_python_meta");
 const fimo_std = @import("fimo_std");
-const heap = fimo_std.heap;
 const Path = fimo_std.path.Path;
 const Context = fimo_std.Context;
 const Tracing = Context.Tracing;
