@@ -21,6 +21,7 @@ use std::{
     ffi::CStr,
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
+    mem::MaybeUninit,
     pin::Pin,
     ptr::NonNull,
 };
@@ -478,7 +479,10 @@ impl Debug for DynamicSymbolExport<'_> {
 pub enum Modifier<'a> {
     Destructor(&'a DestructorModifier<'a>),
     Dependency(Info),
-    DebugInfo,
+    DebugInfo(&'a DebugInfoModifier),
+    InstanceState(&'a InstanceStateModifier),
+    StartEvent(&'a StartEventModifier),
+    StopEvent(&'a StopEventModifier),
 }
 
 sa::assert_impl_all!(Modifier<'_>: Send, Sync);
@@ -497,6 +501,125 @@ pub struct DestructorModifier<'a> {
 sa::assert_impl_all!(DestructorModifier<'_>: Send, Sync);
 sa::assert_impl_all!(DestructorModifier<'static>: Share);
 
+/// A modifier for the debug info of a module.
+#[derive(Debug, Copy, Clone)]
+pub enum DebugInfoModifier {}
+
+/// A constructor and destructor for the state of a module.
+///
+/// Can be specified to bind a state to an instance. The constructor will be called before the
+/// modules exports are initialized and returning an error will abort the loading of the
+/// instance. Inversely, the destructor function will be called after all exports have been
+/// deinitialized. May only be specified once.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct InstanceStateModifier {
+    pub constructor: AssertSharable<
+        unsafe extern "C" fn(
+            instance: Pin<&OpaqueInstanceView<'_>>,
+            loading_set: LoadingSetView<'_>,
+            state: &mut MaybeUninit<Option<NonNull<()>>>,
+        ) -> AnyResult,
+    >,
+    pub destructor: AssertSharable<
+        unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, state: Option<NonNull<()>>),
+    >,
+    _private: PhantomData<()>,
+}
+
+impl InstanceStateModifier {
+    /// Constructs a new `InstanceStateModifier`.
+    ///
+    /// # Safety
+    ///
+    /// The instance is only partially initialized while the constructor and destructor functions
+    /// are called. One must ensure that no uninitialized fields are read.
+    pub const unsafe fn new(
+        constructor: AssertSharable<
+            unsafe extern "C" fn(
+                instance: Pin<&OpaqueInstanceView<'_>>,
+                loading_set: LoadingSetView<'_>,
+                state: &mut MaybeUninit<Option<NonNull<()>>>,
+            ) -> AnyResult,
+        >,
+        destructor: AssertSharable<
+            unsafe extern "C" fn(
+                instance: Pin<&OpaqueInstanceView<'_>>,
+                state: Option<NonNull<()>>,
+            ),
+        >,
+    ) -> Self {
+        Self {
+            constructor,
+            destructor,
+            _private: PhantomData,
+        }
+    }
+}
+
+sa::assert_impl_all!(InstanceStateModifier: Send, Sync, Share);
+
+/// A listener for the start event of the instance.
+///
+/// The event will be dispatched immediately after the instance has been loaded. An error will
+/// result in the destruction of the instance. May only be specified once.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StartEventModifier {
+    pub on_event:
+        AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult>,
+    _private: PhantomData<()>,
+}
+
+impl StartEventModifier {
+    /// Constructs a new `StartEventModifier`.
+    ///
+    /// # Safety
+    ///
+    /// TBD
+    pub const unsafe fn new(
+        on_event: AssertSharable<
+            unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
+        >,
+    ) -> Self {
+        Self {
+            on_event,
+            _private: PhantomData,
+        }
+    }
+}
+
+sa::assert_impl_all!(StartEventModifier: Send, Sync, Share);
+
+/// A listener for the stop event of the instance.
+///
+/// The event will be dispatched immediately before any exports are deinitialized. May only be
+/// specified once.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct StopEventModifier {
+    pub on_event: AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
+    _private: PhantomData<()>,
+}
+
+impl StopEventModifier {
+    /// Constructs a new `StopEventModifier`.
+    ///
+    /// # Safety
+    ///
+    /// TBD
+    pub const unsafe fn new(
+        on_event: AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
+    ) -> Self {
+        Self {
+            on_event,
+            _private: PhantomData,
+        }
+    }
+}
+
+sa::assert_impl_all!(StopEventModifier: Send, Sync, Share);
+
 /// Declaration of a module export.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -508,35 +631,13 @@ pub struct Export<'a> {
     pub description: Option<StrRef<'a>>,
     pub author: Option<StrRef<'a>>,
     pub license: Option<StrRef<'a>>,
-    pub parameters: SliceRef<'a, Parameter<'a>, u32>,
-    pub resources: SliceRef<'a, Resource<'a>, u32>,
-    pub namespace_imports: SliceRef<'a, Namespace<'a>, u32>,
-    pub symbol_imports: SliceRef<'a, SymbolImport<'a>, u32>,
-    pub symbol_exports: SliceRef<'a, SymbolExport<'a>, u32>,
-    pub dynamic_symbol_exports: SliceRef<'a, DynamicSymbolExport<'a>, u32>,
-    pub modifiers: SliceRef<'a, Modifier<'a>, u32>,
-    pub constructor: Option<
-        AssertSharable<
-            unsafe extern "C" fn(
-                instance: Pin<&OpaqueInstanceView<'_>>,
-                loading_set: LoadingSetView<'_>,
-                state: &mut Option<NonNull<()>>,
-            ) -> AnyResult,
-        >,
-    >,
-    pub destructor: Option<
-        AssertSharable<
-            unsafe extern "C" fn(
-                instance: Pin<&OpaqueInstanceView<'_>>,
-                state: Option<NonNull<()>>,
-            ),
-        >,
-    >,
-    pub on_start_event: Option<
-        AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult>,
-    >,
-    pub on_stop_event:
-        Option<AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>>,
+    pub parameters: SliceRef<'a, Parameter<'a>>,
+    pub resources: SliceRef<'a, Resource<'a>>,
+    pub namespace_imports: SliceRef<'a, Namespace<'a>>,
+    pub symbol_imports: SliceRef<'a, SymbolImport<'a>>,
+    pub symbol_exports: SliceRef<'a, SymbolExport<'a>>,
+    pub dynamic_symbol_exports: SliceRef<'a, DynamicSymbolExport<'a>>,
+    pub modifiers: SliceRef<'a, Modifier<'a>>,
     _private: PhantomData<&'a ()>,
 }
 
@@ -571,31 +672,6 @@ impl<'a> Export<'a> {
             symbol_exports: &'a [SymbolExport<'a>],
             dynamic_symbol_exports: &'a [DynamicSymbolExport<'a>],
             modifiers: &'a [Modifier<'a>],
-            constructor: Option<
-                AssertSharable<
-                    unsafe extern "C" fn(
-                        instance: Pin<&OpaqueInstanceView<'_>>,
-                        loading_set: LoadingSetView<'_>,
-                        state: &mut Option<NonNull<()>>,
-                    ) -> AnyResult,
-                >,
-            >,
-            destructor: Option<
-                AssertSharable<
-                    unsafe extern "C" fn(
-                        instance: Pin<&OpaqueInstanceView<'_>>,
-                        state: Option<NonNull<()>>,
-                    ),
-                >,
-            >,
-            on_start_event: Option<
-                AssertSharable<
-                    unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
-                >,
-            >,
-            on_stop_event: Option<
-                AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
-            >,
         ) -> Self {
             unsafe {
                 Self::__new_private(
@@ -610,10 +686,6 @@ impl<'a> Export<'a> {
                     symbol_exports,
                     dynamic_symbol_exports,
                     modifiers,
-                    constructor,
-                    destructor,
-                    on_start_event,
-                    on_stop_event,
                 )
             }
         }
@@ -633,31 +705,6 @@ impl<'a> Export<'a> {
         symbol_exports: &'a [SymbolExport<'a>],
         dynamic_symbol_exports: &'a [DynamicSymbolExport<'a>],
         modifiers: &'a [Modifier<'a>],
-        constructor: Option<
-            AssertSharable<
-                unsafe extern "C" fn(
-                    instance: Pin<&OpaqueInstanceView<'_>>,
-                    loading_set: LoadingSetView<'_>,
-                    state: &mut Option<NonNull<()>>,
-                ) -> AnyResult,
-            >,
-        >,
-        destructor: Option<
-            AssertSharable<
-                unsafe extern "C" fn(
-                    instance: Pin<&OpaqueInstanceView<'_>>,
-                    state: Option<NonNull<()>>,
-                ),
-            >,
-        >,
-        on_start_event: Option<
-            AssertSharable<
-                unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
-            >,
-        >,
-        on_stop_event: Option<
-            AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>)>,
-        >,
     ) -> Self {
         let description = match description {
             None => None,
@@ -693,10 +740,6 @@ impl<'a> Export<'a> {
             symbol_exports,
             dynamic_symbol_exports,
             modifiers,
-            constructor,
-            destructor,
-            on_start_event,
-            on_stop_event,
             _private: PhantomData,
         }
     }

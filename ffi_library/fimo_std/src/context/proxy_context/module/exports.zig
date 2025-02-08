@@ -81,25 +81,80 @@ pub const DynamicSymbolExport = extern struct {
 /// A modifier declaration for a module export.
 pub const Modifier = extern struct {
     tag: enum(i32) {
-        destructor = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DESTRUCTOR,
-        dependency = c.FIMO_MODULE_EXPORT_MODIFIER_KEY_DEPENDENCY,
-        debug_info = c.FIMO_MODULE_EXPORT_MODIFIER_DEBUG_INFO,
+        destructor,
+        dependency,
+        debug_info,
+        instance_state,
+        start_event,
+        stop_event,
         _,
     },
     value: extern union {
-        destructor: *const extern struct {
-            data: ?*anyopaque,
-            destructor: *const fn (ptr: ?*anyopaque) callconv(.c) void,
-        },
-        dependency: *const Module.Info,
-        debug_info: *const extern struct {
-            data: ?*anyopaque,
-            construct: *const fn (
-                ptr: ?*anyopaque,
-                info: *Module.DebugInfo,
-            ) callconv(.c) AnyResult,
-        },
+        destructor: *const Destructor,
+        dependency: *const Dependency,
+        debug_info: *const DebugInfo,
+        instance_state: *const InstanceState,
+        start_event: *const StartEvent,
+        stop_event: *const StopEvent,
     },
+
+    /// A destructor function for a module export.
+    ///
+    /// Is called once the export is no longer in use by the subsystem. An export may declare
+    /// multiple destructors.
+    pub const Destructor = extern struct {
+        data: ?*anyopaque,
+        destructor: *const fn (ptr: ?*anyopaque) callconv(.c) void,
+    };
+
+    /// A dependency to an already loaded instance.
+    ///
+    /// The instance will acquire a static dependency to the provided instance. Multiple
+    /// dependencies may be provided.
+    pub const Dependency = Module.Info;
+
+    /// Accessor to the debug info of a module.
+    ///
+    /// The subsystem may utilize the debug info to provide additional features, like symbol
+    /// tracing. May only be specified once.
+    pub const DebugInfo = extern struct {
+        data: ?*anyopaque,
+        construct: *const fn (ptr: ?*anyopaque, info: *Module.DebugInfo) callconv(.c) AnyResult,
+    };
+
+    /// A constructor and destructor for the state of a module.
+    ///
+    /// Can be specified to bind a state to an instance. The constructor will be called before the
+    /// modules exports are initialized and returning an error will abort the loading of the
+    /// instance. Inversely, the destructor function will be called after all exports have been
+    /// deinitialized. May only be specified once.
+    pub const InstanceState = extern struct {
+        init: *const fn (
+            ctx: *const Module.OpaqueInstance,
+            set: Module.LoadingSet,
+            state: *?*anyopaque,
+        ) callconv(.c) AnyResult,
+        deinit: *const fn (
+            ctx: *const Module.OpaqueInstance,
+            state: ?*anyopaque,
+        ) callconv(.c) void,
+    };
+
+    /// A listener for the start event of the instance.
+    ///
+    /// The event will be dispatched immediately after the instance has been loaded. An error will
+    /// result in the destruction of the instance. May only be specified once.
+    pub const StartEvent = extern struct {
+        on_event: *const fn (ctx: *const Module.OpaqueInstance) callconv(.c) AnyResult,
+    };
+
+    /// A listener for the stop event of the instance.
+    ///
+    /// The event will be dispatched immediately before any exports are deinitialized. May only be
+    /// specified once.
+    pub const StopEvent = extern struct {
+        on_event: *const fn (ctx: *const Module.OpaqueInstance) callconv(.c) void,
+    };
 };
 
 /// Declaration of a module export.
@@ -111,30 +166,19 @@ pub const Export = extern struct {
     author: ?[*:0]const u8 = null,
     license: ?[*:0]const u8 = null,
     parameters: ?[*]const Parameter = null,
-    parameters_count: u32 = 0,
+    parameters_count: usize = 0,
     resources: ?[*]const Resource = null,
-    resources_count: u32 = 0,
+    resources_count: usize = 0,
     namespace_imports: ?[*]const Namespace = null,
-    namespace_imports_count: u32 = 0,
+    namespace_imports_count: usize = 0,
     symbol_imports: ?[*]const SymbolImport = null,
-    symbol_imports_count: u32 = 0,
+    symbol_imports_count: usize = 0,
     symbol_exports: ?[*]const SymbolExport = null,
-    symbol_exports_count: u32 = 0,
+    symbol_exports_count: usize = 0,
     dynamic_symbol_exports: ?[*]const DynamicSymbolExport = null,
-    dynamic_symbol_exports_count: u32 = 0,
+    dynamic_symbol_exports_count: usize = 0,
     modifiers: ?[*]const Modifier = null,
-    modifiers_count: u32 = 0,
-    constructor: ?*const fn (
-        ctx: *const Module.OpaqueInstance,
-        set: Module.LoadingSet,
-        data: *?*anyopaque,
-    ) callconv(.c) AnyResult = null,
-    destructor: ?*const fn (
-        ctx: *const Module.OpaqueInstance,
-        data: ?*anyopaque,
-    ) callconv(.c) void = null,
-    on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) AnyResult = null,
-    on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) void = null,
+    modifiers_count: usize = 0,
 
     /// Runs the registered cleanup routines.
     pub fn deinit(self: *const Export) void {
@@ -148,7 +192,7 @@ pub const Export = extern struct {
                     const dependency = modifier.value.dependency;
                     dependency.unref();
                 },
-                .debug_info => {},
+                .debug_info, .instance_state, .start_event, .stop_event => {},
                 else => @panic("Unknown modifier"),
             }
         }
@@ -216,6 +260,38 @@ pub const Export = extern struct {
     pub fn getModifiers(self: *const Export) []const Modifier {
         return if (self.modifiers) |x| x[0..self.modifiers_count] else &.{};
     }
+
+    /// Returns the debug info modifier, if specified.
+    pub fn getDebugInfoModifier(self: *const Export) ?*const Modifier.DebugInfo {
+        for (self.getModifiers()) |mod| {
+            if (mod.tag == .debug_info) return mod.value.debug_info;
+        }
+        return null;
+    }
+
+    /// Returns the instance state modifier, if specified.
+    pub fn getInstanceStateModifier(self: *const Export) ?*const Modifier.InstanceState {
+        for (self.getModifiers()) |mod| {
+            if (mod.tag == .instance_state) return mod.value.instance_state;
+        }
+        return null;
+    }
+
+    /// Returns the start event modifier, if specified.
+    pub fn getStartEventModifier(self: *const Export) ?*const Modifier.StartEvent {
+        for (self.getModifiers()) |mod| {
+            if (mod.tag == .start_event) return mod.value.start_event;
+        }
+        return null;
+    }
+
+    /// Returns the start event modifier, if specified.
+    pub fn getStopEventModifier(self: *const Export) ?*const Modifier.StopEvent {
+        for (self.getModifiers()) |mod| {
+            if (mod.tag == .stop_event) return mod.value.stop_event;
+        }
+        return null;
+    }
 };
 
 /// Builder for a module export.
@@ -233,19 +309,11 @@ pub const Builder = struct {
         &.{.{ .debug_info = {} }}
     else
         &.{},
-    stateType: type = void,
-    constructor: ?*const fn (
-        ctx: *const Module.OpaqueInstance,
-        set: Module.LoadingSet,
-        data: *?*anyopaque,
-    ) callconv(.c) AnyResult = null,
-    destructor: ?*const fn (
-        ctx: *const Module.OpaqueInstance,
-        data: ?*anyopaque,
-    ) callconv(.c) void = null,
-    on_start_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) AnyResult = null,
-    on_stop_event: ?*const fn (ctx: *const Module.OpaqueInstance) callconv(.c) void = null,
     debug_info: ?Module.DebugInfo.Builder = if (!builtin.strip_debug_info) .{} else null,
+    stateType: type = void,
+    instance_state: ?Self.Modifier.InstanceState = null,
+    start_event: ?Self.Modifier.StartEvent = null,
+    stop_event: ?Self.Modifier.StopEvent = null,
 
     const Parameter = struct {
         name: []const u8,
@@ -302,6 +370,9 @@ pub const Builder = struct {
 
     const Modifier = union(enum) {
         debug_info: void,
+        instance_state: void,
+        start_event: void,
+        stop_event: void,
         _,
     };
 
@@ -635,12 +706,15 @@ pub const Builder = struct {
         comptime initFn: State(T).InitFn,
         comptime deinitFn: State(T).DeinitFn,
     ) Builder {
+        if (self.instance_state != null) @compileError("a state has already been assigned");
         var x = self;
         x.stateType = T;
-        x.constructor = &State(T).wrapInit(initFn);
-        x.destructor = &State(T).wrapDeinit(deinitFn);
+        x.instance_state = .{
+            .init = &State(T).wrapInit(initFn),
+            .deinit = &State(T).wrapDeinit(deinitFn),
+        };
         if (x.debug_info) |*info| _ = info.addType(T);
-        return x;
+        return x.withModifierInner(.{ .instance_state = {} });
     }
 
     /// Adds an `on_start` event to the module.
@@ -648,7 +722,7 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime f: fn (ctx: *const Module.OpaqueInstance) anyerror!void,
     ) Builder {
-        if (self.on_start_event != null)
+        if (self.start_event != null)
             @compileError("the `on_start` event is already defined");
 
         const wrapped = struct {
@@ -663,8 +737,8 @@ pub const Builder = struct {
         }.wrapper;
 
         var x = self;
-        x.on_start_event = &wrapped;
-        return x;
+        x.start_event = .{ .on_event = &wrapped };
+        return x.withModifierInner(.{ .start_event = {} });
     }
 
     /// Adds an `on_stop` event to the module.
@@ -672,7 +746,7 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime f: fn (ctx: *const Module.OpaqueInstance) void,
     ) Builder {
-        if (self.on_stop_event != null)
+        if (self.stop_event != null)
             @compileError("the `on_stop` event is already defined");
 
         const wrapped = struct {
@@ -682,8 +756,8 @@ pub const Builder = struct {
         }.wrapper;
 
         var x = self;
-        x.on_stop_event = &wrapped;
-        return x;
+        x.stop_event = .{ .on_event = &wrapped };
+        return x.withModifierInner(.{ .stop_event = {} });
     }
 
     fn ParameterTable(comptime self: Builder) type {
@@ -943,6 +1017,33 @@ pub const Builder = struct {
                         },
                     };
                 },
+                .instance_state => {
+                    const instance_state = self.instance_state.?;
+                    dst.* = .{
+                        .tag = .instance_state,
+                        .value = .{
+                            .instance_state = &instance_state,
+                        },
+                    };
+                },
+                .start_event => {
+                    const start_event = self.start_event.?;
+                    dst.* = .{
+                        .tag = .start_event,
+                        .value = .{
+                            .start_event = &start_event,
+                        },
+                    };
+                },
+                .stop_event => {
+                    const stop_event = self.stop_event.?;
+                    dst.* = .{
+                        .tag = .stop_event,
+                        .value = .{
+                            .stop_event = &stop_event,
+                        },
+                    };
+                },
                 else => @compileError("unknown modifier"),
             }
         }
@@ -979,8 +1080,6 @@ pub const Builder = struct {
             .dynamic_symbol_exports_count = dynamic_exports.len,
             .modifiers = if (modifiers.len > 0) modifiers.ptr else null,
             .modifiers_count = modifiers.len,
-            .constructor = self.constructor,
-            .destructor = self.destructor,
         };
         embedStaticModuleExport(exp);
 

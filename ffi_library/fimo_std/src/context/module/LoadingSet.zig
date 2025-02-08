@@ -741,29 +741,28 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
 
     const modifiers = @"export".getModifiers();
     for (modifiers, 0..) |mod, i| {
-        if (@intFromEnum(mod.tag) >= c.FIMO_MODULE_EXPORT_MODIFIER_KEY_LAST) {
-            sys.logWarn(
-                "unknown modifier, export='{s}', modifier='{}', index='{}'",
-                .{ @"export".getName(), @intFromEnum(mod.tag), i },
-                @src(),
-            );
-            has_error = true;
-        }
-
         switch (mod.tag) {
-            .debug_info => {
+            .destructor, .dependency => {},
+            .debug_info, .instance_state, .start_event, .stop_event => {
                 for (modifiers[0..i]) |x| {
-                    if (x.tag == .debug_info) {
+                    if (x.tag == mod.tag) {
                         sys.logWarn(
-                            "debug info modifier may only appear once, export='{s}', index='{}'",
-                            .{ @"export".getName(), i },
+                            "the modifier may only appear once, export='{s}', modifier=`{s}`, index='{}'",
+                            .{ @"export".getName(), @tagName(mod.tag), i },
                             @src(),
                         );
                         has_error = true;
                     }
                 }
             },
-            else => {},
+            else => {
+                sys.logWarn(
+                    "unknown modifier, export='{s}', modifier='{}', index='{}'",
+                    .{ @"export".getName(), @intFromEnum(mod.tag), i },
+                    @src(),
+                );
+                has_error = true;
+            },
         }
     }
 

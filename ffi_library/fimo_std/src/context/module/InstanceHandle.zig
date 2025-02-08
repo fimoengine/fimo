@@ -415,10 +415,10 @@ pub const Inner = struct {
         std.debug.assert(self.state == .init);
 
         if (self.@"export") |@"export"| {
-            if (@"export".on_start_event) |event| {
+            if (@"export".getStartEventModifier()) |event| {
                 self.unlock();
                 sys.mutex.unlock();
-                const result = event(self.instance.?);
+                const result = event.on_event(self.instance.?);
                 sys.mutex.lock();
                 self.mutex.lock();
                 try result.intoErrorUnion(err);
@@ -432,10 +432,10 @@ pub const Inner = struct {
         std.debug.assert(self.state == .started);
         self.is_detached = true;
         if (self.@"export") |@"export"| {
-            if (@"export".on_stop_event) |event| {
+            if (@"export".getStopEventModifier()) |event| {
                 self.unlock();
                 sys.mutex.unlock();
-                event(self.instance.?);
+                event.on_event(self.instance.?);
                 sys.mutex.lock();
                 self.mutex.lock();
             }
@@ -452,8 +452,10 @@ pub const Inner = struct {
 
         self.is_detached = true;
         if (self.@"export") |exp| {
-            if (exp.destructor) |dtor|
-                if (self.state == .init) dtor(instance, @constCast(instance.data));
+            if (self.state == .init) {
+                if (exp.getInstanceStateModifier()) |state|
+                    state.deinit(instance, @constCast(instance.data));
+            }
             exp.deinit();
         }
 
@@ -674,11 +676,11 @@ pub fn initExportedInstance(
     }
 
     // Init instance data.
-    if (@"export".constructor) |constructor| {
+    if (@"export".getInstanceStateModifier()) |state| {
         inner.unlock();
         sys.mutex.unlock();
         var data: ?*anyopaque = undefined;
-        const result = constructor(instance, set, &data);
+        const result = state.init(instance, set, &data);
         sys.mutex.lock();
         _ = instance_handle.lock();
         instance.data = @ptrCast(data);

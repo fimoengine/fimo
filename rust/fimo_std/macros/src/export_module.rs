@@ -693,23 +693,23 @@ fn generate_export(
         })
         .collect::<Vec<_>>();
 
-    let (constructor, destructor) = if let Some(state) = state {
+    let mut modifiers: Vec<TokenStream> = Vec::new();
+    if let Some(state) = state {
         let init = &state.0.args[0];
         let deinit = &state.0.args[1];
-
-        let constructor = quote! {
+        modifiers.push(quote! {
             {
                 unsafe extern "C" fn __private_init(
                     instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                     set: ::fimo_std::module::loading_set::LoadingSetView<'_>,
-                    state: &mut ::core::option::Option<::core::ptr::NonNull<()>>,
+                    state: &mut ::core::mem::MaybeUninit<::core::option::Option<::core::ptr::NonNull<()>>>,
                 ) -> ::fimo_std::error::AnyResult {
                     let f = const { #init };
                     unsafe {
                         let instance = std::mem::transmute(instance);
                         match f(instance, set) {
                             ::core::result::Result::Ok(x) => {
-                                *state = ::core::option::Option::Some(x.cast());
+                                _ = *state.write(::core::option::Option::Some(x.cast()));
                                 ::fimo_std::error::AnyResult::new_ok()
                             }
                             ::core::result::Result::Err(x) => {
@@ -719,12 +719,6 @@ fn generate_export(
                         }
                     }
                 }
-                let __private_init = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_init as _) };
-                Some(__private_init)
-            }
-        };
-        let destructor = quote! {
-            {
                 unsafe extern "C" fn __private_deinit(
                     instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                     state: ::core::option::Option<::core::ptr::NonNull<()>>,
@@ -736,14 +730,15 @@ fn generate_export(
                         f(instance, state)
                     }
                 }
-                let __private_deinit = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_deinit as _) };
-                Some(__private_deinit)
+                let modifier = &const {
+                    let __private_init = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_init as _) };
+                    let __private_deinit = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_deinit as _) };
+                    unsafe { ::fimo_std::module::exports::InstanceStateModifier::new(__private_init, __private_deinit) }
+                };
+                ::fimo_std::module::exports::Modifier::InstanceState(modifier)
             }
-        };
-        (constructor, destructor)
-    } else {
-        (quote!(None), quote!(None))
-    };
+        });
+    }
 
     quote! {
         {
@@ -822,7 +817,9 @@ fn generate_export(
             const DYN_EXPORTS: &[::fimo_std::module::exports::DynamicSymbolExport<'static>] = &[
                 #(#dyn_exports),*
             ];
-            const MODIFIERS: &[::fimo_std::module::exports::Modifier<'static>] = &[];
+            const MODIFIERS: &[::fimo_std::module::exports::Modifier<'static>] = &[
+                #(#modifiers),*
+            ];
 
             const EXPORT: ::fimo_std::module::exports::Export<'_> = unsafe {
                 ::fimo_std::module::exports::Export::__new_private(
@@ -837,10 +834,6 @@ fn generate_export(
                     EXPORTS,
                     DYN_EXPORTS,
                     MODIFIERS,
-                    #constructor,
-                    #destructor,
-                    None,
-                    None,
                 )
             };
 
