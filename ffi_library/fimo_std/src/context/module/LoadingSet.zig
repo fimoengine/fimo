@@ -4,6 +4,7 @@ const ArenaAlloactor = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
+const AnyResult = AnyError.AnyResult;
 const c = @import("../../c.zig");
 const Context = @import("../../context.zig");
 const Path = @import("../../path.zig").Path;
@@ -1286,7 +1287,7 @@ const VTableImpl = struct {
         on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) void,
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         data: ?*anyopaque,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
         const module_ = std.mem.span(module);
         const callback = Callback{
@@ -1311,15 +1312,15 @@ const VTableImpl = struct {
             if (@errorReturnTrace()) |tr|
                 self.context.tracing.emitStackTraceSimple(tr.*, @src());
             if (on_abort) |f| f(data);
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn addModule(
         this: *anyopaque,
         owner: *const ProxyModule.OpaqueInstance,
         @"export": *const ProxyModule.Export,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
 
         self.logTrace(
@@ -1339,9 +1340,9 @@ const VTableImpl = struct {
         } catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.context.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn addModulesFromPath(
         this: *anyopaque,
@@ -1349,7 +1350,7 @@ const VTableImpl = struct {
         filter_fn: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) bool,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
         const path_ = Path.initC(path);
 
@@ -1366,9 +1367,9 @@ const VTableImpl = struct {
         self.addModulesFromPath(path_, filter_fn, filter_data) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.context.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn addModulesFromLocal(
         this: *anyopaque,
@@ -1380,7 +1381,7 @@ const VTableImpl = struct {
             data: ?*anyopaque,
         ) callconv(.C) void,
         bin_ptr: *const anyopaque,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
 
         self.logTrace(
@@ -1401,9 +1402,9 @@ const VTableImpl = struct {
         ) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.context.tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn commit(this: *anyopaque) callconv(.c) EnqueuedFuture(Fallible(void)) {
         const self: *Self = @alignCast(@ptrCast(this));

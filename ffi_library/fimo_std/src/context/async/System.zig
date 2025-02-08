@@ -4,11 +4,8 @@ const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const Condition = Thread.Condition;
 
-const AnyError = @import("../../AnyError.zig");
-
-const Async = @import("../async.zig");
 const Context = @import("../../context.zig");
-
+const Async = @import("../async.zig");
 const Task = @import("Task.zig");
 
 const Self = @This();

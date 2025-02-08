@@ -1464,6 +1464,7 @@ pub const Path = struct {
 
 const ffi = struct {
     const AnyError = @import("AnyError.zig");
+    const AnyResult = AnyError.AnyResult;
 
     export fn fimo_utf8_path_buf_new() c.FimoUTF8PathBuf {
         const p = PathBufferUnmanaged{};
@@ -1473,13 +1474,13 @@ const ffi = struct {
     export fn fimo_utf8_path_buf_with_capacity(
         capacity: usize,
         buf: *c.FimoUTF8PathBuf,
-    ) c.FimoResult {
+    ) AnyResult {
         const p = PathBufferUnmanaged.initCapacity(
             std.heap.c_allocator,
             capacity,
-        ) catch |err| return AnyError.initError(err).err;
+        ) catch |err| return AnyError.initError(err).intoResult();
         buf.* = p.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_utf8_path_buf_free(buf: *c.FimoUTF8PathBuf) void {
@@ -1495,31 +1496,31 @@ const ffi = struct {
     export fn fimo_utf8_path_buf_into_owned_path(
         buf: *c.FimoUTF8PathBuf,
         owned: *c.FimoOwnedUTF8Path,
-    ) c.FimoResult {
+    ) AnyResult {
         var p = PathBufferUnmanaged.initC(buf.*);
-        const o = p.toOwnedPath(std.heap.c_allocator) catch |err| return AnyError.initError(err).err;
+        const o = p.toOwnedPath(std.heap.c_allocator) catch |err| return AnyError.initError(err).intoResult();
         owned.* = o.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_utf8_path_buf_push_path(
         buf: *c.FimoUTF8PathBuf,
         path: c.FimoUTF8Path,
-    ) c.FimoResult {
+    ) AnyResult {
         var b = PathBufferUnmanaged.initC(buf.*);
         const p = Path.initC(path);
-        b.pushPath(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        b.pushPath(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).intoResult();
+        return AnyResult.ok;
     }
 
     export fn fimo_utf8_path_buf_push_string(
         buf: *c.FimoUTF8PathBuf,
         path: [*:0]const u8,
-    ) c.FimoResult {
+    ) AnyResult {
         var b = PathBufferUnmanaged.initC(buf.*);
         const p = std.mem.span(path);
-        b.pushString(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        b.pushString(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).intoResult();
+        return AnyResult.ok;
     }
 
     export fn fimo_utf8_path_buf_pop(buf: *c.FimoUTF8PathBuf) bool {
@@ -1530,40 +1531,40 @@ const ffi = struct {
     export fn fimo_owned_utf8_path_from_string(
         path: [*:0]const u8,
         owned: *c.FimoOwnedUTF8Path,
-    ) c.FimoResult {
+    ) AnyResult {
         const p = std.mem.span(path);
         const o = OwnedPathUnmanaged.initString(
             std.heap.c_allocator,
             p,
-        ) catch |err| return AnyError.initError(err).err;
+        ) catch |err| return AnyError.initError(err).intoResult();
         owned.* = o.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_owned_utf8_path_from_path(
         path: c.FimoUTF8Path,
         owned: *c.FimoOwnedUTF8Path,
-    ) c.FimoResult {
+    ) AnyResult {
         const p = Path.initC(path);
         const o = OwnedPathUnmanaged.initPath(
             std.heap.c_allocator,
             p,
-        ) catch |err| return AnyError.initError(err).err;
+        ) catch |err| return AnyError.initError(err).intoResult();
         owned.* = o.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_owned_utf8_path_from_os_path(
         path: c.FimoOSPath,
         owned: *c.FimoOwnedUTF8Path,
-    ) c.FimoResult {
+    ) AnyResult {
         const p = OsPath.initC(path);
         const o = OwnedPathUnmanaged.initOsPath(
             std.heap.c_allocator,
             p,
-        ) catch |err| return AnyError.initError(err).err;
+        ) catch |err| return AnyError.initError(err).intoResult();
         owned.* = o.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_owned_utf8_path_free(path: c.FimoOwnedUTF8Path) void {
@@ -1582,11 +1583,11 @@ const ffi = struct {
         return buf.intoC();
     }
 
-    export fn fimo_utf8_path_new(path_str: [*:0]const u8, path: *c.FimoUTF8Path) c.FimoResult {
+    export fn fimo_utf8_path_new(path_str: [*:0]const u8, path: *c.FimoUTF8Path) AnyResult {
         const str = std.mem.span(path_str);
-        const p = Path.init(str) catch |err| return AnyError.initError(err).err;
+        const p = Path.init(str) catch |err| return AnyError.initError(err).intoResult();
         path.* = p.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_utf8_path_is_absolute(path: c.FimoUTF8Path) bool {
@@ -1621,14 +1622,14 @@ const ffi = struct {
     export fn fimo_owned_os_path_from_path(
         path: c.FimoUTF8Path,
         os_path: *c.FimoOwnedOSPath,
-    ) c.FimoResult {
+    ) AnyResult {
         const p = Path.initC(path);
         const o = OwnedOsPathUnmanaged.initPath(
             std.heap.c_allocator,
             p,
-        ) catch |err| return AnyError.initError(err).err;
+        ) catch |err| return AnyError.initError(err).intoResult();
         os_path.* = o.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 
     export fn fimo_owned_os_path_free(path: c.FimoOwnedOSPath) void {

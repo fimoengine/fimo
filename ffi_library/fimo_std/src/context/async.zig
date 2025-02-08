@@ -1,17 +1,16 @@
 const std = @import("std");
 
-const c = @import("../c.zig");
 const AnyError = @import("../AnyError.zig");
-
+const AnyResult = AnyError.AnyResult;
+const c = @import("../c.zig");
 const Context = @import("../context.zig");
-const ProxyAsync = @import("proxy_context/async.zig");
-
-const Self = @This();
-
 pub const BlockingContext = @import("async/BlockingContext.zig");
 pub const EventLoop = @import("async/EventLoop.zig");
 const System = @import("async/System.zig");
 pub const Task = @import("async/Task.zig");
+const ProxyAsync = @import("proxy_context/async.zig");
+
+const Self = @This();
 
 sys: System,
 
@@ -34,7 +33,7 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) ProxyAsync.EnqueuedFuture(
             const err_int: std.meta.Int(.unsigned, @bitSizeOf(anyerror)) = @intCast(@intFromPtr(data.*));
             const err = @errorFromInt(err_int);
             return .{ .ready = .{
-                .result = AnyError.initError(err).err,
+                .result = AnyError.initError(err).intoResult(),
                 .value = undefined,
             } };
         }
@@ -53,25 +52,25 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) ProxyAsync.EnqueuedFuture(
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn runToCompletion(ptr: *anyopaque) callconv(.c) c.FimoResult {
+    fn runToCompletion(ptr: *anyopaque) callconv(.c) AnyResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.@"async".sys.startEventLoop(true) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        ctx.@"async".sys.startEventLoop(true) catch |err| return AnyError.initError(err).intoResult();
+        return AnyResult.ok;
     }
 
-    fn startEventLoop(ptr: *anyopaque, loop: *ProxyAsync.EventLoop) callconv(.c) c.FimoResult {
+    fn startEventLoop(ptr: *anyopaque, loop: *ProxyAsync.EventLoop) callconv(.c) AnyResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        loop.* = EventLoop.init(&ctx.@"async".sys) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        loop.* = EventLoop.init(&ctx.@"async".sys) catch |err| return AnyError.initError(err).intoResult();
+        return AnyResult.ok;
     }
 
     fn contextNewBlocking(
         ptr: *anyopaque,
         context: *ProxyAsync.BlockingContext,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
-        context.* = BlockingContext.init(&ctx.@"async".sys) catch |err| return AnyError.initError(err).err;
-        return AnyError.intoCResult(null);
+        context.* = BlockingContext.init(&ctx.@"async".sys) catch |err| return AnyError.initError(err).intoResult();
+        return AnyResult.ok;
     }
 
     fn futureEnqueue(
@@ -89,7 +88,7 @@ const VTableImpl = struct {
         cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         future: *ProxyAsync.OpaqueFuture,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const ctx: *Context = @alignCast(@ptrCast(ptr));
         future.* = Task.init(
             &ctx.@"async".sys,
@@ -101,8 +100,8 @@ const VTableImpl = struct {
             poll_fn,
             cleanup_data_fn,
             cleanup_result_fn,
-        ) catch |e| return AnyError.initError(e).err;
-        return AnyError.intoCResult(null);
+        ) catch |e| return AnyError.initError(e).intoResult();
+        return AnyResult.ok;
     }
 };
 

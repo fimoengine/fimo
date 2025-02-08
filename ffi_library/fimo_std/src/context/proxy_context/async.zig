@@ -6,9 +6,10 @@
 
 const std = @import("std");
 
+const AnyError = @import("../../AnyError.zig");
+const AnyResult = AnyError.AnyResult;
 const c = @import("../../c.zig");
 const Context = @import("../proxy_context.zig");
-const AnyError = @import("../../AnyError.zig");
 
 context: Context,
 
@@ -33,11 +34,8 @@ pub const EventLoop = extern struct {
     /// completes its execution.
     pub fn init(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!EventLoop {
         var loop: EventLoop = undefined;
-        const result = ctx.context.vtable.async_v0.start_event_loop(
-            ctx.context.data,
-            &loop,
-        );
-        try AnyError.initChecked(err, result);
+        try ctx.context.vtable.async_v0.start_event_loop(ctx.context.data, &loop)
+            .intoErrorUnion(err);
         return loop;
     }
 
@@ -47,10 +45,7 @@ pub const EventLoop = extern struct {
     /// the context can not be destroyed until the queue is empty. Upon the completion of all
     /// tasks, the funtion will return to the caller.
     pub fn flushWithCurrentThread(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!void {
-        const result = ctx.context.vtable.async_v0.run_to_completion(
-            ctx.context.data,
-        );
-        try AnyError.initChecked(err, result);
+        try ctx.context.vtable.async_v0.run_to_completion(ctx.context.data).intoErrorUnion(err);
     }
 
     /// Signals the event loop to complete the remaining jobs and exit afterwards.
@@ -123,11 +118,8 @@ pub const BlockingContext = extern struct {
     /// Initializes a new blocking context.
     pub fn init(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!BlockingContext {
         var context: BlockingContext = undefined;
-        const result = ctx.context.vtable.async_v0.context_new_blocking(
-            ctx.context.data,
-            &context,
-        );
-        try AnyError.initChecked(err, result);
+        try ctx.context.vtable.async_v0.context_new_blocking(ctx.context.data, &context)
+            .intoErrorUnion(err);
         return context;
     }
 
@@ -280,7 +272,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
             };
 
             var enqueued: OpaqueFuture = undefined;
-            const result = ctx.context.vtable.async_v0.future_enqueue(
+            try ctx.context.vtable.async_v0.future_enqueue(
                 ctx.context.data,
                 std.mem.asBytes(&self),
                 @sizeOf(@This()),
@@ -291,8 +283,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
                 &Wrapper.deinit_data,
                 &Wrapper.deinit_result,
                 &enqueued,
-            );
-            try AnyError.initChecked(err, result);
+            ).intoErrorUnion(err);
             return @bitCast(enqueued);
         }
     };
@@ -693,7 +684,7 @@ pub fn FSMFuture(comptime T: type) type {
 /// A fallible result.
 pub fn Fallible(comptime T: type) type {
     return extern struct {
-        result: c.FimoResult,
+        result: AnyResult,
         value: T,
 
         const Self = @This();
@@ -709,7 +700,7 @@ pub fn Fallible(comptime T: type) type {
 
         /// Extracts the contained result.
         pub fn unwrap(self: Self, err: *?AnyError) AnyError.Error!T {
-            try AnyError.initChecked(err, self.result);
+            try self.result.intoErrorUnion(err);
             return self.value;
         }
 
@@ -717,12 +708,12 @@ pub fn Fallible(comptime T: type) type {
         pub fn wrap(value: anyerror!T) Self {
             const x = value catch |err| {
                 return .{
-                    .result = AnyError.initError(err).err,
+                    .result = AnyError.initError(err).intoResult(),
                     .value = undefined,
                 };
             };
             return .{
-                .result = AnyError.intoCResult(null),
+                .result = AnyResult.ok,
                 .value = x,
             };
         }
@@ -733,9 +724,9 @@ pub fn Fallible(comptime T: type) type {
 ///
 /// Changing the VTable is a breaking change.
 pub const VTable = extern struct {
-    run_to_completion: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
-    start_event_loop: *const fn (ctx: *anyopaque, loop: *EventLoop) callconv(.c) c.FimoResult,
-    context_new_blocking: *const fn (ctx: *anyopaque, context: *BlockingContext) callconv(.c) c.FimoResult,
+    run_to_completion: *const fn (ctx: *anyopaque) callconv(.c) AnyResult,
+    start_event_loop: *const fn (ctx: *anyopaque, loop: *EventLoop) callconv(.c) AnyResult,
+    context_new_blocking: *const fn (ctx: *anyopaque, context: *BlockingContext) callconv(.c) AnyResult,
     future_enqueue: *const fn (
         ctx: *anyopaque,
         data: ?[*]const u8,
@@ -747,5 +738,5 @@ pub const VTable = extern struct {
         cleanup_data: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         future: *OpaqueFuture,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
 };

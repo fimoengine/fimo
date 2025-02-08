@@ -4,6 +4,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const AnyError = @import("../../AnyError.zig");
+const AnyResult = AnyError.AnyResult;
 const c = @import("../../c.zig");
 const Path = @import("../../path.zig").Path;
 const Version = @import("../../Version.zig");
@@ -278,12 +279,8 @@ pub const Info = extern struct {
     /// count increased.
     pub fn findByName(ctx: Module, module: [:0]const u8, err: *?AnyError) AnyError.Error!*const Info {
         var info: *const Info = undefined;
-        const result = ctx.context.vtable.module_v0.find_by_name(
-            ctx.context.data,
-            module.ptr,
-            &info,
-        );
-        try AnyError.initChecked(err, result);
+        try ctx.context.vtable.module_v0.find_by_name(ctx.context.data, module.ptr, &info)
+            .intoErrorUnion(err);
         return info;
     }
 
@@ -299,14 +296,13 @@ pub const Info = extern struct {
         err: *?AnyError,
     ) AnyError.Error!*const Info {
         var info: *const Info = undefined;
-        const result = ctx.context.vtable.module_v0.find_by_symbol(
+        try ctx.context.vtable.module_v0.find_by_symbol(
             ctx.context.data,
             name.ptr,
             namespace.ptr,
             version.intoC(),
             &info,
-        );
-        try AnyError.initChecked(err, result);
+        ).intoErrorUnion(err);
         return info;
     }
 };
@@ -412,50 +408,50 @@ pub fn Instance(
                 namespace: [*:0]const u8,
                 has_dependency: *bool,
                 is_static: *bool,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             add_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             remove_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             query_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
                 has_dependency: *bool,
                 is_static: *bool,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             add_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             remove_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             load_symbol: *const fn (
                 ctx: *const OpaqueInstance,
                 name: [*:0]const u8,
                 namespace: [*:0]const u8,
                 version: c.FimoVersion,
                 symbol: **const anyopaque,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             read_parameter: *const fn (
                 ctx: *const OpaqueInstance,
                 value: *anyopaque,
                 type: ParameterType,
                 module: [*:0]const u8,
                 parameter: [*:0]const u8,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
             write_parameter: *const fn (
                 ctx: *const OpaqueInstance,
                 value: *const anyopaque,
                 type: ParameterType,
                 module: [*:0]const u8,
                 parameter: [*:0]const u8,
-            ) callconv(.c) c.FimoResult,
+            ) callconv(.c) AnyResult,
         };
 
         /// Returns the contained context without increasing the reference count.
@@ -491,13 +487,12 @@ pub fn Instance(
         ) AnyError.Error!enum { removed, added, static } {
             var has_dependency: bool = undefined;
             var is_static: bool = undefined;
-            const result = self.vtable.query_namespace(
+            try self.vtable.query_namespace(
                 self.castOpaque(),
                 namespace.ptr,
                 &has_dependency,
                 &is_static,
-            );
-            try AnyError.initChecked(err, result);
+            ).intoErrorUnion(err);
             if (!has_dependency) return .removed;
             if (!is_static) return .added;
             return .static;
@@ -512,11 +507,7 @@ pub fn Instance(
             namespace: [:0]const u8,
             err: *?AnyError,
         ) AnyError.Error!void {
-            const result = self.vtable.add_namespace(
-                self.castOpaque(),
-                namespace.ptr,
-            );
-            try AnyError.initChecked(err, result);
+            try self.vtable.add_namespace(self.castOpaque(), namespace.ptr).intoErrorUnion(err);
         }
 
         /// Removes a namespace include from the module.
@@ -529,11 +520,7 @@ pub fn Instance(
             namespace: [:0]const u8,
             err: *?AnyError,
         ) AnyError.Error!void {
-            const result = self.vtable.remove_namespace(
-                self.castOpaque(),
-                namespace.ptr,
-            );
-            try AnyError.initChecked(err, result);
+            try self.vtable.remove_namespace(self.castOpaque(), namespace.ptr).intoErrorUnion(err);
         }
 
         /// Checks if a module depends on another module.
@@ -549,13 +536,8 @@ pub fn Instance(
         ) AnyError.Error!enum { removed, added, static } {
             var has_dependency: bool = undefined;
             var is_static: bool = undefined;
-            const result = self.vtable.query_dependency(
-                self.castOpaque(),
-                info,
-                &has_dependency,
-                &is_static,
-            );
-            try AnyError.initChecked(err, result);
+            try self.vtable.query_dependency(self.castOpaque(), info, &has_dependency, &is_static)
+                .intoErrorUnion(err);
             if (!has_dependency) return .removed;
             if (!is_static) return .added;
             return .static;
@@ -572,11 +554,7 @@ pub fn Instance(
             info: *const Info,
             err: *?AnyError,
         ) AnyError.Error!void {
-            const result = self.vtable.add_dependency(
-                self.castOpaque(),
-                info,
-            );
-            try AnyError.initChecked(err, result);
+            try self.vtable.add_dependency(self.castOpaque(), info).intoErrorUnion(err);
         }
 
         /// Removes a module as a dependency.
@@ -590,11 +568,7 @@ pub fn Instance(
             info: *const Info,
             err: *?AnyError,
         ) AnyError.Error!void {
-            const result = self.vtable.remove_dependency(
-                self.castOpaque(),
-                info,
-            );
-            try AnyError.initChecked(err, result);
+            try self.vtable.remove_dependency(self.castOpaque(), info).intoErrorUnion(err);
         }
 
         /// Loads a symbol from the module subsystem.
@@ -633,14 +607,8 @@ pub fn Instance(
             err: *?AnyError,
         ) AnyError.Error!*const anyopaque {
             var sym: *const anyopaque = undefined;
-            const result = self.vtable.load_symbol(
-                self.castOpaque(),
-                name,
-                namespace,
-                version.intoC(),
-                &sym,
-            );
-            try AnyError.initChecked(err, result);
+            try self.vtable.load_symbol(self.castOpaque(), name, namespace, version.intoC(), &sym)
+                .intoErrorUnion(err);
             return sym;
         }
 
@@ -668,14 +636,14 @@ pub fn Instance(
                 32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
                 64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
             };
-            const result = self.vtable.read_parameter(
+            try self.vtable.read_parameter(
                 self.castOpaque(),
                 &value,
                 value_type,
                 module.ptr,
                 parameter.ptr,
-            );
-            try AnyError.initChecked(err, result);
+            ).intoErrorUnion(err);
+            return value;
         }
 
         /// Sets a module parameter with dependency write access.
@@ -697,14 +665,13 @@ pub fn Instance(
                 32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
                 64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
             };
-            const result = self.vtable.write_parameter(
+            try self.vtable.write_parameter(
                 self.castOpaque(),
                 &value,
                 value_type,
                 module.ptr,
                 parameter.ptr,
-            );
-            try AnyError.initChecked(err, result);
+            ).intoErrorUnion(err);
         }
 
         /// Casts the instance pointer to an opaque instance pointer.
@@ -741,11 +708,8 @@ pub const PseudoInstance = extern struct {
     /// instances, i.e., module handles without an associated module.
     pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!*const PseudoInstance {
         var instance: *const PseudoInstance = undefined;
-        const result = ctx.context.vtable.module_v0.pseudo_module_new(
-            ctx.context.data,
-            &instance,
-        );
-        try AnyError.initChecked(err, result);
+        try ctx.context.vtable.module_v0.pseudo_module_new(ctx.context.data, &instance)
+            .intoErrorUnion(err);
         return instance;
     }
 
@@ -767,10 +731,7 @@ pub const PseudoInstance = extern struct {
         namespace: [:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!enum { removed, added, static } {
-        return self.castOpaque().queryNamespace(
-            namespace,
-            err,
-        );
+        return self.castOpaque().queryNamespace(namespace, err);
     }
 
     /// Includes a namespace by the module.
@@ -782,10 +743,7 @@ pub const PseudoInstance = extern struct {
         namespace: [:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!void {
-        return self.castOpaque().addNamespace(
-            namespace,
-            err,
-        );
+        return self.castOpaque().addNamespace(namespace, err);
     }
 
     /// Removes a namespace include from the module.
@@ -798,10 +756,7 @@ pub const PseudoInstance = extern struct {
         namespace: [:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!void {
-        return self.castOpaque().removeNamespace(
-            namespace,
-            err,
-        );
+        return self.castOpaque().removeNamespace(namespace, err);
     }
 
     /// Checks if a module depends on another module.
@@ -815,10 +770,7 @@ pub const PseudoInstance = extern struct {
         info: *const Info,
         err: *?AnyError,
     ) AnyError.Error!enum { removed, added, static } {
-        return self.castOpaque().queryDependency(
-            info,
-            err,
-        );
+        return self.castOpaque().queryDependency(info, err);
     }
 
     /// Acquires another module as a dependency.
@@ -832,10 +784,7 @@ pub const PseudoInstance = extern struct {
         info: *const Info,
         err: *?AnyError,
     ) AnyError.Error!void {
-        return self.castOpaque().addDependency(
-            info,
-            err,
-        );
+        return self.castOpaque().addDependency(info, err);
     }
 
     /// Removes a module as a dependency.
@@ -849,10 +798,7 @@ pub const PseudoInstance = extern struct {
         info: *const Info,
         err: *?AnyError,
     ) AnyError.Error!void {
-        return self.castOpaque().removeDependency(
-            info,
-            err,
-        );
+        return self.castOpaque().removeDependency(info, err);
     }
 
     /// Loads a symbol from the module subsystem.
@@ -884,12 +830,7 @@ pub const PseudoInstance = extern struct {
         version: Version,
         err: *?AnyError,
     ) AnyError.Error!*const anyopaque {
-        return self.castOpaque().loadSymbolRaw(
-            name,
-            namespace,
-            version,
-            err,
-        );
+        return self.castOpaque().loadSymbolRaw(name, namespace, version, err);
     }
 
     /// Reads a module parameter with dependency read access.
@@ -904,12 +845,7 @@ pub const PseudoInstance = extern struct {
         parameter: [:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!T {
-        return self.castOpaque().readParameter(
-            T,
-            module,
-            parameter,
-            err,
-        );
+        return self.castOpaque().readParameter(T, module, parameter, err);
     }
 
     /// Sets a module parameter with dependency write access.
@@ -925,13 +861,7 @@ pub const PseudoInstance = extern struct {
         parameter: [:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!void {
-        return self.castOpaque().writeParameter(
-            T,
-            value,
-            module,
-            parameter,
-            err,
-        );
+        return self.castOpaque().writeParameter(T, value, module, parameter, err);
     }
 
     /// Casts the instance pointer to an opaque instance pointer.
@@ -973,19 +903,19 @@ pub const LoadingSet = extern struct {
             on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
             on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             data: ?*anyopaque,
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) AnyResult,
         add_module: *const fn (
             ctx: *anyopaque,
             owner: *const OpaqueInstance,
             module: *const Export,
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) AnyResult,
         add_modules_from_path: *const fn (
             ctx: *anyopaque,
             path: c.FimoUTF8Path,
             filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
             filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             filter_data: ?*anyopaque,
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) AnyResult,
         add_modules_from_local: *const fn (
             ctx: *anyopaque,
             filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
@@ -996,7 +926,7 @@ pub const LoadingSet = extern struct {
                 data: ?*anyopaque,
             ) callconv(.c) void,
             bin_ptr: *const anyopaque,
-        ) callconv(.c) c.FimoResult,
+        ) callconv(.c) AnyResult,
         commit: *const fn (
             ctx: *anyopaque,
         ) callconv(.c) EnqueuedFuture(Fallible(void)),
@@ -1009,8 +939,7 @@ pub const LoadingSet = extern struct {
     /// by automatically computing a suitable load order for a batch of modules.
     pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!LoadingSet {
         var set: LoadingSet = undefined;
-        const result = ctx.context.vtable.module_v0.set_new(ctx.context.data, &set);
-        try AnyError.initChecked(err, result);
+        try ctx.context.vtable.module_v0.set_new(ctx.context.data, &set).intoErrorUnion(err);
         return set;
     }
 
@@ -1116,15 +1045,14 @@ pub const LoadingSet = extern struct {
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
     ) AnyError.Error!void {
-        const result = self.vtable.add_callback(
+        try self.vtable.add_callback(
             self.data,
             module,
             on_success,
             on_error,
             on_abort,
             data,
-        );
-        try AnyError.initChecked(err, result);
+        ).intoErrorUnion(err);
     }
 
     /// Adds a module to the set.
@@ -1144,12 +1072,7 @@ pub const LoadingSet = extern struct {
         module: *const Export,
         err: *?AnyError,
     ) AnyError.Error!void {
-        const result = self.vtable.add_module(
-            self.data,
-            owner,
-            module,
-        );
-        try AnyError.initChecked(err, result);
+        try self.vtable.add_module(self.data, owner, module).intoErrorUnion(err);
     }
 
     /// Adds modules to the set.
@@ -1216,14 +1139,13 @@ pub const LoadingSet = extern struct {
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
     ) AnyError.Error!void {
-        const result = self.vtable.add_modules_from_path(
+        try self.vtable.add_modules_from_path(
             self.data,
             path.intoC(),
             filter,
             filter_deinit,
             filter_data,
-        );
-        try AnyError.initChecked(err, result);
+        ).intoErrorUnion(err);
     }
 
     /// Adds modules to the set.
@@ -1283,15 +1205,14 @@ pub const LoadingSet = extern struct {
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         err: *?AnyError,
     ) AnyError.Error!void {
-        const result = self.vtable.add_modules_from_local(
+        try self.vtable.add_modules_from_local(
             self.data,
             filter,
             filter_deinit,
             filter_data,
             exports.ExportIter.fimo_impl_module_export_iterator,
             @ptrCast(&exports.ExportIter.fimo_impl_module_export_iterator),
-        );
-        try AnyError.initChecked(err, result);
+        ).intoErrorUnion(err);
     }
 
     /// Loads the modules contained in the set.
@@ -1315,29 +1236,29 @@ pub const VTable = extern struct {
     pseudo_module_new: *const fn (
         ctx: *anyopaque,
         instance: **const PseudoInstance,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
     set_new: *const fn (
         ctx: *anyopaque,
         fut: *LoadingSet,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
     find_by_name: *const fn (
         ctx: *anyopaque,
         name: [*:0]const u8,
         info: **const Info,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
     find_by_symbol: *const fn (
         ctx: *anyopaque,
         name: [*:0]const u8,
         namespace: [*:0]const u8,
         version: c.FimoVersion,
         info: **const Info,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
     namespace_exists: *const fn (
         ctx: *anyopaque,
         namespace: [*:0]const u8,
         exists: *bool,
-    ) callconv(.c) c.FimoResult,
-    prune_instances: *const fn (ctx: *anyopaque) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
+    prune_instances: *const fn (ctx: *anyopaque) callconv(.c) AnyResult,
     query_parameter: *const fn (
         ctx: *anyopaque,
         module: [*:0]const u8,
@@ -1345,21 +1266,21 @@ pub const VTable = extern struct {
         type: *ParameterType,
         read_group: *ParameterAccessGroup,
         write_group: *ParameterAccessGroup,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
     read_parameter: *const fn (
         ctx: *anyopaque,
         value: *anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
     write_parameter: *const fn (
         ctx: *anyopaque,
         value: *const anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) c.FimoResult,
+    ) callconv(.c) AnyResult,
 };
 
 /// Checks for the presence of a namespace in the module subsystem.
@@ -1371,12 +1292,11 @@ pub fn namespaceExists(
     err: *?AnyError,
 ) AnyError.Error!bool {
     var exists: bool = undefined;
-    const result = self.context.vtable.module_v0.namespace_exists(
+    try self.context.vtable.module_v0.namespace_exists(
         self.context.data,
         namespace.ptr,
         &exists,
-    );
-    try AnyError.initChecked(err, result);
+    ).intoErrorUnion(err);
     return exists;
 }
 
@@ -1387,8 +1307,7 @@ pub fn pruneInstances(
     self: Module,
     err: *?AnyError,
 ) AnyError.Error!void {
-    const result = self.context.vtable.module_v0.prune_instances(self.context.data);
-    try AnyError.initChecked(err, result);
+    try self.context.vtable.module_v0.prune_instances(self.context.data).intoErrorUnion(err);
 }
 
 /// Queries the info of a module parameter.
@@ -1404,15 +1323,14 @@ pub fn queryParameter(
     var tag: ParameterType = undefined;
     var read_group: ParameterAccessGroup = undefined;
     var write_group: ParameterAccessGroup = undefined;
-    const result = self.context.vtable.module_v0.query_parameter(
+    try self.context.vtable.module_v0.query_parameter(
         self.context.data,
         module.ptr,
         parameter.ptr,
         &tag,
         &read_group,
         &write_group,
-    );
-    try AnyError.initChecked(err, result);
+    ).intoErrorUnion(err);
     return .{
         .tag = tag,
         .read_group = read_group,
@@ -1443,14 +1361,14 @@ pub fn readParameter(
         32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
         64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
     };
-    const result = self.context.vtable.module_v0.read_parameter(
+    try self.context.vtable.module_v0.read_parameter(
         self.context.data,
         &value,
         value_type,
         module.ptr,
         parameter.ptr,
-    );
-    try AnyError.initChecked(err, result);
+    ).intoErrorUnion(err);
+    return value;
 }
 
 /// Sets a module parameter with public write access.
@@ -1476,12 +1394,11 @@ pub fn writeParameter(
         32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
         64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
     };
-    const result = self.context.vtable.module_v0.write_parameter(
+    try self.context.vtable.module_v0.write_parameter(
         self.context.data,
         &value,
         value_type,
         module.ptr,
         parameter.ptr,
-    );
-    try AnyError.initChecked(err, result);
+    ).intoErrorUnion(err);
 }

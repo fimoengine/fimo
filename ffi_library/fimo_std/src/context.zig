@@ -2,19 +2,17 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const c = @import("c.zig");
 const AnyError = @import("AnyError.zig");
-const Version = @import("Version.zig");
-
-const RefCount = @import("context/RefCount.zig");
-
+const AnyResult = AnyError.AnyResult;
+const c = @import("c.zig");
 const Async = @import("context/async.zig");
-const Tracing = @import("context/tracing.zig");
 const Module = @import("context/module.zig");
-
-pub const ProxyTracing = @import("context/proxy_context/tracing.zig");
-pub const ProxyModule = @import("context/proxy_context/module.zig");
 pub const ProxyContext = @import("context/proxy_context.zig");
+pub const ProxyModule = @import("context/proxy_context/module.zig");
+pub const ProxyTracing = @import("context/proxy_context/tracing.zig");
+const RefCount = @import("context/RefCount.zig");
+const Tracing = @import("context/tracing.zig");
+const Version = @import("Version.zig");
 
 const GPA = std.heap.GeneralPurposeAllocator(.{});
 const Self = @This();
@@ -106,11 +104,11 @@ pub fn fromProxy(ctx: ProxyContext) *Self {
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn isCompatible(ctx: *anyopaque, version: *const c.FimoVersion) callconv(.C) c.FimoResult {
+    fn isCompatible(ctx: *anyopaque, version: *const c.FimoVersion) callconv(.C) AnyResult {
         _ = ctx;
         const v = Version.initC(version.*);
-        if (ProxyContext.context_version.isCompatibleWith(v)) return AnyError.intoCResult(null);
-        return AnyError.initError(error.NotCompatible).err;
+        if (ProxyContext.context_version.isCompatibleWith(v)) return AnyResult.ok;
+        return AnyError.initError(error.NotCompatible).intoResult();
     }
     fn ref(ctx: *anyopaque) callconv(.C) void {
         const self = Self.fromProxyPtr(ctx);

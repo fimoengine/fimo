@@ -198,16 +198,16 @@ const State = struct {
         sym.* = fimo_python_meta.RunString{
             .data = @constCast(ctx),
             .call_f = &struct {
-                fn f(data: ?*anyopaque, code: [*:0]const u8, home: ?[*:0]const u8) callconv(.C) fimo_std.c.FimoResult {
+                fn f(data: ?*anyopaque, code: [*:0]const u8, home: ?[*:0]const u8) callconv(.C) fimo_std.AnyError.AnyResult {
                     const ctx_: *const Instance = @alignCast(@ptrCast(data));
                     const code_ = std.mem.span(code);
                     const home_ = if (home) |h| std.mem.span(h) else null;
                     State.runString(ctx_, code_, home_) catch |err| {
                         if (@errorReturnTrace()) |tr|
                             ctx_.context().tracing().emitStackTraceSimple(tr.*, @src());
-                        return fimo_std.AnyError.initError(err).err;
+                        return fimo_std.AnyError.initError(err).intoResult();
                     };
-                    return fimo_std.AnyError.intoCResult(null);
+                    return fimo_std.AnyError.AnyResult.ok;
                 }
             }.f,
         };

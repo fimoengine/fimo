@@ -7,80 +7,75 @@ const c = @import("c.zig");
 
 const Self = @This();
 
-/// Contained error. Must always represent an actual error.
-err: c.FimoResult,
+data: ?*anyopaque,
+vtable: *const VTable,
 
 /// Errors deriving from an ffi call.
 pub const Error = error{FfiError};
 
-const anyerror_vtable = c.FimoResultVTable{
-    .v0 = .{
-        .release = null,
-        .error_name = anyerror_string,
-        .error_description = anyerror_string,
-    },
+/// VTable of an `AnyError` and `AnyResult`.
+///
+/// Adding fields to the vtable is a breaking change.
+pub const VTable = extern struct {
+    deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
+    name: *const fn (data: ?*anyopaque) callconv(.c) ErrorString,
+    description: *const fn (data: ?*anyopaque) callconv(.c) ErrorString,
 };
-fn anyerror_string(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
+
+const anyerror_vtable = VTable{
+    .deinit = null,
+    .name = anyerror_string,
+    .description = anyerror_string,
+};
+fn anyerror_string(ptr: ?*anyopaque) callconv(.C) ErrorString {
     const err_int: std.meta.Int(.unsigned, @bitSizeOf(anyerror)) = @intCast(@intFromPtr(ptr));
     const err = @errorFromInt(err_int);
-    return ErrorString.init(@errorName(err)).str;
+    return ErrorString.init(@errorName(err));
 }
 
 // Declared in the C header.
-export const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE = c.FimoResultVTable{
-    .v0 = .{
-        .release = null,
-        .error_name = static_string_string,
-        .error_description = static_string_string,
-    },
+export const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE = VTable{
+    .deinit = null,
+    .name = static_string_string,
+    .description = static_string_string,
 };
-fn static_string_string(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
+fn static_string_string(ptr: ?*anyopaque) callconv(.C) ErrorString {
     const str: [*:0]const u8 = @constCast(@alignCast(@ptrCast(ptr.?)));
-    return ErrorString.init(str).str;
+    return ErrorString.init(str);
 }
 
 // Declared in the C header.
-export const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE = c.FimoResultVTable{
-    .v0 = .{
-        .release = null,
-        .error_name = error_code_name,
-        .error_description = error_code_description,
-    },
+export const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE = VTable{
+    .deinit = null,
+    .name = error_code_name,
+    .description = error_code_description,
 };
-fn error_code_name(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
+fn error_code_name(ptr: ?*anyopaque) callconv(.C) ErrorString {
     const code: ErrorCode = @enumFromInt(@intFromPtr(ptr));
-    const string = ErrorString.init(code.name());
-    return string.str;
+    return ErrorString.init(code.name());
 }
-fn error_code_description(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
+fn error_code_description(ptr: ?*anyopaque) callconv(.C) ErrorString {
     const code: ErrorCode = @enumFromInt(@intFromPtr(ptr));
-    const string = ErrorString.init(code.description());
-    return string.str;
+    return ErrorString.init(code.description());
 }
 
 // Declared in the C header.
-export const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE = c.FimoResultVTable{
-    .v0 = .{
-        .release = null,
-        .error_name = system_error_code_name,
-        .error_description = system_error_code_description,
-    },
+export const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE = VTable{
+    .deinit = null,
+    .name = system_error_code_name,
+    .description = system_error_code_description,
 };
-fn system_error_code_name(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
+fn system_error_code_name(ptr: ?*anyopaque) callconv(.C) ErrorString {
     const code: SystemErrorCode = @intCast(@intFromPtr(ptr));
-    const string = ErrorString.initFmt(
-        std.heap.c_allocator,
-        "SystemError({})",
-        .{code},
-    ) catch |e| Self.initError(e).name();
-    return string.str;
+    return ErrorString.initFmt(std.heap.c_allocator, "SystemError({})", .{code}) catch |e|
+        Self.initError(e).name();
 }
-fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) c.FimoResultString {
+fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) ErrorString {
     const code: SystemErrorCode = @intCast(@intFromPtr(ptr));
     switch (builtin.target.os.tag) {
         .windows => {
             const FreeImpl = struct {
-                fn free(p: [*c]const u8) callconv(.c) void {
+                fn free(p: [*:0]const u8) callconv(.c) void {
                     std.os.windows.LocalFree(@constCast(p));
                 }
             };
@@ -96,18 +91,18 @@ fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) c.FimoResultStri
                 null,
             );
             if (format_result == 0) {
-                return ErrorString.init("SystemError(\"unknown error\")").str;
+                return ErrorString.init("SystemError(\"unknown error\")");
             }
             // Remove the trailing `\r\n` characters.
             error_description.?[format_result - 2] = 0;
-            return c.FimoResultString{
-                .str = @ptrCast(@constCast(error_description)),
-                .release = FreeImpl.free,
+            return ErrorString{
+                .data = @ptrCast(@constCast(error_description)),
+                .deinit_fn = FreeImpl.free,
             };
         },
         else => {
             const errno: std.posix.E = @enumFromInt(code);
-            return ErrorString.init(@tagName(errno)).str;
+            return ErrorString.init(@tagName(errno));
         },
     }
 }
@@ -122,16 +117,122 @@ extern fn FormatMessageA(
 ) std.os.windows.DWORD;
 
 // Declared in the C header.
-export const FIMO_IMPL_RESULT_OK = c.FimoResult{
-    .data = null,
-    .vtable = null,
-};
-export const FIMO_IMPL_RESULT_INVALID_ERROR = c.FimoResult{
+export const FIMO_IMPL_RESULT_OK = AnyResult.ok.intoC();
+export const FIMO_IMPL_RESULT_INVALID_ERROR = AnyResult{
     .data = @ptrCast(@constCast(@as([*:0]const u8, "invalid error"))),
     .vtable = &FIMO_IMPL_RESULT_STATIC_STRING_VTABLE,
 };
-export const FIMO_IMPL_RESULT_OK_NAME = ErrorString.init("ok").str;
-export const FIMO_IMPL_RESULT_OK_DESCRIPTION = ErrorString.init("ok").str;
+export const FIMO_IMPL_RESULT_OK_NAME = ErrorString.init("ok");
+export const FIMO_IMPL_RESULT_OK_DESCRIPTION = ErrorString.init("ok");
+
+/// An optional error.
+pub const AnyResult = extern struct {
+    data: ?*anyopaque,
+    vtable: ?*const VTable,
+
+    /// A value representing no error.
+    pub const ok = AnyResult{
+        .data = null,
+        .vtable = null,
+    };
+
+    /// Initializes a result from an `AnyError`.
+    pub fn initErr(err: Self) AnyResult {
+        return AnyResult{
+            .data = err.data,
+            .vtable = err.vtable,
+        };
+    }
+
+    /// Creates a result from the c result.
+    pub fn initC(err: c.FimoResult) AnyResult {
+        return AnyResult{
+            .data = err.data,
+            .vtable = @ptrCast(@alignCast(err.vtable)),
+        };
+    }
+
+    /// Deinitializes the result.
+    pub fn deinit(self: AnyResult) void {
+        if (self.vtable) |vtable| {
+            if (vtable.deinit) |f| f(self.data);
+        }
+    }
+
+    /// Unwraps the result to a c result.
+    pub fn intoC(self: AnyResult) c.FimoResult {
+        return c.FimoResult{
+            .data = self.data,
+            .vtable = @ptrCast(@alignCast(self.vtable)),
+        };
+    }
+
+    /// Returns whether the result is not an error.
+    pub fn isOk(self: *const AnyResult) bool {
+        return self.vtable == null;
+    }
+
+    /// Returns whether the result is an error.
+    pub fn isErr(self: *const AnyResult) bool {
+        return self.vtable != null;
+    }
+
+    /// Unwraps the contained `AnyError`.
+    pub fn unwrapErr(self: AnyResult) Self {
+        return Self{ .data = self.data, .vtable = self.vtable.? };
+    }
+
+    /// Constructs an error union from the `AnyResult`.
+    pub fn intoErrorUnion(self: AnyResult, err: *?Self) Error!void {
+        if (self.isOk()) return;
+        err.* = self.unwrapErr();
+        return Error.FfiError;
+    }
+
+    /// Returns the name string of the result.
+    pub fn name(self: *const AnyResult) ErrorString {
+        if (self.vtable) |vtable| return vtable.name(self.data);
+        return FIMO_IMPL_RESULT_OK_NAME;
+    }
+
+    /// Returns the description string of the result.
+    pub fn description(self: *const AnyResult) ErrorString {
+        if (self.vtable) |vtable| return vtable.description(self.data);
+        return FIMO_IMPL_RESULT_OK_DESCRIPTION;
+    }
+
+    /// Formats the result.
+    ///
+    /// # Format specifiers
+    ///
+    /// * `{}`: Prints the result description.
+    /// * `{dbg}`: Prints the result name.
+    pub fn format(
+        self: *const AnyResult,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = options;
+
+        const debug = comptime parse_fmt: {
+            if (fmt.len == 0) {
+                break :parse_fmt false;
+            } else if (std.mem.eql(u8, fmt, "dbg")) {
+                break :parse_fmt true;
+            } else {
+                @compileError("expected {}, or {dbg}, found {" ++ fmt ++ "}");
+            }
+        };
+
+        const string = if (debug) self.name() else self.description();
+        defer string.deinit();
+        if (self.isOk())
+            try writer.print("AnyResult.ok(\"{}\")", .{string.string()})
+        else
+            try writer.print("AnyResult.err(\"{}\")", .{string.string()});
+    }
+};
 
 /// Creates an error from a zig error.
 ///
@@ -140,11 +241,7 @@ pub fn initError(err: anyerror) Self {
     if (comptime @sizeOf(anyerror) > @sizeOf(usize)) {
         @compileError("Can not pack an `anyerror` into an `AnyError`, as it is too large.");
     }
-
-    return Self{ .err = .{
-        .data = @ptrFromInt(@intFromError(err)),
-        .vtable = &anyerror_vtable,
-    } };
+    return Self{ .data = @ptrFromInt(@intFromError(err)), .vtable = &anyerror_vtable };
 }
 
 test initError {
@@ -161,10 +258,7 @@ pub fn initErrorCode(code: ErrorCode) ?Self {
     }
     if (code == .ok) return null;
     const code_int: usize = @intCast(@intFromEnum(code));
-    return Self{ .err = .{
-        .data = @ptrFromInt(code_int),
-        .vtable = &FIMO_IMPL_RESULT_ERROR_CODE_VTABLE,
-    } };
+    return Self{ .data = @ptrFromInt(code_int), .vtable = &FIMO_IMPL_RESULT_ERROR_CODE_VTABLE };
 }
 
 test initErrorCode {
@@ -189,10 +283,10 @@ pub fn initSystemErrorCode(code: SystemErrorCode) ?Self {
         @compileError("Can not pack an `SystemErrorCode` into an `AnyError`, as it is too large.");
     }
     if (code == 0) return null;
-    return Self{ .err = .{
+    return Self{
         .data = @ptrFromInt(@as(usize, @intCast(code))),
         .vtable = &FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE,
-    } };
+    };
 }
 
 test initSystemErrorCode {
@@ -220,45 +314,35 @@ test initSystemErrorCode {
     try std.testing.expect(std.mem.eql(u8, error_description.string(), expected_error_description));
 }
 
-/// Creates an optional error from the c result.
-pub fn initC(err: c.FimoResult) ?Self {
-    if (c.fimo_result_is_ok(err)) return null;
-    return Self{ .err = err };
-}
-
-/// Checks whether the pointed to value contains an error.
-pub fn checkError(err: *?Self) Error!void {
-    if (err.* != null) return error.FfiError;
-}
-
-/// Initializes the error and checks whether it contains an error.
-pub fn initChecked(err: *?Self, c_result: c.FimoResult) Error!void {
-    if (err.*) |e| e.deinit();
-    err.* = Self.initC(c_result);
-    return checkError(err);
+/// Creates an error from the c result.
+pub fn initC(err: c.FimoResult) Self {
+    if (c.fimo_result_is_ok(err)) unreachable;
+    return Self{ .data = err.data, .vtable = @ptrCast(@alignCast(err.vtable)) };
 }
 
 /// Cleans up the error.
 pub fn deinit(self: Self) void {
-    c.fimo_result_release(self.err);
+    if (self.vtable.deinit) |f| f(self.data);
+}
+
+/// Constructs an `AnyResult` from the error.
+pub fn intoResult(self: Self) AnyResult {
+    return AnyResult.initErr(self);
 }
 
 /// Unwraps the optional error to the c equivalent.
-pub fn intoCResult(self: ?Self) c.FimoResult {
-    if (self) |v| return v.err;
-    return .{ .data = null, .vtable = null };
+pub fn intoC(self: Self) c.FimoResult {
+    return .{ .data = self.data, .vtable = @ptrCast(@alignCast(self.vtable)) };
 }
 
 /// Returns the name string of the error.
 pub fn name(self: *const Self) ErrorString {
-    const str = self.err.vtable.*.v0.error_name.?(self.err.data);
-    return ErrorString{ .str = str };
+    return self.vtable.name(self.data);
 }
 
 /// Returns the description string of the error.
 pub fn description(self: *const Self) ErrorString {
-    const str = self.err.vtable.*.v0.error_description.?(self.err.data);
-    return ErrorString{ .str = str };
+    return self.vtable.description(self.data);
 }
 
 /// Formats the error.
@@ -608,8 +692,9 @@ pub const SystemErrorCode = switch (builtin.target.os.tag) {
 };
 
 /// An owned string originating from an error.
-pub const ErrorString = struct {
-    str: c.FimoResultString,
+pub const ErrorString = extern struct {
+    data: [*:0]const u8,
+    deinit_fn: ?*const fn (data: [*:0]const u8) callconv(.c) void,
 
     // List of known allocators that we specialize against.
     const known_allocators = .{
@@ -622,10 +707,7 @@ pub const ErrorString = struct {
     ///
     /// The string is assumed to have a static lifetime.
     pub fn init(str: [*:0]const u8) ErrorString {
-        return ErrorString{ .str = .{
-            .str = str,
-            .release = null,
-        } };
+        return ErrorString{ .data = str, .deinit_fn = null };
     }
 
     test init {
@@ -664,10 +746,10 @@ pub const ErrorString = struct {
                 &.{ std.mem.asBytes(&allocator), err },
                 0,
             );
-            return ErrorString{ .str = .{
-                .str = dupe[@sizeOf(std.mem.Allocator)..].ptr,
-                .release = free_func,
-            } };
+            return ErrorString{
+                .data = dupe[@sizeOf(std.mem.Allocator)..].ptr,
+                .deinit_fn = free_func,
+            };
         }
     }
 
@@ -683,10 +765,10 @@ pub const ErrorString = struct {
                 }
             }.free;
             const dupe = try allocator.dupeZ(u8, err);
-            return ErrorString{ .str = .{
-                .str = dupe.ptr,
-                .release = free_func,
-            } };
+            return ErrorString{
+                .data = dupe.ptr,
+                .deinit_fn = free_func,
+            };
         }
     }
 
@@ -696,7 +778,7 @@ pub const ErrorString = struct {
             const error_string = try ErrorString.initDupe(std.testing.allocator, err);
             defer error_string.deinit();
             try std.testing.expect(std.mem.eql(u8, error_string.string(), err));
-            try std.testing.expect(error_string.str.release == null);
+            try std.testing.expect(error_string.deinit_fn == null);
         }
 
         const err = "error message";
@@ -734,10 +816,10 @@ pub const ErrorString = struct {
                 args,
             );
             @as(*align(1) std.mem.Allocator, @ptrCast(buff.ptr)).* = allocator;
-            return ErrorString{ .str = .{
-                .str = buff[@sizeOf(std.mem.Allocator)..].ptr,
-                .release = free_func,
-            } };
+            return ErrorString{
+                .data = buff[@sizeOf(std.mem.Allocator)..].ptr,
+                .deinit_fn = free_func,
+            };
         }
     }
 
@@ -754,10 +836,10 @@ pub const ErrorString = struct {
                 }
             }.free;
             const buff = try std.fmt.allocPrintZ(allocator, fmt, args);
-            return ErrorString{ .str = .{
-                .str = buff.ptr,
-                .release = free_func,
-            } };
+            return ErrorString{
+                .data = buff.ptr,
+                .deinit_fn = free_func,
+            };
         }
     }
 
@@ -773,7 +855,7 @@ pub const ErrorString = struct {
             );
             defer error_string.deinit();
             try std.testing.expect(std.mem.eql(u8, error_string.string(), err));
-            try std.testing.expect(error_string.str.release == null);
+            try std.testing.expect(error_string.deinit_fn == null);
         }
 
         const error_string = try ErrorString.initFmt(
@@ -787,14 +869,12 @@ pub const ErrorString = struct {
 
     /// Releases the error string.
     pub fn deinit(self: ErrorString) void {
-        if (self.str.release) |release| {
-            release(self.str.str);
-        }
+        if (self.deinit_fn) |f| f(self.data);
     }
 
     /// Extracts the contained string.
     pub fn string(self: *const ErrorString) [:0]const u8 {
-        return std.mem.span(self.str.str);
+        return std.mem.span(self.data);
     }
 
     /// Formats the string.

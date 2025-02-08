@@ -1,9 +1,10 @@
 //! A version specifier.
 
 const std = @import("std");
-const Version = @This();
+
 const c = @import("c.zig");
 
+const Version = @This();
 major: u32,
 minor: u32,
 patch: u32,
@@ -220,17 +221,18 @@ test format {
 
 const ffi = struct {
     const AnyError = @import("AnyError.zig");
+    const AnyResult = AnyError.AnyResult;
 
     export fn fimo_version_parse_str(
         str: [*]const u8,
         str_len: usize,
         version: *c.FimoVersion,
-    ) c.FimoResult {
+    ) AnyResult {
         const text = str[0..str_len];
         if (Version.parse(text)) |v| {
             version.* = v.intoC();
-            return AnyError.intoCResult(null);
-        } else |err| return AnyError.initError(err).err;
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
     }
 
     export fn fimo_version_str_len(
@@ -264,14 +266,14 @@ const ffi = struct {
         str: [*]u8,
         str_len: usize,
         written: ?*usize,
-    ) c.FimoResult {
+    ) AnyResult {
         const v = Version.initC(version.*);
         const buffer = str[0..str_len];
         if (std.fmt.bufPrint(buffer, "{}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
-            return AnyError.intoCResult(null);
-        } else |err| return AnyError.initError(err).err;
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
     }
 
     export fn fimo_version_write_str_long(
@@ -279,14 +281,14 @@ const ffi = struct {
         str: [*]u8,
         str_len: usize,
         written: ?*usize,
-    ) c.FimoResult {
+    ) AnyResult {
         const v = Version.initC(version.*);
         const buffer = str[0..str_len];
         if (std.fmt.bufPrint(buffer, "{long}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
-            return AnyError.intoCResult(null);
-        } else |err| return AnyError.initError(err).err;
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
     }
 
     export fn fimo_version_cmp(

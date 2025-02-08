@@ -3,13 +3,9 @@ const AtomicValue = std.atomic.Value;
 const Mutex = std.Thread.Mutex;
 const DoublyLinkedList = std.DoublyLinkedList;
 
-const AnyError = @import("../../AnyError.zig");
-
-const RefCount = @import("../RefCount.zig");
-
 const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyTracing = @import("../proxy_context/tracing.zig");
-
+const RefCount = @import("../RefCount.zig");
 const System = @import("System.zig");
 
 const Self = @This();

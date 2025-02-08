@@ -33,7 +33,7 @@ pub const RunString = extern struct {
         data: ?*anyopaque,
         code: [*:0]const u8,
         home: ?[*:0]const u8,
-    ) callconv(.C) fimo_std.c.FimoResult,
+    ) callconv(.C) fimo_std.AnyError.AnyResult,
 
     /// Executes the passed string in the embedded python interpreter.
     ///
@@ -47,11 +47,6 @@ pub const RunString = extern struct {
         home: ?[:0]const u8,
         err: *?AnyError,
     ) AnyError.Error!void {
-        const result = self.call_f(
-            self.data,
-            code.ptr,
-            if (home) |h| h.ptr else null,
-        );
-        try AnyError.initChecked(err, result);
+        try self.call_f(self.data, code.ptr, if (home) |h| h.ptr else null).intoErrorUnion(err);
     }
 };

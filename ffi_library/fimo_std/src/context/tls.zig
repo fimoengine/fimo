@@ -1,11 +1,9 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
 const c = std.c;
 const posix = std.posix;
 const windows = std.os.windows;
-
 const allocator = std.heap.c_allocator;
+const builtin = @import("builtin");
 
 pub const TlsError = error{
     /// The process-wide limit on the total number of tls slots has been reached.

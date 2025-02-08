@@ -1,18 +1,15 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const c = @import("../c.zig");
-const AnyError = @import("../AnyError.zig");
+const Context = @import("../context.zig");
 const time = @import("../time.zig");
+const ProxyTracing = @import("proxy_context/tracing.zig");
 const tls = @import("tls.zig");
-
 const CallStack = @import("tracing/CallStack.zig");
 const StackFrame = @import("tracing/StackFrame.zig");
 
-const Context = @import("../context.zig");
-const ProxyTracing = @import("proxy_context/tracing.zig");
 const Tracing = @This();
-
-const Allocator = std.mem.Allocator;
 
 allocator: Allocator,
 subscribers: []ProxyTracing.Subscriber,
@@ -21,24 +18,8 @@ max_level: ProxyTracing.Level,
 thread_data: tls.Tls(ThreadData),
 thread_count: std.atomic.Value(usize),
 
-/// Errors of the tracing subsystem.
-pub const TracingError = error{
-    ThreadRegistered,
-    ThreadNotRegistered,
-    CallStackInUse,
-    CallStackEmpty,
-    CallStackBound,
-    CallStackNotBound,
-    CallStackSuspended,
-    CallStackNotSuspended,
-    CallStackBlocked,
-    CallStackNotBlocked,
-    CallStackNotEmpty,
-    CallStackSpanNotOnTop,
-} || Allocator.Error;
-
 /// Initializes the tracing subsystem.
-pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (TracingError || tls.TlsError)!Tracing {
+pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (Allocator.Error || tls.TlsError)!Tracing {
     var self = Tracing{
         .allocator = allocator,
         .subscribers = undefined,
@@ -97,8 +78,8 @@ pub fn asContext(self: *Tracing) *Context {
 
 /// Creates a new empty call stack.
 ///
-/// If successful, the new call stack is marked as suspended. The
-/// new call stack is not set to be the active call stack.
+/// If successful, the new call stack is marked as suspended. The new call stack is not set to be
+/// the active call stack.
 pub fn createCallStack(self: *Tracing) ProxyTracing.CallStack {
     if (!self.isEnabled()) return CallStack.dummy_call_stack;
     const call_stack = CallStack.init(self);
@@ -107,13 +88,11 @@ pub fn createCallStack(self: *Tracing) ProxyTracing.CallStack {
 
 /// Marks the current call stack as being suspended.
 ///
-/// While suspended, the call stack can not be utilized for tracing
-/// messages. The call stack optionally also be marked as being
-/// blocked. In that case, the call stack must be unblocked prior
-/// to resumption.
+/// While suspended, the call stack can not be utilized for tracing messages. The call stack
+/// optionally also be marked as being blocked. In that case, the call stack must be unblocked
+/// prior to resumption.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub fn suspendCurrentCallStack(self: *const Tracing, mark_blocked: bool) void {
     if (!self.isEnabled()) return;
     if (!self.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
@@ -123,11 +102,10 @@ pub fn suspendCurrentCallStack(self: *const Tracing, mark_blocked: bool) void {
 
 /// Marks the current call stack as being resumed.
 ///
-/// Once resumed, the context can be used to trace messages. To be
-/// successful, the current call stack must be suspended and unblocked.
+/// Once resumed, the context can be used to trace messages. To be successful, the current call
+/// stack must be suspended and unblocked.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub fn resumeCurrentCallStack(self: *const Tracing) void {
     if (!self.isEnabled()) return;
     if (!self.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
@@ -137,13 +115,11 @@ pub fn resumeCurrentCallStack(self: *const Tracing) void {
 
 /// Creates a new span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpan(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -152,7 +128,7 @@ pub inline fn pushSpan(
     target: ?[:0]const u8,
     level: ProxyTracing.Level,
     location: std.builtin.SourceLocation,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     const desc = &struct {
         var desc = ProxyTracing.SpanDesc{
             .metadata = &.{
@@ -173,13 +149,11 @@ pub inline fn pushSpan(
 
 /// Creates a new error span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanErr(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -187,8 +161,7 @@ pub inline fn pushSpanErr(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -196,19 +169,16 @@ pub inline fn pushSpanErr(
         target,
         .err,
         location,
-        err,
     );
 }
 
 /// Creates a new warn span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanWarn(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -216,8 +186,7 @@ pub inline fn pushSpanWarn(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -225,19 +194,16 @@ pub inline fn pushSpanWarn(
         target,
         .warn,
         location,
-        err,
     );
 }
 
 /// Creates a new info span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanInfo(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -245,8 +211,7 @@ pub inline fn pushSpanInfo(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -254,19 +219,16 @@ pub inline fn pushSpanInfo(
         target,
         .info,
         location,
-        err,
     );
 }
 
 /// Creates a new debug span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanDebug(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -274,8 +236,7 @@ pub inline fn pushSpanDebug(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -283,19 +244,16 @@ pub inline fn pushSpanDebug(
         target,
         .debug,
         location,
-        err,
     );
 }
 
 /// Creates a new trace span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanTrace(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -303,8 +261,7 @@ pub inline fn pushSpanTrace(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -312,150 +269,127 @@ pub inline fn pushSpanTrace(
         target,
         .trace,
         location,
-        err,
     );
 }
 
 /// Creates a new error span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanErrSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpanErr(
         fmt,
         args,
         null,
         null,
         location,
-        err,
     );
 }
 
 /// Creates a new warn span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanWarnSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpanWarn(
         fmt,
         args,
         null,
         null,
         location,
-        err,
     );
 }
 
 /// Creates a new info span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanInfoSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpanInfo(
         fmt,
         args,
         null,
         null,
         location,
-        err,
     );
 }
 
 /// Creates a new debug span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanDebugSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpanDebug(
         fmt,
         args,
         null,
         null,
         location,
-        err,
     );
 }
 
 /// Creates a new trace span with the default formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The message is formatted with the default
-/// formatter of the zig standard library. The message may be cut of,
+/// If successful, the newly created span is used as the context for succeeding events. The message
+/// is formatted with the default formatter of the zig standard library. The message may be cut of,
 /// if the length exceeds the internal formatting buffer size.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub inline fn pushSpanTraceSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-    err: *?AnyError,
-) (TracingError || AnyError.Error)!ProxyTracing.Span {
+) ProxyTracing.Span {
     return self.pushSpanTrace(
         fmt,
         args,
         null,
         null,
         location,
-        err,
     );
 }
 
 /// Creates a new span with a custom formatter and enters it.
 ///
-/// If successful, the newly created span is used as the context for
-/// succeeding events. The subsystem may use a formatting buffer of a
-/// fixed size. The formatter is expected to cut-of the message after
-/// reaching that specified size. The `desc` must remain valid until
-/// the span is destroyed.
+/// If successful, the newly created span is used as the context for succeeding events. The
+/// subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of the
+/// message after reaching that specified size. The `desc` must remain valid until the span is
+/// destroyed.
 ///
-/// This function may return an error, if the current thread is not
-/// registered with the subsystem.
+/// This function may panic, if the current thread is not registered with the subsystem.
 pub fn pushSpanCustom(
     self: *const Tracing,
     desc: *const ProxyTracing.SpanDesc,
@@ -470,9 +404,8 @@ pub fn pushSpanCustom(
 
 /// Emits a new event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitEvent(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -500,9 +433,8 @@ pub fn emitEvent(
 
 /// Emits a new error event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitErr(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -523,9 +455,8 @@ pub fn emitErr(
 
 /// Emits a new warn event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitWarn(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -546,9 +477,8 @@ pub fn emitWarn(
 
 /// Emits a new info event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitInfo(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -569,9 +499,8 @@ pub fn emitInfo(
 
 /// Emits a new debug event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitDebug(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -592,9 +521,8 @@ pub fn emitDebug(
 
 /// Emits a new trace event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitTrace(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -615,9 +543,8 @@ pub fn emitTrace(
 
 /// Emits a new error event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitErrSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -635,9 +562,8 @@ pub fn emitErrSimple(
 
 /// Emits a new warn event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitWarnSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -655,9 +581,8 @@ pub fn emitWarnSimple(
 
 /// Emits a new info event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitInfoSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -675,9 +600,8 @@ pub fn emitInfoSimple(
 
 /// Emits a new debug event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitDebugSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -695,9 +619,8 @@ pub fn emitDebugSimple(
 
 /// Emits a new trace event with the standard formatter.
 ///
-/// The message is formatted using the default formatter of the zig
-/// standard library. The message may be cut of, if the length exceeds
-/// the internal formatting buffer size.
+/// The message is formatted using the default formatter of the zig standard library. The message
+/// may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitTraceSimple(
     self: *const Tracing,
     comptime fmt: []const u8,
@@ -715,8 +638,7 @@ pub fn emitTraceSimple(
 
 /// Emits a new error event dumping the stack trace.
 ///
-/// The stack trace may be cut of, if the length exceeds the internal
-/// formatting buffer size.
+/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitStackTrace(
     self: *const Tracing,
     name: ?[:0]const u8,
@@ -742,8 +664,7 @@ pub fn emitStackTrace(
 
 /// Emits a new error event dumping the stack trace.
 ///
-/// The stack trace may be cut of, if the length exceeds the internal
-/// formatting buffer size.
+/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
 pub fn emitStackTraceSimple(
     self: *const Tracing,
     stack_trace: std.builtin.StackTrace,
@@ -759,8 +680,8 @@ pub fn emitStackTraceSimple(
 
 /// Emits a new event with a custom formatter.
 ///
-/// The subsystem may use a formatting buffer of a fixed size. The formatter is
-/// expected to cut-of the message after reaching that specified size.
+/// The subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
+/// the message after reaching that specified size.
 pub fn emitEventCustom(
     self: *const Tracing,
     event: *const ProxyTracing.Event,
@@ -781,8 +702,8 @@ pub fn isEnabled(self: *const Tracing) bool {
 
 /// Returns whether the subsystem is configured to trace the current thread.
 ///
-/// In addition to requiring the correctt configuration of the subsystem,
-/// this also requires that the current thread be registered.
+/// In addition to requiring the correctt configuration of the subsystem, this also requires that
+/// the current thread be registered.
 pub fn isEnabledForCurrentThread(self: *const Tracing) bool {
     return self.isEnabled() and self.thread_data.get() != null;
 }

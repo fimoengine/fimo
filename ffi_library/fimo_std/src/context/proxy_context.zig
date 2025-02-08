@@ -1,18 +1,18 @@
 //! Public interface to the fimo std context.
 const std = @import("std");
 
-const c = @import("../c.zig");
 const AnyError = @import("../AnyError.zig");
+const AnyResult = AnyError.AnyResult;
+const c = @import("../c.zig");
+const Inner = @import("../context.zig");
 const Version = @import("../Version.zig");
+pub const Async = @import("proxy_context/async.zig");
+pub const Module = @import("proxy_context/module.zig");
+pub const Tracing = @import("proxy_context/tracing.zig");
 
 data: *anyopaque,
 vtable: *const VTable,
 
-const Inner = @import("../context.zig");
-
-pub const Async = @import("proxy_context/async.zig");
-pub const Tracing = @import("proxy_context/tracing.zig");
-pub const Module = @import("proxy_context/module.zig");
 const Self = @This();
 
 comptime {
@@ -74,7 +74,7 @@ pub const CompatibilityContext = struct {
         check_version: *const fn (
             ctx: *anyopaque,
             version: *const c.FimoVersion,
-        ) callconv(.C) c.FimoResult,
+        ) callconv(.C) AnyResult,
     };
 
     /// Initializes the object from a ffi object.
@@ -113,9 +113,9 @@ pub const CompatibilityContext = struct {
             .patch = version.patch,
             .build = version.build,
         };
-        const err = AnyError.initC(self.vtable.check_version(self.data, &v));
-        defer if (err) |e| e.deinit();
-        return err == null;
+        const result = self.vtable.check_version(self.data, &v);
+        defer result.deinit();
+        return result.isOk();
     }
 };
 
@@ -151,9 +151,9 @@ pub fn isCompatibleWithVersion(self: Self, version: Version) bool {
         .patch = version.patch,
         .build = version.build,
     };
-    const err = AnyError.initC(self.vtable.check_version(self.data, &v));
-    defer if (err) |e| e.deinit();
-    return err == null;
+    const result = self.vtable.check_version(self.data, &v);
+    defer result.deinit();
+    return result.isOk();
 }
 
 /// Acquires a reference to the context.
@@ -194,10 +194,10 @@ pub fn @"async"(self: Self) Async {
 // ----------------------------------------------------
 
 const ffi = struct {
-    export fn fimo_context_init(options: [*:null]const ?*const TaggedInStruct, context: *c.FimoContext) c.FimoResult {
-        const ctx = Self.init(std.mem.span(options)) catch |err| return AnyError.initError(err).err;
+    export fn fimo_context_init(options: [*:null]const ?*const TaggedInStruct, context: *c.FimoContext) AnyResult {
+        const ctx = Self.init(std.mem.span(options)) catch |err| return AnyError.initError(err).intoResult();
         context.* = ctx.intoC();
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 };
 

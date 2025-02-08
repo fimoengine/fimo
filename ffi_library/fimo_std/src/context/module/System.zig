@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
-const AnyError = @import("../../AnyError.zig");
 const Context = @import("../../context.zig");
 const Version = @import("../../Version.zig");
 const Async = @import("../async.zig");

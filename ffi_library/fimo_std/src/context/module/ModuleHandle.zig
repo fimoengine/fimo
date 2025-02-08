@@ -1,19 +1,18 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const windows = std.os.windows;
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
 
-const RefCount = @import("../RefCount.zig");
 const Path = @import("../../path.zig").Path;
 const PathError = @import("../../path.zig").PathError;
 const OsPath = @import("../../path.zig").OsPath;
 const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const OwnedOsPathUnmanaged = @import("../../path.zig").OwnedOsPathUnmanaged;
+const ProxyModule = @import("../proxy_context/module.zig");
+const RefCount = @import("../RefCount.zig");
 
 const Self = @This();
-const ProxyModule = @import("../proxy_context/module.zig");
-
 allocator: Allocator,
 iterator: IteratorFn,
 ref_count: RefCount = .{},

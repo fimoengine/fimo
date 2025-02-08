@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
 
 const ProxyAsync = @import("../proxy_context/async.zig");
-
 const System = @import("System.zig");
 
 const Self = @This();

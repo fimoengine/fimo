@@ -1,11 +1,8 @@
 const std = @import("std");
 
-const AnyError = @import("../../AnyError.zig");
 const time = @import("../../time.zig");
-
-const Tracing = @import("../tracing.zig");
 const ProxyTracing = @import("../proxy_context/tracing.zig");
-
+const Tracing = @import("../tracing.zig");
 const TracingError = Tracing.TracingError;
 const CallStack = @import("CallStack.zig");
 

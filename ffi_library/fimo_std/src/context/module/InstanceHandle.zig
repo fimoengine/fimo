@@ -4,6 +4,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
 const AnyError = @import("../../AnyError.zig");
+const AnyResult = AnyError.AnyResult;
 const c = @import("../../c.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
@@ -420,7 +421,7 @@ pub const Inner = struct {
                 const result = event(self.instance.?);
                 sys.mutex.lock();
                 self.mutex.lock();
-                try AnyError.initChecked(err, result);
+                try result.intoErrorUnion(err);
             }
         }
         self.state = .started;
@@ -681,7 +682,7 @@ pub fn initExportedInstance(
         sys.mutex.lock();
         _ = instance_handle.lock();
         instance.data = @ptrCast(data);
-        try AnyError.initChecked(err, result);
+        try result.intoErrorUnion(err);
     }
     inner.state = .init;
 
@@ -709,7 +710,7 @@ pub fn initExportedInstance(
         const result = src.constructor(instance, &sym);
         sys.mutex.lock();
         _ = instance_handle.lock();
-        try AnyError.initChecked(err, result);
+        try result.intoErrorUnion(err);
         var skip_dtor = false;
         errdefer if (!skip_dtor) src.destructor(instance, sym);
 
@@ -1134,7 +1135,7 @@ const InstanceVTableImpl = struct {
         namespace: [*:0]const u8,
         has_dependency: *bool,
         is_static: *bool,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
         self.logTrace(
@@ -1153,42 +1154,42 @@ const InstanceVTableImpl = struct {
             has_dependency.* = false;
             is_static.* = false;
         }
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn addNamespace(
         ctx: *const ProxyModule.OpaqueInstance,
         namespace: [*:0]const u8,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
 
         self.addNamespace(namespace_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn removeNamespace(
         ctx: *const ProxyModule.OpaqueInstance,
         namespace: [*:0]const u8,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
 
         self.removeNamespace(namespace_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn queryDependency(
         ctx: *const ProxyModule.OpaqueInstance,
         info: *const ProxyModule.Info,
         has_dependency: *bool,
         is_static: *bool,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const dependency = std.mem.span(info.name);
         self.logTrace(
@@ -1207,33 +1208,33 @@ const InstanceVTableImpl = struct {
             has_dependency.* = false;
             is_static.* = false;
         }
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn addDependency(
         ctx: *const ProxyModule.OpaqueInstance,
         info: *const ProxyModule.Info,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
 
         self.addDependency(info) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn removeDependency(
         ctx: *const ProxyModule.OpaqueInstance,
         info: *const ProxyModule.Info,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
 
         self.removeDependency(info) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn loadSymbol(
         ctx: *const ProxyModule.OpaqueInstance,
@@ -1241,7 +1242,7 @@ const InstanceVTableImpl = struct {
         namespace: [*:0]const u8,
         version: c.FimoVersion,
         symbol: **const anyopaque,
-    ) callconv(.c) c.FimoResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const name_ = std.mem.span(name);
         const namespace_ = std.mem.span(namespace);
@@ -1250,9 +1251,9 @@ const InstanceVTableImpl = struct {
         symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn readParameter(
         ctx: *const ProxyModule.OpaqueInstance,
@@ -1260,7 +1261,7 @@ const InstanceVTableImpl = struct {
         @"type": ProxyModule.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.C) c.FimoResult {
+    ) callconv(.C) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const module_ = std.mem.span(module);
         const parameter_ = std.mem.span(parameter);
@@ -1268,9 +1269,9 @@ const InstanceVTableImpl = struct {
         self.readParameter(value, @"type", module_, parameter_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
     fn writeParameter(
         ctx: *const ProxyModule.OpaqueInstance,
@@ -1278,7 +1279,7 @@ const InstanceVTableImpl = struct {
         @"type": ProxyModule.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.C) c.FimoResult {
+    ) callconv(.C) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const module_ = std.mem.span(module);
         const parameter_ = std.mem.span(parameter);
@@ -1286,9 +1287,9 @@ const InstanceVTableImpl = struct {
         self.writeParameter(value, @"type", module_, parameter_) catch |e| {
             if (@errorReturnTrace()) |tr|
                 self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).err;
+            return AnyError.initError(e).intoResult();
         };
-        return AnyError.intoCResult(null);
+        return AnyResult.ok;
     }
 };
 

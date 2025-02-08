@@ -4,10 +4,8 @@ const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const Condition = Thread.Condition;
 
-const RefCount = @import("../RefCount.zig");
-
 const ProxyAsync = @import("../proxy_context/async.zig");
-
+const RefCount = @import("../RefCount.zig");
 const System = @import("System.zig");
 
 const Self = @This();
