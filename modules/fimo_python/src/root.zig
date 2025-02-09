@@ -25,7 +25,7 @@ const Instance = Module.exports.Builder
     .withResource(.{ .name = "module_path", .path = Path.init("module.fimo_module") catch unreachable })
     .withResource(.{ .name = "lib_path", .path = Path.init("Lib") catch unreachable })
     .withResource(.{ .name = "dynload_path", .path = Path.init("DLLs") catch unreachable })
-    .withDynamicExport(
+    .withDynamicExportSync(
     fimo_python_meta.symbols.RunString,
     "run_string",
     .global,

@@ -951,7 +951,13 @@ pub const InitExportedOp = FSMFuture(struct {
     /// 2:
     ///     1. init static exports
     ///     2. init dynamic exports
-    ///     3. return
+    ///     3. goto 3
+    /// 3:
+    ///     1. if (no dynamic symbol left) return
+    ///     2. init export future
+    /// 4:
+    ///     1. wait for export future
+    ///     2. goto 3
     sys: *System,
     set: ProxyModule.LoadingSet,
     @"export": *const ProxyModule.Export,
@@ -961,6 +967,9 @@ pub const InitExportedOp = FSMFuture(struct {
     inner: *Inner = undefined,
     instance: *ProxyModule.OpaqueInstance = undefined,
     state_future: EnqueuedFuture(Fallible(?*anyopaque)) = undefined,
+    dyn_export_index: usize = 0,
+    exports: []*const anyopaque = undefined,
+    dyn_export_future: EnqueuedFuture(Fallible(*anyopaque)) = undefined,
     ret: Error!*ProxyModule.OpaqueInstance = undefined,
 
     pub const Error = (InstanceHandleError || AnyError.Error);
@@ -1128,18 +1137,16 @@ pub const InitExportedOp = FSMFuture(struct {
 
     pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) Error!void {
         _ = waker;
-        const sys = self.sys;
         const @"export" = self.@"export";
-        const instance_handle = self.instance_handle;
         const inner = self.inner;
-        const instance = self.instance;
         const allocator = inner.arena.allocator();
 
         // Init static exports.
         const exp_exports = @"export".getSymbolExports();
         const exp_dyn_exports = @"export".getDynamicSymbolExports();
         const exports = try allocator.alloc(*const anyopaque, exp_exports.len + exp_dyn_exports.len);
-        instance.exports = @ptrCast(exports.ptr);
+        self.exports = exports;
+        self.instance.exports = @ptrCast(exports.ptr);
         for (exp_exports, exports[0..exp_exports.len]) |src, *dst| {
             const sym = src.symbol;
             const src_name = std.mem.span(src.name);
@@ -1152,32 +1159,60 @@ pub const InitExportedOp = FSMFuture(struct {
             });
             dst.* = sym;
         }
+    }
 
-        // Init dynamic exports.
-        for (exp_dyn_exports, exports[exp_exports.len..]) |src, *dst| {
-            inner.unlock();
-            sys.mutex.unlock();
-            var sym: *anyopaque = undefined;
-            const result = src.constructor(instance, &sym);
-            sys.mutex.lock();
-            _ = instance_handle.lock();
-            try result.intoErrorUnion(self.err);
-            var skip_dtor = false;
-            errdefer if (!skip_dtor) src.destructor(instance, sym);
-
-            const src_name = std.mem.span(src.name);
-            const src_namespace = std.mem.span(src.namespace);
-            const src_version = Version.initC(src.version);
-            try inner.addSymbol(src_name, src_namespace, .{
-                .symbol = sym,
-                .version = src_version,
-                .dtor = src.destructor,
-            });
-            skip_dtor = true;
-            dst.* = sym;
+    pub fn __state3(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        _ = waker;
+        // Check if there is another dynamic export.
+        const exp_dyn_exports = self.@"export".getDynamicSymbolExports();
+        if (self.dyn_export_index >= exp_dyn_exports.len) {
+            self.ret = self.instance;
+            return .ret;
         }
 
-        self.ret = instance;
+        // Initialize the future.
+        const src = exp_dyn_exports[self.dyn_export_index];
+        self.inner.unlock();
+        self.sys.mutex.unlock();
+        self.dyn_export_future = src.constructor(self.instance);
+        return .next;
+    }
+
+    pub fn __unwind4(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        if (reason != .completed) self.dyn_export_future.deinit();
+    }
+
+    pub fn __state4(self: *@This(), waker: ProxyAsync.Waker) Error!ProxyAsync.FSMOpExt(@This()) {
+        // Wait for the future and jump back to the loop in state 3.
+        switch (self.dyn_export_future.poll(waker)) {
+            .ready => |result| {
+                self.sys.mutex.lock();
+                _ = self.instance_handle.lock();
+                const sym = try result.unwrap(self.err);
+
+                const i = self.dyn_export_index;
+                const src = self.@"export".getDynamicSymbolExports()[i];
+                const dst = &self.exports[i];
+                var skip_dtor = false;
+                errdefer if (!skip_dtor) src.destructor(self.instance, sym);
+
+                const src_name = std.mem.span(src.name);
+                const src_namespace = std.mem.span(src.namespace);
+                const src_version = Version.initC(src.version);
+                try self.inner.addSymbol(src_name, src_namespace, .{
+                    .symbol = sym,
+                    .version = src_version,
+                    .dtor = src.destructor,
+                });
+                skip_dtor = true;
+                dst.* = sym;
+
+                self.dyn_export_future.deinit();
+                self.dyn_export_index += 1;
+                return .{ .transition = 3 };
+            },
+            .pending => return .yield,
+        }
     }
 });
 

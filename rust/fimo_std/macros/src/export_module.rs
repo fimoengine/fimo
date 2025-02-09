@@ -202,6 +202,7 @@ impl ToTokens for ItemExport {
         let on_start_event = self.on_start_event();
         let on_stop_event = self.on_stop_event();
         let export = generate_export(
+            view_ident,
             name,
             description,
             author,
@@ -496,6 +497,7 @@ fn state_ref(state: Option<&BuilderExprState>) -> TokenStream {
 
 #[allow(clippy::too_many_arguments)]
 fn generate_export(
+    view_ident: &Ident,
     name: &Expr,
     description: Option<&BuilderExprDescription>,
     author: Option<&BuilderExprAuthor>,
@@ -671,23 +673,34 @@ fn generate_export(
                 const {
                     unsafe extern "C" fn __private_constructor(
                         instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
-                        symbol: &mut ::core::ptr::NonNull<()>,
-                    ) -> ::fimo_std::error::AnyResult {
+                    ) -> ::fimo_std::r#async::EnqueuedFuture<
+                            ::fimo_std::r#async::Fallible<
+                                ::core::ptr::NonNull<()>,
+                                dyn ::fimo_std::module::symbols::Share,
+                            >
+                        > {
                         let f = const { #init };
                         unsafe {
-                            let instance = ::core::mem::transmute(instance);
                             type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
-                            match f(instance) {
-                                ::core::result::Result::Ok(x) => {
-                                    let opaque = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::ptr_from_target(x) };
-                                    let opaque = opaque.as_ptr().cast_mut();
-                                    *symbol = ::core::ptr::NonNull::new(opaque).expect("null pointers are not allowed");
-                                    ::fimo_std::error::AnyResult::new_ok()
-                                }
-                                ::core::result::Result::Err(x) => {
-                                    let x = <::fimo_std::error::AnyError>::new(x);
-                                    ::fimo_std::error::AnyResult::new_err(x)
-                                }
+                            let instance: ::core::pin::Pin<
+                                &::fimo_std::module::instance::Stage1InstanceView<'_, #view_ident<'_>>
+                            >   = ::core::mem::transmute(instance);
+                            let fut = f(instance);
+                            let fut = async move {
+                                ::fimo_std::r#async::Fallible::new_result(
+                                    fut.await
+                                        .map_err(<::fimo_std::error::AnyError>::new)
+                                        .map(|x| {
+                                            let opaque = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::ptr_from_target(x) };
+                                            let opaque = opaque.as_ptr().cast_mut();
+                                            ::core::ptr::NonNull::new(opaque).expect("null pointers are not allowed")
+                                        })
+                                )
+                            };
+                            unsafe {
+                                ::fimo_std::r#async::Future::new(fut)
+                                    .enqueue_unchecked(instance.context())
+                                    .expect("could not enqueue future")
                             }
                         }
                     }
@@ -696,7 +709,9 @@ fn generate_export(
                         symbol: ::core::ptr::NonNull<()>,
                     ) {
                         let f = const { #deinit };
-                        let instance = unsafe { ::core::mem::transmute(instance) };
+                        let instance: ::core::pin::Pin<
+                            &::fimo_std::module::instance::Stage1InstanceView<'_, #view_ident<'_>>
+                        >   = unsafe{ ::core::mem::transmute(instance) };
                         type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
                         let symbol = ::fimo_std::utils::ConstNonNull::new(symbol.as_ptr()).expect("should not be null");
                         let symbol = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::target_from_ptr(symbol) };

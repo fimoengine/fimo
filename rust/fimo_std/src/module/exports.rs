@@ -3,7 +3,6 @@
 use crate::{
     r#async::{EnqueuedFuture, Fallible},
     context::ContextView,
-    error::AnyResult,
     module::{
         info::Info,
         instance::{GenericInstance, OpaqueInstanceView, Stage0InstanceView, Stage1InstanceView},
@@ -405,12 +404,12 @@ impl Debug for SymbolExport<'_> {
 /// Declaration of a static module symbol export.
 #[repr(C)]
 #[derive(Copy, Clone)]
+#[allow(clippy::type_complexity)]
 pub struct DynamicSymbolExport<'a> {
     pub constructor: AssertSharable<
         unsafe extern "C" fn(
             instance: Pin<&OpaqueInstanceView<'_>>,
-            symbol: &mut NonNull<()>,
-        ) -> AnyResult,
+        ) -> EnqueuedFuture<Fallible<NonNull<()>, dyn Share>>,
     >,
     pub destructor: AssertSharable<
         unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
@@ -432,12 +431,12 @@ impl<'a> DynamicSymbolExport<'a> {
     ///
     /// `constructor` must construct an instance of a type that implements [`SymbolPointer`] and
     /// `destructor` must release the instance of the same type.
+    #[allow(clippy::type_complexity)]
     pub const unsafe fn new(
         constructor: AssertSharable<
             unsafe extern "C" fn(
                 instance: Pin<&OpaqueInstanceView<'_>>,
-                symbol: &mut NonNull<()>,
-            ) -> AnyResult,
+            ) -> EnqueuedFuture<Fallible<NonNull<()>, dyn Share>>,
         >,
         destructor: AssertSharable<
             unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
@@ -851,14 +850,15 @@ where
 
     /// Adds a static export to the module.
     #[allow(clippy::type_complexity)]
-    pub const fn with_dynamic_export<T, E>(
+    pub const fn with_dynamic_export<'a, T, E>(
         &mut self,
         _table_name: &str,
         _linkage: SymbolLinkage,
-        _init: for<'a> fn(
-            Pin<&'a Stage1InstanceView<'_, InstanceView>>,
-        ) -> Result<<T::Type as SymbolPointer>::Target<'a>, E>,
-        _deinit: fn(
+        _init: impl AsyncFn(
+            Pin<&'a Stage1InstanceView<'a, InstanceView>>,
+        ) -> Result<<T::Type as SymbolPointer>::Target<'a>, E>
+        + 'a,
+        _deinit: impl Fn(
             Pin<&Stage1InstanceView<'_, InstanceView>>,
             <T::Type as SymbolPointer>::Target<'_>,
         ),
@@ -866,7 +866,12 @@ where
     where
         T: SymbolInfo,
         E: Debug + Display,
+        InstanceView: 'a,
     {
+        #[allow(clippy::mem_forget)]
+        std::mem::forget(_init);
+        #[allow(clippy::mem_forget)]
+        std::mem::forget(_deinit);
         self
     }
 

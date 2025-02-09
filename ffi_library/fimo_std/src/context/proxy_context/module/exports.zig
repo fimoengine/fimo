@@ -78,8 +78,7 @@ pub const SymbolExport = extern struct {
 pub const DynamicSymbolExport = extern struct {
     constructor: *const fn (
         ctx: *const Module.OpaqueInstance,
-        symbol: **anyopaque,
-    ) callconv(.c) AnyResult,
+    ) callconv(.c) EnqueuedFuture(Fallible(*anyopaque)),
     destructor: *const fn (
         ctx: *const Module.OpaqueInstance,
         symbol: *anyopaque,
@@ -370,8 +369,7 @@ pub const Builder = struct {
             dynamic: struct {
                 initFn: *const fn (
                     ctx: *const Module.OpaqueInstance,
-                    symbol: **anyopaque,
-                ) callconv(.c) AnyResult,
+                ) callconv(.c) EnqueuedFuture(Fallible(*anyopaque)),
                 deinitFn: *const fn (
                     ctx: *const Module.OpaqueInstance,
                     symbol: *anyopaque,
@@ -583,32 +581,90 @@ pub const Builder = struct {
         comptime T: Module.Symbol,
         comptime name: [:0]const u8,
         comptime linkage: SymbolLinkage,
-        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*T.symbol,
+        comptime Fut: type,
+        comptime initFn: fn (ctx: *const Module.OpaqueInstance) Fut,
         comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *T.symbol) void,
     ) Builder {
-        const initWrapped = struct {
-            fn f(ctx: *const Module.OpaqueInstance, out: **anyopaque) callconv(.c) AnyResult {
-                out.* = initFn(ctx) catch |err| return AnyError.initError(err).intoResult();
-                return AnyResult.ok;
+        const Result = Fut.Result;
+        switch (@typeInfo(Result)) {
+            .error_union => |x| std.debug.assert(x.payload == *T.symbol),
+            else => std.debug.assert(Result == *T.symbol),
+        }
+        const Wrapper = struct {
+            fn wrapInit(
+                ctx: *const Module.OpaqueInstance,
+            ) callconv(.c) Async.EnqueuedFuture(Fallible(*anyopaque)) {
+                const fut = initFn(ctx).intoFuture();
+                var mapped_fut = fut.map(
+                    Fallible(*anyopaque),
+                    struct {
+                        fn map(v: Result) Fallible(*anyopaque) {
+                            const x = v catch |err| return Fallible(*anyopaque).wrap(err);
+                            return Fallible(*anyopaque).wrap(@ptrCast(x));
+                        }
+                    }.map,
+                ).intoFuture();
+                var err: ?AnyError = null;
+                return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
+                    mapped_fut.deinit();
+                    err.?.deinit();
+                    return EnqueueError(*anyopaque);
+                };
             }
-        }.f;
-        const deinitWrapped = struct {
-            fn f(ctx: *const Module.OpaqueInstance, symbol: *anyopaque) callconv(.c) void {
+            fn wrapDeinit(
+                ctx: *const Module.OpaqueInstance,
+                symbol: *anyopaque,
+            ) callconv(.c) void {
                 return deinitFn(ctx, @alignCast(@ptrCast(symbol)));
             }
-        }.f;
+        };
+
         const exp = Builder.SymbolExport{
             .symbol = T,
             .name = name,
             .linkage = linkage,
             .value = .{
                 .dynamic = .{
-                    .initFn = &initWrapped,
-                    .deinitFn = &deinitWrapped,
+                    .initFn = &Wrapper.wrapInit,
+                    .deinitFn = &Wrapper.wrapDeinit,
                 },
             },
         };
         return self.withExportInner(exp);
+    }
+
+    /// Adds a static export to the module.
+    pub fn withDynamicExportSync(
+        comptime self: Builder,
+        comptime T: Module.Symbol,
+        comptime name: [:0]const u8,
+        comptime linkage: SymbolLinkage,
+        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*T.symbol,
+        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *T.symbol) void,
+    ) Builder {
+        const Wrapper = struct {
+            instance: *const Module.OpaqueInstance,
+
+            const Result = anyerror!*T.symbol;
+            const Future = Async.Future(@This(), Result, poll, null);
+
+            fn init(instance: *const Module.OpaqueInstance) Future {
+                return Future.init(.{ .instance = instance });
+            }
+
+            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!*T.symbol) {
+                _ = waker;
+                return .{ .ready = initFn(this.instance) };
+            }
+        };
+        return self.withDynamicExport(
+            T,
+            name,
+            linkage,
+            Wrapper.Future,
+            Wrapper.init,
+            deinitFn,
+        );
     }
 
     fn withModifierInner(

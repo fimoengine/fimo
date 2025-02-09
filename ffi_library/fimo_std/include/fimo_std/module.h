@@ -825,13 +825,17 @@ typedef struct FimoModuleSymbolExport {
     const char *ns;
 } FimoModuleSymbolExport;
 
+typedef FIMO_ASYNC_FALLIBLE(void*) FimoModuleDynamicSymbolExportFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleDynamicSymbolExportFutureResult)
+    FimoModuleDynamicSymbolExportFuture;
+
 /// Declaration of a dynamic module symbol export.
 typedef struct FimoModuleDynamicSymbolExport {
     /// Constructor function for a dynamic symbol.
     ///
     /// The constructor is in charge of constructing an instance of a symbol. To that effect, it is
-    /// provided  an instance to the module. The resulting symbol is written into the last argument.
-    FimoResult (*constructor)(const FimoModuleInstance *module, void **symbol);
+    /// provided  an instance to the module.
+    FimoModuleDynamicSymbolExportFuture (*constructor)(const FimoModuleInstance *module);
     /// Destructor function for a dynamic symbol.
     ///
     /// The destructor is safe to assume, that the symbol is no longer used by any other module.

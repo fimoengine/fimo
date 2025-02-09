@@ -39,7 +39,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_dynamic_export::<A2, _>(
         "a2",
         SymbolLinkage::Global,
-        |_inst: Pin<&Stage1InstanceView<'_, AView<'_>>>| -> Result<_, std::convert::Infallible> {
+        async |_inst| -> Result<_, std::convert::Infallible> {
             extern "C" fn add(a: i32, b: i32) -> i32 {
                 a + b
             }
