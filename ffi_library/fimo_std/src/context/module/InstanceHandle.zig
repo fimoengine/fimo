@@ -410,21 +410,8 @@ pub const Inner = struct {
         self.dependencies.clearRetainingCapacity();
     }
 
-    pub fn start(self: *Inner, sys: *System, err: *?AnyError) AnyError.Error!void {
-        std.debug.assert(!self.isDetached());
-        std.debug.assert(self.state == .init);
-
-        if (self.@"export") |@"export"| {
-            if (@"export".getStartEventModifier()) |event| {
-                self.unlock();
-                sys.mutex.unlock();
-                const result = event.on_event(self.instance.?);
-                sys.mutex.lock();
-                self.mutex.lock();
-                try result.intoErrorUnion(err);
-            }
-        }
-        self.state = .started;
+    pub fn start(self: *Inner, sys: *System, err: *?AnyError) StartInstanceOp {
+        return StartInstanceOp.Data.init(self, sys, err);
     }
 
     pub fn stop(self: *Inner, sys: *System) void {
@@ -552,186 +539,10 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
             .data = null,
         },
     };
-    instance_handle.inner.state = .init;
+    instance_handle.inner.state = .started;
     instance_handle.inner.instance = &instance.instance;
     return instance;
 }
-
-// pub fn initExportedInstance(
-//     sys: *System,
-//     set: ProxyModule.LoadingSet,
-//     @"export": *const ProxyModule.Export,
-//     handle: *ModuleHandle,
-//     err: *?AnyError,
-// ) (InstanceHandleError || AnyError.Error)!*ProxyModule.OpaqueInstance {
-//     const instance_handle = try Self.init(
-//         sys,
-//         @"export".getName(),
-//         @"export".getDescription(),
-//         @"export".getAuthor(),
-//         @"export".getLicense(),
-//         handle.path.raw,
-//         handle,
-//         @"export",
-//         .regular,
-//     );
-//     handle.ref();
-//     errdefer instance_handle.unref();
-
-//     const inner = instance_handle.lock();
-//     defer inner.unlock();
-
-//     inner.refStrong() catch unreachable;
-//     errdefer inner.unrefStrong();
-
-//     const instance = try instance_handle.inner.arena.allocator().create(ProxyModule.OpaqueInstance);
-//     instance.* = .{
-//         .vtable = &instance_vtable,
-//         .parameters = null,
-//         .resources = null,
-//         .imports = null,
-//         .exports = null,
-//         .info = &instance_handle.info,
-//         .ctx = sys.asContext().asProxy().intoC(),
-//         .data = null,
-//     };
-//     inner.instance = instance;
-//     const allocator = inner.arena.allocator();
-
-//     // Init parameters.
-//     const exp_parameters = @"export".getParameters();
-//     const parameters = try allocator.alloc(*ProxyModule.OpaqueParameter, exp_parameters.len);
-//     instance.parameters = @ptrCast(parameters.ptr);
-//     for (exp_parameters, parameters) |src, *dst| {
-//         const data = Parameter.Data{
-//             .value = switch (src.type) {
-//                 .u8 => .{ .u8 = std.atomic.Value(u8).init(src.default_value.u8) },
-//                 .u16 => .{ .u16 = std.atomic.Value(u16).init(src.default_value.u16) },
-//                 .u32 => .{ .u32 = std.atomic.Value(u32).init(src.default_value.u32) },
-//                 .u64 => .{ .u64 = std.atomic.Value(u64).init(src.default_value.u64) },
-//                 .i8 => .{ .i8 = std.atomic.Value(i8).init(src.default_value.i8) },
-//                 .i16 => .{ .i16 = std.atomic.Value(i16).init(src.default_value.i16) },
-//                 .i32 => .{ .i32 = std.atomic.Value(i32).init(src.default_value.i32) },
-//                 .i64 => .{ .i64 = std.atomic.Value(i64).init(src.default_value.i64) },
-//                 else => return error.InvalidParameterType,
-//             },
-//         };
-//         var param: *Parameter = try Parameter.init(
-//             instance_handle,
-//             data,
-//             src.read_group,
-//             src.write_group,
-//             src.read,
-//             src.write,
-//         );
-//         try inner.addParameter(std.mem.span(src.name), param);
-//         dst.* = &param.proxy;
-//     }
-
-//     // Init resources.
-//     const exp_resources = @"export".getResources();
-//     const resources = try allocator.alloc(c.FimoUTF8Path, exp_resources.len);
-//     instance.resources = @ptrCast(resources.ptr);
-//     for (exp_resources, resources) |src, *dst| {
-//         var buf = PathBufferUnmanaged{};
-//         try buf.pushPath(inner.arena.allocator(), handle.path.asPath());
-//         try buf.pushString(inner.arena.allocator(), std.mem.span(src.path));
-//         // Append a null-terminator to ensure that the path can be passed to c interfaces.
-//         try buf.buffer.append(inner.arena.allocator(), 0);
-//         dst.* = buf.asPath().intoC();
-//         dst.length -= 1;
-//     }
-
-//     // Init namespaces.
-//     for (@"export".getNamespaceImports()) |imp| {
-//         const name = std.mem.span(imp.name);
-//         if (sys.getNamespace(name) == null) return error.NotFound;
-//         try inner.addNamespace(name, .static);
-//     }
-
-//     // Init imports.
-//     const exp_imports = @"export".getSymbolImports();
-//     const imports = try allocator.alloc(*const anyopaque, exp_imports.len);
-//     instance.imports = @ptrCast(imports.ptr);
-//     for (exp_imports, imports) |src, *dst| {
-//         const src_name = std.mem.span(src.name);
-//         const src_namespace = std.mem.span(src.namespace);
-//         const src_version = Version.initC(src.version);
-//         const sym = sys.getSymbolCompatible(
-//             src_name,
-//             src_namespace,
-//             src_version,
-//         ) orelse return error.NotFound;
-
-//         const owner = sys.getInstance(sym.owner).?;
-//         const owner_handle = Self.fromInstancePtr(owner.instance);
-//         const owner_inner = owner_handle.lock();
-//         defer owner_inner.unlock();
-
-//         const owner_sym = owner_inner.getSymbol(
-//             src_name,
-//             src_namespace,
-//             src_version,
-//         ).?;
-//         if (inner.getDependency(sym.owner) == null) try inner.addDependency(owner_inner, .static);
-//         dst.* = owner_sym.symbol;
-//     }
-
-//     // Init instance data.
-//     if (@"export".getInstanceStateModifier()) |state| {
-//         inner.unlock();
-//         sys.mutex.unlock();
-//         var data: ?*anyopaque = undefined;
-//         const result = state.init(instance, set, &data);
-//         sys.mutex.lock();
-//         _ = instance_handle.lock();
-//         instance.data = @ptrCast(data);
-//         try result.intoErrorUnion(err);
-//     }
-//     inner.state = .init;
-
-//     // Init exports.
-//     const exp_exports = @"export".getSymbolExports();
-//     const exp_dyn_exports = @"export".getDynamicSymbolExports();
-//     const exports = try allocator.alloc(*const anyopaque, exp_exports.len + exp_dyn_exports.len);
-//     instance.exports = @ptrCast(exports.ptr);
-//     for (exp_exports, exports[0..exp_exports.len]) |src, *dst| {
-//         const sym = src.symbol;
-//         const src_name = std.mem.span(src.name);
-//         const src_namespace = std.mem.span(src.namespace);
-//         const src_version = Version.initC(src.version);
-//         try inner.addSymbol(src_name, src_namespace, .{
-//             .symbol = sym,
-//             .version = src_version,
-//             .dtor = null,
-//         });
-//         dst.* = sym;
-//     }
-//     for (exp_dyn_exports, exports[exp_exports.len..]) |src, *dst| {
-//         inner.unlock();
-//         sys.mutex.unlock();
-//         var sym: *anyopaque = undefined;
-//         const result = src.constructor(instance, &sym);
-//         sys.mutex.lock();
-//         _ = instance_handle.lock();
-//         try result.intoErrorUnion(err);
-//         var skip_dtor = false;
-//         errdefer if (!skip_dtor) src.destructor(instance, sym);
-
-//         const src_name = std.mem.span(src.name);
-//         const src_namespace = std.mem.span(src.namespace);
-//         const src_version = Version.initC(src.version);
-//         try inner.addSymbol(src_name, src_namespace, .{
-//             .symbol = sym,
-//             .version = src_version,
-//             .dtor = src.destructor,
-//         });
-//         skip_dtor = true;
-//         dst.* = sym;
-//     }
-
-//     return instance;
-// }
 
 pub fn fromInstancePtr(instance: *const ProxyModule.OpaqueInstance) *const Self {
     std.debug.assert(instance.vtable == &instance_vtable);
@@ -1367,6 +1178,73 @@ pub const InitExportedOp = FSMFuture(struct {
         }
 
         self.ret = instance;
+    }
+});
+
+pub const StartInstanceOp = FSMFuture(struct {
+    inner: *Inner,
+    sys: *System,
+    err: *?AnyError,
+    @"export": *const ProxyModule.Export,
+    instance: *const ProxyModule.OpaqueInstance,
+    future: ProxyAsync.EnqueuedFuture(ProxyAsync.Fallible(void)) = undefined,
+    ret: AnyError.Error!void = undefined,
+
+    pub const __no_abort = true;
+
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: AnyError.Error) void {
+        if (trace) |tr| self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+        self.ret = err;
+    }
+
+    pub fn __ret(self: *@This()) AnyError.Error!void {
+        return self.ret;
+    }
+
+    pub fn init(
+        inner: *Inner,
+        sys: *System,
+        err: *?AnyError,
+    ) StartInstanceOp {
+        std.debug.assert(!inner.isDetached());
+        std.debug.assert(inner.state == .init);
+        return StartInstanceOp.init(.{
+            .inner = inner,
+            .sys = sys,
+            .err = err,
+            .@"export" = inner.@"export".?,
+            .instance = inner.instance.?,
+        });
+    }
+
+    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        _ = waker;
+        if (self.@"export".getStartEventModifier()) |event| {
+            self.inner.unlock();
+            self.sys.mutex.unlock();
+            self.future = event.on_event(self.instance);
+            return .next;
+        }
+        self.inner.state = .started;
+        return .ret;
+    }
+
+    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.future.deinit();
+    }
+
+    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) AnyError.Error!ProxyAsync.FSMOp {
+        switch (self.future.poll(waker)) {
+            .ready => |result| {
+                self.sys.mutex.lock();
+                self.inner.mutex.lock();
+                try result.unwrap(self.err);
+                self.inner.state = .started;
+                return .ret;
+            },
+            .pending => return .yield,
+        }
     }
 });
 

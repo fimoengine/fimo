@@ -130,6 +130,26 @@ impl ItemExport {
             })
             .next_back()
     }
+
+    fn on_start_event(&self) -> Option<&BuilderExprOnStartEvent> {
+        self.exprs
+            .iter()
+            .filter_map(|expr| match expr {
+                BuilderExpr::OnStartEvent(expr) => Some(expr),
+                _ => None,
+            })
+            .next_back()
+    }
+
+    fn on_stop_event(&self) -> Option<&BuilderExprOnStopEvent> {
+        self.exprs
+            .iter()
+            .filter_map(|expr| match expr {
+                BuilderExpr::OnStopEvent(expr) => Some(expr),
+                _ => None,
+            })
+            .next_back()
+    }
 }
 
 impl ToTokens for ItemExport {
@@ -179,6 +199,8 @@ impl ToTokens for ItemExport {
         let author = self.author();
         let license = self.license();
         let namespaces = self.namespaces();
+        let on_start_event = self.on_start_event();
+        let on_stop_event = self.on_stop_event();
         let export = generate_export(
             name,
             description,
@@ -191,6 +213,8 @@ impl ToTokens for ItemExport {
             &exports,
             &dyn_exports,
             state,
+            on_start_event,
+            on_stop_event,
         );
 
         let export_ident = &self._ident;
@@ -483,6 +507,8 @@ fn generate_export(
     exports: &[&BuilderExprExport],
     dyn_exports: &[&BuilderExprDynExport],
     state: Option<&BuilderExprState>,
+    on_start_event: Option<&BuilderExprOnStartEvent>,
+    on_stop_event: Option<&BuilderExprOnStopEvent>,
 ) -> TokenStream {
     let description = description.map_or(quote!(None), |x| {
         let args = &x.0.args;
@@ -751,6 +777,65 @@ fn generate_export(
             }
         });
     }
+    if let Some(event) = on_start_event {
+        let on_event = &event.0.args[0];
+        modifiers.push(quote! {
+            {
+                unsafe extern "C" fn __private_on_event(
+                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                ) -> ::fimo_std::r#async::EnqueuedFuture<
+                        ::fimo_std::r#async::Fallible<
+                            (),
+                            dyn ::fimo_std::module::symbols::Share,
+                        >
+                    >
+                {
+                    let f = const { #on_event };
+                    unsafe {
+                        let instance = std::mem::transmute(instance);
+                        let fut = f(instance);
+                        let fut = async move {
+                            ::fimo_std::r#async::Fallible::new_result(
+                                fut.await
+                                    .map_err(<::fimo_std::error::AnyError>::new)
+                            )
+                        };
+                        unsafe {
+                            ::fimo_std::r#async::Future::new(fut)
+                                .enqueue_unchecked(instance.context())
+                                .expect("could not enqueue future")
+                        }
+                    }
+                }
+                let modifier = &const {
+                    let __private_on_event = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_on_event as _) };
+                    unsafe { ::fimo_std::module::exports::StartEventModifier::new(__private_on_event) }
+                };
+                ::fimo_std::module::exports::Modifier::StartEvent(modifier)
+            }
+        });
+    }
+    if let Some(event) = on_stop_event {
+        let on_event = &event.0.args[0];
+        modifiers.push(quote! {
+            {
+                unsafe extern "C" fn __private_on_event(
+                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                ) {
+                    let f = const { #on_event };
+                    unsafe {
+                        let instance = std::mem::transmute(instance);
+                        f(instance)
+                    }
+                }
+                let modifier = &const {
+                    let __private_on_event = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_on_event as _) };
+                    unsafe { ::fimo_std::module::exports::StopEventModifier::new(__private_on_event) }
+                };
+                ::fimo_std::module::exports::Modifier::StopEvent(modifier)
+            }
+        });
+    }
 
     quote! {
         {
@@ -875,6 +960,8 @@ enum BuilderExpr {
     Export(BuilderExprExport),
     DynExport(BuilderExprDynExport),
     State(BuilderExprState),
+    OnStartEvent(BuilderExprOnStartEvent),
+    OnStopEvent(BuilderExprOnStopEvent),
     Build(BuilderExprBuild),
 }
 
@@ -901,6 +988,8 @@ impl BuilderExpr {
             "with_export" => BuilderExprExport::from_expr(expr),
             "with_dynamic_export" => BuilderExprDynExport::from_expr(expr),
             "with_state" => BuilderExprState::from_expr(expr),
+            "with_on_start_event" => BuilderExprOnStartEvent::from_expr(expr),
+            "with_on_stop_event" => BuilderExprOnStopEvent::from_expr(expr),
             "build" => BuilderExprBuild::from_expr(expr),
             _ => Err(Error::new_spanned(&expr.method, "unknown builder method")),
         }
@@ -921,6 +1010,8 @@ impl ToTokens for BuilderExpr {
             BuilderExpr::Export(expr) => expr.to_tokens(tokens),
             BuilderExpr::DynExport(expr) => expr.to_tokens(tokens),
             BuilderExpr::State(expr) => expr.to_tokens(tokens),
+            BuilderExpr::OnStartEvent(expr) => expr.to_tokens(tokens),
+            BuilderExpr::OnStopEvent(expr) => expr.to_tokens(tokens),
             BuilderExpr::Build(expr) => expr.to_tokens(tokens),
         }
     }
@@ -1242,6 +1333,8 @@ builder_expr! {
     fn with_export(<inline table_name>, BuilderExprExport, BuilderExpr::Export, BuilderExprInnerT);
     fn with_dynamic_export(<inline table_name>, BuilderExprDynExport, BuilderExpr::DynExport, BuilderExprInnerTU);
     fn with_state(BuilderExprState, BuilderExpr::State, BuilderExprInnerTUV);
+    fn with_on_start_event(BuilderExprOnStartEvent, BuilderExpr::OnStartEvent, BuilderExprInner);
+    fn with_on_stop_event(BuilderExprOnStopEvent, BuilderExpr::OnStopEvent, BuilderExprInner);
     fn build(BuilderExprBuild, BuilderExpr::Build, BuilderExprInner);
 }
 

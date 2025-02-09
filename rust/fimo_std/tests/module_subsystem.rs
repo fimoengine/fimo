@@ -148,6 +148,8 @@ const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
     .with_import::<B0>("b0")
     .with_import::<B1>("b1")
     .with_state::<CState, _, _>(CState::init, CState::deinit)
+    .with_on_start_event(CState::on_start)
+    .with_on_stop_event(CState::on_stop)
     .build();
 
 #[derive(Debug)]
@@ -197,6 +199,23 @@ impl CState {
     }
 
     fn deinit(_instance: Pin<&UninitInstanceView<'_, CView<'_>>>, _value: NonNull<Self>) {}
+
+    async fn on_start(instance: Pin<&CView<'_>>) -> Result<(), std::convert::Infallible> {
+        emit_info!(
+            instance.context(),
+            "starting instance: {:?}",
+            instance.info()
+        );
+        Ok(())
+    }
+
+    fn on_stop(instance: Pin<&CView<'_>>) {
+        emit_info!(
+            instance.context(),
+            "stopping instance: {:?}",
+            instance.info()
+        );
+    }
 }
 
 #[test]

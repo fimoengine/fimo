@@ -895,6 +895,7 @@ const LoadOp = FSMFuture(struct {
     err: ?AnyError = null,
     instance_future: InstanceHandle.InitExportedOp = undefined,
     instance: *ProxyModule.OpaqueInstance = undefined,
+    start_instance_future: InstanceHandle.StartInstanceOp = undefined,
     ret: void = {},
 
     pub const __no_abort = true;
@@ -1098,38 +1099,58 @@ const LoadOp = FSMFuture(struct {
         _ = waker;
         const set = self.load_graph.set;
         const sys = set.asSys();
-        const name = self.name;
         const instance = self.instance;
 
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
 
-        inner.start(sys, &self.err) catch |e_| {
-            if (@errorReturnTrace()) |tr|
-                sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            if (self.err) |*e| {
-                sys.logWarn(
-                    "instance `on_start` error...skipping," ++
-                        " instance='{s}', error='{dbg}:{}'",
-                    .{ name, e.*, e.* },
-                    @src(),
-                );
-                e.deinit();
-            } else {
-                sys.logWarn(
-                    "instance `on_start` error...skipping," ++
-                        " instance='{s}', error='{s}'",
-                    .{ name, @errorName(e_) },
-                    @src(),
-                );
-            }
+        set.unlock();
+        self.start_instance_future = inner.start(sys, &self.err);
+    }
 
-            inner.unrefStrong();
-            inner.deinit();
+    pub fn __unwind4(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        self.start_instance_future.deinit();
+    }
 
-            set.getModuleInfo(name).?.signalError();
-            return;
-        };
+    pub fn __state4(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        const set = self.load_graph.set;
+        const sys = set.asSys();
+        const instance = self.instance;
+        const instance_handle = InstanceHandle.fromInstancePtr(instance);
+        const inner = @constCast(&instance_handle.inner);
+
+        switch (self.start_instance_future.poll(waker)) {
+            .ready => |result| {
+                result catch |e_| {
+                    if (@errorReturnTrace()) |tr|
+                        sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+                    if (self.err) |*e| {
+                        sys.logWarn(
+                            "instance `on_start` error...skipping," ++
+                                " instance='{s}', error='{dbg}:{}'",
+                            .{ self.name, e.*, e.* },
+                            @src(),
+                        );
+                        e.deinit();
+                    } else {
+                        sys.logWarn(
+                            "instance `on_start` error...skipping," ++
+                                " instance='{s}', error='{s}'",
+                            .{ self.name, @errorName(e_) },
+                            @src(),
+                        );
+                    }
+                    inner.unrefStrong();
+                    inner.deinit();
+                    set.lock();
+                    set.getModuleInfo(self.name).?.signalError();
+                    return .ret;
+                };
+                set.lock();
+            },
+            .pending => return .yield,
+        }
 
         sys.addInstance(inner) catch |e| {
             if (@errorReturnTrace()) |tr|
@@ -1137,19 +1158,20 @@ const LoadOp = FSMFuture(struct {
             sys.logWarn(
                 "internal error while adding instance...skipping," ++
                     " instance='{s}', error='{s}'",
-                .{ name, @errorName(e) },
+                .{ self.name, @errorName(e) },
                 @src(),
             );
             inner.stop(sys);
             inner.unrefStrong();
             inner.deinit();
-            return;
+            return .ret;
         };
         defer inner.unlock();
         defer inner.unrefStrong();
 
-        set.getModuleInfo(name).?.signalSuccess(instance.info);
-        set.logTrace("instance loaded, instance='{s}'", .{name}, @src());
+        set.getModuleInfo(self.name).?.signalSuccess(self.instance.info);
+        set.logTrace("instance loaded, instance='{s}'", .{self.name}, @src());
+        return .ret;
     }
 });
 

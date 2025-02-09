@@ -83,6 +83,22 @@ fn deinitCModule(inst: *const Module.OpaqueInstance) void {
     );
 }
 
+fn startCModule(inst: *const Module.OpaqueInstance) !void {
+    inst.context().tracing().emitInfoSimple(
+        "starting instance: name='{s}'",
+        .{inst.info.name},
+        @src(),
+    );
+}
+
+fn stopCModule(inst: *const Module.OpaqueInstance) void {
+    inst.context().tracing().emitInfoSimple(
+        "stopping instance: name='{s}'",
+        .{inst.info.name},
+        @src(),
+    );
+}
+
 const A = Module.exports.Builder
     .init("a")
     .withDescription("Test module a")
@@ -172,6 +188,8 @@ const C = Module.exports.Builder
     .withImport(.{ .name = "b0", .symbol = B0 })
     .withImport(.{ .name = "b1", .symbol = B1 })
     .withStateSync(void, initCModule, deinitCModule)
+    .withOnStartEventSync(startCModule)
+    .withOnStopEvent(stopCModule)
     .exportModule();
 
 comptime {

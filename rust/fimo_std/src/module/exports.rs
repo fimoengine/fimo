@@ -583,8 +583,11 @@ sa::assert_impl_all!(InstanceStateModifier: Send, Sync, Share);
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct StartEventModifier {
-    pub on_event:
-        AssertSharable<unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult>,
+    pub on_event: AssertSharable<
+        unsafe extern "C" fn(
+            instance: Pin<&OpaqueInstanceView<'_>>,
+        ) -> EnqueuedFuture<Fallible<(), dyn Share>>,
+    >,
     _private: PhantomData<()>,
 }
 
@@ -596,7 +599,9 @@ impl StartEventModifier {
     /// TBD
     pub const unsafe fn new(
         on_event: AssertSharable<
-            unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>) -> AnyResult,
+            unsafe extern "C" fn(
+                instance: Pin<&OpaqueInstanceView<'_>>,
+            ) -> EnqueuedFuture<Fallible<(), dyn Share>>,
         >,
     ) -> Self {
         Self {
@@ -879,6 +884,23 @@ where
         E: Debug + Display,
         F: IntoFuture<Output = Result<NonNull<T>, E>> + 'a,
     {
+        self
+    }
+
+    /// Adds an `on_start` event to the module.
+    pub const fn with_on_start_event<'a, E, F>(
+        &mut self,
+        _on_event: fn(Pin<&'a InstanceView>) -> F,
+    ) -> &mut Self
+    where
+        E: Debug + Display,
+        F: IntoFuture<Output = Result<(), E>> + 'a,
+    {
+        self
+    }
+
+    /// Adds an `on_stop` event to the module.
+    pub const fn with_on_stop_event(&mut self, _on_event: fn(Pin<&InstanceView>)) -> &mut Self {
         self
     }
 

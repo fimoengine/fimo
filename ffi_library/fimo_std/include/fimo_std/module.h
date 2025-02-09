@@ -927,13 +927,15 @@ typedef struct FimoModuleExportModifierInstanceState {
     void (*destructor)(const FimoModuleInstance *module, void *state);
 } FimoModuleExportModifierInstanceState;
 
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoResult) FimoModuleExportModifierStartEventFuture;
+
 /// Value for the `FIMO_MODULE_EXPORT_MODIFIER_START_EVENT` modifier key.
 typedef struct FimoModuleExportModifierStartEvent {
     /// Function to call once the module has been loaded.
     ///
     /// Implementors of a module can utilize this event to perform arbitrary an arbitrary action
     /// once the module has been loaded. If the call returns an error, the module will be unloaded.
-    FimoResult (*on_event)(const FimoModuleInstance *module);
+    FimoModuleExportModifierStartEventFuture (*on_event)(const FimoModuleInstance *module);
 } FimoModuleExportModifierStartEvent;
 
 /// Value for the `FIMO_MODULE_EXPORT_MODIFIER_STOP_EVENT` modifier key.

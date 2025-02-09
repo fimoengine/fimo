@@ -61,10 +61,11 @@ pub fn addPseudoInstance(self: *Self) !*const ProxyModule.PseudoInstance {
     const instance = try InstanceHandle.initPseudoInstance(&self.sys, name);
     const handle = InstanceHandle.fromInstancePtr(&instance.instance);
     const inner = handle.lock();
-    errdefer inner.deinit();
+    errdefer {
+        inner.stop(&self.sys);
+        inner.deinit();
+    }
 
-    var err: ?AnyError = null;
-    inner.start(&self.sys, &err) catch unreachable;
     try self.sys.addInstance(inner);
     inner.unlock();
     return instance;

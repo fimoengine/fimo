@@ -156,7 +156,7 @@ pub const Modifier = extern struct {
     /// The event will be dispatched immediately after the instance has been loaded. An error will
     /// result in the destruction of the instance. May only be specified once.
     pub const StartEvent = extern struct {
-        on_event: *const fn (ctx: *const Module.OpaqueInstance) callconv(.c) AnyResult,
+        on_event: *const fn (ctx: *const Module.OpaqueInstance) callconv(.c) EnqueuedFuture(Fallible(void)),
     };
 
     /// A listener for the stop event of the instance.
@@ -387,6 +387,25 @@ pub const Builder = struct {
         stop_event: void,
         _,
     };
+
+    fn EnqueueError(comptime T: type) Async.EnqueuedFuture(Fallible(T)) {
+        return .{
+            .data = @constCast(@ptrCast(&{})),
+            .poll_fn = &struct {
+                fn f(
+                    data: **anyopaque,
+                    waker: Async.Waker,
+                    res: *Fallible(T),
+                ) callconv(.c) bool {
+                    _ = data;
+                    _ = waker;
+                    res.* = Fallible(T).wrap(error.EnqueueError);
+                    return true;
+                }
+            }.f,
+            .cleanup_fn = null,
+        };
+    }
 
     /// Initializes a new builder.
     pub fn init(comptime name: [:0]const u8) Builder {
@@ -647,23 +666,6 @@ pub const Builder = struct {
                 ctx: *const Module.OpaqueInstance,
                 set: Module.LoadingSet,
             ) callconv(.c) Async.EnqueuedFuture(Fallible(?*anyopaque)) {
-                const error_fallback_future = Async.EnqueuedFuture(Fallible(?*anyopaque)){
-                    .data = @constCast(@ptrCast(&{})),
-                    .poll_fn = &struct {
-                        fn f(
-                            data: **anyopaque,
-                            waker: Async.Waker,
-                            res: *Fallible(?*anyopaque),
-                        ) callconv(.c) bool {
-                            _ = data;
-                            _ = waker;
-                            res.* = Fallible(?*anyopaque).wrap(error.EnqueueError);
-                            return true;
-                        }
-                    }.f,
-                    .cleanup_fn = null,
-                };
-
                 const fut = initFn(ctx, set).intoFuture();
                 var mapped_fut = fut.map(
                     Fallible(?*anyopaque),
@@ -682,7 +684,7 @@ pub const Builder = struct {
                 return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
-                    return error_fallback_future;
+                    return EnqueueError(?*anyopaque);
                 };
             }
 
@@ -745,28 +747,64 @@ pub const Builder = struct {
         return self.withState(Wrapper.Future, Wrapper.init, deinitFn);
     }
 
-    /// Adds an `on_start` event to the module.
     pub fn withOnStartEvent(
         comptime self: Builder,
-        comptime f: fn (ctx: *const Module.OpaqueInstance) anyerror!void,
+        comptime Fut: type,
+        comptime f: fn (ctx: *const Module.OpaqueInstance) Fut,
     ) Builder {
+        const Result = Fut.Result;
+        const T: type = switch (@typeInfo(Result)) {
+            .error_union => |x| x.payload,
+            else => Result,
+        };
+        std.debug.assert(T == void);
+        const Wrapper = struct {
+            fn wrapF(
+                ctx: *const Module.OpaqueInstance,
+            ) callconv(.c) Async.EnqueuedFuture(Fallible(void)) {
+                const fut = f(ctx).intoFuture();
+                var mapped_fut = fut.map(
+                    Fallible(void),
+                    Fallible(void).wrap,
+                ).intoFuture();
+                var err: ?AnyError = null;
+                return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
+                    mapped_fut.deinit();
+                    err.?.deinit();
+                    return EnqueueError(void);
+                };
+            }
+        };
+
         if (self.start_event != null)
             @compileError("the `on_start` event is already defined");
 
-        const wrapped = struct {
-            fn wrapper(ctx: *const Module.OpaqueInstance) callconv(.c) AnyResult {
-                f(ctx) catch |err| {
-                    if (@errorReturnTrace()) |tr|
-                        ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
-                    return AnyError.initError(err).intoResult();
-                };
-                return AnyResult.ok;
-            }
-        }.wrapper;
-
         var x = self;
-        x.start_event = .{ .on_event = &wrapped };
+        x.start_event = .{ .on_event = &Wrapper.wrapF };
         return x.withModifierInner(.{ .start_event = {} });
+    }
+
+    /// Adds an `on_start` event to the module.
+    pub fn withOnStartEventSync(
+        comptime self: Builder,
+        comptime f: fn (ctx: *const Module.OpaqueInstance) anyerror!void,
+    ) Builder {
+        const Wrapper = struct {
+            instance: *const Module.OpaqueInstance,
+
+            const Result = anyerror!void;
+            const Future = Async.Future(@This(), Result, poll, null);
+
+            fn init(instance: *const Module.OpaqueInstance) Future {
+                return Future.init(.{ .instance = instance });
+            }
+
+            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!void) {
+                _ = waker;
+                return .{ .ready = f(this.instance) };
+            }
+        };
+        return self.withOnStartEvent(Wrapper.Future, Wrapper.init);
     }
 
     /// Adds an `on_stop` event to the module.
