@@ -808,12 +808,30 @@ pub const Builder = struct {
     }
 
     fn ResourceTable(comptime self: Builder) type {
+        const PathWrapper = extern struct {
+            ffi: c.FimoUTF8Path,
+            pub fn cStr(this: @This()) [:0]const u8 {
+                return this.ffi.path[0..this.ffi.length :0];
+            }
+            pub fn path(this: @This()) Path {
+                return Path.initC(this.ffi);
+            }
+            pub fn format(
+                this: @This(),
+                comptime fmt: []const u8,
+                options: std.fmt.FormatOptions,
+                out_stream: anytype,
+            ) !void {
+                try this.path().format(fmt, options, out_stream);
+            }
+        };
+
         if (self.resources.len == 0) return void;
         var fields: [self.resources.len]std.builtin.Type.StructField = undefined;
         for (self.resources, &fields) |x, *f| {
             f.* = std.builtin.Type.StructField{
                 .name = x.name,
-                .type = [*:0]const u8,
+                .type = PathWrapper,
                 .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf([*:0]const u8),

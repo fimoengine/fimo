@@ -325,8 +325,8 @@ pub fn Instance(
             std.debug.assert(@alignOf(ParametersT) <= @alignOf(*OpaqueParameter));
             std.debug.assert(@sizeOf(ParametersT) % @sizeOf(*OpaqueParameter) == 0);
             for (@typeInfo(ParametersT).@"struct".fields) |field| {
+                std.debug.assert(field.alignment == @alignOf(*OpaqueParameter));
                 std.debug.assert(@sizeOf(field.type) == @sizeOf(*OpaqueParameter));
-                std.debug.assert(@alignOf(field.type) == @alignOf(*OpaqueParameter));
                 std.debug.assert(@typeInfo(field.type).pointer.child.isParameter());
             }
         },
@@ -338,8 +338,8 @@ pub fn Instance(
             std.debug.assert(t.layout == .@"extern");
             std.debug.assert(@alignOf(ResourcesT) <= @alignOf([*:0]const u8));
             for (@typeInfo(ResourcesT).@"struct".fields) |field| {
-                std.debug.assert(field.type == [*:0]const u8);
-                std.debug.assert(field.alignment == @alignOf([*:0]const u8));
+                std.debug.assert(field.alignment == @alignOf(c.FimoUTF8Path));
+                std.debug.assert(@sizeOf(field.type) == @sizeOf(c.FimoUTF8Path));
             }
         },
         .void => {},
@@ -351,9 +351,9 @@ pub fn Instance(
             std.debug.assert(@alignOf(ImportsT) <= @alignOf(*const anyopaque));
             std.debug.assert(@sizeOf(ImportsT) % @sizeOf(*const anyopaque) == 0);
             for (@typeInfo(ImportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size != .slice);
-                std.debug.assert(@typeInfo(field.type).pointer.is_const);
                 std.debug.assert(field.alignment == @alignOf([*:0]const u8));
+                std.debug.assert(@typeInfo(field.type).pointer.size == .one);
+                std.debug.assert(@typeInfo(field.type).pointer.is_const);
             }
         },
         .void => {},
@@ -365,7 +365,7 @@ pub fn Instance(
             std.debug.assert(@alignOf(ExportsT) <= @alignOf(*const anyopaque));
             std.debug.assert(@sizeOf(ExportsT) % @sizeOf(*const anyopaque) == 0);
             for (@typeInfo(ExportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size != .slice);
+                std.debug.assert(@typeInfo(field.type).pointer.size == .one);
                 std.debug.assert(@typeInfo(field.type).pointer.is_const);
                 std.debug.assert(field.alignment == @alignOf([*:0]const u8));
             }

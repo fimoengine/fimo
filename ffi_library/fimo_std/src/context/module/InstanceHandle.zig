@@ -630,14 +630,16 @@ pub fn initExportedInstance(
 
     // Init resources.
     const exp_resources = @"export".getResources();
-    const resources = try allocator.alloc([*:0]u8, exp_resources.len);
+    const resources = try allocator.alloc(c.FimoUTF8Path, exp_resources.len);
     instance.resources = @ptrCast(resources.ptr);
     for (exp_resources, resources) |src, *dst| {
         var buf = PathBufferUnmanaged{};
-        defer buf.deinit(sys.allocator);
-        try buf.pushPath(sys.allocator, handle.path.asPath());
-        try buf.pushString(sys.allocator, std.mem.span(src.path));
-        dst.* = try inner.arena.allocator().dupeZ(u8, buf.asPath().raw);
+        try buf.pushPath(inner.arena.allocator(), handle.path.asPath());
+        try buf.pushString(inner.arena.allocator(), std.mem.span(src.path));
+        // Append a null-terminator to ensure that the path can be passed to c interfaces.
+        try buf.buffer.append(inner.arena.allocator(), 0);
+        dst.* = buf.asPath().intoC();
+        dst.length -= 1;
     }
 
     // Init namespaces.

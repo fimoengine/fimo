@@ -218,8 +218,9 @@ typedef void FimoModuleParamTable;
 
 /// Opaque type for a resource path table of a module.
 ///
-/// The import table is equivalent to an array of `const char*`, where each entry represents one
-/// resource path. The resource paths are ordered in declaration order.
+/// The import table is equivalent to an array of `FimoUTF8Path`, where each entry represents one
+/// resource path. Additionally, each path is null-terminated. The resource paths are ordered in
+/// declaration order.
 typedef void FimoModuleResourceTable;
 
 /// Opaque type for a symbol import table of a module.

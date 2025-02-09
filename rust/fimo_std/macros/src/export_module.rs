@@ -310,22 +310,20 @@ fn generate_resources(resources: &[&BuilderExprResource]) -> TokenStream {
     }
 
     quote! {
-        struct ResourceWrapper(*const ::core::ffi::c_char);
+        struct ResourceWrapper(::fimo_std::module::symbols::SliceRef<'static, u8>);
         impl ResourceWrapper {
             const fn as_str(&self) -> &str {
                 unsafe {
-                    let cstr = ::core::ffi::CStr::from_ptr(self.0);
                     #[cfg(debug_assertions)]
                     {
-                        match cstr.to_str() {
+                        match ::core::str::from_utf8(self.0.as_slice()) {
                             ::core::result::Result::Ok(s) => s,
                             ::core::result::Result::Err(_) => panic!("expected utf8 string")
                         }
                     }
                     #[cfg(not(debug_assertions))]
                     {
-                        let len = cstr.count_bytes();
-                        ::core::str::from_utf8_unchecked(::core::slice::from_raw_parts(self.0.cast(), len))
+                        ::core::str::from_utf8_unchecked(self.0.as_slice())
                     }
                 }
             }
