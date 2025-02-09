@@ -171,7 +171,7 @@ const C = Module.exports.Builder
     .withImport(.{ .name = "a1", .symbol = A1 })
     .withImport(.{ .name = "b0", .symbol = B0 })
     .withImport(.{ .name = "b1", .symbol = B1 })
-    .withState(void, initCModule, deinitCModule)
+    .withStateSync(void, initCModule, deinitCModule)
     .exportModule();
 
 comptime {

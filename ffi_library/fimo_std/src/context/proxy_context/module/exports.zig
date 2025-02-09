@@ -8,6 +8,9 @@ const c = @import("../../../c.zig");
 const Path = @import("../../../path.zig").Path;
 const Version = @import("../../../Version.zig");
 const Context = @import("../../proxy_context.zig");
+const Async = @import("../async.zig");
+const Fallible = Async.Fallible;
+const EnqueuedFuture = Async.EnqueuedFuture;
 const Module = @import("../module.zig");
 
 const Self = @This();
@@ -141,8 +144,7 @@ pub const Modifier = extern struct {
         init: *const fn (
             ctx: *const Module.OpaqueInstance,
             set: Module.LoadingSet,
-            state: *?*anyopaque,
-        ) callconv(.c) AnyResult,
+        ) callconv(.c) EnqueuedFuture(Fallible(?*anyopaque)),
         deinit: *const fn (
             ctx: *const Module.OpaqueInstance,
             state: ?*anyopaque,
@@ -386,95 +388,6 @@ pub const Builder = struct {
         _,
     };
 
-    fn State(comptime T: type) type {
-        if (@sizeOf(T) == 0) {
-            return struct {
-                const InitFn = fn (
-                    ctx: *const Module.OpaqueInstance,
-                    set: Module.LoadingSet,
-                ) anyerror!void;
-                const DeinitFn = fn (ctx: *const Module.OpaqueInstance) void;
-                fn wrapInit(comptime f: InitFn) fn (
-                    ctx: *const Module.OpaqueInstance,
-                    set: Module.LoadingSet,
-                    data: *?*anyopaque,
-                ) callconv(.c) AnyResult {
-                    return struct {
-                        fn wrapper(
-                            ctx: *const Module.OpaqueInstance,
-                            set: Module.LoadingSet,
-                            data: *?*anyopaque,
-                        ) callconv(.c) AnyResult {
-                            f(ctx, set) catch |err| {
-                                if (@errorReturnTrace()) |tr|
-                                    ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
-                                return AnyError.initError(err).intoResult();
-                            };
-                            data.* = null;
-                            return AnyResult.ok;
-                        }
-                    }.wrapper;
-                }
-                fn wrapDeinit(comptime f: DeinitFn) fn (
-                    ctx: *const Module.OpaqueInstance,
-                    data: ?*anyopaque,
-                ) callconv(.c) void {
-                    return struct {
-                        fn wrapper(
-                            ctx: *const Module.OpaqueInstance,
-                            data: ?*anyopaque,
-                        ) callconv(.c) void {
-                            std.debug.assert(data == null);
-                            f(ctx);
-                        }
-                    }.wrapper;
-                }
-            };
-        } else {
-            return struct {
-                const InitFn = fn (
-                    ctx: *const Module.OpaqueInstance,
-                    set: Module.LoadingSet,
-                ) anyerror!*T;
-                const DeinitFn = fn (ctx: *const Module.OpaqueInstance, state: *T) void;
-                fn wrapInit(comptime f: InitFn) fn (
-                    ctx: *const Module.OpaqueInstance,
-                    set: Module.LoadingSet,
-                    data: *?*anyopaque,
-                ) callconv(.c) AnyResult {
-                    return struct {
-                        fn wrapper(
-                            ctx: *const Module.OpaqueInstance,
-                            set: Module.LoadingSet,
-                            data: *?*anyopaque,
-                        ) callconv(.c) AnyResult {
-                            data.* = f(ctx, set) catch |err| {
-                                if (@errorReturnTrace()) |tr|
-                                    ctx.context().tracing().emitStackTraceSimple(tr.*, @src());
-                                return AnyError.initError(err).intoResult();
-                            };
-                            return AnyResult.ok;
-                        }
-                    }.wrapper;
-                }
-                fn wrapDeinit(comptime f: DeinitFn) fn (
-                    ctx: *const Module.OpaqueInstance,
-                    data: ?*anyopaque,
-                ) callconv(.c) void {
-                    return struct {
-                        fn wrapper(
-                            ctx: *const Module.OpaqueInstance,
-                            data: ?*anyopaque,
-                        ) callconv(.c) void {
-                            const state: ?*T = @alignCast(@ptrCast(data));
-                            f(ctx, state.?);
-                        }
-                    }.wrapper;
-                }
-            };
-        }
-    }
-
     /// Initializes a new builder.
     pub fn init(comptime name: [:0]const u8) Builder {
         return .{ .name = name };
@@ -716,19 +629,120 @@ pub const Builder = struct {
     /// Adds a state to the module.
     pub fn withState(
         comptime self: Builder,
-        comptime T: type,
-        comptime initFn: State(T).InitFn,
-        comptime deinitFn: State(T).DeinitFn,
+        comptime Fut: type,
+        comptime initFn: fn (*const Module.OpaqueInstance, Module.LoadingSet) Fut,
+        comptime deinitFn: anytype,
     ) Builder {
+        const Result = Fut.Result;
+        const T: type = switch (@typeInfo(Result)) {
+            .error_union => |x| x.payload,
+            else => Result,
+        };
+        if (@sizeOf(T) != 0) {
+            std.debug.assert(@typeInfo(T).pointer.size == .one);
+            std.debug.assert(@typeInfo(T).pointer.is_const == false);
+        }
+        const Wrapper = struct {
+            fn wrapInit(
+                ctx: *const Module.OpaqueInstance,
+                set: Module.LoadingSet,
+            ) callconv(.c) Async.EnqueuedFuture(Fallible(?*anyopaque)) {
+                const error_fallback_future = Async.EnqueuedFuture(Fallible(?*anyopaque)){
+                    .data = @constCast(@ptrCast(&{})),
+                    .poll_fn = &struct {
+                        fn f(
+                            data: **anyopaque,
+                            waker: Async.Waker,
+                            res: *Fallible(?*anyopaque),
+                        ) callconv(.c) bool {
+                            _ = data;
+                            _ = waker;
+                            res.* = Fallible(?*anyopaque).wrap(error.EnqueueError);
+                            return true;
+                        }
+                    }.f,
+                    .cleanup_fn = null,
+                };
+
+                const fut = initFn(ctx, set).intoFuture();
+                var mapped_fut = fut.map(
+                    Fallible(?*anyopaque),
+                    struct {
+                        fn f(v: Result) Fallible(?*anyopaque) {
+                            if (comptime @sizeOf(T) == 0) {
+                                return Fallible(?*anyopaque).wrap(@constCast(&T{}));
+                            } else {
+                                const x = v catch |err| return Fallible(?*anyopaque).wrap(err);
+                                return Fallible(?*anyopaque).wrap(@ptrCast(x));
+                            }
+                        }
+                    }.f,
+                ).intoFuture();
+                var err: ?AnyError = null;
+                return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
+                    mapped_fut.deinit();
+                    err.?.deinit();
+                    return error_fallback_future;
+                };
+            }
+
+            fn wrapDeinit(
+                ctx: *const Module.OpaqueInstance,
+                data: ?*anyopaque,
+            ) callconv(.c) void {
+                if (comptime @sizeOf(T) == 0) {
+                    const f: fn (*const Module.OpaqueInstance) void = deinitFn;
+                    f(ctx);
+                } else {
+                    const f: fn (*const Module.OpaqueInstance, T) void = deinitFn;
+                    const state: T = @alignCast(@ptrCast(data));
+                    f(ctx, state);
+                }
+            }
+        };
+
         if (self.instance_state != null) @compileError("a state has already been assigned");
         var x = self;
         x.stateType = T;
         x.instance_state = .{
-            .init = &State(T).wrapInit(initFn),
-            .deinit = &State(T).wrapDeinit(deinitFn),
+            .init = &Wrapper.wrapInit,
+            .deinit = &Wrapper.wrapDeinit,
         };
         if (x.debug_info) |*info| _ = info.addType(T);
         return x.withModifierInner(.{ .instance_state = {} });
+    }
+
+    /// Adds a state to the module.
+    pub fn withStateSync(
+        comptime self: Builder,
+        comptime T: type,
+        comptime initFn: anytype,
+        comptime deinitFn: anytype,
+    ) Builder {
+        const Ret = if (comptime @sizeOf(T) == 0) void else *T;
+        const Wrapper = struct {
+            instance: *const Module.OpaqueInstance,
+            set: Module.LoadingSet,
+
+            const Result = anyerror!Ret;
+            const Future = Async.Future(@This(), Result, poll, null);
+
+            fn init(instance: *const Module.OpaqueInstance, set: Module.LoadingSet) Future {
+                return Future.init(.{ .instance = instance, .set = set });
+            }
+
+            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!Ret) {
+                _ = waker;
+                if (comptime @sizeOf(T) == 0) {
+                    const f: fn (*const Module.OpaqueInstance, Module.LoadingSet) anyerror!void = initFn;
+                    return .{ .ready = f(this.instance, this.set) };
+                } else {
+                    const f: fn (*const Module.OpaqueInstance, Module.LoadingSet) anyerror!*T = initFn;
+                    return .{ .ready = f(this.instance, this.set) };
+                }
+            }
+        };
+        return self.withState(Wrapper.Future, Wrapper.init, deinitFn);
     }
 
     /// Adds an `on_start` event to the module.

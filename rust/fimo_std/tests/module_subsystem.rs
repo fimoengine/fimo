@@ -147,14 +147,14 @@ const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
     .with_import::<A1>("a1")
     .with_import::<B0>("b0")
     .with_import::<B1>("b1")
-    .with_state::<CState, _>(CState::init, CState::deinit)
+    .with_state::<CState, _, _>(CState::init, CState::deinit)
     .build();
 
 #[derive(Debug)]
 struct CState;
 
 impl CState {
-    fn init(
+    async fn init(
         instance: Pin<&UninitInstanceView<'_, CView<'_>>>,
         _set: LoadingSetView<'_>,
     ) -> Result<NonNull<Self>, std::convert::Infallible> {
@@ -187,8 +187,8 @@ impl CState {
         let imports = instance.imports();
         assert_eq!(**imports.a0(), 5);
         assert_eq!(**imports.a1(), 10);
-        // assert_eq!(*imports.b0(), -2);
-        // assert_eq!(*imports.b1(), 77);
+        assert_eq!(**imports.b0(), -2);
+        assert_eq!(**imports.b1(), 77);
 
         let info = instance.info();
         emit_info!(instance.context(), "{info:?}");

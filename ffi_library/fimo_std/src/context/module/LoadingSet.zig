@@ -891,6 +891,10 @@ fn addModulesFromLocal(
 const LoadOp = FSMFuture(struct {
     node_id: graph.NodeId,
     load_graph: *LoadGraph,
+    name: [:0]const u8 = undefined,
+    err: ?AnyError = null,
+    instance_future: InstanceHandle.InitExportedOp = undefined,
+    instance: *ProxyModule.OpaqueInstance = undefined,
     ret: void = {},
 
     pub const __no_abort = true;
@@ -1012,10 +1016,9 @@ const LoadOp = FSMFuture(struct {
         const sys = set.asSys();
 
         sys.lock();
-        defer sys.unlock();
-
+        errdefer sys.unlock();
         set.lock();
-        defer set.unlock();
+        errdefer set.unlock();
 
         const node = blk: {
             self.load_graph.mutex.lock();
@@ -1023,8 +1026,8 @@ const LoadOp = FSMFuture(struct {
             break :blk self.load_graph.dependency_tree.nodePtr(self.node_id).?;
         };
         const info = set.getModuleInfo(node.module).?;
-        const name = std.mem.span(info.@"export".name);
-        set.logTrace("loading instance, instance='{s}'", .{name}, @src());
+        self.name = std.mem.span(info.@"export".name);
+        set.logTrace("loading instance, instance='{s}'", .{self.name}, @src());
 
         // Recheck that all dependencies could be loaded.
         for (info.@"export".getSymbolImports()) |i| {
@@ -1037,47 +1040,74 @@ const LoadOp = FSMFuture(struct {
             }
         }
 
-        // Construct the instance.
-        var err: ?AnyError = null;
+        // Initialize the instance future.
         set.unlock();
-        const instance = InstanceHandle.initExportedInstance(
-            sys,
-            set.asProxySet(),
-            info.@"export",
-            info.handle,
-            &err,
-        ) catch |e_| {
-            if (@errorReturnTrace()) |tr|
-                sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |*e| {
-                sys.logWarn(
-                    "instance construction error...skipping," ++
-                        " instance='{s}', error='{dbg}:{}'",
-                    .{ name, e.*, e.* },
-                    @src(),
-                );
-                e.deinit();
-            } else {
-                sys.logWarn(
-                    "instance construction error...skipping," ++
-                        " instance='{s}', error='{s}'",
-                    .{ name, @errorName(e_) },
-                    @src(),
-                );
-            }
-            set.lock();
-            set.getModuleInfo(name).?.signalError();
-            return;
-        };
-        set.lock();
+        self.instance_future = InstanceHandle.InitExportedOp.init(.{
+            .sys = sys,
+            .set = set.asProxySet(),
+            .@"export" = info.@"export",
+            .handle = info.handle,
+            .err = &self.err,
+        });
+    }
+
+    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+        _ = reason;
+        const set = self.load_graph.set;
+        const sys = set.asSys();
+
+        self.instance_future.deinit();
+        set.unlock();
+        sys.unlock();
+    }
+
+    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        const set = self.load_graph.set;
+        const sys = set.asSys();
+        switch (self.instance_future.poll(waker)) {
+            .ready => |result| {
+                self.instance = result catch |err| {
+                    if (self.err) |*e| {
+                        sys.logWarn(
+                            "instance construction error...skipping," ++
+                                " instance='{s}', error='{dbg}:{}'",
+                            .{ self.name, e.*, e.* },
+                            @src(),
+                        );
+                        e.deinit();
+                    } else {
+                        sys.logWarn(
+                            "instance construction error...skipping," ++
+                                " instance='{s}', error='{s}'",
+                            .{ self.name, @errorName(err) },
+                            @src(),
+                        );
+                    }
+                    set.lock();
+                    set.getModuleInfo(self.name).?.signalError();
+                    return .ret;
+                };
+                set.lock();
+                return .next;
+            },
+            .pending => return .yield,
+        }
+    }
+
+    pub fn __state3(self: *@This(), waker: ProxyAsync.Waker) void {
+        _ = waker;
+        const set = self.load_graph.set;
+        const sys = set.asSys();
+        const name = self.name;
+        const instance = self.instance;
 
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
 
-        inner.start(sys, &err) catch |e_| {
+        inner.start(sys, &self.err) catch |e_| {
             if (@errorReturnTrace()) |tr|
                 sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            if (err) |*e| {
+            if (self.err) |*e| {
                 sys.logWarn(
                     "instance `on_start` error...skipping," ++
                         " instance='{s}', error='{dbg}:{}'",

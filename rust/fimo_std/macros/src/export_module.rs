@@ -706,20 +706,28 @@ fn generate_export(
                 unsafe extern "C" fn __private_init(
                     instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
                     set: ::fimo_std::module::loading_set::LoadingSetView<'_>,
-                    state: &mut ::core::mem::MaybeUninit<::core::option::Option<::core::ptr::NonNull<()>>>,
-                ) -> ::fimo_std::error::AnyResult {
+                ) -> ::fimo_std::r#async::EnqueuedFuture<
+                        ::fimo_std::r#async::Fallible<
+                            ::core::option::Option<::core::ptr::NonNull<()>>,
+                            dyn ::fimo_std::module::symbols::Share,
+                        >
+                    >
+                {
                     let f = const { #init };
                     unsafe {
                         let instance = std::mem::transmute(instance);
-                        match f(instance, set) {
-                            ::core::result::Result::Ok(x) => {
-                                _ = *state.write(::core::option::Option::Some(x.cast()));
-                                ::fimo_std::error::AnyResult::new_ok()
-                            }
-                            ::core::result::Result::Err(x) => {
-                                let x = <::fimo_std::error::AnyError>::new(x);
-                                ::fimo_std::error::AnyResult::new_err(x)
-                            }
+                        let fut = f(instance, set);
+                        let fut = async move {
+                            ::fimo_std::r#async::Fallible::new_result(
+                                fut.await
+                                    .map_err(<::fimo_std::error::AnyError>::new)
+                                    .map(|x| ::core::option::Option::Some(x.cast()))
+                            )
+                        };
+                        unsafe {
+                            ::fimo_std::r#async::Future::new(fut)
+                                .enqueue_unchecked(instance.context())
+                                .expect("could not enqueue future")
                         }
                     }
                 }
@@ -1233,7 +1241,7 @@ builder_expr! {
     fn with_import(<inline table_name>, BuilderExprImport, BuilderExpr::Import, BuilderExprInnerT);
     fn with_export(<inline table_name>, BuilderExprExport, BuilderExpr::Export, BuilderExprInnerT);
     fn with_dynamic_export(<inline table_name>, BuilderExprDynExport, BuilderExpr::DynExport, BuilderExprInnerTU);
-    fn with_state(BuilderExprState, BuilderExpr::State, BuilderExprInnerTU);
+    fn with_state(BuilderExprState, BuilderExpr::State, BuilderExprInnerTUV);
     fn build(BuilderExprBuild, BuilderExpr::Build, BuilderExprInner);
 }
 
@@ -1447,6 +1455,113 @@ impl ToTokens for BuilderExprInnerTU {
         self.t_arg.to_tokens(tokens);
         self.comma_token.to_tokens(tokens);
         self.u_arg.to_tokens(tokens);
+        self.trailing_comma_token.to_tokens(tokens);
+        self.gt_token.to_tokens(tokens);
+        self.paren_token.surround(tokens, |tokens| {
+            self.args.to_tokens(tokens);
+        });
+    }
+}
+
+struct BuilderExprInnerTUV {
+    dot_token: Token![.],
+    method: Ident,
+    colon2_token: Option<Token![::]>,
+    lt_token: Token![<],
+    generic_args: Punctuated<GenericArgument, Token![,]>,
+    t_arg: Type,
+    comma_token: Token![,],
+    u_arg: Type,
+    comma_token2: Token![,],
+    v_arg: Type,
+    trailing_comma_token: Option<Token![,]>,
+    gt_token: Token![>],
+    paren_token: token::Paren,
+    args: Punctuated<Expr, Token![,]>,
+}
+
+impl BuilderExprInnerTUV {
+    fn new(expr: &ExprMethodCall) -> syn::Result<Self> {
+        if let Some(attr) = expr.attrs.first() {
+            return Err(Error::new_spanned(attr, "attributes not supported"));
+        }
+
+        let dot_token = expr.dot_token;
+        let method = expr.method.clone();
+        let paren_token = expr.paren_token;
+        let args = expr.args.clone();
+
+        let mut turbofish = match expr.turbofish.clone() {
+            Some(turbofish) => turbofish,
+            None => {
+                return Err(Error::new_spanned(
+                    &expr.method,
+                    "expected generic arguments",
+                ));
+            }
+        };
+        if turbofish.args.len() < 2 {
+            return Err(Error::new_spanned(
+                turbofish,
+                "expected at least 2 generic arguments",
+            ));
+        }
+
+        let colon2_token = turbofish.colon2_token;
+        let lt_token = turbofish.lt_token;
+        let (v_arg, trailing_comma_token) = turbofish.args.pop().unwrap().into_tuple();
+        let v_arg = match v_arg {
+            GenericArgument::Type(x) => x,
+            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
+        };
+
+        let (u_arg, comma_token2) = turbofish.args.pop().unwrap().into_tuple();
+        let comma_token2 = comma_token2.unwrap();
+        let u_arg = match u_arg {
+            GenericArgument::Type(x) => x,
+            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
+        };
+
+        let (t_arg, comma_token) = turbofish.args.pop().unwrap().into_tuple();
+        let comma_token = comma_token.unwrap();
+        let t_arg = match t_arg {
+            GenericArgument::Type(x) => x,
+            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
+        };
+        let generic_args = turbofish.args;
+        let gt_token = turbofish.gt_token;
+
+        Ok(Self {
+            dot_token,
+            method,
+            colon2_token,
+            lt_token,
+            generic_args,
+            t_arg,
+            comma_token,
+            u_arg,
+            comma_token2,
+            v_arg,
+            trailing_comma_token,
+            gt_token,
+            paren_token,
+            args,
+        })
+    }
+}
+
+impl ToTokens for BuilderExprInnerTUV {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.dot_token.to_tokens(tokens);
+        self.method.to_tokens(tokens);
+        self.colon2_token.to_tokens(tokens);
+        self.lt_token.to_tokens(tokens);
+        self.generic_args.to_tokens(tokens);
+        self.t_arg.to_tokens(tokens);
+        self.comma_token.to_tokens(tokens);
+        self.u_arg.to_tokens(tokens);
+        self.comma_token2.to_tokens(tokens);
+        self.v_arg.to_tokens(tokens);
         self.trailing_comma_token.to_tokens(tokens);
         self.gt_token.to_tokens(tokens);
         self.paren_token.surround(tokens, |tokens| {

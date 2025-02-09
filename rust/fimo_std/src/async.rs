@@ -2,7 +2,7 @@
 
 use crate::{
     context::{ContextHandle, ContextView},
-    error::{AnyError, AnyResult},
+    error::{AnyError, AnyResult, private},
     handle,
     module::symbols::{AssertSharable, Share},
     utils::{ConstNonNull, OpaqueHandle, View, Viewable},
@@ -234,12 +234,12 @@ pub type EnqueuedFuture<R> = Future<EnqueuedHandle, R>;
 /// Result of a fallible future.
 #[repr(C)]
 #[derive(Debug)]
-pub struct Fallible<T> {
-    result: AnyResult<dyn Send + Sync + Share>,
+pub struct Fallible<T, E: private::Sealed + ?Sized = dyn Send + Sync + Share> {
+    result: AnyResult<E>,
     value: MaybeUninit<T>,
 }
 
-impl<T> Fallible<T> {
+impl<T, E: private::Sealed + ?Sized> Fallible<T, E> {
     /// Constructs a new instance from a value.
     pub fn new(value: T) -> Self {
         Self {
@@ -249,7 +249,7 @@ impl<T> Fallible<T> {
     }
 
     /// Constructs a new instance from a result.
-    pub fn new_result(res: Result<T, AnyError<dyn Send + Sync + Share>>) -> Self {
+    pub fn new_result(res: Result<T, AnyError<E>>) -> Self {
         match res {
             Ok(v) => Self {
                 result: Default::default(),
@@ -263,7 +263,7 @@ impl<T> Fallible<T> {
     }
 
     /// Extracts the result.
-    pub fn unwrap(self) -> Result<T, AnyError<dyn Send + Sync + Share>> {
+    pub fn unwrap(self) -> Result<T, AnyError<E>> {
         match self.result.into_result() {
             Ok(_) => Ok(unsafe { self.value.assume_init() }),
             Err(e) => Err(e),
@@ -271,8 +271,8 @@ impl<T> Fallible<T> {
     }
 }
 
-unsafe impl<T: Send> Send for Fallible<T> {}
-unsafe impl<T: Sync> Sync for Fallible<T> {}
+unsafe impl<T: Send, E: private::Sealed + Send + ?Sized> Send for Fallible<T, E> {}
+unsafe impl<T: Sync, E: private::Sealed + Sync + ?Sized> Sync for Fallible<T, E> {}
 
 /// A future from the async subsystem.
 #[repr(C)]
@@ -324,11 +324,15 @@ impl<T, R> Future<T, R> {
     }
 
     /// Enqueues the future on the subsystem.
-    pub fn enqueue(self, ctx: ContextView<'_>) -> Result<EnqueuedFuture<R>, AnyError>
-    where
-        T: Send + 'static,
-        R: Send + 'static,
-    {
+    ///
+    /// # Safety
+    ///
+    /// This function does not check that the future can be sent to another thread, or that it lives
+    /// long enough.
+    pub unsafe fn enqueue_unchecked(
+        self,
+        ctx: ContextView<'_>,
+    ) -> Result<EnqueuedFuture<R>, AnyError> {
         extern "C" fn poll<T, R>(
             data: Option<NonNull<()>>,
             waker: WakerView<'_>,
@@ -384,6 +388,15 @@ impl<T, R> Future<T, R> {
             let out = std::mem::transmute::<EnqueuedFuture<()>, EnqueuedFuture<R>>(out);
             Ok(out)
         }
+    }
+
+    /// Enqueues the future on the subsystem.
+    pub fn enqueue(self, ctx: ContextView<'_>) -> Result<EnqueuedFuture<R>, AnyError>
+    where
+        T: Send + 'static,
+        R: Send + 'static,
+    {
+        unsafe { self.enqueue_unchecked(ctx) }
     }
 
     fn poll_ffi(self: Pin<&mut Self>, waker: WakerView<'_>) -> Poll<R> {

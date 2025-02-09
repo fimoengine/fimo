@@ -1,6 +1,7 @@
 //! Utilities for defining and working with module exports.
 
 use crate::{
+    r#async::{EnqueuedFuture, Fallible},
     context::ContextView,
     error::AnyResult,
     module::{
@@ -21,7 +22,6 @@ use std::{
     ffi::CStr,
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
-    mem::MaybeUninit,
     pin::Pin,
     ptr::NonNull,
 };
@@ -529,13 +529,13 @@ pub enum DebugInfoModifier {}
 /// deinitialized. May only be specified once.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+#[allow(clippy::type_complexity)]
 pub struct InstanceStateModifier {
     pub constructor: AssertSharable<
         unsafe extern "C" fn(
             instance: Pin<&OpaqueInstanceView<'_>>,
             loading_set: LoadingSetView<'_>,
-            state: &mut MaybeUninit<Option<NonNull<()>>>,
-        ) -> AnyResult,
+        ) -> EnqueuedFuture<Fallible<Option<NonNull<()>>, dyn Share>>,
     >,
     pub destructor: AssertSharable<
         unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, state: Option<NonNull<()>>),
@@ -550,13 +550,14 @@ impl InstanceStateModifier {
     ///
     /// The instance is only partially initialized while the constructor and destructor functions
     /// are called. One must ensure that no uninitialized fields are read.
+    #[allow(clippy::type_complexity)]
     pub const unsafe fn new(
         constructor: AssertSharable<
             unsafe extern "C" fn(
                 instance: Pin<&OpaqueInstanceView<'_>>,
                 loading_set: LoadingSetView<'_>,
-                state: &mut MaybeUninit<Option<NonNull<()>>>,
-            ) -> AnyResult,
+            )
+                -> EnqueuedFuture<Fallible<Option<NonNull<()>>, dyn Share>>,
         >,
         destructor: AssertSharable<
             unsafe extern "C" fn(
@@ -868,17 +869,15 @@ where
 
     /// Adds a state to the module.
     #[allow(clippy::type_complexity)]
-    pub const fn with_state<T, E>(
+    pub const fn with_state<'a, T, E, F>(
         &mut self,
-        _init: fn(
-            Pin<&UninitInstanceView<'_, InstanceView>>,
-            LoadingSetView<'_>,
-        ) -> Result<NonNull<T>, E>,
+        _init: fn(Pin<&'a UninitInstanceView<'a, InstanceView>>, LoadingSetView<'a>) -> F,
         _deinit: fn(Pin<&UninitInstanceView<'_, InstanceView>>, NonNull<T>),
     ) -> &mut Self
     where
         T: Send + Sync + 'static,
         E: Debug + Display,
+        F: IntoFuture<Output = Result<NonNull<T>, E>> + 'a,
     {
         self
     }

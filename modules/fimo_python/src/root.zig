@@ -32,7 +32,7 @@ const Instance = Module.exports.Builder
     State.initRunString,
     State.deinitRunString,
 )
-    .withState(State, State.init, State.deinit)
+    .withStateSync(State, State.init, State.deinit)
     .exportModule();
 
 comptime {

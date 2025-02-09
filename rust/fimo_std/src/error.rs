@@ -862,7 +862,7 @@ impl From<AnyError<dyn Send + Sync + Share>> for AnyError<dyn Sync + Share> {
     }
 }
 
-mod private {
+pub(crate) mod private {
     use std::marker::Unsize;
 
     use crate::module::symbols::Share;

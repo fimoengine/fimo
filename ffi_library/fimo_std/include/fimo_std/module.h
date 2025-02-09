@@ -907,6 +907,10 @@ typedef struct FimoModuleExportModifierDebugInfo {
     FimoResult (*construct)(void *data, FimoModuleDebugInfo *info);
 } FimoModuleExportModifierDebugInfo;
 
+typedef FIMO_ASYNC_FALLIBLE(void*) FimoModuleExportModifierInstanceStateFutureResult;
+typedef FIMO_ASYNC_ENQUEUED_FUTURE(FimoModuleExportModifierInstanceStateFutureResult)
+    FimoModuleExportModifierInstanceStateFuture;
+
 /// Value for the `FIMO_MODULE_EXPORT_MODIFIER_KEY_INSTANCE_STATE` modifier key.
 typedef struct FimoModuleExportModifierInstanceState {
     /// Constructor function for a module.
@@ -915,7 +919,8 @@ typedef struct FimoModuleExportModifierInstanceState {
     /// at module load time. Some use cases for module constructors are initialization of global
     /// module data, or fetching optional symbols. Returning an error aborts the loading of the
     /// module. Is called before the symbols of the modules are exported/initialized.
-    FimoResult (*constructor)(const FimoModuleInstance *module, FimoModuleLoadingSet set, void **state);
+    FimoModuleExportModifierInstanceStateFuture (*constructor)(const FimoModuleInstance *module,
+        FimoModuleLoadingSet set);
     /// Destructor function for a module.
     ///
     /// During its destruction, a module is not allowed to access the module subsystem.
