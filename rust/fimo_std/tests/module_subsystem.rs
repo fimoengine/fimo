@@ -11,7 +11,7 @@ use fimo_std::{
     module::{
         exports::{Builder, SymbolLinkage},
         info::Info,
-        instance::{GenericInstance, PseudoInstance, UninitInstanceView, UnloadingInstanceView},
+        instance::{GenericInstance, PseudoInstance, Stage0InstanceView, Stage1InstanceView},
         loading_set::{FilterRequest, LoadingSet, LoadingSetView},
         parameters::ParameterAccessGroup,
         symbols::SymbolInfo,
@@ -39,7 +39,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_dynamic_export::<A2, _>(
         "a2",
         SymbolLinkage::Global,
-        |_inst: Pin<&UninitInstanceView<'_, AView<'_>>>| -> Result<_, std::convert::Infallible> {
+        |_inst: Pin<&Stage1InstanceView<'_, AView<'_>>>| -> Result<_, std::convert::Infallible> {
             extern "C" fn add(a: i32, b: i32) -> i32 {
                 a + b
             }
@@ -47,7 +47,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
                 extern "C" fn(_, _) -> _,
             >::new(add))
         },
-        |instance: Pin<&UnloadingInstanceView<'_, AView<'_>>>, _f| {
+        |instance: Pin<&Stage1InstanceView<'_, AView<'_>>>, _f| {
             emit_info!(instance.context(), "dropping \"a2\"");
         },
     )
@@ -157,7 +157,7 @@ struct CState;
 
 impl CState {
     async fn init(
-        instance: Pin<&UninitInstanceView<'_, CView<'_>>>,
+        instance: Pin<&Stage0InstanceView<'_, CView<'_>>>,
         _set: LoadingSetView<'_>,
     ) -> Result<NonNull<Self>, std::convert::Infallible> {
         let parameters = instance.parameters();
@@ -198,7 +198,7 @@ impl CState {
         Ok(NonNull::from(&CState))
     }
 
-    fn deinit(_instance: Pin<&UninitInstanceView<'_, CView<'_>>>, _value: NonNull<Self>) {}
+    fn deinit(_instance: Pin<&Stage0InstanceView<'_, CView<'_>>>, _value: NonNull<Self>) {}
 
     async fn on_start(instance: Pin<&CView<'_>>) -> Result<(), std::convert::Infallible> {
         emit_info!(

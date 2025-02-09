@@ -543,7 +543,7 @@ fn generate_export(
 
                 type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
                 const READ: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>) -> Repr> = #read;
-                if let Some(x) = READ {
+                if READ.is_some() {
                     unsafe extern "C" fn __private_read(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
                         unsafe {
                             type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
@@ -562,7 +562,7 @@ fn generate_export(
                 }
 
                 const WRITE: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>, Repr)> = #write;
-                if let Some(x) = WRITE {
+                if WRITE.is_some() {
                     unsafe extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::utils::ConstNonNull<()>) {
                         unsafe {
                             type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;

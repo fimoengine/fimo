@@ -6,9 +6,7 @@ use crate::{
     error::AnyResult,
     module::{
         info::Info,
-        instance::{
-            GenericInstance, OpaqueInstanceView, UninitInstanceView, UnloadingInstanceView,
-        },
+        instance::{GenericInstance, OpaqueInstanceView, Stage0InstanceView, Stage1InstanceView},
         loading_set::LoadingSetView,
         parameters::{
             ParameterAccessGroup, ParameterCast, ParameterData, ParameterRepr, ParameterType,
@@ -858,10 +856,10 @@ where
         _table_name: &str,
         _linkage: SymbolLinkage,
         _init: for<'a> fn(
-            Pin<&'a UninitInstanceView<'_, InstanceView>>,
+            Pin<&'a Stage1InstanceView<'_, InstanceView>>,
         ) -> Result<<T::Type as SymbolPointer>::Target<'a>, E>,
         _deinit: fn(
-            Pin<&UnloadingInstanceView<'_, InstanceView>>,
+            Pin<&Stage1InstanceView<'_, InstanceView>>,
             <T::Type as SymbolPointer>::Target<'_>,
         ),
     ) -> &mut Self
@@ -876,8 +874,8 @@ where
     #[allow(clippy::type_complexity)]
     pub const fn with_state<'a, T, E, F>(
         &mut self,
-        _init: fn(Pin<&'a UninitInstanceView<'a, InstanceView>>, LoadingSetView<'a>) -> F,
-        _deinit: fn(Pin<&UninitInstanceView<'_, InstanceView>>, NonNull<T>),
+        _init: fn(Pin<&'a Stage0InstanceView<'a, InstanceView>>, LoadingSetView<'a>) -> F,
+        _deinit: fn(Pin<&Stage0InstanceView<'_, InstanceView>>, NonNull<T>),
     ) -> &mut Self
     where
         T: Send + Sync + 'static,
