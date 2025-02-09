@@ -217,8 +217,7 @@ fn load_modules() -> Result<(), AnyError> {
         let _prune = PruneInstancesOnDrop::new(&context);
 
         let set = LoadingSet::new(&context)?;
-        set.view()
-            .add_modules_from_local(|_| FilterRequest::Load)?;
+        set.view().add_modules_from_local(|_| FilterRequest::Load)?;
         set.view().commit().await?;
 
         let instance = PseudoInstance::new(&context)?;
