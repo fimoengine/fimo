@@ -23,11 +23,11 @@ use fimo_std::{
 };
 
 symbol! {
-    symbol A0 @ (0, 1, 0) = a_export_0: *const i32;
-    symbol A1 @ (0, 1, 0) = a_export_1: *const i32;
-    symbol A2 @ (0, 1, 0) = add: extern "C" fn(i32, i32) -> i32;
-    symbol B0 @ (0, 1, 0) = "b"::b_export_0: *const i32;
-    symbol B1 @ (0, 1, 0) = "b"::b_export_1: *const i32;
+    symbol A0 @ Version("0.1.0") = a_export_0: *const i32;
+    symbol A1 @ Version("0.1.0") = a_export_1: *const i32;
+    symbol A2 @ Version("0.1.0") = add: extern "C" fn(i32, i32) -> i32;
+    symbol B0 @ Version("0.1.0") = "b"::b_export_0: *const i32;
+    symbol B1 @ Version("0.1.0") = "b"::b_export_1: *const i32;
 }
 
 #[fimo_std::module::exports::export_module]

@@ -4,17 +4,43 @@ const std = @import("std");
 
 const c = @import("c.zig");
 
+major: usize,
+minor: usize,
+patch: usize,
+pre: ?[*]const u8 = null,
+pre_len: usize = 0,
+build: ?[*]const u8 = null,
+build_len: usize = 0,
+
 const Version = @This();
-major: u32,
-minor: u32,
-patch: u32,
-build: u64 = 0,
 
-/// Maximum number of characters required to represent a version without the build number.
-pub const max_str_length = 32;
+/// Initializes the object from a semantic version.
+pub fn initSemanticVersion(version: std.SemanticVersion) Version {
+    const pre, const pre_len = if (version.pre) |str| .{ str.ptr, str.len } else .{ null, 0 };
+    const build, const build_len = if (version.build) |str| .{ str.ptr, str.len } else .{ null, 0 };
+    return Version{
+        .major = version.major,
+        .minor = version.minor,
+        .patch = version.patch,
+        .pre = pre,
+        .pre_len = pre_len,
+        .build = build,
+        .build_len = build_len,
+    };
+}
 
-/// Maximum number of characters required to represent a version with the build number.
-pub const max_long_str_length = 53;
+/// Casts the object to a semantic version.
+pub fn intoSemanticVersion(self: Version) std.SemanticVersion {
+    const pre = if (self.pre) |str| str[0..self.pre_len] else null;
+    const build = if (self.build) |str| str[0..self.build_len] else null;
+    return std.SemanticVersion{
+        .major = self.major,
+        .minor = self.minor,
+        .patch = self.patch,
+        .pre = pre,
+        .build = build,
+    };
+}
 
 /// Initializes the object from a ffi version.
 pub fn initC(version: c.FimoVersion) Version {
@@ -22,7 +48,10 @@ pub fn initC(version: c.FimoVersion) Version {
         .major = version.major,
         .minor = version.minor,
         .patch = version.patch,
+        .pre = version.pre,
+        .pre_len = version.pre_len,
         .build = version.build,
+        .build_len = version.build_len,
     };
 }
 
@@ -32,28 +61,18 @@ pub fn intoC(self: Version) c.FimoVersion {
         .major = self.major,
         .minor = self.minor,
         .patch = self.patch,
+        .pre = self.pre,
+        .pre_len = self.pre_len,
         .build = self.build,
+        .build_len = self.build_len,
     };
 }
 
-/// Returns the order of two versions without considering the build number.
+/// Returns the order of two versions.
 pub fn order(lhs: Version, rhs: Version) std.math.Order {
-    if (lhs.major < rhs.major) return .lt;
-    if (lhs.major > rhs.major) return .gt;
-    if (lhs.minor < rhs.minor) return .lt;
-    if (lhs.minor > rhs.minor) return .gt;
-    if (lhs.patch < rhs.patch) return .lt;
-    if (lhs.patch > rhs.patch) return .gt;
-    return .eq;
-}
-
-/// Returns the order of two versions, also considering the build number.
-pub fn orderLong(lhs: Version, rhs: Version) std.math.Order {
-    const order_short = Version.order(lhs, rhs);
-    if (order_short != .eq) return order_short;
-    if (lhs.build < rhs.build) return .lt;
-    if (lhs.build > rhs.build) return .gt;
-    return .eq;
+    const lhs_sem = lhs.intoSemanticVersion();
+    const rhs_sem = rhs.intoSemanticVersion();
+    return lhs_sem.order(rhs_sem);
 }
 
 /// Checks for the compatibility of two versions.
@@ -64,83 +83,64 @@ pub fn orderLong(lhs: Version, rhs: Version) std.math.Order {
 pub fn isCompatibleWith(got: Version, required: Version) bool {
     if (got.major != required.major) return false;
     if (got.major == 0 and got.minor != required.minor) return false;
-    return got.order(required) != .lt;
+    const got_sem = got.intoSemanticVersion();
+    const required_sem = required.intoSemanticVersion();
+    return got_sem.order(required_sem) != .lt;
 }
 
 /// Parses a version from a string.
 pub fn parse(text: []const u8) !Version {
-    // Parse the required major, minor, and patch numbers.
-    const extra_index = std.mem.indexOfScalar(u8, text, '+');
-    const required = text[0..(extra_index orelse text.len)];
-    var it = std.mem.splitScalar(u8, required, '.');
-    var ver = Version{
-        .major = try parseNum(u32, it.first()),
-        .minor = try parseNum(u32, it.next() orelse return error.InvalidVersion),
-        .patch = try parseNum(u32, it.next() orelse return error.InvalidVersion),
-    };
-    if (it.next() != null) return error.InvalidVersion;
-    if (extra_index == null) return ver;
-
-    // Parse the build number
-    const extra_idx = extra_index.?;
-    if (extra_idx == text.len - 1) return error.InvalidVersion;
-    const extra: []const u8 = text[extra_idx + 1 .. text.len];
-    ver.build = try parseNum(usize, extra);
-    return ver;
-}
-
-fn parseNum(T: type, text: []const u8) error{ InvalidVersion, Overflow }!T {
-    // Leading zeroes are not allowed.
-    if (text.len > 1 and text[0] == '0') return error.InvalidVersion;
-
-    return std.fmt.parseUnsigned(T, text, 10) catch |err| switch (err) {
-        error.InvalidCharacter => return error.InvalidVersion,
-        error.Overflow => return error.Overflow,
-    };
+    const sem = try std.SemanticVersion.parse(text);
+    return initSemanticVersion(sem);
 }
 
 /// Formats the version.
-///
-/// # Format specifiers
-///
-/// * `{}`: Prints the version without the build number.
-/// * `{long}`: Prints the version with the build number.
 pub fn format(
     self: Version,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     out_stream: anytype,
 ) !void {
-    _ = options;
-    const with_build = comptime parse_fmt: {
-        if (fmt.len == 0) {
-            break :parse_fmt false;
-        } else if (std.mem.eql(u8, fmt, "long")) {
-            break :parse_fmt true;
-        } else {
-            @compileError("expected {}, or {long}, found {" ++ fmt ++ "}");
-        }
-    };
-    try std.fmt.format(out_stream, "{d}.{d}.{d}", .{ self.major, self.minor, self.patch });
-    if (with_build and self.build > 0) try std.fmt.format(out_stream, "+{d}", .{self.build});
+    return self.intoSemanticVersion().format(fmt, options, out_stream);
 }
 
 test format {
+    // Taken from the zig standard library.
+
     // Valid version strings should be accepted.
     for ([_][]const u8{
         "0.0.4",
         "1.2.3",
         "10.20.30",
-        "1.1.2+1",
+        "1.1.2-prerelease+meta",
+        "1.1.2+meta",
+        "1.1.2+meta-valid",
+        "1.0.0-alpha",
+        "1.0.0-beta",
+        "1.0.0-alpha.beta",
+        "1.0.0-alpha.beta.1",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha0.valid",
+        "1.0.0-alpha.0valid",
+        "1.0.0-alpha-a.b-c-somethinglong+build.1-aef.1-its-okay",
+        "1.0.0-rc.1+build.1",
+        "2.0.0-rc.1+build.123",
+        "1.2.3-beta",
+        "10.2.3-DEV-SNAPSHOT",
+        "1.2.3-SNAPSHOT-123",
         "1.0.0",
         "2.0.0",
         "1.1.7",
-        "2.0.0+1848",
-        "2.0.1+1227",
-        "1.0.0+5",
-        "1.2.3+788",
+        "2.0.0+build.1848",
+        "2.0.1-alpha.1227",
+        "1.0.0-alpha+beta",
+        "1.2.3----RC-SNAPSHOT.12.9.1--.12+788",
+        "1.2.3----R-S.12.9.1--.12+meta",
+        "1.2.3----RC-SNAPSHOT.12.9.1--.12",
+        "1.0.0+0.build.1-rc.10000aaa-kk-0.1",
+        "5.4.0-1018-raspi",
         "5.7.123",
-    }) |valid| try std.testing.expectFmt(valid, "{long}", .{try parse(valid)});
+    }) |valid| try std.testing.expectFmt(valid, "{}", .{try parse(valid)});
 
     // Invalid version strings should be rejected.
     for ([_][]const u8{
@@ -223,6 +223,12 @@ const ffi = struct {
     const AnyError = @import("AnyError.zig");
     const AnyResult = AnyError.AnyResult;
 
+    fn numDigits(num: usize) usize {
+        const x = std.math.log10(num);
+        if (std.math.pow(usize, 10, x) < num) return x + 1;
+        return x;
+    }
+
     export fn fimo_version_parse_str(
         str: [*]const u8,
         str_len: usize,
@@ -238,30 +244,45 @@ const ffi = struct {
     export fn fimo_version_str_len(
         version: *const c.FimoVersion,
     ) usize {
-        const v = Version.initC(version.*);
-        var buffer: [max_str_length]u8 = undefined;
-        const print = std.fmt.bufPrint(
-            buffer[0..buffer.len],
-            "{}",
-            .{v},
-        ) catch unreachable;
-        return print.len;
+        const major_len: usize = numDigits(version.major);
+        const minor_len: usize = numDigits(version.minor);
+        const patch_len: usize = numDigits(version.patch);
+        return major_len + minor_len + patch_len + 2;
     }
 
-    export fn fimo_version_str_len_long(
+    export fn fimo_version_str_len_full(
         version: *const c.FimoVersion,
     ) usize {
         const v = Version.initC(version.*);
-        var buffer: [max_long_str_length]u8 = undefined;
-        const print = std.fmt.bufPrint(
-            buffer[0..buffer.len],
-            "{long}",
-            .{v},
-        ) catch unreachable;
-        return print.len;
+        var len: usize = 0;
+        len += numDigits(v.major);
+        len += numDigits(v.minor);
+        len += numDigits(v.patch);
+        if (v.pre_len != 0) len += v.pre_len + 1;
+        if (v.build_len != 0) len += v.build_len + 1;
+        return len;
     }
 
     export fn fimo_version_write_str(
+        version: *const c.FimoVersion,
+        str: [*]u8,
+        str_len: usize,
+        written: ?*usize,
+    ) AnyResult {
+        var v = Version.initC(version.*);
+        v.pre = null;
+        v.pre_len = 0;
+        v.build = null;
+        v.build_len = 0;
+        const buffer = str[0..str_len];
+        if (std.fmt.bufPrint(buffer, "{}", .{v})) |b| {
+            if (written) |w| w.* = b.len;
+            if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fimo_version_write_str_full(
         version: *const c.FimoVersion,
         str: [*]u8,
         str_len: usize,
@@ -276,21 +297,6 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_version_write_str_long(
-        version: *const c.FimoVersion,
-        str: [*]u8,
-        str_len: usize,
-        written: ?*usize,
-    ) AnyResult {
-        const v = Version.initC(version.*);
-        const buffer = str[0..str_len];
-        if (std.fmt.bufPrint(buffer, "{long}", .{v})) |b| {
-            if (written) |w| w.* = b.len;
-            if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
-            return AnyResult.ok;
-        } else |err| return AnyError.initError(err).intoResult();
-    }
-
     export fn fimo_version_cmp(
         lhs: *const c.FimoVersion,
         rhs: *const c.FimoVersion,
@@ -298,19 +304,6 @@ const ffi = struct {
         const l = Version.initC(lhs.*);
         const r = Version.initC(rhs.*);
         return switch (l.order(r)) {
-            .lt => -1,
-            .eq => 0,
-            .gt => 1,
-        };
-    }
-
-    export fn fimo_version_cmp_long(
-        lhs: *const c.FimoVersion,
-        rhs: *const c.FimoVersion,
-    ) c_int {
-        const l = Version.initC(lhs.*);
-        const r = Version.initC(rhs.*);
-        return switch (l.orderLong(r)) {
             .lt => -1,
             .eq => 0,
             .gt => 1,

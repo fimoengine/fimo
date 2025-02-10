@@ -22,3 +22,6 @@ features = ["visit", "full"]
 
 [dependencies.quote]
 version = "1.0"
+
+[dependencies.semver]
+version = "1.0"

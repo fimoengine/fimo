@@ -709,7 +709,7 @@ pub trait SymbolInfo: Debug + Copy + PartialEq + Eq + PartialOrd + Ord + std::ha
     /// Namespace of the symbol.
     const NAMESPACE: &'static CStr = c"";
     /// Version of the symbol.
-    const VERSION: Version;
+    const VERSION: Version<'static>;
 }
 
 /// Declares new symbols.
@@ -720,15 +720,15 @@ pub trait SymbolInfo: Debug + Copy + PartialEq + Eq + PartialOrd + Ord + std::ha
 /// use fimo_std::symbol;
 ///
 /// symbol! {
-///     symbol Foo @ (0, 0, 2) = foo: *const f32;
-///     symbol Bar @ (1, 0, 0) = "my_mod"::bar: extern "C" fn(i32, i32) -> i32;
+///     symbol Foo @ Version("0.0.2") = foo: *const f32;
+///     symbol Bar @ Version("1.0.0") = "my_mod"::bar: extern "C" fn(i32, i32) -> i32;
 /// }
 /// ```
 #[macro_export]
 macro_rules! symbol {
     () => {};
     (
-        symbol $sym:ident @ ($major:literal, $minor:literal, $patch:literal $(, $build:literal)?) = $($ns:literal::)? $name:ident : $ty:ty;
+        symbol $sym:ident @ Version($version:literal) = $($ns:literal::)? $name:ident : $ty:ty;
         $($rest:tt)*
     ) => {
         #[doc = core::concat!("Marker type for the `", core::stringify!($name), "` symbol", $(" in the `", $ns, "` namespace",)? ".")]
@@ -750,7 +750,7 @@ macro_rules! symbol {
                     Err(_) => unreachable!(),
                 }
             };
-            const VERSION: $crate::version::Version = $crate::version!($major, $minor, $patch, $($build)?);
+            const VERSION: $crate::version::Version<'static> = $crate::version::version!($version);
         }
 
         $crate::symbol!($($rest)*);

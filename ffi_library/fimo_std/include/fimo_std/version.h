@@ -10,44 +10,18 @@
 extern "C" {
 #endif
 
-/// A version specifier.
+/// A version specifier following the Semantic Versioning 2.0.0 specification.
 typedef struct FimoVersion {
-    FimoU32 major;
-    FimoU32 minor;
-    FimoU32 patch;
-    FimoU64 build;
+    FimoUSize major;
+    FimoUSize minor;
+    FimoUSize patch;
+    const char *pre;
+    FimoUSize pre_len;
+    const char *build;
+    FimoUSize build_len;
 } FimoVersion;
 
-/// Major version of fimo std.
-#define FIMO_VERSION_MAJOR 0
-
-/// Minor version of fimo std.
-#define FIMO_VERSION_MINOR 1
-
-/// Patch version of fimo std.
-#define FIMO_VERSION_PATCH 0
-
-/// Build number of fimo std.
-#define FIMO_VERSION_BUILD_NUMBER 0
-
-/// Maximum required string length (without zero-terminator) required to represent a version
-/// without the build number.
-#define FIMO_VERSION_MAX_STR_LENGTH 32
-
-/// Maximum required string length (without zero-terminator) required to represent a version
-/// with the build number.
-#define FIMO_VERSION_LONG_MAX_STR_LENGTH 53
-
-/// Constructs a new `FimoVersion`.
-#define FIMO_VERSION_LONG(major_num, minor_num, patch_num, build_num)                                                  \
-    { .major = (major_num), .minor = (minor_num), .patch = (patch_num), .build = (build_num) }
-
-/// Constructs a new `FimoVersion`.
-#define FIMO_VERSION(major_num, minor_num, patch_num) FIMO_VERSION_LONG(major_num, minor_num, patch_num, 0)
-
 /// Parses a string into a `FimoVersion`.
-///
-/// The string must be of the form "major.minor.patch" or "major.minor.patch+build".
 FIMO_EXPORT
 FIMO_MUST_USE
 FimoResult fimo_version_parse_str(const char *str, size_t str_len, FimoVersion *version);
@@ -62,11 +36,11 @@ size_t fimo_version_str_len(const FimoVersion *version);
 
 /// Calculates the string length required to represent the version as a string.
 ///
-/// The returned length is large enough for a call to `fimo_version_write_str_long` with the same
+/// The returned length is large enough for a call to `fimo_version_write_str_full` with the same
 /// version instance. The returned length does not include the zero-terminator.
 FIMO_EXPORT
 FIMO_MUST_USE
-size_t fimo_version_str_len_long(const FimoVersion *version);
+size_t fimo_version_str_len_full(const FimoVersion *version);
 
 /// Represents the version as a string.
 ///
@@ -79,12 +53,12 @@ FimoResult fimo_version_write_str(const FimoVersion *version, char *str, size_t 
 
 /// Represents the version as a string.
 ///
-/// Writes a string of the form "major.minor.patch+build" into `str`. If `str` is large enough to
+/// Writes a string representation of the version into `str`. If `str` is large enough to
 /// store a zero-terminator, it is appended at the end of the written characters. If `written` is
 /// not `NULL`, it is set to the number of characters written without the zero-terminator.
 FIMO_EXPORT
 FIMO_MUST_USE
-FimoResult fimo_version_write_str_long(const FimoVersion *version, char *str, size_t str_len, size_t *written);
+FimoResult fimo_version_write_str_full(const FimoVersion *version, char *str, size_t str_len, size_t *written);
 
 /// Compares two versions.
 ///
@@ -93,14 +67,6 @@ FimoResult fimo_version_write_str_long(const FimoVersion *version, char *str, si
 FIMO_EXPORT
 FIMO_MUST_USE
 int fimo_version_cmp(const FimoVersion *lhs, const FimoVersion *rhs);
-
-/// Compares two versions.
-///
-/// Returns an ordering of the two versions, taking into consideration the build numbers. Returns
-/// `-1` if `lhs < rhs`, `0` if `lhs == rhs`, or `1` if `lhs > rhs`.
-FIMO_EXPORT
-FIMO_MUST_USE
-int fimo_version_cmp_long(const FimoVersion *lhs, const FimoVersion *rhs);
 
 /// Checks for the compatibility of two versions.
 ///
@@ -112,7 +78,7 @@ int fimo_version_cmp_long(const FimoVersion *lhs, const FimoVersion *rhs);
 ///
 /// 1. The major versions of `got` and `required` must be equal.
 /// 2. If the major version is `0`, the minor versions must be equal.
-/// 3. `got >= required` without the build number.
+/// 3. `got >= required`.
 FIMO_EXPORT
 FIMO_MUST_USE
 bool fimo_version_compatible(const FimoVersion *got, const FimoVersion *required);

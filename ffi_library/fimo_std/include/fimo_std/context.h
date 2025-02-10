@@ -4,6 +4,7 @@
 #include <fimo_std/error.h>
 #include <fimo_std/utils.h>
 #include <fimo_std/version.h>
+#include <fimo_std/impl/context_version_.h>
 
 #ifdef __cplusplus
 extern "C" {

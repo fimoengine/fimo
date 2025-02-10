@@ -1,12 +1,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// Must match the `version` in `build.zig.zon`.
+const fimo_version: std.SemanticVersion = .{ .major = 0, .minor = 1, .patch = 0 };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     // Generate additional build files.
     const wf = b.addWriteFiles();
+    const context_version = generateVersion(b, wf);
     const visualizers = generateGDBScripts(b, wf);
     generateLicenseFile(b, wf);
 
@@ -26,6 +30,7 @@ pub fn build(b: *std.Build) void {
 
     // Install the headers.
     _ = headers.addCopyDirectory(b.path("include/"), ".", .{});
+    _ = headers.addCopyDirectory(wf.getDirectory().join(b.allocator, "include/") catch unreachable, ".", .{});
     // Install the natvis files.
     _ = headers.addCopyDirectory(b.path("visualizers/natvis"), "fimo_std/impl/natvis", .{});
     // Install the generated license.
@@ -48,8 +53,9 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .pic = true,
     });
+    module.addImport("context_version", context_version);
     module.addImport("visualizers", visualizers);
-    module.addIncludePath(b.path("include/"));
+    module.addIncludePath(headers.getDirectory());
     if (target.result.os.tag == .windows) module.linkSystemLibrary("advapi32", .{});
 
     // ----------------------------------------------------
@@ -144,6 +150,36 @@ pub fn build(b: *std.Build) void {
     });
     const doc_step = b.step("doc", "Generate documentation");
     doc_step.dependOn(&install_doc.step);
+}
+
+fn generateVersion(
+    b: *std.Build,
+    wf: *std.Build.Step.WriteFile,
+) *std.Build.Module {
+    const header_contents = b.fmt(
+        \\ // Machine generated
+        \\ #define FIMO_CONTEXT_VERSION_MAJOR {}
+        \\ #define FIMO_CONTEXT_VERSION_MINOR {}
+        \\ #define FIMO_CONTEXT_VERSION_PATCH {}
+        \\ #define FIMO_CONTEXT_VERSION_PRE "{s}"
+        \\ #define FIMO_CONTEXT_VERSION_PRE_LEN {}
+        \\ #define FIMO_CONTEXT_VERSION_BUILD "{s}"
+        \\ #define FIMO_CONTEXT_VERSION_BUILD_LEN {}
+        \\
+    , .{
+        fimo_version.major,
+        fimo_version.minor,
+        fimo_version.patch,
+        fimo_version.pre orelse "",
+        (fimo_version.pre orelse "").len,
+        fimo_version.build orelse "",
+        (fimo_version.build orelse "").len,
+    });
+    _ = wf.add("include/fimo_std/impl/context_version_.h", header_contents);
+
+    const options = b.addOptions();
+    options.addOption(std.SemanticVersion, "version", fimo_version);
+    return options.createModule();
 }
 
 fn generateGDBScripts(

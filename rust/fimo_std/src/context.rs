@@ -8,6 +8,7 @@ use crate::{
     utils::{View, Viewable},
     version::Version,
 };
+use core::panic;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 handle!(pub handle ContextHandle: Send + Sync + Share);
@@ -58,7 +59,8 @@ impl VTable {
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableHeader {
-    pub check_version: unsafe extern "C" fn(handle: ContextHandle, version: &Version) -> AnyResult,
+    pub check_version:
+        unsafe extern "C" fn(handle: ContextHandle, version: &Version<'_>) -> AnyResult,
 }
 
 /// Core virtual function table of a [`ContextView`].
@@ -87,12 +89,29 @@ sa::assert_impl_all!(ContextView<'static>: Share);
 
 impl ContextView<'_> {
     /// Current `Context` version of the library.
-    pub const CURRENT_VERSION: Version = Version::new_long(
-        bindings::FIMO_VERSION_MAJOR,
-        bindings::FIMO_VERSION_MINOR,
-        bindings::FIMO_VERSION_PATCH,
-        bindings::FIMO_VERSION_BUILD_NUMBER as u64,
-    );
+    pub const CURRENT_VERSION: Version<'static> = {
+        let major = bindings::FIMO_CONTEXT_VERSION_MAJOR as usize;
+        let minor = bindings::FIMO_CONTEXT_VERSION_MINOR as usize;
+        let patch = bindings::FIMO_CONTEXT_VERSION_PATCH as usize;
+        let pre = if bindings::FIMO_CONTEXT_VERSION_PRE.is_empty() {
+            None
+        } else {
+            match bindings::FIMO_CONTEXT_VERSION_PRE.to_str() {
+                Ok(x) => Some(x),
+                Err(_) => panic!("invalid pre release string"),
+            }
+        };
+        let build = if bindings::FIMO_CONTEXT_VERSION_BUILD.is_empty() {
+            None
+        } else {
+            match bindings::FIMO_CONTEXT_VERSION_BUILD.to_str() {
+                Ok(x) => Some(x),
+                Err(_) => panic!("invalid build string"),
+            }
+        };
+
+        Version::new_full(major, minor, patch, pre, build)
+    };
 
     /// Checks that the version of the `Context` is compatible.
     pub fn check_version(&self) -> error::Result {

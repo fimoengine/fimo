@@ -280,7 +280,7 @@ impl Debug for Namespace<'_> {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct SymbolImport<'a> {
-    pub version: Version,
+    pub version: Version<'a>,
     pub name: StrRef<'a>,
     pub namespace: StrRef<'a>,
     _private: PhantomData<()>,
@@ -291,7 +291,7 @@ sa::assert_impl_all!(SymbolImport<'static>: Share);
 
 impl<'a> SymbolImport<'a> {
     /// Constructs a new `SymbolImport`.
-    pub const fn new(version: Version, name: &'a CStr) -> Self {
+    pub const fn new(version: Version<'a>, name: &'a CStr) -> Self {
         Self {
             version,
             name: StrRef::new(name),
@@ -342,7 +342,7 @@ pub enum SymbolLinkage {
 pub struct SymbolExport<'a> {
     pub symbol: AssertSharable<ConstNonNull<()>>,
     pub linkage: SymbolLinkage,
-    pub version: Version,
+    pub version: Version<'a>,
     pub name: StrRef<'a>,
     pub namespace: StrRef<'a>,
     _private: PhantomData<()>,
@@ -358,7 +358,7 @@ impl<'a> SymbolExport<'a> {
     /// Constructs a new `SymbolExport`.
     pub const fn new<T: ~const SymbolPointer + 'a>(
         symbol: T::Target<'a>,
-        version: Version,
+        version: Version<'a>,
         name: &'a CStr,
         linkage: SymbolLinkage,
     ) -> Self {
@@ -415,7 +415,7 @@ pub struct DynamicSymbolExport<'a> {
         unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
     >,
     pub linkage: SymbolLinkage,
-    pub version: Version,
+    pub version: Version<'a>,
     pub name: StrRef<'a>,
     pub namespace: StrRef<'a>,
     _private: PhantomData<()>,
@@ -441,7 +441,7 @@ impl<'a> DynamicSymbolExport<'a> {
         destructor: AssertSharable<
             unsafe extern "C" fn(instance: Pin<&OpaqueInstanceView<'_>>, symbol: NonNull<()>),
         >,
-        version: Version,
+        version: Version<'a>,
         name: &'a CStr,
         linkage: SymbolLinkage,
     ) -> Self {
@@ -645,7 +645,7 @@ sa::assert_impl_all!(StopEventModifier: Send, Sync, Share);
 #[allow(clippy::type_complexity)]
 pub struct Export<'a> {
     pub next: Option<OpaqueHandle<dyn Send + Sync + Share>>,
-    pub version: Version,
+    pub version: Version<'a>,
     pub name: StrRef<'a>,
     pub description: Option<StrRef<'a>>,
     pub author: Option<StrRef<'a>>,

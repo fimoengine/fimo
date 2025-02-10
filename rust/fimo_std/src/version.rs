@@ -2,80 +2,123 @@
 
 use crate::{
     error::{AnyError, AnyResult},
+    module::symbols::SliceRef,
     utils::ConstNonNull,
 };
-use core::fmt::Display;
-use std::{mem::MaybeUninit, ptr::NonNull};
+use core::{fmt::Display, panic};
+use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 unsafe extern "C" {
     fn fimo_version_parse_str(
         str: ConstNonNull<u8>,
         len: usize,
-        out: &mut MaybeUninit<Version>,
+        out: &mut MaybeUninit<Version<'static>>,
     ) -> AnyResult;
-    fn fimo_version_str_len(version: &Version) -> usize;
-    fn fimo_version_str_len_long(version: &Version) -> usize;
+    fn fimo_version_str_len(version: &Version<'_>) -> usize;
+    fn fimo_version_str_len_full(version: &Version<'_>) -> usize;
     fn fimo_version_write_str(
-        version: &Version,
+        version: &Version<'_>,
         str: NonNull<u8>,
         len: usize,
         written: Option<&mut MaybeUninit<usize>>,
     ) -> AnyResult;
-    fn fimo_version_write_str_long(
-        version: &Version,
+    fn fimo_version_write_str_full(
+        version: &Version<'_>,
         str: NonNull<u8>,
         len: usize,
         written: Option<&mut MaybeUninit<usize>>,
     ) -> AnyResult;
-    fn fimo_version_cmp(lhs: &Version, rhs: &Version) -> std::ffi::c_int;
-    fn fimo_version_cmp_long(lhs: &Version, rhs: &Version) -> std::ffi::c_int;
-    fn fimo_version_compatible(got: &Version, required: &Version) -> bool;
+    fn fimo_version_cmp(lhs: &Version<'_>, rhs: &Version<'_>) -> std::ffi::c_int;
+    fn fimo_version_compatible(got: &Version<'_>, required: &Version<'_>) -> bool;
 }
 
-/// Constructs a new [`Version`].
-#[macro_export]
-macro_rules! version {
-    ($major:literal, $minor:literal, $patch:literal $(,)?) => {{ $crate::version::Version::new($major, $minor, $patch) }};
-    ($major:literal, $minor:literal, $patch:literal, $build:literal$(,)?) => {{ $crate::version::Version::new_long($major, $minor, $patch, $build) }};
-    ($version:literal) => {{ $crate::version::Version::try_from($version) }};
-}
+pub use fimo_std_macros::version;
 
 /// A version specifier.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct Version {
-    pub major: u32,
-    pub minor: u32,
-    pub patch: u32,
-    pub build: u64,
+pub struct Version<'a> {
+    pub major: usize,
+    pub minor: usize,
+    pub patch: usize,
+    pub pre: SliceRef<'a, u8>,
+    pub build: SliceRef<'a, u8>,
+    _private: PhantomData<()>,
 }
 
-impl Version {
-    /// Maximum length of a formatted `Version` string.
-    pub const MAX_STR_LENGTH: usize = 32;
-
-    /// Maximum length of a fully formatted `Version` string.
-    pub const MAX_LONG_STR_LENGTH: usize = 53;
-
+impl<'a> Version<'a> {
     /// Constructs a new `Version`.
-    ///
-    /// The `build` number is set to `0`.
-    pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
+    pub const fn new(major: usize, minor: usize, patch: usize) -> Self {
         Self {
             major,
             minor,
             patch,
-            build: 0,
+            pre: SliceRef::new(&[]),
+            build: SliceRef::new(&[]),
+            _private: PhantomData,
         }
     }
 
     /// Constructs a new `Version`.
-    pub const fn new_long(major: u32, minor: u32, patch: u32, build: u64) -> Self {
+    pub const fn new_full(
+        major: usize,
+        minor: usize,
+        patch: usize,
+        pre: Option<&'a str>,
+        build: Option<&'a str>,
+    ) -> Self {
+        let pre = match pre {
+            Some(s) => SliceRef::new(s.as_bytes()),
+            None => SliceRef::new(&[]),
+        };
+        let build = match build {
+            Some(s) => SliceRef::new(s.as_bytes()),
+            None => SliceRef::new(&[]),
+        };
+
         Self {
             major,
             minor,
             patch,
+            pre,
             build,
+            _private: PhantomData,
+        }
+    }
+
+    #[doc(hidden)]
+    pub const fn __private_new(
+        major: u64,
+        minor: u64,
+        patch: u64,
+        pre: Option<&'a str>,
+        build: Option<&'a str>,
+    ) -> Self {
+        if size_of::<usize>() < size_of::<u64>()
+            && (major > usize::MAX as u64 || minor > usize::MAX as u64 || patch > usize::MAX as u64)
+        {
+            panic!("overflow");
+        }
+
+        let major = major as _;
+        let minor = minor as _;
+        let patch = patch as _;
+        let pre = match pre {
+            Some(s) => SliceRef::new(s.as_bytes()),
+            None => SliceRef::new(&[]),
+        };
+        let build = match build {
+            Some(s) => SliceRef::new(s.as_bytes()),
+            None => SliceRef::new(&[]),
+        };
+
+        Self {
+            major,
+            minor,
+            patch,
+            pre,
+            build,
+            _private: PhantomData,
         }
     }
 
@@ -90,18 +133,17 @@ impl Version {
     /// Returns the length required to format the `Version`.
     ///
     /// Returns the minimum required buffer length to format the `Version` using
-    /// [`Self::write_str_long`].
-    pub fn str_len_long(&self) -> usize {
-        unsafe { fimo_version_str_len_long(self) }
+    /// [`Self::write_str_full`].
+    pub fn str_len_full(&self) -> usize {
+        unsafe { fimo_version_str_len_full(self) }
     }
 
     /// Formats the `Version` into a buffer.
     ///
     /// Formats a string representation of the `Version`, containing its major-, minor-, and patch
     /// numbers into the provided buffer. Use [`Self::str_len`] to query the minimum buffer size
-    /// required by this function. A size of at least [`Self::MAX_STR_LENGTH`] is guaranteed to
-    /// work, regardless of the contents of the `Version`.
-    pub fn write_str<'a>(&self, buff: &'a mut [u8]) -> Result<&'a mut str, AnyError> {
+    /// required by this function.
+    pub fn write_str<'b>(&self, buff: &'b mut [u8]) -> Result<&'b mut str, AnyError> {
         let mut written = MaybeUninit::uninit();
         unsafe {
             fimo_version_write_str(
@@ -120,14 +162,12 @@ impl Version {
 
     /// Formats the `Version` into a buffer.
     ///
-    /// Formats a string representation of the `Version`, containing its major-, minor-, patch- and
-    /// build numbers into the provided buffer. Use [`Self::str_len_long`] to query the minimum
-    /// buffer size required by this function. A size of at least [`Self::MAX_LONG_STR_LENGTH`] is
-    /// guaranteed to work, regardless of the contents of the `Version`.
-    pub fn write_str_long<'a>(&self, buff: &'a mut [u8]) -> Result<&'a mut str, AnyError> {
+    /// Formats a string representation of the `Version` into the provided buffer. Use
+    /// [`Self::str_len_long`] to query the minimum buffer size required by this function.
+    pub fn write_str_full<'b>(&self, buff: &'b mut [u8]) -> Result<&'b mut str, AnyError> {
         let mut written = MaybeUninit::uninit();
         unsafe {
-            fimo_version_write_str_long(
+            fimo_version_write_str_full(
                 self,
                 NonNull::new_unchecked(buff.as_mut_ptr()),
                 buff.len(),
@@ -141,20 +181,6 @@ impl Version {
         }
     }
 
-    /// Compares two `Versions`.
-    ///
-    /// Works like the implementation of [`Ord`], but also considers the build numbers of the two
-    /// `Version`s.
-    pub fn cmp_long(&self, other: &Self) -> core::cmp::Ordering {
-        let cmp = unsafe { fimo_version_cmp_long(self, other) };
-        match cmp {
-            -1 => core::cmp::Ordering::Less,
-            0 => core::cmp::Ordering::Equal,
-            1 => core::cmp::Ordering::Greater,
-            _ => unreachable!(),
-        }
-    }
-
     /// Checks for the compatibility of two `Version`s.
     ///
     /// If the `Version` is compatible with `required`, it indicates that an object versioned with
@@ -165,27 +191,27 @@ impl Version {
     ///
     /// 1. The major numbers of `self` and `required` must be equal.
     /// 2. If the major number is `0`, then the minor numbers must be equal.
-    /// 3. `self >= required` without the build number.
+    /// 3. `self >= required`.
     pub fn compatible(&self, required: &Self) -> bool {
         unsafe { fimo_version_compatible(self, required) }
     }
 }
 
-impl PartialEq for Version {
+impl PartialEq for Version<'_> {
     fn eq(&self, other: &Self) -> bool {
-        matches!(self.cmp_long(other), core::cmp::Ordering::Equal)
+        matches!(self.cmp(other), core::cmp::Ordering::Equal)
     }
 }
 
-impl Eq for Version {}
+impl Eq for Version<'_> {}
 
-impl PartialOrd for Version {
+impl PartialOrd for Version<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Version {
+impl Ord for Version<'_> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         let cmp = unsafe { fimo_version_cmp(self, other) };
         match cmp {
@@ -197,17 +223,17 @@ impl Ord for Version {
     }
 }
 
-impl Display for Version {
+impl Display for Version<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let mut buff = [0; Self::MAX_LONG_STR_LENGTH];
+        let mut buff = [0; 256];
         let formatted = self
-            .write_str_long(&mut buff)
+            .write_str_full(&mut buff)
             .expect("version string should fit into the string");
         write!(f, "{formatted}")
     }
 }
 
-impl TryFrom<&str> for Version {
+impl<'a> TryFrom<&'a str> for Version<'a> {
     type Error = AnyError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {

@@ -199,7 +199,7 @@ pub trait GenericInstance: Sized {
         self,
         name: &CStr,
         namespace: &CStr,
-        version: Version,
+        version: Version<'_>,
     ) -> Result<ConstNonNull<()>, AnyError> {
         let this = self.to_opaque_instance_view();
         let name = StrRef::new(name);
@@ -331,7 +331,7 @@ pub struct InstanceVTable {
         handle: Pin<&OpaqueInstanceView<'_>>,
         name: StrRef<'_>,
         namespace: StrRef<'_>,
-        version: Version,
+        version: Version<'_>,
         out: &mut MaybeUninit<ConstNonNull<()>>,
     ) -> AnyResult,
     pub read_parameter: unsafe extern "C" fn(

@@ -245,7 +245,7 @@ const LoadGraph = struct {
                 } else if (sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
                     sys.logWarn(
                         "instance is missing required symbol...skipping," ++
-                            " instance='{s}', symbol='{s}', namespace='{s}', version='{long}'",
+                            " instance='{s}', symbol='{s}', namespace='{s}', version='{}'",
                         .{ name, imp_name, imp_ns, imp_ver },
                         @src(),
                     );
@@ -490,7 +490,7 @@ fn addModuleInner(
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
             self.context.module.sys.logError(
-                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{long}'",
+                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
             );
@@ -502,7 +502,7 @@ fn addModuleInner(
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
             self.context.module.sys.logError(
-                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{long}'",
+                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
             );
@@ -564,7 +564,7 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
     }
     if (!Context.ProxyContext.context_version.isCompatibleWith(@"export".getVersion())) {
         sys.logWarn(
-            "incompatible context version, got='{long}', required='{long}'",
+            "incompatible context version, got='{}', required='{}'",
             .{ Context.ProxyContext.context_version, @"export".getVersion() },
             @src(),
         );
@@ -1350,7 +1350,7 @@ const VTableImpl = struct {
         const version_ = Version.initC(version);
 
         self.logTrace(
-            "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{long}'",
+            "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{}'",
             .{ self, name_, namespace_, version_ },
             @src(),
         );

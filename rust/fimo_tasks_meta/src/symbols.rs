@@ -2,5 +2,5 @@
 use fimo_std::{module::symbols::AssertSharable, symbol};
 
 symbol! {
-    symbol Context @ (0, 1, 0) = "fimo_tasks"::context: *const AssertSharable<crate::Context>;
+    symbol Context @ Version("0.1.0") = "fimo_tasks"::context: *const AssertSharable<crate::Context>;
 }

@@ -55,7 +55,7 @@ pub struct VTableV0 {
         handle: ContextHandle,
         name: StrRef<'_>,
         namespace: StrRef<'_>,
-        version: Version,
+        version: Version<'_>,
         out: &mut MaybeUninit<Info>,
     ) -> AnyResult,
     pub namespace_exists: unsafe extern "C" fn(

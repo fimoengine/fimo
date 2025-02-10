@@ -291,7 +291,7 @@ impl Info {
         ctx: impl Viewable<ContextView<'_>>,
         name: &CStr,
         namespace: &CStr,
-        version: Version,
+        version: Version<'_>,
     ) -> Result<Self, AnyError> {
         let ctx = ctx.view();
         let mut out = MaybeUninit::uninit();

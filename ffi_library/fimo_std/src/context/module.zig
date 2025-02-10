@@ -106,7 +106,7 @@ pub fn findInstanceBySymbol(
     version: Version,
 ) System.SystemError!*const ProxyModule.Info {
     self.logTrace(
-        "searching for symbol owner, name='{s}', namespace='{s}', version='{long}'",
+        "searching for symbol owner, name='{s}', namespace='{s}', version='{}'",
         .{ name, namespace, version },
         @src(),
     );

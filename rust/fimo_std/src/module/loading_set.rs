@@ -48,7 +48,7 @@ pub struct LoadingSetVTable {
         handle: LoadingSetHandle,
         name: StrRef<'_>,
         namespace: StrRef<'_>,
-        version: Version,
+        version: Version<'_>,
     ) -> bool,
     pub add_callback: unsafe extern "C" fn(
         handle: LoadingSetHandle,
@@ -117,7 +117,7 @@ impl LoadingSetVTable {
                 handle: LoadingSetHandle,
                 name: StrRef<'_>,
                 namespace: StrRef<'_>,
-                version: Version,
+                version: Version<'_>,
             ) -> bool,
             add_callback: unsafe extern "C" fn(
                 handle: LoadingSetHandle,
@@ -220,7 +220,7 @@ impl LoadingSetView<'_> {
     }
 
     /// Checks whether the set contains a specific symbol.
-    pub fn query_symbol_raw(&self, name: &CStr, namespace: &CStr, version: Version) -> bool {
+    pub fn query_symbol_raw(&self, name: &CStr, namespace: &CStr, version: Version<'_>) -> bool {
         unsafe {
             let f = self.vtable.query_symbol;
             f(

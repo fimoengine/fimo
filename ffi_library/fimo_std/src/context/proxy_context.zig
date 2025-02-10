@@ -1,6 +1,8 @@
 //! Public interface to the fimo std context.
 const std = @import("std");
 
+const context_version_opt = @import("context_version");
+
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const c = @import("../c.zig");
@@ -22,12 +24,7 @@ comptime {
 }
 
 /// Interface version compiled against.
-pub const context_version = Version{
-    .major = c.FIMO_VERSION_MAJOR,
-    .minor = c.FIMO_VERSION_MINOR,
-    .patch = c.FIMO_VERSION_PATCH,
-    .build = c.FIMO_VERSION_BUILD_NUMBER,
-};
+pub const context_version = Version.initSemanticVersion(context_version_opt.version);
 
 /// Id of the fimo std interface types.
 pub const TypeId = enum(i32) {

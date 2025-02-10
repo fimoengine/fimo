@@ -674,7 +674,7 @@ fn removeDependency(self: *const Self, info: *const ProxyModule.Info) !void {
 
 fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
     self.logTrace(
-        "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{long}'",
+        "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{}'",
         .{ self.info.name, name, namespace, version },
         @src(),
     );

@@ -6,17 +6,19 @@ fn main() {
         .option("-Dbuild-static=true")
         .build();
     let lib_dir = zig_out.join("lib");
+    let include_dir = zig_out.join("include");
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=fimo_std");
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=ffi");
+    println!("cargo:rerun-if-changed={}", include_dir.display());
     #[cfg(windows)]
     println!("cargo:rustc-link-lib=dylib=Pathcch");
 
     let bindings = bindgen::builder()
         .header("wrapper.h")
-        .clang_arg("-Iffi/include")
-        .clang_arg("-std=c17")
+        .clang_arg(format!("-I{}", include_dir.display()))
+        .clang_arg("-std=c23")
         .clang_arg("-DFIMO_STD_BINDGEN")
         .use_core()
         .newtype_enum("Fimo.*")
