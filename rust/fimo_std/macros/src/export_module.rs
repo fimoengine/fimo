@@ -294,7 +294,7 @@ fn generate_parameters(parameters: &[&BuilderExprParameter]) -> TokenStream {
     let mut accessors: Vec<TokenStream> = Default::default();
     for param in parameters {
         let ident = param.table_name();
-        let ty = &param.0.t_arg;
+        let ty = param.0.generic_type_argument(0).unwrap();
         fields.push(quote! {
             #ident: ::core::pin::Pin<&'static ::fimo_std::module::parameters::Parameter<#ty>>
         });
@@ -383,7 +383,7 @@ fn generate_imports(
         .iter()
         .map(|import| {
             let ident = import.table_name();
-            let symbol_t = &import.0.t_arg;
+            let symbol_t = import.0.generic_type_argument(0).unwrap();
             (ident, symbol_t)
         })
         .collect::<Vec<_>>();
@@ -400,12 +400,12 @@ fn generate_exports(
         .iter()
         .map(|export| {
             let ident = export.table_name();
-            let symbol_t = &export.0.t_arg;
+            let symbol_t = export.0.generic_type_argument(0).unwrap();
             (ident, symbol_t)
         })
         .chain(dyn_exports.iter().map(|export| {
             let ident = export.table_name();
-            let symbol_t = &export.0.t_arg;
+            let symbol_t = export.0.generic_type_argument(0).unwrap();
             (ident, symbol_t)
         }))
         .collect::<Vec<_>>();
@@ -488,7 +488,7 @@ fn generate_vtable(
 
 fn state_ref(state: Option<&BuilderExprState>) -> TokenStream {
     if let Some(x) = state {
-        let t = &x.0.t_arg;
+        let t = x.0.generic_type_argument(0).unwrap();
         quote! {pub type State = #t;}
     } else {
         quote! {pub type State = ();}
@@ -526,7 +526,7 @@ fn generate_export(
     });
 
     let parameters = parameters.iter().map(|&param| {
-        let ty = &param.0.t_arg;
+        let ty = param.0.generic_type_argument(0).unwrap();
         let name = &param.0.args[1];
         let default_value = &param.0.args[2];
         let read_group = &param.0.args[3];
@@ -608,7 +608,7 @@ fn generate_export(
             }
         })
         .chain(imports.iter().map(|imp| {
-            let t = &imp.0.t_arg;
+            let t = imp.0.generic_type_argument(0).unwrap();
             quote! {
                 insert_in_ns(
                     &mut namespaces,
@@ -623,7 +623,7 @@ fn generate_export(
     let imports = imports
         .iter()
         .map(|&imp| {
-            let t = &imp.0.t_arg;
+            let t = imp.0.generic_type_argument(0).unwrap();
             quote! {
                 const {
                     let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
@@ -641,7 +641,7 @@ fn generate_export(
     let exports = exports
         .iter()
         .map(|&exp| {
-            let t = &exp.0.t_arg;
+            let t = exp.0.generic_type_argument(0).unwrap();
             let linkage = &exp.0.args[1];
             let value = &exp.0.args[2];
             quote! {
@@ -665,7 +665,7 @@ fn generate_export(
     let dyn_exports = dyn_exports
         .iter()
         .map(|&exp| {
-            let t = &exp.0.t_arg;
+            let t = exp.0.generic_type_argument(0).unwrap();
             let linkage = &exp.0.args[1];
             let init = &exp.0.args[2];
             let deinit = &exp.0.args[3];
@@ -756,7 +756,9 @@ fn generate_export(
                 {
                     let f = const { #init };
                     unsafe {
-                        let instance = std::mem::transmute(instance);
+                        let instance: ::core::pin::Pin<
+                            &::fimo_std::module::instance::Stage0InstanceView<'_, #view_ident<'_>>
+                        >   = ::core::mem::transmute(instance);
                         let fut = f(instance, set);
                         let fut = async move {
                             ::fimo_std::r#async::Fallible::new_result(
@@ -778,7 +780,9 @@ fn generate_export(
                 ) {
                     let f = const { #deinit };
                     unsafe {
-                        let instance = std::mem::transmute(instance);
+                        let instance: ::core::pin::Pin<
+                            &::fimo_std::module::instance::Stage0InstanceView<'_, #view_ident<'_>>
+                        >   = ::core::mem::transmute(instance);
                         let state = state.expect("expected a non-null pointer").cast();
                         f(instance, state)
                     }
@@ -807,7 +811,7 @@ fn generate_export(
                 {
                     let f = const { #on_event };
                     unsafe {
-                        let instance = std::mem::transmute(instance);
+                        let instance: ::core::pin::Pin<&#view_ident<'_>> = ::core::mem::transmute(instance);
                         let fut = f(instance);
                         let fut = async move {
                             ::fimo_std::r#async::Fallible::new_result(
@@ -839,7 +843,7 @@ fn generate_export(
                 ) {
                     let f = const { #on_event };
                     unsafe {
-                        let instance = std::mem::transmute(instance);
+                        let instance: ::core::pin::Pin<&#view_ident<'_>> = ::core::mem::transmute(instance);
                         f(instance)
                     }
                 }
@@ -1258,17 +1262,17 @@ impl ToTokens for BuilderPath {
 }
 
 macro_rules! builder_expr {
-    ($(fn $method:ident ($(<inline $table_name:ident>,)? $name:ident, $builder:path, $inner:ident);)*) => {
+    ($(fn $method:ident ($(<inline $table_name:ident>,)? $name:ident, $builder:path $(, $type_args:literal)?);)*) => {
         $(
-            builder_expr!(op $method ($($table_name,)? $name, $builder, $inner));
+            builder_expr!(op $method ($($table_name,)? $name, $builder $(, $type_args)?));
         )*
     };
-    (op $method:ident ($name:ident, $builder:path, $inner:ident)) => {
-        struct $name($inner);
+    (op $method:ident ($name:ident, $builder:path $(, $type_args:literal)?)) => {
+        struct $name(BuilderExprInner);
         impl $name {
             fn from_expr(expr: &ExprMethodCall) -> syn::Result<Vec<BuilderExpr>> {
                 assert_eq!(expr.method.to_string(), std::stringify!($method));
-                let this = Self($inner::new(expr)?);
+                let this = Self(BuilderExprInner::new(expr, false $(|| $type_args)?)?);
                 let op = $builder(this);
 
                 let mut ops = BuilderExpr::from_expr(&expr.receiver)?;
@@ -1287,8 +1291,8 @@ macro_rules! builder_expr {
             }
         }
     };
-    (op $method:ident (table_name, $name:ident, $builder:path, $inner:ident)) => {
-        struct $name($inner);
+    (op $method:ident (table_name, $name:ident, $builder:path $(, $type_args:literal)?)) => {
+        struct $name(BuilderExprInner);
         impl $name {
             fn from_expr(expr: &ExprMethodCall) -> syn::Result<Vec<BuilderExpr>> {
                 assert_eq!(expr.method.to_string(), std::stringify!($method));
@@ -1309,7 +1313,7 @@ macro_rules! builder_expr {
                     _ => return Err(Error::new_spanned(table_name, "expected a string literal")),
                 }
 
-                let this = Self($inner::new(expr)?);
+                let this = Self(BuilderExprInner::new(expr, false $(|| $type_args)?)?);
                 let op = $builder(this);
 
                 let mut ops = BuilderExpr::from_expr(&expr.receiver)?;
@@ -1338,19 +1342,19 @@ macro_rules! builder_expr {
 }
 
 builder_expr! {
-    fn with_description(BuilderExprDescription, BuilderExpr::Description, BuilderExprInner);
-    fn with_author(BuilderExprAuthor, BuilderExpr::Author, BuilderExprInner);
-    fn with_license(BuilderExprLicense, BuilderExpr::License, BuilderExprInner);
-    fn with_parameter(<inline table_name>, BuilderExprParameter, BuilderExpr::Parameter, BuilderExprInnerT);
-    fn with_resource(<inline table_name>, BuilderExprResource, BuilderExpr::Resource, BuilderExprInner);
-    fn with_namespace(BuilderExprNamespace, BuilderExpr::Namespace, BuilderExprInner);
-    fn with_import(<inline table_name>, BuilderExprImport, BuilderExpr::Import, BuilderExprInnerT);
-    fn with_export(<inline table_name>, BuilderExprExport, BuilderExpr::Export, BuilderExprInnerT);
-    fn with_dynamic_export(<inline table_name>, BuilderExprDynExport, BuilderExpr::DynExport, BuilderExprInnerTU);
-    fn with_state(BuilderExprState, BuilderExpr::State, BuilderExprInnerTUV);
-    fn with_on_start_event(BuilderExprOnStartEvent, BuilderExpr::OnStartEvent, BuilderExprInner);
-    fn with_on_stop_event(BuilderExprOnStopEvent, BuilderExpr::OnStopEvent, BuilderExprInner);
-    fn build(BuilderExprBuild, BuilderExpr::Build, BuilderExprInner);
+    fn with_description(BuilderExprDescription, BuilderExpr::Description);
+    fn with_author(BuilderExprAuthor, BuilderExpr::Author);
+    fn with_license(BuilderExprLicense, BuilderExpr::License);
+    fn with_parameter(<inline table_name>, BuilderExprParameter, BuilderExpr::Parameter, true);
+    fn with_resource(<inline table_name>, BuilderExprResource, BuilderExpr::Resource);
+    fn with_namespace(BuilderExprNamespace, BuilderExpr::Namespace);
+    fn with_import(<inline table_name>, BuilderExprImport, BuilderExpr::Import, true);
+    fn with_export(<inline table_name>, BuilderExprExport, BuilderExpr::Export, true);
+    fn with_dynamic_export(<inline table_name>, BuilderExprDynExport, BuilderExpr::DynExport, true);
+    fn with_state(BuilderExprState, BuilderExpr::State, true);
+    fn with_on_start_event(BuilderExprOnStartEvent, BuilderExpr::OnStartEvent);
+    fn with_on_stop_event(BuilderExprOnStopEvent, BuilderExpr::OnStopEvent);
+    fn build(BuilderExprBuild, BuilderExpr::Build);
 }
 
 struct BuilderExprInner {
@@ -1362,9 +1366,39 @@ struct BuilderExprInner {
 }
 
 impl BuilderExprInner {
-    fn new(expr: &ExprMethodCall) -> syn::Result<Self> {
+    fn new(expr: &ExprMethodCall, require_first_gen_arg: bool) -> syn::Result<Self> {
         if let Some(attr) = expr.attrs.first() {
             return Err(Error::new_spanned(attr, "attributes not supported"));
+        }
+
+        if require_first_gen_arg {
+            let elem = expr
+                .turbofish
+                .iter()
+                .flat_map(|args| args.args.iter())
+                .find_map(|arg| match arg {
+                    GenericArgument::Type(x) => Some(x),
+                    _ => None,
+                });
+            match elem {
+                Some(Type::Infer(x)) => {
+                    return Err(Error::new_spanned(
+                        x,
+                        "first generic type argument may not be inferred",
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    if let Some(turbofish) = &expr.turbofish {
+                        return Err(Error::new_spanned(turbofish, "missing generic arguments"));
+                    } else {
+                        return Err(Error::new_spanned(
+                            &expr.method,
+                            "missing generic arguments",
+                        ));
+                    }
+                }
+            }
         }
 
         let dot_token = expr.dot_token;
@@ -1381,6 +1415,17 @@ impl BuilderExprInner {
             args,
         })
     }
+
+    fn generic_type_argument(&self, index: usize) -> Option<&Type> {
+        self.turbofish
+            .iter()
+            .flat_map(|args| args.args.iter())
+            .filter_map(|arg| match arg {
+                GenericArgument::Type(x) => Some(x),
+                _ => None,
+            })
+            .nth(index)
+    }
 }
 
 impl ToTokens for BuilderExprInner {
@@ -1390,288 +1435,6 @@ impl ToTokens for BuilderExprInner {
         if let Some(turbofish) = &self.turbofish {
             turbofish.to_tokens(tokens);
         }
-        self.paren_token.surround(tokens, |tokens| {
-            self.args.to_tokens(tokens);
-        });
-    }
-}
-
-struct BuilderExprInnerT {
-    dot_token: Token![.],
-    method: Ident,
-    colon2_token: Option<Token![::]>,
-    lt_token: Token![<],
-    generic_args: Punctuated<GenericArgument, Token![,]>,
-    t_arg: Type,
-    trailing_comma_token: Option<Token![,]>,
-    gt_token: Token![>],
-    paren_token: token::Paren,
-    args: Punctuated<Expr, Token![,]>,
-}
-
-impl BuilderExprInnerT {
-    fn new(expr: &ExprMethodCall) -> syn::Result<Self> {
-        if let Some(attr) = expr.attrs.first() {
-            return Err(Error::new_spanned(attr, "attributes not supported"));
-        }
-
-        let dot_token = expr.dot_token;
-        let method = expr.method.clone();
-        let paren_token = expr.paren_token;
-        let args = expr.args.clone();
-
-        let mut turbofish = match expr.turbofish.clone() {
-            Some(turbofish) => turbofish,
-            None => {
-                return Err(Error::new_spanned(
-                    &expr.method,
-                    "expected generic arguments",
-                ));
-            }
-        };
-        if turbofish.args.is_empty() {
-            return Err(Error::new_spanned(
-                turbofish,
-                "expected at least 1 generic argument",
-            ));
-        }
-
-        let colon2_token = turbofish.colon2_token;
-        let lt_token = turbofish.lt_token;
-        let (t_arg, trailing_comma_token) = turbofish.args.pop().unwrap().into_tuple();
-        let t_arg = match t_arg {
-            GenericArgument::Type(x) => x,
-            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
-        };
-        let generic_args = turbofish.args;
-        let gt_token = turbofish.gt_token;
-
-        Ok(Self {
-            dot_token,
-            method,
-            colon2_token,
-            lt_token,
-            generic_args,
-            t_arg,
-            trailing_comma_token,
-            gt_token,
-            paren_token,
-            args,
-        })
-    }
-}
-
-impl ToTokens for BuilderExprInnerT {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.dot_token.to_tokens(tokens);
-        self.method.to_tokens(tokens);
-        self.colon2_token.to_tokens(tokens);
-        self.lt_token.to_tokens(tokens);
-        self.generic_args.to_tokens(tokens);
-        self.t_arg.to_tokens(tokens);
-        self.trailing_comma_token.to_tokens(tokens);
-        self.gt_token.to_tokens(tokens);
-        self.paren_token.surround(tokens, |tokens| {
-            self.args.to_tokens(tokens);
-        });
-    }
-}
-
-struct BuilderExprInnerTU {
-    dot_token: Token![.],
-    method: Ident,
-    colon2_token: Option<Token![::]>,
-    lt_token: Token![<],
-    generic_args: Punctuated<GenericArgument, Token![,]>,
-    t_arg: Type,
-    comma_token: Token![,],
-    u_arg: Type,
-    trailing_comma_token: Option<Token![,]>,
-    gt_token: Token![>],
-    paren_token: token::Paren,
-    args: Punctuated<Expr, Token![,]>,
-}
-
-impl BuilderExprInnerTU {
-    fn new(expr: &ExprMethodCall) -> syn::Result<Self> {
-        if let Some(attr) = expr.attrs.first() {
-            return Err(Error::new_spanned(attr, "attributes not supported"));
-        }
-
-        let dot_token = expr.dot_token;
-        let method = expr.method.clone();
-        let paren_token = expr.paren_token;
-        let args = expr.args.clone();
-
-        let mut turbofish = match expr.turbofish.clone() {
-            Some(turbofish) => turbofish,
-            None => {
-                return Err(Error::new_spanned(
-                    &expr.method,
-                    "expected generic arguments",
-                ));
-            }
-        };
-        if turbofish.args.len() < 2 {
-            return Err(Error::new_spanned(
-                turbofish,
-                "expected at least 2 generic arguments",
-            ));
-        }
-
-        let colon2_token = turbofish.colon2_token;
-        let lt_token = turbofish.lt_token;
-        let (u_arg, trailing_comma_token) = turbofish.args.pop().unwrap().into_tuple();
-        let u_arg = match u_arg {
-            GenericArgument::Type(x) => x,
-            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
-        };
-
-        let (t_arg, comma_token) = turbofish.args.pop().unwrap().into_tuple();
-        let comma_token = comma_token.unwrap();
-        let t_arg = match t_arg {
-            GenericArgument::Type(x) => x,
-            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
-        };
-        let generic_args = turbofish.args;
-        let gt_token = turbofish.gt_token;
-
-        Ok(Self {
-            dot_token,
-            method,
-            colon2_token,
-            lt_token,
-            generic_args,
-            t_arg,
-            comma_token,
-            u_arg,
-            trailing_comma_token,
-            gt_token,
-            paren_token,
-            args,
-        })
-    }
-}
-
-impl ToTokens for BuilderExprInnerTU {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.dot_token.to_tokens(tokens);
-        self.method.to_tokens(tokens);
-        self.colon2_token.to_tokens(tokens);
-        self.lt_token.to_tokens(tokens);
-        self.generic_args.to_tokens(tokens);
-        self.t_arg.to_tokens(tokens);
-        self.comma_token.to_tokens(tokens);
-        self.u_arg.to_tokens(tokens);
-        self.trailing_comma_token.to_tokens(tokens);
-        self.gt_token.to_tokens(tokens);
-        self.paren_token.surround(tokens, |tokens| {
-            self.args.to_tokens(tokens);
-        });
-    }
-}
-
-struct BuilderExprInnerTUV {
-    dot_token: Token![.],
-    method: Ident,
-    colon2_token: Option<Token![::]>,
-    lt_token: Token![<],
-    generic_args: Punctuated<GenericArgument, Token![,]>,
-    t_arg: Type,
-    comma_token: Token![,],
-    u_arg: Type,
-    comma_token2: Token![,],
-    v_arg: Type,
-    trailing_comma_token: Option<Token![,]>,
-    gt_token: Token![>],
-    paren_token: token::Paren,
-    args: Punctuated<Expr, Token![,]>,
-}
-
-impl BuilderExprInnerTUV {
-    fn new(expr: &ExprMethodCall) -> syn::Result<Self> {
-        if let Some(attr) = expr.attrs.first() {
-            return Err(Error::new_spanned(attr, "attributes not supported"));
-        }
-
-        let dot_token = expr.dot_token;
-        let method = expr.method.clone();
-        let paren_token = expr.paren_token;
-        let args = expr.args.clone();
-
-        let mut turbofish = match expr.turbofish.clone() {
-            Some(turbofish) => turbofish,
-            None => {
-                return Err(Error::new_spanned(
-                    &expr.method,
-                    "expected generic arguments",
-                ));
-            }
-        };
-        if turbofish.args.len() < 2 {
-            return Err(Error::new_spanned(
-                turbofish,
-                "expected at least 2 generic arguments",
-            ));
-        }
-
-        let colon2_token = turbofish.colon2_token;
-        let lt_token = turbofish.lt_token;
-        let (v_arg, trailing_comma_token) = turbofish.args.pop().unwrap().into_tuple();
-        let v_arg = match v_arg {
-            GenericArgument::Type(x) => x,
-            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
-        };
-
-        let (u_arg, comma_token2) = turbofish.args.pop().unwrap().into_tuple();
-        let comma_token2 = comma_token2.unwrap();
-        let u_arg = match u_arg {
-            GenericArgument::Type(x) => x,
-            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
-        };
-
-        let (t_arg, comma_token) = turbofish.args.pop().unwrap().into_tuple();
-        let comma_token = comma_token.unwrap();
-        let t_arg = match t_arg {
-            GenericArgument::Type(x) => x,
-            _ => return Err(Error::new_spanned(turbofish.args, "expected type argument")),
-        };
-        let generic_args = turbofish.args;
-        let gt_token = turbofish.gt_token;
-
-        Ok(Self {
-            dot_token,
-            method,
-            colon2_token,
-            lt_token,
-            generic_args,
-            t_arg,
-            comma_token,
-            u_arg,
-            comma_token2,
-            v_arg,
-            trailing_comma_token,
-            gt_token,
-            paren_token,
-            args,
-        })
-    }
-}
-
-impl ToTokens for BuilderExprInnerTUV {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.dot_token.to_tokens(tokens);
-        self.method.to_tokens(tokens);
-        self.colon2_token.to_tokens(tokens);
-        self.lt_token.to_tokens(tokens);
-        self.generic_args.to_tokens(tokens);
-        self.t_arg.to_tokens(tokens);
-        self.comma_token.to_tokens(tokens);
-        self.u_arg.to_tokens(tokens);
-        self.comma_token2.to_tokens(tokens);
-        self.v_arg.to_tokens(tokens);
-        self.trailing_comma_token.to_tokens(tokens);
-        self.gt_token.to_tokens(tokens);
         self.paren_token.surround(tokens, |tokens| {
             self.args.to_tokens(tokens);
         });

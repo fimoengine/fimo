@@ -877,28 +877,36 @@ where
 
     /// Adds a state to the module.
     #[allow(clippy::type_complexity)]
-    pub const fn with_state<'a, T, E, F>(
+    pub const fn with_state<'a, T, E>(
         &mut self,
-        _init: fn(Pin<&'a Stage0InstanceView<'a, InstanceView>>, LoadingSetView<'a>) -> F,
+        _init: impl AsyncFn(
+            Pin<&'a Stage0InstanceView<'a, InstanceView>>,
+            LoadingSetView<'a>,
+        ) -> Result<NonNull<T>, E>
+        + 'a,
         _deinit: fn(Pin<&Stage0InstanceView<'_, InstanceView>>, NonNull<T>),
     ) -> &mut Self
     where
         T: Send + Sync + 'static,
         E: Debug + Display,
-        F: IntoFuture<Output = Result<NonNull<T>, E>> + 'a,
+        InstanceView: 'a,
     {
+        #[allow(clippy::mem_forget)]
+        std::mem::forget(_init);
         self
     }
 
     /// Adds an `on_start` event to the module.
-    pub const fn with_on_start_event<'a, E, F>(
+    pub const fn with_on_start_event<'a, E>(
         &mut self,
-        _on_event: fn(Pin<&'a InstanceView>) -> F,
+        _on_event: impl AsyncFn(Pin<&'a InstanceView>) -> Result<(), E> + 'a,
     ) -> &mut Self
     where
         E: Debug + Display,
-        F: IntoFuture<Output = Result<(), E>> + 'a,
+        InstanceView: 'a,
     {
+        #[allow(clippy::mem_forget)]
+        std::mem::forget(_on_event);
         self
     }
 

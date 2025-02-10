@@ -147,7 +147,7 @@ const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
     .with_import::<A1>("a1")
     .with_import::<B0>("b0")
     .with_import::<B1>("b1")
-    .with_state::<CState, _, _>(CState::init, CState::deinit)
+    .with_state::<CState, _>(CState::init, CState::deinit)
     .with_on_start_event(CState::on_start)
     .with_on_stop_event(CState::on_stop)
     .build();
