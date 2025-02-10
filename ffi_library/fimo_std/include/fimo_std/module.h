@@ -1013,6 +1013,65 @@ struct FimoModuleExport {
     FimoUSize modifiers_count;
 };
 
+/// Profile of the module subsystem.
+///
+/// Each profile enables a set of default features.
+typedef enum FimoModuleProfile : FimoI32 {
+    FIMO_MODULE_PROFILE_RELEASE,
+    FIMO_MODULE_PROFILE_DEV,
+} FimoModuleProfile;
+
+/// Optional features recognized by the module subsystem.
+///
+/// Some features may be mutually exclusive.
+typedef enum FimoModuleFeatureTag : FimoU16 {
+    // remove once a feature has been declared
+    FIMO_MODULE_FEATURE_TAG_,
+} FimoModuleFeatureTag;
+
+/// Request flag for an optional feature.
+typedef enum FimoModuleFeatureRequestFlag : FimoU16 {
+    FIMO_MODULE_FEATURE_REQUEST_FLAG_REQUIRED,
+    FIMO_MODULE_FEATURE_REQUEST_FLAG_ON,
+    FIMO_MODULE_FEATURE_REQUEST_FLAG_OFF,
+} FimoModuleFeatureRequestFlag;
+
+/// Request for an optional feature.
+typedef struct FimoModuleFeatureRequest {
+    FimoModuleFeatureTag tag;
+    FimoModuleFeatureRequestFlag flag;
+} FimoModuleFeatureRequest;
+
+/// Status flag of an optional feature.
+typedef enum FimoModuleFeatureStatusFlag : FimoU16 {
+    FIMO_MODULE_FEATURE_STATUS_FLAG_ON,
+    FIMO_MODULE_FEATURE_STATUS_FLAG_OFF,
+} FimoModuleFeatureStatusFlag;
+
+/// Status of an optional feature.
+typedef struct FimoModuleFeatureStatus {
+    FimoModuleFeatureTag tag;
+    FimoModuleFeatureStatusFlag flag;
+} FimoModuleFeatureStatus;
+
+/// Configuration for the module subsystem.
+typedef struct FimoModuleConfig {
+    /// Type of the struct.
+    ///
+    /// Must be `FIMO_STRUCT_TYPE_MODULE_CONFIG`.
+    FimoStructType id;
+    /// Pointer to a possible extension.
+    ///
+    /// Reserved for future use. Must be `NULL`.
+    const void *next;
+    /// Feature profile of the subsytem.
+    FimoModuleProfile profile;
+    /// Array of optional feature requests.
+    const FimoModuleFeatureRequest *features;
+    /// Number of optional feature requests.
+    FimoUSize feature_count;
+} FimoModuleConfig;
+
 /// A filter for selection modules to load by the module subsystem.
 ///
 /// The filter function is passed the module export declaration and can then decide whether the
@@ -1035,6 +1094,13 @@ typedef void (*FimoModuleLoadingErrorCallback)(const FimoModuleExport *arg0, voi
 ///
 /// Changing the VTable is a breaking change.
 typedef struct FimoModuleVTableV0 {
+    /// Returns the active profile of the module subsystem.
+    FimoModuleProfile (*profile)(void *ctx);
+    /// Returns the status of all features known to the subsystem.
+    ///
+    /// The start of the array or `NULL` is written into `features`. The return value is the array
+    /// length.
+    FimoUSize (*features)(void *ctx, const FimoModuleFeatureRequest **features);
     /// Constructs a new pseudo module.
     ///
     /// The functions of the module subsystem require that the caller owns a reference to their own

@@ -1,13 +1,14 @@
 //! Module subsystem.
 
 use crate::{
-    context::{ContextHandle, ContextView},
+    context::{ContextHandle, ContextView, TypeId},
     error::{AnyError, AnyResult},
-    utils::{ConstNonNull, OpaqueHandle, Viewable},
+    utils::{ConstNonNull, OpaqueHandle, Unsafe, Viewable},
     version::Version,
 };
 use std::{
     ffi::CStr,
+    marker::PhantomData,
     mem::{ManuallyDrop, MaybeUninit},
     ptr::NonNull,
 };
@@ -26,7 +27,7 @@ use loading_set::LoadingSet;
 use parameters::{
     ParameterAccessGroup, ParameterCast, ParameterInfo, ParameterRepr, ParameterType,
 };
-use symbols::StrRef;
+use symbols::{SliceRef, StrRef};
 
 /// Virtual function table of the module subsystem.
 ///
@@ -34,6 +35,11 @@ use symbols::StrRef;
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
+    pub profile: unsafe extern "C" fn(handle: ContextHandle) -> Profile,
+    pub features: unsafe extern "C" fn(
+        handle: ContextHandle,
+        &mut MaybeUninit<Option<ConstNonNull<FeatureStatus>>>,
+    ) -> usize,
     pub new_pseudo_instance: unsafe extern "C" fn(
         handle: ContextHandle,
         out: &mut MaybeUninit<PseudoInstance>,
@@ -84,6 +90,14 @@ pub struct VTableV0 {
 
 /// Definition of the module subsystem.
 pub trait ModuleSubsystem: Copy {
+    /// Returns the active profile of the module subsystem.
+    fn profile(self) -> Profile;
+
+    /// Returns the status of all features known to the subsystem.
+    fn features<'this>(self) -> &'this [FeatureStatus]
+    where
+        Self: 'this;
+
     /// Checks for the presence of a namespace in the module backend.
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
@@ -126,6 +140,31 @@ impl<'a, T> ModuleSubsystem for T
 where
     T: Viewable<ContextView<'a>>,
 {
+    fn profile(self) -> Profile {
+        unsafe {
+            let ctx = self.view();
+            (ctx.vtable.module_v0.profile)(ctx.handle)
+        }
+    }
+
+    fn features<'this>(self) -> &'this [FeatureStatus]
+    where
+        Self: 'this,
+    {
+        unsafe {
+            let mut out = MaybeUninit::uninit();
+            let ctx = self.view();
+            let len = (ctx.vtable.module_v0.features)(ctx.handle, &mut out);
+            let ptr = out.assume_init();
+            if len == 0 {
+                &[]
+            } else {
+                let ptr = ptr.unwrap();
+                std::slice::from_raw_parts(ptr.as_ptr(), len)
+            }
+        }
+    }
+
     fn namespace_exists(self, namespace: &CStr) -> Result<bool, AnyError> {
         unsafe {
             let mut out = MaybeUninit::uninit();
@@ -241,4 +280,120 @@ unsafe extern "C" {
         f: unsafe extern "C" fn(&Export<'_>, Option<OpaqueHandle>) -> bool,
         handle: Option<OpaqueHandle>,
     );
+}
+
+/// Profile of the module subsystem.
+///
+/// Each profile enables a set of default features.
+#[repr(i32)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Profile {
+    #[cfg_attr(not(debug_assertions), default)]
+    Release,
+    #[cfg_attr(debug_assertions, default)]
+    Dev,
+}
+
+/// Optional features recognized by the module subsystem.
+///
+/// Some features may be mutually exclusive.
+#[repr(u16)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FeatureTag {
+    // Remove once the first feature is added.
+    #[doc(hidden)]
+    _Private,
+}
+
+/// Request flag for an optional feature.
+#[repr(u16)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FeatureRequestFlag {
+    Required,
+    On,
+    Off,
+}
+
+/// Request for an optional feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C)]
+pub struct FeatureRequest {
+    pub tag: FeatureTag,
+    pub flag: FeatureRequestFlag,
+}
+
+/// Status flag of an optional feature.
+#[repr(u16)]
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FeatureStatusFlag {
+    On,
+    Off,
+}
+
+/// Status of an optional feature.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FeatureStatus {
+    pub tag: FeatureTag,
+    pub flag: FeatureStatusFlag,
+}
+
+/// Configuration of the module subsystem.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Config<'a> {
+    /// # Safety
+    ///
+    /// Must be [`TypeId::ModuleConfig`].
+    pub id: Unsafe<TypeId>,
+    pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
+    pub profile: Profile,
+    pub features: SliceRef<'a, FeatureRequest>,
+    _private: PhantomData<()>,
+}
+
+impl<'a> Config<'a> {
+    /// Creates the default config.
+    pub const fn new() -> Self {
+        unsafe {
+            Self {
+                id: Unsafe::new(TypeId::ModuleConfig),
+                next: None,
+                profile: if cfg!(debug_assertions) {
+                    Profile::Dev
+                } else {
+                    Profile::Release
+                },
+                features: SliceRef::new(&[]),
+                _private: PhantomData,
+            }
+        }
+    }
+
+    /// Sets a custom profile.
+    pub const fn with_profile(mut self, profile: Profile) -> Self {
+        self.profile = profile;
+        self
+    }
+
+    /// Sets a custom list of feature requests.
+    pub const fn with_features(mut self, features: &'a [FeatureRequest]) -> Self {
+        self.features = SliceRef::new(features);
+        self
+    }
+
+    /// Returns a slice of all subscribers.
+    pub const fn features(&self) -> &[FeatureRequest] {
+        self.features.as_slice()
+    }
+}
+
+impl Default for Config<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
 }

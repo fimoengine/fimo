@@ -21,6 +21,8 @@ const Self = @This();
 mutex: Mutex = .{},
 allocator: Allocator,
 arena: ArenaAllocator,
+profile: ProxyModule.Profile,
+features: [feature_count]ProxyModule.FeatureStatus,
 tmp_dir: tmp_path.TmpDirUnmanaged,
 state: enum { idle, loading_set } = .idle,
 loading_set_waiters: std.ArrayListUnmanaged(LoadingSetWaiter) = .{},
@@ -30,6 +32,8 @@ instances: std.StringArrayHashMapUnmanaged(InstanceRef) = .{},
 namespaces: std.StringArrayHashMapUnmanaged(NamespaceInfo) = .{},
 symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashContext, false) = .{},
 
+const feature_count = std.meta.fields(ProxyModule.FeatureTag).len;
+
 pub const SystemError = error{
     InUse,
     Duplicate,
@@ -38,6 +42,10 @@ pub const SystemError = error{
     NotADependency,
     CyclicDependency,
     LoadingInProcess,
+} || Allocator.Error;
+
+pub const SystemInitError = error{
+    InvalidConfig,
 } || Allocator.Error;
 
 pub const LoadingSetWaiter = struct {
@@ -55,10 +63,58 @@ const NamespaceInfo = struct {
     num_references: usize,
 };
 
-pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
+pub fn init(
+    ctx: *const Context,
+    config: *const ProxyModule.Config,
+) (SystemInitError || tmp_path.TmpDirError)!Self {
+    if (config.next != null) {
+        ctx.tracing.emitErrSimple("`next` field of the config is reserved", .{}, @src());
+        return SystemInitError.InvalidConfig;
+    }
+    const profile = switch (config.profile) {
+        .release, .dev => |x| x,
+        else => |x| {
+            ctx.tracing.emitErrSimple("unknown profile, profile='{}'", .{@intFromEnum(x)}, @src());
+            return SystemInitError.InvalidConfig;
+        },
+    };
+    var feature_status: [feature_count]ProxyModule.FeatureStatus = @splat(undefined);
+    for (&feature_status, 0..) |*status, i| {
+        status.tag = @enumFromInt(i);
+        status.flag = .off;
+    }
+    if (config.features) |features| {
+        for (features[0..config.feature_count]) |request| switch (request.tag) {
+            else => |tag| {
+                if (request.flag == .required) {
+                    ctx.tracing.emitErrSimple(
+                        "unknown feature was marked as required, feature='{}'",
+                        .{@intFromEnum(tag)},
+                        @src(),
+                    );
+                    return SystemInitError.InvalidConfig;
+                }
+                ctx.tracing.emitErrSimple(
+                    "unknown feature...ignoring, feature='{}'",
+                    .{@intFromEnum(tag)},
+                    @src(),
+                );
+            },
+        };
+    }
+    for (&feature_status) |status| {
+        ctx.tracing.emitDebugSimple(
+            "module subsystem feature=`{s}`, status=`{s}`",
+            .{ @tagName(status.tag), @tagName(status.flag) },
+            @src(),
+        );
+    }
+
     var module = Self{
         .allocator = ctx.allocator,
         .arena = ArenaAllocator.init(ctx.allocator),
+        .profile = profile,
+        .features = feature_status,
         .tmp_dir = undefined,
         .dep_graph = graph.GraphUnmanaged(
             *const ProxyModule.OpaqueInstance,
@@ -67,7 +123,7 @@ pub fn init(ctx: *const Context) (SystemError || tmp_path.TmpDirError)!Self {
     };
 
     module.tmp_dir = try tmp_path.TmpDirUnmanaged.init(module.allocator, "fimo_modules_");
-    ctx.tracing.emitTraceSimple(
+    ctx.tracing.emitDebugSimple(
         "module subsystem tmp dir: {s}",
         .{module.tmp_dir.path.raw},
         @src(),

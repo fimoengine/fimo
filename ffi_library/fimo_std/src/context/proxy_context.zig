@@ -32,6 +32,7 @@ pub const context_version = Version{
 /// Id of the fimo std interface types.
 pub const TypeId = enum(i32) {
     tracing_config,
+    module_config,
     _,
 };
 

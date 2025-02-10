@@ -1074,7 +1074,7 @@ pub fn default_subscriber() -> OpaqueSubscriber {
 
 /// Configuration of the tracing subsystem.
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct Config<'a> {
     /// # Safety
     ///
@@ -1084,6 +1084,7 @@ pub struct Config<'a> {
     pub format_buffer_length: Option<NonZeroUsize>,
     pub max_level: Level,
     pub subscribers: SliceRef<'a, OpaqueSubscriber>,
+    _private: PhantomData<()>,
 }
 
 sa::assert_impl_all!(Config<'_>: Send, Sync);
@@ -1102,6 +1103,7 @@ impl<'a> Config<'a> {
                     Level::Error
                 },
                 subscribers: SliceRef::new(&[]),
+                _private: PhantomData,
             }
         }
     }
@@ -1118,6 +1120,7 @@ impl<'a> Config<'a> {
         self
     }
 
+    /// Sets a custom list of subscribers.
     pub const fn with_subscribers(mut self, subscribers: &'a [OpaqueSubscriber]) -> Self {
         self.subscribers = SliceRef::new(subscribers);
         self
@@ -1129,24 +1132,9 @@ impl<'a> Config<'a> {
     }
 }
 
-unsafe impl Send for Config<'_> {}
-unsafe impl Sync for Config<'_> {}
-
 impl Default for Config<'_> {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl Debug for Config<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field("id", &self.id)
-            .field("next", &self.next)
-            .field("format_buffer_length", &self.format_buffer_length)
-            .field("max_level", &self.max_level)
-            .field("subscribers", &self.subscribers())
-            .finish()
     }
 }
 

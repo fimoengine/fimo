@@ -205,7 +205,6 @@ mod slice_private {
 
 /// An ffi-safe slice reference.
 #[repr(C)]
-#[derive(Debug)]
 pub struct SliceRef<'a, T, U: slice_private::SliceLength = usize> {
     ptr: Option<ConstNonNull<T>>,
     len: U,
@@ -267,6 +266,8 @@ where
     }
 }
 
+unsafe impl<T: Send, U: slice_private::SliceLength + Send> Send for SliceRef<'_, T, U> {}
+unsafe impl<T: Sync, U: slice_private::SliceLength + Sync> Sync for SliceRef<'_, T, U> {}
 unsafe impl<T: Share, U: slice_private::SliceLength> Share for SliceRef<'static, T, U> {}
 
 impl<T, U: slice_private::SliceLength> Copy for SliceRef<'_, T, U> {}
@@ -274,6 +275,12 @@ impl<T, U: slice_private::SliceLength> Copy for SliceRef<'_, T, U> {}
 impl<T, U: slice_private::SliceLength> Clone for SliceRef<'_, T, U> {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl<T: Debug, U: slice_private::SliceLength> Debug for SliceRef<'_, T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&**self, f)
     }
 }
 
@@ -293,7 +300,6 @@ impl<T, U: slice_private::SliceLength> Deref for SliceRef<'_, T, U> {
 
 /// An ffi-safe mutable slice reference.
 #[repr(C)]
-#[derive(Debug)]
 pub struct SliceRefMut<'a, T, U: const slice_private::SliceLength> {
     ptr: Option<NonNull<T>>,
     len: U,
@@ -355,7 +361,15 @@ impl<'a, T, U: const slice_private::SliceLength> SliceRefMut<'a, T, U> {
     }
 }
 
+unsafe impl<T: Send, U: const slice_private::SliceLength + Send> Send for SliceRefMut<'_, T, U> {}
+unsafe impl<T: Sync, U: const slice_private::SliceLength + Sync> Sync for SliceRefMut<'_, T, U> {}
 unsafe impl<T: Share, U: const slice_private::SliceLength> Share for SliceRefMut<'static, T, U> {}
+
+impl<T: Debug, U: const slice_private::SliceLength> Debug for SliceRefMut<'_, T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&**self, f)
+    }
+}
 
 impl<'a, T, U: const slice_private::SliceLength> From<&'a mut [T]> for SliceRefMut<'a, T, U> {
     fn from(value: &'a mut [T]) -> Self {

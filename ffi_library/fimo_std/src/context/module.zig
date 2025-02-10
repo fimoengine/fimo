@@ -22,8 +22,8 @@ const Self = @This();
 
 sys: System,
 
-pub fn init(ctx: *Context) !Self {
-    return Self{ .sys = try System.init(ctx) };
+pub fn init(ctx: *Context, config: *const ProxyModule.Config) !Self {
+    return Self{ .sys = try System.init(ctx, config) };
 }
 
 pub fn deinit(self: *Self) void {
@@ -233,6 +233,15 @@ pub fn writeParameter(
 // ----------------------------------------------------
 
 const VTableImpl = struct {
+    fn profile(ptr: *anyopaque) callconv(.c) ProxyModule.Profile {
+        const ctx = Context.fromProxyPtr(ptr);
+        return ctx.module.sys.profile;
+    }
+    fn features(ptr: *anyopaque, out: *?[*]const ProxyModule.FeatureStatus) callconv(.c) usize {
+        const ctx = Context.fromProxyPtr(ptr);
+        out.* = &ctx.module.sys.features;
+        return ctx.module.sys.features.len;
+    }
     fn addPseudoInstance(
         ptr: *anyopaque,
         instance: **const ProxyModule.PseudoInstance,
@@ -372,6 +381,8 @@ const VTableImpl = struct {
 };
 
 pub const vtable = ProxyModule.VTable{
+    .profile = &VTableImpl.profile,
+    .features = &VTableImpl.features,
     .pseudo_module_new = &VTableImpl.addPseudoInstance,
     .set_new = &VTableImpl.addLoadingSet,
     .find_by_name = &VTableImpl.findInstanceByName,

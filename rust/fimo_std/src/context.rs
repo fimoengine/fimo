@@ -176,32 +176,47 @@ impl Drop for Context {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum TypeId {
     TracingConfig,
+    ModuleConfig,
 }
 
 /// A builder for a [`Context`].
 #[derive(Debug, Default)]
 pub struct ContextBuilder<'a> {
     tracing: Option<crate::tracing::Config<'a>>,
+    module: Option<crate::module::Config<'a>>,
 }
 
 impl<'a> ContextBuilder<'a> {
     /// Constructs a new builder.
-    pub fn new() -> Self {
-        Self { tracing: None }
+    pub const fn new() -> Self {
+        Self {
+            tracing: None,
+            module: None,
+        }
     }
 
     /// Adds a config for the tracing subsystem.
-    pub fn with_tracing_config(mut self, config: crate::tracing::Config<'a>) -> Self {
+    pub const fn with_tracing_config(mut self, config: crate::tracing::Config<'a>) -> Self {
         self.tracing = Some(config);
+        self
+    }
+
+    /// Adds a config for the module subsystem.
+    pub const fn with_module_config(mut self, config: crate::module::Config<'a>) -> Self {
+        self.module = Some(config);
         self
     }
 
     /// Builds the context.
     pub fn build(self) -> Result<Context, AnyError> {
         let mut counter = 0;
-        let mut options: [*const bindings::FimoBaseStructIn; 2] = [core::ptr::null(); 2];
-        if let Some(tracing) = self.tracing.as_ref() {
-            options[counter] = (&raw const *tracing).cast();
+        let mut options: [*const bindings::FimoBaseStructIn; 3] = [core::ptr::null(); 3];
+        if let Some(cfg) = self.tracing.as_ref() {
+            options[counter] = (&raw const *cfg).cast();
+            counter += 1;
+        }
+        if let Some(cfg) = self.module.as_ref() {
+            options[counter] = (&raw const *cfg).cast();
             counter += 1;
         }
 

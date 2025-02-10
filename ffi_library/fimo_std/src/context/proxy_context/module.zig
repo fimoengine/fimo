@@ -1230,18 +1230,60 @@ pub const LoadingSet = extern struct {
     }
 };
 
+/// Profile of the module subsystem.
+///
+/// Each profile enables a set of default features.
+pub const Profile = enum(i32) {
+    release,
+    dev,
+    _,
+};
+
+/// Optional features recognized by the module subsystem.
+///
+/// Some features may be mutually exclusive.
+pub const FeatureTag = enum(u16) {
+    _,
+};
+
+/// Request for an optional feature.
+pub const FeatureRequest = extern struct {
+    tag: FeatureTag,
+    flag: enum(u16) { required, on, off },
+};
+
+/// Status of an optional feature.
+pub const FeatureStatus = extern struct {
+    tag: FeatureTag,
+    flag: enum(u16) { on, off },
+};
+
+/// Configuration for the module subsystem.
+pub const Config = extern struct {
+    id: Context.TypeId = .module_config,
+    next: ?*const void = null,
+    /// Feature profile of the subsystem.
+    profile: Profile = switch (builtin.mode) {
+        .Debug => .dev,
+        .ReleaseSafe, .ReleaseFast, .ReleaseSmall => .release,
+    },
+    /// List of optional feature requests.
+    features: ?[*]const FeatureRequest = null,
+    /// Number of optional feature requests.
+    feature_count: usize = 0,
+};
+
 /// VTable of the module subsystem.
 ///
 /// Changing the VTable is a breaking change.
 pub const VTable = extern struct {
+    profile: *const fn (ctx: *anyopaque) callconv(.c) Profile,
+    features: *const fn (ctx: *anyopaque, features: *?[*]const FeatureStatus) callconv(.c) usize,
     pseudo_module_new: *const fn (
         ctx: *anyopaque,
         instance: **const PseudoInstance,
     ) callconv(.c) AnyResult,
-    set_new: *const fn (
-        ctx: *anyopaque,
-        fut: *LoadingSet,
-    ) callconv(.c) AnyResult,
+    set_new: *const fn (ctx: *anyopaque, fut: *LoadingSet) callconv(.c) AnyResult,
     find_by_name: *const fn (
         ctx: *anyopaque,
         name: [*:0]const u8,
@@ -1283,6 +1325,19 @@ pub const VTable = extern struct {
         parameter: [*:0]const u8,
     ) callconv(.c) AnyResult,
 };
+
+/// Returns the active profile of the module subsystem.
+pub fn profile(self: Module) Profile {
+    return self.context.vtable.module_v0.profile(self.context.data);
+}
+
+/// Returns the status of all features known to the subsystem.
+pub fn features(self: Module) []const FeatureStatus {
+    var ptr: ?[*]const FeatureStatus = undefined;
+    const len = self.context.vtable.module_v0.features(self.context.data, &ptr);
+    if (ptr) |p| return p[0..len];
+    return &.{};
+}
 
 /// Checks for the presence of a namespace in the module subsystem.
 ///

@@ -26,12 +26,17 @@ module: Module,
 
 pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
     var tracing_cfg: ?*const ProxyTracing.Config = null;
+    var module_cfg: ?*const ProxyModule.Config = null;
     for (options) |opt| {
         const o = if (opt) |o| o else return error.InvalidInput;
         switch (o.id) {
             .tracing_config => {
                 if (tracing_cfg != null) return error.InvalidInput;
                 tracing_cfg = @alignCast(@ptrCast(o));
+            },
+            .module_config => {
+                if (module_cfg != null) return error.InvalidInput;
+                module_cfg = @alignCast(@ptrCast(o));
             },
             else => return error.InvalidInput,
         }
@@ -55,9 +60,11 @@ pub fn init(options: [:null]const ?*const ProxyContext.TaggedInStruct) !*Self {
 
     self.tracing = try Tracing.init(self.allocator, tracing_cfg);
     errdefer self.tracing.deinit();
-    tracing_cfg = null;
 
-    self.module = try Module.init(self);
+    self.tracing.registerThread();
+    defer self.tracing.unregisterThread();
+
+    self.module = try Module.init(self, module_cfg orelse &.{});
     errdefer self.module.deinit();
 
     self.@"async" = try Async.init(self);
