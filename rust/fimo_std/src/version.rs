@@ -163,7 +163,7 @@ impl<'a> Version<'a> {
     /// Formats the `Version` into a buffer.
     ///
     /// Formats a string representation of the `Version` into the provided buffer. Use
-    /// [`Self::str_len_long`] to query the minimum buffer size required by this function.
+    /// [`Self::str_len_full`] to query the minimum buffer size required by this function.
     pub fn write_str_full<'b>(&self, buff: &'b mut [u8]) -> Result<&'b mut str, AnyError> {
         let mut written = MaybeUninit::uninit();
         unsafe {

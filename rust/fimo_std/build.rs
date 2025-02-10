@@ -18,7 +18,7 @@ fn main() {
     let bindings = bindgen::builder()
         .header("wrapper.h")
         .clang_arg(format!("-I{}", include_dir.display()))
-        .clang_arg("-std=c23")
+        .clang_arg("-std=c17")
         .clang_arg("-DFIMO_STD_BINDGEN")
         .use_core()
         .newtype_enum("Fimo.*")
