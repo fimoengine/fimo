@@ -76,7 +76,7 @@ fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) ErrorString {
         .windows => {
             const FreeImpl = struct {
                 fn free(p: [*:0]const u8) callconv(.c) void {
-                    std.os.windows.LocalFree(@constCast(p));
+                    if (LocalFree(@constCast(p)) != null) unreachable;
                 }
             };
 
@@ -114,7 +114,8 @@ extern fn FormatMessageA(
     lpBuffer: std.os.windows.LPSTR,
     nSize: std.os.windows.DWORD,
     Arguments: ?std.os.windows.va_list,
-) std.os.windows.DWORD;
+) callconv(.winapi) std.os.windows.DWORD;
+extern fn LocalFree(in: ?std.os.windows.HLOCAL) callconv(.winapi) ?std.os.windows.HLOCAL;
 
 // Declared in the C header.
 export const FIMO_IMPL_RESULT_OK = AnyResult.ok.intoC();
