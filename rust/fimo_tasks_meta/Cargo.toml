@@ -11,7 +11,7 @@ description = "Bindings to the fimo tasks symbols"
 workspace = true
 
 [dependencies.fimo_std]
-version = "0.1"
+version = "0.2.0-dev"
 path = "../fimo_std"
 
 [build-dependencies.bindgen]
