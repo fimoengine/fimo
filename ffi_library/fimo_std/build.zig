@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 /// Must match the `version` in `build.zig.zon`.
-const fimo_version: std.SemanticVersion = .{ .major = 0, .minor = 1, .patch = 0 };
+const fimo_version: std.SemanticVersion = .{ .major = 0, .minor = 2, .patch = 0, .pre = "dev" };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
