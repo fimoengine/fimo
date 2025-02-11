@@ -55,7 +55,7 @@ fn IdMap(comptime T: type) type {
 
         fn add(self: *Self, allocator: Allocator, value: T) !usize {
             const id_from_free_list = self.free_ids.items.len != 0;
-            const id = self.free_ids.popOrNull() orelse self.next_id;
+            const id = self.free_ids.pop() orelse self.next_id;
             errdefer if (id_from_free_list) self.free_ids.appendAssumeCapacity(id);
             try self.map.put(allocator, id, value);
             if (!id_from_free_list) self.next_id += 1;
@@ -539,7 +539,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
 
             try stack.append(allocator, from);
             try visited.put(allocator, from, {});
-            while (stack.popOrNull()) |current| {
+            while (stack.pop()) |current| {
                 const node = self.nodes.get(current.id) orelse unreachable;
                 if (node.outgoing.contains(to)) return true;
 

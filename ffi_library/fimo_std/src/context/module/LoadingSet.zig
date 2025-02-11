@@ -108,7 +108,7 @@ const ModuleInfo = struct {
     pub fn signalError(self: *ModuleInfo) void {
         std.debug.assert(self.status == .unloaded);
         self.status = .err;
-        while (self.callbacks.popOrNull()) |callback| {
+        while (self.callbacks.pop()) |callback| {
             callback.on_error(self.@"export", callback.data);
         }
     }
@@ -116,7 +116,7 @@ const ModuleInfo = struct {
     pub fn signalSuccess(self: *ModuleInfo, info: *const ProxyModule.Info) void {
         std.debug.assert(self.status == .unloaded);
         self.status = .loaded;
-        while (self.callbacks.popOrNull()) |callback| {
+        while (self.callbacks.pop()) |callback| {
             callback.on_success(info, callback.data);
         }
     }
@@ -1254,7 +1254,7 @@ const CommitOp = FSMFuture(struct {
 
         self.load_graph.deinit();
         self.set.asSys().state = .idle;
-        if (self.set.asSys().loading_set_waiters.popOrNull()) |waiter| {
+        if (self.set.asSys().loading_set_waiters.pop()) |waiter| {
             waiter.waker.wakeUnref();
         }
     }
