@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["rust/*"]
+members = ["rust/fimo_std"]
 
 [workspace.package]
 version = "0.2.0-dev"
