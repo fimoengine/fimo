@@ -55,6 +55,16 @@ pub fn build(b: *std.Build) void {
             check_step,
             &packages,
         );
+        _ = add_package(
+            b,
+            "fimo_tasks_meta",
+            .{ .target = target, .optimize = optimize },
+            modules,
+            test_step,
+            doc_step,
+            check_step,
+            &packages,
+        );
     }
 
     const enable_rust_bindings = b.option(

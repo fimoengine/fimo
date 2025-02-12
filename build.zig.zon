@@ -1,56 +1,27 @@
 .{
-    // This is the default name used by packages depending on this one. For
-    // example, when a user runs `zig fetch --save <url>`, this field is used
-    // as the key in the `dependencies` table. Although the user can choose a
-    // different name, most users will stick with this provided value.
-    //
-    // It is redundant to include "zig" in this name because it is already
-    // within the Zig package namespace.
     .name = "fimo",
-
-    // This is a [Semantic Version](https://semver.org/).
-    // In a future version of Zig it will be used for package deduplication.
     .version = "0.2.0-dev",
-
-    // This field is optional.
-    // This is currently advisory only; Zig does not yet do anything
-    // with this value.
     .minimum_zig_version = "0.14.0",
-
-    // This field is optional.
-    // Each dependency must either provide a `url` and `hash`, or a `path`.
-    // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
-    // Once all dependencies are fetched, `zig build` no longer requires
-    // internet connectivity.
     .dependencies = .{
-        .compile_commands = .{
-            // Use a fork of the repo for zig 0.14.0 support.
-            // .url = "https://github.com/the-argus/zig-compile-commands/archive/697abd2d24dc73fe0ead1849f17c43f18c038bc6.tar.gz",
-            // .hash = "12204f3f579b3072cddf75f31514c55b0bd30e09c755dd2389a0aa8bba79b7311be9",
-            .path = "tools/zig-compile-commands",
-        },
+        // Zig bindings
         .fimo_std = .{
             .path = "ffi_library/fimo_std",
         },
         .fimo_python_meta = .{
             .path = "ffi_library/fimo_python_meta",
         },
-        .fimo_python = .{
-            .path = "modules/fimo_python",
+        .fimo_tasks_meta = .{
+            .path = "ffi_library/fimo_tasks_meta",
         },
+        // Rust bindings
         .fimo_std_rs = .{
             .path = "rust/fimo_std",
         },
+        // Modules
+        .fimo_python = .{
+            .path = "modules/fimo_python",
+        },
     },
-
-    // Specifies the set of files and directories that are included in this package.
-    // Only files and directories listed here are included in the `hash` that
-    // is computed for this package. Only files listed here will remain on disk
-    // when using the zig package manager. As a rule of thumb, one should list
-    // files required for compilation plus any license(s).
-    // Paths are relative to the build root. Use the empty string (`""`) to refer to
-    // the build root itself.
-    // A directory listed here means that all files within, recursively, are included.
     .paths = .{
         ".cargo",
         "cmake",
