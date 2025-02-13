@@ -210,8 +210,52 @@ pub const Symbol = struct {
     name: [:0]const u8,
     namespace: [:0]const u8 = "",
     version: Version,
-    symbol: type,
+    T: type,
+
+    /// Requests the symbol from `obj`.
+    pub fn requestFrom(comptime symbol: Symbol, obj: anytype) *const symbol.T {
+        return obj.provideSymbol(symbol);
+    }
+
+    pub fn format(
+        self: Symbol,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        _ = options;
+        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, self);
+        if (self.namespace.len != 0) try std.fmt.format(out_stream, "{s}::", .{self.namespace});
+        try std.fmt.format(out_stream, "{s}@v{}", .{ self.name, self.version });
+    }
 };
+
+/// A wrapper type that binds a symbol to its pointer value.
+pub fn SymbolWrapper(comptime symbol: Symbol) type {
+    return extern struct {
+        value: *const symbol.T,
+
+        /// Asserts that `sym` is compatible to the contained symbol and returns it.
+        fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
+            comptime {
+                std.debug.assert(std.mem.eql(u8, sym.name, symbol.name));
+                std.debug.assert(std.mem.eql(u8, sym.namespace, symbol.namespace));
+                std.debug.assert(symbol.version.isCompatibleWith(sym.version));
+            }
+            return self.value;
+        }
+    };
+}
+
+test SymbolWrapper {
+    const symbol = Symbol{
+        .name = "test",
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .T = i32,
+    };
+    const wrapper = SymbolWrapper(symbol){ .value = &5 };
+    try std.testing.expectEqual(5, symbol.requestFrom(wrapper).*);
+}
 
 /// Info of a loaded module instance.
 pub const Info = extern struct {
@@ -307,95 +351,55 @@ pub const Info = extern struct {
     }
 };
 
+/// Configuration for an instance.
+pub const InstanceConfig = struct {
+    /// Type of the parameters table.
+    ParametersType: type = void,
+    /// Type of the resources table.
+    ResourcesType: type = void,
+    /// Type of the imports table.
+    ImportsType: type = void,
+    /// Type of the exports table.
+    ExportsType: type = void,
+    /// Type of the instance state.
+    StateType: type = void,
+    provider: ?fn (instance: anytype, comptime symbol: Symbol) *const anyopaque = null,
+};
+
 /// State of a loaded module.
 ///
 /// A module is self-contained, and may not be passed to other modules. An instance is valid for
 /// as long as the owning module remains loaded. Modules must not leak any resources outside its
 /// own module, ensuring that they are destroyed upon module unloading.
-pub fn Instance(
-    comptime ParametersT: type,
-    comptime ResourcesT: type,
-    comptime ImportsT: type,
-    comptime ExportsT: type,
-    comptime DataT: type,
-) type {
-    switch (@typeInfo(ParametersT)) {
-        .@"struct" => |t| {
-            std.debug.assert(t.layout == .@"extern");
-            std.debug.assert(@alignOf(ParametersT) <= @alignOf(*OpaqueParameter));
-            std.debug.assert(@sizeOf(ParametersT) % @sizeOf(*OpaqueParameter) == 0);
-            for (@typeInfo(ParametersT).@"struct".fields) |field| {
-                std.debug.assert(field.alignment == @alignOf(*OpaqueParameter));
-                std.debug.assert(@sizeOf(field.type) == @sizeOf(*OpaqueParameter));
-                std.debug.assert(@typeInfo(field.type).pointer.child.isParameter());
-            }
-        },
-        .void => {},
-        else => @compileError("Invalid instance parameter type"),
-    }
-    switch (@typeInfo(ResourcesT)) {
-        .@"struct" => |t| {
-            std.debug.assert(t.layout == .@"extern");
-            std.debug.assert(@alignOf(ResourcesT) <= @alignOf([*:0]const u8));
-            for (@typeInfo(ResourcesT).@"struct".fields) |field| {
-                std.debug.assert(field.alignment == @alignOf(c.FimoUTF8Path));
-                std.debug.assert(@sizeOf(field.type) == @sizeOf(c.FimoUTF8Path));
-            }
-        },
-        .void => {},
-        else => @compileError("Invalid instance resource type"),
-    }
-    switch (@typeInfo(ImportsT)) {
-        .@"struct" => |t| {
-            std.debug.assert(t.layout == .@"extern");
-            std.debug.assert(@alignOf(ImportsT) <= @alignOf(*const anyopaque));
-            std.debug.assert(@sizeOf(ImportsT) % @sizeOf(*const anyopaque) == 0);
-            for (@typeInfo(ImportsT).@"struct".fields) |field| {
-                std.debug.assert(field.alignment == @alignOf([*:0]const u8));
-                std.debug.assert(@typeInfo(field.type).pointer.size == .one);
-                std.debug.assert(@typeInfo(field.type).pointer.is_const);
-            }
-        },
-        .void => {},
-        else => @compileError("Invalid instance imports type"),
-    }
-    switch (@typeInfo(ExportsT)) {
-        .@"struct" => |t| {
-            std.debug.assert(t.layout == .@"extern");
-            std.debug.assert(@alignOf(ExportsT) <= @alignOf(*const anyopaque));
-            std.debug.assert(@sizeOf(ExportsT) % @sizeOf(*const anyopaque) == 0);
-            for (@typeInfo(ExportsT).@"struct".fields) |field| {
-                std.debug.assert(@typeInfo(field.type).pointer.size == .one);
-                std.debug.assert(@typeInfo(field.type).pointer.is_const);
-                std.debug.assert(field.alignment == @alignOf([*:0]const u8));
-            }
-        },
-        .void => {},
-        else => @compileError("Invalid instance exports type"),
-    }
-
-    const ParametersPtr = if (@sizeOf(ParametersT) == 0) ?*const ParametersT else *const ParametersT;
-    const ResourcesPtr = if (@sizeOf(ResourcesT) == 0) ?*const ResourcesT else *const ResourcesT;
-    const ImportsPtr = if (@sizeOf(ImportsT) == 0) ?*const ImportsT else *const ImportsT;
-    const ExportsPtr = if (@sizeOf(ExportsT) == 0) ?*const ExportsT else *const ExportsT;
-    const DataPtr = if (@sizeOf(DataT) == 0) ?*const DataT else *const DataT;
-
+pub fn Instance(comptime config: InstanceConfig) type {
     return extern struct {
         vtable: *const Self.VTable,
-        parameters: ParametersPtr,
-        resources: ResourcesPtr,
-        imports: ImportsPtr,
-        exports: ExportsPtr,
+        parameters_: if (@sizeOf(Self.Parameters) == 0)
+            ?*const Self.Parameters
+        else
+            *const Self.Parameters,
+        resources_: if (@sizeOf(Self.Resources) == 0)
+            ?*const Self.Resources
+        else
+            *const Self.Resources,
+        imports_: if (@sizeOf(Self.Imports) == 0)
+            ?*const Self.Imports
+        else
+            *const Self.Imports,
+        exports_: if (@sizeOf(Self.Exports) == 0)
+            ?*const Self.Exports
+        else
+            *const Self.Exports,
         info: *const Info,
-        ctx: c.FimoContext,
-        data: DataPtr,
+        context_: c.FimoContext,
+        state_: if (@sizeOf(Self.State) == 0) ?*Self.State else *Self.State,
 
         const Self = @This();
-        pub const Parameters = ParametersT;
-        pub const Resources = ResourcesT;
-        pub const Imports = ImportsT;
-        pub const Exports = ExportsT;
-        pub const Data = DataT;
+        pub const Parameters = config.ParametersType;
+        pub const Resources = config.ResourcesType;
+        pub const Imports = config.ImportsType;
+        pub const Exports = config.ExportsType;
+        pub const State = config.StateType;
 
         /// VTable of an Instance.
         ///
@@ -454,9 +458,57 @@ pub fn Instance(
             ) callconv(.c) AnyResult,
         };
 
+        /// Returns the parameter table.
+        pub fn parameters(self: *const Self) *const Self.Parameters {
+            return if (comptime @sizeOf(Self.Parameters) == 0)
+                self.parameters_ orelse &Self.Parameters{}
+            else
+                self.parameters_;
+        }
+
+        /// Returns the resource table.
+        pub fn resources(self: *const Self) *const Self.Resources {
+            return if (comptime @sizeOf(Self.Resources) == 0)
+                self.resources_ orelse &Self.Resources{}
+            else
+                self.resources_;
+        }
+
+        /// Returns the import table.
+        pub fn imports(self: *const Self) *const Self.Imports {
+            return if (comptime @sizeOf(Self.Imports) == 0)
+                self.imports_ orelse &Self.Imports{}
+            else
+                self.imports_;
+        }
+
+        /// Returns the export table.
+        pub fn exports(self: *const Self) *const Self.Exports {
+            return if (comptime @sizeOf(Self.Exports) == 0)
+                self.exports_ orelse &Self.Exports{}
+            else
+                self.exports_;
+        }
+
         /// Returns the contained context without increasing the reference count.
         pub fn context(self: *const @This()) Context {
-            return Context.initC(self.ctx);
+            return Context.initC(self.context_);
+        }
+
+        /// Returns the instance state.
+        pub fn state(self: *const @This()) *const Self.State {
+            return if (comptime @sizeOf(Self.State) == 0)
+                self.state_ orelse &Self.State{}
+            else
+                self.state_;
+        }
+
+        /// Provides a pointer to the requested symbol.
+        pub fn provideSymbol(self: *const @This(), comptime symbol: Symbol) *const symbol.T {
+            if (config.provider) |provider|
+                return @ptrCast(@alignCast(provider(self, symbol)))
+            else
+                @compileError("instance configuration does not specify a symbol provider function.");
         }
 
         /// Increases the strong reference count of the module instance.
@@ -582,14 +634,14 @@ pub fn Instance(
             self: *const @This(),
             comptime symbol: Symbol,
             err: *?AnyError,
-        ) AnyError.Error!*const symbol.symbol {
+        ) AnyError.Error!SymbolWrapper(symbol) {
             const s = try self.loadSymbolRaw(
                 symbol.name,
                 symbol.namespace,
                 symbol.version,
                 err,
             );
-            return @alignCast(@ptrCast(s));
+            return .{ .value = @alignCast(@ptrCast(s)) };
         }
 
         /// Loads a symbol from the module subsystem.
@@ -682,13 +734,7 @@ pub fn Instance(
 }
 
 /// Type of an opaque module instance.
-pub const OpaqueInstance = Instance(
-    void,
-    void,
-    void,
-    void,
-    void,
-);
+pub const OpaqueInstance = Instance(.{});
 
 /// Type of a pseudo module instance.
 pub const PseudoInstance = extern struct {
@@ -698,7 +744,7 @@ pub const PseudoInstance = extern struct {
     pub const Resources = OpaqueInstance.Resources;
     pub const Imports = OpaqueInstance.Imports;
     pub const Exports = OpaqueInstance.Exports;
-    pub const Data = OpaqueInstance.Data;
+    pub const State = OpaqueInstance.State;
 
     /// Constructs a new pseudo instance.
     ///
@@ -812,7 +858,7 @@ pub const PseudoInstance = extern struct {
         self: *const @This(),
         comptime symbol: Symbol,
         err: *?AnyError,
-    ) AnyError.Error!*const symbol.symbol {
+    ) AnyError.Error!SymbolWrapper(symbol) {
         return self.castOpaque().loadSymbol(symbol, err);
     }
 

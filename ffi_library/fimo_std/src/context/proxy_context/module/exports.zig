@@ -525,7 +525,7 @@ pub const Builder = struct {
 
         var x = self.withNamespace(import.symbol.namespace);
         x.imports = &imports;
-        if (x.debug_info) |*info| info.addImport(import.symbol.symbol);
+        if (x.debug_info) |*info| info.addImport(import.symbol.T);
         return x;
     }
 
@@ -551,8 +551,8 @@ pub const Builder = struct {
         x.exports = &exports;
         if (x.debug_info) |*info| {
             switch (@"export".value) {
-                .static => info.addExport(@"export".symbol.symbol),
-                .dynamic => info.addDynamicExport(@"export".symbol.symbol),
+                .static => info.addExport(@"export".symbol.T),
+                .dynamic => info.addDynamicExport(@"export".symbol.T),
             }
         }
         return x;
@@ -561,13 +561,13 @@ pub const Builder = struct {
     /// Adds a static export to the module.
     pub fn withExport(
         comptime self: Builder,
-        comptime T: Module.Symbol,
+        comptime symbol: Module.Symbol,
         comptime name: [:0]const u8,
         comptime linkage: SymbolLinkage,
-        comptime value: *const T.symbol,
+        comptime value: *const symbol.T,
     ) Builder {
         const exp = Builder.SymbolExport{
-            .symbol = T,
+            .symbol = symbol,
             .name = name,
             .linkage = linkage,
             .value = .{ .static = value },
@@ -578,17 +578,17 @@ pub const Builder = struct {
     /// Adds a static export to the module.
     pub fn withDynamicExport(
         comptime self: Builder,
-        comptime T: Module.Symbol,
+        comptime symbol: Module.Symbol,
         comptime name: [:0]const u8,
         comptime linkage: SymbolLinkage,
         comptime Fut: type,
         comptime initFn: fn (ctx: *const Module.OpaqueInstance) Fut,
-        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *T.symbol) void,
+        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *symbol.T) void,
     ) Builder {
         const Result = Fut.Result;
         switch (@typeInfo(Result)) {
-            .error_union => |x| std.debug.assert(x.payload == *T.symbol),
-            else => std.debug.assert(Result == *T.symbol),
+            .error_union => |x| std.debug.assert(x.payload == *symbol.T),
+            else => std.debug.assert(Result == *symbol.T),
         }
         const Wrapper = struct {
             fn wrapInit(
@@ -613,14 +613,14 @@ pub const Builder = struct {
             }
             fn wrapDeinit(
                 ctx: *const Module.OpaqueInstance,
-                symbol: *anyopaque,
+                symbol_ptr: *anyopaque,
             ) callconv(.c) void {
-                return deinitFn(ctx, @alignCast(@ptrCast(symbol)));
+                return deinitFn(ctx, @alignCast(@ptrCast(symbol_ptr)));
             }
         };
 
         const exp = Builder.SymbolExport{
-            .symbol = T,
+            .symbol = symbol,
             .name = name,
             .linkage = linkage,
             .value = .{
@@ -636,29 +636,29 @@ pub const Builder = struct {
     /// Adds a static export to the module.
     pub fn withDynamicExportSync(
         comptime self: Builder,
-        comptime T: Module.Symbol,
+        comptime symbol: Module.Symbol,
         comptime name: [:0]const u8,
         comptime linkage: SymbolLinkage,
-        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*T.symbol,
-        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *T.symbol) void,
+        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*symbol.T,
+        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *symbol.T) void,
     ) Builder {
         const Wrapper = struct {
             instance: *const Module.OpaqueInstance,
 
-            const Result = anyerror!*T.symbol;
+            const Result = anyerror!*symbol.T;
             const Future = Async.Future(@This(), Result, poll, null);
 
             fn init(instance: *const Module.OpaqueInstance) Future {
                 return Future.init(.{ .instance = instance });
             }
 
-            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!*T.symbol) {
+            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!*symbol.T) {
                 _ = waker;
                 return .{ .ready = initFn(this.instance) };
             }
         };
         return self.withDynamicExport(
-            T,
+            symbol,
             name,
             linkage,
             Wrapper.Future,
@@ -687,12 +687,12 @@ pub const Builder = struct {
         if (self.debug_info != null) return self;
 
         var debug_info = Module.DebugInfo.Builder{};
-        for (self.imports) |sym| debug_info.addImport(sym.symbol.symbol);
+        for (self.imports) |sym| debug_info.addImport(sym.symbol.T);
         for (self.exports) |sym| {
             if (sym.value == .static)
-                debug_info.addExport(sym.symbol.symbol)
+                debug_info.addExport(sym.symbol.T)
             else
-                debug_info.addDynamicExport(sym.symbol.symbol);
+                debug_info.addDynamicExport(sym.symbol.T);
         }
         debug_info.addType(self.stateType);
 
@@ -962,7 +962,7 @@ pub const Builder = struct {
         for (self.imports, &fields) |x, *f| {
             f.* = std.builtin.Type.StructField{
                 .name = x.name,
-                .type = *const x.symbol.symbol,
+                .type = *const x.symbol.T,
                 .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*const anyopaque),
@@ -987,7 +987,7 @@ pub const Builder = struct {
             if (x.value != .static) continue;
             fields[i] = std.builtin.Type.StructField{
                 .name = x.name,
-                .type = *const x.symbol.symbol,
+                .type = *const x.symbol.T,
                 .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*const anyopaque),
@@ -998,7 +998,7 @@ pub const Builder = struct {
             if (x.value != .dynamic) continue;
             fields[i] = std.builtin.Type.StructField{
                 .name = x.name,
-                .type = *const x.symbol.symbol,
+                .type = *const x.symbol.T,
                 .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*const anyopaque),
@@ -1014,6 +1014,44 @@ pub const Builder = struct {
             },
         };
         return @Type(t);
+    }
+
+    fn SymbolProvider(comptime self: Builder) fn (anytype, comptime Module.Symbol) *const anyopaque {
+        const SymbolInfo = struct {
+            name: [:0]const u8,
+            symbol: Module.Symbol,
+            location: enum { imp, exp },
+        };
+        var infos: [self.imports.len + self.exports.len]SymbolInfo = undefined;
+        for (infos[0..self.imports.len], self.imports) |*info, sym| {
+            info.* = .{ .name = sym.name, .symbol = sym.symbol, .location = .imp };
+        }
+        for (infos[self.imports.len..], self.exports) |*info, sym| {
+            info.* = .{ .name = sym.name, .symbol = sym.symbol, .location = .exp };
+        }
+        const infos_c = infos;
+        return struct {
+            fn provide(instance: anytype, comptime symbol: Module.Symbol) *const anyopaque {
+                const name, const location = comptime blk: {
+                    for (&infos_c) |info| {
+                        if (std.mem.eql(u8, info.symbol.name, symbol.name) and
+                            std.mem.eql(u8, info.symbol.namespace, symbol.namespace) and
+                            info.symbol.version.isCompatibleWith(symbol.version))
+                        {
+                            break :blk .{ info.name, info.location };
+                        }
+                    }
+                    @compileError(std.fmt.comptimePrint(
+                        "the instance does not provide the symbol {}",
+                        .{symbol},
+                    ));
+                };
+                return if (comptime location == .imp)
+                    @field(instance.imports(), name)
+                else
+                    @field(instance.exports(), name);
+            }
+        }.provide;
     }
 
     fn ffiParameters(comptime self: Builder) []const Self.Parameter {
@@ -1225,13 +1263,14 @@ pub const Builder = struct {
         };
         embedStaticModuleExport(exp);
 
-        return Module.Instance(
-            self.ParameterTable(),
-            self.ResourceTable(),
-            self.ImportTable(),
-            self.ExportsTable(),
-            self.stateType,
-        );
+        return Module.Instance(.{
+            .ParametersType = self.ParameterTable(),
+            .ResourcesType = self.ResourceTable(),
+            .ImportsType = self.ImportTable(),
+            .ExportsType = self.ExportsTable(),
+            .StateType = self.stateType,
+            .provider = self.SymbolProvider(),
+        });
     }
 };
 

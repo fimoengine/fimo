@@ -441,7 +441,7 @@ pub const Inner = struct {
         if (self.@"export") |exp| {
             if (self.state == .init) {
                 if (exp.getInstanceStateModifier()) |state|
-                    state.deinit(instance, @constCast(instance.data));
+                    state.deinit(instance, @constCast(instance.state_));
             }
             exp.deinit();
         }
@@ -530,13 +530,13 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
     instance.* = .{
         .instance = .{
             .vtable = &instance_vtable,
-            .parameters = null,
-            .resources = null,
-            .imports = null,
-            .exports = null,
+            .parameters_ = null,
+            .resources_ = null,
+            .imports_ = null,
+            .exports_ = null,
             .info = &instance_handle.info,
-            .ctx = sys.asContext().asProxy().intoC(),
-            .data = null,
+            .context_ = sys.asContext().asProxy().intoC(),
+            .state_ = null,
         },
     };
     instance_handle.inner.state = .started;
@@ -1012,13 +1012,13 @@ pub const InitExportedOp = FSMFuture(struct {
         const instance = try instance_handle.inner.arena.allocator().create(ProxyModule.OpaqueInstance);
         instance.* = .{
             .vtable = &instance_vtable,
-            .parameters = null,
-            .resources = null,
-            .imports = null,
-            .exports = null,
+            .parameters_ = null,
+            .resources_ = null,
+            .imports_ = null,
+            .exports_ = null,
             .info = &instance_handle.info,
-            .ctx = self.sys.asContext().asProxy().intoC(),
-            .data = null,
+            .context_ = self.sys.asContext().asProxy().intoC(),
+            .state_ = null,
         };
         inner.instance = instance;
         self.instance = instance;
@@ -1027,7 +1027,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Init parameters.
         const exp_parameters = self.@"export".getParameters();
         const parameters = try allocator.alloc(*ProxyModule.OpaqueParameter, exp_parameters.len);
-        instance.parameters = @ptrCast(parameters.ptr);
+        instance.parameters_ = @ptrCast(parameters.ptr);
         for (exp_parameters, parameters) |src, *dst| {
             const data = Parameter.Data{
                 .value = switch (src.type) {
@@ -1057,7 +1057,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Init resources.
         const exp_resources = self.@"export".getResources();
         const resources = try allocator.alloc(c.FimoUTF8Path, exp_resources.len);
-        instance.resources = @ptrCast(resources.ptr);
+        instance.resources_ = @ptrCast(resources.ptr);
         for (exp_resources, resources) |src, *dst| {
             var buf = PathBufferUnmanaged{};
             try buf.pushPath(inner.arena.allocator(), self.handle.path.asPath());
@@ -1078,7 +1078,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Init imports.
         const exp_imports = self.@"export".getSymbolImports();
         const imports = try allocator.alloc(*const anyopaque, exp_imports.len);
-        instance.imports = @ptrCast(imports.ptr);
+        instance.imports_ = @ptrCast(imports.ptr);
         for (exp_imports, imports) |src, *dst| {
             const src_name = std.mem.span(src.name);
             const src_namespace = std.mem.span(src.namespace);
@@ -1126,7 +1126,7 @@ pub const InitExportedOp = FSMFuture(struct {
             .ready => |result| {
                 self.sys.mutex.lock();
                 _ = self.instance_handle.lock();
-                self.instance.data = @ptrCast(try result.unwrap(self.err));
+                self.instance.state_ = @ptrCast(try result.unwrap(self.err));
                 self.state_future.deinit();
                 self.inner.state = .init;
                 return .next;
@@ -1146,7 +1146,7 @@ pub const InitExportedOp = FSMFuture(struct {
         const exp_dyn_exports = @"export".getDynamicSymbolExports();
         const exports = try allocator.alloc(*const anyopaque, exp_exports.len + exp_dyn_exports.len);
         self.exports = exports;
-        self.instance.exports = @ptrCast(exports.ptr);
+        self.instance.exports_ = @ptrCast(exports.ptr);
         for (exp_exports, exports[0..exp_exports.len]) |src, *dst| {
             const sym = src.symbol;
             const src_name = std.mem.span(src.name);
