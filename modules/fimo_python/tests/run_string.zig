@@ -69,7 +69,7 @@ pub fn main() !void {
     try instance.addNamespace(fimo_python_meta.symbols.RunString.namespace, &err);
     const run_string = try instance.loadSymbol(fimo_python_meta.symbols.RunString, &err);
 
-    try run_string.call(
+    try run_string.value.call(
         \\import sys
         \\
         \\print("Hello Python!", file=sys.stderr)

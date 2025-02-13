@@ -146,21 +146,21 @@ const State = struct {
         PyConfig_InitIsolatedConfig(&cfg);
         defer PyConfig_Clear(&cfg);
 
-        var status = PyConfig_SetBytesString(&cfg, &cfg.home, ctx.resources.home.cStr());
+        var status = PyConfig_SetBytesString(&cfg, &cfg.home, ctx.resources().home.cStr());
         if (PyStatus_Exception(status) != 0) return error.HomeConfig;
 
-        status = PyConfig_SetBytesString(&cfg, &cfg.program_name, ctx.resources.module_path.cStr());
+        status = PyConfig_SetBytesString(&cfg, &cfg.program_name, ctx.resources().module_path.cStr());
         if (PyStatus_Exception(status) != 0) return error.ProgramNameConfig;
 
         cfg.module_search_paths_set = 1;
-        const lib_path = Py_DecodeLocale(ctx.resources.lib_path.cStr(), null);
+        const lib_path = Py_DecodeLocale(ctx.resources().lib_path.cStr(), null);
         defer if (lib_path != null) PyMem_RawFree(lib_path);
         if (lib_path == null) return error.DecodeLibPath;
         status = PyWideStringList_Append(&cfg.module_search_paths, lib_path);
         if (PyStatus_Exception(status) != 0) return error.AppendLibPath;
 
         if (builtin.target.os.tag == .windows) {
-            const dynload_path = Py_DecodeLocale(ctx.resources.dynload_path.cStr(), null);
+            const dynload_path = Py_DecodeLocale(ctx.resources().dynload_path.cStr(), null);
             defer if (dynload_path != null) PyMem_RawFree(dynload_path);
             if (dynload_path == null) return error.DecodeDynloadPath;
             status = PyWideStringList_Append(&cfg.module_search_paths, dynload_path);

@@ -22,7 +22,7 @@ pub const symbols = struct {
             .minor = c.FIPY_SYMBOL_VERSION_MINOR_RUN_STRING,
             .patch = c.FIPY_SYMBOL_VERSION_PATCH_RUN_STRING,
         },
-        .symbol = Root.RunString,
+        .T = Root.RunString,
     };
 };
 
