@@ -307,7 +307,7 @@ fn buildCPythonUnix(
     );
     switch (optimize) {
         .Debug => {
-            if (target.result.isDarwin()) {
+            if (target.result.os.tag.isDarwin()) {
                 _ = python_bin.addCopyFile(
                     install_dir.path(b, "lib/libpython3.13d.dylib"),
                     "libpython3.13d.so",
@@ -329,7 +329,7 @@ fn buildCPythonUnix(
             );
         },
         else => {
-            if (target.result.isDarwin()) {
+            if (target.result.os.tag.isDarwin()) {
                 _ = python_bin.addCopyFile(
                     install_dir.path(b, "lib/libpython3.13.dylib"),
                     "libpython3.13.so",

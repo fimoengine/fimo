@@ -124,7 +124,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
             null
         else
             info.dli_fname;
-        if (comptime builtin.target.isDarwin())
+        if (comptime builtin.target.os.tag.isDarwin())
             _ = std.c.dlopen(
                 module_path,
                 .{ .NOW = true, .LOCAL = true, .NOLOAD = true },
@@ -227,7 +227,7 @@ pub fn initPath(allocator: Allocator, p: Path, tmp_dir: Path) ModuleHandleError!
             @intFromEnum(windows.LoadLibraryFlags.load_library_search_dll_load_dir) |
                 @intFromEnum(windows.LoadLibraryFlags.load_library_search_default_dirs),
         ) orelse return error.DlOpenError
-    else if (comptime builtin.target.isDarwin())
+    else if (comptime builtin.target.os.tag.isDarwin())
         std.c.dlopen(
             native_path.raw.ptr,
             .{ .NOW = true, .LOCAL = true, .NODELETE = true },
