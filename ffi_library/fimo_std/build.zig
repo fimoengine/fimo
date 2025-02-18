@@ -205,7 +205,7 @@ fn generateGDBScripts(
     defer root_file_bytes.deinit();
     root_file_bytes.appendSlice("const builtin = @import(\"builtin\");\n\n") catch unreachable;
     root_file_bytes.appendSlice("comptime {\n") catch unreachable;
-    root_file_bytes.appendSlice("\tif (builtin.os.tag != .windows and !builtin.target.isDarwin()) {\n") catch unreachable;
+    root_file_bytes.appendSlice("\tif (builtin.os.tag != .windows and !builtin.target.os.tag.isDarwin()) {\n") catch unreachable;
 
     var it = dir.iterateAssumeFirstIteration();
     while (it.next() catch @panic("failed to read dir")) |entry| {
