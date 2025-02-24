@@ -6,7 +6,7 @@ const math = std.math;
 
 const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
-const Time = time.Time;
+const Instant = time.Instant;
 const Duration = time.Duration;
 
 const ParkingLot = @import("ParkingLot.zig");
@@ -51,7 +51,7 @@ pub fn Futex(comptime T: type) type {
                 }
             };
 
-            const timeout_time = Time.now().addSaturating(timeout);
+            const timeout_time = Instant.now().addSaturating(timeout);
             const result = ParkingLot.park(
                 provider,
                 ptr,

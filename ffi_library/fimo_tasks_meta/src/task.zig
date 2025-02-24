@@ -3,7 +3,7 @@ const std = @import("std");
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 const time = fimo_std.time;
-const Time = time.Time;
+const Instant = time.Instant;
 const Duration = time.Duration;
 
 const symbols = @import("symbols.zig");
@@ -103,11 +103,11 @@ pub fn Task(comptime T: type) type {
             try testing.initTestContextInTask(struct {
                 fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
                     _ = err;
-                    const before_sleep = Time.now();
+                    const before_sleep = Instant.now();
                     const duration = Duration.initSeconds(2);
                     sleepCurrent(ctx, duration);
-                    const elapsed = try Time.elapsed(before_sleep);
-                    try std.testing.expect(elapsed.secs >= duration.secs);
+                    const elapsed = try Instant.elapsed(before_sleep);
+                    try std.testing.expect(elapsed.order(duration) != .lt);
                 }
             }.f);
         }

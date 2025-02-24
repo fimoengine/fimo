@@ -8,7 +8,7 @@ const math = std.math;
 const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
 const Duration = time.Duration;
-const Time = time.Time;
+const Instant = time.Instant;
 
 const Mutex = @import("Mutex.zig");
 const ParkingLot = @import("ParkingLot.zig");
@@ -59,7 +59,7 @@ pub fn timedWait(
     mutex: *Mutex,
     timeout: Duration,
 ) error{Timeout}!void {
-    const timeout_time = Time.now().addSaturating(timeout);
+    const timeout_time = Instant.now().addSaturating(timeout);
     try self.waitInternal(provider, mutex, timeout_time);
 }
 
@@ -83,7 +83,7 @@ fn waitInternal(
     self: *Condition,
     provider: anytype,
     mutex: *Mutex,
-    timeout: ?Time,
+    timeout: ?Instant,
 ) error{Timeout}!void {
     const Validation = struct {
         condition: *Condition,

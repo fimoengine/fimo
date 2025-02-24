@@ -6,7 +6,7 @@ const Module = Context.Module;
 const Symbol = Module.Symbol;
 const c = fimo_std.c;
 const Duration = c.FimoDuration;
-const Time = c.FimoTime;
+const Instant = c.FimoInstant;
 
 const pool = @import("pool.zig");
 const Pool = pool.Pool;
@@ -125,7 +125,7 @@ pub const parking_lot_park = Symbol{
             is_last: bool,
         ) callconv(.c) void,
         token: ParkToken,
-        timeout: ?*const Time,
+        timeout: ?*const Instant,
     ) callconv(.c) ParkResult,
 };
 pub const parking_lot_unpark_one = Symbol{
