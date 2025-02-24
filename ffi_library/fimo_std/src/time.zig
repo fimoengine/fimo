@@ -163,6 +163,15 @@ pub const Duration = struct {
         return seconds + self.sub_sec_nanos;
     }
 
+    /// Returns the order of two durations.
+    pub fn order(self: Duration, other: Duration) std.math.Order {
+        if (self.secs < other.secs) return .lt;
+        if (self.secs > other.secs) return .gt;
+        if (self.sub_sec_nanos < other.sub_sec_nanos) return .lt;
+        if (self.sub_sec_nanos > other.sub_sec_nanos) return .gt;
+        return .eq;
+    }
+
     /// Adds two durations.
     pub fn add(lhs: Duration, rhs: Duration) error{Overflow}!Duration {
         var seconds = try std.math.add(Seconds, lhs.secs, rhs.secs);
@@ -288,6 +297,15 @@ pub const Time = struct {
         return t.durationSince(time);
     }
 
+    /// Returns the order of two time points.
+    pub fn order(self: Time, other: Time) std.math.Order {
+        if (self.secs < other.secs) return .lt;
+        if (self.secs > other.secs) return .gt;
+        if (self.sub_sec_nanos < other.sub_sec_nanos) return .lt;
+        if (self.sub_sec_nanos > other.sub_sec_nanos) return .gt;
+        return .eq;
+    }
+
     /// Returns the difference between two time points.
     pub fn durationSince(time: Time, earlier: Time) error{Overflow}!Duration {
         const t_dur = Duration{ .secs = time.secs, .sub_sec_nanos = time.sub_sec_nanos };
@@ -317,6 +335,129 @@ pub const Time = struct {
     /// Shifts the time point backwards by the specified duration, saturating to the unix epoch.
     pub fn subSaturating(time: Time, duration: Duration) Time {
         return time.sub(duration) catch Time.UnixEpoch;
+    }
+};
+
+/// A monotonically increasing point in time.
+///
+/// The starting point is undefined.
+pub const Instant = struct {
+    /// Number of seconds.
+    secs: Seconds = 0,
+    /// Number of nanoseconds.
+    sub_sec_nanos: SubSecondNanos = 0,
+
+    /// The latest possible time point.
+    pub const Max = Instant{
+        .secs = std.math.maxInt(Seconds),
+        .sub_sec_nanos = nanos_per_sec - 1,
+    };
+
+    /// Initializes the object from a ffi time.
+    pub fn initC(time: c.FimoInstant) Instant {
+        return Instant{
+            .secs = @intCast(time.secs),
+            .sub_sec_nanos = @intCast(time.nanos),
+        };
+    }
+
+    /// Casts the object to a ffi time.
+    pub fn intoC(self: Instant) c.FimoInstant {
+        return c.FimoInstant{
+            .secs = @intCast(self.secs),
+            .nanos = @intCast(self.sub_sec_nanos),
+        };
+    }
+
+    /// Returns the current time.
+    pub fn now() Instant {
+        switch (builtin.os.tag) {
+            .windows => {
+                const frequency = std.os.windows.QueryPerformanceFrequency();
+                const counter = std.os.windows.QueryPerformanceCounter();
+                const ns = blk: {
+                    // 10Mhz (1 qpc tick every 100ns) is a common enough QPF value that we can optimize on it.
+                    // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
+                    const common_frequency = 10_000_000;
+                    if (frequency == common_frequency) {
+                        break :blk counter * (nanos_per_sec / common_frequency);
+                    }
+
+                    // Convert to ns using fixed point.
+                    const scale = @as(u64, nanos_per_sec << 32) / @as(u32, @intCast(frequency));
+                    const result = (@as(u96, counter) * scale) >> 32;
+                    break :blk @as(u64, @truncate(result));
+                };
+                return Instant{
+                    .secs = @intCast(ns / nanos_per_sec),
+                    .sub_sec_nanos = @intCast(ns % nanos_per_sec),
+                };
+            },
+            .wasi => {
+                var ns: std.os.wasi.timestamp_t = undefined;
+                const err = std.os.wasi.clock_time_get(.MONOTONIC, 1, &ns);
+                std.debug.assert(err == .SUCCESS);
+                return Instant{
+                    .secs = @intCast(ns / nanos_per_sec),
+                    .sub_sec_nanos = @intCast(ns % nanos_per_sec),
+                };
+            },
+            else => {
+                const ts = std.posix.clock_gettime(
+                    .MONOTONIC,
+                ) catch @panic("MONOTONIC clock not supported");
+                return Instant{
+                    .secs = @intCast(ts.sec),
+                    .sub_sec_nanos = @intCast(ts.nsec),
+                };
+            },
+        }
+    }
+
+    /// Returns the duration elapsed since a prior time point.
+    pub fn elapsed(time: Instant) error{Overflow}!Duration {
+        const t = Instant.now();
+        return t.durationSince(time);
+    }
+
+    /// Returns the order of two time points.
+    pub fn order(self: Instant, other: Instant) std.math.Order {
+        if (self.secs < other.secs) return .lt;
+        if (self.secs > other.secs) return .gt;
+        if (self.sub_sec_nanos < other.sub_sec_nanos) return .lt;
+        if (self.sub_sec_nanos > other.sub_sec_nanos) return .gt;
+        return .eq;
+    }
+
+    /// Returns the difference between two time points.
+    pub fn durationSince(time: Instant, earlier: Instant) error{Overflow}!Duration {
+        const t_dur = Duration{ .secs = time.secs, .sub_sec_nanos = time.sub_sec_nanos };
+        const e_dur = Duration{ .secs = earlier.secs, .sub_sec_nanos = earlier.sub_sec_nanos };
+        return t_dur.sub(e_dur);
+    }
+
+    /// Shifts the time point forwards by the specified duration.
+    pub fn add(time: Instant, duration: Duration) error{Overflow}!Instant {
+        const t = Duration{ .secs = time.secs, .sub_sec_nanos = time.sub_sec_nanos };
+        const d = try t.add(duration);
+        return Instant{ .secs = d.secs, .sub_sec_nanos = d.sub_sec_nanos };
+    }
+
+    /// Shifts the time point forwards by the specified duration, saturating to the maximum time point.
+    pub fn addSaturating(time: Instant, duration: Duration) Instant {
+        return time.add(duration) catch Instant.Max;
+    }
+
+    /// Shifts the time point backwards by the specified duration.
+    pub fn sub(time: Instant, duration: Duration) error{Overflow}!Instant {
+        const t = Duration{ .secs = time.secs, .sub_sec_nanos = time.sub_sec_nanos };
+        const d = try t.sub(duration);
+        return Instant{ .secs = d.secs, .sub_sec_nanos = d.sub_sec_nanos };
+    }
+
+    /// Shifts the time point backwards by the specified duration, saturating to the zero time point.
+    pub fn subSaturating(time: Instant, duration: Duration) Instant {
+        return time.sub(duration) catch Instant{};
     }
 };
 
@@ -368,10 +509,7 @@ const ffi = struct {
         return duration.nanos;
     }
 
-    export fn fimo_duration_as_millis(
-        duration: *const c.FimoDuration,
-        high: ?*u32,
-    ) u64 {
+    export fn fimo_duration_as_millis(duration: *const c.FimoDuration, high: ?*u32) u64 {
         const d = Duration.initC(duration.*);
         const millis = d.millis();
 
@@ -381,10 +519,7 @@ const ffi = struct {
         return @truncate(millis);
     }
 
-    export fn fimo_duration_as_micros(
-        duration: *const c.FimoDuration,
-        high: ?*u32,
-    ) u64 {
+    export fn fimo_duration_as_micros(duration: *const c.FimoDuration, high: ?*u32) u64 {
         const d = Duration.initC(duration.*);
         const micros = d.micros();
 
@@ -394,10 +529,7 @@ const ffi = struct {
         return @truncate(micros);
     }
 
-    export fn fimo_duration_as_nanos(
-        duration: *const c.FimoDuration,
-        high: ?*u32,
-    ) u64 {
+    export fn fimo_duration_as_nanos(duration: *const c.FimoDuration, high: ?*u32) u64 {
         const d = Duration.initC(duration.*);
         const nanos = d.nanos();
 
@@ -405,6 +537,16 @@ const ffi = struct {
             h.* = @intCast(nanos >> 64);
         }
         return @truncate(nanos);
+    }
+
+    export fn fimo_duration_cmp(lhs: *const c.FimoDuration, rhs: *const c.FimoDuration) i32 {
+        const d1 = Duration.initC(lhs.*);
+        const d2 = Duration.initC(rhs.*);
+        return switch (d1.order(d2)) {
+            .lt => -1,
+            .eq => 0,
+            .gt => 1,
+        };
     }
 
     export fn fimo_duration_add(
@@ -455,15 +597,22 @@ const ffi = struct {
         return Time.now().intoC();
     }
 
-    export fn fimo_time_elapsed(
-        time_point: *const c.FimoTime,
-        out: *c.FimoDuration,
-    ) AnyResult {
+    export fn fimo_time_elapsed(time_point: *const c.FimoTime, out: *c.FimoDuration) AnyResult {
         const t = Time.initC(time_point.*);
         if (t.elapsed()) |dur| {
             out.* = dur.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fimo_time_cmp(lhs: *const c.FimoTime, rhs: *const c.FimoTime) i32 {
+        const d1 = Time.initC(lhs.*);
+        const d2 = Time.initC(rhs.*);
+        return switch (d1.order(d2)) {
+            .lt => -1,
+            .eq => 0,
+            .gt => 1,
+        };
     }
 
     export fn fimo_time_duration_since(
@@ -519,6 +668,88 @@ const ffi = struct {
         duration: *const c.FimoDuration,
     ) c.FimoTime {
         const t = Time.initC(time_point.*);
+        const d = Duration.initC(duration.*);
+        return t.subSaturating(d).intoC();
+    }
+
+    export fn fimo_instant_now() c.FimoInstant {
+        return Instant.now().intoC();
+    }
+
+    export fn fimo_instant_elapsed(
+        time_point: *const c.FimoInstant,
+        out: *c.FimoDuration,
+    ) AnyResult {
+        const t = Instant.initC(time_point.*);
+        if (t.elapsed()) |dur| {
+            out.* = dur.intoC();
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fimo_instant_cmp(lhs: *const c.FimoInstant, rhs: *const c.FimoInstant) i32 {
+        const d1 = Instant.initC(lhs.*);
+        const d2 = Instant.initC(rhs.*);
+        return switch (d1.order(d2)) {
+            .lt => -1,
+            .eq => 0,
+            .gt => 1,
+        };
+    }
+
+    export fn fimo_instant_duration_since(
+        time_point: *const c.FimoInstant,
+        earlier_time_point: *const c.FimoInstant,
+        out: *c.FimoDuration,
+    ) AnyResult {
+        const t1 = Instant.initC(time_point.*);
+        const t2 = Instant.initC(earlier_time_point.*);
+        if (t1.durationSince(t2)) |dur| {
+            out.* = dur.intoC();
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fimo_instant_add(
+        time_point: *const c.FimoInstant,
+        duration: *const c.FimoDuration,
+        out: *c.FimoInstant,
+    ) AnyResult {
+        const t = Instant.initC(time_point.*);
+        const d = Duration.initC(duration.*);
+        if (t.add(d)) |shifted| {
+            out.* = shifted.intoC();
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fimo_instant_saturating_add(
+        time_point: *const c.FimoInstant,
+        duration: *const c.FimoDuration,
+    ) c.FimoInstant {
+        const t = Instant.initC(time_point.*);
+        const d = Duration.initC(duration.*);
+        return t.addSaturating(d).intoC();
+    }
+
+    export fn fimo_instant_sub(
+        time_point: *const c.FimoInstant,
+        duration: *const c.FimoDuration,
+        out: *c.FimoInstant,
+    ) AnyResult {
+        const t = Instant.initC(time_point.*);
+        const d = Duration.initC(duration.*);
+        if (t.sub(d)) |shifted| {
+            out.* = shifted.intoC();
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fimo_instant_saturating_sub(
+        time_point: *const c.FimoInstant,
+        duration: *const c.FimoDuration,
+    ) c.FimoInstant {
+        const t = Instant.initC(time_point.*);
         const d = Duration.initC(duration.*);
         return t.subSaturating(d).intoC();
     }
