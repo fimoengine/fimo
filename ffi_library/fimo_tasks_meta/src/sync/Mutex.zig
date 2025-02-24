@@ -14,7 +14,7 @@ const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 const time = fimo_std.time;
 const Duration = time.Duration;
-const Time = time.Time;
+const Instant = time.Instant;
 
 const task = @import("../task.zig");
 const Task = task.OpaqueTask;
@@ -93,7 +93,7 @@ const BargingLock = extern struct {
         timeout: Duration,
     ) error{Timeout}!void {
         if (self.state.cmpxchgWeak(unlocked, is_locked_bit, .acquire, .monotonic) != null) {
-            const timeout_time = Time.now().addSaturating(timeout);
+            const timeout_time = Instant.now().addSaturating(timeout);
             if (!self.lockSlow(provider, timeout_time)) return error.Timeout;
         }
     }
@@ -110,7 +110,7 @@ const BargingLock = extern struct {
         }
     }
 
-    fn lockSlow(self: *BargingLock, provider: anytype, timeout: ?Time) bool {
+    fn lockSlow(self: *BargingLock, provider: anytype, timeout: ?Instant) bool {
         @branchHint(.cold);
         // The WebKit developers observed an optimum at 40 spins for the Intel architecture.
         const spin_limit: usize = 40;

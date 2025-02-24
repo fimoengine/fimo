@@ -7,7 +7,7 @@
 //! [3]: https://docs.rs/parking_lot_core/latest/parking_lot_core/
 const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
-const Time = time.Time;
+const Instant = time.Instant;
 
 const symbols = @import("../symbols.zig");
 
@@ -88,7 +88,7 @@ pub fn park(
     timed_out_data: anytype,
     timed_out: fn (data: *@TypeOf(timed_out_data), key: *const anyopaque, is_last: bool) void,
     token: ParkToken,
-    timeout: ?Time,
+    timeout: ?Instant,
 ) ParkResult {
     const Validation = struct {
         fn f(data: *anyopaque) callconv(.c) bool {
