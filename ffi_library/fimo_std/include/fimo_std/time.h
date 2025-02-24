@@ -31,9 +31,7 @@ typedef struct FimoDuration {
     FimoU32 nanos;
 } FimoDuration;
 
-/**
- * A point in time since the unix epoch.
- */
+/// A point in time since the unix epoch.
 typedef struct FimoTime {
     /// Number of seconds
     FimoU64 secs;
@@ -41,17 +39,15 @@ typedef struct FimoTime {
     FimoU32 nanos;
 } FimoTime;
 
-/**
- * A monotonic point in time.
- *
- * The starting point is undefined.
- */
-typedef struct FimoTimeMonotonic {
+/// A monotonically increasing point in time.
+///
+/// The starting point is undefined.
+typedef struct FimoInstant {
     /// Number of seconds
     FimoU64 secs;
     /// Number of nanoseconds, must be in [0, 999999999]
     FimoU32 nanos;
-} FimoTimeMonotonic;
+} FimoInstant;
 
 /// Constructs a duration.
 #define FIMO_SECONDS(seconds)                                                                                          \
@@ -91,8 +87,8 @@ typedef struct FimoTimeMonotonic {
     (FimoTime) { .secs = UINT64_MAX, .nanos = 999999999 }
 
 /// Constructs the latest possible monotonic time point.
-#define FIMO_TIME_MONOTONIC_MAX                                                                                        \
-    (FimoTimeMonotonic) { .secs = UINT64_MAX, .nanos = 999999999 }
+#define FIMO_INSTANT_MAX                                                                                               \
+    (FimoInstant) { .secs = UINT64_MAX, .nanos = 999999999 }
 
 /// Constructs the zero duration.
 FIMO_EXPORT
@@ -165,6 +161,16 @@ FIMO_EXPORT
 FIMO_MUST_USE
 FimoU64 fimo_duration_as_nanos(const FimoDuration *duration, FimoU32 *high);
 
+/// Returns the order of two durations.
+///
+/// Returns:
+/// - `-1` if `lhs < rhs`
+/// - `0` if `lhs == rhs`
+/// - `1` if `lhs > rhs`
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoI32 fimo_duration_cmp(const FimoDuration *lhs, const FimoDuration *rhs);
+
 /// Adds two durations.
 FIMO_EXPORT
 FIMO_MUST_USE
@@ -199,6 +205,16 @@ FIMO_EXPORT
 FIMO_MUST_USE
 FimoResult fimo_time_elapsed(const FimoTime *time_point, FimoDuration *elapsed);
 
+/// Returns the order of two time points.
+///
+/// Returns:
+/// - `-1` if `lhs < rhs`
+/// - `0` if `lhs == rhs`
+/// - `1` if `lhs > rhs`
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoI32 fimo_time_cmp(const FimoTime *lhs, const FimoTime *rhs);
+
 /// Returns the difference between two time points.
 FIMO_EXPORT
 FIMO_MUST_USE
@@ -224,10 +240,66 @@ FimoResult fimo_time_sub(const FimoTime *time_point, const FimoDuration *duratio
 
 /// Subtracts a duration from a time point.
 ///
-/// The result saturates to `FIMO_UNIX_EPOCH`, if an overflow occurs or the resulting duration is negative.
+/// The result saturates to `FIMO_UNIX_EPOCH`, if an overflow occurs or the resulting duration is
+/// negative.
 FIMO_EXPORT
 FIMO_MUST_USE
 FimoTime fimo_time_saturating_sub(const FimoTime *time_point, const FimoDuration *duration);
+
+/// Returns the current time.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoInstant fimo_instant_now(void);
+
+/// Returns the duration elapsed since a prior time point.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoResult fimo_instant_elapsed(const FimoInstant *time_point, FimoDuration *elapsed);
+
+/// Returns the order of two time points.
+///
+/// Returns:
+/// - `-1` if `lhs < rhs`
+/// - `0` if `lhs == rhs`
+/// - `1` if `lhs > rhs`
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoI32 fimo_instant_cmp(const FimoInstant *lhs, const FimoInstant *rhs);
+
+/// Returns the difference between two time points.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoResult fimo_instant_duration_since(const FimoInstant *time_point, const FimoInstant *earlier,
+                                        FimoDuration *duration);
+
+/// Adds a duration to a time point.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoResult fimo_instant_add(const FimoInstant *time_point, const FimoDuration *duration,
+                            FimoInstant *out);
+
+/// Adds a duration to a time point.
+///
+/// The result saturates to `FIMO_INSTANT_MAX`, if an overflow occurs.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoInstant fimo_instant_saturating_add(const FimoInstant *time_point,
+                                        const FimoDuration *duration);
+
+/// Subtracts a duration from a time point.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoResult fimo_instant_sub(const FimoInstant *time_point, const FimoDuration *duration,
+                            FimoInstant *out);
+
+/// Subtracts a duration from a time point.
+///
+/// The result saturates to the zero time point, if an overflow occurs or the resulting duration is
+/// negative.
+FIMO_EXPORT
+FIMO_MUST_USE
+FimoInstant fimo_instant_saturating_sub(const FimoInstant *time_point,
+                                        const FimoDuration *duration);
 
 #ifdef __cplusplus
 }

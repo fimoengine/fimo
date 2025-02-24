@@ -14,6 +14,7 @@ unsafe extern "C" {
     fn fimo_duration_as_millis(duration: &Duration, high: Option<&mut MaybeUninit<u32>>) -> u64;
     fn fimo_duration_as_micros(duration: &Duration, high: Option<&mut MaybeUninit<u32>>) -> u64;
     fn fimo_duration_as_nanos(duration: &Duration, high: Option<&mut MaybeUninit<u32>>) -> u64;
+    fn fimo_duration_cmp(lhs: &Duration, rhs: &Duration) -> i32;
     fn fimo_duration_add(
         lhs: &Duration,
         rhs: &Duration,
@@ -186,6 +187,25 @@ impl Duration {
     }
 }
 
+impl PartialOrd for Duration {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Duration {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        unsafe {
+            match fimo_duration_cmp(self, other) {
+                -1 => std::cmp::Ordering::Less,
+                0 => std::cmp::Ordering::Equal,
+                1 => std::cmp::Ordering::Greater,
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
 impl Add for Duration {
     type Output = Duration;
 
@@ -217,6 +237,7 @@ impl SubAssign for Duration {
 unsafe extern "C" {
     fn fimo_time_now() -> Time;
     fn fimo_time_elapsed(time: &Time, out: &mut MaybeUninit<Duration>) -> AnyResult;
+    fn fimo_time_cmp(lhs: &Time, rhs: &Time) -> i32;
     fn fimo_time_duration_since(
         time: &Time,
         earlier: &Time,
@@ -327,6 +348,25 @@ impl Time {
     }
 }
 
+impl PartialOrd for Time {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Time {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        unsafe {
+            match fimo_time_cmp(self, other) {
+                -1 => std::cmp::Ordering::Less,
+                0 => std::cmp::Ordering::Equal,
+                1 => std::cmp::Ordering::Greater,
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
 impl Add<Duration> for Time {
     type Output = Time;
 
@@ -350,6 +390,174 @@ impl Sub<Duration> for Time {
 }
 
 impl SubAssign<Duration> for Time {
+    fn sub_assign(&mut self, rhs: Duration) {
+        *self = self.checked_sub(rhs).unwrap();
+    }
+}
+
+unsafe extern "C" {
+    fn fimo_instant_now() -> Instant;
+    fn fimo_instant_elapsed(time: &Instant, out: &mut MaybeUninit<Duration>) -> AnyResult;
+    fn fimo_instant_cmp(lhs: &Instant, rhs: &Instant) -> i32;
+    fn fimo_instant_duration_since(
+        time: &Instant,
+        earlier: &Instant,
+        out: &mut MaybeUninit<Duration>,
+    ) -> AnyResult;
+    fn fimo_instant_add(
+        time: &Instant,
+        duration: &Duration,
+        out: &mut MaybeUninit<Instant>,
+    ) -> AnyResult;
+    fn fimo_instant_saturating_add(time: &Instant, duration: &Duration) -> Instant;
+    fn fimo_instant_sub(
+        time: &Instant,
+        duration: &Duration,
+        out: &mut MaybeUninit<Instant>,
+    ) -> AnyResult;
+    fn fimo_instant_saturating_sub(time: &Instant, duration: &Duration) -> Instant;
+}
+
+/// A monotonically increasing point in time.
+///
+/// The starting point is undefined.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Instant {
+    pub secs: u64,
+    // Must be in [0, 999999999]
+    pub nanos: u32,
+}
+
+impl Instant {
+    /// Maximum time point.
+    pub const MAX_TIME_POINT: Self = Self {
+        secs: u64::MAX,
+        nanos: 999999999,
+    };
+
+    /// Returns the current time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fimo_std::time::Instant;
+    ///
+    /// let time = Instant::now();
+    /// ```
+    pub fn now() -> Self {
+        unsafe { fimo_instant_now() }
+    }
+
+    /// Returns the duration elapsed since the time.
+    ///
+    /// May result in an error, if a time shift caused `self` to be in the future.
+    pub fn elapsed(&self) -> Result<Duration, AnyError> {
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_instant_elapsed(self, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
+    }
+
+    /// Returns the difference between two time points.
+    ///
+    /// Returns an error if `self` is after `other`.
+    pub fn duration_since(&self, other: &Self) -> Result<Duration, AnyError> {
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_instant_duration_since(self, other, &mut out).into_result()?;
+            Ok(out.assume_init())
+        }
+    }
+
+    /// Offsets the time point forwards.
+    ///
+    /// Returns `Some(t)` where t is the time `self + duration` if `t` can be represented as an
+    /// `Instant`, `None` otherwise.
+    pub fn checked_add(&self, duration: Duration) -> Option<Self> {
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_instant_add(self, &duration, &mut out)
+                .into_result()
+                .map(|_| out.assume_init())
+                .ok()
+        }
+    }
+
+    /// Offsets the time point forwards.
+    ///
+    /// Returns `t` where t is the time `self + duration` if `t` can be represented as an `Instant`,
+    /// `MAX_TIME_POINT` otherwise.
+    pub fn saturating_add(&self, duration: Duration) -> Self {
+        unsafe { fimo_instant_saturating_add(self, &duration) }
+    }
+
+    /// Offsets the time point backwards.
+    ///
+    /// Returns `Some(t)` where t is the time `self - duration` if `t` can be represented as an
+    /// `Instant`, `None` otherwise.
+    pub fn checked_sub(&self, duration: Duration) -> Option<Self> {
+        let mut out = MaybeUninit::uninit();
+        unsafe {
+            fimo_instant_sub(self, &duration, &mut out)
+                .into_result()
+                .map(|_| out.assume_init())
+                .ok()
+        }
+    }
+
+    /// Offsets the time point backwards.
+    ///
+    /// Returns `t` where t is the time `self - duration` if `t` can be represented as an `Instant`,
+    /// the zero time point otherwise.
+    pub fn saturating_sub(&self, duration: Duration) -> Self {
+        unsafe { fimo_instant_saturating_sub(self, &duration) }
+    }
+}
+
+impl PartialOrd for Instant {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Instant {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        unsafe {
+            match fimo_instant_cmp(self, other) {
+                -1 => std::cmp::Ordering::Less,
+                0 => std::cmp::Ordering::Equal,
+                1 => std::cmp::Ordering::Greater,
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+impl Add<Duration> for Instant {
+    type Output = Instant;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        self.checked_add(rhs).unwrap()
+    }
+}
+
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, rhs: Duration) {
+        *self = self.checked_add(rhs).unwrap();
+    }
+}
+
+impl Sub<Duration> for Instant {
+    type Output = Instant;
+
+    fn sub(self, rhs: Duration) -> Self::Output {
+        self.checked_sub(rhs).unwrap()
+    }
+}
+
+impl SubAssign<Duration> for Instant {
     fn sub_assign(&mut self, rhs: Duration) {
         *self = self.checked_sub(rhs).unwrap();
     }
