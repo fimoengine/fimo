@@ -27,12 +27,13 @@ pub fn build(b: *std.Build) void {
     const enable_bindings = b.option(
         bool,
         "bindings",
-        "Enable bindings",
+        "Enable bindings (default: true)",
     ) orelse true;
     if (enable_bindings) {
         _ = add_package(
             b,
             "fimo_std",
+            true,
             .{
                 .target = target,
                 .optimize = optimize,
@@ -48,6 +49,7 @@ pub fn build(b: *std.Build) void {
         _ = add_package(
             b,
             "fimo_python_meta",
+            true,
             .{ .target = target, .optimize = optimize },
             modules,
             test_step,
@@ -58,6 +60,7 @@ pub fn build(b: *std.Build) void {
         _ = add_package(
             b,
             "fimo_tasks_meta",
+            true,
             .{ .target = target, .optimize = optimize },
             modules,
             test_step,
@@ -70,12 +73,13 @@ pub fn build(b: *std.Build) void {
     const enable_rust_bindings = b.option(
         bool,
         "rust_bindings",
-        "Enable Rust bindings",
+        "Enable Rust bindings (default: true)",
     ) orelse true;
     if (enable_rust_bindings) {
         _ = add_package(
             b,
             "fimo_std_rs",
+            true,
             .{
                 .target = target,
                 .optimize = optimize,
@@ -92,12 +96,13 @@ pub fn build(b: *std.Build) void {
     const enable_modules = b.option(
         bool,
         "modules",
-        "Enable modules",
+        "Enable modules (default: true)",
     ) orelse true;
     if (enable_modules) {
         _ = add_package(
             b,
             "fimo_python",
+            false,
             .{
                 .target = target,
                 .optimize = optimize,
@@ -115,6 +120,7 @@ pub fn build(b: *std.Build) void {
 fn add_package(
     b: *std.Build,
     name: []const u8,
+    default: bool,
     args: anytype,
     modules: *std.Build.Step.WriteFile,
     test_step: *std.Build.Step,
@@ -130,8 +136,8 @@ fn add_package(
     if (!(b.option(
         bool,
         b.fmt("{s}", .{name}),
-        b.fmt("Enable the `{s}` package", .{name}),
-    ) orelse true)) {
+        b.fmt("Enable the `{s}` package (default: {})", .{ name, default }),
+    ) orelse default)) {
         return null;
     }
 
