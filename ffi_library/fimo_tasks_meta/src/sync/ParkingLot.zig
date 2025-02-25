@@ -31,6 +31,16 @@ pub const ParkResult = extern struct {
     token: UnparkToken = .default,
 };
 
+/// Result of a park multiple operation.
+pub const ParkMultipleResult = extern struct {
+    type: enum(i32) { unparked, invalid, timed_out, keys_invalid } = .invalid,
+    index: u32 = 0,
+    token: UnparkToken = .default,
+};
+
+/// Maximum number of keys allowed for the park multiple operation.
+pub const max_park_multiple_key_count = 128;
+
 /// Result of an unpark operation.
 pub const UnparkResult = extern struct {
     /// Number of tasks that were unparked.
@@ -119,6 +129,54 @@ pub fn park(
         &BeforeSleep.f,
         &timed_out_data_,
         &TimedOut.f,
+        token,
+        timeout_ptr,
+    );
+}
+
+/// Parks the current task in the queues associated with the given keys.
+///
+/// A maximum of `max_park_multiple_key_count` keys may be provided.
+///
+/// The `validation` function is called while the queue managing the key is locked and can abort
+/// the operation by returning false. If `validation` returns true then the current task is
+/// appended to the queue and the queue is unlocked.
+///
+/// The `before_sleep` function is called after the queues are unlocked but before the task is put
+/// to sleep. The task will then sleep until it is unparked or the given timeout is reached. Since
+/// it is called while the queue is unlocked, it can be used to perform additional operations, as
+/// long as `park` or `parkMultiple` is not called recursively.
+pub fn parkMultiple(
+    provider: anytype,
+    keys: []*const anyopaque,
+    validation_data: anytype,
+    validation: fn (data: *@TypeOf(validation_data), key_index: usize) bool,
+    before_sleep_data: anytype,
+    before_sleep: fn (data: *@TypeOf(before_sleep_data)) void,
+    token: ParkToken,
+    timeout: ?Instant,
+) ParkMultipleResult {
+    const Validation = struct {
+        fn f(data: *anyopaque, key_index: usize) callconv(.c) bool {
+            return validation(@ptrCast(@alignCast(data)), key_index);
+        }
+    };
+    const BeforeSleep = struct {
+        fn f(data: *anyopaque) callconv(.c) void {
+            return before_sleep(@ptrCast(@alignCast(data)));
+        }
+    };
+    var validation_data_ = validation_data;
+    var before_sleep_data_ = before_sleep_data;
+    const timeout_ = if (timeout) |t| t.intoC() else null;
+    const timeout_ptr = if (timeout_) |t| &t else null;
+    const sym = symbols.parking_lot_park_multiple.requestFrom(provider);
+    return sym(
+        keys,
+        &validation_data_,
+        &Validation.f,
+        &before_sleep_data_,
+        &BeforeSleep.f,
         token,
         timeout_ptr,
     );

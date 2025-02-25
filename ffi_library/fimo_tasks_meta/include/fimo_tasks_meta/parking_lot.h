@@ -36,6 +36,16 @@ typedef struct FimoTasksMeta_ParkingLotParkResult {
     FimoTasksMeta_ParkingLotUnparkToken token;
 } FimoTasksMeta_ParkingLotParkResult;
 
+/// Result of a park multiple operation.
+typedef struct FimoTasksMeta_ParkingLotParkMultipleResult {
+    FimoTasksMeta_ParkingLotParkResultType type;
+    FimoI32 index;
+    FimoTasksMeta_ParkingLotUnparkToken token;
+} FimoTasksMeta_ParkingLotParkMultipleResult;
+
+/// Maximum number of keys allowed for the park multiple operation.
+#define FIMO_TASKS_META_PARKING_LOT_MAX_PARK_MULTIPLE_KEY_COUNT 128
+
 /// Result of an unpark operation.
 typedef struct FimoTasksMeta_ParkingLotUnparkResult {
     /// Number of tasks that were unparked.
@@ -92,7 +102,29 @@ typedef FimoTasksMeta_ParkingLotParkResult(*FimoTasksMeta_parking_lot_park)(
     void *timed_out_data,
     void(*timed_out)(void *data, const void *key, bool is_last),
     FimoTasksMeta_ParkingLotParkToken token,
-    const FimoTime *timeout
+    const FimoInstant *timeout
+);
+
+/// Parks the current task in the queues associated with the given keys.
+///
+/// A maximum of `FIMO_TASKS_META_PARKING_LOT_MAX_PARK_MULTIPLE_KEY_COUNT` keys may be provided.
+///
+/// The `validation` function is called while the queue managing the key is locked and can abort
+/// the operation by returning false. If `validation` returns true then the current task is
+/// appended to the queue and the queue is unlocked.
+///
+/// The `before_sleep` function is called after the queues are unlocked but before the task is put
+/// to sleep. The task will then sleep until it is unparked or the given timeout is reached. Since
+/// it is called while the queue is unlocked, it can be used to perform additional operations, as
+/// long as `park` or `parkMultiple` is not called recursively.
+typedef FimoTasksMeta_ParkingLotParkMultipleResult(*FimoTasksMeta_parking_lot_park_multiple)(
+    const void *key,
+    void *validation_data,
+    bool(*validation)(void *data, FimoUSize key_index),
+    void *before_sleep_data,
+    void(*before_sleep)(void *data),
+    FimoTasksMeta_ParkingLotParkToken token,
+    const FimoInstant *timeout
 );
 
 /// Unparks one task from the queue associated with the given key.

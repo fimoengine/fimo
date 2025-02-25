@@ -19,6 +19,7 @@ const ParkingLot = sync.ParkingLot;
 const ParkToken = ParkingLot.ParkToken;
 const UnparkToken = ParkingLot.UnparkToken;
 const ParkResult = ParkingLot.ParkResult;
+const ParkMultipleResult = ParkingLot.ParkMultipleResult;
 const UnparkResult = ParkingLot.UnparkResult;
 const RequeueOp = ParkingLot.RequeueOp;
 const FilterOp = ParkingLot.FilterOp;
@@ -127,6 +128,20 @@ pub const parking_lot_park = Symbol{
         token: ParkToken,
         timeout: ?*const Instant,
     ) callconv(.c) ParkResult,
+};
+pub const parking_lot_park_multiple = Symbol{
+    .name = "parking_lot_park_multiple",
+    .namespace = symbol_namespace,
+    .version = Context.context_version,
+    .T = fn (
+        key: *const anyopaque,
+        validation_data: *anyopaque,
+        validation: *const fn (data: *anyopaque, key_index: usize) callconv(.c) bool,
+        before_sleep_data: *anyopaque,
+        before_sleep: *const fn (data: *anyopaque) callconv(.c) void,
+        token: ParkToken,
+        timeout: ?*const Instant,
+    ) callconv(.c) ParkMultipleResult,
 };
 pub const parking_lot_unpark_one = Symbol{
     .name = "parking_lot_unpark_one",
