@@ -1176,29 +1176,32 @@ pub const Builder = struct {
     /// where the debug info stores the signature of the functions, irrespective of it being
     /// callable with a known abi.
     pub fn addType(comptime self: *@This(), comptime T: type) usize {
+        const num_types = self.types.len;
+        const id = self.addTypeInner(T);
+        if (num_types != self.types.len) {
+            const types: [self.types.len]Builder.Type = self.types[0..].*;
+            self.types = &types;
+        }
+
+        return id;
+    }
+
+    fn addTypeInner(comptime self: *@This(), comptime T: type) usize {
         for (self.types) |ty| {
             if (ty.type == T) return ty.info.id;
         }
 
-        // Reserve a slot for the current type, such that cycles don't end up
-        // recursing endlessly.
+        // Reserve a slot for the current type, such that cycles don't end up recursing endlessly.
         var types_tmp: [self.types.len + 1]Builder.Type = undefined;
         @memcpy(types_tmp[0..self.types.len], self.types);
         const t_id = self.types.len;
-        types_tmp[t_id] = .{
-            .type = T,
-            .info = .{
-                .id = t_id,
-                .name = @typeName(T),
-                .data = undefined,
-            },
-        };
-        self.types = &types_tmp;
 
         var t: Builder.Type = undefined;
         t.type = T;
         t.info.id = t_id;
         t.info.name = @typeName(T);
+
+        // Partially initialize the data to support cyclic types.
         t.info.data = switch (@typeInfo(T)) {
             .void, .noreturn => .{ .void = .{} },
             .bool => .{ .bool = .{} },
@@ -1243,7 +1246,6 @@ pub const Builder = struct {
                 const is_const = v.is_const;
                 const is_volatile = v.is_volatile;
                 const is_allowzero = v.is_allowzero;
-                const child_id = self.addType(v.child);
 
                 break :blk .{
                     .pointer = .{
@@ -1254,7 +1256,7 @@ pub const Builder = struct {
                         .is_const = is_const,
                         .is_volatile = is_volatile,
                         .is_allowzero = is_allowzero,
-                        .child_id = child_id,
+                        .child_id = undefined,
                     },
                 };
             },
@@ -1263,9 +1265,6 @@ pub const Builder = struct {
                 const bitsize: u3 = @bitSizeOf(T) % 8;
                 const alignment: u8 = @intCast(std.math.log2_int(u16, @alignOf(T)));
                 const length: usize = v.len;
-                const child_id = self.addType(v.child);
-
-                if (self.types[child_id].info.data == .@"opaque") break :blk .{ .@"opaque" = .{} };
 
                 break :blk .{
                     .array = .{
@@ -1273,7 +1272,7 @@ pub const Builder = struct {
                         .bitsize = bitsize,
                         .alignment = alignment,
                         .length = length,
-                        .child_id = child_id,
+                        .child_id = undefined,
                     },
                 };
             },
@@ -1283,11 +1282,8 @@ pub const Builder = struct {
 
                 var fields_tmp: [v.fields.len]Impl.Type.StructField = undefined;
                 for (v.fields, &fields_tmp) |src, *dst| {
-                    const type_id = self.addType(src.type);
-                    if (self.types[type_id].info.data == .@"opaque") break :blk .{ .@"opaque" = .{} };
-
                     dst.name = src.name;
-                    dst.type_id = type_id;
+                    dst.type_id = undefined;
                     dst.offset = @offsetOf(T, src.name);
                     dst.bit_offset = @truncate(@bitOffsetOf(T, src.name) % 8);
                     dst.alignment = @intCast(std.math.log2_int(u16, src.alignment));
@@ -1313,30 +1309,33 @@ pub const Builder = struct {
                 const child_info = @typeInfo(v.child);
                 if (child_info != .pointer) break :blk .{ .@"opaque" = .{} };
 
-                const child_id = self.addType(v.child);
-                const child = self.types[child_id].info;
-                if (child.data != .pointer) break :blk .{ .@"opaque" = .{} };
+                const pointer_info = child_info.pointer;
+                if (pointer_info.size == .slice) break :blk .{ .@"opaque" = .{} };
+                if (pointer_info.address_space != .generic) break :blk .{ .@"opaque" = .{} };
 
-                const pointer = child.data.pointer;
-                if (pointer.is_allowzero) break :blk .{ .@"opaque" = .{} };
+                const size: usize = @sizeOf(v.child);
+                const bitsize: u3 = @bitSizeOf(v.child) % 8;
+                const alignment: u8 = @intCast(std.math.log2_int(u16, @alignOf(v.child)));
+                const pointee_alignment: u8 = @intCast(std.math.log2_int(u16, pointer_info.alignment));
+                const is_const = pointer_info.is_const;
+                const is_volatile = pointer_info.is_volatile;
+                const is_allowzero = pointer_info.is_allowzero;
 
                 break :blk .{
                     .pointer = .{
-                        .size = pointer.size,
-                        .bitsize = pointer.bitsize,
-                        .alignment = pointer.alignment,
-                        .pointee_alignment = pointer.pointee_alignment,
-                        .is_const = pointer.is_const,
-                        .is_volatile = pointer.is_volatile,
-                        .is_allowzero = true,
-                        .child_id = pointer.child_id,
+                        .size = size,
+                        .bitsize = bitsize,
+                        .alignment = alignment,
+                        .pointee_alignment = pointee_alignment,
+                        .is_const = is_const,
+                        .is_volatile = is_volatile,
+                        .is_allowzero = is_allowzero,
+                        .child_id = undefined,
                     },
                 };
             },
             .@"enum" => |v| blk: {
-                const tag_id = self.addType(v.tag_type);
-                const tag = self.types[tag_id].info;
-                if (tag.data != .int) break :blk .{ .@"opaque" = .{} };
+                if (@typeInfo(v.tag_type) != .int) break :blk .{ .@"opaque" = .{} };
 
                 const size: usize = @sizeOf(T);
                 const bitsize: u3 = @bitSizeOf(T) % 8;
@@ -1347,7 +1346,7 @@ pub const Builder = struct {
                         .size = size,
                         .bitsize = bitsize,
                         .alignment = alignment,
-                        .tag_id = tag_id,
+                        .tag_id = undefined,
                     },
                 };
             },
@@ -1357,11 +1356,8 @@ pub const Builder = struct {
 
                 var fields_tmp: [v.fields.len]Impl.Type.UnionField = undefined;
                 for (v.fields, &fields_tmp) |src, *dst| {
-                    const type_id = self.addType(src.type);
-                    if (self.types[type_id].info.data == .@"opaque") break :blk .{ .@"opaque" = .{} };
-
                     dst.name = src.name;
-                    dst.type_id = type_id;
+                    dst.type_id = undefined;
                     dst.alignment = @intCast(std.math.log2_int(u16, src.alignment));
                 }
 
@@ -1382,21 +1378,15 @@ pub const Builder = struct {
                 };
             },
             .@"fn" => |v| blk: {
-                var parameters_tmp: [v.params.len]Impl.Type.FnParameter = undefined;
-                for (v.params, &parameters_tmp) |src, *dst| {
-                    dst.type_id = if (src.type) |ty| self.addType(ty) else null;
-                }
-
                 const calling_convention = v.calling_convention;
                 const is_var_args = v.is_var_args;
-                const ret_type_id = self.addType(v.return_type orelse void);
-                const parameters: [v.params.len]Impl.Type.FnParameter = parameters_tmp;
+                const parameters: [v.params.len]Impl.Type.FnParameter = undefined;
 
                 break :blk .{
                     .@"fn" = .{
                         .calling_convention = calling_convention,
                         .is_var_args = is_var_args,
-                        .return_type_id = ret_type_id,
+                        .return_type_id = undefined,
                         .parameters = &parameters,
                     },
                 };
@@ -1404,13 +1394,75 @@ pub const Builder = struct {
             else => .{ .@"opaque" = .{} },
         };
 
-        var types: [self.types.len]Builder.Type = undefined;
-        @memcpy(types[0..], self.types);
+        types_tmp[t_id] = t;
+        self.types = &types_tmp;
+
+        // Initialize children.
+        switch (t.info.data) {
+            .pointer => |*v| {
+                const t_info = @typeInfo(T);
+                if (t_info == .pointer) {
+                    const info = t_info.pointer;
+                    v.child_id = self.addTypeInner(info.child);
+                } else if (t_info == .optional) {
+                    const info = t_info.optional;
+                    v.child_id = self.addTypeInner(info.child);
+                } else unreachable;
+            },
+            .array => |*v| {
+                const info = @typeInfo(T).array;
+                v.child_id = self.addTypeInner(info.child);
+                if (self.types[v.child_id].info.data == .@"opaque") v.* = .{ .@"opaque" = .{} };
+            },
+            .@"struct" => |*v| blk: {
+                const info = @typeInfo(T).@"struct";
+                var fields_tmp: [v.fields.len]Impl.Type.StructField = v.fields[0..].*;
+                for (info.fields, &fields_tmp) |src, *field| {
+                    field.type_id = self.addTypeInner(src.type);
+                    if (self.types[field.type_id].info.data == .@"opaque") {
+                        v.* = .{ .@"opaque" = .{} };
+                        break :blk;
+                    }
+                }
+                const fields: [v.fields.len]Impl.Type.StructField = fields_tmp;
+                v.fields = &fields;
+            },
+            .@"enum" => |*v| {
+                const info = @typeInfo(T).@"enum";
+                v.tag_id = self.addTypeInner(info.tag_type);
+            },
+            .@"union" => |*v| blk: {
+                const info = @typeInfo(T).@"union";
+                var fields_tmp: [v.fields.len]Impl.Type.UnionField = v.fields[0..].*;
+                for (info.fields, &fields_tmp) |src, *field| {
+                    field.type_id = self.addTypeInner(src.type);
+                    if (self.types[field.type_id].info.data == .@"opaque") {
+                        v.* = .{ .@"opaque" = .{} };
+                        break :blk;
+                    }
+                }
+                const fields: [v.fields.len]Impl.Type.UnionField = fields_tmp;
+                v.fields = &fields;
+            },
+            .@"fn" => |*v| {
+                const info = @typeInfo(T).@"fn";
+                var parameters_tmp: [v.parameters.len]Impl.Type.FnParameter = v.parameters[0..].*;
+                for (info.params, &parameters_tmp) |src, *dst| {
+                    dst.type_id = if (src.type) |ty| self.addTypeInner(ty) else null;
+                }
+                const parameters: [v.parameters.len]Impl.Type.FnParameter = parameters_tmp;
+
+                v.return_type_id = self.addTypeInner(info.return_type orelse void);
+                v.parameters = &parameters;
+            },
+            else => {},
+        }
+
+        var types: [self.types.len]Builder.Type = self.types[0..].*;
         types[t_id] = t;
 
         const types_c: [self.types.len]Builder.Type = types;
         self.types = &types_c;
-
         return t_id;
     }
 

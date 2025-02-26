@@ -21,6 +21,9 @@
         .fimo_python = .{
             .path = "modules/fimo_python",
         },
+        .fimo_tasks = .{
+            .path = "modules/fimo_tasks",
+        },
     },
     .paths = .{
         ".cargo",
