@@ -1,5 +1,5 @@
 .{
-    .name = "fimo",
+    .name = .fimo,
     .version = "0.2.0-dev",
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
@@ -22,6 +22,7 @@
             .path = "modules/fimo_python",
         },
     },
+    .fingerprint = 0x7551ee4fd1f40ebd,
     .paths = .{
         ".cargo",
         "cmake",
