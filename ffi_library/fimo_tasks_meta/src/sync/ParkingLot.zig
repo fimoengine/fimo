@@ -148,7 +148,7 @@ pub fn park(
 /// long as `park` or `parkMultiple` is not called recursively.
 pub fn parkMultiple(
     provider: anytype,
-    keys: []*const anyopaque,
+    keys: []const *const anyopaque,
     validation_data: anytype,
     validation: fn (data: *@TypeOf(validation_data), key_index: usize) bool,
     before_sleep_data: anytype,
@@ -172,7 +172,8 @@ pub fn parkMultiple(
     const timeout_ptr = if (timeout_) |t| &t else null;
     const sym = symbols.parking_lot_park_multiple.requestFrom(provider);
     return sym(
-        keys,
+        keys.ptr,
+        keys.len,
         &validation_data_,
         &Validation.f,
         &before_sleep_data_,
