@@ -134,7 +134,8 @@ pub const parking_lot_park_multiple = Symbol{
     .namespace = symbol_namespace,
     .version = Context.context_version,
     .T = fn (
-        key: *const anyopaque,
+        keys: [*]const *const anyopaque,
+        key_count: usize,
         validation_data: *anyopaque,
         validation: *const fn (data: *anyopaque, key_index: usize) callconv(.c) bool,
         before_sleep_data: *anyopaque,

@@ -1,0 +1,22 @@
+.{
+    .name = .fimo_tasks,
+    .version = "0.2.0-dev",
+    .dependencies = .{
+        .fimo_std = .{
+            .path = "../../ffi_library/fimo_std",
+        },
+        .fimo_tasks_meta = .{
+            .path = "../../ffi_library/fimo_tasks_meta",
+        },
+        .context = .{
+            .url = "git+https://github.com/boostorg/context#boost-1.87.0",
+            .hash = "122009893042c6626f0a48b8b9e25dc8f57fe19ed31f3955fcdbcc47cc4e92d9a3f1",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "include",
+        "src",
+    },
+}
