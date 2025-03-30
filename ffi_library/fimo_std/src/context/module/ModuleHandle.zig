@@ -145,20 +145,20 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
     }
 }
 
-pub fn initPath(allocator: Allocator, p: Path, tmp_dir: Path) ModuleHandleError!*Self {
-    var buffer = PathBufferUnmanaged{};
-    defer buffer.deinit(allocator);
+pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
+    var module_path = PathBufferUnmanaged{};
+    defer module_path.deinit(allocator);
 
     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return error.InvalidPath;
     defer allocator.free(cwd);
-    try buffer.pushString(allocator, cwd);
+    try module_path.pushString(allocator, cwd);
 
     const stat = std.fs.cwd().statFile(p.raw) catch return error.InvalidPath;
     switch (stat.kind) {
-        .file => try buffer.pushPath(allocator, p),
+        .file => try module_path.pushPath(allocator, p),
         .directory => {
             const default_module_name = Path.init("module.fimo_module") catch unreachable;
-            try buffer.pushPath(allocator, default_module_name);
+            try module_path.pushPath(allocator, default_module_name);
         },
         .sym_link => {
             const link_buffer = try allocator.alloc(u8, std.fs.max_path_bytes);
@@ -168,44 +168,13 @@ pub fn initPath(allocator: Allocator, p: Path, tmp_dir: Path) ModuleHandleError!
                 link_buffer,
             ) catch return error.InvalidPath;
             const res_p = Path.init(resolved) catch return error.InvalidPath;
-            return Self.initPath(allocator, res_p, tmp_dir);
+            return Self.initPath(allocator, res_p);
         },
         else => return error.InvalidPath,
     }
+    const module_dir = module_path.asPath().parent() orelse return error.InvalidPath;
 
-    const module_binary = buffer.asPath().fileName() orelse return error.InvalidPath;
-    const module_dir = buffer.asPath().parent() orelse return error.InvalidPath;
-
-    var symlink_path = PathBufferUnmanaged{};
-    errdefer symlink_path.deinit(allocator);
-    try symlink_path.pushPath(allocator, tmp_dir);
-    while (true) {
-        var random_bytes: [8]u8 = undefined;
-        std.crypto.random.bytes(&random_bytes);
-        var suffix: [std.fs.base64_encoder.calcSize(8)]u8 = undefined;
-        _ = std.fs.base64_encoder.encode(&suffix, &random_bytes);
-        const sub_path = try std.fmt.allocPrint(
-            allocator,
-            "module_{s}",
-            .{suffix},
-        );
-        defer allocator.free(sub_path);
-        try symlink_path.pushString(allocator, sub_path);
-
-        std.fs.cwd().symLink(module_dir.raw, symlink_path.asPath().raw, .{
-            .is_directory = true,
-        }) catch |err| switch (err) {
-            error.PathAlreadyExists => _ = symlink_path.pop(),
-            else => return error.InvalidPath,
-        };
-        break;
-    }
-    try symlink_path.pushPath(allocator, module_binary);
-
-    const native_path = try OwnedOsPathUnmanaged.initPath(
-        allocator,
-        symlink_path.asPath(),
-    );
+    const native_path = try OwnedOsPathUnmanaged.initPath(allocator, module_path.asPath());
     defer native_path.deinit(allocator);
 
     var handle = try allocator.create(Self);
@@ -216,8 +185,7 @@ pub fn initPath(allocator: Allocator, p: Path, tmp_dir: Path) ModuleHandleError!
         .iterator = undefined,
     };
 
-    _ = symlink_path.pop();
-    handle.path = try symlink_path.toOwnedPath(allocator);
+    handle.path = try OwnedPathUnmanaged.initPath(allocator, module_dir);
     errdefer handle.path.deinit(allocator);
 
     const raw_handle = if (comptime builtin.os.tag == .windows)

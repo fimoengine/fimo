@@ -32,7 +32,6 @@ arena: ArenaAlloactor,
 active_commits: usize = 0,
 should_recreate_map: bool = false,
 active_load_graph: ?*LoadGraph = null,
-module_load_path: OwnedPathUnmanaged,
 string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
 modules: std.StringArrayHashMapUnmanaged(ModuleInfo) = .{},
 symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashContext, false) = .{},
@@ -47,12 +46,21 @@ const ModuleInfo = struct {
     status: Status,
     allocator: Allocator,
     handle: *ModuleHandle,
-    info: ?*const ProxyModule.Info,
-    @"export": *const ProxyModule.Export,
-    owner: ?*const ProxyModule.OpaqueInstance,
     callbacks: std.ArrayListUnmanaged(Callback) = .{},
 
-    const Status = enum { unloaded, loaded, err };
+    const Status = union(enum) {
+        unloaded: struct {
+            @"export": *const ProxyModule.Export,
+            owner: ?*const ProxyModule.OpaqueInstance,
+        },
+        err: struct {
+            @"export": *const ProxyModule.Export,
+            owner: ?*const ProxyModule.OpaqueInstance,
+        },
+        loaded: struct {
+            info: *const ProxyModule.Info,
+        },
+    };
 
     fn init(
         allocator: Allocator,
@@ -69,27 +77,41 @@ const ModuleInfo = struct {
         }
 
         return .{
-            .status = .unloaded,
+            .status = .{ .unloaded = .{ .@"export" = @"export", .owner = owner } },
             .allocator = allocator,
             .handle = handle,
-            .info = null,
-            .@"export" = @"export",
-            .owner = owner,
         };
     }
 
     fn deinit(self: *ModuleInfo) void {
-        for (self.callbacks.items) |callback| {
-            std.debug.assert(self.status != .loaded);
-            callback.on_error(self.@"export", callback.data);
-        }
-        self.callbacks.clearRetainingCapacity();
-        if (self.status != .loaded) self.@"export".deinit();
-        if (self.owner) |owner| {
-            const handle = InstanceHandle.fromInstancePtr(owner);
-            const inner = handle.lock();
-            defer inner.unlock();
-            inner.unrefStrong();
+        switch (self.status) {
+            .unloaded => |v| {
+                for (self.callbacks.items) |cb| cb.on_error(v.@"export", cb.data);
+                self.callbacks.clearAndFree(self.allocator);
+                v.@"export".deinit();
+                if (v.owner) |owner| {
+                    const handle = InstanceHandle.fromInstancePtr(owner);
+                    const inner = handle.lock();
+                    defer inner.unlock();
+                    inner.unrefStrong();
+                }
+            },
+            .err => |v| {
+                for (self.callbacks.items) |cb| cb.on_error(v.@"export", cb.data);
+                self.callbacks.clearAndFree(self.allocator);
+                v.@"export".deinit();
+                if (v.owner) |owner| {
+                    const handle = InstanceHandle.fromInstancePtr(owner);
+                    const inner = handle.lock();
+                    defer inner.unlock();
+                    inner.unrefStrong();
+                }
+            },
+            .loaded => |v| {
+                std.debug.assert(self.callbacks.items.len == 0);
+                self.callbacks.clearAndFree(self.allocator);
+                v.info.unref();
+            },
         }
         self.handle.unref();
     }
@@ -97,28 +119,30 @@ const ModuleInfo = struct {
     fn appendCallback(self: *ModuleInfo, callback: Callback) Allocator.Error!void {
         switch (self.status) {
             .unloaded => try self.callbacks.append(self.allocator, callback),
-            .loaded => callback.on_success(self.info.?, callback.data),
-            .err => {
-                std.debug.assert(self.info == null);
-                callback.on_error(self.@"export", callback.data);
-            },
+            .loaded => |v| callback.on_success(v.info, callback.data),
+            .err => |v| callback.on_error(v.@"export", callback.data),
         }
     }
 
     pub fn signalError(self: *ModuleInfo) void {
-        std.debug.assert(self.status == .unloaded);
-        self.status = .err;
-        while (self.callbacks.pop()) |callback| {
-            callback.on_error(self.@"export", callback.data);
-        }
+        const status = self.status.unloaded;
+        self.status = .{ .err = .{ .@"export" = status.@"export", .owner = status.owner } };
+        while (self.callbacks.pop()) |cb| cb.on_error(status.@"export", cb.data);
     }
 
     pub fn signalSuccess(self: *ModuleInfo, info: *const ProxyModule.Info) void {
-        std.debug.assert(self.status == .unloaded);
-        self.status = .loaded;
-        while (self.callbacks.pop()) |callback| {
-            callback.on_success(info, callback.data);
+        const status = self.status.unloaded;
+        status.@"export".deinit();
+        if (status.owner) |owner| {
+            const handle = InstanceHandle.fromInstancePtr(owner);
+            const inner = handle.lock();
+            defer inner.unlock();
+            inner.unrefStrong();
         }
+
+        info.ref();
+        self.status = .{ .loaded = .{ .info = info } };
+        while (self.callbacks.pop()) |cb| cb.on_success(info, cb.data);
     }
 };
 
@@ -225,7 +249,7 @@ const LoadGraph = struct {
             }
 
             // Check that all imported symbols are already exposed, or will be exposed.
-            for (info.@"export".getSymbolImports()) |imp| {
+            for (info.status.unloaded.@"export".getSymbolImports()) |imp| {
                 const imp_name = std.mem.span(imp.name);
                 const imp_ns = std.mem.span(imp.namespace);
                 const imp_ver = Version.initC(imp.version);
@@ -255,7 +279,7 @@ const LoadGraph = struct {
             }
 
             // Check that no exported symbols are already exposed.
-            for (info.@"export".getSymbolExports()) |e| {
+            for (info.status.unloaded.@"export".getSymbolExports()) |e| {
                 const e_name = std.mem.span(e.name);
                 const e_ns = std.mem.span(e.namespace);
                 if (sys.getSymbol(e_name, e_ns) != null) {
@@ -269,7 +293,7 @@ const LoadGraph = struct {
                     continue :check;
                 }
             }
-            for (info.@"export".getDynamicSymbolExports()) |e| {
+            for (info.status.unloaded.@"export".getDynamicSymbolExports()) |e| {
                 const e_name = std.mem.span(e.name);
                 const e_ns = std.mem.span(e.namespace);
                 if (sys.getSymbol(e_name, e_ns) != null) {
@@ -311,7 +335,7 @@ const LoadGraph = struct {
                 info.signalError();
             }
 
-            for (info.@"export".getSymbolImports()) |imp| {
+            for (info.status.unloaded.@"export".getSymbolImports()) |imp| {
                 const i_name = std.mem.span(imp.name);
                 const i_namespace = std.mem.span(imp.namespace);
                 const i_version = Version.initC(imp.version);
@@ -371,16 +395,8 @@ pub fn init(context: *Context) !ProxyModule.LoadingSet {
     errdefer arena.deinit();
     const allocator = arena.allocator();
 
-    const module_load_path = try OwnedPathUnmanaged.initPath(
-        allocator,
-        sys.tmp_dir.path.asPath(),
-    );
     const set = try allocator.create(Self);
-    set.* = .{
-        .arena = undefined,
-        .context = context,
-        .module_load_path = module_load_path,
-    };
+    set.* = .{ .arena = undefined, .context = context };
     set.arena = arena;
 
     return set.asProxySet();
@@ -438,7 +454,7 @@ fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
 }
 
 fn addModuleInfo(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
-    const name = try self.cacheString(module_info.@"export".getName());
+    const name = try self.cacheString(module_info.status.unloaded.@"export".getName());
     try self.modules.put(self.arena.allocator(), name, module_info);
 }
 
@@ -856,11 +872,7 @@ fn addModulesFromPath(
     ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
 ) !void {
-    const module_handle = try ModuleHandle.initPath(
-        self.context.allocator,
-        path,
-        self.module_load_path.asPath(),
-    );
+    const module_handle = try ModuleHandle.initPath(self.context.allocator, path);
     defer module_handle.unref();
     try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
 }
@@ -986,7 +998,10 @@ const LoadOp = FSMFuture(struct {
             const dep_name = dep_node.module;
             const dep_info = set.getModuleInfo(dep_name).?;
             var status = dep_info.status;
-            if (dep_node.fut == null) status = .err;
+            if (dep_node.fut == null) {
+                const unloaded = status.unloaded;
+                status = .{ .err = .{ .@"export" = unloaded.@"export", .owner = unloaded.owner } };
+            }
 
             switch (status) {
                 .err => {
@@ -1027,11 +1042,11 @@ const LoadOp = FSMFuture(struct {
             break :blk self.load_graph.dependency_tree.nodePtr(self.node_id).?;
         };
         const info = set.getModuleInfo(node.module).?;
-        self.name = std.mem.span(info.@"export".name);
+        self.name = std.mem.span(info.status.unloaded.@"export".name);
         set.logTrace("loading instance, instance='{s}'", .{self.name}, @src());
 
         // Recheck that all dependencies could be loaded.
-        for (info.@"export".getSymbolImports()) |i| {
+        for (info.status.unloaded.@"export".getSymbolImports()) |i| {
             const i_name = std.mem.span(i.name);
             const i_namespace = std.mem.span(i.namespace);
             const i_version = Version.initC(i.version);
@@ -1046,7 +1061,7 @@ const LoadOp = FSMFuture(struct {
         self.instance_future = InstanceHandle.InitExportedOp.init(.{
             .sys = sys,
             .set = set.asProxySet(),
-            .@"export" = info.@"export",
+            .@"export" = info.status.unloaded.@"export",
             .handle = info.handle,
             .err = &self.err,
         });

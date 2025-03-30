@@ -710,13 +710,15 @@ pub const Builder = struct {
     ) Builder {
         const Result = Fut.Result;
         const T: type = switch (@typeInfo(Result)) {
-            .error_union => |x| x.payload,
+            .error_union => |x| blk: {
+                const payload = x.payload;
+                if (@sizeOf(payload) == 0) break :blk payload;
+                const info = @typeInfo(payload);
+                std.debug.assert(payload == *info.pointer.child);
+                break :blk info.pointer.child;
+            },
             else => Result,
         };
-        if (@sizeOf(T) != 0) {
-            std.debug.assert(@typeInfo(T).pointer.size == .one);
-            std.debug.assert(@typeInfo(T).pointer.is_const == false);
-        }
         const Wrapper = struct {
             fn wrapInit(
                 ctx: *const Module.OpaqueInstance,
@@ -752,8 +754,8 @@ pub const Builder = struct {
                     const f: fn (*const Module.OpaqueInstance) void = deinitFn;
                     f(ctx);
                 } else {
-                    const f: fn (*const Module.OpaqueInstance, T) void = deinitFn;
-                    const state: T = @alignCast(@ptrCast(data));
+                    const f: fn (*const Module.OpaqueInstance, *T) void = deinitFn;
+                    const state: *T = @alignCast(@ptrCast(data));
                     f(ctx, state);
                 }
             }

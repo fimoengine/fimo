@@ -373,7 +373,7 @@ pub fn init(
 
     const op = node.data.state.notify();
     std.debug.assert(op == .enqueue);
-    node.data.enqueue();
+    node.data.enqueueAndIncreaseCount();
 
     const future = ProxyAsync.ExternFuture(*@This(), anyopaque){
         .data = &node.data,
@@ -479,6 +479,21 @@ fn deinitPublic(self_ptr: **Self) callconv(.c) void {
     self.unref();
 }
 
+fn enqueueAndIncreaseCount(self: *Self) void {
+    self.sys.mutex.lock();
+    defer self.sys.mutex.unlock();
+    self.sys.enqueued_tasks += 1;
+    self.sys.queue.append(self.asNode());
+    self.sys.cvar.signal();
+}
+
+fn decreaseCount(self: *Self) void {
+    self.sys.mutex.lock();
+    defer self.sys.mutex.unlock();
+    self.sys.enqueued_tasks -= 1;
+    // No signal is necessary, as it is only called by the event loop.
+}
+
 fn enqueue(self: *Self) void {
     self.sys.mutex.lock();
     defer self.sys.mutex.unlock();
@@ -504,6 +519,7 @@ pub fn poll(self: *Self) void {
             if (self.cleanup_data_fn) |f| f(self.data);
             if (detached) if (self.cleanup_result_fn) |f| f(self.result);
             self.state.wake();
+            self.decreaseCount();
             self.unref();
         },
         .enqueue => self.enqueue(),

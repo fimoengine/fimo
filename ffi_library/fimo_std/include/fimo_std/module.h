@@ -1130,9 +1130,10 @@ typedef struct FimoModuleVTableV0 {
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
     FimoResult (*namespace_exists)(void *ctx, const char *ns, bool *exists);
-    /// Unloads all unused instances.
+    /// Marks all instances as unloadable.
     ///
-    /// After calling this function, all unreferenced instances are unloaded.
+    /// Tries to unload all instances that are not referenced by any other modules. If the instance is
+    /// still referenced, this will mark the instance as unloadable and enqueue it for unloading.
     FimoResult (*prune_instances)(void *ctx);
     /// Queries the info of a module parameter.
     ///
