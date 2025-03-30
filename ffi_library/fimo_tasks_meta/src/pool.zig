@@ -69,10 +69,9 @@ pub const Worker = enum(usize) {
 
 /// A stack size.
 pub const StackSize = enum(usize) {
-    _,
-
     /// Sentinel for the default stack size of a worker pool.
-    pub const default: StackSize = fromInt(0);
+    default = 0,
+    _,
 
     /// Constructs a new size from an integer.
     pub fn fromInt(size: usize) StackSize {
@@ -164,9 +163,12 @@ pub const Pool = extern struct {
         var err: ?AnyError = null;
         defer if (err) |e| e.deinit();
 
-        const cfg = Config{ .is_queryable = true };
+        const cfg = Config{ .is_queryable = true, .worker_count = 4 };
         const pool = try Pool.init(&ctx, &cfg, &err);
-        defer pool.unref();
+        defer {
+            pool.requestClose();
+            pool.unref();
+        }
         const pool_id = pool.id();
 
         const query = try Pool.queryAll(&ctx, &err);
@@ -319,6 +321,16 @@ pub const Config = extern struct {
         /// A value of `0` indicates no upper limit.
         max_allocated: usize = 0,
     };
+
+    /// Returns the label of the pool.
+    pub fn label(self: *const @This()) []const u8 {
+        return if (self.label_) |l| l[0..self.label_len] else "<unlabelled>";
+    }
+
+    /// Returns the stack configurations of the pool.
+    pub fn stacks(self: *const @This()) []const StackConfig {
+        return if (self.stacks_len != 0) self.stacks_[0..self.stacks_len] else &.{};
+    }
 };
 
 /// A query of the available worker pools.

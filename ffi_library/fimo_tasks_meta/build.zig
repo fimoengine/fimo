@@ -64,19 +64,28 @@ pub fn build(b: *std.Build) void {
     // Test
     // ----------------------------------------------------
 
-    const test_module = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    test_module.root_module.addImport("fimo_std", fimo_std);
-    test_module.root_module.addImport("c", module_c.createModule());
-    const run_lib_unit_tests = b.addRunArtifact(test_module);
+    const modules = b.option(
+        std.Build.LazyPath,
+        "modules",
+        "Path to the modules for testing",
+    );
+    if (modules) |mod| {
+        const test_module = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/root.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        test_module.root_module.addImport("fimo_std", fimo_std);
+        test_module.root_module.addImport("c", module_c.createModule());
+        const run_lib_unit_tests = b.addRunArtifact(test_module);
+        run_lib_unit_tests.has_side_effects = true;
+        run_lib_unit_tests.setCwd(mod);
 
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+        const test_step = b.step("test", "Run tests");
+        test_step.dependOn(&run_lib_unit_tests.step);
+    }
 
     // ----------------------------------------------------
     // Documentation

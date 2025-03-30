@@ -25,7 +25,7 @@ pub const Entry = extern struct {
     },
     payload: extern union {
         abort_on_error: bool,
-        min_stack_size: StackSize,
+        set_min_stack_size: StackSize,
         select_worker: Worker,
         select_any_worker: void,
         enqueue_task: *OpaqueTask,
@@ -146,8 +146,8 @@ pub fn CommandBuffer(T: type) type {
         state: T,
 
         /// Returns the label of the command buffer.
-        pub fn label(self: *const @This()) ?[]const u8 {
-            return if (self.label_) |l| l[0..self.label_len] else null;
+        pub fn label(self: *const @This()) []const u8 {
+            return if (self.label_) |l| l[0..self.label_len] else "<unlabelled>";
         }
 
         /// Returns the entries of the command buffer.

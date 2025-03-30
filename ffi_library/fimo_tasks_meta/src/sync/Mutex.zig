@@ -229,6 +229,7 @@ const BargingLock = extern struct {
                 }
             };
             _ = ParkingLot.unparkOne(provider, self, Callback{ .ptr = self }, Callback.f);
+            return;
         }
     }
 

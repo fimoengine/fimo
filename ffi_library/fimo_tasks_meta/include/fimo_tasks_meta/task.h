@@ -40,7 +40,7 @@ typedef struct FimoTasksMeta_Task {
 /// Returns the id of the current task.
 typedef bool(*FimoTasksMeta_task_id)(FimoTasksMeta_TaskId *id);
 
-/// Yields the current task back to the scheduler of the worker pool.
+/// Yields the current task or thread back to the scheduler.
 typedef void(*FimoTasksMeta_yield)();
 
 /// Aborts the current task.

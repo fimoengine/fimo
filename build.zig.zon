@@ -21,6 +21,9 @@
         .fimo_python = .{
             .path = "modules/fimo_python",
         },
+        .fimo_tasks = .{
+            .path = "modules/fimo_tasks",
+        },
     },
     .fingerprint = 0x7551ee4fd1f40ebd,
     .paths = .{
