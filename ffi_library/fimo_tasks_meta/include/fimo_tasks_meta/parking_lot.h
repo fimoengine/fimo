@@ -118,7 +118,8 @@ typedef FimoTasksMeta_ParkingLotParkResult(*FimoTasksMeta_parking_lot_park)(
 /// it is called while the queue is unlocked, it can be used to perform additional operations, as
 /// long as `park` or `parkMultiple` is not called recursively.
 typedef FimoTasksMeta_ParkingLotParkMultipleResult(*FimoTasksMeta_parking_lot_park_multiple)(
-    const void *key,
+    const void * const *keys,
+    FimoUSize key_count,
     void *validation_data,
     bool(*validation)(void *data, FimoUSize key_index),
     void *before_sleep_data,

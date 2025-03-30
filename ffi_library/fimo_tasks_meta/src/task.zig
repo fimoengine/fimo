@@ -64,8 +64,8 @@ pub fn Task(comptime T: type) type {
         state: T,
 
         /// Returns the label of the task.
-        pub fn label(self: *const @This()) ?[]const u8 {
-            return if (self.label_) |l| l[0..self.label_len] else null;
+        pub fn label(self: *const @This()) []const u8 {
+            return if (self.label_) |l| l[0..self.label_len] else "<unlabelled>";
         }
 
         /// Runs the completion and deinit routines of the task.
@@ -80,7 +80,7 @@ pub fn Task(comptime T: type) type {
             if (self.on_deinit) |f| f(self);
         }
 
-        /// Yields the current task back to the scheduler of the worker pool.
+        /// Yields the current task or thread back to the scheduler.
         pub fn yieldCurrent(provider: anytype) void {
             const sym = symbols.yield.requestFrom(provider);
             sym();
