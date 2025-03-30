@@ -496,7 +496,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
         }
 
         /// Returns the instance state.
-        pub fn state(self: *const @This()) *const Self.State {
+        pub fn state(self: *const @This()) *Self.State {
             return if (comptime @sizeOf(Self.State) == 0)
                 self.state_ orelse &Self.State{}
             else
@@ -1402,9 +1402,10 @@ pub fn namespaceExists(
     return exists;
 }
 
-/// Unloads all unused instances.
+/// Marks all instances as unloadable.
 ///
-/// After calling this function, all unreferenced instances are unloaded.
+/// Tries to unload all instances that are not referenced by any other modules. If the instance is
+/// still referenced, this will mark the instance as unloadable and enqueue it for unloading.
 pub fn pruneInstances(
     self: Module,
     err: *?AnyError,

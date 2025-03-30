@@ -719,10 +719,14 @@ pub fn wouldTrace(self: *const Tracing, metadata: *const ProxyTracing.Metadata) 
 /// Upon registration, the current thread is assigned a new tracing call stack.
 pub fn registerThread(self: *Tracing) void {
     if (!self.isEnabled()) return;
-    if (self.thread_data.get() != null) @panic(@errorName(error.ThreadRegistered));
 
-    const data = ThreadData.init(self);
-    self.thread_data.set(data) catch |err| @panic(@errorName(err));
+    if (self.thread_data.get()) |data| {
+        data.ref_count += 1;
+        return;
+    } else {
+        const data = ThreadData.init(self);
+        self.thread_data.set(data) catch |err| @panic(@errorName(err));
+    }
 }
 
 /// Tries to unregister the current thread from the subsystem.
@@ -733,6 +737,9 @@ pub fn unregisterThread(self: *Tracing) void {
 
     const data = self.thread_data.get();
     if (data) |d| {
+        d.ref_count -= 1;
+        if (d.ref_count > 0) return;
+
         d.deinit();
         self.thread_data.set(null) catch |err| @panic(@errorName(err));
     } else @panic(@errorName(error.ThreadNotRegistered));
@@ -749,6 +756,7 @@ pub fn flush(self: *const Tracing) void {
 const ThreadData = struct {
     call_stack: *CallStack,
     owner: *Tracing,
+    ref_count: usize = 1,
 
     fn init(owner: *Tracing) *ThreadData {
         const data = owner.allocator.create(

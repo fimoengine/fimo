@@ -268,14 +268,16 @@ pub const Inner = struct {
         return self.strong_count == 0 and self.dependents_count == 0;
     }
 
-    fn unloadRequested(self: *const Inner) bool {
-        return self.unload_requested;
-    }
-
-    fn requestUnload(self: *Inner, waiter: ProxyAsync.Waker) enum { noop, wait, unload } {
-        if (self.unload_requested or self.isDetached()) return .noop;
+    pub fn enqueueUnload(self: *Inner) !void {
+        if (self.unload_requested or self.isDetached()) return;
         self.unload_requested = true;
 
+        const x = Self.fromInnerPtr(self);
+        try EnqueueUnloadOp.Data.init(x);
+    }
+
+    fn checkAsyncUnload(self: *Inner, waiter: ProxyAsync.Waker) enum { noop, wait, unload } {
+        if (self.isDetached()) return .noop;
         std.debug.assert(self.unload_waiter == null);
         if (self.canUnload()) return .unload;
 
@@ -285,7 +287,7 @@ pub const Inner = struct {
 
     fn unblockUnload(self: *Inner) void {
         std.debug.assert(!self.isDetached());
-        if (!self.unloadRequested()) return;
+        if (!self.unload_requested) return;
         if (!self.canUnload()) return;
 
         if (self.unload_waiter) |waiter| {
@@ -811,29 +813,29 @@ const param_data_vtable = ProxyModule.OpaqueParameterData.VTable{
 // Info Futures
 // ----------------------------------------------------
 
-const InfoRequestUnloadOp = FSMFuture(struct {
+const EnqueueUnloadOp = FSMFuture(struct {
     handle: *const Self,
     ret: void = undefined,
 
     pub const __no_abort = true;
 
-    fn init(handle: *const Self) void {
+    fn init(handle: *const Self) !void {
         handle.sys.logTrace(
-            "requesting unload of instance, instance='{s}'",
+            "enqueueing unload of instance, instance='{s}'",
             .{handle.info.name},
             @src(),
         );
         handle.ref();
 
         const context = handle.sys.asContext();
-        const f = InfoRequestUnloadOp.init(@This(){
+        const f = EnqueueUnloadOp.init(@This(){
             .handle = handle,
         }).intoFuture();
-        var enqueued = Async.Task.initFuture(
+        var enqueued = try Async.Task.initFuture(
             @TypeOf(f),
             &context.@"async".sys,
             &f,
-        ) catch |e| @panic(@errorName(e));
+        );
 
         // Detaches the future.
         enqueued.deinit();
@@ -849,14 +851,32 @@ const InfoRequestUnloadOp = FSMFuture(struct {
     }
 
     pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+        self.handle.logTrace(
+            "attempting to unload instance, instance=`{s}`",
+            .{self.handle.info.name},
+            @src(),
+        );
+
         const inner = self.handle.lock();
         defer inner.unlock();
-        switch (inner.requestUnload(waker)) {
+        switch (inner.checkAsyncUnload(waker)) {
             .noop => {
+                self.handle.logTrace(
+                    "skipping unload, already unloaded, instance=`{s}`",
+                    .{self.handle.info.name},
+                    @src(),
+                );
                 self.ret = {};
                 return .ret;
             },
-            .wait => return .yield,
+            .wait => {
+                self.handle.logTrace(
+                    "unload blocked, instance=`{s}`",
+                    .{self.handle.info.name},
+                    @src(),
+                );
+                return .yield;
+            },
             .unload => return .next,
         }
     }
@@ -872,6 +892,12 @@ const InfoRequestUnloadOp = FSMFuture(struct {
         const sys = self.handle.sys;
         sys.lock();
         defer sys.unlock();
+
+        self.handle.logTrace(
+            "unloading instance, instance=`{s}`",
+            .{self.handle.info.name},
+            @src(),
+        );
 
         const inner = self.handle.lock();
         sys.removeInstance(inner) catch |err| @panic(@errorName(err));
@@ -896,7 +922,9 @@ const InfoVTableImpl = struct {
     }
     fn markUnloadable(info: *const ProxyModule.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
-        InfoRequestUnloadOp.Data.init(x);
+        const inner = x.lock();
+        defer inner.unlock();
+        inner.enqueueUnload() catch |e| @panic(@errorName(e));
     }
     fn isLoaded(info: *const ProxyModule.Info) callconv(.C) bool {
         const x = Self.fromInfoPtr(info);
@@ -931,10 +959,6 @@ const info_vtable = ProxyModule.Info.VTable{
 // ----------------------------------------------------
 // Instance Futures
 // ----------------------------------------------------
-
-comptime {
-    _ = InitExportedOp;
-}
 
 pub const InitExportedOp = FSMFuture(struct {
     /// The state machine is split up into the following states:

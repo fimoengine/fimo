@@ -135,12 +135,12 @@ pub fn queryNamespace(self: *Self, namespace: []const u8) bool {
     return self.sys.getNamespace(namespace) != null;
 }
 
-/// Unloads all unreferenced instances.
+/// Marks all instances as unloadable.
 pub fn pruneInstances(self: *Self) System.SystemError!void {
     self.logTrace("pruning instances", .{}, @src());
     self.sys.lock();
     defer self.sys.unlock();
-    try self.sys.cleanupLooseInstances();
+    try self.sys.pruneInstances();
 }
 
 /// Queries the info of a module parameter.

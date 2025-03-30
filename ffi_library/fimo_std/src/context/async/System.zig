@@ -13,6 +13,7 @@ const Self = @This();
 allocator: Allocator,
 mutex: Mutex = .{},
 cvar: Condition = .{},
+enqueued_tasks: usize = 0,
 queue: Task.TaskQueue = .{},
 running: bool = false,
 should_quit: bool = false,
@@ -24,6 +25,7 @@ pub fn init(ctx: *Context) !Self {
 pub fn deinit(self: *Self) void {
     self.mutex.lock();
     defer self.mutex.unlock();
+    std.debug.assert(self.enqueued_tasks == 0);
     std.debug.assert(self.queue.len == 0);
     std.debug.assert(!self.running);
 }
@@ -64,8 +66,6 @@ pub fn startEventLoopThread(self: *Self) !Thread {
             this.asContext().ref();
             defer this.asContext().unref();
 
-            this.asContext().tracing.registerThread();
-            defer this.asContext().tracing.unregisterThread();
             this.executorEventLoop();
         }
     }.f;
@@ -83,10 +83,13 @@ pub fn stopEventLoop(self: *Self) void {
 }
 
 fn executorEventLoop(self: *Self) void {
+    self.asContext().tracing.registerThread();
+    defer self.asContext().tracing.unregisterThread();
+
     while (true) {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.queue.len == 0 and self.should_quit) break;
+        if (self.enqueued_tasks == 0 and self.should_quit) break;
         const task = self.queue.popFirst() orelse {
             self.cvar.wait(&self.mutex);
             continue;

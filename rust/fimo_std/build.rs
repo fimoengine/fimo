@@ -13,7 +13,7 @@ fn main() {
     println!("cargo:rerun-if-changed=ffi");
     println!("cargo:rerun-if-changed={}", include_dir.display());
     #[cfg(windows)]
-    println!("cargo:rustc-link-lib=dylib=Pathcch");
+    println!("cargo:rustc-link-lib=dylib=advapi32");
 
     let bindings = bindgen::builder()
         .header("wrapper.h")

@@ -159,7 +159,7 @@ pub const Duration = struct {
 
     /// Extracts the number of nanoseconds.
     pub fn nanos(self: Duration) Nanos {
-        const seconds: Nanos = @intCast(self.secs * nanos_per_sec);
+        const seconds = @as(Nanos, @intCast(self.secs)) * nanos_per_sec;
         return seconds + self.sub_sec_nanos;
     }
 
@@ -175,7 +175,11 @@ pub const Duration = struct {
     /// Adds two durations.
     pub fn add(lhs: Duration, rhs: Duration) error{Overflow}!Duration {
         var seconds = try std.math.add(Seconds, lhs.secs, rhs.secs);
-        var nanoseconds = try std.math.add(SubSecondNanos, lhs.sub_sec_nanos, rhs.sub_sec_nanos);
+        var nanoseconds = try std.math.add(
+            u32,
+            @intCast(lhs.sub_sec_nanos),
+            @intCast(rhs.sub_sec_nanos),
+        );
         if (nanoseconds >= nanos_per_sec) {
             nanoseconds -= nanos_per_sec;
             seconds = try std.math.add(Seconds, seconds, 1);
@@ -183,7 +187,7 @@ pub const Duration = struct {
 
         return Duration{
             .secs = seconds,
-            .sub_sec_nanos = nanoseconds,
+            .sub_sec_nanos = @intCast(nanoseconds),
         };
     }
 
@@ -201,7 +205,7 @@ pub const Duration = struct {
             nanoseconds -= rhs.sub_sec_nanos;
         } else {
             seconds = try std.math.sub(Seconds, seconds, 1);
-            nanoseconds += nanos_per_millis - rhs.sub_sec_nanos;
+            nanoseconds += nanos_per_sec - rhs.sub_sec_nanos;
         }
 
         return Duration{

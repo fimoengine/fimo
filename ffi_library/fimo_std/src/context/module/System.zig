@@ -23,7 +23,6 @@ allocator: Allocator,
 arena: ArenaAllocator,
 profile: ProxyModule.Profile,
 features: [feature_count]ProxyModule.FeatureStatus,
-tmp_dir: tmp_path.TmpDirUnmanaged,
 state: enum { idle, loading_set } = .idle,
 loading_set_waiters: std.ArrayListUnmanaged(LoadingSetWaiter) = .{},
 dep_graph: graph.GraphUnmanaged(*const ProxyModule.OpaqueInstance, void),
@@ -42,6 +41,7 @@ pub const SystemError = error{
     NotADependency,
     CyclicDependency,
     LoadingInProcess,
+    EnqueueError,
 } || Allocator.Error;
 
 pub const SystemInitError = error{
@@ -110,33 +110,22 @@ pub fn init(
         );
     }
 
-    var module = Self{
+    return Self{
         .allocator = ctx.allocator,
         .arena = ArenaAllocator.init(ctx.allocator),
         .profile = profile,
         .features = feature_status,
-        .tmp_dir = undefined,
         .dep_graph = graph.GraphUnmanaged(
             *const ProxyModule.OpaqueInstance,
             void,
         ).init(null, null),
     };
-
-    module.tmp_dir = try tmp_path.TmpDirUnmanaged.init(module.allocator, "fimo_modules_");
-    ctx.tracing.emitDebugSimple(
-        "module subsystem tmp dir: {s}",
-        .{module.tmp_dir.path.raw},
-        @src(),
-    );
-
-    return module;
 }
 
 pub fn deinit(self: *Self) void {
     std.debug.assert(self.state == .idle);
     std.debug.assert(self.loading_set_waiters.items.len == 0);
 
-    self.tmp_dir.deinit(self.allocator);
     self.loading_set_waiters.deinit(self.allocator);
     self.dep_graph.deinit(self.allocator);
 
@@ -353,10 +342,15 @@ pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *Instan
     inner.removeDependency(other) catch unreachable;
 }
 
-pub fn cleanupLooseInstances(self: *Self) SystemError!void {
-    var it = self.dep_graph.externalsIterator(.incoming);
-    while (it.next()) |entry| {
-        const instance = entry.data_ptr.*;
+pub fn pruneInstances(self: *Self) SystemError!void {
+    const nodes = self.dep_graph.sortTopological(self.allocator, .incoming) catch |err| switch (err) {
+        Allocator.Error.OutOfMemory => return Allocator.Error.OutOfMemory,
+        else => unreachable,
+    };
+    defer self.allocator.free(nodes);
+
+    for (nodes) |node| {
+        const instance = self.dep_graph.nodePtr(node).?.*;
         const handle = InstanceHandle.fromInstancePtr(instance);
         if (handle.type != .regular) continue;
 
@@ -364,7 +358,10 @@ pub fn cleanupLooseInstances(self: *Self) SystemError!void {
         var unlock_inner = true;
         defer if (unlock_inner) inner.unlock();
 
-        if (!inner.canUnload()) continue;
+        if (!inner.canUnload()) {
+            inner.enqueueUnload() catch return error.EnqueueError;
+            continue;
+        }
         self.logTrace(
             "unloading unused instance, instance='{s}'",
             .{instance.info.name},
@@ -374,9 +371,6 @@ pub fn cleanupLooseInstances(self: *Self) SystemError!void {
         inner.stop(self);
         inner.deinit();
         unlock_inner = false;
-
-        // Rebuild the iterator.
-        it = self.dep_graph.externalsIterator(.incoming);
     }
 }
 
