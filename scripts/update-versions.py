@@ -32,7 +32,7 @@ def update_zig_version(path, major, minor, patch, pre, build):
     with open(path, 'w') as f:
         f.write(content_new)
 
-def fimo_std_version(path, major, minor, patch, pre, build):
+def fimo_version(path, major, minor, patch, pre, build):
     version = f'.major = {major}, .minor = {minor}, .patch = {patch}'
     if pre is not None:
         version = f'{version}, .pre = "{pre}"'
@@ -41,8 +41,8 @@ def fimo_std_version(path, major, minor, patch, pre, build):
 
     with open(path, 'r') as f:
         content = f.read()
-        pattern = "^const fimo_version: std.SemanticVersion = .{.*};"
-        replacement = f"const fimo_version: std.SemanticVersion = .{{ {version} }};"
+        pattern = "^pub const fimo_version: std.SemanticVersion = .{.*};"
+        replacement = f"pub const fimo_version: std.SemanticVersion = .{{ {version} }};"
         content_new = re.sub(pattern, replacement, content, flags = re.M)
 
     with open(path, 'w') as f:
@@ -79,8 +79,8 @@ if __name__ == "__main__":
 
     update_rust_version(root_path.joinpath("Cargo.toml"), major, minor, patch, pre, build)
     update_zig_version(root_path.joinpath("build.zig.zon"), major, minor, patch, pre, build)
-    fimo_std_version(root_path.joinpath("ffi_library/fimo_std/build.zig"), major, minor, patch, pre, build)
-    update_version_recursive(root_path.joinpath("ffi_library"), major, minor, patch, pre, build)
+    fimo_version(root_path.joinpath("tools/build-internals/build.zig"), major, minor, patch, pre, build)
+    update_version_recursive(root_path.joinpath("pkgs"), major, minor, patch, pre, build)
     update_version_recursive(root_path.joinpath("modules"), major, minor, patch, pre, build)
     update_version_recursive(root_path.joinpath("rust"), major, minor, patch, pre, build)
     update_version_recursive(root_path.joinpath("src"), major, minor, patch, pre, build)

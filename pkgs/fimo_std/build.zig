@@ -3,9 +3,6 @@ const builtin = @import("builtin");
 
 const build_internals = @import("tools/build-internals");
 
-/// Must match the `version` in `build.zig.zon`.
-const fimo_version: std.SemanticVersion = .{ .major = 0, .minor = 2, .patch = 0, .pre = "dev" };
-
 pub fn configure(b: *build_internals.FimoBuild) void {
     // Generate additional build files.
     const wf = b.build.addWriteFiles();
@@ -131,18 +128,18 @@ fn generateVersion(
         \\ #define FIMO_CONTEXT_VERSION_BUILD_LEN {}
         \\
     , .{
-        fimo_version.major,
-        fimo_version.minor,
-        fimo_version.patch,
-        fimo_version.pre orelse "",
-        (fimo_version.pre orelse "").len,
-        fimo_version.build orelse "",
-        (fimo_version.build orelse "").len,
+        build_internals.fimo_version.major,
+        build_internals.fimo_version.minor,
+        build_internals.fimo_version.patch,
+        build_internals.fimo_version.pre orelse "",
+        (build_internals.fimo_version.pre orelse "").len,
+        build_internals.fimo_version.build orelse "",
+        (build_internals.fimo_version.build orelse "").len,
     });
     _ = wf.add("include/fimo_std/impl/context_version_.h", header_contents);
 
     const options = b.addOptions();
-    options.addOption(std.SemanticVersion, "version", fimo_version);
+    options.addOption(std.SemanticVersion, "version", build_internals.fimo_version);
     return options.createModule();
 }
 

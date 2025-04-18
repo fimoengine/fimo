@@ -13,6 +13,8 @@ pub fn build(b: *Build) void {
     });
 }
 
+pub const fimo_version: std.SemanticVersion = .{ .major = 0, .minor = 2, .patch = 0, .pre = "dev" };
+
 pub const FimoBuild = struct {
     build: *Build,
     build_dep: *Build.Dependency,
