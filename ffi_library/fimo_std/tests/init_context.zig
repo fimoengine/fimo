@@ -1,5 +1,4 @@
 const fimo_std = @import("fimo_std");
-
 const Context = fimo_std.Context;
 const Tracing = Context.Tracing;
 

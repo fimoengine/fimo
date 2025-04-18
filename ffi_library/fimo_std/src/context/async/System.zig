@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const Condition = Thread.Condition;
+const DoublyLinkedList = std.DoublyLinkedList;
 
 const Context = @import("../../context.zig");
 const Async = @import("../async.zig");
@@ -14,7 +15,7 @@ allocator: Allocator,
 mutex: Mutex = .{},
 cvar: Condition = .{},
 enqueued_tasks: usize = 0,
-queue: Task.TaskQueue = .{},
+queue: DoublyLinkedList = .{},
 running: bool = false,
 should_quit: bool = false,
 
@@ -26,7 +27,7 @@ pub fn deinit(self: *Self) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     std.debug.assert(self.enqueued_tasks == 0);
-    std.debug.assert(self.queue.len == 0);
+    std.debug.assert(self.queue.len() == 0);
     std.debug.assert(!self.running);
 }
 
@@ -90,13 +91,14 @@ fn executorEventLoop(self: *Self) void {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (self.enqueued_tasks == 0 and self.should_quit) break;
-        const task = self.queue.popFirst() orelse {
+        const node = self.queue.popFirst() orelse {
             self.cvar.wait(&self.mutex);
             continue;
         };
+        const task: *Task = @fieldParentPtr("node", node);
 
         self.mutex.unlock();
-        task.data.poll();
+        task.poll();
         self.mutex.lock();
     }
 

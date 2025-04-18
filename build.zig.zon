@@ -3,6 +3,21 @@
     .version = "0.2.0-dev",
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
+        .@"tools/build-internals" = .{
+            .path = "tools/build-internals",
+        },
+
+        .@"meta/fimo_std" = .{
+            .path = "ffi_library/fimo_std",
+        },
+        .@"meta/fimo_tasks_meta" = .{
+            .path = "ffi_library/fimo_tasks_meta",
+        },
+
+        .@"module/fimo_tasks" = .{
+            .path = "modules/fimo_tasks",
+        },
+
         // Zig bindings
         .fimo_std = .{
             .path = "ffi_library/fimo_std",

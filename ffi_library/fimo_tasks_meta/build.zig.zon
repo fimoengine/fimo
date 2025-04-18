@@ -2,8 +2,8 @@
     .name = .fimo_tasks_meta,
     .version = "0.2.0-dev",
     .dependencies = .{
-        .fimo_std = .{
-            .path = "../fimo_std",
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
         },
     },
     .fingerprint = 0xb354501161c950f5,

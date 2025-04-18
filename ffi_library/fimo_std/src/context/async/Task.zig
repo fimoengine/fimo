@@ -10,9 +10,6 @@ const System = @import("System.zig");
 
 const Self = @This();
 
-pub const TaskQueue = DoublyLinkedList(Self);
-const Node = TaskQueue.Node;
-
 sys: *System,
 refcount: RefCount = .{},
 call_stack: ProxyTracing.CallStack,
@@ -20,6 +17,7 @@ call_stack: ProxyTracing.CallStack,
 mutex: Mutex = .{},
 state: State = .{},
 waiter: ?ProxyAsync.Waker = null,
+node: DoublyLinkedList.Node = .{},
 
 result_size: usize,
 data: ?*anyopaque,
@@ -349,34 +347,32 @@ pub fn init(
     const call_stack = sys.asContext().tracing.createCallStack();
     errdefer call_stack.deinit();
 
-    const node = try allocator.create(Node);
-    errdefer allocator.destroy(node);
+    const self = try allocator.create(Self);
+    errdefer allocator.destroy(self);
 
-    node.* = .{
-        .data = .{
-            .sys = sys,
-            .call_stack = call_stack,
+    self.* = .{
+        .sys = sys,
+        .call_stack = call_stack,
 
-            .result_size = result_size,
-            .data = buffer_data,
-            .result = result_data,
-            .buffer = buffer,
+        .result_size = result_size,
+        .data = buffer_data,
+        .result = result_data,
+        .buffer = buffer,
 
-            .poll_fn = poll_fn,
-            .cleanup_data_fn = cleanup_data_fn,
-            .cleanup_result_fn = cleanup_result_fn,
-        },
+        .poll_fn = poll_fn,
+        .cleanup_data_fn = cleanup_data_fn,
+        .cleanup_result_fn = cleanup_result_fn,
     };
 
     // Increase the ref count for the public future.
-    node.data.ref();
+    self.ref();
 
-    const op = node.data.state.notify();
+    const op = self.state.notify();
     std.debug.assert(op == .enqueue);
-    node.data.enqueueAndIncreaseCount();
+    self.enqueueAndIncreaseCount();
 
     const future = ProxyAsync.ExternFuture(*@This(), anyopaque){
-        .data = &node.data,
+        .data = self,
         .poll_fn = &pollPublic,
         .cleanup_fn = &deinitPublic,
     };
@@ -400,13 +396,8 @@ fn unref(self: *Self) void {
     self.call_stack.deinit();
     const allocator = self.sys.allocator;
     allocator.free(self.buffer);
-    const node = self.asNode();
-    allocator.destroy(node);
+    allocator.destroy(self);
     ctx.unref();
-}
-
-fn asNode(self: *Self) *Node {
-    return @fieldParentPtr("data", self);
 }
 
 fn asWaker(self: *Self) ProxyAsync.Waker {
@@ -483,7 +474,7 @@ fn enqueueAndIncreaseCount(self: *Self) void {
     self.sys.mutex.lock();
     defer self.sys.mutex.unlock();
     self.sys.enqueued_tasks += 1;
-    self.sys.queue.append(self.asNode());
+    self.sys.queue.append(&self.node);
     self.sys.cvar.signal();
 }
 
@@ -497,7 +488,7 @@ fn decreaseCount(self: *Self) void {
 fn enqueue(self: *Self) void {
     self.sys.mutex.lock();
     defer self.sys.mutex.unlock();
-    self.sys.queue.append(self.asNode());
+    self.sys.queue.append(&self.node);
     self.sys.cvar.signal();
 }
 

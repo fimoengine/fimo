@@ -2,11 +2,8 @@
     .name = .fimo_tasks,
     .version = "0.2.0-dev",
     .dependencies = .{
-        .fimo_std = .{
-            .path = "../../ffi_library/fimo_std",
-        },
-        .fimo_tasks_meta = .{
-            .path = "../../ffi_library/fimo_tasks_meta",
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
         },
         .context = .{
             .url = "git+https://github.com/boostorg/context#boost-1.87.0",

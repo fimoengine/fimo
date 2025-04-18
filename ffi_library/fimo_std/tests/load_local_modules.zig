@@ -133,62 +133,62 @@ const C = Module.exports.Builder
     .withAuthor("fimo")
     .withLicense("MIT and Apache 2.0")
     .withParameter(.{
-    .name = "pub_pub",
-    .member_name = "pub_pub",
-    .read_group = .public,
-    .write_group = .public,
-    .default_value = .{ .u32 = 0 },
-})
+        .name = "pub_pub",
+        .member_name = "pub_pub",
+        .read_group = .public,
+        .write_group = .public,
+        .default_value = .{ .u32 = 0 },
+    })
     .withParameter(.{
-    .name = "pub_dep",
-    .member_name = "pub_dep",
-    .read_group = .public,
-    .write_group = .dependency,
-    .default_value = .{ .u32 = 1 },
-})
+        .name = "pub_dep",
+        .member_name = "pub_dep",
+        .read_group = .public,
+        .write_group = .dependency,
+        .default_value = .{ .u32 = 1 },
+    })
     .withParameter(.{
-    .name = "pub_pri",
-    .member_name = "pub_pri",
-    .read_group = .public,
-    .default_value = .{ .u32 = 2 },
-})
+        .name = "pub_pri",
+        .member_name = "pub_pri",
+        .read_group = .public,
+        .default_value = .{ .u32 = 2 },
+    })
     .withParameter(.{
-    .name = "dep_pub",
-    .member_name = "dep_pub",
-    .read_group = .dependency,
-    .write_group = .public,
-    .default_value = .{ .u32 = 3 },
-})
+        .name = "dep_pub",
+        .member_name = "dep_pub",
+        .read_group = .dependency,
+        .write_group = .public,
+        .default_value = .{ .u32 = 3 },
+    })
     .withParameter(.{
-    .name = "dep_dep",
-    .member_name = "dep_dep",
-    .read_group = .dependency,
-    .write_group = .dependency,
-    .default_value = .{ .u32 = 4 },
-})
+        .name = "dep_dep",
+        .member_name = "dep_dep",
+        .read_group = .dependency,
+        .write_group = .dependency,
+        .default_value = .{ .u32 = 4 },
+    })
     .withParameter(.{
-    .name = "dep_pri",
-    .member_name = "dep_pri",
-    .read_group = .dependency,
-    .default_value = .{ .u32 = 5 },
-})
+        .name = "dep_pri",
+        .member_name = "dep_pri",
+        .read_group = .dependency,
+        .default_value = .{ .u32 = 5 },
+    })
     .withParameter(.{
-    .name = "pri_pub",
-    .member_name = "pri_pub",
-    .write_group = .public,
-    .default_value = .{ .u32 = 6 },
-})
+        .name = "pri_pub",
+        .member_name = "pri_pub",
+        .write_group = .public,
+        .default_value = .{ .u32 = 6 },
+    })
     .withParameter(.{
-    .name = "pri_dep",
-    .member_name = "pri_dep",
-    .write_group = .dependency,
-    .default_value = .{ .u32 = 7 },
-})
+        .name = "pri_dep",
+        .member_name = "pri_dep",
+        .write_group = .dependency,
+        .default_value = .{ .u32 = 7 },
+    })
     .withParameter(.{
-    .name = "pri_pri",
-    .member_name = "pri_pri",
-    .default_value = .{ .u32 = 8 },
-})
+        .name = "pri_pri",
+        .member_name = "pri_pri",
+        .default_value = .{ .u32 = 8 },
+    })
     .withResource(.{ .name = "empty", .path = Path.init("") catch unreachable })
     .withResource(.{ .name = "a", .path = Path.init("a.bin") catch unreachable })
     .withResource(.{ .name = "b", .path = Path.init("b.txt") catch unreachable })
