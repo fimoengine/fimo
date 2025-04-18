@@ -7,8 +7,8 @@ const meta_list: []const struct {
     name: [:0]const u8,
     dep_name: [:0]const u8,
 } = &.{
-    .{ .name = "fimo_std", .dep_name = "meta/fimo_std" },
-    .{ .name = "fimo_tasks_meta", .dep_name = "meta/fimo_tasks_meta" },
+    .{ .name = "fimo_std", .dep_name = "pkg/fimo_std" },
+    .{ .name = "fimo_tasks_meta", .dep_name = "pkg/fimo_tasks_meta" },
 };
 
 const module_list: []const struct {
