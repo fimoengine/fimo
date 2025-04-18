@@ -7,36 +7,14 @@
             .path = "tools/build-internals",
         },
 
-        .@"meta/fimo_std" = .{
-            .path = "ffi_library/fimo_std",
+        .@"pkg/fimo_std" = .{
+            .path = "pkgs/fimo_std",
         },
-        .@"meta/fimo_tasks_meta" = .{
-            .path = "ffi_library/fimo_tasks_meta",
+        .@"pkg/fimo_tasks_meta" = .{
+            .path = "pkgs/fimo_tasks_meta",
         },
 
         .@"module/fimo_tasks" = .{
-            .path = "modules/fimo_tasks",
-        },
-
-        // Zig bindings
-        .fimo_std = .{
-            .path = "ffi_library/fimo_std",
-        },
-        .fimo_python_meta = .{
-            .path = "ffi_library/fimo_python_meta",
-        },
-        .fimo_tasks_meta = .{
-            .path = "ffi_library/fimo_tasks_meta",
-        },
-        // Rust bindings
-        .fimo_std_rs = .{
-            .path = "rust/fimo_std",
-        },
-        // Modules
-        .fimo_python = .{
-            .path = "modules/fimo_python",
-        },
-        .fimo_tasks = .{
             .path = "modules/fimo_tasks",
         },
     },
