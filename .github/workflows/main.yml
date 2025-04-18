@@ -30,40 +30,35 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - name: Build and test
+      - name: Test Zig
         uses: nick-fields/retry@v2
-        if: runner.os != 'Windows'
         with:
           timeout_minutes: 30
           max_attempts: 2
           shell: bash
           command: |
             if ${{ matrix.build-type == 'Release' }}; then
-              zig build --release=safe
               zig build check --release=safe
               zig build test --release=safe
             else
-              zig build
               zig build check
               zig build test
             fi
 
-      - name: Build and test
+      - name: Test Rust
         uses: nick-fields/retry@v2
-        if: runner.os == 'Windows'
         with:
           timeout_minutes: 30
           max_attempts: 2
+          shell: bash
           command: |
-            if (${{ matrix.build-type == 'Release' }}) {
-              zig build --release=safe
-              zig build check --release=safe
-              zig build test --release=safe
-            } else {
-              zig build
-              zig build check
-              zig build test
-            }
+            if ${{ matrix.build-type == 'Release' }}; then
+              cargo clippy --release
+              cargo test --release
+            else
+              cargo clippy
+              cargo test
+            fi
 
   formatting:
     name: "Cargo fmt"
