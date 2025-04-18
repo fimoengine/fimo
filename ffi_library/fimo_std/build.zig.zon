@@ -2,7 +2,11 @@
     .name = .fimo_std,
     .version = "0.2.0-dev",
     //.minimum_zig_version = "0.14.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
+        },
+    },
     .fingerprint = 0x6d5533552999aa5,
     .paths = .{
         "include",

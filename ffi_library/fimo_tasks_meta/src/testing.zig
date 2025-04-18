@@ -63,6 +63,10 @@ pub const TestContext = struct {
 };
 
 pub fn initTestContext() !TestContext {
+    comptime {
+        _ = @import("test_module");
+    }
+
     const tracing_cfg = Tracing.Config{
         .max_level = .debug,
         .subscribers = &.{Tracing.default_subscriber},
@@ -87,13 +91,10 @@ pub fn initTestContext() !TestContext {
     const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
     defer async_ctx.deinit();
 
-    const module_path = try fimo_std.path.Path.init("./fimo_tasks/module.fimo_module");
-
     const set = try Module.LoadingSet.init(ctx.module(), &err);
     defer set.unref();
 
-    try set.addModulesFromPath(
-        module_path,
+    try set.addModulesFromLocal(
         &{},
         struct {
             fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterRequest {
