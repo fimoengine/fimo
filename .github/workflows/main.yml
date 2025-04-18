@@ -8,6 +8,7 @@ env:
 jobs:
   ci:
     name: "Build and test"
+    timeout-minutes: 10
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -31,34 +32,26 @@ jobs:
           components: rustfmt, clippy
 
       - name: Test Zig
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 30
-          max_attempts: 2
-          shell: bash
-          command: |
-            if ${{ matrix.build-type == 'Release' }}; then
-              zig build check --release=safe
-              zig build test --release=safe
-            else
-              zig build check
-              zig build test
-            fi
+        shell: bash
+        run: |
+          if ${{ matrix.build-type == 'Release' }}; then
+            zig build check --release=safe
+            zig build test --release=safe
+          else
+            zig build check
+            zig build test
+          fi
 
       - name: Test Rust
-        uses: nick-fields/retry@v2
-        with:
-          timeout_minutes: 30
-          max_attempts: 2
-          shell: bash
-          command: |
-            if ${{ matrix.build-type == 'Release' }}; then
-              cargo clippy --release
-              cargo test --release
-            else
-              cargo clippy
-              cargo test
-            fi
+        shell: bash
+        run: |
+          if ${{ matrix.build-type == 'Release' }}; then
+            cargo clippy --release
+            cargo test --release
+          else
+            cargo clippy
+            cargo test
+          fi
 
   formatting:
     name: "Cargo fmt"
