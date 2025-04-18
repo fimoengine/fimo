@@ -1,6 +1,6 @@
 name: CI
 
-on: [ push, pull_request ]
+on: [push, pull_request]
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,20 +11,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-14, windows-latest, ubuntu-24.04 ]
-        build-type: [ Debug, Release ]
+        os: [macos-14, windows-latest, ubuntu-24.04]
+        build-type: [Debug, Release]
         rust:
           - nightly
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '>=3.11'
-      - run: |
-          python -m ensurepip --upgrade --default-pip
-          python -m pip install -r requirements.txt
       - uses: mlugg/setup-zig@v1
         with:
           version: master
@@ -35,21 +29,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt, clippy
-
-      - name: Install (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          echo "deb-src http://archive.ubuntu.com/ubuntu/ $(lsb_release -cs) main" | sudo tee -a /etc/apt/sources.list
-          sudo apt-get update
-          sudo apt-get build-dep python3
-          sudo apt-get install pkg-config
-          sudo apt-get install build-essential gdb lcov pkg-config \
-                libbz2-dev libffi-dev libgdbm-dev libgdbm-compat-dev liblzma-dev \
-                libncurses5-dev libreadline6-dev libsqlite3-dev libssl-dev \
-                lzma lzma-dev tk-dev uuid-dev zlib1g-dev
-      - name: Install (macOS)
-        if: runner.os == 'macOS'
-        run: brew install mpdecimal
 
       - name: Build and test
         uses: nick-fields/retry@v2
@@ -91,7 +70,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-latest, windows-latest, ubuntu-latest ]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         rust:
           - nightly
     steps:
