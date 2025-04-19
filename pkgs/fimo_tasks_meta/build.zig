@@ -44,6 +44,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
         .root_source_file = test_src.path(b, "root.zig"),
         .target = builder.graph.target,
         .optimize = builder.graph.optimize,
+        .valgrind = builder.graph.target.result.os.tag == .linux,
     });
     test_module.addImport("fimo_std", fimo_std_pkg.root_module);
     test_module.addImport("c", test_module_c.createModule());
