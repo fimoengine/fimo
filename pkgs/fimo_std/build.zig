@@ -32,7 +32,23 @@ pub fn configure(b: *build_internals.FimoBuild) void {
         .headers = headers.getDirectory(),
     });
 
-    _ = pkg.addTest(.{ .step = .{ .module = module } });
+    _ = pkg.addTest(.{ .step = .{
+        .module = blk: {
+            const t = b.build.addModule("fimo_std", .{
+                .root_source_file = b.build.path("src/root.zig"),
+                .target = b.graph.target,
+                .optimize = b.graph.optimize,
+                .valgrind = b.graph.target.result.os.tag == .linux,
+                .link_libc = true,
+                .pic = true,
+            });
+            t.addImport("context_version", context_version);
+            t.addImport("visualizers", visualizers);
+            t.addIncludePath(headers.getDirectory());
+
+            break :blk t;
+        },
+    } });
 
     const event_loop_test = b.build.addExecutable(.{
         .name = "event_loop_test",
@@ -40,6 +56,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             .target = b.graph.target,
             .optimize = b.graph.optimize,
             .root_source_file = b.build.path("tests/event_loop.zig"),
+            .valgrind = b.graph.target.result.os.tag == .linux,
         }),
     });
     event_loop_test.root_module.addImport("fimo_std", pkg.root_module);
@@ -51,6 +68,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             .target = b.graph.target,
             .optimize = b.graph.optimize,
             .root_source_file = b.build.path("tests/init_context.zig"),
+            .valgrind = b.graph.target.result.os.tag == .linux,
         }),
     });
     init_ctx_test.root_module.addImport("fimo_std", pkg.root_module);
@@ -62,6 +80,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             .target = b.graph.target,
             .optimize = b.graph.optimize,
             .root_source_file = b.build.path("tests/load_local_modules.zig"),
+            .valgrind = b.graph.target.result.os.tag == .linux,
         }),
     });
     local_modules_test.root_module.addImport("fimo_std", pkg.root_module);
