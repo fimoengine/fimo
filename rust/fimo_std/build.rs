@@ -3,6 +3,7 @@ use std::{env, path::PathBuf};
 fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     let zig_out = zigcli::Build::new("ffi")
+        .option("-Dbuild-standalone=true")
         .option("-Dbuild-static=true")
         .build();
     let lib_dir = zig_out.join("lib");

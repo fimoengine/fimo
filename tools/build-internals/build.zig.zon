@@ -1,0 +1,10 @@
+.{
+    .name = .build_internals,
+    .fingerprint = 0x3b8e9aff578fa3dd,
+    .version = "0.0.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}

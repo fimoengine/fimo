@@ -1,0 +1,23 @@
+.{
+    .name = .fimo_std,
+    .version = "0.2.0-dev",
+    //.minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
+        },
+    },
+    .fingerprint = 0x6d5533552999aa5,
+    .paths = .{
+        "include",
+        "src",
+        "tests",
+        "third_party",
+        "tools",
+        "visualizers",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE-APACHE",
+        "LICENSE-MIT",
+    },
+}

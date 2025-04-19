@@ -552,7 +552,7 @@ fn channelTest(
 
         const value_map = try std.testing.allocator.alignedAlloc(
             atomic.Value(bool),
-            atomic.cache_line,
+            .fromByteUnits(atomic.cache_line),
             num_messages,
         );
         defer std.testing.allocator.free(value_map);

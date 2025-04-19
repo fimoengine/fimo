@@ -3,25 +3,18 @@
     .version = "0.2.0-dev",
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
-        // Zig bindings
-        .fimo_std = .{
-            .path = "ffi_library/fimo_std",
+        .@"tools/build-internals" = .{
+            .path = "tools/build-internals",
         },
-        .fimo_python_meta = .{
-            .path = "ffi_library/fimo_python_meta",
+
+        .@"pkg/fimo_std" = .{
+            .path = "pkgs/fimo_std",
         },
-        .fimo_tasks_meta = .{
-            .path = "ffi_library/fimo_tasks_meta",
+        .@"pkg/fimo_tasks_meta" = .{
+            .path = "pkgs/fimo_tasks_meta",
         },
-        // Rust bindings
-        .fimo_std_rs = .{
-            .path = "rust/fimo_std",
-        },
-        // Modules
-        .fimo_python = .{
-            .path = "modules/fimo_python",
-        },
-        .fimo_tasks = .{
+
+        .@"module/fimo_tasks" = .{
             .path = "modules/fimo_tasks",
         },
     },

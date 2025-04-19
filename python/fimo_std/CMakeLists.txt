@@ -1,1 +1,0 @@
-fimo_add_python_bindings(fimo_std)

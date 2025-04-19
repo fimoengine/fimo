@@ -1,15 +1,12 @@
 .{
-    .name = .fimo_tasks,
+    .name = .fimo_tasks_meta,
     .version = "0.2.0-dev",
     .dependencies = .{
         .@"tools/build-internals" = .{
             .path = "../../tools/build-internals",
         },
-        .context = .{
-            .url = "git+https://github.com/boostorg/context#boost-1.87.0",
-            .hash = "122009893042c6626f0a48b8b9e25dc8f57fe19ed31f3955fcdbcc47cc4e92d9a3f1",
-        },
     },
+    .fingerprint = 0xb354501161c950f5,
     .paths = .{
         "build.zig",
         "build.zig.zon",

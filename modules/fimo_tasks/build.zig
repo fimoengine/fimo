@@ -1,45 +1,26 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+const build_internals = @import("tools/build-internals");
 
-    // ----------------------------------------------------
-    // fimo_std
-    // ----------------------------------------------------
-
-    const fimo_std_dep = b.dependency("fimo_std", .{
-        .target = target,
-        .optimize = optimize,
-        .@"build-static" = true,
-    });
-    const fimo_std = fimo_std_dep.module("fimo_std");
-
-    // ----------------------------------------------------
-    // fimo_python_meta
-    // ----------------------------------------------------
-
-    const fimo_tasks_meta_dep = b.dependency(
-        "fimo_tasks_meta",
-        .{ .target = target, .optimize = optimize },
-    );
-    const fimo_tasks_meta = fimo_tasks_meta_dep.module("fimo_tasks_meta");
-
-    // ----------------------------------------------------
-    // Boost context
-    // ----------------------------------------------------
+pub fn configure(builder: *build_internals.FimoBuild) void {
+    const b = builder.build;
+    const fimo_std_pkg = builder.getPackage("fimo_std");
+    const fimo_tasks_meta_pkg = builder.getPackage("fimo_tasks_meta");
 
     const context_dep = b.dependency(
         "context",
-        .{ .target = target, .optimize = optimize },
+        .{
+            .target = builder.graph.target,
+            .optimize = builder.graph.optimize,
+        },
     );
     const context_path = context_dep.path("src");
     const context = b.addLibrary(.{
         .linkage = .static,
         .name = "context",
         .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
+            .target = builder.graph.target,
+            .optimize = builder.graph.optimize,
         }),
     });
     switch (context.rootModuleTarget().cpu.arch) {
@@ -90,60 +71,40 @@ pub fn build(b: *std.Build) void {
         else => @panic("Invalid arch"),
     }
 
-    // ----------------------------------------------------
-    // Module
-    // ----------------------------------------------------
-
-    const fimo_tasks = b.addModule("fimo_tasks", .{
+    const module = b.addModule("fimo_tasks", .{
         .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .target = builder.graph.target,
+        .optimize = builder.graph.optimize,
     });
-    fimo_tasks.addImport("fimo_std", fimo_std);
-    fimo_tasks.addImport("fimo_tasks_meta", fimo_tasks_meta);
-    fimo_tasks.linkLibrary(context);
+    module.addImport("fimo_std", fimo_std_pkg.root_module);
+    module.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
+    module.linkLibrary(context);
 
-    const fimo_tasks_lib = b.addLibrary(.{
-        .linkage = .dynamic,
+    const mod = builder.addModule(.{
         .name = "fimo_tasks",
-        .root_module = fimo_tasks,
+        .root_module = module,
     });
-    b.installArtifact(fimo_tasks_lib);
 
-    const module = b.addWriteFiles();
-    b.addNamedLazyPath("module", module.getDirectory());
-    _ = module.addCopyFile(fimo_tasks_lib.getEmittedBin(), "module.fimo_module");
-    if (fimo_tasks_lib.producesPdbFile()) {
-        _ = module.addCopyFile(fimo_tasks_lib.getEmittedPdb(), "fimo_tasks.pdb");
-    }
+    _ = mod.addTest(.{
+        .name = "fimo_tasks_test",
+        .step = .{
+            .module = blk: {
+                const t = b.createModule(.{
+                    .root_source_file = b.path("src/root.zig"),
+                    .target = builder.graph.target,
+                    .optimize = builder.graph.optimize,
+                    .valgrind = builder.graph.target.result.os.tag == .linux,
+                });
+                t.addImport("fimo_std", fimo_std_pkg.root_module);
+                t.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
+                t.linkLibrary(context);
 
-    // ----------------------------------------------------
-    // Check
-    // ----------------------------------------------------
-
-    const check = b.step("check", "Check if fimo_tasks compiles");
-    check.dependOn(&fimo_tasks_lib.step);
-
-    // ----------------------------------------------------
-    // Tests
-    // ----------------------------------------------------
-
-    const modules = b.option(std.Build.LazyPath, "modules", "Path to the modules for testing");
-    _ = modules;
-
-    const fimo_tasks_test = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
-            .target = target,
-            .optimize = optimize,
-            .sanitize_thread = target.result.os.tag != .windows,
-        }),
+                break :blk t;
+            },
+        },
     });
-    fimo_tasks_test.root_module.addImport("fimo_std", fimo_std);
-    fimo_tasks_test.root_module.addImport("fimo_tasks_meta", fimo_tasks_meta);
-    fimo_tasks_test.linkLibrary(context);
-    const run_lib_unit_tests = b.addRunArtifact(fimo_tasks_test);
+}
 
-    const tests = b.step("test", "Run tests");
-    tests.dependOn(&run_lib_unit_tests.step);
+pub fn build(b: *std.Build) void {
+    _ = b;
 }

@@ -84,7 +84,7 @@ pub fn UnorderedBoundedSpmcChannel(comptime T: type) type {
             const num_counters = (n_ceil * 2) - 1;
             const counters = try allocator.alignedAlloc(
                 atomic.Value(usize),
-                atomic.cache_line,
+                .fromByteUnits(atomic.cache_line),
                 num_counters,
             );
             for (counters) |*counter| {
@@ -725,7 +725,7 @@ fn channelTest(
 
         const value_map = try std.testing.allocator.alignedAlloc(
             atomic.Value(bool),
-            atomic.cache_line,
+            .fromByteUnits(atomic.cache_line),
             num_messages,
         );
         defer std.testing.allocator.free(value_map);

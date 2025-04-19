@@ -80,8 +80,11 @@ impl Build {
     /// Creates a new blank set of configurations to build the project specified at the path
     /// `paths`.
     pub fn new(path: impl AsRef<Path>) -> Self {
+        let path = env::current_dir().unwrap().join(path);
+        let path = dunce::canonicalize(path).expect("canonicalization failed");
+
         Self {
-            path: env::current_dir().unwrap().join(path),
+            path,
             step: None,
             prefix: None,
             prefix_lib_dir: None,

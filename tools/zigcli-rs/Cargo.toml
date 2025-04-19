@@ -14,4 +14,5 @@ categories = ["development-tools::build-utils"]
 edition = "2021"
 rust-version = "1.78.0"
 
-[dependencies]
+[dependencies.dunce]
+version = "1.0.5"
