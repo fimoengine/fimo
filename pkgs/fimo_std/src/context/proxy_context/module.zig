@@ -363,6 +363,7 @@ pub const InstanceConfig = struct {
     ExportsType: type = void,
     /// Type of the instance state.
     StateType: type = void,
+    @"export": ?*const anyopaque = null,
     provider: ?fn (instance: anytype, comptime symbol: Symbol) *const anyopaque = null,
 };
 
@@ -400,6 +401,9 @@ pub fn Instance(comptime config: InstanceConfig) type {
         pub const Imports = config.ImportsType;
         pub const Exports = config.ExportsType;
         pub const State = config.StateType;
+
+        pub const @"export" = if (config.@"export") |e| @as(*const Export, @ptrCast(@alignCast(e))) else {};
+        pub const fimo_module_instance_marker: void = {};
 
         /// VTable of an Instance.
         ///
