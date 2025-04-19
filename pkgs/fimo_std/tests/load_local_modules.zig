@@ -252,8 +252,9 @@ pub fn main() !void {
     );
     try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
+    var instance_init = true;
     const instance = try Module.PseudoInstance.init(ctx.module(), &err);
-    defer instance.deinit();
+    defer if (instance_init) instance.deinit();
 
     const a = try Module.Info.findByName(ctx.module(), "a", &err);
     defer a.unref();
@@ -287,6 +288,7 @@ pub fn main() !void {
     defer info.unrefInstanceStrong();
 
     instance.deinit();
+    instance_init = false;
     try testing.expect(a.isLoaded());
     try testing.expect(b.isLoaded());
     try testing.expect(c.isLoaded());
