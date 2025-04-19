@@ -1271,6 +1271,7 @@ pub const Builder = struct {
             .ImportsType = self.ImportTable(),
             .ExportsType = self.ExportsTable(),
             .StateType = self.stateType,
+            .@"export" = exp,
             .provider = self.SymbolProvider(),
         });
     }
@@ -1357,36 +1358,25 @@ const exports_section = switch (builtin.target.os.tag) {
 /// Iterator over all exports of the current binary.
 pub const ExportIter = struct {
     /// Iterator position. Does not necessarily point to a valid export.
-    position: [*]const ?*const Export,
-
-    /// Initializes the iterator. Does not need to be deinitialized.
-    pub fn init() @This() {
-        return .{
-            .position = @ptrCast(exports_section.start_exports),
-        };
-    }
+    exports: [*]const ?*const Export = exports_section.start_exports,
 
     /// Returns the next export in the export link.
     pub fn next(self: *@This()) ?*const Export {
-        while (true) {
-            if (self.position == exports_section.stop_exports) {
-                return null;
-            }
-            const element_ptr = self.position;
-            self.position += 1;
+        while (self.exports != exports_section.stop_exports) {
+            const element_ptr = self.exports;
+            self.exports += 1;
 
             const element = element_ptr[0];
-            if (element != null) {
-                return element;
-            }
+            if (element != null) return element;
         }
+        return null;
     }
 
     pub export fn fimo_impl_module_export_iterator(
         inspector: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
         data: ?*anyopaque,
     ) void {
-        var it = ExportIter.init();
+        var it = ExportIter{};
         while (it.next()) |exp| {
             if (!inspector(exp, data)) {
                 return;
@@ -1399,11 +1389,12 @@ pub const ExportIter = struct {
 ///
 /// For internal use only, as the pointer should not generally be null.
 fn embedStaticModuleExport(comptime module: ?*const Export) void {
+    const name = if (module) |m| std.mem.span(m.name) else "unknown";
     _ = struct {
         const data = module;
         comptime {
             @export(&data, .{
-                .name = "module_export_" ++ @typeName(@This()),
+                .name = "module_export_" ++ name ++ "_" ++ @typeName(@This()),
                 .section = c.FIMO_IMPL_MODULE_SECTION,
                 .linkage = .strong,
                 .visibility = exports_section.export_visibility,

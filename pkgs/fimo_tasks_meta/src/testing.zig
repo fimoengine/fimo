@@ -62,13 +62,13 @@ pub const TestContext = struct {
     }
 };
 
-pub fn initTestContext() !TestContext {
-    comptime {
-        _ = @import("test_module");
-    }
+comptime {
+    @import("test_module").forceExportModules();
+}
 
+pub fn initTestContext() !TestContext {
     const tracing_cfg = Tracing.Config{
-        .max_level = .debug,
+        .max_level = .trace,
         .subscribers = &.{Tracing.default_subscriber},
         .subscriber_count = 1,
     };
@@ -82,7 +82,10 @@ pub fn initTestContext() !TestContext {
     errdefer ctx.tracing().unregisterThread();
 
     var err: ?fimo_std.AnyError = null;
-    errdefer if (err) |e| e.deinit();
+    errdefer if (err) |e| {
+        ctx.tracing().emitErrSimple("{}", .{e}, @src());
+        e.deinit();
+    };
 
     errdefer Async.EventLoop.flushWithCurrentThread(ctx.@"async"(), &err) catch unreachable;
     const event_loop = try Async.EventLoop.init(ctx.@"async"(), &err);

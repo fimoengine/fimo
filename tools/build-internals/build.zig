@@ -150,16 +150,45 @@ pub const FimoBuild = struct {
             const wf = b.addWriteFiles();
 
             var bytes = ArrayListUnmanaged(u8).empty;
+            bytes.appendSlice(b.allocator,
+                \\ const std = @import("std");
+                \\ fn refAllExports(comptime T: type) void {
+                \\    inline for (comptime std.meta.declarations(T)) |decl| {
+                \\        _ = &@field(T, decl.name);
+                \\    }
+                \\ }
+                \\ pub fn forceExportModules() void {
+                \\    @setEvalBranchQuota(2000000);
+                \\    inline for (comptime std.meta.declarations(@This())) |decl| {
+                \\        if (@TypeOf(@field(@This(), decl.name)) == type) {
+                \\            switch (@typeInfo(@field(@This(), decl.name))) {
+                \\                .@"struct", .@"enum", .@"union", .@"opaque" => {
+                \\                    refAllExports(@field(@This(), decl.name));
+                \\                    if (@hasDecl(@field(@This(), decl.name), "forceExportModules")) {
+                \\                        @field(@This(), decl.name).forceExportModules();
+                \\                    }
+                \\                    if (@hasDecl(@field(@This(), decl.name), "fimo_export")) {
+                \\                        refAllExports(@field(@This(), decl.name).fimo_export);
+                \\                    }
+                \\                },
+                \\                else => {},
+                \\            }
+                \\        }
+                \\    }
+                \\ }
+                \\ comptime { forceExportModules(); }
+                \\
+            ) catch @panic("oom");
             if (self.root_module != null) {
                 bytes.appendSlice(
                     b.allocator,
-                    "comptime { _ = @import(\"module\"); }",
+                    "pub const module = @import(\"module\");\n",
                 ) catch @panic("oom");
             }
             for (self.module_deps) |dep| {
                 bytes.appendSlice(b.allocator, b.fmt(
-                    "comptime {{ _ = @import(\"{s}\"); }}",
-                    .{dep},
+                    "pub const {s} = @import(\"{s}\");\n",
+                    .{ dep, dep },
                 )) catch @panic("oom");
             }
 
