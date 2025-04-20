@@ -113,10 +113,16 @@ pub fn abortTask() noreturn {
     unreachable;
 }
 
-/// Puts the current task to sleep for the specified amount of time.
-pub fn sleepTask(duration: Duration) void {
-    const timeout = Instant.now().addSaturating(duration);
-    sendMsgToScheduler(.{ .sleep = .{ .timeout = timeout } });
+/// Puts the current task or thread to sleep for the specified amount of time.
+pub fn sleep(duration: Duration) void {
+    const is_task = if (_current) |curr| curr.active_task != null else false;
+    if (is_task) {
+        const timeout = Instant.now().addSaturating(duration);
+        sendMsgToScheduler(.{ .sleep = .{ .timeout = timeout } });
+    } else {
+        const nanos: usize = @truncate(@min(std.math.maxInt(usize), duration.nanos()));
+        Thread.sleep(nanos);
+    }
 }
 
 /// Checks if `ptr` still contains the value `expect` and if so, blocks until either:
@@ -223,21 +229,13 @@ pub fn taskEntry(tr: context_.Transfer) callconv(.c) noreturn {
         const tracing = worker.pool.runtime.tracing();
 
         const pool_label: []const u8 = worker.pool.label;
-        const buffer_label = task.owner.buffer.label();
-        const task_label: []const u8 = task.task.label();
         const span = if (tracing) |tra| Tracing.Span.initTrace(
             tra,
             null,
             null,
             @src(),
-            "pool=`{s}`, worker=`{}`, buffer=`{s}`, task=`{s}`, id=`{}`",
-            .{
-                pool_label,
-                @intFromEnum(worker.id),
-                buffer_label,
-                task_label,
-                @intFromEnum(task.id),
-            },
+            "pool=`{s}`, worker=`{}`, buffer=`{*}`, task=`{*}`",
+            .{ pool_label, worker.id, task.owner, task },
         ) else null;
         defer if (span) |sp| sp.deinit();
 
@@ -264,7 +262,7 @@ pub fn run(self: *Self) void {
         null,
         @src(),
         "worker event loop, worker=`{}`",
-        .{@intFromEnum(self.id)},
+        .{self.id},
     ) else null;
     defer if (span) |sp| sp.deinit();
 

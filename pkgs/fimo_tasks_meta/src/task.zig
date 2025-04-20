@@ -79,39 +79,39 @@ pub fn Task(comptime T: type) type {
             if (self.on_abort) |f| f(self);
             if (self.on_deinit) |f| f(self);
         }
-
-        /// Yields the current task or thread back to the scheduler.
-        pub fn yieldCurrent(provider: anytype) void {
-            const sym = symbols.yield.requestFrom(provider);
-            sym();
-        }
-
-        /// Aborts the current task.
-        pub fn abortCurrent(provider: anytype) noreturn {
-            const sym = symbols.abort.requestFrom(provider);
-            sym();
-            unreachable;
-        }
-
-        /// Puts the current task to sleep for the specified amount of time.
-        pub fn sleepCurrent(provider: anytype, duration: Duration) void {
-            const sym = symbols.sleep.requestFrom(provider);
-            sym(duration.intoC());
-        }
-
-        test "sleep" {
-            try testing.initTestContextInTask(struct {
-                fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-                    _ = err;
-                    const before_sleep = Instant.now();
-                    const duration = Duration.initSeconds(2);
-                    sleepCurrent(ctx, duration);
-                    const elapsed = try Instant.elapsed(before_sleep);
-                    try std.testing.expect(elapsed.order(duration) != .lt);
-                }
-            }.f);
-        }
     };
+}
+
+/// Yields the current task or thread back to the scheduler.
+pub fn yield(provider: anytype) void {
+    const sym = symbols.yield.requestFrom(provider);
+    sym();
+}
+
+/// Aborts the current task.
+pub fn abort(provider: anytype) noreturn {
+    const sym = symbols.abort.requestFrom(provider);
+    sym();
+    unreachable;
+}
+
+/// Puts the current task or thread to sleep for the specified amount of time.
+pub fn sleep(provider: anytype, duration: Duration) void {
+    const sym = symbols.sleep.requestFrom(provider);
+    sym(duration.intoC());
+}
+
+test "sleep" {
+    try testing.initTestContextInTask(struct {
+        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
+            _ = err;
+            const before_sleep = Instant.now();
+            const duration = Duration.initSeconds(2);
+            sleep(ctx, duration);
+            const elapsed = try Instant.elapsed(before_sleep);
+            try std.testing.expect(elapsed.order(duration) != .lt);
+        }
+    }.f);
 }
 
 /// A task with an unknown state.
