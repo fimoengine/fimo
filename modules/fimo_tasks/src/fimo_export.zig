@@ -345,7 +345,7 @@ fn abort() callconv(.c) void {
 }
 
 fn sleep(duration: fimo_std.c.FimoDuration) callconv(.c) void {
-    Worker.sleepTask(Duration.initC(duration));
+    Worker.sleep(Duration.initC(duration));
 }
 
 fn taskLocalSet(

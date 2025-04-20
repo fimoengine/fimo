@@ -17,7 +17,7 @@ const Duration = time.Duration;
 const Instant = time.Instant;
 
 const task = @import("../task.zig");
-const Task = task.OpaqueTask;
+const yield = task.yield;
 const TaskId = task.Id;
 const testing = @import("../testing.zig");
 const ParkingLot = @import("ParkingLot.zig");
@@ -132,7 +132,7 @@ const BargingLock = extern struct {
             // Yield to the scheduler if there is no contention.
             if (state & has_parked_bit == 0 and spin_count < spin_limit) {
                 spin_count += 1;
-                Task.yieldCurrent(provider);
+                yield(provider);
                 state = self.state.load(.monotonic);
                 continue;
             }
@@ -444,7 +444,7 @@ test "many contended (tasks)" {
                     var i: usize = num_increments;
                     while (i > 0) : (i -= 1) {
                         // Occasionally hint to let another thread run.
-                        defer if (i % 100 == 0) Task.yieldCurrent(self.ctx);
+                        defer if (i % 100 == 0) yield(self.ctx);
 
                         self.mutex.lock(self.ctx);
                         defer self.mutex.unlock(self.ctx);

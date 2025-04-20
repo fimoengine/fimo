@@ -254,49 +254,28 @@ const WordLock = struct {
     const queue_locked_bit: usize = 0b10;
 
     const QueueEntry = struct {
-        waiter: Waiter,
+        event: Event = .{},
         next: ?*QueueEntry = null,
         tail: ?*QueueEntry = null,
     };
 
-    const Waiter = union(enum) {
-        thread: struct {
-            should_park: bool = true,
-            mutex: Thread.Mutex = .{},
-            condition: Thread.Condition = .{},
-        },
-        task: struct {
-            pool: *Pool,
-            should_park: atomic.Value(u32) = .init(1),
-        },
+    const Event = struct {
+        should_park: bool = true,
+        mutex: Thread.Mutex = .{},
+        condition: Thread.Condition = .{},
 
-        fn wait(self: *Waiter) void {
-            switch (self.*) {
-                .thread => |*waiter| {
-                    waiter.mutex.lock();
-                    defer waiter.mutex.unlock();
-                    while (waiter.should_park) waiter.condition.wait(&waiter.mutex);
-                    std.debug.assert(!waiter.should_park);
-                },
-                .task => |*waiter| {
-                    while (waiter.should_park.load(.acquire) != 0) Worker.waitTask(&waiter.should_park, 1);
-                },
-            }
+        fn wait(self: *Event) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            while (self.should_park) self.condition.wait(&self.mutex);
+            std.debug.assert(!self.should_park);
         }
 
-        fn signal(self: *Waiter) void {
-            switch (self.*) {
-                .thread => |*waiter| {
-                    waiter.mutex.lock();
-                    defer waiter.mutex.unlock();
-                    waiter.should_park = false;
-                    waiter.condition.signal();
-                },
-                .task => |*waiter| {
-                    waiter.should_park.store(0, .release);
-                    waiter.pool.wakeByAddress(&waiter.should_park, 1);
-                },
-            }
+        fn signal(self: *Event) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.should_park = false;
+            self.condition.signal();
         }
     };
 
@@ -327,10 +306,10 @@ const WordLock = struct {
 
     fn lockSlow(self: *WordLock) void {
         @branchHint(.cold);
+
         const spin_limit = 40;
         var spin_count: usize = 0;
         var value = self.value.load(.monotonic);
-        const is_task = Worker.currentTask() != null;
         while (true) {
             // Try the fast path again.
             if (value & locked_bit == 0) {
@@ -340,9 +319,7 @@ const WordLock = struct {
                     value | locked_bit,
                     .acquire,
                     .monotonic,
-                )) |_| {} else {
-                    return;
-                }
+                )) |_| {} else return;
             }
 
             // If there is no queue we try spinning again.
@@ -353,16 +330,8 @@ const WordLock = struct {
                 continue;
             }
 
-            var entry = QueueEntry{
-                .waiter = if (is_task)
-                    .{ .task = .{ .pool = Worker.currentPool().? } }
-                else
-                    .{ .thread = .{} },
-            };
-
-            value = self.value.load(.monotonic);
-
             // Wait until the lock is not held and we acquire the queue lock.
+            value = self.value.load(.monotonic);
             if (value & queue_locked_bit != 0 or
                 value & locked_bit == 0 or
                 self.value.cmpxchgWeak(value, value | queue_locked_bit, .acquire, .monotonic) != null)
@@ -373,6 +342,7 @@ const WordLock = struct {
             }
 
             // Put `entry` in the queue.
+            var entry = QueueEntry{};
             var queue: ?*QueueEntry = @ptrFromInt(value & ~head_mask);
             if (queue) |head| {
                 head.tail.?.next = &entry;
@@ -399,7 +369,7 @@ const WordLock = struct {
             }
 
             // Wait until we are unparked.
-            entry.waiter.wait();
+            entry.event.wait();
 
             std.debug.assert(entry.next == null);
             std.debug.assert(entry.tail == null);
@@ -457,7 +427,7 @@ const WordLock = struct {
         // Unpark the waiter.
         head.next = null;
         head.tail = null;
-        head.waiter.signal();
+        head.event.signal();
     }
 };
 
@@ -553,11 +523,11 @@ fn lockBucketPair(
         if (key_1 == key_2) return .{ bucket_1, bucket_1 };
         if (@intFromPtr(key_1) <= @intFromPtr(key_2)) {
             const bucket_2 = table.getBucket(key_2);
-            bucket_2.mutex.lock();
+            if (bucket_1 != bucket_2) bucket_2.mutex.lock();
             return .{ bucket_1, bucket_2 };
         } else {
             const bucket_2 = table.getBucket(key_1);
-            bucket_2.mutex.lock();
+            if (bucket_1 != bucket_2) bucket_2.mutex.lock();
             return .{ bucket_2, bucket_1 };
         }
     }
@@ -798,6 +768,7 @@ pub fn parkMultiple(
         }
 
         multi_queue.mutex.lock();
+        if (multi_queue.consumer_key != null) enqueue_status = .consumed;
         switch (enqueue_status) {
             .invalid => return ParkMultipleResult{
                 .type = .invalid,
