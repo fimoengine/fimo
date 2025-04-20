@@ -3,7 +3,6 @@ const atomic = std.atomic;
 const Thread = std.Thread;
 const Futex = Thread.Futex;
 const Allocator = std.mem.Allocator;
-const ThreadSafeAllocator = std.heap.ThreadSafeAllocator;
 
 const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
@@ -25,7 +24,7 @@ const Worker = @import("Worker.zig");
 
 const Self = @This();
 
-allocator: ThreadSafeAllocator,
+gpa: Allocator,
 num_waiters: atomic.Value(usize) = .init(0),
 hash_table: atomic.Value(?*HashTable) = .init(null),
 
@@ -67,7 +66,7 @@ const HashTable = struct {
 
     const MultiQueueEntry = struct {
         mutex: WordLock = .{},
-        waiter: Waiter,
+        event: Event,
         unpark_token: UnparkToken = .default,
         park_token: ParkToken = .default,
         consumer_key: ?*const anyopaque = null,
@@ -121,7 +120,7 @@ const HashTable = struct {
         }
     };
 
-    const Waiter = union(enum) {
+    const Event = union(enum) {
         thread: struct {
             futex: atomic.Value(u32) = .init(1),
         },
@@ -130,7 +129,7 @@ const HashTable = struct {
             futex: atomic.Value(u32) = .init(1),
         },
 
-        fn park(self: *Waiter, timeout: ?Instant) void {
+        fn park(self: *Event, timeout: ?Instant) void {
             switch (self.*) {
                 .thread => |*thread| {
                     while (thread.futex.load(.acquire) != 0) {
@@ -170,7 +169,7 @@ const HashTable = struct {
             }
         }
 
-        fn lock_unpark(self: *Waiter) UnparkHandle {
+        fn lock_unpark(self: *Event) UnparkHandle {
             switch (self.*) {
                 .thread => |*thread| {
                     thread.futex.store(0, .release);
@@ -325,7 +324,7 @@ const WordLock = struct {
             // If there is no queue we try spinning again.
             if (value & head_mask == 0 and spin_count < spin_limit) {
                 spin_count += 1;
-                Worker.yield();
+                Thread.yield() catch {};
                 value = self.value.load(.monotonic);
                 continue;
             }
@@ -336,7 +335,7 @@ const WordLock = struct {
                 value & locked_bit == 0 or
                 self.value.cmpxchgWeak(value, value | queue_locked_bit, .acquire, .monotonic) != null)
             {
-                Worker.yield();
+                Thread.yield() catch {};
                 value = self.value.load(.monotonic);
                 continue;
             }
@@ -391,13 +390,13 @@ const WordLock = struct {
                 if (self.value.cmpxchgWeak(locked_bit, 0, .release, .monotonic)) |_| {
                     return;
                 }
-                Worker.yield();
+                Thread.yield() catch {};
                 continue;
             }
 
             // Wait until the queue is unlocked.
             if (value & queue_locked_bit != 0) {
-                Worker.yield();
+                Thread.yield() catch {};
                 continue;
             }
 
@@ -431,20 +430,20 @@ const WordLock = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator) Self {
-    return Self{ .allocator = .{ .child_allocator = allocator } };
+pub fn init(gpa: std.mem.Allocator) Self {
+    return Self{ .gpa = gpa };
 }
 
 pub fn deinit(self: *Self) void {
     if (self.num_waiters.load(.monotonic) != 0) @panic("parking lot is not empty");
-    if (self.hash_table.load(.acquire)) |table| table.deinit(self.allocator.allocator());
+    if (self.hash_table.load(.acquire)) |table| table.deinit(self.gpa);
 }
 
 fn getHashTable(self: *Self) *HashTable {
     const table = self.hash_table.load(.acquire);
     if (table) |t| return t;
 
-    const allocator = self.allocator.allocator();
+    const allocator = self.gpa;
     const new_table = HashTable.init(allocator, HashTable.load_factor, null);
     if (self.hash_table.cmpxchgStrong(null, new_table, .acq_rel, .acquire)) |old| {
         new_table.deinit(allocator);
@@ -465,7 +464,7 @@ fn growHashTable(self: *Self, num_waiters: usize) void {
     };
     defer for (old_table.buckets) |*bucket| bucket.mutex.unlock();
 
-    const new_table = HashTable.init(self.allocator.allocator(), num_waiters, old_table);
+    const new_table = HashTable.init(self.gpa, num_waiters, old_table);
     for (old_table.buckets) |*bucket| {
         bucket.rehashInto(new_table);
     }
@@ -540,12 +539,12 @@ fn unlockBucketPair(bucket_1: *HashTable.Bucket, bucket_2: *HashTable.Bucket) vo
 
 fn createMultiQueueEntry(token: ParkToken) HashTable.MultiQueueEntry {
     const is_task = Worker.currentTask() != null;
-    const waiter = if (is_task)
-        HashTable.Waiter{ .task = .{ .pool = Worker.currentPool().? } }
+    const event = if (is_task)
+        HashTable.Event{ .task = .{ .pool = Worker.currentPool().? } }
     else
-        HashTable.Waiter{ .thread = .{} };
+        HashTable.Event{ .thread = .{} };
     return .{
-        .waiter = waiter,
+        .event = event,
         .park_token = token,
     };
 }
@@ -624,8 +623,7 @@ pub fn park(
 
     // Invoke the pre-sleep callback.
     before_sleep(before_sleep_data);
-
-    multi_queue.waiter.park(timeout);
+    multi_queue.event.park(timeout);
 
     // It is possible that the current task was not parked, as some other thread may have already
     // unparked it, or a timeout occurred. In that case we must check if the entry is still in the
@@ -794,8 +792,7 @@ pub fn parkMultiple(
 
     // Invoke the pre-sleep callback.
     before_sleep(before_sleep_data);
-
-    multi_queue.waiter.park(timeout);
+    multi_queue.event.park(timeout);
 
     // Dequeue the entry from all queues.
     for (keys, entries) |key, *entry| {
@@ -894,7 +891,7 @@ pub fn unparkOne(
         result.be_fair = bucket.fair_timeout.shouldTimeout();
         const unpark_token = callback(callback_data, result);
 
-        const handle = curr_multi_queue.waiter.lock_unpark();
+        const handle = curr_multi_queue.event.lock_unpark();
         bucket.mutex.unlock();
         handle.unpark();
         curr_multi_queue.consumeAndUnlock(unpark_token, key);
@@ -923,10 +920,7 @@ pub fn unparkAll(self: *Self, key: *const anyopaque, token: UnparkToken) usize {
     var link: *atomic.Value(?*HashTable.Entry) = &bucket.head;
     var current: ?*HashTable.Entry = bucket.head.load(.monotonic);
     var previous: ?*HashTable.Entry = null;
-    var handles_allocator = std.heap.stackFallback(
-        @sizeOf(HandleTokenPair) * 8,
-        self.allocator.allocator(),
-    );
+    var handles_allocator = std.heap.stackFallback(@sizeOf(HandleTokenPair) * 8, self.gpa);
     const allocator = handles_allocator.get();
     var handles = std.ArrayListUnmanaged(HandleTokenPair){};
     defer handles.deinit(allocator);
@@ -954,7 +948,7 @@ pub fn unparkAll(self: *Self, key: *const anyopaque, token: UnparkToken) usize {
         if (bucket.tail.load(.monotonic) == curr) bucket.tail.store(previous, .monotonic);
 
         // Unpark all entries after the bucket is unlocked.
-        const handle = curr_multi_queue.waiter.lock_unpark();
+        const handle = curr_multi_queue.event.lock_unpark();
         handles.append(allocator, .{
             .handle = handle,
             .entry = curr_multi_queue,
@@ -1003,10 +997,7 @@ pub fn unparkFilter(
     var link: *atomic.Value(?*HashTable.Entry) = &bucket.head;
     var current: ?*HashTable.Entry = bucket.head.load(.monotonic);
     var previous: ?*HashTable.Entry = null;
-    var handles_allocator = std.heap.stackFallback(
-        @sizeOf(HandleTokenPair) * 8,
-        self.allocator.allocator(),
-    );
+    var handles_allocator = std.heap.stackFallback(@sizeOf(HandleTokenPair) * 8, self.gpa);
     const allocator = handles_allocator.get();
     var handles = std.ArrayListUnmanaged(HandleTokenPair){};
     defer handles.deinit(allocator);
@@ -1039,7 +1030,7 @@ pub fn unparkFilter(
 
                 // Add the current entry to the list.
                 handles.append(allocator, .{
-                    .handle = curr_multi_queue.waiter.lock_unpark(),
+                    .handle = curr_multi_queue.event.lock_unpark(),
                     .entry = curr_multi_queue,
                 }) catch @panic("oom");
 
@@ -1107,10 +1098,7 @@ pub fn unparkRequeue(
         handle: HashTable.UnparkHandle,
         entry: *HashTable.MultiQueueEntry,
     };
-    var handles_allocator = std.heap.stackFallback(
-        @sizeOf(HandleTokenPair) * 8,
-        self.allocator.allocator(),
-    );
+    var handles_allocator = std.heap.stackFallback(@sizeOf(HandleTokenPair) * 8, self.gpa);
     const allocator = handles_allocator.get();
     var handles = std.ArrayListUnmanaged(HandleTokenPair){};
     defer handles.deinit(allocator);
@@ -1151,7 +1139,7 @@ pub fn unparkRequeue(
         if (result.unparked_tasks < op.num_tasks_to_unpark) {
             // Add the current entry to the list.
             handles.append(allocator, .{
-                .handle = curr_multi_queue.waiter.lock_unpark(),
+                .handle = curr_multi_queue.event.lock_unpark(),
                 .entry = curr_multi_queue,
             }) catch @panic("oom");
 
