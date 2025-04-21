@@ -95,6 +95,44 @@ pub fn abort(provider: anytype) noreturn {
     unreachable;
 }
 
+test "abort" {
+    try testing.initTestContextInTask(struct {
+        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
+            const builder_config = BuilderConfig(*const testing.TestContext){
+                .on_start = struct {
+                    fn f(t: *Task(*const testing.TestContext)) void {
+                        abort(t.state);
+                    }
+                }.f,
+            };
+            const builder = Builder(builder_config){
+                .label = "abortTask",
+                .state = ctx,
+            };
+            var task = builder.build();
+
+            const Pool = @import("pool.zig").Pool;
+            const pool = Pool.current(ctx).?;
+            defer pool.unref();
+
+            var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer arena.deinit();
+            const allocator = arena.allocator();
+
+            const buffer_config = @import("command_buffer.zig").BuilderConfig(void){};
+            var buffer_builder = @import("command_buffer.zig").Builder(buffer_config){ .state = {} };
+            try buffer_builder.abortOnError(allocator);
+            try buffer_builder.enqueueTask(allocator, @ptrCast(&task));
+            var buffer = buffer_builder.build();
+
+            const handle = try pool.enqueueCommandBuffer(&buffer, err);
+            defer handle.unref();
+            const status = handle.waitOn();
+            try std.testing.expect(status == .aborted);
+        }
+    }.f);
+}
+
 /// Puts the current task or thread to sleep for the specified amount of time.
 pub fn sleep(provider: anytype, duration: Duration) void {
     const sym = symbols.sleep.requestFrom(provider);

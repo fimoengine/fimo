@@ -74,9 +74,7 @@ pub fn exit(self: *Self, is_abort: bool) void {
 /// Runs the cleanup operations that must occur while the task is not running.
 pub fn afterExit(self: *Self, is_abort: bool) void {
     std.debug.assert(self.state == .stopped);
-    // TODO: Abort call stack.
-    _ = is_abort;
-    if (self.call_stack) |cs| cs.deinit();
+    if (self.call_stack) |cs| if (is_abort) cs.deinitAbort() else cs.deinit();
     std.debug.assert(self.context != null);
     self.context = null;
 }
