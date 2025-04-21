@@ -60,7 +60,7 @@ pub fn deinit(self: *Self) void {
 
     const now = time.Time.now();
     for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
-        subscriber.destroyCallStack(now, call_stack);
+        subscriber.destroyCallStack(now, call_stack, false);
     }
 
     const owner = self.owner;
@@ -74,6 +74,26 @@ fn deinitUnbound(self: *Self) void {
     if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
     if (self.mutex.lock_count != 1) @panic(@errorName(error.CallStackBound));
     self.deinit();
+}
+
+fn deinitAbort(self: *Self) void {
+    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
+    if (self.mutex.lock_count != 1) @panic(@errorName(error.CallStackBound));
+
+    while (self.end_frame) |frame| {
+        frame.deinitAbortUnchecked();
+    }
+
+    const now = time.Time.now();
+    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+        subscriber.destroyCallStack(now, call_stack, true);
+    }
+
+    const owner = self.owner;
+    self.call_stacks.deinit(self.owner.allocator);
+    owner.allocator.free(self.buffer);
+    owner.allocator.destroy(self);
+    owner.asContext().unref();
 }
 
 pub fn bind(self: *Self) void {
@@ -202,6 +222,9 @@ const DummyVTableImpl = struct {
     fn deinit(handle: *anyopaque) callconv(.c) void {
         std.debug.assert(handle == dummy_call_stack.handle);
     }
+    fn deinitAbort(handle: *anyopaque) callconv(.c) void {
+        std.debug.assert(handle == dummy_call_stack.handle);
+    }
     fn replaceActive(handle: *anyopaque) callconv(.c) ProxyTracing.CallStack {
         std.debug.assert(handle == dummy_call_stack.handle);
         return dummy_call_stack;
@@ -218,6 +241,7 @@ pub const dummy_call_stack = ProxyTracing.CallStack{
 
 const dummy_vtable = ProxyTracing.CallStack.VTable{
     .deinit = &DummyVTableImpl.deinit,
+    .deinit_abort = &DummyVTableImpl.deinitAbort,
     .replace_active = &DummyVTableImpl.replaceActive,
     .unblock = &DummyVTableImpl.unblock,
 };
@@ -230,6 +254,10 @@ const VTableImpl = struct {
     fn deinit(handle: *anyopaque) callconv(.c) void {
         const self: *Self = @alignCast(@ptrCast(handle));
         self.deinitUnbound();
+    }
+    fn deinitAbort(handle: *anyopaque) callconv(.c) void {
+        const self: *Self = @alignCast(@ptrCast(handle));
+        self.deinitAbort();
     }
     fn replaceActive(handle: *anyopaque) callconv(.c) ProxyTracing.CallStack {
         const self: *Self = @alignCast(@ptrCast(handle));
@@ -254,6 +282,7 @@ const VTableImpl = struct {
 
 const vtable = ProxyTracing.CallStack.VTable{
     .deinit = &VTableImpl.deinit,
+    .deinit_abort = &VTableImpl.deinitAbort,
     .replace_active = &VTableImpl.replaceActive,
     .unblock = &VTableImpl.unblock,
 };

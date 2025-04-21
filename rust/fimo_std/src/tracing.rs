@@ -486,6 +486,7 @@ handle!(pub handle SpanHandle: Send + Sync + Share);
 #[derive(Debug)]
 pub struct SpanVTable {
     pub drop: unsafe extern "C" fn(handle: SpanHandle),
+    pub drop_unwind: unsafe extern "C" fn(handle: SpanHandle),
     _private: PhantomData<()>,
 }
 
@@ -500,9 +501,13 @@ impl SpanVTable {
         /// [the documentation on unstable features][unstable] for details.
         ///
         /// [unstable]: crate#unstable-features
-        pub const fn new(drop: unsafe extern "C" fn(handle: SpanHandle)) -> Self {
+        pub const fn new(
+            drop: unsafe extern "C" fn(handle: SpanHandle),
+            drop_unwind: unsafe extern "C" fn(handle: SpanHandle),
+        ) -> Self {
             Self {
                 drop,
+                drop_unwind,
                 _private: PhantomData,
             }
         }
@@ -541,6 +546,20 @@ impl Span {
             )
         }
     }
+
+    /// Unwinds and destroys a span.
+    ///
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack. The span may not be in use prior to a call to
+    /// this function, and may not be used afterwards.
+    ///
+    /// This function must be called while the owning call stack is bound by the current thread.
+    #[inline(always)]
+    pub fn drop_unwind(self) {
+        let this = ManuallyDrop::new(self);
+        let f = this.vtable.drop_unwind;
+        unsafe { f(this.handle) }
+    }
 }
 
 impl Drop for Span {
@@ -557,6 +576,7 @@ handle!(pub handle CallStackHandle: Send + Sync + Share);
 #[derive(Debug)]
 pub struct CallStackVTable {
     pub drop: unsafe extern "C" fn(handle: CallStackHandle),
+    pub drop_unwind: unsafe extern "C" fn(handle: CallStackHandle),
     pub replace_active: unsafe extern "C" fn(handle: CallStackHandle) -> CallStack,
     pub unblock: unsafe extern "C" fn(handle: CallStackHandle),
     _private: PhantomData<()>,
@@ -575,11 +595,13 @@ impl CallStackVTable {
         /// [unstable]: crate#unstable-features
         pub const fn new(
             drop: unsafe extern "C" fn(handle: CallStackHandle),
+            drop_unwind: unsafe extern "C" fn(handle: CallStackHandle),
             replace_active: unsafe extern "C" fn(handle: CallStackHandle) -> CallStack,
             unblock: unsafe extern "C" fn(handle: CallStackHandle),
         ) -> Self {
             Self {
                 drop,
+                drop_unwind,
                 replace_active,
                 unblock,
                 _private: PhantomData,
@@ -614,6 +636,18 @@ impl CallStack {
         let ctx = ctx.view();
         let f = ctx.vtable.tracing_v0.create_call_stack;
         unsafe { f(ctx.handle) }
+    }
+
+    /// Unwinds and destroys a call stack.
+    ///
+    /// Marks that the task was aborted. Before calling this function, the call stack  must not be
+    /// active. If successful, the call stack may not be used afterwards. The caller must own the
+    /// call stack uniquely.
+    #[inline(always)]
+    pub fn drop_unwind(self) {
+        let this = ManuallyDrop::new(self);
+        let f = this.vtable.drop_unwind;
+        unsafe { f(this.handle) }
     }
 
     /// Switches the call stack of the current thread.
@@ -717,7 +751,7 @@ pub trait Subscriber: Send + Sync + Share {
     fn drop_call_stack(&self, call_stack: Box<Self::CallStack>);
 
     /// Destroys the call stack.
-    fn destroy_call_stack(&self, time: Time, call_stack: Box<Self::CallStack>);
+    fn destroy_call_stack(&self, time: Time, call_stack: Box<Self::CallStack>, is_unwind: bool);
 
     /// Marks the call stack as being unblocked.
     fn unblock_call_stack(&self, time: Time, call_stack: &mut Self::CallStack);
@@ -741,7 +775,7 @@ pub trait Subscriber: Send + Sync + Share {
     fn drop_span(&self, call_stack: &mut Self::CallStack);
 
     /// Exits and destroys a span.
-    fn destroy_span(&self, time: Time, call_stack: &mut Self::CallStack);
+    fn destroy_span(&self, time: Time, call_stack: &mut Self::CallStack, is_unwind: bool);
 
     /// Emits an event.
     fn emit_event(
@@ -778,6 +812,7 @@ pub struct SubscriberVTable {
         handle: Option<SubscriberHandle>,
         time: &Time,
         call_stack: SubscriberCallStackHandle,
+        is_unwind: bool,
     ),
     pub unblock_call_stack: unsafe extern "C" fn(
         handle: Option<SubscriberHandle>,
@@ -811,6 +846,7 @@ pub struct SubscriberVTable {
         handle: Option<SubscriberHandle>,
         time: &Time,
         call_stack: SubscriberCallStackHandle,
+        is_unwind: bool,
     ),
     pub emit_event: unsafe extern "C" fn(
         handle: Option<SubscriberHandle>,
@@ -915,12 +951,13 @@ impl OpaqueSubscriber {
             handle: Option<SubscriberHandle>,
             time: &Time,
             call_stack: SubscriberCallStackHandle,
+            is_unwind: bool,
         ) {
             unsafe {
                 let subscriber: &T =
                     &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
                 let call_stack = Box::from_raw(call_stack.as_ptr());
-                subscriber.destroy_call_stack(*time, call_stack);
+                subscriber.destroy_call_stack(*time, call_stack, is_unwind);
             }
         }
         unsafe extern "C" fn call_stack_unblock<T: Subscriber>(
@@ -991,12 +1028,13 @@ impl OpaqueSubscriber {
             handle: Option<SubscriberHandle>,
             time: &Time,
             call_stack: SubscriberCallStackHandle,
+            is_unwind: bool,
         ) {
             unsafe {
                 let subscriber: &T =
                     &*handle.map_or(std::ptr::null(), |x| x.as_ptr::<T>().cast_const());
                 let call_stack = &mut *call_stack.as_ptr();
-                subscriber.destroy_span(*time, call_stack);
+                subscriber.destroy_span(*time, call_stack, is_unwind);
             }
         }
         unsafe extern "C" fn event_emit<T: Subscriber>(

@@ -69,20 +69,49 @@ pub fn init(
 
 pub fn deinit(self: *Self) void {
     const stack = self.owner;
-    const tracing = stack.owner;
-    if (!tracing.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
-
     if (!stack.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
     defer stack.mutex.unlock();
     if (stack.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
     if (stack.state.blocked) @panic(@errorName(error.CallStackBlocked));
     if (stack.state.suspended) @panic(@errorName(error.CallStackSuspended));
-    if (stack.end_frame == null) @panic(@errorName(error.CallStackEmpty));
-    if (self.next != null) @panic(@errorName(error.CallStackSpanNotOnTop));
+    if (stack.end_frame != self) @panic(@errorName(error.CallStackSpanNotOnTop));
+    std.debug.assert(self.next == null);
 
     const now = time.Time.now();
     for (self.owner.call_stacks.items, self.owner.owner.subscribers) |call_stack, subscriber| {
-        subscriber.destroySpan(now, call_stack);
+        subscriber.destroySpan(now, call_stack, false);
+    }
+
+    self.owner.cursor = self.parent_cursor;
+    self.owner.max_level = self.parent_max_level;
+    if (self.previous) |previous| {
+        previous.next = null;
+        self.owner.end_frame = previous;
+    } else {
+        self.owner.start_frame = null;
+        self.owner.end_frame = null;
+    }
+
+    self.owner.owner.allocator.destroy(self);
+}
+
+pub fn deinitAbort(self: *Self) void {
+    const stack = self.owner;
+    if (!stack.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
+    defer stack.mutex.unlock();
+    if (stack.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
+    if (stack.state.blocked) @panic(@errorName(error.CallStackBlocked));
+    if (stack.state.suspended) @panic(@errorName(error.CallStackSuspended));
+    if (stack.end_frame != self) @panic(@errorName(error.CallStackSpanNotOnTop));
+    std.debug.assert(self.next == null);
+
+    self.deinitAbortUnchecked();
+}
+
+pub fn deinitAbortUnchecked(self: *Self) void {
+    const now = time.Time.now();
+    for (self.owner.call_stacks.items, self.owner.owner.subscribers) |call_stack, subscriber| {
+        subscriber.destroySpan(now, call_stack, true);
     }
 
     self.owner.cursor = self.parent_cursor;
@@ -113,6 +142,9 @@ const DummyVTableImpl = struct {
     fn deinit(handle: *anyopaque) callconv(.c) void {
         std.debug.assert(handle == dummy_span.handle);
     }
+    fn deinitAbort(handle: *anyopaque) callconv(.c) void {
+        std.debug.assert(handle == dummy_span.handle);
+    }
 };
 
 pub const dummy_span = ProxyTracing.Span{
@@ -122,6 +154,7 @@ pub const dummy_span = ProxyTracing.Span{
 
 const dummy_vtable = ProxyTracing.Span.VTable{
     .deinit = &DummyVTableImpl.deinit,
+    .deinit_abort = &DummyVTableImpl.deinitAbort,
 };
 
 // ----------------------------------------------------
@@ -133,8 +166,13 @@ const VTableImpl = struct {
         const self: *Self = @alignCast(@ptrCast(handle));
         self.deinit();
     }
+    fn deinitAbort(handle: *anyopaque) callconv(.c) void {
+        const self: *Self = @alignCast(@ptrCast(handle));
+        self.deinitAbort();
+    }
 };
 
 const vtable = ProxyTracing.Span.VTable{
     .deinit = &VTableImpl.deinit,
+    .deinit_abort = &VTableImpl.deinitAbort,
 };
