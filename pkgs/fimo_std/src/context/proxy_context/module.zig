@@ -236,7 +236,7 @@ pub fn SymbolWrapper(comptime symbol: Symbol) type {
         value: *const symbol.T,
 
         /// Asserts that `sym` is compatible to the contained symbol and returns it.
-        fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
+        pub fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
             comptime {
                 std.debug.assert(std.mem.eql(u8, sym.name, symbol.name));
                 std.debug.assert(std.mem.eql(u8, sym.namespace, symbol.namespace));
@@ -255,6 +255,67 @@ test SymbolWrapper {
     };
     const wrapper = SymbolWrapper(symbol){ .value = &5 };
     try std.testing.expectEqual(5, symbol.requestFrom(wrapper).*);
+}
+
+pub fn SymbolGroup(comptime symbols: anytype) type {
+    const symbols_info = @typeInfo(@TypeOf(symbols)).@"struct";
+    var fields: []const std.builtin.Type.StructField = &.{};
+    for (symbols_info.fields) |f| {
+        if (f.type != Symbol) continue;
+        const symbol: Symbol = @field(symbols, f.name);
+        fields = fields ++ [_]std.builtin.Type.StructField{.{
+            .name = f.name,
+            .type = *const symbol.T,
+            .default_value_ptr = null,
+            .is_comptime = false,
+            .alignment = @alignOf(*const symbol.T),
+        }};
+    }
+    const Inner = @Type(.{
+        .@"struct" = .{
+            .layout = .auto,
+            .fields = fields,
+            .decls = &.{},
+            .is_tuple = symbols_info.is_tuple,
+        },
+    });
+
+    return struct {
+        symbols: Inner,
+
+        /// Asserts that `sym` is compatible to the contained symbol and returns it.
+        pub fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
+            const name = comptime blk: {
+                for (symbols_info.fields) |f| {
+                    const symbol: Symbol = @field(symbols, f.name);
+                    if (std.mem.eql(u8, sym.name, symbol.name) and
+                        std.mem.eql(u8, sym.namespace, symbol.namespace) and
+                        symbol.version.isCompatibleWith(sym.version)) break :blk f.name;
+                }
+                @compileError(std.fmt.comptimePrint(
+                    "the symbol group does not provide the symbol {}",
+                    .{sym},
+                ));
+            };
+            return @field(self.symbols, name);
+        }
+    };
+}
+
+test SymbolGroup {
+    const a = Symbol{
+        .name = "a",
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .T = i32,
+    };
+    const b = Symbol{
+        .name = "b",
+        .version = .{ .major = 1, .minor = 0, .patch = 0 },
+        .T = i32,
+    };
+    const group = SymbolGroup(.{ a, b }){ .symbols = .{ &5, &10 } };
+    try std.testing.expectEqual(5, a.requestFrom(group).*);
+    try std.testing.expectEqual(10, b.requestFrom(group).*);
 }
 
 /// Info of a loaded module instance.
@@ -627,6 +688,22 @@ pub fn Instance(comptime config: InstanceConfig) type {
             try self.vtable.remove_dependency(self.castOpaque(), info).intoErrorUnion(err);
         }
 
+        /// Loads a group of symbols from the module subsystem.
+        ///
+        /// Is equivalent to calling `loadSymbol` for each symbol of the group independently.
+        pub fn loadSymbolGroup(
+            self: *const @This(),
+            comptime symbols: anytype,
+            err: *?AnyError,
+        ) AnyError.Error!SymbolGroup(symbols) {
+            var group: SymbolGroup(symbols) = undefined;
+            inline for (std.meta.fields(@TypeOf(symbols))) |f| {
+                const symbol = try self.loadSymbol(@field(symbols, f.name), err);
+                @field(group.symbols, f.name) = symbol.value;
+            }
+            return group;
+        }
+
         /// Loads a symbol from the module subsystem.
         ///
         /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
@@ -849,6 +926,17 @@ pub const PseudoInstance = extern struct {
         err: *?AnyError,
     ) AnyError.Error!void {
         return self.castOpaque().removeDependency(info, err);
+    }
+
+    /// Loads a group of symbols from the module subsystem.
+    ///
+    /// Is equivalent to calling `loadSymbol` for each symbol of the group independently.
+    pub fn loadSymbolGroup(
+        self: *const @This(),
+        comptime symbols: anytype,
+        err: *?AnyError,
+    ) AnyError.Error!SymbolGroup(symbols) {
+        return self.castOpaque().loadSymbolGroup(symbols, err);
     }
 
     /// Loads a symbol from the module subsystem.

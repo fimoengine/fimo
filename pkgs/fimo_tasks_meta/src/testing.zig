@@ -8,6 +8,7 @@ const Tracing = Context.Tracing;
 const Module = Context.Module;
 const Symbol = Module.Symbol;
 const SymbolWrapper = Module.SymbolWrapper;
+const SymbolGroup = Module.SymbolGroup;
 const PseudoInstance = Module.PseudoInstance;
 
 const command_buffer = @import("command_buffer.zig");
@@ -25,24 +26,7 @@ pub const TestContext = struct {
     ctx: Context,
     event_loop: Async.EventLoop,
     instance: *const PseudoInstance,
-    task_id: SymbolWrapper(symbols.task_id),
-    worker_id: SymbolWrapper(symbols.worker_id),
-    worker_pool: SymbolWrapper(symbols.worker_pool),
-    worker_pool_by_id: SymbolWrapper(symbols.worker_pool_by_id),
-    query_worker_pools: SymbolWrapper(symbols.query_worker_pools),
-    create_worker_pool: SymbolWrapper(symbols.create_worker_pool),
-    yield: SymbolWrapper(symbols.yield),
-    abort: SymbolWrapper(symbols.abort),
-    sleep: SymbolWrapper(symbols.sleep),
-    task_local_set: SymbolWrapper(symbols.task_local_set),
-    task_local_get: SymbolWrapper(symbols.task_local_get),
-    task_local_clear: SymbolWrapper(symbols.task_local_clear),
-    parking_lot_park: SymbolWrapper(symbols.parking_lot_park),
-    parking_lot_park_multiple: SymbolWrapper(symbols.parking_lot_park_multiple),
-    parking_lot_unpark_one: SymbolWrapper(symbols.parking_lot_unpark_one),
-    parking_lot_unpark_all: SymbolWrapper(symbols.parking_lot_unpark_all),
-    parking_lot_unpark_filter: SymbolWrapper(symbols.parking_lot_unpark_filter),
-    parking_lot_unpark_requeue: SymbolWrapper(symbols.parking_lot_unpark_requeue),
+    symbols: SymbolGroup(symbols.all_symbols),
 
     pub fn deinit(self: *TestContext) void {
         self.instance.deinit();
@@ -56,9 +40,7 @@ pub const TestContext = struct {
     }
 
     pub fn provideSymbol(self: *const TestContext, comptime symbol: Symbol) *const symbol.T {
-        if (comptime !std.mem.eql(u8, symbol.namespace, symbols.symbol_namespace))
-            @compileError("unknown namespace " ++ symbol.namespace);
-        return @field(self, symbol.name).value;
+        return symbol.requestFrom(self.symbols);
     }
 };
 
@@ -124,24 +106,7 @@ pub fn initTestContext() !TestContext {
         .ctx = ctx,
         .event_loop = event_loop,
         .instance = instance,
-        .task_id = try instance.loadSymbol(symbols.task_id, &err),
-        .worker_id = try instance.loadSymbol(symbols.worker_id, &err),
-        .worker_pool = try instance.loadSymbol(symbols.worker_pool, &err),
-        .worker_pool_by_id = try instance.loadSymbol(symbols.worker_pool_by_id, &err),
-        .query_worker_pools = try instance.loadSymbol(symbols.query_worker_pools, &err),
-        .create_worker_pool = try instance.loadSymbol(symbols.create_worker_pool, &err),
-        .yield = try instance.loadSymbol(symbols.yield, &err),
-        .abort = try instance.loadSymbol(symbols.abort, &err),
-        .sleep = try instance.loadSymbol(symbols.sleep, &err),
-        .task_local_set = try instance.loadSymbol(symbols.task_local_set, &err),
-        .task_local_get = try instance.loadSymbol(symbols.task_local_get, &err),
-        .task_local_clear = try instance.loadSymbol(symbols.task_local_clear, &err),
-        .parking_lot_park = try instance.loadSymbol(symbols.parking_lot_park, &err),
-        .parking_lot_park_multiple = try instance.loadSymbol(symbols.parking_lot_park_multiple, &err),
-        .parking_lot_unpark_one = try instance.loadSymbol(symbols.parking_lot_unpark_one, &err),
-        .parking_lot_unpark_all = try instance.loadSymbol(symbols.parking_lot_unpark_all, &err),
-        .parking_lot_unpark_filter = try instance.loadSymbol(symbols.parking_lot_unpark_filter, &err),
-        .parking_lot_unpark_requeue = try instance.loadSymbol(symbols.parking_lot_unpark_requeue, &err),
+        .symbols = try instance.loadSymbolGroup(symbols.all_symbols, &err),
     };
 
     return test_ctx;
