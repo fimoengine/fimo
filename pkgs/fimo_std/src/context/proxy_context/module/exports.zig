@@ -513,10 +513,14 @@ pub const Builder = struct {
     /// Automatically imports the required namespaces.
     pub fn withMultipleImports(comptime self: Builder, comptime imports: anytype) Builder {
         var builder = self;
-        inline for (std.meta.fields(@TypeOf(imports))) |f| {
+        const imports_info = @typeInfo(@TypeOf(imports)).@"struct";
+        inline for (imports_info.fields) |f| {
             const name = f.name;
             const symbol = @field(imports, name);
-            builder = builder.withImport(.{ .name = name, .symbol = symbol });
+            builder = builder.withImport(.{
+                .name = if (imports_info.is_tuple) null else name,
+                .symbol = symbol,
+            });
         }
         return builder;
     }

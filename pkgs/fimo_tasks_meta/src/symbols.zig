@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 const AnyResult = AnyError.AnyResult;
@@ -30,6 +32,28 @@ const TssKey = task_local.OpaqueKey;
 
 /// Namespace for all symbols of the package.
 pub const symbol_namespace: [:0]const u8 = "fimo-tasks";
+
+/// Tuple containing all symbols of the package.
+pub const all_symbols = .{
+    task_id,
+    worker_id,
+    worker_pool,
+    worker_pool_by_id,
+    query_worker_pools,
+    create_worker_pool,
+    yield,
+    abort,
+    sleep,
+    task_local_set,
+    task_local_get,
+    task_local_clear,
+    parking_lot_park,
+    parking_lot_park_multiple,
+    parking_lot_unpark_one,
+    parking_lot_unpark_all,
+    parking_lot_unpark_filter,
+    parking_lot_unpark_requeue,
+};
 
 pub const task_id = Symbol{
     .name = "task_id",
