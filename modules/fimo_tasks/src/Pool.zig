@@ -286,7 +286,11 @@ pub fn init(options: InitOptions) !*Self {
     self.thread = try Thread.spawn(.{}, runEventLoop, .{self_ref});
     self.thread.setName("event loop") catch {};
 
-    self.runtime.logDebug("created pool `{*}`", .{self}, @src());
+    self.runtime.logDebug(
+        "created `{*}`, label=`{s}`, public=`{}`",
+        .{ self, self.label, self.is_public },
+        @src(),
+    );
     return self;
 }
 
@@ -340,7 +344,7 @@ pub fn unrefWeak(self: *Self) void {
 /// Releases a weak reference and waits for the thread to join.
 pub fn unrefWeakAndJoin(self: *Self) void {
     // Wait until the thread is joined.
-    self.runtime.logDebug("joining pool `{*}`", .{self}, @src());
+    self.runtime.logDebug("joining `{*}`", .{self}, @src());
     std.debug.assert(self.enqueue_requests.isClosed());
     self.thread.join();
     self.unrefWeak();
@@ -390,7 +394,7 @@ pub fn wakeByAddress(self: *Self, value: *const atomic.Value(u32), max_waiters: 
 }
 
 pub fn requestClose(self: *Self) void {
-    self.runtime.logDebug("requesting close of pool `{*}`", .{self}, @src());
+    self.runtime.logDebug("`{*}` close requested", .{self}, @src());
     self.enqueue_requests.close(&self.runtime.lot);
     self.signal_channel.sender().trySend(&self.runtime.lot, {}) catch {};
 }
@@ -408,16 +412,12 @@ pub fn enqueueTask(self: *Self, task: *Task, worker: ?MetaWorker) void {
     std.debug.assert(task.next == null);
     const lot = &self.runtime.lot;
     if (worker) |w| {
-        self.runtime.logDebug(
-            "enqueueing task `{*}` to worker `{}` queue",
-            .{ task, @intFromEnum(w) },
-            @src(),
-        );
+        self.runtime.logDebug("`{*}` enqueueing `{*}` to `{}`", .{ self, task, w }, @src());
         std.debug.assert(task.worker == null or task.worker == worker);
         const ptr = &self.workers[@intFromEnum(w)];
         ptr.private_queue.sender().send(lot, task) catch unreachable;
     } else {
-        self.runtime.logDebug("enqueueing task `{*}` to global queue", .{task}, @src());
+        self.runtime.logDebug("`{*}` enqueueing `{*}` to global queue", .{ self, task }, @src());
         self.global_channel.sender(self.allocator).send(lot, task) catch |e| @panic(@errorName(e));
     }
 }
@@ -442,7 +442,7 @@ fn handleComplete(self: *Self, msg: *PrivateMessage) void {
 fn handleSleep(self: *Self, msg: *PrivateMessage) void {
     const timeout = &msg.msg.sleep.timeout;
     std.debug.assert(timeout.next == null);
-    self.runtime.logDebug("enqueueing sleep timeout `{*}`", .{timeout}, @src());
+    self.runtime.logDebug("`{*}` enqueueing sleep timeout `{*}`", .{ self, timeout }, @src());
 
     // Insert the timeout into the timeout queue.
     if (self.timeouts_head == null) {
@@ -469,11 +469,11 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
     const wait = &msg.msg.wait;
     const task: *Task = wait.task;
     std.debug.assert(task.next == null);
-    self.runtime.logDebug("processing wait request for task `{*}`", .{task}, @src());
+    self.runtime.logDebug("`{*}` processing wait for `{*}`", .{ self, task }, @src());
 
     // Wake the task if the value does not match the expected value.
     if (wait.value.load(.acquire) != wait.expect) {
-        self.runtime.logDebug("waking task `{*}` due to value mismatch", .{task}, @src());
+        self.runtime.logDebug("`{*}` waking `{*}`", .{ self, task }, @src());
         wait.timed_out.* = false;
         task.msg = null;
         if (task.call_stack) |cs| cs.unblock();
@@ -483,8 +483,8 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
 
     // Enqueue the waiter.
     self.runtime.logDebug(
-        "enqueuing waiter `{*}` for task `{*}` to waiter list at key `{*}`",
-        .{ wait, task, wait.value },
+        "`{*}` enqueuing waiter `{x}` for `{*}`, key=`{*}`",
+        .{ self, @intFromPtr(wait), task, wait.value },
         @src(),
     );
     const entry = self.waiters.getOrPutValue(self.allocator, wait.value, .{}) catch @panic("oom");
@@ -499,8 +499,8 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
     // Enqueue the task timeout, if it has one.
     if (wait.timeout) |*timeout| blk: {
         self.runtime.logDebug(
-            "enqueueing wait timeout `{*}` for waiter `{*}`",
-            .{ timeout, wait },
+            "`{*}` enqueueing wait timeout `{x}`, waiter=`{x}`",
+            .{ self, @intFromPtr(timeout), @intFromPtr(wait) },
             @src(),
         );
 
@@ -529,8 +529,8 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
     const wake = msg.msg.wake;
     self.allocator.destroy(msg);
     self.runtime.logDebug(
-        "waking {} waiters for key `{*}`",
-        .{ wake.max_waiters, wake.value },
+        "`{*}` waking {} waiters, key=`{*}`",
+        .{ self, wake.max_waiters, wake.value },
         @src(),
     );
     if (wake.max_waiters == 0) return;
@@ -553,13 +553,17 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 
         link.* = curr.next;
         if (bucket.tail == curr) bucket.tail = previous;
-        self.runtime.logDebug("waking waiter `{*}`", .{curr_wait}, @src());
+        self.runtime.logDebug(
+            "`{*}` waking waiter `{x}`",
+            .{ self, @intFromPtr(curr_wait) },
+            @src(),
+        );
 
         // If the task registered a timeout we also dequeue it.
         if (curr_wait.timeout) |*timeout| {
             self.runtime.logDebug(
-                "removing timeout `{*}` for waiter `{*}`",
-                .{ timeout, curr_wait },
+                "`{*}` removing timeout `{x}`, waiter=`{x}`",
+                .{ self, @intFromPtr(timeout), @intFromPtr(curr_wait) },
                 @src(),
             );
             var timeout_current = self.timeouts_head;
@@ -594,13 +598,13 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 }
 
 fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
-    self.runtime.logDebug("timeout `{*}` reached", .{timeout}, @src());
+    self.runtime.logDebug("`{*}` timeout `{x}` reached", .{ self, @intFromPtr(timeout) }, @src());
 
     const task = timeout.task;
     const wait = switch (task.msg.?.msg) {
         .complete, .wake => unreachable,
         .sleep => {
-            self.runtime.logDebug("waking task `{*}` from sleep", .{task}, @src());
+            self.runtime.logDebug("`{*}` waking `{*}` from sleep", .{ self, task }, @src());
             task.msg = null;
             std.debug.assert(task.next == null);
             if (task.call_stack) |cs| cs.unblock();
@@ -608,7 +612,11 @@ fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
             return;
         },
         .wait => |*v| blk: {
-            self.runtime.logDebug("timing out waiter `{*}`", .{v}, @src());
+            self.runtime.logDebug(
+                "`{*}` timing out waiter `{x}`",
+                .{ self, @intFromPtr(v) },
+                @src(),
+            );
             break :blk v;
         },
     };
@@ -647,8 +655,8 @@ fn processEnqueueRequest(self: *Self, buffer: *CommandBuffer) void {
     std.debug.assert(buffer.owner == self);
     std.debug.assert(buffer.enqueue_status == .dequeued);
     self.runtime.logDebug(
-        "spawning new command buffer `{*}` to pool `{*}`",
-        .{ buffer, self },
+        "`{*}` spawning `{*}`",
+        .{ self, buffer },
         @src(),
     );
     self.command_buffer_count += 1;
@@ -665,8 +673,8 @@ fn runEventLoop(self: *Self) void {
         null,
         null,
         @src(),
-        "pool event loop, pool=`{s}`, id={*}",
-        .{ self.label, self },
+        "event loop, pool=`{*}`",
+        .{self},
     ) else null;
     defer if (span) |sp| sp.deinit();
 
@@ -683,7 +691,7 @@ fn runEventLoop(self: *Self) void {
         // Wait until the next message arrives or timeout occurs.
         var curr_msg = rx.recvUntil(lot, next_timeout) catch |err| switch (err) {
             error.Timeout => blk: {
-                self.runtime.logDebug("recv timed out", .{}, @src());
+                self.runtime.logDebug("`{*}` recv timed out", .{self}, @src());
                 break :blk null;
             },
             else => break,
@@ -725,12 +733,12 @@ fn runEventLoop(self: *Self) void {
         // If there are no more command buffers and the public message queue is closed we can stop
         // the event loop.
         if (self.command_buffer_count == 0 and self.enqueue_requests.isClosed()) {
-            self.runtime.logDebug("closing event loop", .{}, @src());
+            self.runtime.logDebug("`{*}` closing", .{self}, @src());
             self.signal_channel.close(lot);
             self.private_message_queue.close(lot);
         }
     }
-    self.runtime.logDebug("terminating event loop", .{}, @src());
+    self.runtime.logDebug("`{*}` terminating", .{self}, @src());
 
     // Join all worker threads.
     self.should_join.store(true, .release);
