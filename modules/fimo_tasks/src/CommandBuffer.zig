@@ -75,7 +75,11 @@ pub fn init(owner: *Pool, buffer: *MetaCommandBuffer) Allocator.Error!*Self {
         .entry_status = entry_status,
     };
 
-    owner.runtime.logDebug("created command buffer `{*}`", .{self}, @src());
+    owner.runtime.logDebug(
+        "created `{*}`, label=`{s}`",
+        .{ self, self.buffer.label() },
+        @src(),
+    );
     return self;
 }
 
@@ -88,7 +92,7 @@ pub fn abortDeinit(self: *Self) void {
     std.debug.assert(self.enqueue_status == .dequeued);
     std.debug.assert(self.state.load(.acquire) == running);
     std.debug.assert(self.ref_count.load(.acquire) == 1);
-    self.owner.runtime.logDebug("destroying command buffer {*}", .{self}, @src());
+    self.owner.runtime.logDebug("destroying {*}", .{self}, @src());
 
     for (self.buffer.entries()) |entry| entry.abort();
     self.buffer.abort();
@@ -108,7 +112,7 @@ pub fn ref(self: *Self) *Self {
 pub fn unref(self: *Self) void {
     if (self.ref_count.fetchSub(1, .release) != 1) return;
     _ = self.ref_count.load(.acquire);
-    self.owner.runtime.logDebug("destroying command buffer {*}", .{self}, @src());
+    self.owner.runtime.logDebug("destroying {*}", .{self}, @src());
 
     for (self.entry_status) |entry| std.debug.assert(entry == .processed);
     const state = self.state.load(.acquire);
@@ -133,7 +137,7 @@ pub fn completeTask(self: *Self, task: *Task, is_error: bool) void {
         .running_task => |*t| {
             std.debug.assert(task == t);
             self.owner.runtime.logDebug(
-                "completed task `{*}` of command buffer `{*}`",
+                "completed `{*}` of `{*}`",
                 .{ task, self },
                 @src(),
             );
@@ -147,7 +151,7 @@ pub fn completeTask(self: *Self, task: *Task, is_error: bool) void {
 }
 
 pub fn processEntry(self: *Self) void {
-    self.owner.runtime.logDebug("processing command buffer `{*}`", .{self}, @src());
+    self.owner.runtime.logDebug("processing `{*}`", .{self}, @src());
     std.debug.assert(self.enqueue_status == .will_process);
     self.enqueue_status = .dequeued;
 
@@ -205,8 +209,8 @@ fn processAbortOnError(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .abort_on_error);
     self.abort_on_error = entry.payload.abort_on_error;
     self.owner.runtime.logDebug(
-        "setting command buffer `{*}` `abort on error` setting to `{}`",
-        .{ self, self.abort_on_error },
+        "`{*}` setting `abort on error` to `{}`, index=`{}`",
+        .{ self, self.abort_on_error, self.entry_index },
         @src(),
     );
     self.markStatus(.processed);
@@ -216,16 +220,16 @@ fn processMinStackSize(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .set_min_stack_size);
     const min_stack_size = entry.payload.set_min_stack_size;
     self.owner.runtime.logDebug(
-        "setting command buffer `{*}` `min stack size` setting to `{}`",
-        .{ self, min_stack_size },
+        "`{*}` setting `min stack size` to `{}`, index=`{}`",
+        .{ self, min_stack_size, self.entry_index },
         @src(),
     );
     if (self.owner.getStackAllocator(min_stack_size) == null) {
         self.owner.runtime.logErr(
-            "command buffer validation failed:" ++
-                " invalid stack size, label=`{s}`, entry=`{s}`, index=`{}`, stack_size=`{}`",
+            "`{*}` validation failed:" ++
+                " invalid stack size, entry=`{s}`, index=`{}`, stack_size=`{}`",
             .{
-                self.buffer.label(),
+                self,
                 @tagName(entry.tag),
                 self.entry_index,
                 @intFromEnum(min_stack_size),
@@ -243,19 +247,19 @@ fn processSelectWorker(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .select_worker);
     const worker = entry.payload.select_worker;
     self.owner.runtime.logDebug(
-        "setting command buffer `{*}` `worker` setting to `{}`",
-        .{ self, @intFromEnum(worker) },
+        "`{*}` setting `worker` to `{}`, index=`{}`",
+        .{ self, worker, self.entry_index },
         @src(),
     );
     if (self.owner.workers.len <= @intFromEnum(worker)) {
         self.owner.runtime.logErr(
-            "command buffer validation failed:" ++
-                " invalid worker, label=`{s}`, entry=`{s}`, index=`{}`, worker=`{}`",
+            "`{*}` validation failed:" ++
+                " invalid worker, entry=`{s}`, index=`{}`, worker=`{}`",
             .{
-                self.buffer.label(),
+                self,
                 @tagName(entry.tag),
                 self.entry_index,
-                @intFromEnum(worker),
+                worker,
             },
             @src(),
         );
@@ -270,8 +274,8 @@ fn processSelectAnyWorker(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .select_any_worker);
     self.worker = null;
     self.owner.runtime.logDebug(
-        "setting command buffer `{*}` `worker` setting to `any`",
-        .{self},
+        "`{*}` setting `worker` to `any`, index=`{}`",
+        .{ self, self.entry_index },
         @src(),
     );
     self.markStatus(.processed);
@@ -287,10 +291,10 @@ fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
         },
         Allocator.Error.OutOfMemory => {
             self.owner.runtime.logErr(
-                "command buffer validation failed:" ++
-                    " stack allocation failed, label=`{s}`, entry=`{s}`, index=`{}`, stack=`{}`",
+                "`{*}` validation failed:" ++
+                    " stack allocation failed, entry=`{s}`, index=`{}`, stack=`{}`",
                 .{
-                    self.buffer.label(),
+                    self,
                     @tagName(entry.tag),
                     self.entry_index,
                     @intFromEnum(self.stack_size),
@@ -316,8 +320,8 @@ fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
     const task_ptr = &task_status.running_task;
 
     self.owner.runtime.logDebug(
-        "spawning new task `{*}` from command buffer `{*}`",
-        .{ task_ptr, self },
+        "`{*}` spawning `{*}`, index=`{}`",
+        .{ self, task_ptr, task_ptr.entry_index },
         @src(),
     );
     _ = self.owner.task_count.fetchAdd(1, .monotonic);
@@ -328,10 +332,10 @@ fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .enqueue_command_buffer);
     const buffer = Self.init(self.owner, entry.payload.enqueue_command_buffer) catch {
         self.owner.runtime.logErr(
-            "command buffer validation failed:" ++
-                " enqueue of command buffer failed, label=`{s}`, entry=`{s}`, index=`{}`, buffer=`{s}`",
+            "`{*}` validation failed:" ++
+                " enqueue of command buffer failed, entry=`{s}`, index=`{}`, enqueue-buffer=`{s}`",
             .{
-                self.buffer.label(),
+                self,
                 @tagName(entry.tag),
                 self.entry_index,
                 entry.payload.enqueue_command_buffer.label(),
@@ -342,8 +346,8 @@ fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
         return;
     };
     self.owner.runtime.logDebug(
-        "spawning new command buffer `{*}` from command buffer `{*}` to pool `{*}`",
-        .{ buffer, self, self.owner },
+        "`{*}` spawning `{*}` to `{*}`, index=`{}`",
+        .{ self, buffer, self.owner, self.entry_index },
         @src(),
     );
     self.owner.command_buffer_count += 1;
@@ -354,8 +358,8 @@ fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
 fn processWaitOnBarrier(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_barrier);
     self.owner.runtime.logDebug(
-        "waiting for completion of preceding commands for command buffer `{*}`",
-        .{self},
+        "`{*}` waiting on barrier, index=`{}`",
+        .{ self, self.entry_index },
         @src(),
     );
 
@@ -363,24 +367,24 @@ fn processWaitOnBarrier(self: *Self, entry: Entry) ProcessError!void {
     while (self.completed_index != self.entry_index) {
         try self.waitOnEntry(self.completed_index);
     }
-
-    self.owner.runtime.logDebug(
-        "completed barrier for command buffer `{*}`",
-        .{self},
-        @src(),
-    );
     return self.markStatus(.processed);
 }
 
 fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_command_buffer);
+    self.owner.runtime.logDebug(
+        "`{*}` waiting on child command buffer, index=`{}`",
+        .{ self, self.entry_index },
+        @src(),
+    );
+
     const handle = entry.payload.wait_on_command_buffer;
     if (handle.vtable != &vtable) {
         self.owner.runtime.logErr(
-            "command buffer validation failed:" ++
-                " invalid handle, label=`{s}`, entry=`{s}`, index=`{}`",
+            "`{*}` validation failed:" ++
+                " invalid handle, entry=`{s}`, index=`{}`",
             .{
-                self.buffer.label(),
+                self,
                 @tagName(entry.tag),
                 self.entry_index,
             },
@@ -392,11 +396,11 @@ fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
     const buffer: *Self = @ptrCast(@alignCast(handle.data));
     if (buffer.owner != self.owner) {
         self.owner.runtime.logErr(
-            "command buffer validation failed:" ++
-                " handle owner mismatch, label=`{s}`, entry=`{s}`, index=`{}`," ++
+            "`{*}` validation failed:" ++
+                " handle owner mismatch, entry=`{s}`, index=`{}`," ++
                 " expected=`{s}`, got=`{s}`",
             .{
-                self.buffer.label(),
+                self,
                 @tagName(entry.tag),
                 self.entry_index,
                 self.owner.label,
@@ -417,14 +421,20 @@ fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
 
 fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_command_indirect);
+    self.owner.runtime.logDebug(
+        "`{*}` waiting on command, index=`{}`",
+        .{ self, self.entry_index },
+        @src(),
+    );
+
     const offset = entry.payload.wait_on_command_indirect;
     if (offset == 0) return self.markStatus(.processed);
     if (offset > self.entry_index) {
         self.owner.runtime.logErr(
-            "command buffer validation failed:" ++
-                " offset out of bounds, label=`{s}`, entry=`{s}`, index=`{}`, offset=`{}`",
+            "`{*}` validation failed:" ++
+                " offset out of bounds, entry=`{s}`, index=`{}`, offset=`{}`",
             .{
-                self.buffer.label(),
+                self,
                 @tagName(entry.tag),
                 self.entry_index,
                 offset,
@@ -442,10 +452,10 @@ fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
 
 fn processUnknown(self: *Self, entry: Entry) void {
     self.owner.runtime.logErr(
-        "command buffer validation failed:" ++
-            " unknown entry type, label=`{s}`, entry=`{}`, index=`{}`",
+        "`{*}` validation failed:" ++
+            " unknown entry type, entry=`{}`, index=`{}`",
         .{
-            self.buffer.label(),
+            self,
             @intFromEnum(entry.tag),
             self.entry_index,
         },
@@ -458,7 +468,7 @@ pub fn enqueueToPool(self: *Self) void {
     if (self.enqueue_status != .dequeued) return;
 
     self.owner.runtime.logDebug(
-        "enqueueing command buffer `{*}` to pool `{*}`",
+        "`{*}` enqueueing to `{*}`",
         .{ self, self.owner },
         @src(),
     );
@@ -554,7 +564,7 @@ fn broadcast(self: *Self) void {
     std.debug.assert(self.completed_index == self.entry_index);
     std.debug.assert(self.entry_index == self.entry_status.len);
     self.owner.runtime.logDebug(
-        "waking waiters of command buffer `{*}`",
+        "`{*}` waking waiters",
         .{self},
         @src(),
     );
@@ -575,7 +585,7 @@ fn broadcast(self: *Self) void {
         var current: ?*Self = head;
         while (current) |waiter| {
             std.debug.assert(self.enqueue_status == .blocked);
-            self.owner.runtime.logDebug("waking command buffer `{*}`", .{waiter}, @src());
+            self.owner.runtime.logDebug("waking `{*}`", .{waiter}, @src());
             waiter.enqueue_status = .will_process;
             current = waiter.next;
         }
@@ -604,11 +614,7 @@ fn waitOnEntry(self: *Self, entry_index: usize) ProcessError!void {
         // If the command is a running task, we need to do nothing, as the
         // task will notify us when it is done
         .running_task => |*task| {
-            self.owner.runtime.logDebug(
-                "blocking command buffer `{*}` until completion of task `{*}`",
-                .{ self, task },
-                @src(),
-            );
+            self.owner.runtime.logDebug("`{*}` blocking on `{*}`", .{ self, task }, @src());
             return error.Block;
         },
         // If we are waiting on another command buffer, we have to register
@@ -634,11 +640,7 @@ fn waitOnBuffer(self: *Self, buffer: *Self) ProcessError!Handle.CompletionStatus
     if (state & status_mask != running)
         return if (state & status_mask == completed) .completed else .aborted;
 
-    self.owner.runtime.logDebug(
-        "blocking command buffer `{*}` until completion of command buffer `{*}`",
-        .{ self, buffer },
-        @src(),
-    );
+    self.owner.runtime.logDebug("`{*}` blocking on `{*}`", .{ self, buffer }, @src());
     if (buffer.waiters_tail) |tail| {
         tail.next = self;
     } else {
@@ -652,7 +654,7 @@ fn waitOnBuffer(self: *Self, buffer: *Self) ProcessError!Handle.CompletionStatus
 
 fn waitOn(self: *Self) Handle.CompletionStatus {
     self.owner.runtime.logDebug(
-        "waiting on completion of command buffer `{*}`",
+        "waiting on `{*}`",
         .{self},
         @src(),
     );

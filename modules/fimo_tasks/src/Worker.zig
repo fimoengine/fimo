@@ -227,15 +227,13 @@ pub fn taskEntry(tr: context_.Transfer) callconv(.c) noreturn {
 
     {
         const tracing = worker.pool.runtime.tracing();
-
-        const pool_label: []const u8 = worker.pool.label;
         const span = if (tracing) |tra| Tracing.Span.initTrace(
             tra,
             null,
             null,
             @src(),
-            "pool=`{s}`, worker=`{}`, buffer=`{*}`, task=`{*}`",
-            .{ pool_label, worker.id, task.owner, task },
+            "pool=`{*}`, worker=`{}`, buffer=`{*}`, task=`{*}`",
+            .{ worker.pool, worker.id, task.owner, task },
         ) else null;
         defer if (span) |sp| sp.deinit();
 
@@ -273,13 +271,13 @@ pub fn run(self: *Self) void {
             self.pool.runtime.logDebug("exiting event loop", .{}, @src());
             break;
         };
-        self.pool.runtime.logDebug("received task `{*}`", .{task}, @src());
+        self.pool.runtime.logDebug("received `{*}`", .{task}, @src());
         task.ensureReady();
 
         // Bind the task to the current worker.
         std.debug.assert(task.worker == null or task.worker == self.id);
         if (task.worker == null) {
-            self.pool.runtime.logDebug("binding task `{*}` to worker", .{task}, @src());
+            self.pool.runtime.logDebug("binding `{*}` to {}", .{ task, self.id }, @src());
             _ = self.private_task_count.fetchAdd(1, .monotonic);
             task.worker = self.id;
         }
@@ -289,7 +287,7 @@ pub fn run(self: *Self) void {
         self.active_task = task;
 
         // Switch to the task's call stack.
-        self.pool.runtime.logDebug("switching to task `{*}`", .{task}, @src());
+        self.pool.runtime.logDebug("switching to `{*}`", .{task}, @src());
         swapCallStack(tracing, &self.call_stack, &task.call_stack, false);
 
         // Switch to the task's context.
@@ -297,7 +295,7 @@ pub fn run(self: *Self) void {
         const t_ctx = task.context.?;
         task.context = null;
         const tr = t_ctx.yieldTo(0);
-        self.pool.runtime.logDebug("switching to event loop from task `{*}`", .{task}, @src());
+        self.pool.runtime.logDebug("`{*}` switching to event loop", .{task}, @src());
         task.context = tr.context;
 
         // Set the task as inactive.
@@ -312,7 +310,7 @@ pub fn run(self: *Self) void {
                 swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
                 task.afterExit(false);
                 _ = self.private_task_count.fetchSub(1, .monotonic);
-                self.pool.runtime.logDebug("task `{*}` completed", .{task}, @src());
+                self.pool.runtime.logDebug("`{*}` completed", .{task}, @src());
 
                 self.sendToPool(task, .{
                     .msg = .{
@@ -328,7 +326,7 @@ pub fn run(self: *Self) void {
                 swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
                 task.afterExit(true);
                 _ = self.private_task_count.fetchSub(1, .monotonic);
-                self.pool.runtime.logDebug("task `{*}` aborted", .{task}, @src());
+                self.pool.runtime.logDebug("`{*}` aborted", .{task}, @src());
 
                 self.sendToPool(task, .{
                     .msg = .{
@@ -342,7 +340,7 @@ pub fn run(self: *Self) void {
             .yield => {
                 // Switch back to the event loop call stack.
                 swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
-                self.pool.runtime.logDebug("task `{*}` yielded", .{task}, @src());
+                self.pool.runtime.logDebug("`{*}` yielded", .{task}, @src());
 
                 // Push the task back onto the local queue.
                 const sx = self.private_queue.sender();
@@ -353,7 +351,7 @@ pub fn run(self: *Self) void {
                 if (Instant.now().order(msg.timeout) != .lt) {
                     // Switch back to the event loop call stack.
                     swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
-                    self.pool.runtime.logDebug("task `{*}` sleeping, but timeout expired", .{task}, @src());
+                    self.pool.runtime.logDebug("`{*}` sleeping, but timeout expired", .{task}, @src());
 
                     // Push the task back onto the local queue.
                     const sx = self.private_queue.sender();
@@ -363,7 +361,7 @@ pub fn run(self: *Self) void {
 
                 // Switch back to the event loop call stack and block.
                 swapCallStack(tracing, &task.call_stack, &self.call_stack, true);
-                self.pool.runtime.logDebug("task `{*}` sleeping", .{task}, @src());
+                self.pool.runtime.logDebug("`{*}` sleeping", .{task}, @src());
 
                 self.sendToPool(task, .{
                     .msg = .{
@@ -383,7 +381,7 @@ pub fn run(self: *Self) void {
 
                     // Switch back to the event loop call stack.
                     swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
-                    self.pool.runtime.logDebug("task `{*}` waiting, but timeout expired", .{task}, @src());
+                    self.pool.runtime.logDebug("`{*}` waiting, but timeout expired", .{task}, @src());
 
                     // Push the task back onto the local queue.
                     const sx = self.private_queue.sender();
@@ -393,7 +391,7 @@ pub fn run(self: *Self) void {
 
                 // Switch back to the event loop call stack.
                 swapCallStack(tracing, &task.call_stack, &self.call_stack, true);
-                self.pool.runtime.logDebug("task `{*}` waiting", .{task}, @src());
+                self.pool.runtime.logDebug("`{*}` waiting", .{task}, @src());
 
                 self.sendToPool(task, .{
                     .msg = .{
