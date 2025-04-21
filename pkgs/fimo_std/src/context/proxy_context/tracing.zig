@@ -41,6 +41,7 @@ pub const Span = extern struct {
     /// Adding fields to the vtable is not a breaking change.
     pub const VTable = extern struct {
         deinit: *const fn (ptr: *anyopaque) callconv(.c) void,
+        deinit_abort: *const fn (ptr: *anyopaque) callconv(.c) void,
     };
 
     /// Creates a new span with the default formatter and enters it.
@@ -226,6 +227,17 @@ pub const Span = extern struct {
     pub fn deinit(self: Span) void {
         self.vtable.deinit(self.handle);
     }
+
+    /// Unwinds and destroys a span.
+    ///
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack. The span may not be in use prior to a call to
+    /// this function, and may not be used afterwards.
+    ///
+    /// This function must be called while the owning call stack is bound by the current thread.
+    pub fn deinitAbort(self: Span) void {
+        self.vtable.deinit_abort(self.handle);
+    }
 };
 
 /// Descriptor of a new span.
@@ -255,6 +267,7 @@ pub const CallStack = extern struct {
     /// Adding fields to the vtable is not a breaking change.
     pub const VTable = extern struct {
         deinit: *const fn (handle: *anyopaque) callconv(.c) void,
+        deinit_abort: *const fn (handle: *anyopaque) callconv(.c) void,
         replace_active: *const fn (handle: *anyopaque) callconv(.c) CallStack,
         unblock: *const fn (handle: *anyopaque) callconv(.c) void,
     };
@@ -276,6 +289,15 @@ pub const CallStack = extern struct {
     /// call stack uniquely.
     pub fn deinit(self: CallStack) void {
         self.vtable.deinit(self.handle);
+    }
+
+    /// Unwinds and destroys a call stack.
+    ///
+    /// Marks that the task was aborted. Before calling this function, the call stack  must not be
+    /// active. If successful, the call stack may not be used afterwards. The caller must own the
+    /// call stack uniquely.
+    pub fn deinitAbort(self: CallStack) void {
+        self.vtable.deinit_abort(self.handle);
     }
 
     /// Switches the call stack of the current thread.
@@ -430,6 +452,7 @@ pub const Subscriber = extern struct {
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
+            is_unwind: bool,
         ) callconv(.c) void,
         /// Marks the stack as unblocked.
         call_stack_unblock: *const fn (
@@ -468,6 +491,7 @@ pub const Subscriber = extern struct {
             ctx: ?*anyopaque,
             time: *const c.FimoTime,
             call_stack: *anyopaque,
+            is_unwind: bool,
         ) callconv(.c) void,
         /// Emits an event.
         event_emit: *const fn (
@@ -496,6 +520,7 @@ pub const Subscriber = extern struct {
             ctx: @TypeOf(obj),
             time: Time,
             call_stack: *CallStackT,
+            is_unwind: bool,
         ) void,
         comptime call_stack_unblock_fn: fn (
             ctx: @TypeOf(obj),
@@ -521,7 +546,12 @@ pub const Subscriber = extern struct {
             call_stack: *CallStackT,
         ) void,
         comptime span_drop_fn: fn (ctx: @TypeOf(obj), call_stack: *CallStackT) void,
-        comptime span_pop_fn: fn (ctx: @TypeOf(obj), time: Time, call_stack: *CallStackT) void,
+        comptime span_pop_fn: fn (
+            ctx: @TypeOf(obj),
+            time: Time,
+            call_stack: *CallStackT,
+            is_unwind: bool,
+        ) void,
         comptime event_emit_fn: fn (
             ctx: @TypeOf(obj),
             time: Time,
@@ -566,11 +596,12 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
+                is_unwind: bool,
             ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                call_stack_destroy_fn(self, t, cs);
+                call_stack_destroy_fn(self, t, cs, is_unwind);
             }
             fn callStackUnblock(
                 ptr: ?*anyopaque,
@@ -635,11 +666,12 @@ pub const Subscriber = extern struct {
                 ptr: ?*anyopaque,
                 time_c: *const c.FimoTime,
                 call_stack: *anyopaque,
+                is_unwind: bool,
             ) callconv(.c) void {
                 const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
                 const t = Time.initC(time_c.*);
                 const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                span_pop_fn(self, t, cs);
+                span_pop_fn(self, t, cs, is_unwind);
             }
             fn eventEmit(
                 ptr: ?*anyopaque,
@@ -703,11 +735,17 @@ pub const Subscriber = extern struct {
         );
     }
 
-    pub fn destroyCallStack(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
+    pub fn destroyCallStack(
+        self: Subscriber,
+        timepoint: Time,
+        call_stack: *anyopaque,
+        is_unwind: bool,
+    ) void {
         self.vtable.call_stack_destroy(
             self.data,
             &timepoint.intoC(),
             call_stack,
+            is_unwind,
         );
     }
 
@@ -758,8 +796,13 @@ pub const Subscriber = extern struct {
         self.vtable.span_drop(self.data, call_stack);
     }
 
-    pub fn destroySpan(self: Subscriber, timepoint: Time, call_stack: *anyopaque) void {
-        self.vtable.span_pop(self.data, &timepoint.intoC(), call_stack);
+    pub fn destroySpan(
+        self: Subscriber,
+        timepoint: Time,
+        call_stack: *anyopaque,
+        is_unwind: bool,
+    ) void {
+        self.vtable.span_pop(self.data, &timepoint.intoC(), call_stack, is_unwind);
     }
 
     pub fn emitEvent(
@@ -1226,9 +1269,15 @@ const DefaultSubscriber = struct {
         Self.allocator.destroy(call_stack);
     }
 
-    fn destroyCallStack(self: *const Self, time: Time, call_stack: *Self.CallStack) void {
+    fn destroyCallStack(
+        self: *const Self,
+        time: Time,
+        call_stack: *Self.CallStack,
+        is_unwind: bool,
+    ) void {
         _ = self;
         _ = time;
+        _ = is_unwind;
         std.debug.assert(call_stack.tail == null);
         Self.allocator.destroy(call_stack);
     }
@@ -1280,9 +1329,10 @@ const DefaultSubscriber = struct {
         call_stack.tail = previous;
     }
 
-    fn destroySpan(self: *const Self, time: Time, call_stack: *Self.CallStack) void {
+    fn destroySpan(self: *const Self, time: Time, call_stack: *Self.CallStack, is_unwind: bool) void {
         _ = self;
         _ = time;
+        _ = is_unwind;
         const tail = call_stack.tail.?;
         const previous = tail.previous;
         Self.allocator.destroy(tail);

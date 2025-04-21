@@ -1,8 +1,8 @@
 #ifndef FIMO_TRACING_H
 #define FIMO_TRACING_H
 
-#include <stddef.h>
 #include <stdarg.h>
+#include <stddef.h>
 
 #include <fimo_std/context.h>
 #include <fimo_std/error.h>
@@ -40,6 +40,12 @@ typedef struct FimoTracingCallStackVTable {
     /// automatically, on thread exit or during destruction of the context. The caller must own the
     /// call stack uniquely.
     void (*drop)(void *handle);
+    /// Unwinds and destroys a call stack.
+    ///
+    /// Marks that the task was aborted. Before calling this function, the call stack  must not be
+    /// active. If successful, the call stack may not be used afterwards. The caller must own the
+    /// call stack uniquely.
+    void (*drop_unwind)(void *handle);
     /// Switches the call stack of the current thread.
     ///
     /// If successful, this call stack will be used as the active call stack of the calling thread.
@@ -116,6 +122,14 @@ typedef struct FimoTracingSpanVTable {
     ///
     /// This function must be called while the owning call stack is bound by the current thread.
     void (*drop)(void *handle);
+    /// Unwinds and destroys a span.
+    ///
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack. The span may not be in use prior to a call to
+    /// this function, and may not be used afterwards.
+    ///
+    /// This function must be called while the owning call stack is bound by the current thread.
+    void (*drop_unwind)(void *handle);
 } FimoTracingSpanVTable;
 
 /// A period of time, during which events can occur.
@@ -140,7 +154,7 @@ typedef struct FimoTracingEvent {
 ///
 /// The formatter function is allowed to format only part of the message, if it would not fit into
 /// the buffer.
-typedef void (*FimoTracingFormat)(char *, FimoUSize, const void *, FimoUSize *);
+typedef void (*FimoTracingFormat)(char *buffer, FimoUSize buffer_len, const void *data, FimoUSize *written);
 
 /// VTable of a tracing subscriber.
 ///
@@ -152,35 +166,37 @@ typedef struct FimoTracingSubscriberVTable {
     /// Reserved for future use. Must be `NULL`.
     const void *next;
     /// Increases the reference count of the subscriber.
-    void (*acquire)(void *);
+    void (*acquire)(void *ctx);
     /// Decreases the reference count of the subscriber.
-    void (*release)(void *);
+    void (*release)(void *ctx);
     /// Creates a new stack.
-    void* (*call_stack_create)(void *, const FimoTime *);
+    void *(*call_stack_create)(void *ctx, const FimoTime *time);
     /// Drops an empty call stack.
     ///
     /// Calling this function reverts the creation of the call stack.
-    void (*call_stack_drop)(void *, void *);
+    void (*call_stack_drop)(void *ctx, void *call_stack);
     /// Destroys a stack.
-    void (*call_stack_destroy)(void *, const FimoTime *, void *);
+    void (*call_stack_destroy)(void *ctx, const FimoTime *time, void *call_stack, bool is_unwind);
     /// Marks the stack as unblocked.
-    void (*call_stack_unblock)(void *, const FimoTime *, void *);
+    void (*call_stack_unblock)(void *ctx, const FimoTime *time, void *call_stack);
     /// Marks the stack as suspended/blocked.
-    void (*call_stack_suspend)(void *, const FimoTime *, void *, bool);
+    void (*call_stack_suspend)(void *ctx, const FimoTime *time, void *call_stack, bool mark_blocked);
     /// Marks the stack as resumed.
-    void (*call_stack_resume)(void *, const FimoTime *, void *);
+    void (*call_stack_resume)(void *ctx, const FimoTime *time, void *call_stack);
     /// Creates a new span.
-    void (*span_push)(void *, const FimoTime *, const FimoTracingSpanDesc *, const char *, FimoUSize, void *);
+    void (*span_push)(void *ctx, const FimoTime *time, const FimoTracingSpanDesc *span_desc, const char *msg,
+                      FimoUSize msg_len, void *call_stack);
     /// Drops a newly created span.
     ///
     /// Calling this function reverts the creation of the span.
-    void (*span_drop)(void *, void *);
+    void (*span_drop)(void *ctx, void *call_stack);
     /// Exits and destroys a span.
-    void (*span_pop)(void *, const FimoTime *, void *);
+    void (*span_pop)(void *ctx, const FimoTime *time, void *call_stack, bool is_unwind);
     /// Emits an event.
-    void (*event_emit)(void *, const FimoTime *, void *, const FimoTracingEvent *, const char *, FimoUSize);
+    void (*event_emit)(void *ctx, const FimoTime *time, void *call_stack, const FimoTracingEvent *event,
+                       const char *msg, FimoUSize msg_len);
     /// Flushes the messages of the subscriber.
-    void (*flush)(void *);
+    void (*flush)(void *ctx);
 } FimoTracingSubscriberVTable;
 
 /// A subscriber for tracing events.
@@ -245,14 +261,13 @@ typedef struct FimoTracingVTableV0 {
     /// subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
     /// the message after reaching that specified size. The `desc` must remain valid until the span
     /// is destroyed.
-    FimoTracingSpan (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc,
-                                   FimoTracingFormat format, const void *data);
+    FimoTracingSpan (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc, FimoTracingFormat format,
+                                   const void *data);
     /// Emits a new event with a custom formatter.
     ///
     /// The subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
     /// the message after reaching that specified size.
-    void (*event_emit)(void *ctx, const FimoTracingEvent *event, FimoTracingFormat format,
-                       const void * data);
+    void (*event_emit)(void *ctx, const FimoTracingEvent *event, FimoTracingFormat format, const void *data);
     /// Checks whether the tracing subsystem is enabled.
     ///
     /// This function can be used to check whether to call into the subsystem at all. Calling this
