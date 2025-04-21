@@ -356,7 +356,7 @@ pub const Builder = struct {
     };
 
     const SymbolImport = struct {
-        name: [:0]const u8,
+        name: ?[:0]const u8 = null,
         symbol: Module.Symbol,
     };
 
@@ -502,6 +502,19 @@ pub const Builder = struct {
         return x;
     }
 
+    /// Adds multiple imports to the module.
+    ///
+    /// Automatically imports the required namespaces.
+    pub fn withMultipleImports(comptime self: Builder, comptime imports: anytype) Builder {
+        var builder = self;
+        inline for (std.meta.fields(@TypeOf(imports))) |f| {
+            const name = f.name;
+            const symbol = @field(imports, name);
+            builder = builder.withImport(.{ .name = name, .symbol = symbol });
+        }
+        return builder;
+    }
+
     /// Adds an import to the module.
     ///
     /// Automatically imports the required namespace.
@@ -509,15 +522,16 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime import: Builder.SymbolImport,
     ) Builder {
-        for (self.imports) |imp| {
-            if (std.mem.eql(u8, imp.name, import.name))
+        if (import.name) |import_name| for (self.imports) |imp| {
+            const imp_name = imp.name orelse continue;
+            if (std.mem.eql(u8, imp_name, import_name))
                 @compileError(
                     std.fmt.comptimePrint(
                         "duplicate import member name: '{s}'",
                         .{imp.name},
                     ),
                 );
-        }
+        };
 
         var imports: [self.imports.len + 1]Builder.SymbolImport = undefined;
         @memcpy(imports[0..self.imports.len], self.imports);
@@ -961,9 +975,11 @@ pub const Builder = struct {
     fn ImportTable(comptime self: Builder) type {
         if (self.imports.len == 0) return void;
         var fields: [self.imports.len]std.builtin.Type.StructField = undefined;
-        for (self.imports, &fields) |x, *f| {
+        for (self.imports, &fields, 0..) |x, *f, i| {
+            @setEvalBranchQuota(10_000);
+            var num_buf: [128]u8 = undefined;
             f.* = std.builtin.Type.StructField{
-                .name = x.name,
+                .name = x.name orelse (std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable),
                 .type = *const x.symbol.T,
                 .default_value_ptr = null,
                 .is_comptime = false,
@@ -1025,8 +1041,13 @@ pub const Builder = struct {
             location: enum { imp, exp },
         };
         var infos: [self.imports.len + self.exports.len]SymbolInfo = undefined;
-        for (infos[0..self.imports.len], self.imports) |*info, sym| {
-            info.* = .{ .name = sym.name, .symbol = sym.symbol, .location = .imp };
+        for (infos[0..self.imports.len], self.imports, 0..) |*info, sym, i| {
+            @setEvalBranchQuota(10_000);
+            info.* = .{
+                .name = sym.name orelse std.fmt.comptimePrint("{d}", .{i})[0..],
+                .symbol = sym.symbol,
+                .location = .imp,
+            };
         }
         for (infos[self.imports.len..], self.exports) |*info, sym| {
             info.* = .{ .name = sym.name, .symbol = sym.symbol, .location = .exp };

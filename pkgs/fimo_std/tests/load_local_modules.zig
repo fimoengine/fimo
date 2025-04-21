@@ -69,8 +69,8 @@ fn initCModule(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !void
     ctx.context().tracing().emitTraceSimple("img: '{s}'", .{resources.img}, @src());
 
     const imports = ctx.imports();
-    try testing.expectEqual(imports.a0.*, 5);
-    try testing.expectEqual(imports.a1.*, 10);
+    try testing.expectEqual(imports.@"0".*, 5);
+    try testing.expectEqual(imports.@"1".*, 10);
     try testing.expectEqual(imports.b0.*, -2);
     try testing.expectEqual(imports.b1.*, 77);
 
@@ -193,10 +193,8 @@ const C = Module.exports.Builder
     .withResource(.{ .name = "a", .path = Path.init("a.bin") catch unreachable })
     .withResource(.{ .name = "b", .path = Path.init("b.txt") catch unreachable })
     .withResource(.{ .name = "img", .path = Path.init("c/d.img") catch unreachable })
-    .withImport(.{ .name = "a0", .symbol = A0 })
-    .withImport(.{ .name = "a1", .symbol = A1 })
-    .withImport(.{ .name = "b0", .symbol = B0 })
-    .withImport(.{ .name = "b1", .symbol = B1 })
+    .withMultipleImports(.{ A0, A1 })
+    .withMultipleImports(.{ .b0 = B0, .b1 = B1 })
     .withStateSync(void, initCModule, deinitCModule)
     .withOnStartEventSync(startCModule)
     .withOnStopEvent(stopCModule)
