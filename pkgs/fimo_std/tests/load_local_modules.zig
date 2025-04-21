@@ -114,8 +114,8 @@ const A = Module.exports.Builder
     .withDescription("Test module a")
     .withAuthor("fimo")
     .withLicense("MIT and Apache 2.0")
-    .withExport(A0, "a0", .global, &5)
-    .withExport(A1, "a1", .global, &10)
+    .withExport(.{ .symbol = A0 }, &5)
+    .withExport(.{ .symbol = A1 }, &10)
     .exportModule();
 
 const B = Module.exports.Builder
@@ -123,8 +123,8 @@ const B = Module.exports.Builder
     .withDescription("Test module b")
     .withAuthor("fimo")
     .withLicense("MIT and Apache 2.0")
-    .withExport(B0, "b0", .global, &-2)
-    .withExport(B1, "b1", .global, &77)
+    .withExport(.{ .symbol = B0, .name = "b0" }, &-2)
+    .withExport(.{ .symbol = B1, .name = "b1" }, &77)
     .exportModule();
 
 const C = Module.exports.Builder

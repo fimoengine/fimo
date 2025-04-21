@@ -325,7 +325,7 @@ pub const Builder = struct {
     start_event: ?Self.Modifier.StartEvent = null,
     stop_event: ?Self.Modifier.StopEvent = null,
 
-    const Parameter = struct {
+    pub const Parameter = struct {
         name: []const u8,
         member_name: [:0]const u8,
         default_value: union(enum) {
@@ -350,19 +350,25 @@ pub const Builder = struct {
         ) callconv(.c) void = null,
     };
 
-    const Resource = struct {
+    pub const Resource = struct {
         name: [:0]const u8,
         path: Path,
     };
 
-    const SymbolImport = struct {
+    pub const SymbolImport = struct {
         name: ?[:0]const u8 = null,
         symbol: Module.Symbol,
     };
 
+    pub const SymbolExportOptions = struct {
+        symbol: Module.Symbol,
+        name: ?[:0]const u8 = null,
+        linkage: SymbolLinkage = .global,
+    };
+
     const SymbolExport = struct {
         symbol: Module.Symbol,
-        name: [:0]const u8,
+        name: ?[:0]const u8,
         linkage: SymbolLinkage,
         value: union(enum) {
             static: *const anyopaque,
@@ -547,15 +553,16 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime @"export": Builder.SymbolExport,
     ) Builder {
-        for (self.exports) |exp| {
-            if (std.mem.eql(u8, exp.name, @"export".name))
+        if (@"export".name) |export_name| for (self.exports) |exp| {
+            const exp_name = exp.name orelse continue;
+            if (std.mem.eql(u8, exp_name, export_name))
                 @compileError(
                     std.fmt.comptimePrint(
                         "duplicate export member name: '{s}'",
                         .{exp.name},
                     ),
                 );
-        }
+        };
 
         var exports: [self.exports.len + 1]Builder.SymbolExport = undefined;
         @memcpy(exports[0..self.exports.len], self.exports);
@@ -575,15 +582,13 @@ pub const Builder = struct {
     /// Adds a static export to the module.
     pub fn withExport(
         comptime self: Builder,
-        comptime symbol: Module.Symbol,
-        comptime name: [:0]const u8,
-        comptime linkage: SymbolLinkage,
-        comptime value: *const symbol.T,
+        comptime options: SymbolExportOptions,
+        comptime value: *const options.symbol.T,
     ) Builder {
         const exp = Builder.SymbolExport{
-            .symbol = symbol,
-            .name = name,
-            .linkage = linkage,
+            .symbol = options.symbol,
+            .name = options.name,
+            .linkage = options.linkage,
             .value = .{ .static = value },
         };
         return self.withExportInner(exp);
@@ -592,17 +597,15 @@ pub const Builder = struct {
     /// Adds a static export to the module.
     pub fn withDynamicExport(
         comptime self: Builder,
-        comptime symbol: Module.Symbol,
-        comptime name: [:0]const u8,
-        comptime linkage: SymbolLinkage,
+        comptime options: SymbolExportOptions,
         comptime Fut: type,
         comptime initFn: fn (ctx: *const Module.OpaqueInstance) Fut,
-        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *symbol.T) void,
+        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *options.symbol.T) void,
     ) Builder {
         const Result = Fut.Result;
         switch (@typeInfo(Result)) {
-            .error_union => |x| std.debug.assert(x.payload == *symbol.T),
-            else => std.debug.assert(Result == *symbol.T),
+            .error_union => |x| std.debug.assert(x.payload == *options.symbol.T),
+            else => std.debug.assert(Result == *options.symbol.T),
         }
         const Wrapper = struct {
             fn wrapInit(
@@ -634,9 +637,9 @@ pub const Builder = struct {
         };
 
         const exp = Builder.SymbolExport{
-            .symbol = symbol,
-            .name = name,
-            .linkage = linkage,
+            .symbol = options.symbol,
+            .name = options.name,
+            .linkage = options.linkage,
             .value = .{
                 .dynamic = .{
                     .initFn = &Wrapper.wrapInit,
@@ -650,31 +653,27 @@ pub const Builder = struct {
     /// Adds a static export to the module.
     pub fn withDynamicExportSync(
         comptime self: Builder,
-        comptime symbol: Module.Symbol,
-        comptime name: [:0]const u8,
-        comptime linkage: SymbolLinkage,
-        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*symbol.T,
-        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *symbol.T) void,
+        comptime options: SymbolExportOptions,
+        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*options.symbol.T,
+        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *options.symbol.T) void,
     ) Builder {
         const Wrapper = struct {
             instance: *const Module.OpaqueInstance,
 
-            const Result = anyerror!*symbol.T;
+            const Result = anyerror!*options.symbol.T;
             const Future = Async.Future(@This(), Result, poll, null);
 
             fn init(instance: *const Module.OpaqueInstance) Future {
                 return Future.init(.{ .instance = instance });
             }
 
-            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!*symbol.T) {
+            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!*options.symbol.T) {
                 _ = waker;
                 return .{ .ready = initFn(this.instance) };
             }
         };
         return self.withDynamicExport(
-            symbol,
-            name,
-            linkage,
+            options,
             Wrapper.Future,
             Wrapper.init,
             deinitFn,
@@ -1002,9 +1001,11 @@ pub const Builder = struct {
         var i: usize = 0;
         var fields: [self.exports.len]std.builtin.Type.StructField = undefined;
         for (self.exports) |x| {
+            @setEvalBranchQuota(10_000);
             if (x.value != .static) continue;
+            var num_buf: [128]u8 = undefined;
             fields[i] = std.builtin.Type.StructField{
-                .name = x.name,
+                .name = x.name orelse (std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable),
                 .type = *const x.symbol.T,
                 .default_value_ptr = null,
                 .is_comptime = false,
@@ -1014,8 +1015,9 @@ pub const Builder = struct {
         }
         for (self.exports) |x| {
             if (x.value != .dynamic) continue;
+            var num_buf: [128]u8 = undefined;
             fields[i] = std.builtin.Type.StructField{
-                .name = x.name,
+                .name = x.name orelse (std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable),
                 .type = *const x.symbol.T,
                 .default_value_ptr = null,
                 .is_comptime = false,
@@ -1049,8 +1051,26 @@ pub const Builder = struct {
                 .location = .imp,
             };
         }
+        var i: usize = 0;
         for (infos[self.imports.len..], self.exports) |*info, sym| {
-            info.* = .{ .name = sym.name, .symbol = sym.symbol, .location = .exp };
+            @setEvalBranchQuota(10_000);
+            if (sym.value != .static) continue;
+            info.* = .{
+                .name = sym.name orelse std.fmt.comptimePrint("{d}", .{i})[0..],
+                .symbol = sym.symbol,
+                .location = .exp,
+            };
+            i += 1;
+        }
+        for (infos[self.imports.len..], self.exports) |*info, sym| {
+            @setEvalBranchQuota(10_000);
+            if (sym.value != .dynamic) continue;
+            info.* = .{
+                .name = sym.name orelse std.fmt.comptimePrint("{d}", .{i})[0..],
+                .symbol = sym.symbol,
+                .location = .exp,
+            };
+            i += 1;
         }
         const infos_c = infos;
         return struct {
