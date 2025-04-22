@@ -67,6 +67,7 @@ pub fn Task(comptime T: type) type {
 
         /// Returns the label of the task.
         pub fn label(self: *const @This()) []const u8 {
+            if (self.label_len == 0) return "<unlabelled>";
             return if (self.label_) |l| l[0..self.label_len] else "<unlabelled>";
         }
 
@@ -113,10 +114,9 @@ test "abort" {
                 }
             };
             const future = try pool.enqueueFuture(
-                std.testing.allocator,
                 Runner.start,
                 .{ctx},
-                .{ .label = "abortTask" },
+                .{ .allocator = std.testing.allocator, .label = "abortTask" },
                 err,
             );
             defer future.deinit();

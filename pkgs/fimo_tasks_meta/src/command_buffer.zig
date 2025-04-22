@@ -149,6 +149,7 @@ pub fn CommandBuffer(T: type) type {
 
         /// Returns the label of the command buffer.
         pub fn label(self: *const @This()) []const u8 {
+            if (self.label_len == 0) return "<unlabelled>";
             return if (self.label_) |l| l[0..self.label_len] else "<unlabelled>";
         }
 
