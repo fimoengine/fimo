@@ -126,10 +126,9 @@ pub fn initTestContextInTask(func: fn (*const TestContext, *?AnyError) anyerror!
     }
 
     const future = try p.enqueueFuture(
-        std.testing.allocator,
         func,
         .{ &ctx, &err },
-        .{ .label = "test" },
+        .{ .allocator = std.testing.allocator, .label = "test" },
         &err,
     );
     defer future.deinit();
