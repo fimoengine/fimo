@@ -9,6 +9,9 @@ const AnyResult = AnyError.AnyResult;
 const command_buffer = @import("command_buffer.zig");
 const OpaqueCommandBuffer = command_buffer.OpaqueCommandBuffer;
 const Handle = command_buffer.Handle;
+const future = @import("future.zig");
+const Future = future.Future;
+const SpawnFutureOptions = future.SpawnFutureOptions;
 const symbols = @import("symbols.zig");
 const testing = @import("testing.zig");
 
@@ -250,6 +253,21 @@ pub const Pool = extern struct {
             }
             try w.resize(allocator, len);
         }
+    }
+
+    /// Enqueues a new future in the pool.
+    ///
+    /// The allocator must remain valid until the underlying buffer is referenced.
+    pub fn enqueueFuture(
+        self: Pool,
+        allocator: Allocator,
+        function: anytype,
+        args: std.meta.ArgsTuple(@TypeOf(function)),
+        options: SpawnFutureOptions,
+        err: *?AnyError,
+    ) (Allocator.Error || AnyError.Error)!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+        const Result = @typeInfo(@TypeOf(function)).@"fn".return_type.?;
+        return Future(Result).spawn(allocator, self, function, args, options, err);
     }
 
     /// Enqueues the command buffer in the pool.

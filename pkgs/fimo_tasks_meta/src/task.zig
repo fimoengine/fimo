@@ -59,6 +59,8 @@ pub fn Task(comptime T: type) type {
         /// Will be invoked on an arbitrary thread, if the task is aborted.
         on_abort: ?*const fn (task: *@This()) callconv(.c) void = null,
         /// Optional deinitialization routine.
+        ///
+        /// Will be invoked after all references to the task cease to exist.
         on_deinit: ?*const fn (task: *@This()) callconv(.c) void = null,
         /// Task state.
         state: T,
@@ -68,16 +70,19 @@ pub fn Task(comptime T: type) type {
             return if (self.label_) |l| l[0..self.label_len] else "<unlabelled>";
         }
 
-        /// Runs the completion and deinit routines of the task.
-        pub fn complete(self: *@This()) void {
-            if (self.on_complete) |f| f(self);
+        /// Runs the deinit routine of the task.
+        pub fn deinit(self: *@This()) void {
             if (self.on_deinit) |f| f(self);
         }
 
-        /// Runs the abort and deinit routines of the task.
+        /// Runs the completion routine of the task.
+        pub fn complete(self: *@This()) void {
+            if (self.on_complete) |f| f(self);
+        }
+
+        /// Runs the abort routine of the task.
         pub fn abort(self: *@This()) void {
             if (self.on_abort) |f| f(self);
-            if (self.on_deinit) |f| f(self);
         }
     };
 }
@@ -98,37 +103,24 @@ pub fn abort(provider: anytype) noreturn {
 test "abort" {
     try testing.initTestContextInTask(struct {
         fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-            const builder_config = BuilderConfig(*const testing.TestContext){
-                .on_start = struct {
-                    fn f(t: *Task(*const testing.TestContext)) void {
-                        abort(t.state);
-                    }
-                }.f,
-            };
-            const builder = Builder(builder_config){
-                .label = "abortTask",
-                .state = ctx,
-            };
-            var task = builder.build();
-
             const Pool = @import("pool.zig").Pool;
             const pool = Pool.current(ctx).?;
             defer pool.unref();
 
-            var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-            defer arena.deinit();
-            const allocator = arena.allocator();
-
-            const buffer_config = @import("command_buffer.zig").BuilderConfig(void){};
-            var buffer_builder = @import("command_buffer.zig").Builder(buffer_config){ .state = {} };
-            try buffer_builder.abortOnError(allocator);
-            try buffer_builder.enqueueTask(allocator, @ptrCast(&task));
-            var buffer = buffer_builder.build();
-
-            const handle = try pool.enqueueCommandBuffer(&buffer, err);
-            defer handle.unref();
-            const status = handle.waitOn();
-            try std.testing.expect(status == .aborted);
+            const Runner = struct {
+                fn start(c: *const testing.TestContext) void {
+                    abort(c);
+                }
+            };
+            const future = try pool.enqueueFuture(
+                std.testing.allocator,
+                Runner.start,
+                .{ctx},
+                .{ .label = "abortTask" },
+                err,
+            );
+            defer future.deinit();
+            try std.testing.expectError(error.Aborted, future.@"await"());
         }
     }.f);
 }
