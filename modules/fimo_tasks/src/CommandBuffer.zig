@@ -96,6 +96,7 @@ pub fn abortDeinit(self: *Self) void {
 
     for (self.buffer.entries()) |entry| entry.abort();
     self.buffer.abort();
+    self.buffer.deinit();
 
     const pool = self.owner;
     const allocator = pool.allocator;
@@ -118,6 +119,7 @@ pub fn unref(self: *Self) void {
     const state = self.state.load(.acquire);
     std.debug.assert(state != running);
     std.debug.assert(state & waiting_bit == 0);
+    self.buffer.deinit();
 
     const pool = self.owner;
     const allocator = pool.allocator;

@@ -835,6 +835,7 @@ const VTableImpl = struct {
         const b = CommandBuffer.init(this, buffer) catch |err| {
             for (buffer.entries()) |entry| entry.abort();
             buffer.abort();
+            buffer.deinit();
             return AnyError.initError(err).intoResult();
         };
         this.enqueueCommandBuffer(b) catch |err| {

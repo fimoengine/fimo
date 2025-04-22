@@ -35,8 +35,8 @@ pub const Entry = extern struct {
         wait_on_command_indirect: usize,
     },
 
-    /// Runs the completion and deinit routines of the entry.
-    pub fn complete(self: Entry) void {
+    /// Deinitializes the entry.
+    pub fn deinit(self: Entry) void {
         switch (self.tag) {
             .abort_on_error,
             .set_min_stack_size,
@@ -45,14 +45,14 @@ pub const Entry = extern struct {
             .wait_on_barrier,
             .wait_on_command_indirect,
             => {},
-            .enqueue_task => self.payload.enqueue_task.complete(),
-            .enqueue_command_buffer => self.payload.enqueue_command_buffer.complete(),
+            .enqueue_task => self.payload.enqueue_task.deinit(),
+            .enqueue_command_buffer => self.payload.enqueue_command_buffer.deinit(),
             .wait_on_command_buffer => self.payload.wait_on_command_buffer.unref(),
             else => @panic("unknown entry type"),
         }
     }
 
-    /// Runs the abort and deinit routines of the entry.
+    /// Runs the abort routines of the entry.
     pub fn abort(self: Entry) void {
         switch (self.tag) {
             .abort_on_error,
@@ -61,10 +61,10 @@ pub const Entry = extern struct {
             .select_any_worker,
             .wait_on_barrier,
             .wait_on_command_indirect,
+            .wait_on_command_buffer,
             => {},
             .enqueue_task => self.payload.enqueue_task.abort(),
             .enqueue_command_buffer => self.payload.enqueue_command_buffer.abort(),
-            .wait_on_command_buffer => self.payload.wait_on_command_buffer.unref(),
             else => @panic("unknown entry type"),
         }
     }
@@ -141,6 +141,8 @@ pub fn CommandBuffer(T: type) type {
         /// Will be invoked on an arbitrary thread, if the command buffer is aborted.
         on_abort: ?*const fn (buffer: *CommandBuffer(T)) callconv(.c) void = null,
         /// Optional deinitialization routine.
+        ///
+        /// Will be invoked after all references to the task cease to exist.
         on_deinit: ?*const fn (buffer: *CommandBuffer(T)) callconv(.c) void = null,
         /// Command buffer state.
         state: T,
@@ -155,16 +157,20 @@ pub fn CommandBuffer(T: type) type {
             return if (self.entries_) |l| l[0..self.entries_len] else &.{};
         }
 
-        /// Runs the completion and deinit routines of the command buffer.
-        pub fn complete(self: *@This()) void {
-            if (self.on_complete) |f| f(self);
+        /// Runs the deinit routine of the command buffer.
+        pub fn deinit(self: *@This()) void {
+            for (self.entries()) |entry| entry.deinit();
             if (self.on_deinit) |f| f(self);
         }
 
-        /// Runs the abort and deinit routines of the command buffer.
+        /// Runs the completion routine of the command buffer.
+        pub fn complete(self: *@This()) void {
+            if (self.on_complete) |f| f(self);
+        }
+
+        /// Runs the abort routine of the command buffer.
         pub fn abort(self: *@This()) void {
             if (self.on_abort) |f| f(self);
-            if (self.on_deinit) |f| f(self);
         }
     };
 }
@@ -192,6 +198,15 @@ pub fn Builder(config: anytype) type {
         label: ?[]const u8 = null,
         entries: ArrayListUnmanaged(Entry) = .{},
         state: State,
+
+        /// Aborts all commands of the command buffer.
+        pub fn abortAndFreeCommands(self: *@This(), allocator: Allocator) void {
+            for (self.entries.items) |entry| {
+                entry.abort();
+                entry.deinit();
+            }
+            self.entries.clearAndFree(allocator);
+        }
 
         /// Configures the command buffer to abort the following commands if any of them errors.
         pub fn abortOnError(self: *@This(), allocator: Allocator) Allocator.Error!void {

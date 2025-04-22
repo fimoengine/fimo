@@ -116,9 +116,8 @@ pub fn initTestContextInTask(func: fn (*const TestContext, *?AnyError) anyerror!
     var ctx = try initTestContext();
     defer ctx.deinit();
 
-    var e: ?anyerror = null;
     var err: ?AnyError = null;
-    defer if (err) |e_| e_.deinit();
+    defer if (err) |e| e.deinit();
 
     const p = try Pool.init(ctx, &.{ .worker_count = 4, .label_ = "test", .label_len = 4 }, &err);
     defer {
@@ -126,45 +125,13 @@ pub fn initTestContextInTask(func: fn (*const TestContext, *?AnyError) anyerror!
         p.unref();
     }
 
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const TaskState = extern struct {
-        ctx: *const TestContext,
-        err: *?AnyError,
-        e: *?anyerror,
-    };
-    const builder_config = TaskBuilderConfig(TaskState){
-        .on_start = struct {
-            fn f(t: *Task(TaskState)) void {
-                func(t.state.ctx, t.state.err) catch |e_| {
-                    t.state.e.* = e_;
-                };
-            }
-        }.f,
-    };
-    const builder = TaskBuilder(builder_config){
-        .label = "testTask",
-        .state = .{
-            .ctx = &ctx,
-            .err = &err,
-            .e = &e,
-        },
-    };
-    var task_ = builder.build();
-
-    const buffer_builder_config = CommandBufferBuilderConfig(void){};
-    var buffer_builder = CommandBufferBuilder(buffer_builder_config){
-        .label = "testBuffer",
-        .state = {},
-    };
-    try buffer_builder.enqueueTask(allocator, @ptrCast(&task_));
-    var buffer = buffer_builder.build();
-
-    const handle = try p.enqueueCommandBuffer(&buffer, &err);
-    defer handle.unref();
-    const status = handle.waitOn();
-    if (e) |e_| return e_;
-    if (status == .aborted) return error.Aborted;
+    const future = try p.enqueueFuture(
+        std.testing.allocator,
+        func,
+        .{ &ctx, &err },
+        .{ .label = "test" },
+        &err,
+    );
+    defer future.deinit();
+    try future.@"await"();
 }
