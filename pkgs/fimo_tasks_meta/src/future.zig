@@ -3,6 +3,11 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const fimo_std = @import("fimo_std");
+const Async = fimo_std.Context.Async;
+const Waker = Async.Waker;
+const Poll = Async.Poll;
+const BlockingContext = Async.BlockingContext;
+const EnqueuedFuture = Async.EnqueuedFuture;
 const AnyError = fimo_std.AnyError;
 const AnyResult = AnyError.AnyResult;
 
@@ -17,6 +22,9 @@ const Worker = pool.Worker;
 const Pool = pool.Pool;
 const task = @import("task.zig");
 const Task = task.Task;
+const testing = @import("testing.zig");
+
+pub const SpawnError = Allocator.Error || AnyError.Error;
 
 /// Options for spawning new futures.
 pub const SpawnFutureOptions = struct {
@@ -64,113 +72,404 @@ pub fn Future(Result: type) type {
                 .aborted => error.Aborted,
             };
         }
+    };
+}
 
-        /// Spawns a new future in the provided pool.
-        pub fn spawn(
-            enqueuePool: Pool,
-            function: anytype,
-            args: std.meta.ArgsTuple(@TypeOf(function)),
-            options: SpawnFutureOptions,
-            err: *?AnyError,
-        ) (Allocator.Error || AnyError.Error)!@This() {
-            const TaskState = extern struct {
-                inner: [@sizeOf(Inner)]u8 align(@alignOf(Inner)),
-                const Inner = struct {
-                    args: @TypeOf(args),
-                    result: Result = undefined,
-                };
-                fn getInner(self: *@This()) *Inner {
-                    return std.mem.bytesAsValue(Inner, self.inner[0..]);
+/// Spawns a new detached future in the provided pool.
+pub fn go(
+    executor: Pool,
+    function: anytype,
+    args: std.meta.ArgsTuple(@TypeOf(function)),
+    options: SpawnFutureOptions,
+    err: *?AnyError,
+) SpawnError!void {
+    const cleanup = struct {
+        fn f() void {}
+    }.f;
+    return goWithCleanup(executor, function, args, cleanup, .{}, options, err);
+}
+
+/// Spawns a new detached future in the provided pool.
+///
+/// The cleanup function is invoked after all references to the future cease to exist.
+pub fn goWithCleanup(
+    executor: Pool,
+    function: anytype,
+    args: std.meta.ArgsTuple(@TypeOf(function)),
+    cleanup: anytype,
+    cleanup_args: std.meta.ArgsTuple(@TypeOf(cleanup)),
+    options: SpawnFutureOptions,
+    err: *?AnyError,
+) SpawnError!void {
+    if (@typeInfo(@TypeOf(function)).@"fn".return_type.? != void) {
+        @compileError("expected function with a `void` return type");
+    }
+    const FutureState = struct {
+        allocator: Allocator,
+        buffer_len: usize,
+        args: @TypeOf(args),
+        cleanup_args: @TypeOf(cleanup_args),
+        task: Task(void),
+        command_buffer: CommandBuffer(void),
+    };
+
+    const label_len = if (options.label) |l| l.len else 0;
+    const num_entries = blk: {
+        var num: usize = 2 + options.dependencies.len;
+        if (options.stack_size != null) num += 1;
+        if (options.worker != null) num += 1;
+        break :blk num;
+    };
+
+    const label_start = @sizeOf(FutureState);
+    const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
+    const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
+    const alloc = try options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len);
+
+    const future: *FutureState = std.mem.bytesAsValue(FutureState, alloc[0..@sizeOf(FutureState)]);
+    const label: []u8 = alloc[label_start .. label_start + label_len];
+    const entries: []Entry = @alignCast(std.mem.bytesAsSlice(Entry, alloc[entries_start..]));
+    std.mem.copyForwards(u8, label, options.label orelse "");
+
+    future.* = .{
+        .allocator = options.allocator,
+        .buffer_len = full_bytes_len,
+        .args = args,
+        .cleanup_args = cleanup_args,
+        .task = .{
+            .on_start = &struct {
+                fn f(t: *Task(void)) callconv(.c) void {
+                    const fut: *FutureState = @fieldParentPtr("task", t);
+                    @call(.auto, function, fut.args);
                 }
-            };
-            const State = extern struct {
-                inner: [@sizeOf(Inner)]u8 align(@alignOf(Inner)),
-                const Inner = struct {
-                    allocator: Allocator,
-                    task: Task(TaskState) = undefined,
-                };
-                fn getInner(self: *@This()) *Inner {
-                    return std.mem.bytesAsValue(Inner, self.inner[0..]);
+            }.f,
+            .state = {},
+        },
+        .command_buffer = .{
+            .label_ = label.ptr,
+            .label_len = label.len,
+            .entries_ = entries.ptr,
+            .entries_len = entries.len,
+            .on_deinit = &struct {
+                fn f(b: *CommandBuffer(void)) callconv(.c) void {
+                    const fut: *FutureState = @fieldParentPtr("command_buffer", b);
+                    const cl_args = fut.cleanup_args;
+                    const allocator = fut.allocator;
+                    const bytes = std.mem.asBytes(b).ptr[0..fut.buffer_len];
+                    allocator.free(bytes);
+                    @call(.auto, cleanup, cl_args);
                 }
-            };
+            }.f,
+            .state = {},
+        },
+    };
 
-            const label_len = if (options.label) |l| l.len else 0;
-            const num_entries = blk: {
-                var num: usize = 2 + options.dependencies.len;
-                if (options.stack_size != null) num += 1;
-                if (options.worker != null) num += 1;
-                break :blk num;
-            };
+    var entries_al = ArrayListUnmanaged(Entry).initBuffer(entries);
+    entries_al.appendAssumeCapacity(.{
+        .tag = .abort_on_error,
+        .payload = .{ .abort_on_error = true },
+    });
+    if (options.stack_size) |stack_size| entries_al.appendAssumeCapacity(.{
+        .tag = .set_min_stack_size,
+        .payload = .{ .set_min_stack_size = stack_size },
+    });
+    if (options.worker) |worker| entries_al.appendAssumeCapacity(.{
+        .tag = .select_worker,
+        .payload = .{ .select_worker = worker },
+    });
+    for (options.dependencies) |handle| entries_al.appendAssumeCapacity(.{
+        .tag = .wait_on_command_buffer,
+        .payload = .{ .wait_on_command_buffer = handle.ref() },
+    });
+    entries_al.appendAssumeCapacity(.{
+        .tag = .enqueue_task,
+        .payload = .{ .enqueue_task = @ptrCast(&future.task) },
+    });
 
-            const label_start = @sizeOf(CommandBuffer(State));
-            const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
-            const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
-            const alloc = try options.allocator.alignedAlloc(u8, .of(CommandBuffer(State)), full_bytes_len);
+    try executor.enqueueCommandBufferDetached(&future.command_buffer, err);
+}
 
-            const buffer: *CommandBuffer(State) = std.mem.bytesAsValue(
-                CommandBuffer(State),
-                alloc[0..@sizeOf(CommandBuffer(State))],
-            );
-            const label: []u8 = alloc[label_start .. label_start + label_len];
-            const entries: []Entry = @alignCast(std.mem.bytesAsSlice(Entry, alloc[entries_start..]));
-            std.mem.copyForwards(u8, label, options.label orelse "");
+/// Spawns a new future in the provided pool.
+pub fn init(
+    executor: Pool,
+    function: anytype,
+    args: std.meta.ArgsTuple(@TypeOf(function)),
+    options: SpawnFutureOptions,
+    err: *?AnyError,
+) SpawnError!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    const cleanup = struct {
+        fn f() void {}
+    }.f;
+    return initWithCleanup(executor, function, args, cleanup, .{}, options, err);
+}
 
-            buffer.* = .{
-                .label_ = label.ptr,
-                .label_len = label.len,
-                .entries_ = entries.ptr,
-                .entries_len = entries.len,
-                .on_deinit = &struct {
-                    fn f(b: *CommandBuffer(State)) callconv(.c) void {
-                        const al = b.state.getInner().allocator;
-                        const alloc_len = std.mem.alignForward(
-                            usize,
-                            @sizeOf(CommandBuffer(State)) + b.label_len,
-                            @alignOf(Entry),
-                        ) + (b.entries_len * @sizeOf(Entry));
-                        const bytes = std.mem.asBytes(b).ptr[0..alloc_len];
-                        al.free(bytes);
-                    }
-                }.f,
-                .state = .{
-                    .inner = std.mem.toBytes(State.Inner{ .allocator = options.allocator }),
-                },
-            };
-            buffer.state.getInner().task = .{
-                .on_start = &struct {
-                    fn f(t: *Task(TaskState)) callconv(.c) void {
-                        const inner = t.state.getInner();
-                        inner.result = @call(.auto, function, inner.args);
-                    }
-                }.f,
-                .state = .{ .inner = std.mem.toBytes(TaskState.Inner{ .args = args }) },
-            };
+/// Spawns a new future in the provided pool.
+///
+/// The cleanup function is invoked after all references to the future cease to exist.
+pub fn initWithCleanup(
+    executor: Pool,
+    function: anytype,
+    args: std.meta.ArgsTuple(@TypeOf(function)),
+    cleanup: anytype,
+    cleanup_args: std.meta.ArgsTuple(@TypeOf(cleanup)),
+    options: SpawnFutureOptions,
+    err: *?AnyError,
+) SpawnError!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    const Result = @typeInfo(@TypeOf(function)).@"fn".return_type.?;
+    const FutureState = struct {
+        allocator: Allocator,
+        buffer_len: usize,
+        result: Result = undefined,
+        args: @TypeOf(args),
+        cleanup_args: @TypeOf(cleanup_args),
+        task: Task(void),
+        command_buffer: CommandBuffer(void),
+    };
 
-            var entries_al = ArrayListUnmanaged(Entry).initBuffer(entries);
-            entries_al.appendAssumeCapacity(.{
-                .tag = .abort_on_error,
-                .payload = .{ .abort_on_error = true },
-            });
-            if (options.stack_size) |stack_size| entries_al.appendAssumeCapacity(.{
-                .tag = .set_min_stack_size,
-                .payload = .{ .set_min_stack_size = stack_size },
-            });
-            if (options.worker) |worker| entries_al.appendAssumeCapacity(.{
-                .tag = .select_worker,
-                .payload = .{ .select_worker = worker },
-            });
-            for (options.dependencies) |handle| entries_al.appendAssumeCapacity(.{
-                .tag = .wait_on_command_buffer,
-                .payload = .{ .wait_on_command_buffer = handle.ref() },
-            });
-            entries_al.appendAssumeCapacity(.{
-                .tag = .enqueue_task,
-                .payload = .{ .enqueue_task = @ptrCast(&buffer.state.getInner().task) },
-            });
+    const label_len = if (options.label) |l| l.len else 0;
+    const num_entries = blk: {
+        var num: usize = 2 + options.dependencies.len;
+        if (options.stack_size != null) num += 1;
+        if (options.worker != null) num += 1;
+        break :blk num;
+    };
 
-            const handle = try enqueuePool.enqueueCommandBuffer(@ptrCast(buffer), err);
-            const result_ptr = &buffer.state.getInner().task.state.getInner().result;
-            return .{ .handle = handle, .result = result_ptr };
+    const label_start = @sizeOf(FutureState);
+    const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
+    const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
+    const alloc = try options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len);
+
+    const future: *FutureState = std.mem.bytesAsValue(FutureState, alloc[0..@sizeOf(FutureState)]);
+    const label: []u8 = alloc[label_start .. label_start + label_len];
+    const entries: []Entry = @alignCast(std.mem.bytesAsSlice(Entry, alloc[entries_start..]));
+    std.mem.copyForwards(u8, label, options.label orelse "");
+
+    future.* = .{
+        .allocator = options.allocator,
+        .buffer_len = full_bytes_len,
+        .args = args,
+        .cleanup_args = cleanup_args,
+        .task = .{
+            .on_start = &struct {
+                fn f(t: *Task(void)) callconv(.c) void {
+                    const fut: *FutureState = @fieldParentPtr("task", t);
+                    fut.result = @call(.auto, function, fut.args);
+                }
+            }.f,
+            .state = {},
+        },
+        .command_buffer = .{
+            .label_ = label.ptr,
+            .label_len = label.len,
+            .entries_ = entries.ptr,
+            .entries_len = entries.len,
+            .on_deinit = &struct {
+                fn f(b: *CommandBuffer(void)) callconv(.c) void {
+                    const fut: *FutureState = @fieldParentPtr("command_buffer", b);
+                    const cl_args = fut.cleanup_args;
+                    const allocator = fut.allocator;
+                    const bytes = std.mem.asBytes(b).ptr[0..fut.buffer_len];
+                    allocator.free(bytes);
+                    @call(.auto, cleanup, cl_args);
+                }
+            }.f,
+            .state = {},
+        },
+    };
+
+    var entries_al = ArrayListUnmanaged(Entry).initBuffer(entries);
+    entries_al.appendAssumeCapacity(.{
+        .tag = .abort_on_error,
+        .payload = .{ .abort_on_error = true },
+    });
+    if (options.stack_size) |stack_size| entries_al.appendAssumeCapacity(.{
+        .tag = .set_min_stack_size,
+        .payload = .{ .set_min_stack_size = stack_size },
+    });
+    if (options.worker) |worker| entries_al.appendAssumeCapacity(.{
+        .tag = .select_worker,
+        .payload = .{ .select_worker = worker },
+    });
+    for (options.dependencies) |handle| entries_al.appendAssumeCapacity(.{
+        .tag = .wait_on_command_buffer,
+        .payload = .{ .wait_on_command_buffer = handle.ref() },
+    });
+    entries_al.appendAssumeCapacity(.{
+        .tag = .enqueue_task,
+        .payload = .{ .enqueue_task = @ptrCast(&future.task) },
+    });
+
+    const handle = try executor.enqueueCommandBuffer(&future.command_buffer, err);
+    return .{ .handle = handle, .result = &future.result };
+}
+
+/// Spawns a new future that can be polled by stackless futures.
+pub fn initPollable(
+    executor: Pool,
+    function: anytype,
+    args: std.meta.ArgsTuple(@TypeOf(function)),
+    options: SpawnFutureOptions,
+    err: *?AnyError,
+) SpawnError!EnqueuedFuture(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    const cleanup = struct {
+        fn f() void {}
+    }.f;
+    return initPollableWithCleanup(executor, function, args, cleanup, .{}, options, err);
+}
+
+pub fn initPollableWithCleanup(
+    executor: Pool,
+    function: anytype,
+    args: std.meta.ArgsTuple(@TypeOf(function)),
+    cleanup: anytype,
+    cleanup_args: std.meta.ArgsTuple(@TypeOf(cleanup)),
+    options: SpawnFutureOptions,
+    err: *?AnyError,
+) SpawnError!EnqueuedFuture(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
+    const Result = @typeInfo(@TypeOf(function)).@"fn".return_type.?;
+    const FutureState = struct {
+        waker: ?Waker = null,
+        mutex: std.Thread.Mutex = .{},
+        allocator: Allocator,
+        buffer_len: usize,
+        handle: Handle = undefined,
+        result: Result = undefined,
+        ready: std.atomic.Value(bool) = .init(false),
+        args: @TypeOf(args),
+        cleanup_args: @TypeOf(cleanup_args),
+        task: Task(void),
+        command_buffer: CommandBuffer(void),
+
+        fn poll(this: **anyopaque, waker: Waker) Poll(Result) {
+            const self: *@This() = @ptrCast(@alignCast(this.*));
+            if (self.ready.load(.acquire)) return .{ .ready = self.result };
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (self.ready.load(.monotonic)) return .{ .ready = self.result };
+            if (self.waker) |w| w.unref();
+            self.waker = waker.ref();
+            return .pending;
+        }
+
+        fn onCleanup(this: **anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(this.*));
+            self.handle.unref();
         }
     };
+
+    const label_len = if (options.label) |l| l.len else 0;
+    const num_entries = blk: {
+        var num: usize = 2 + options.dependencies.len;
+        if (options.stack_size != null) num += 1;
+        if (options.worker != null) num += 1;
+        break :blk num;
+    };
+
+    const label_start = @sizeOf(FutureState);
+    const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
+    const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
+    const alloc = try options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len);
+
+    const future: *FutureState = std.mem.bytesAsValue(FutureState, alloc[0..@sizeOf(FutureState)]);
+    const label: []u8 = alloc[label_start .. label_start + label_len];
+    const entries: []Entry = @alignCast(std.mem.bytesAsSlice(Entry, alloc[entries_start..]));
+    std.mem.copyForwards(u8, label, options.label orelse "");
+
+    future.* = .{
+        .allocator = options.allocator,
+        .buffer_len = full_bytes_len,
+        .args = args,
+        .cleanup_args = cleanup_args,
+        .task = .{
+            .on_start = &struct {
+                fn f(t: *Task(void)) callconv(.c) void {
+                    const fut: *FutureState = @fieldParentPtr("task", t);
+                    fut.result = @call(.auto, function, fut.args);
+                    fut.ready.store(true, .release);
+                    fut.mutex.lock();
+                    defer fut.mutex.unlock();
+                    if (fut.waker) |w| w.wakeUnref();
+                    fut.waker = null;
+                }
+            }.f,
+            .state = {},
+        },
+        .command_buffer = .{
+            .label_ = label.ptr,
+            .label_len = label.len,
+            .entries_ = entries.ptr,
+            .entries_len = entries.len,
+            .on_deinit = &struct {
+                fn f(b: *CommandBuffer(void)) callconv(.c) void {
+                    const fut: *FutureState = @fieldParentPtr("command_buffer", b);
+                    const cl_args = fut.cleanup_args;
+                    const allocator = fut.allocator;
+                    if (fut.waker) |w| w.wakeUnref();
+                    const buffer = std.mem.asBytes(fut).ptr[0..fut.buffer_len];
+                    allocator.free(buffer);
+                    @call(.auto, cleanup, cl_args);
+                }
+            }.f,
+            .state = {},
+        },
+    };
+
+    var entries_al = ArrayListUnmanaged(Entry).initBuffer(entries);
+    entries_al.appendAssumeCapacity(.{
+        .tag = .abort_on_error,
+        .payload = .{ .abort_on_error = true },
+    });
+    if (options.stack_size) |stack_size| entries_al.appendAssumeCapacity(.{
+        .tag = .set_min_stack_size,
+        .payload = .{ .set_min_stack_size = stack_size },
+    });
+    if (options.worker) |worker| entries_al.appendAssumeCapacity(.{
+        .tag = .select_worker,
+        .payload = .{ .select_worker = worker },
+    });
+    for (options.dependencies) |handle| entries_al.appendAssumeCapacity(.{
+        .tag = .wait_on_command_buffer,
+        .payload = .{ .wait_on_command_buffer = handle.ref() },
+    });
+    entries_al.appendAssumeCapacity(.{
+        .tag = .enqueue_task,
+        .payload = .{ .enqueue_task = &future.task },
+    });
+
+    future.handle = try executor.enqueueCommandBuffer(&future.command_buffer, err);
+    return EnqueuedFuture(Result).init(future, FutureState.poll, FutureState.onCleanup);
+}
+
+test "pollable future" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    var err: ?AnyError = null;
+    defer if (err) |e| e.deinit();
+
+    const p = try Pool.init(ctx, &.{ .worker_count = 4, .label_ = "test", .label_len = 4 }, &err);
+    defer {
+        p.requestClose();
+        p.unref();
+    }
+
+    const start = struct {
+        fn f(ctx_: *const testing.TestContext, a: usize, b: usize) usize {
+            task.sleep(ctx_, .initMillis(200));
+            return a + b;
+        }
+    }.f;
+    var future = try initPollable(
+        p,
+        start,
+        .{ &ctx, 5, 10 },
+        .{ .label = "pollable future", .allocator = std.testing.allocator },
+        &err,
+    );
+    defer future.deinit();
+    var fut = future.intoFuture();
+
+    const awaiter = try Async.BlockingContext.init(ctx.ctx.@"async"(), &err);
+    defer awaiter.deinit();
+    try std.testing.expectEqual(15, fut.awaitBlockingBorrow(awaiter));
 }

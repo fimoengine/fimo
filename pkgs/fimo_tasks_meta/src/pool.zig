@@ -255,18 +255,6 @@ pub const Pool = extern struct {
         }
     }
 
-    /// Enqueues a new future in the pool.
-    pub fn enqueueFuture(
-        self: Pool,
-        function: anytype,
-        args: std.meta.ArgsTuple(@TypeOf(function)),
-        options: SpawnFutureOptions,
-        err: *?AnyError,
-    ) (Allocator.Error || AnyError.Error)!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
-        const Result = @typeInfo(@TypeOf(function)).@"fn".return_type.?;
-        return Future(Result).spawn(self, function, args, options, err);
-    }
-
     /// Enqueues the command buffer in the pool.
     ///
     /// The buffer must remain valid until it is deinitialized by the pool.

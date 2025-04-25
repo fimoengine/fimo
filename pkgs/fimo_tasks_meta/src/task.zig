@@ -113,7 +113,8 @@ test "abort" {
                     abort(c);
                 }
             };
-            const future = try pool.enqueueFuture(
+            const future = try @import("future.zig").init(
+                pool,
                 Runner.start,
                 .{ctx},
                 .{ .allocator = std.testing.allocator, .label = "abortTask" },
@@ -140,6 +141,22 @@ test "sleep" {
             sleep(ctx, duration);
             const elapsed = try Instant.elapsed(before_sleep);
             try std.testing.expect(elapsed.order(duration) != .lt);
+        }
+    }.f);
+}
+
+test "short sleep" {
+    try testing.initTestContextInTask(struct {
+        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
+            _ = err;
+            const duration = Duration.initMillis(1);
+            for (0..10) |_| {
+                const before_sleep = Instant.now();
+                sleep(ctx, duration);
+                const elapsed = try Instant.elapsed(before_sleep);
+                try std.testing.expect(elapsed.order(duration) != .lt);
+                ctx.ctx.tracing().emitDebugSimple("slept for {}ms", .{elapsed.millis()}, @src());
+            }
         }
     }.f);
 }
