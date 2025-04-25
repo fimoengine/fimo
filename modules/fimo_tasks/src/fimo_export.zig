@@ -68,6 +68,9 @@ comptime {
     _ = Instance;
 }
 
+extern fn timeBeginPeriod(uPeriod: c_uint) callconv(std.os.windows.WINAPI) c_uint;
+extern fn timeEndPeriod(uPeriod: c_uint) callconv(std.os.windows.WINAPI) c_uint;
+
 const State = struct {
     debug_allocator: switch (builtin.mode) {
         .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}),
@@ -88,6 +91,15 @@ const State = struct {
                 @src(),
             );
             return error.AlreadyInitialized;
+        }
+        if (comptime builtin.target.os.tag == .windows) {
+            if (timeBeginPeriod(1) != 0) {
+                ctx.context().tracing().emitWarnSimple(
+                    "`timeBeginPeriod` failed, defaulting to default timer resolution",
+                    .{},
+                    @src(),
+                );
+            }
         }
 
         const allocator = switch (builtin.mode) {
@@ -116,6 +128,7 @@ const State = struct {
             else => {},
         }
         global_state = undefined;
+        if (comptime builtin.target.os.tag == .windows) _ = timeEndPeriod(1);
     }
 };
 
