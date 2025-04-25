@@ -125,7 +125,8 @@ pub fn initTestContextInTask(func: fn (*const TestContext, *?AnyError) anyerror!
         p.unref();
     }
 
-    const future = try p.enqueueFuture(
+    const future = try @import("future.zig").init(
+        p,
         func,
         .{ &ctx, &err },
         .{ .allocator = std.testing.allocator, .label = "test" },
