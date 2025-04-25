@@ -3,9 +3,10 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
+const c = @import("c");
+
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("../../c.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
 const Version = @import("../../Version.zig");

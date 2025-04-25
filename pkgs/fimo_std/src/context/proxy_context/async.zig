@@ -6,9 +6,10 @@
 
 const std = @import("std");
 
+const c = @import("c");
+
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("../../c.zig");
 const Context = @import("../proxy_context.zig");
 
 context: Context,

@@ -1,11 +1,11 @@
 //! Public interface to the fimo std context.
 const std = @import("std");
 
+const c = @import("c");
 const context_version_opt = @import("context_version");
 
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("../c.zig");
 const Inner = @import("../context.zig");
 const Version = @import("../Version.zig");
 pub const Async = @import("proxy_context/async.zig");

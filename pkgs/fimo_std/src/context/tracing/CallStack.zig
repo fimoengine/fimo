@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const c = @import("../../c.zig");
+const c = @import("c");
+
 const time = @import("../../time.zig");
 const ProxyTracing = @import("../proxy_context/tracing.zig");
 const Tracing = @import("../tracing.zig");

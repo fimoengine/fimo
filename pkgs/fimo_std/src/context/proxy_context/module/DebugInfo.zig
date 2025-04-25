@@ -1,7 +1,7 @@
 //! Cross-platform and language-agnostic interface of a module debug info.
 const std = @import("std");
 
-const c = @import("../../../c.zig");
+const c = @import("c");
 
 data: ?*anyopaque,
 vtable: *const VTable,

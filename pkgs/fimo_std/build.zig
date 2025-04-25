@@ -15,6 +15,13 @@ pub fn configure(b: *build_internals.FimoBuild) void {
     _ = headers.addCopyFile(b.build.path("LICENSE-MIT"), "fimo_std/LICENSE-MIT");
     _ = headers.addCopyFile(b.build.path("LICENSE-APACHE"), "fimo_std/LICENSE-APACHE");
 
+    const translate_c = b.build.addTranslateC(.{
+        .root_source_file = headers.getDirectory().path(b.build, "fimo_std/fimo.h"),
+        .target = b.graph.target,
+        .optimize = b.graph.optimize,
+    });
+    translate_c.addIncludePath(headers.getDirectory());
+
     const module = b.build.addModule("fimo_std", .{
         .root_source_file = b.build.path("src/root.zig"),
         .target = b.graph.target,
@@ -22,6 +29,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
         .link_libc = true,
         .pic = true,
     });
+    module.addImport("c", translate_c.createModule());
     module.addImport("context_version", context_version);
     module.addImport("visualizers", visualizers);
     module.addIncludePath(headers.getDirectory());
@@ -42,6 +50,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
                 .link_libc = true,
                 .pic = true,
             });
+            t.addImport("c", translate_c.createModule());
             t.addImport("context_version", context_version);
             t.addImport("visualizers", visualizers);
             t.addIncludePath(headers.getDirectory());

@@ -1,9 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const c = @import("c");
+
 const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("c.zig");
 
 const os_ext = switch (builtin.target.os.tag) {
     .windows => struct {

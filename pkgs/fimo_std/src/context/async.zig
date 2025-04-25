@@ -1,8 +1,9 @@
 const std = @import("std");
 
+const c = @import("c");
+
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("../c.zig");
 const Context = @import("../context.zig");
 pub const BlockingContext = @import("async/BlockingContext.zig");
 pub const EventLoop = @import("async/EventLoop.zig");
