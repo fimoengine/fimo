@@ -4,7 +4,7 @@ const unicode = std.unicode;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
-const c = @import("c.zig");
+const c = @import("c");
 
 const separator = if (builtin.os.tag == .windows) '\\' else '/';
 

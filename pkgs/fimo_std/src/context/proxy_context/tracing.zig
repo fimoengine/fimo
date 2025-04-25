@@ -3,7 +3,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const c = @import("../../c.zig");
+const c = @import("c");
+
 const Time = @import("../../time.zig").Time;
 const Context = @import("../proxy_context.zig");
 

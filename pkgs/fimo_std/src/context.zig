@@ -2,9 +2,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const c = @import("c");
+
 const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("c.zig");
 const Async = @import("context/async.zig");
 const Module = @import("context/module.zig");
 pub const ProxyContext = @import("context/proxy_context.zig");

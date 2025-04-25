@@ -1,7 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const c = @import("../c.zig");
+const c = @import("c");
+
 const Context = @import("../context.zig");
 const time = @import("../time.zig");
 const ProxyTracing = @import("proxy_context/tracing.zig");

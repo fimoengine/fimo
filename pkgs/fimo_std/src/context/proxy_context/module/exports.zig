@@ -2,9 +2,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const c = @import("c");
+
 const AnyError = @import("../../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const c = @import("../../../c.zig");
 const Path = @import("../../../path.zig").Path;
 const Version = @import("../../../Version.zig");
 const Context = @import("../../proxy_context.zig");

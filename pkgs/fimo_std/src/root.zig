@@ -1,9 +1,9 @@
 const std = @import("std");
 
+pub const c = @import("c");
 const visualizers = @import("visualizers");
 
 pub const AnyError = @import("AnyError.zig");
-pub const c = @import("c.zig");
 const context = @import("context.zig");
 pub const Context = context.ProxyContext;
 pub const path = @import("path.zig");

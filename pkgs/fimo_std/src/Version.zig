@@ -2,7 +2,7 @@
 
 const std = @import("std");
 
-const c = @import("c.zig");
+const c = @import("c");
 
 major: usize,
 minor: usize,
