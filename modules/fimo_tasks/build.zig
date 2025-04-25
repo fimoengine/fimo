@@ -79,6 +79,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     module.addImport("fimo_std", fimo_std_pkg.root_module);
     module.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
     module.linkLibrary(context);
+    if (builder.graph.target.result.os.tag == .windows) module.linkSystemLibrary("winmm", .{});
 
     const mod = builder.addModule(.{
         .name = "fimo_tasks",
@@ -98,6 +99,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                 t.addImport("fimo_std", fimo_std_pkg.root_module);
                 t.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
                 t.linkLibrary(context);
+                if (builder.graph.target.result.os.tag == .windows) t.linkSystemLibrary("winmm", .{});
 
                 break :blk t;
             },
