@@ -501,16 +501,17 @@ impl Build {
         }
 
         // Determine the cache dir, if not set.
-        if self.cache_dir.is_none() {
-            let mut cache_dir = PathBuf::from(getenv_unwrap("OUT_DIR"));
-            cache_dir.push(".zig-cache");
-            self.cache_dir(cache_dir);
-        }
-        if self.global_cache_dir.is_none() {
-            let mut cache_dir = PathBuf::from(getenv_unwrap("OUT_DIR"));
-            cache_dir.push(".zig-cache");
-            self.global_cache_dir(cache_dir);
-        }
+        // TODO: Enable once zig fixes its cache misses.
+        // if self.cache_dir.is_none() {
+        //     let mut cache_dir = PathBuf::from(getenv_unwrap("OUT_DIR"));
+        //     cache_dir.push(".zig-cache");
+        //     self.cache_dir(cache_dir);
+        // }
+        // if self.global_cache_dir.is_none() {
+        //     let mut cache_dir = PathBuf::from(getenv_unwrap("OUT_DIR"));
+        //     cache_dir.push(".zig-cache");
+        //     self.global_cache_dir(cache_dir);
+        // }
 
         let mut cmd = Command::new(self.zig_executable());
         cmd.current_dir(&self.path);
