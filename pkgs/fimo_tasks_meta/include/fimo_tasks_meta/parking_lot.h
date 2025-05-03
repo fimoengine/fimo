@@ -18,6 +18,12 @@
 extern "C" {
 #endif
 
+/// Value of the default park token.
+#define FIMO_TASKS_META_PARKING_LOT_PARK_TOKEN_DEFAULT (FimoTasksMeta_ParkingLotParkToken)0
+
+/// Value of the default unpark token.
+#define FIMO_TASKS_META_PARKING_LOT_UNPARK_TOKEN_DEFAULT (FimoTasksMeta_ParkingLotUnparkToken)0
+
 /// A value associated with a parked task for filter purposes.
 typedef FimoUSize FimoTasksMeta_ParkingLotParkToken;
 
