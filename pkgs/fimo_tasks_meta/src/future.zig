@@ -124,7 +124,10 @@ pub fn goWithCleanup(
     const label_start = @sizeOf(FutureState);
     const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
     const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
-    const alloc = try options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len);
+    const alloc = options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len) catch |e| {
+        @call(.auto, cleanup, cleanup_args);
+        return e;
+    };
 
     const future: *FutureState = std.mem.bytesAsValue(FutureState, alloc[0..@sizeOf(FutureState)]);
     const label: []u8 = alloc[label_start .. label_start + label_len];
@@ -237,7 +240,10 @@ pub fn initWithCleanup(
     const label_start = @sizeOf(FutureState);
     const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
     const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
-    const alloc = try options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len);
+    const alloc = options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len) catch |e| {
+        @call(.auto, cleanup, cleanup_args);
+        return e;
+    };
 
     const future: *FutureState = std.mem.bytesAsValue(FutureState, alloc[0..@sizeOf(FutureState)]);
     const label: []u8 = alloc[label_start .. label_start + label_len];
@@ -368,7 +374,10 @@ pub fn initPollableWithCleanup(
     const label_start = @sizeOf(FutureState);
     const entries_start = std.mem.alignForward(usize, label_start + label_len, @alignOf(Entry));
     const full_bytes_len = entries_start + (num_entries * @sizeOf(Entry));
-    const alloc = try options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len);
+    const alloc = options.allocator.alignedAlloc(u8, .of(FutureState), full_bytes_len) catch |e| {
+        @call(.auto, cleanup, cleanup_args);
+        return e;
+    };
 
     const future: *FutureState = std.mem.bytesAsValue(FutureState, alloc[0..@sizeOf(FutureState)]);
     const label: []u8 = alloc[label_start .. label_start + label_len];
