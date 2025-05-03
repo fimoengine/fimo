@@ -9,6 +9,7 @@ const meta_list: []const struct {
 } = &.{
     .{ .name = "fimo_std", .dep_name = "pkg/fimo_std" },
     .{ .name = "fimo_tasks_meta", .dep_name = "pkg/fimo_tasks_meta" },
+    .{ .name = "fimo_worlds_meta", .dep_name = "pkg/fimo_worlds_meta" },
 };
 
 const module_list: []const struct {
@@ -16,6 +17,7 @@ const module_list: []const struct {
     dep_name: [:0]const u8,
 } = &.{
     .{ .name = "fimo_tasks", .dep_name = "module/fimo_tasks" },
+    .{ .name = "fimo_worlds", .dep_name = "module/fimo_worlds" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -39,8 +41,10 @@ pub fn build(b: *std.Build) void {
 
     const pkg_std = b.option(bool, "pkg-std", "Enable the fimo_std package (default: yes)") orelse true;
     const pkg_tasks = b.option(bool, "pkg-tasks", "Enable the fimo_tasks_meta package (default: yes)") orelse true;
+    const pkg_worlds = b.option(bool, "pkg-worlds", "Enable the fimo_worlds_meta package (default: yes)") orelse true;
 
     const mod_tasks = b.option(bool, "module-tasks", "Enable the fimo_tasks module (default: yes)") orelse true;
+    const mod_worlds = b.option(bool, "module-worlds", "Enable the fimo_worlds module (default: yes)") orelse true;
 
     const builder = FimoBuild.init(
         b,
@@ -49,9 +53,11 @@ pub fn build(b: *std.Build) void {
         .{
             .fimo_std = pkg_std,
             .fimo_tasks_meta = pkg_tasks,
+            .fimo_worlds_meta = pkg_worlds,
         },
         .{
             .fimo_tasks = mod_tasks,
+            .fimo_worlds = mod_worlds,
         },
     );
 
