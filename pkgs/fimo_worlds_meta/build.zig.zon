@@ -1,0 +1,16 @@
+.{
+    .name = .fimo_worlds_meta,
+    .version = "0.2.0-dev",
+    .dependencies = .{
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
+        },
+    },
+    .fingerprint = 0xfe320a5e87074f9e,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "include",
+        "src",
+    },
+}

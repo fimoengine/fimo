@@ -1,0 +1,15 @@
+.{
+    .name = .fimo_worlds,
+    .version = "0.2.0-dev",
+    .dependencies = .{
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "include",
+        "src",
+    },
+}

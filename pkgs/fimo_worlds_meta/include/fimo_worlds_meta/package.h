@@ -1,0 +1,23 @@
+#ifndef FIMO_WORLDS_META_PACKAGE_H
+#define FIMO_WORLDS_META_PACKAGE_H
+
+#include <fimo_std/impl/context_version_.h>
+
+#include <fimo_worlds_meta/errors.h>
+#include <fimo_worlds_meta/jobs.h>
+#include <fimo_worlds_meta/resources.h>
+#include <fimo_worlds_meta/systems.h>
+#include <fimo_worlds_meta/worlds.h>
+
+/// Namespace for all symbols of the package.
+#define FIMO_WORLDS_META_SYMBOL_NAMESPACE "fimo-worlds"
+
+#define FIMO_WORLDS_META_SYMBOL_VERSION_MAJOR FIMO_CONTEXT_VERSION_MAJOR
+#define FIMO_WORLDS_META_SYMBOL_VERSION_MINOR FIMO_CONTEXT_VERSION_MINOR
+#define FIMO_WORLDS_META_SYMBOL_VERSION_PATCH FIMO_CONTEXT_VERSION_PATCH
+#define FIMO_WORLDS_META_SYMBOL_VERSION_PRE FIMO_CONTEXT_VERSION_PRE
+#define FIMO_WORLDS_META_SYMBOL_VERSION_PRE_LEN FIMO_CONTEXT_VERSION_PRE_LEN
+#define FIMO_WORLDS_META_SYMBOL_VERSION_BUILD FIMO_CONTEXT_VERSION_BUILD
+#define FIMO_WORLDS_META_SYMBOL_VERSION_BUILD_LEN FIMO_CONTEXT_VERSION_BUILD_LEN
+
+#endif // FIMO_WORLDS_META_PACKAGE_H

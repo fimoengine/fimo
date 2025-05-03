@@ -13,9 +13,15 @@
         .@"pkg/fimo_tasks_meta" = .{
             .path = "pkgs/fimo_tasks_meta",
         },
+        .@"pkg/fimo_worlds_meta" = .{
+            .path = "pkgs/fimo_worlds_meta",
+        },
 
         .@"module/fimo_tasks" = .{
             .path = "modules/fimo_tasks",
+        },
+        .@"module/fimo_worlds" = .{
+            .path = "modules/fimo_worlds",
         },
     },
     .fingerprint = 0x7551ee4fd1f40ebd,
