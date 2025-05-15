@@ -6,18 +6,20 @@ const build_internals = @import("tools/build-internals");
 const meta_list: []const struct {
     name: [:0]const u8,
     dep_name: [:0]const u8,
+    pub_name: []const u8,
 } = &.{
-    .{ .name = "fimo_std", .dep_name = "pkg/fimo_std" },
-    .{ .name = "fimo_tasks_meta", .dep_name = "pkg/fimo_tasks_meta" },
-    .{ .name = "fimo_worlds_meta", .dep_name = "pkg/fimo_worlds_meta" },
+    .{ .name = "fimo_std", .dep_name = "pkg/fimo_std", .pub_name = "pkg-std" },
+    .{ .name = "fimo_tasks_meta", .dep_name = "pkg/fimo_tasks_meta", .pub_name = "pkg-tasks" },
+    .{ .name = "fimo_worlds_meta", .dep_name = "pkg/fimo_worlds_meta", .pub_name = "pkg-worlds" },
 };
 
 const module_list: []const struct {
     name: [:0]const u8,
     dep_name: [:0]const u8,
+    pub_name: []const u8,
 } = &.{
-    .{ .name = "fimo_tasks", .dep_name = "module/fimo_tasks" },
-    .{ .name = "fimo_worlds", .dep_name = "module/fimo_worlds" },
+    .{ .name = "fimo_tasks", .dep_name = "module/fimo_tasks", .pub_name = "mod-tasks" },
+    .{ .name = "fimo_worlds", .dep_name = "module/fimo_worlds", .pub_name = "mod-worlds" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -38,6 +40,8 @@ pub fn build(b: *std.Build) void {
 
     const install_standalone = b.option(bool, "standalone-module", "Enable standalone binary (default: yes)") orelse true;
     const install_split = b.option(bool, "split-modules", "Enable split module binaries (default: no)") orelse false;
+
+    const test_filter = b.option([]const u8, "test-filter", "Filter the test execution to one specific package or module (default: none)");
 
     const pkg_std = b.option(bool, "pkg-std", "Enable the fimo_std package (default: yes)") orelse true;
     const pkg_tasks = b.option(bool, "pkg-tasks", "Enable the fimo_tasks_meta package (default: yes)") orelse true;
@@ -61,6 +65,12 @@ pub fn build(b: *std.Build) void {
         },
     );
 
+    const test_pkg_names = if (test_filter) |filter| blk: {
+        for (meta_list) |pkg| if (std.mem.eql(u8, filter, pkg.pub_name)) break :blk pkg.name;
+        for (module_list) |mod| if (std.mem.eql(u8, filter, mod.pub_name)) break :blk mod.name;
+        break :blk "_";
+    } else null;
+
     for (builder.builder.graph.pkgs.values()) |pkg| {
         const test_dir = std.Build.Step.InstallArtifact.Options.Dir{
             .override = .{
@@ -68,7 +78,8 @@ pub fn build(b: *std.Build) void {
             },
         };
         for (pkg.tests.items) |t| {
-            test_step.dependOn(&t.getRunArtifact().step);
+            if (test_pkg_names == null or std.mem.eql(u8, test_pkg_names.?, pkg.name))
+                test_step.dependOn(&t.getRunArtifact().step);
             if (install_tests) {
                 install_step.dependOn(
                     &b.addInstallArtifact(t.getArtifact(), .{ .dest_dir = test_dir }).step,
@@ -95,7 +106,8 @@ pub fn build(b: *std.Build) void {
             },
         };
         for (mod.tests.items) |t| {
-            test_step.dependOn(&t.getRunArtifact().step);
+            if (test_pkg_names == null or std.mem.eql(u8, test_pkg_names.?, mod.name))
+                test_step.dependOn(&t.getRunArtifact().step);
             if (install_tests) {
                 install_step.dependOn(
                     &b.addInstallArtifact(t.getArtifact(), .{ .dest_dir = test_dir }).step,
