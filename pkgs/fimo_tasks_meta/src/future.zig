@@ -158,7 +158,7 @@ pub fn goWithCleanup(
                     const fut: *FutureState = @fieldParentPtr("command_buffer", b);
                     const cl_args = fut.cleanup_args;
                     const allocator = fut.allocator;
-                    const bytes = std.mem.asBytes(b).ptr[0..fut.buffer_len];
+                    const bytes = std.mem.asBytes(fut).ptr[0..fut.buffer_len];
                     allocator.free(bytes);
                     @call(.auto, cleanup, cl_args);
                 }
@@ -274,7 +274,7 @@ pub fn initWithCleanup(
                     const fut: *FutureState = @fieldParentPtr("command_buffer", b);
                     const cl_args = fut.cleanup_args;
                     const allocator = fut.allocator;
-                    const bytes = std.mem.asBytes(b).ptr[0..fut.buffer_len];
+                    const bytes = std.mem.asBytes(fut).ptr[0..fut.buffer_len];
                     allocator.free(bytes);
                     @call(.auto, cleanup, cl_args);
                 }
