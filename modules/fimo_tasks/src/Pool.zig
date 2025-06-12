@@ -258,9 +258,9 @@ pub fn init(options: InitOptions) !*Self {
     var running_workers: usize = 0;
     self.workers = try allocator.alloc(Worker, options.worker_count);
     errdefer {
-        self.global_channel.close(&options.runtime.lot);
+        self.global_channel.close(&options.runtime.futex);
         for (self.workers[0..running_workers]) |*worker| {
-            worker.private_queue.close(&options.runtime.lot);
+            worker.private_queue.close(&options.runtime.futex);
             worker.thread.join();
         }
         allocator.free(self.workers);
@@ -379,14 +379,14 @@ pub fn refStrongFromWeakOrJoinAndUnref(self: *Self) bool {
 pub fn enqueueCommandBuffer(self: *Self, buffer: *CommandBuffer) SendError!void {
     const buffer_ref = buffer.ref();
     errdefer buffer_ref.unref();
-    return self.enqueue_requests.sender().send(&self.runtime.lot, buffer_ref);
+    return self.enqueue_requests.sender().send(&self.runtime.futex, buffer_ref);
 }
 
 pub fn wakeByAddress(self: *Self, value: *const atomic.Value(u32), max_waiters: usize) void {
     const allocator = self.allocator;
     const msg = allocator.create(PrivateMessage) catch @panic("oom");
     msg.* = .{ .msg = .{ .wake = .{ .value = value, .max_waiters = max_waiters } } };
-    self.private_message_queue.sender().send(&self.runtime.lot, msg) catch |err| switch (err) {
+    self.private_message_queue.sender().send(&self.runtime.futex, msg) catch |err| switch (err) {
         // If the private message queue is closed, we don't need to wake up anyone.
         error.Closed => allocator.destroy(msg),
         else => unreachable,
@@ -395,8 +395,8 @@ pub fn wakeByAddress(self: *Self, value: *const atomic.Value(u32), max_waiters: 
 
 pub fn requestClose(self: *Self) void {
     self.runtime.logDebug("`{*}` close requested", .{self}, @src());
-    self.enqueue_requests.close(&self.runtime.lot);
-    self.signal_channel.sender().trySend(&self.runtime.lot, {}) catch {};
+    self.enqueue_requests.close(&self.runtime.futex);
+    self.signal_channel.sender().trySend(&self.runtime.futex, {}) catch {};
 }
 
 pub fn getStackAllocator(self: *Self, size: StackSize) ?*StackAllocator {
@@ -410,15 +410,15 @@ pub fn getStackAllocator(self: *Self, size: StackSize) ?*StackAllocator {
 pub fn enqueueTask(self: *Self, task: *Task, worker: ?MetaWorker) void {
     std.debug.assert(task.msg == null);
     std.debug.assert(task.next == null);
-    const lot = &self.runtime.lot;
+    const futex = &self.runtime.futex;
     if (worker) |w| {
         self.runtime.logDebug("`{*}` enqueueing `{*}` to `{}`", .{ self, task, w }, @src());
         std.debug.assert(task.worker == null or task.worker == worker);
         const ptr = &self.workers[@intFromEnum(w)];
-        ptr.private_queue.sender().send(lot, task) catch unreachable;
+        ptr.private_queue.sender().send(futex, task) catch unreachable;
     } else {
         self.runtime.logDebug("`{*}` enqueueing `{*}` to global queue", .{ self, task }, @src());
-        self.global_channel.sender(self.allocator).send(lot, task) catch |e| @panic(@errorName(e));
+        self.global_channel.sender(self.allocator).send(futex, task) catch |e| @panic(@errorName(e));
     }
 }
 
@@ -683,13 +683,13 @@ fn runEventLoop(self: *Self) void {
         self.enqueue_requests.receiver(),
         self.signal_channel.receiver(),
     });
-    const lot = &self.runtime.lot;
+    const futex = &self.runtime.futex;
 
     const max_timeout = Instant.now().addSaturating(Duration.Max);
     var next_timeout = max_timeout;
     while (true) {
         // Wait until the next message arrives or timeout occurs.
-        var curr_msg = rx.recvUntil(lot, next_timeout) catch |err| switch (err) {
+        var curr_msg = rx.recvUntil(futex, next_timeout) catch |err| switch (err) {
             error.Timeout => blk: {
                 self.runtime.logDebug("`{*}` recv timed out", .{self}, @src());
                 break :blk null;
@@ -734,8 +734,8 @@ fn runEventLoop(self: *Self) void {
         // the event loop.
         if (self.command_buffer_count == 0 and self.enqueue_requests.isClosed()) {
             self.runtime.logDebug("`{*}` closing", .{self}, @src());
-            self.signal_channel.close(lot);
-            self.private_message_queue.close(lot);
+            self.signal_channel.close(futex);
+            self.private_message_queue.close(futex);
         }
     }
     self.runtime.logDebug("`{*}` terminating", .{self}, @src());
@@ -748,10 +748,10 @@ fn runEventLoop(self: *Self) void {
     std.debug.assert(self.process_list_tail == null);
     std.debug.assert(self.timeouts_head == null);
     std.debug.assert(self.waiters.count() == 0);
-    self.global_channel.close(lot);
+    self.global_channel.close(futex);
 
     for (self.workers) |*worker| {
-        worker.private_queue.close(lot);
+        worker.private_queue.close(futex);
         worker.thread.join();
         std.debug.assert(worker.private_task_count.load(.acquire) == 0);
     }

@@ -6,12 +6,12 @@ const time = fimo_std.time;
 const Duration = time.Duration;
 const Instant = time.Instant;
 
-const ParkingLot = @import("../ParkingLot.zig");
+const Futex = @import("../Futex.zig");
 const Worker = @import("../Worker.zig");
 const receiver = @import("receiver.zig");
 const RecvError = receiver.RecvError;
 const TimedRecvError = receiver.TimedRecvError;
-const ParkError = receiver.ParkError;
+const WaitError = receiver.WaitError;
 const Receiver = receiver.Receiver;
 
 /// A receiver that receives messages from multiple receivers.
@@ -90,9 +90,9 @@ pub fn MultiReceiver(comptime Receivers: type, comptime Ts: []const type) type {
         ///
         /// The caller will block until a message is available.
         /// If all channels are closed and empty, an error is returned.
-        pub fn recv(self: *const Self, lot: *ParkingLot) RecvError!T {
+        pub fn recv(self: *const Self, futex: *Futex) RecvError!T {
             if (try self.tryRecv()) |msg| return msg;
-            return self.recvSlow(lot, null) catch |err| switch (err) {
+            return self.recvSlow(futex, null) catch |err| switch (err) {
                 TimedRecvError.Closed => RecvError.Closed,
                 TimedRecvError.Timeout => unreachable,
             };
@@ -102,21 +102,21 @@ pub fn MultiReceiver(comptime Receivers: type, comptime Ts: []const type) type {
         ///
         /// The caller will block until a message is available or the specified duration has elapsed.
         /// If all channels are closed and empty, an error is returned.
-        pub fn recvFor(self: *const Self, lot: *ParkingLot, duration: Duration) TimedRecvError!T {
+        pub fn recvFor(self: *const Self, futex: *Futex, duration: Duration) TimedRecvError!T {
             const timeout = Instant.now().addSaturating(duration);
-            return self.recvUntil(lot, timeout);
+            return self.recvUntil(futex, timeout);
         }
 
         /// Receives one message from the channels.
         ///
         /// The caller will block until a message is available or the timeout is reached.
         /// If all channels are closed and empty, an error is returned.
-        pub fn recvUntil(self: *const Self, lot: *ParkingLot, timeout: Instant) TimedRecvError!T {
+        pub fn recvUntil(self: *const Self, futex: *Futex, timeout: Instant) TimedRecvError!T {
             if (try self.tryRecv()) |msg| return msg;
-            return self.recvSlow(lot, timeout);
+            return self.recvSlow(futex, timeout);
         }
 
-        fn recvSlow(self: *const Self, lot: *ParkingLot, timeout: ?Instant) TimedRecvError!T {
+        fn recvSlow(self: *const Self, futex: *Futex, timeout: ?Instant) TimedRecvError!T {
             @branchHint(.cold);
 
             var spin_count: usize = 0;
@@ -151,60 +151,33 @@ pub fn MultiReceiver(comptime Receivers: type, comptime Ts: []const type) type {
 
                 // Filter the remaining channels.
                 var num_keys: usize = 0;
-                var keys: [num_receivers]*const anyopaque = undefined;
-                var channels: [num_receivers]*anyopaque = undefined;
+                var keys: [num_receivers]Futex.KeyExpect = undefined;
                 var rx_indices: [num_receivers]usize = undefined;
                 inline for (&receiver_open, self.receivers, 0..) |open, rx, i| {
                     if (open) {
-                        const channel = rx.parkChannel();
-                        keys[num_keys] = rx.parkKey();
-                        channels[num_keys] = channel;
+                        keys[num_keys] = rx.prepareWait() catch |err| switch (err) {
+                            WaitError.Retry => continue :loop,
+                            WaitError.Timeout => return TimedRecvError.Timeout,
+                        };
                         rx_indices[num_keys] = i;
                         num_keys += 1;
-                        rx.preparePark(channel) catch |err| switch (err) {
-                            ParkError.Retry => continue :loop,
-                            ParkError.Timeout => return TimedRecvError.Timeout,
-                        };
                     }
                 }
 
-                const Validation = struct {
-                    ctx: *const Self,
-                    index_rx_map: []usize,
-                    channels: []*anyopaque,
-                    fn f(this: @This(), index: usize) bool {
-                        const rx_idx = this.index_rx_map[index];
-                        const channel = this.channels[index];
-                        inline for (this.ctx.receivers, 0..) |rx, i| {
-                            if (i == rx_idx) return rx.shouldPark(channel);
-                        }
-                        unreachable;
-                    }
+                const idx = futex.waitv(keys[0..num_keys], timeout) catch |err| switch (err) {
+                    error.KeyError => unreachable,
+                    error.Invalid => continue,
+                    error.Timeout => return TimedRecvError.Timeout,
                 };
-                const BeforeSleep = struct {
-                    fn f(this: @This()) void {
-                        _ = this;
+                const rx_idx = rx_indices[idx];
+                inline for (self.receivers, std.meta.fields(T), 0..) |rx, field, i| {
+                    if (i == rx_idx) {
+                        const result = rx.tryRecv() catch |err| switch (err) {
+                            RecvError.Closed => null,
+                            else => return err,
+                        };
+                        if (result) |value| return @unionInit(T, field.name, value);
                     }
-                };
-                const result = lot.parkMultiple(
-                    keys[0..num_keys],
-                    Validation{
-                        .ctx = self,
-                        .index_rx_map = rx_indices[0..num_keys],
-                        .channels = channels[0..num_keys],
-                    },
-                    Validation.f,
-                    BeforeSleep{},
-                    BeforeSleep.f,
-                    .default,
-                    timeout,
-                );
-                switch (result.type) {
-                    // The state changed or we were unparked, retry.
-                    .unparked, .invalid => {},
-                    // We timed out, return the timeout error.
-                    .timed_out => return ParkError.Timeout,
-                    .keys_invalid => unreachable,
                 }
 
                 // Retry another round.
@@ -231,8 +204,8 @@ fn channelTest(
         received: bool = false,
     };
 
-    var lot = ParkingLot.init(std.testing.allocator);
-    defer lot.deinit();
+    var futex = Futex.init(std.testing.allocator);
+    defer futex.deinit();
 
     for (0..repeats) |_| {
         var channel_1 = IntrusiveMpscChannel(*Node).empty;
@@ -252,7 +225,7 @@ fn channelTest(
             channel_weight: f32,
             sx_1: IntrusiveMpscChannel(*Node).Sender,
             sx_2: IntrusiveMpscChannel(*Node).Sender,
-            lot: *ParkingLot,
+            futex: *Futex,
             num_threads: usize,
             nodes: []Node,
             node_counter: *atomic.Value(usize),
@@ -267,11 +240,11 @@ fn channelTest(
                     const sx = if (rng.float(f32) < self.channel_weight) self.sx_1 else self.sx_2;
 
                     const node = &self.nodes[idx];
-                    sx.send(self.lot, node) catch unreachable;
+                    sx.send(self.futex, node) catch unreachable;
 
                     if (self.sent_counter.fetchAdd(1, .release) == self.nodes.len - 1) {
-                        self.sx_1.channel.close(self.lot);
-                        self.sx_2.channel.close(self.lot);
+                        self.sx_1.channel.close(self.futex);
+                        self.sx_2.channel.close(self.futex);
                     }
                 }
             }
@@ -285,7 +258,7 @@ fn channelTest(
                 .channel_weight = channel_weight,
                 .sx_1 = channel_1.sender(),
                 .sx_2 = channel_2.sender(),
-                .lot = &lot,
+                .futex = &futex,
                 .num_threads = num_threads,
                 .nodes = nodes,
                 .node_counter = &node_counter,
@@ -295,7 +268,7 @@ fn channelTest(
         }
 
         while (true) {
-            const elem = rx.recv(&lot) catch break;
+            const elem = rx.recv(&futex) catch break;
             switch (elem) {
                 .@"0", .@"1" => |v| v.received = true,
             }
@@ -305,50 +278,50 @@ fn channelTest(
     }
 }
 
-test "one one zero" {
+test "multi receiver: one one zero" {
     try channelTest(1000, 1, 1, 0.0);
 }
 
-test "one one fifty" {
+test "multi receiver: one one fifty" {
     try channelTest(1000, 1, 1, 0.5);
 }
 
-test "one hundred zero" {
+test "multi receiver: one hundred zero" {
     try channelTest(100, 1, 100, 0.0);
 }
 
-test "one hundred twenty" {
+test "multi receiver: one hundred twenty" {
     try channelTest(100, 1, 100, 0.2);
 }
 
-test "one hundred fifty" {
+test "multi receiver: one hundred fifty" {
     try channelTest(100, 1, 100, 0.5);
 }
 
-test "one hundred eighty" {
+test "multi receiver: one hundred eighty" {
     try channelTest(100, 1, 100, 0.8);
 }
 
-test "one hundred hundred" {
+test "multi receiver: one hundred hundred" {
     try channelTest(100, 1, 100, 1.0);
 }
 
-test "hundred hundred zero" {
+test "multi receiver: hundred hundred zero" {
     try channelTest(100, 100, 100, 0.0);
 }
 
-test "hundred hundred twenty" {
+test "multi receiver: hundred hundred twenty" {
     try channelTest(100, 100, 100, 0.2);
 }
 
-test "hundred hundred fifty" {
+test "multi receiver: hundred hundred fifty" {
     try channelTest(100, 100, 100, 0.5);
 }
 
-test "hundred hundred eighty" {
+test "multi receiver: hundred hundred eighty" {
     try channelTest(100, 100, 100, 0.8);
 }
 
-test "hundred hundred hundred" {
+test "multi receiver: hundred hundred hundred" {
     try channelTest(100, 100, 100, 1.0);
 }

@@ -169,7 +169,7 @@ fn fetchTask(self: *Self) RecvError!*Task {
     // Try to maintain a balanced distribution of tasks among workers.
     if (num_global_tasks / num_workers > num_local_tasks) {
         const rx = multi_receiver(&.{ *Task, *Task }, .{ self.global_rx, self.private_queue.receiver() });
-        const msg = try rx.recv(&self.pool.runtime.lot);
+        const msg = try rx.recv(&self.pool.runtime.futex);
         switch (msg) {
             .@"0" => |v| {
                 std.debug.assert(v.worker == null);
@@ -182,7 +182,7 @@ fn fetchTask(self: *Self) RecvError!*Task {
         }
     } else {
         const rx = multi_receiver(&.{ *Task, *Task }, .{ self.private_queue.receiver(), self.global_rx });
-        const msg = try rx.recv(&self.pool.runtime.lot);
+        const msg = try rx.recv(&self.pool.runtime.futex);
         switch (msg) {
             .@"0" => |v| {
                 std.debug.assert(v.worker == null or v.worker == self.id);
@@ -202,7 +202,7 @@ fn sendToPool(self: *Self, task: *Task, msg: Pool.PrivateMessage) void {
     task.msg = msg;
 
     if (task.msg) |*m|
-        self.pool_sx.send(&self.pool.runtime.lot, m) catch unreachable
+        self.pool_sx.send(&self.pool.runtime.futex, m) catch unreachable
     else
         unreachable;
 }
@@ -350,7 +350,7 @@ pub fn run(self: *Self) void {
 
                 // Push the task back onto the local queue.
                 const sx = self.private_queue.sender();
-                sx.send(&self.pool.runtime.lot, task) catch unreachable;
+                sx.send(&self.pool.runtime.futex, task) catch unreachable;
             },
             .sleep => |msg| {
                 // If the timeout has already expired, the operation is equivalent to a yield.
@@ -361,7 +361,7 @@ pub fn run(self: *Self) void {
 
                     // Push the task back onto the local queue.
                     const sx = self.private_queue.sender();
-                    sx.send(&self.pool.runtime.lot, task) catch unreachable;
+                    sx.send(&self.pool.runtime.futex, task) catch unreachable;
                     continue;
                 }
 
@@ -391,7 +391,7 @@ pub fn run(self: *Self) void {
 
                     // Push the task back onto the local queue.
                     const sx = self.private_queue.sender();
-                    sx.send(&self.pool.runtime.lot, task) catch unreachable;
+                    sx.send(&self.pool.runtime.futex, task) catch unreachable;
                     continue;
                 };
 
