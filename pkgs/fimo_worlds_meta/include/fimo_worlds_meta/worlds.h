@@ -67,7 +67,8 @@ typedef FimoWorldsMeta_Error(*FimoWorldsMeta_world_add_resource)(
 /// Removes the resource from the world.
 typedef FimoWorldsMeta_Error(*FimoWorldsMeta_world_remove_resource)(
     FimoWorldsMeta_World *world,
-    FimoWorldsMeta_ResourceId id
+    FimoWorldsMeta_ResourceId id,
+    void *value
 );
 
 /// Acquires a set of exclusive and shared resource references.

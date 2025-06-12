@@ -75,7 +75,7 @@ typedef struct FimoWorldsMeta_SystemDescriptor {
     /// Alignment in bytes of the factory. Must be a power-of-two.
     FimoUSize factory_alignment;
     /// Optional function to call when destroying the factory.
-    void(*factory_destroy)(void *factory);
+    void(*factory_destroy)(const void *factory);
 
     /// Size in bytes of the system state.
     FimoUSize system_size;
@@ -169,12 +169,10 @@ typedef FimoWorldsMeta_Error(*FimoWorldsMeta_system_group_create)(
 
 /// Destroys the system group.
 ///
-/// The caller may provide a reference to a fence via `signal`, to be notified when the group
-/// has been destroyed. If no fence is provided, the caller will block until the group is
-/// destroyed. Scheduled operations will be executed.
+/// The caller is blocked until the group is destroyed. The group may not be running
+/// and must be empty.
 typedef void(*FimoWorldsMeta_system_group_destroy)(
-    FimoWorldsMeta_SystemGroup *group,
-    FimoWorldsMeta_Fence *signal
+    FimoWorldsMeta_SystemGroup *group
 );
 
 /// Returns the world the group is contained in.

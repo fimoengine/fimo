@@ -1,6 +1,11 @@
 const std = @import("std");
 
+const fimo_tasks_meta = @import("fimo_tasks_meta");
+
+const Job = @import("Job.zig");
+const Fence = Job.Fence;
 const symbols = @import("symbols.zig");
+const testing = @import("testing.zig");
 const worlds = @import("worlds.zig");
 const World = worlds.World;
 
@@ -16,6 +21,11 @@ pub const RegisterOptions = struct {
         size: usize,
         alignment: usize,
     };
+};
+
+/// A resource id with an unknown resource type.
+pub const ResourceId = enum(usize) {
+    _,
 };
 
 /// A unique identifier of a registered resource.
@@ -76,9 +86,9 @@ pub fn TypedResourceId(T: type) type {
             self: Self,
             provider: anytype,
             world: *World,
-            value: *const T,
+            value: T,
         ) error{AddFailed}!void {
-            return world.addResource(provider, self.asId(), value);
+            return world.addResource(provider, self.asId(), &value);
         }
 
         /// Removes the resource from the world.
@@ -86,8 +96,10 @@ pub fn TypedResourceId(T: type) type {
             self: Self,
             provider: anytype,
             world: *World,
-        ) error{RemoveFailed}!void {
-            return world.removeResource(provider, self.asId());
+        ) error{RemoveFailed}!T {
+            var value: T = undefined;
+            try world.removeResource(provider, self.asId(), &value);
+            return value;
         }
 
         /// Returns an exclusive reference to the resource in the world.
@@ -121,5 +133,196 @@ pub fn TypedResourceId(T: type) type {
     };
 }
 
-/// A resource id with an unknown resource type.
-pub const ResourceId = TypedResourceId(anyopaque);
+test "resource: smoke test" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const id1 = try TypedResourceId(i32).register(&ctx, .{ .label = "resource-1" });
+    defer id1.unregister(&ctx);
+
+    const id2 = try TypedResourceId(i32).register(&ctx, .{ .label = "resource-2" });
+    defer id2.unregister(&ctx);
+    try std.testing.expect(id1 != id2);
+}
+
+test "resource: add to world" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const id = try TypedResourceId(i32).register(&ctx, .{ .label = "resource-1" });
+    defer id.unregister(&ctx);
+
+    const world = try World.init(&ctx, .{ .label = "test-world" });
+    defer world.deinit(&ctx);
+
+    const value: i32 = 5;
+    try std.testing.expect(!id.existsInWorld(&ctx, world));
+    try id.addToWorld(&ctx, world, value);
+    defer _ = id.removeFromWorld(&ctx, world) catch unreachable;
+    try std.testing.expect(id.existsInWorld(&ctx, world));
+
+    const ptr = id.lockInWorldExclusive(&ctx, world);
+    defer id.unlockInWorldExclusive(&ctx, world);
+    try std.testing.expectEqual(value, ptr.*);
+}
+
+test "resource: unique lock" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const id = try TypedResourceId(usize).register(&ctx, .{ .label = "resource-1" });
+    defer id.unregister(&ctx);
+
+    const world = try World.init(&ctx, .{ .label = "test-world" });
+    defer world.deinit(&ctx);
+
+    const executor = world.getPool(&ctx);
+    defer executor.unref();
+
+    try id.addToWorld(&ctx, world, 0);
+    defer _ = id.removeFromWorld(&ctx, world) catch unreachable;
+
+    const num_jobs = 4;
+    const iterations = 1000;
+
+    const Runner = struct {
+        ctx: *const testing.TestContext,
+        id: TypedResourceId(usize),
+        world: *World,
+
+        fn run(self: @This()) void {
+            for (0..iterations) |_| {
+                const ptr = self.id.lockInWorldExclusive(self.ctx, self.world);
+                defer self.id.unlockInWorldExclusive(self.ctx, self.world);
+                ptr.* += 1;
+            }
+        }
+    };
+
+    var fences = [_]Fence{.{}} ** num_jobs;
+    for (&fences) |*fence| try Job.go(
+        &ctx,
+        Runner.run,
+        .{.{ .ctx = &ctx, .id = id, .world = world }},
+        .{
+            .allocator = std.testing.allocator,
+            .executor = executor,
+            .signal = .{ .fence = fence },
+        },
+    );
+    for (&fences) |*fence| fence.wait(&ctx);
+
+    const ptr = id.lockInWorldExclusive(&ctx, world);
+    defer id.unlockInWorldExclusive(&ctx, world);
+    try std.testing.expectEqual(num_jobs * iterations, ptr.*);
+}
+
+test "resource: shared lock" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const id = try TypedResourceId(usize).register(&ctx, .{ .label = "resource-1" });
+    defer id.unregister(&ctx);
+
+    const world = try World.init(&ctx, .{ .label = "test-world" });
+    defer world.deinit(&ctx);
+
+    const executor = world.getPool(&ctx);
+    defer executor.unref();
+
+    try id.addToWorld(&ctx, world, 0);
+    defer _ = id.removeFromWorld(&ctx, world) catch unreachable;
+
+    const num_writers: usize = 2;
+    const num_readers: usize = 4;
+    const num_writes: usize = 10000;
+    const num_reads: usize = num_writes * 2;
+
+    const Runner = struct {
+        ctx: *const testing.TestContext,
+        world: *World,
+
+        writes: TypedResourceId(usize),
+        reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+
+        term1: usize = 0,
+        term2: usize = 0,
+        term_sum: usize = 0,
+
+        const Self = @This();
+
+        fn reader(self: *Self) void {
+            while (true) {
+                const writes = self.writes.lockInWorldShared(self.ctx, self.world);
+                defer self.writes.unlockInWorldShared(self.ctx, self.world);
+
+                if (writes.* >= num_writes or self.reads.load(.unordered) >= num_reads)
+                    break;
+
+                self.check();
+
+                _ = self.reads.fetchAdd(1, .monotonic);
+            }
+        }
+
+        fn writer(self: *Self, thread_idx: usize) void {
+            var prng = std.Random.DefaultPrng.init(thread_idx);
+            var rnd = prng.random();
+
+            while (true) {
+                const writes = self.writes.lockInWorldExclusive(self.ctx, self.world);
+                defer self.writes.unlockInWorldExclusive(self.ctx, self.world);
+
+                if (writes.* >= num_writes)
+                    break;
+
+                self.check();
+
+                const term1 = rnd.int(usize);
+                self.term1 = term1;
+
+                fimo_tasks_meta.task.yield(self.ctx);
+
+                const term2 = rnd.int(usize);
+                self.term2 = term2;
+                fimo_tasks_meta.task.yield(self.ctx);
+
+                self.term_sum = term1 +% term2;
+                writes.* += 1;
+            }
+        }
+
+        fn check(self: *const Self) void {
+            const term_sum = self.term_sum;
+            fimo_tasks_meta.task.yield(self.ctx);
+
+            const term2 = self.term2;
+            fimo_tasks_meta.task.yield(self.ctx);
+
+            const term1 = self.term1;
+            std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;
+        }
+    };
+
+    var runner = Runner{ .ctx = &ctx, .world = world, .writes = id };
+    var fences = [_]Fence{.{}} ** (num_writers + num_readers);
+
+    for (fences[0..num_writers], 0..) |*f, i| try Job.go(
+        &ctx,
+        Runner.writer,
+        .{ &runner, i },
+        .{ .allocator = std.testing.allocator, .executor = executor, .signal = .{ .fence = f } },
+    );
+    for (fences[num_writers..]) |*f| try Job.go(
+        &ctx,
+        Runner.reader,
+        .{&runner},
+        .{ .allocator = std.testing.allocator, .executor = executor, .signal = .{ .fence = f } },
+    );
+
+    for (&fences) |*fence| fence.wait(&ctx);
+
+    const writes = id.lockInWorldShared(&ctx, world);
+    defer id.unlockInWorldShared(&ctx, world);
+    try std.testing.expectEqual(num_writes, writes.*);
+}
