@@ -75,7 +75,7 @@ pub const resource_register = Symbol{
     .version = context_version,
     .T = fn (
         resource: *const RegisterResourceOptions.Descriptor,
-        id: **ResourceId,
+        id: *ResourceId,
     ) callconv(.c) Error,
 };
 
@@ -117,7 +117,7 @@ pub const system_group_destroy = Symbol{
     .name = "system_group_destroy",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup, signal: ?*Fence) callconv(.c) void,
+    .T = fn (group: *SystemGroup) callconv(.c) void,
 };
 
 pub const system_group_get_world = Symbol{
@@ -152,7 +152,7 @@ pub const system_group_remove_system = Symbol{
     .name = "system_group_remove_system",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup, id: SystemId, signal: ?*Fence) callconv(.c) void,
+    .T = fn (group: *SystemGroup, id: SystemId, signal: *Fence) callconv(.c) void,
 };
 
 pub const system_group_schedule = Symbol{
@@ -284,7 +284,7 @@ pub const world_remove_resource = Symbol{
     .name = "world_remove_resource",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId) callconv(.c) Error,
+    .T = fn (world: *World, id: ResourceId, value: *anyopaque) callconv(.c) Error,
 };
 
 pub const world_lock_resources = Symbol{

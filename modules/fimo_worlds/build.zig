@@ -5,6 +5,7 @@ const build_internals = @import("tools/build-internals");
 pub fn configure(builder: *build_internals.FimoBuild) void {
     const b = builder.build;
     const fimo_std_pkg = builder.getPackage("fimo_std");
+    const fimo_tasks_meta_pkg = builder.getPackage("fimo_tasks_meta");
     const fimo_worlds_meta_pkg = builder.getPackage("fimo_worlds_meta");
 
     const fimo_worlds = b.addModule("fimo_worlds", .{
@@ -13,6 +14,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
         .optimize = builder.graph.optimize,
     });
     fimo_worlds.addImport("fimo_std", fimo_std_pkg.root_module);
+    fimo_worlds.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
     fimo_worlds.addImport("fimo_worlds_meta", fimo_worlds_meta_pkg.root_module);
 
     const module = builder.addModule(.{
@@ -31,6 +33,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                     .valgrind = builder.graph.target.result.os.tag == .linux,
                 });
                 t.addImport("fimo_std", fimo_std_pkg.root_module);
+                t.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
                 t.addImport("fimo_worlds_meta", fimo_worlds_meta_pkg.root_module);
 
                 break :blk t;

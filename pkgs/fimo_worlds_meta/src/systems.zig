@@ -81,12 +81,11 @@ pub const SystemGroup = opaque {
 
     /// Destroys the system group.
     ///
-    /// The caller may provide a reference to a fence via `signal`, to be notified when the group
-    /// has been destroyed. If no fence is provided, the caller will block until the group is
-    /// destroyed. Scheduled operations will be executed.
-    pub fn deinit(self: *SystemGroup, provider: anytype, signal: ?*Fence) void {
+    /// The caller is blocked until the group is destroyed. The group may not be running
+    /// and must be empty.
+    pub fn deinit(self: *SystemGroup, provider: anytype) void {
         const sym = symbols.system_group_destroy.requestFrom(provider);
-        return sym(self, signal);
+        return sym(self);
     }
 
     /// Returns the world the group is contained in.
@@ -129,9 +128,28 @@ pub const SystemGroup = opaque {
     /// Removes a system from the group.
     ///
     /// Already scheduled systems will not be affected. This operation may remove systems added
-    /// transitively. The caller may provide a reference to a fence via `signal`, to be notified
+    /// transitively. The caller will block until the system is removed from the group.
+    pub fn removeSystem(
+        self: *SystemGroup,
+        provider: anytype,
+        id: SystemId,
+    ) void {
+        var fence = Fence{};
+        self.removeSystemAsync(provider, id, &fence);
+        fence.wait(provider);
+    }
+
+    /// Removes a system from the group.
+    ///
+    /// Already scheduled systems will not be affected. This operation may remove systems added
+    /// transitively. The caller must provide a reference to a fence via `signal`, to be notified
     /// when the system has been removed from the group.
-    pub fn removeSystem(self: *SystemGroup, provider: anytype, id: SystemId, signal: ?*Fence) void {
+    pub fn removeSystemAsync(
+        self: *SystemGroup,
+        provider: anytype,
+        id: SystemId,
+        signal: *Fence,
+    ) void {
         const sym = symbols.system_group_remove_system.requestFrom(provider);
         return sym(self, id, signal);
     }
@@ -389,9 +407,9 @@ pub const System = struct {
         /// Length in characters of the system label.
         label_len: usize,
         /// Optional array of resources to require with exclusive access.
-        unique_ids: ?[*]const ResourceId,
+        exclusive_ids: ?[*]const ResourceId,
         /// Length of the `exclusive_ids` array.
-        unique_ids_len: usize,
+        exclusive_ids_len: usize,
         /// Optional array of resources to require with shared access.
         shared_ids: ?[*]const ResourceId,
         /// Length of the `shared_ids` array.
@@ -418,7 +436,7 @@ pub const System = struct {
         /// Alignment in bytes of the factory. Must be a power-of-two.
         factory_alignment: usize,
         /// Optional function to call when destroying the factory.
-        factory_deinit: ?*const fn (factory: ?*anyopaque) callconv(.c) void,
+        factory_deinit: ?*const fn (factory: ?*const anyopaque) callconv(.c) void,
 
         /// Size in bytes of the system state.
         system_size: usize,
@@ -467,16 +485,16 @@ pub const System = struct {
         before: []Dependency,
         after: []Dependency,
     ) error{RegisterFailed}!SystemId {
-        var unique: [exclusive_ids.len]ResourceId = undefined;
-        inline for (0..unique.len) |i| unique[i] = exclusive_ids[i].asId();
+        var exclusive: [exclusive_ids.len]ResourceId = undefined;
+        inline for (0..exclusive.len) |i| exclusive[i] = exclusive_ids[i].asId();
         var shared: [shared_ids.len]ResourceId = undefined;
         inline for (0..shared.len) |i| shared[i] = shared_ids[i].asId();
         const desc = Descriptor{
             .next = null,
             .label = if (label) |l| l.ptr else null,
             .label_len = if (label) |l| l.len else 0,
-            .unique_ids = unique[0..].ptr,
-            .unique_ids_len = unique.len,
+            .exclusive_ids = exclusive[0..].ptr,
+            .exclusive_ids_len = exclusive.len,
             .shared_ids = shared[0..].ptr,
             .shared_ids_len = shared.len,
             .before = before.ptr,

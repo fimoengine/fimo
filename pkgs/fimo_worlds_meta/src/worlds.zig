@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 
+const fimo_std = @import("fimo_std");
+const AnyError = fimo_std.AnyError;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 
@@ -10,6 +12,7 @@ const ResourceId = resources.ResourceId;
 const symbols = @import("symbols.zig");
 const systems = @import("systems.zig");
 const SystemGroup = systems.SystemGroup;
+const testing = @import("testing.zig");
 
 /// Options for creating a new world.
 pub const CreateOptions = struct {
@@ -60,11 +63,11 @@ pub const World = opaque {
 
         var world: *World = undefined;
         const sym = symbols.world_create.requestFrom(provider);
-        switch (sym(&desc, &world)) {
-            .Ok => {},
+        return switch (sym(&desc, &world)) {
+            .Ok => world,
             .OperationFailed => error.InitFailed,
             else => unreachable,
-        }
+        };
     }
 
     /// Destroys the world.
@@ -115,9 +118,10 @@ pub const World = opaque {
         self: *World,
         provider: anytype,
         id: ResourceId,
+        value: *anyopaque,
     ) error{RemoveFailed}!void {
         const sym = symbols.world_remove_resource.requestFrom(provider);
-        return switch (sym(self, id)) {
+        return switch (sym(self, id, value)) {
             .Ok => {},
             .OperationFailed => error.RemoveFailed,
             else => unreachable,
@@ -200,7 +204,7 @@ pub fn WorldAllocator(Provider: type) type {
         fn alloc(this: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(this));
             const sym = symbols.world_allocator_alloc.requestFrom(self.provider);
-            return sym(self.context, len, alignment.toByteUnits(), ret_addr);
+            return sym(self.world, len, alignment.toByteUnits(), ret_addr);
         }
 
         fn resize(
@@ -213,7 +217,7 @@ pub fn WorldAllocator(Provider: type) type {
             const self: *Self = @ptrCast(@alignCast(this));
             const sym = symbols.world_allocator_resize.requestFrom(self.provider);
             return sym(
-                self.context,
+                self.world,
                 memory.ptr,
                 memory.len,
                 alignment.toByteUnits(),
@@ -232,7 +236,7 @@ pub fn WorldAllocator(Provider: type) type {
             const self: *Self = @ptrCast(@alignCast(this));
             const sym = symbols.world_allocator_remap.requestFrom(self.provider);
             return sym(
-                self.context,
+                self.world,
                 memory.ptr,
                 memory.len,
                 alignment.toByteUnits(),
@@ -241,11 +245,11 @@ pub fn WorldAllocator(Provider: type) type {
             );
         }
 
-        fn free(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+        fn free(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(this));
             const sym = symbols.world_allocator_free.requestFrom(self.provider);
-            return sym(
-                self.context,
+            sym(
+                self.world,
                 memory.ptr,
                 memory.len,
                 alignment.toByteUnits(),
@@ -257,4 +261,65 @@ pub fn WorldAllocator(Provider: type) type {
             return .{ .ptr = self, .vtable = &vtable };
         }
     };
+}
+
+test "world: smoke test" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const world = try World.init(&ctx, .{ .label = "test-world" });
+    defer world.deinit(&ctx);
+
+    const label = world.getLabel(&ctx).?;
+    try std.testing.expectEqualSlices(u8, "test-world", label);
+}
+
+test "world: custom pool" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    var err: ?AnyError = null;
+    defer if (err) |e| e.deinit();
+
+    const executor = try Pool.init(&ctx, &.{}, &err);
+    defer {
+        executor.requestClose();
+        executor.unref();
+    }
+
+    const world = try World.init(&ctx, .{ .label = "test-world", .pool = executor });
+    defer world.deinit(&ctx);
+
+    const ex = world.getPool(&ctx);
+    defer ex.unref();
+    try std.testing.expectEqual(executor.id(), ex.id());
+}
+
+test "world allocator: base" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const world = try World.init(&ctx, .{ .label = "test-world" });
+    defer world.deinit(&ctx);
+
+    var world_allocator = world.getAllocator(&ctx);
+    const allocator = world_allocator.allocator();
+
+    try std.heap.testAllocator(allocator);
+    try std.heap.testAllocatorAligned(allocator);
+    try std.heap.testAllocatorLargeAlignment(allocator);
+    try std.heap.testAllocatorAlignedShrink(allocator);
+}
+
+test "world allocator: auto free memory" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const world = try World.init(&ctx, .{ .label = "test-world" });
+    defer world.deinit(&ctx);
+
+    var world_allocator = world.getAllocator(&ctx);
+    const allocator = world_allocator.allocator();
+
+    _ = try allocator.alloc(u8, 100);
 }

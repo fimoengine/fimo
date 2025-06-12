@@ -32,7 +32,17 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     });
 
     const wf = b.addWriteFiles();
+    const test_c_headers = wf.addCopyDirectory(b.path("include/"), "include", .{});
     const test_src = wf.addCopyDirectory(b.path("src/"), "src", .{});
+
+    const test_translate_c = b.addTranslateC(.{
+        .root_source_file = test_c_headers.path(b, "fimo_worlds_meta/package.h"),
+        .target = builder.graph.target,
+        .optimize = builder.graph.optimize,
+    });
+    test_translate_c.addIncludePath(b.path("include/"));
+    test_translate_c.addIncludePath(fimo_std_pkg.headers.?);
+    test_translate_c.addIncludePath(fimo_tasks_pkg.headers.?);
 
     const test_module = b.createModule(.{
         .root_source_file = test_src.path(b, "root.zig"),
@@ -42,15 +52,21 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     });
     test_module.addImport("fimo_std", fimo_std_pkg.root_module);
     test_module.addImport("fimo_tasks_meta", fimo_tasks_pkg.root_module);
-    test_module.addImport("c", translate_c.createModule());
+    test_module.addImport("c", test_translate_c.createModule());
 
     _ = pkg.addTest(.{
         .name = "fimo_worlds_meta_test",
         .step = .{ .module = test_module },
         .configure = &struct {
             fn f(t: *build_internals.FimoBuild.Test) void {
-                const fimo_worlds = t.owner.getModule("fimo_worlds");
-                t.step.module.addImport("test_module", fimo_worlds.getLinkModule());
+                const bundle = t.owner.createModule(.{
+                    .name = "test_module",
+                    .module_deps = &.{
+                        "fimo_tasks",
+                        "fimo_worlds",
+                    },
+                });
+                t.step.module.addImport("test_module", bundle.getLinkModule());
             }
         }.f,
     });
