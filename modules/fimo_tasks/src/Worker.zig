@@ -49,6 +49,12 @@ pub fn currentPool() ?*Pool {
     return worker.pool;
 }
 
+pub fn currentPoolIfInTask() ?*Pool {
+    const worker = _current orelse return null;
+    if (worker.active_task != null) return worker.pool;
+    return null;
+}
+
 /// Returns the task running on the current thread.
 pub fn currentTask() ?*Task {
     const worker = _current orelse return null;

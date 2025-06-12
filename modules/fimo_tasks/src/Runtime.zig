@@ -10,6 +10,7 @@ const Module = Context.Module;
 const context = @import("context.zig");
 const fimo_export = @import("fimo_export.zig");
 const Instance = fimo_export.Instance;
+const Futex = @import("Futex.zig");
 const ParkingLot = @import("ParkingLot.zig");
 const PoolMap = @import("PoolMap.zig");
 const root = @import("root.zig");
@@ -17,6 +18,7 @@ const root = @import("root.zig");
 const Self = @This();
 
 allocator: Allocator,
+futex: Futex,
 lot: ParkingLot,
 pool_map: PoolMap = .{},
 instance: ?*const Module.OpaqueInstance = null,
@@ -30,6 +32,7 @@ pub fn init(allocator: Allocator) Self {
 pub fn initInInstance(allocator: Allocator, instance: ?*const Instance) Self {
     return .{
         .allocator = allocator,
+        .futex = .init(allocator),
         .lot = .init(allocator),
         .pool_map = .{},
         .instance = @ptrCast(instance),
@@ -41,6 +44,7 @@ pub fn initInInstance(allocator: Allocator, instance: ?*const Instance) Self {
 /// Blocks until all worker pools are joined.
 pub fn deinit(self: *Self) void {
     self.pool_map.deinit(self.allocator);
+    self.futex.deinit();
     self.lot.deinit();
 }
 
