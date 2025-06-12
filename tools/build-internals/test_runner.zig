@@ -49,6 +49,7 @@ pub fn main() !void {
             }
             break :blk name;
         };
+        printer.status(.text, "{s}\n", .{friendly_name});
 
         current_test = friendly_name;
         std.testing.allocator_instance = .{};
