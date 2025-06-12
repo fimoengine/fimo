@@ -458,11 +458,10 @@ fn handleSleep(self: *Self, msg: *PrivateMessage) void {
             current = curr.next;
             continue;
         }
-
-        timeout.next = curr;
-        link.* = timeout;
-        return;
+        break;
     }
+    timeout.next = current;
+    link.* = timeout;
 }
 
 fn handleWait(self: *Self, msg: *PrivateMessage) void {
@@ -517,11 +516,10 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
                 current = curr.next;
                 continue;
             }
-
-            timeout.next = curr;
-            link.* = timeout;
-            return;
+            break;
         }
+        timeout.next = current;
+        link.* = timeout;
     }
 }
 
@@ -533,6 +531,7 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
         .{ self, wake.max_waiters, wake.value },
         @src(),
     );
+    std.debug.assert(wake.max_waiters == 0 or wake.max_waiters == 1);
     if (wake.max_waiters == 0) return;
 
     // Dequeue the waiters from the bucket.
@@ -544,12 +543,7 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
     var previous: ?*Task = null;
     while (current) |curr| {
         const curr_wait = &curr.msg.?.msg.wait;
-        if (curr_wait.value != wake.value) {
-            link = &curr.next;
-            previous = curr;
-            current = curr.next;
-            continue;
-        }
+        std.debug.assert(curr_wait.value == wake.value);
 
         link.* = curr.next;
         if (bucket.tail == curr) bucket.tail = previous;
@@ -582,6 +576,10 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
                 break;
             }
         }
+
+        link = &curr.next;
+        previous = curr;
+        current = curr.next;
 
         curr_wait.timed_out.* = false;
         curr.next = null;

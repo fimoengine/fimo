@@ -110,14 +110,15 @@ pub fn Futex(comptime T: type) type {
                 null,
             );
             std.debug.assert(result.type != .timed_out);
-            std.debug.assert(result.token == .default);
+            std.debug.assert(result.token == ParkingLot.UnparkToken.default);
         }
 
         /// Unblocks at most `max_waiters` waiters.
         pub fn wake(provider: anytype, ptr: *const atomic.Value(T), max_waiters: usize) void {
             const Callback = struct {
-                fn f(self: *@This()) ParkingLot.UnparkToken {
+                fn f(self: *@This(), result: ParkingLot.UnparkResult) ParkingLot.UnparkToken {
                     _ = self;
+                    _ = result;
                     return .default;
                 }
             };

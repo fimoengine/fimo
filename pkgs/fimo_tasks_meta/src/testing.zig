@@ -50,7 +50,7 @@ comptime {
 
 pub fn initTestContext() !TestContext {
     const tracing_cfg = Tracing.Config{
-        .max_level = .trace,
+        .max_level = .warn,
         .subscribers = &.{Tracing.default_subscriber},
         .subscriber_count = 1,
     };

@@ -94,6 +94,15 @@ pub fn yield(provider: anytype) void {
     sym();
 }
 
+test "yield" {
+    try testing.initTestContextInTask(struct {
+        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
+            _ = err;
+            for (0..100000) |_| yield(ctx);
+        }
+    }.f);
+}
+
 /// Aborts the current task.
 pub fn abort(provider: anytype) noreturn {
     const sym = symbols.abort.requestFrom(provider);

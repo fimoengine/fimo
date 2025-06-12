@@ -7,6 +7,8 @@ const atomic = std.atomic;
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 
+const future = @import("../future.zig");
+const pool = @import("../pool.zig");
 const task = @import("../task.zig");
 const yield = task.yield;
 const testing = @import("../testing.zig");
@@ -66,7 +68,7 @@ fn lockExclusiveSlow(self: *Self, provider: anytype) void {
     };
 
     // Step 1: grab exclusive ownership of writer_bit.
-    self.lockCommon(provider, token_shared, self, TryLock.f, writer_bit);
+    self.lockCommon(provider, token_exclusive, self, TryLock.f, writer_bit | upgradable_bit);
 
     // Step 2: wait for all remaining readers to exit the lock.
     self.waitForReaders(provider);
@@ -473,7 +475,7 @@ fn wakeParkedTasks(
 ) void {
     // We must wake up at least one upgrader or writer if there is one,
     // otherwise they may end up parked indefinitely since unlock_shared
-    // does not call wake_parked_threads.
+    // does not call wakeParkedTasks.
     const Filter = struct {
         new_state: *usize,
         fn f(this: *@This(), token: ParkToken) ParkingLot.FilterOp {
@@ -655,7 +657,7 @@ fn lockCommon(
             TimedOut{},
             TimedOut.f,
             token,
-            null,
+            fimo_std.time.Instant.now().addSaturating(.initSeconds(2)),
         );
         switch (result.type) {
             // We were unparked. Return if the lock was passed to us.
@@ -744,6 +746,189 @@ test "smoke test (tasks)" {
 
             rwl.lockExclusive(ctx);
             rwl.unlockExclusive(ctx);
+        }
+    }.f);
+}
+
+test "concurrent access (threads)" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+
+    const num_writers: usize = 2;
+    const num_readers: usize = 4;
+    const num_writes: usize = 10000;
+    const num_reads: usize = num_writes * 2;
+
+    const Runner = struct {
+        ctx: *const testing.TestContext,
+        rwl: Self = .{},
+        writes: usize = 0,
+        reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+
+        term1: usize = 0,
+        term2: usize = 0,
+        term_sum: usize = 0,
+
+        fn reader(self: *@This()) !void {
+            while (true) {
+                self.rwl.lockShared(self.ctx);
+                defer self.rwl.unlockShared(self.ctx);
+
+                if (self.writes >= num_writes or self.reads.load(.unordered) >= num_reads)
+                    break;
+
+                try self.check();
+
+                _ = self.reads.fetchAdd(1, .monotonic);
+            }
+        }
+
+        fn writer(self: *@This(), thread_idx: usize) !void {
+            var prng = std.Random.DefaultPrng.init(thread_idx);
+            var rnd = prng.random();
+
+            while (true) {
+                self.rwl.lockExclusive(self.ctx);
+                defer self.rwl.unlockExclusive(self.ctx);
+
+                if (self.writes >= num_writes)
+                    break;
+
+                try self.check();
+
+                const term1 = rnd.int(usize);
+                self.term1 = term1;
+                try std.Thread.yield();
+
+                const term2 = rnd.int(usize);
+                self.term2 = term2;
+                try std.Thread.yield();
+
+                self.term_sum = term1 +% term2;
+                self.writes += 1;
+            }
+        }
+
+        fn check(self: *const @This()) !void {
+            const term_sum = self.term_sum;
+            try std.Thread.yield();
+
+            const term2 = self.term2;
+            try std.Thread.yield();
+
+            const term1 = self.term1;
+            try std.testing.expectEqual(term_sum, term1 +% term2);
+        }
+    };
+
+    var runner = Runner{ .ctx = &ctx };
+    var threads: [num_writers + num_readers]std.Thread = undefined;
+
+    for (threads[0..num_writers], 0..) |*t, i| t.* = try std.Thread.spawn(.{}, Runner.writer, .{ &runner, i });
+    for (threads[num_writers..]) |*t| t.* = try std.Thread.spawn(.{}, Runner.reader, .{&runner});
+
+    for (threads) |t| t.join();
+
+    try std.testing.expectEqual(num_writes, runner.writes);
+}
+
+test "concurrent access (tasks)" {
+    try testing.initTestContextInTask(struct {
+        fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
+            const executor = pool.Pool.current(ctx).?;
+            defer executor.unref();
+
+            const num_writers: usize = 2;
+            const num_readers: usize = 4;
+            const num_writes: usize = 10000;
+            const num_reads: usize = num_writes * 2;
+
+            const Runner = struct {
+                ctx: *const testing.TestContext,
+                rwl: Self = .{},
+                writes: usize = 0,
+                reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+
+                term1: usize = 0,
+                term2: usize = 0,
+                term_sum: usize = 0,
+
+                fn reader(self: *@This()) void {
+                    while (true) {
+                        self.rwl.lockShared(self.ctx);
+                        defer self.rwl.unlockShared(self.ctx);
+
+                        if (self.writes >= num_writes or self.reads.load(.unordered) >= num_reads)
+                            break;
+
+                        self.check();
+
+                        _ = self.reads.fetchAdd(1, .monotonic);
+                    }
+                }
+
+                fn writer(self: *@This(), thread_idx: usize) void {
+                    var prng = std.Random.DefaultPrng.init(thread_idx);
+                    var rnd = prng.random();
+
+                    while (true) {
+                        self.rwl.lockExclusive(self.ctx);
+                        defer self.rwl.unlockExclusive(self.ctx);
+
+                        if (self.writes >= num_writes)
+                            break;
+
+                        self.check();
+
+                        const term1 = rnd.int(usize);
+                        self.term1 = term1;
+                        yield(self.ctx);
+
+                        const term2 = rnd.int(usize);
+                        self.term2 = term2;
+                        yield(self.ctx);
+
+                        self.term_sum = term1 +% term2;
+                        self.writes += 1;
+                    }
+                }
+
+                fn check(self: *const @This()) void {
+                    const term_sum = self.term_sum;
+                    yield(self.ctx);
+
+                    const term2 = self.term2;
+                    yield(self.ctx);
+
+                    const term1 = self.term1;
+                    std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;
+                }
+            };
+
+            var runner = Runner{ .ctx = ctx };
+            var futures: [num_readers + num_writers]future.Future(void) = undefined;
+
+            for (futures[0..num_writers], 0..) |*fu, i| fu.* = try future.init(
+                executor,
+                Runner.writer,
+                .{ &runner, i },
+                .{ .allocator = std.testing.allocator },
+                err,
+            );
+            for (futures[num_writers..]) |*fu| fu.* = try future.init(
+                executor,
+                Runner.reader,
+                .{&runner},
+                .{ .allocator = std.testing.allocator },
+                err,
+            );
+
+            for (futures) |fu| {
+                _ = fu.@"await"() catch {};
+                fu.deinit();
+            }
+
+            try std.testing.expectEqual(num_writes, runner.writes);
         }
     }.f);
 }
