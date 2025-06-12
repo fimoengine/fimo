@@ -2,15 +2,13 @@ const std = @import("std");
 
 const intrusive_mpsc = @import("channel/intrusive_mpsc.zig");
 pub const IntrusiveMpscChannel = intrusive_mpsc.IntrusiveMpscChannel;
-const mpsc = @import("channel/mpsc.zig");
-pub const MpscChannel = mpsc.MpscChannel;
 const multi_receiver_ = @import("channel/multi_receiver.zig");
 pub const MultiReceiver = multi_receiver_.MultiReceiver;
 pub const multi_receiver = multi_receiver_.multi_receiver;
 const receiver = @import("channel/receiver.zig");
 pub const RecvError = receiver.RecvError;
 pub const TimedRecvError = receiver.TimedRecvError;
-pub const ParkError = receiver.ParkError;
+pub const WaitError = receiver.WaitError;
 pub const Receiver = receiver.Receiver;
 const sender = @import("channel/sender.zig");
 pub const TrySendError = sender.TrySendError;
@@ -25,7 +23,6 @@ pub const UnorderedSpmcChannel = unordered_spmc.UnorderedSpmcChannel;
 
 test {
     std.testing.refAllDeclsRecursive(intrusive_mpsc);
-    std.testing.refAllDeclsRecursive(mpsc);
     std.testing.refAllDeclsRecursive(multi_receiver_);
     std.testing.refAllDeclsRecursive(receiver);
     std.testing.refAllDeclsRecursive(sender);

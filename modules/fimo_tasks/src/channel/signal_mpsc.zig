@@ -6,16 +6,14 @@ const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
 const Instant = time.Instant;
 const Duration = time.Duration;
-const fimo_tasks_meta = @import("fimo_tasks_meta");
-const MetaParkingLot = fimo_tasks_meta.sync.ParkingLot;
 
-const ParkingLot = @import("../ParkingLot.zig");
+const Futex = @import("../Futex.zig");
 const Worker = @import("../Worker.zig");
 const receiver = @import("receiver.zig");
-const GenericReceiver = receiver.ParkableReceiver;
+const GenericReceiver = receiver.WaitableReceiver;
 const RecvError = receiver.RecvError;
 const TimedRecvError = receiver.TimedRecvError;
-const ParkError = receiver.ParkError;
+const WaitError = receiver.WaitError;
 const sender = @import("sender.zig");
 const TrySendError = sender.TrySendError;
 const SendError = sender.SendError;
@@ -59,7 +57,7 @@ pub const SignalMpscChannel = struct {
     ///
     /// After closing the channel, no more messages can be sent into it.
     /// All blocked receivers will be woken up and receive an error.
-    pub fn close(self: *Self, lot: *ParkingLot) void {
+    pub fn close(self: *Self, futex: *Futex) void {
         const state = self.state.load(.monotonic);
 
         // If the channel is already closed we can skip waking up the consumers.
@@ -67,7 +65,7 @@ pub const SignalMpscChannel = struct {
 
         // Mark the channel as closed and wake all consumers.
         _ = self.state.fetchOr(closed_bit, .release);
-        self.sender().broadcast(lot);
+        self.sender().broadcast(futex);
     }
 };
 
@@ -90,7 +88,7 @@ const SenderImpl = struct {
     }
 
     /// Tries to send a message into the channel without blocking.
-    pub fn trySend(self: Self, lot: *ParkingLot, msg: void) TrySendError!void {
+    pub fn trySend(self: Self, futex: *Futex, msg: void) TrySendError!void {
         _ = msg;
 
         const channel = self.channel;
@@ -111,15 +109,15 @@ const SenderImpl = struct {
             ) != null) continue;
 
             // Signal the receiver that there is a new message available.
-            self.signal(lot);
+            self.signal(futex);
             return;
         }
     }
 
     /// Sends a message into the channel, blocking if necessary.
-    pub fn send(self: Self, lot: *ParkingLot, msg: void) SendError!void {
+    pub fn send(self: Self, futex: *Futex, msg: void) SendError!void {
         while (true) {
-            return self.trySend(lot, msg) catch |err| switch (err) {
+            return self.trySend(futex, msg) catch |err| switch (err) {
                 TrySendError.Closed => SendError.Closed,
                 TrySendError.Full => continue,
                 else => unreachable,
@@ -128,75 +126,43 @@ const SenderImpl = struct {
     }
 
     /// Signals one waiting receiver of the channel.
-    pub fn signal(self: Self, lot: *ParkingLot) void {
+    pub fn signal(self: Self, futex: *Futex) void {
         // Do nothing if there are no waiters.
         if (self.channel.state.load(.monotonic) & waiting_bit == 0) return;
-        self.notifySlow(lot, false);
+        self.notifySlow(futex, false);
     }
 
     /// Signals all waiting receivers of the channel.
-    pub fn broadcast(self: Self, lot: *ParkingLot) void {
+    pub fn broadcast(self: Self, futex: *Futex) void {
         // Do nothing if there are no waiters.
         if (self.channel.state.load(.monotonic) & waiting_bit == 0) return;
-        self.notifySlow(lot, true);
+        self.notifySlow(futex, true);
     }
 
-    fn notifySlow(self: Self, lot: *ParkingLot, all: bool) void {
+    fn notifySlow(self: Self, futex: *Futex, all: bool) void {
         @branchHint(.cold);
-
-        const Validate = struct {
-            all: bool,
-            fn f(this: @This()) MetaParkingLot.RequeueOp {
-                return MetaParkingLot.RequeueOp{
-                    .num_tasks_to_unpark = if (this.all) std.math.maxInt(usize) else 1,
-                };
-            }
-        };
-        const Callback = struct {
-            ctx: Self,
-            fn f(
-                this: @This(),
-                op: MetaParkingLot.RequeueOp,
-                result: MetaParkingLot.UnparkResult,
-            ) MetaParkingLot.UnparkToken {
-                _ = op;
-                // If there aren't any waiters left we clear the waiting bit.
-                if (!result.has_more_tasks) _ = this.ctx.channel.state.fetchAnd(
-                    ~waiting_bit,
-                    .monotonic,
-                );
-                return .default;
-            }
-        };
-
-        _ = lot.unparkRequeue(
-            &self.channel.state,
-            &self.channel.state,
-            Validate{ .all = all },
-            Validate.f,
-            Callback{ .ctx = self },
-            Callback.f,
-        );
+        if (self.channel.state.fetchAnd(~waiting_bit, .monotonic) & waiting_bit == 0) return;
+        _ = futex.wake(&self.channel.state, if (all) std.math.maxInt(usize) else 1);
     }
 
-    fn genericTrySend(ctx: *anyopaque, lot: *ParkingLot, msg: void) TrySendError!void {
+    fn genericTrySend(ctx: *anyopaque, futex: *Futex, msg: void) TrySendError!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        try self.trySend(lot, msg);
+        try self.trySend(futex, msg);
     }
 
-    fn genericSend(ctx: *anyopaque, lot: *ParkingLot, msg: void) SendError!void {
+    fn genericSend(ctx: *anyopaque, futex: *Futex, msg: void) SendError!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        try self.send(lot, msg);
+        try self.send(futex, msg);
     }
 
-    fn genericSignal(ctx: *anyopaque, lot: *ParkingLot) void {
+    fn genericSignal(ctx: *anyopaque, futex: *Futex) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        self.signal(lot);
+        self.signal(futex);
     }
 
-    fn genericBroadcast(ctx: *anyopaque, lot: *ParkingLot) void {
+    fn genericBroadcast(ctx: *anyopaque, futex: *Futex) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        self.broadcast(lot);
+        self.broadcast(futex);
     }
 };
 
@@ -214,11 +180,7 @@ const ReceiverImpl = struct {
                 .recv = &genericRecv,
                 .recvFor = &genericRecvFor,
                 .recvUntil = &genericRecvUntil,
-                .parkChannel = &genericParkChannel,
-                .parkKey = &genericParkKey,
-                .preparePark = &genericPreparePark,
-                .shouldPark = &genericShouldPark,
-                .onParkTimeout = &genericOnParkTimeout,
+                .prepareWait = &genericPrepareWait,
             },
         };
     }
@@ -240,9 +202,9 @@ const ReceiverImpl = struct {
     ///
     /// The caller will block until a message is available.
     /// If the channel is closed and empty, an error is returned.
-    pub fn recv(self: Self, lot: *ParkingLot) RecvError!void {
+    pub fn recv(self: Self, futex: *Futex) RecvError!void {
         if (try self.tryRecv()) |msg| return msg;
-        return self.recvSlow(lot, null) catch |err| switch (err) {
+        return self.recvSlow(futex, null) catch |err| switch (err) {
             TimedRecvError.Closed => RecvError.Closed,
             TimedRecvError.Timeout => unreachable,
         };
@@ -252,21 +214,21 @@ const ReceiverImpl = struct {
     ///
     /// The caller will block until a message is available or the specified duration has elapsed.
     /// If the channel is closed and empty, an error is returned.
-    pub fn recvFor(self: Self, lot: *ParkingLot, duration: Duration) TimedRecvError!void {
+    pub fn recvFor(self: Self, futex: *Futex, duration: Duration) TimedRecvError!void {
         const timeout = Instant.now().addSaturating(duration);
-        return self.recvUntil(lot, timeout);
+        return self.recvUntil(futex, timeout);
     }
 
     /// Receives one message from the channel.
     ///
     /// The caller will block until a message is available or the timeout is reached.
     /// If the channel is closed and empty, an error is returned.
-    pub fn recvUntil(self: Self, lot: *ParkingLot, timeout: Instant) TimedRecvError!void {
+    pub fn recvUntil(self: Self, futex: *Futex, timeout: Instant) TimedRecvError!void {
         if (try self.tryRecv()) |msg| return msg;
-        return self.recvSlow(lot, timeout);
+        return self.recvSlow(futex, timeout);
     }
 
-    fn recvSlow(self: Self, lot: *ParkingLot, timeout: ?Instant) TimedRecvError!void {
+    fn recvSlow(self: Self, futex: *Futex, timeout: ?Instant) TimedRecvError!void {
         @branchHint(.cold);
 
         var spin_count: usize = 0;
@@ -289,9 +251,9 @@ const ReceiverImpl = struct {
             }
 
             // If the channel is still empty, park the caller.
-            self.park(lot, timeout) catch |err| switch (err) {
-                ParkError.Retry => continue,
-                ParkError.Timeout => return TimedRecvError.Timeout,
+            self.wait(futex, timeout) catch |err| switch (err) {
+                WaitError.Retry => continue,
+                WaitError.Timeout => return TimedRecvError.Timeout,
             };
 
             // Retry another round.
@@ -301,22 +263,11 @@ const ReceiverImpl = struct {
         unreachable;
     }
 
-    /// Returns the channel used to park the receiver.
-    pub fn parkChannel(self: Self) *anyopaque {
-        return self.channel;
-    }
-
-    /// Returns the key used to park the receiver.
-    pub fn parkKey(self: Self) *const anyopaque {
-        return &self.channel.state;
-    }
-
     /// Prepares the receiver for parking.
-    pub fn preparePark(self: Self, channel: *anyopaque) ParkError!void {
-        std.debug.assert(@as(*anyopaque, self.channel) == channel);
+    pub fn prepareWait(self: Self) WaitError!Futex.KeyExpect {
         const state = self.channel.state.load(.monotonic);
-        if (state & signaled_bit != 0) return;
-        if (state & closed_bit != 0) return;
+        if (state & signaled_bit != 0) return WaitError.Retry;
+        if (state & closed_bit != 0) return WaitError.Retry;
 
         // Mark the channel as having a parked task.
         if (state & waiting_bit == 0) {
@@ -325,67 +276,18 @@ const ReceiverImpl = struct {
                 state | waiting_bit,
                 .monotonic,
                 .monotonic,
-            )) |_| return ParkError.Retry;
+            )) |_| return WaitError.Retry;
         }
+
+        return .{ .key = &self.channel.state, .key_size = @sizeOf(u8), .expect = waiting_bit };
     }
 
-    /// Checks whether the caller should park.
-    pub fn shouldPark(self: Self, channel: *anyopaque) bool {
-        std.debug.assert(@as(*anyopaque, self.channel) == channel);
-        return self.channel.state.load(.monotonic) & ~closed_bit == waiting_bit;
-    }
-
-    /// Callback to handle a timeout while parked.
-    pub fn onParkTimeout(
-        self: Self,
-        channel: *anyopaque,
-        key: *const anyopaque,
-        was_last: bool,
-    ) void {
-        _ = key;
-        std.debug.assert(@as(*anyopaque, self.channel) == channel);
-        if (was_last) {
-            _ = self.channel.state.fetchAnd(~waiting_bit, .monotonic);
-        }
-    }
-
-    fn park(self: Self, lot: *ParkingLot, timeout: ?Instant) ParkError!void {
-        try self.preparePark(self.channel);
-
-        const Validation = struct {
-            ctx: Self,
-            fn f(this: @This()) bool {
-                return this.ctx.shouldPark(this.ctx.channel);
-            }
+    fn wait(self: Self, futex: *Futex, timeout: ?Instant) WaitError!void {
+        const k = try self.prepareWait();
+        return futex.wait(k.key, k.key_size, k.expect, timeout) catch |err| switch (err) {
+            error.Invalid => WaitError.Retry,
+            error.Timeout => WaitError.Timeout,
         };
-        const BeforeSleep = struct {
-            fn f(this: @This()) void {
-                _ = this;
-            }
-        };
-        const TimedOut = struct {
-            ctx: Self,
-            fn f(this: @This(), key: *const anyopaque, was_last: bool) void {
-                this.ctx.onParkTimeout(this.ctx.channel, key, was_last);
-            }
-        };
-        const result = lot.park(
-            self.parkKey(),
-            Validation{ .ctx = self },
-            Validation.f,
-            BeforeSleep{},
-            BeforeSleep.f,
-            TimedOut{ .ctx = self },
-            TimedOut.f,
-            .default,
-            timeout,
-        );
-        switch (result.type) {
-            // The state changed or we were unparked, retry.
-            .unparked, .invalid => {},
-            // We timed out, return the timeout error.
-            .timed_out => return ParkError.Timeout,
-        }
     }
 
     fn genericTryRecv(ctx: *anyopaque) RecvError!?void {
@@ -393,48 +295,23 @@ const ReceiverImpl = struct {
         return self.tryRecv();
     }
 
-    fn genericRecv(ctx: *anyopaque, lot: *ParkingLot) RecvError!void {
+    fn genericRecv(ctx: *anyopaque, futex: *Futex) RecvError!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.recv(lot);
+        return self.recv(futex);
     }
 
-    fn genericRecvFor(ctx: *anyopaque, lot: *ParkingLot, duration: Duration) TimedRecvError!void {
+    fn genericRecvFor(ctx: *anyopaque, futex: *Futex, duration: Duration) TimedRecvError!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.recvFor(lot, duration);
+        return self.recvFor(futex, duration);
     }
 
-    fn genericRecvUntil(ctx: *anyopaque, lot: *ParkingLot, timeout: Instant) TimedRecvError!void {
+    fn genericRecvUntil(ctx: *anyopaque, futex: *Futex, timeout: Instant) TimedRecvError!void {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.recvUntil(lot, timeout);
+        return self.recvUntil(futex, timeout);
     }
 
-    fn genericParkChannel(ctx: *anyopaque) *anyopaque {
+    fn genericPrepareWait(ctx: *anyopaque) WaitError!Futex.KeyExpect {
         const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.parkChannel();
-    }
-
-    fn genericParkKey(ctx: *anyopaque) *const anyopaque {
-        const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.parkKey();
-    }
-
-    fn genericPreparePark(ctx: *anyopaque, channel: *anyopaque) ParkError!void {
-        const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.preparePark(channel);
-    }
-
-    fn genericShouldPark(ctx: *anyopaque, channel: *anyopaque) bool {
-        const self: *Self = @ptrCast(@alignCast(ctx));
-        return self.shouldPark(channel);
-    }
-
-    fn genericOnParkTimeout(
-        ctx: *anyopaque,
-        channel: *anyopaque,
-        key: *const anyopaque,
-        was_last: bool,
-    ) void {
-        const self: *Self = @ptrCast(@alignCast(ctx));
-        self.onParkTimeout(channel, key, was_last);
+        return self.prepareWait();
     }
 };
