@@ -67,6 +67,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             .root_source_file = b.build.path("tests/event_loop.zig"),
             .valgrind = b.graph.target.result.os.tag == .linux,
         }),
+        .use_llvm = if (b.graph.target.result.os.tag == .linux) true else null,
     });
     event_loop_test.root_module.addImport("fimo_std", pkg.root_module);
     _ = pkg.addTest(.{ .name = "event_loop_test", .step = .{ .executable = event_loop_test } });
@@ -79,6 +80,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             .root_source_file = b.build.path("tests/init_context.zig"),
             .valgrind = b.graph.target.result.os.tag == .linux,
         }),
+        .use_llvm = if (b.graph.target.result.os.tag == .linux) true else null,
     });
     init_ctx_test.root_module.addImport("fimo_std", pkg.root_module);
     _ = pkg.addTest(.{ .name = "init_context_test", .step = .{ .executable = init_ctx_test } });
@@ -91,6 +93,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             .root_source_file = b.build.path("tests/load_local_modules.zig"),
             .valgrind = b.graph.target.result.os.tag == .linux,
         }),
+        .use_llvm = if (b.graph.target.result.os.tag == .linux) true else null,
     });
     local_modules_test.root_module.addImport("fimo_std", pkg.root_module);
     _ = pkg.addTest(.{ .name = "local_modules_test", .step = .{ .executable = local_modules_test } });
@@ -126,6 +129,7 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .name = "fimo_std",
         .root_module = pkg.root_module,
+        .use_llvm = if (target.result.os.tag == .linux) true else null,
     });
     static_lib.bundle_compiler_rt = true;
     if (target.result.os.tag == .windows) static_lib.dll_export_fns = true;
@@ -135,6 +139,7 @@ pub fn build(b: *std.Build) void {
         .linkage = .dynamic,
         .name = "fimo_std_shared",
         .root_module = pkg.root_module,
+        .use_llvm = if (target.result.os.tag == .linux) true else null,
     });
     if (build_dynamic) b.installArtifact(dynamic_lib);
 

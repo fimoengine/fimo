@@ -227,6 +227,7 @@ pub const FimoBuild = struct {
                 .linkage = .static,
                 .name = self.name,
                 .root_module = root_module,
+                .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
             });
             artifact.bundle_compiler_rt = true;
 
@@ -245,6 +246,7 @@ pub const FimoBuild = struct {
                 .linkage = .dynamic,
                 .name = self.name,
                 .root_module = root_module,
+                .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
             });
 
             self.dynamic_lib = artifact;
@@ -299,6 +301,7 @@ pub const FimoBuild = struct {
                 .module => |root_module| b.addTest(.{
                     .name = self.name,
                     .root_module = root_module,
+                    .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
                     .test_runner = .{
                         .path = owner.build_dep.path("test_runner.zig"),
                         .mode = .simple,
