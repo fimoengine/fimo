@@ -343,7 +343,7 @@ impl<T, R> Future<T, R> {
 
             let (f, state) = unsafe {
                 let this = data.cast::<Future<T, R>>();
-                ((*this).poll_fn, &raw mut *(*this).state)
+                ((*this).poll_fn, (&raw mut (*this).state).cast())
             };
             let result = result.cast::<R>();
 

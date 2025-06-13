@@ -46,7 +46,6 @@
 #![feature(trivial_bounds)]
 #![feature(const_trait_impl)]
 #![feature(panic_update_hook)]
-#![feature(result_flattening)]
 #![feature(maybe_uninit_slice)]
 #![feature(vec_into_raw_parts)]
 #![feature(min_specialization)]
