@@ -7,6 +7,11 @@ const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
 const Instant = time.Instant;
 const Duration = time.Duration;
+const fimo_tasks_meta = @import("fimo_tasks_meta");
+pub const max_waitv_key_count = fimo_tasks_meta.sync.Futex.max_waitv_key_count;
+pub const KeyExpect = fimo_tasks_meta.sync.Futex.KeyExpect;
+pub const Filter = fimo_tasks_meta.sync.Futex.Filter;
+pub const RequeueResult = fimo_tasks_meta.sync.Futex.RequeueResult;
 
 const Pool = @import("Pool.zig");
 const Worker = @import("Worker.zig");
@@ -16,14 +21,6 @@ const Self = @This();
 gpa: Allocator,
 num_waiters: atomic.Value(usize) = .init(0),
 hash_table: atomic.Value(?*HashTable) = .init(null),
-
-pub const max_waitv_key_count = 128;
-
-pub const KeyExpect = extern struct {
-    key: *const anyopaque,
-    key_size: usize,
-    expect: u64,
-};
 
 const Waiter = struct {
     lock: Thread.Mutex = .{},
@@ -117,13 +114,25 @@ const Waiter = struct {
 const Entry = struct {
     key: atomic.Value(*const anyopaque),
     key_size: atomic.Value(usize),
+    token: usize,
     next: ?*Entry = null,
     waiter: *Waiter,
 
-    fn init(futex: *Self, key: *const anyopaque, key_size: usize, waiter: *Waiter) Entry {
+    fn init(
+        futex: *Self,
+        key: *const anyopaque,
+        key_size: usize,
+        token: usize,
+        waiter: *Waiter,
+    ) Entry {
         const num_waiters = futex.num_waiters.fetchAdd(1, .monotonic) + 1;
         futex.growHashTable(num_waiters);
-        return .{ .key = .init(key), .key_size = .init(key_size), .waiter = waiter };
+        return .{
+            .key = .init(key),
+            .key_size = .init(key_size),
+            .token = token,
+            .waiter = waiter,
+        };
     }
 
     fn unregisterOne(futex: *Self) void {
@@ -434,7 +443,8 @@ fn checkKeyEquality(key: *const anyopaque, key_size: usize, expect: u64) bool {
 /// If the value does not match, the function returns imediately with `error.Invalid`. The
 /// `key_size` parameter specifies the size of the value in bytes and must be either of `1`, `2`,
 /// `4` or `8`, in which case `key` is treated as pointer to `u8`, `u16`, `u32`, or
-/// `u64` respectively, and `expect` is truncated.
+/// `u64` respectively, and `expect` is truncated. The `token` is a user definable integer to store
+/// additional metadata about the waiter, which can be utilized to controll some wake operations.
 ///
 /// If `timeout` is set, and it is reached before a wake operation wakes the task, the task will be
 /// resumed, and the function returns `error.Timeout`.
@@ -443,11 +453,12 @@ pub fn wait(
     key: *const anyopaque,
     key_size: usize,
     expect: u64,
+    token: usize,
     timeout: ?Instant,
 ) error{ Invalid, Timeout }!void {
     // Create a new waiter and a new entry for the key.
     var waiter = Waiter.init(1);
-    var entry = Entry.init(self, key, key_size, &waiter);
+    var entry = Entry.init(self, key, key_size, token, &waiter);
     defer Entry.unregisterOne(self);
 
     // Try to enqueue the entry into its bucket.
@@ -470,7 +481,7 @@ pub fn wait(
 
 /// Puts the caller to sleep if all keys match their expected values.
 ///
-/// Is a generalization of `wait` for multiple keys. At least `1` key must, and at most
+/// Is a generalization of `wait` for multiple keys. At least `1` key, and at most
 /// `max_waitv_key_count` may be passed to this function. Otherwise it returns `error.KeyError`.
 pub fn waitv(
     self: *Self,
@@ -480,7 +491,7 @@ pub fn waitv(
     if (keys.len == 0 or keys.len > max_waitv_key_count) return error.KeyError;
     if (keys.len == 1) {
         const k = keys[0];
-        try self.wait(k.key, k.key_size, k.expect, timeout);
+        try self.wait(k.key, k.key_size, k.expect, k.token, timeout);
         return 0;
     }
 
@@ -488,7 +499,7 @@ pub fn waitv(
     var waiter = Waiter.init(keys.len);
     var entry_buffer: [max_waitv_key_count]Entry = undefined;
     const entries = entry_buffer[0..keys.len];
-    for (keys, entries) |k, *e| e.* = Entry.init(self, k.key, k.key_size, &waiter);
+    for (keys, entries) |k, *e| e.* = Entry.init(self, k.key, k.key_size, k.token, &waiter);
     defer Entry.unregisterMany(self, keys.len);
 
     // Try to enqueue all entries into their buckets.
@@ -545,8 +556,9 @@ pub fn waitv(
 
 /// Wakes at most `max_waiters` waiting on `key`.
 ///
-/// Returns the number of woken waiters.
-pub fn wake(self: *Self, key: *const anyopaque, max_waiters: usize) usize {
+/// Uses the token provided by the waiter and the `filter` to determine whether to ignore it from
+/// being woken up. Returns the number of woken waiters.
+pub fn wakeFilter(self: *Self, key: *const anyopaque, max_waiters: usize, filter: Filter) usize {
     if (max_waiters == 0) return 0;
     var wake_count: usize = 0;
 
@@ -564,6 +576,14 @@ pub fn wake(self: *Self, key: *const anyopaque, max_waiters: usize) usize {
             // Skip entries with wrong keys.
             if (wake_count == max_waiters) break;
             if (curr.key.load(.monotonic) != key) {
+                link = &curr.next;
+                current = curr.next;
+                previous = curr;
+                continue;
+            }
+
+            // Skip entries that are filtered out.
+            if (!filter.checkToken(curr.token)) {
                 link = &curr.next;
                 current = curr.next;
                 previous = curr;
@@ -602,13 +622,21 @@ pub fn wake(self: *Self, key: *const anyopaque, max_waiters: usize) usize {
     return wake_count;
 }
 
+/// Wakes at most `max_waiters` waiting on `key`.
+///
+/// Returns the number of woken waiters.
+pub fn wake(self: *Self, key: *const anyopaque, max_waiters: usize) usize {
+    return self.wakeFilter(key, max_waiters, .all);
+}
+
 /// Requeues waiters from `key_from` to `key_to`.
 ///
 /// Checks if the value behind `key_from` equals `expect`, in which case up to a maximum of
 /// `max_wakes` waiters are woken up from `key_from` and a maximum of `max_requeues` waiters
 /// are requeued from the `key_from` queue to the `key_to` queue. If the value does not match
-/// the function returns `error.Invalid`.
-pub fn requeue(
+/// the function returns `error.Invalid`. Uses the token provided by the waiter and the `filter`
+/// to determine whether to ignore it from being woken up.
+pub fn requeueFilter(
     self: *Self,
     key_from: *const anyopaque,
     key_to: *const anyopaque,
@@ -616,7 +644,8 @@ pub fn requeue(
     expect: u64,
     max_wakes: usize,
     max_requeues: usize,
-) error{Invalid}!struct { wake_count: usize = 0, requeue_count: usize = 0 } {
+    filter: Filter,
+) error{Invalid}!RequeueResult {
     if (max_wakes == 0 and max_requeues == 0) return .{};
     var wake_count: usize = 0;
     var requeue_count: usize = 0;
@@ -637,6 +666,14 @@ pub fn requeue(
             // Skip entries with wrong keys.
             if (wake_count == max_wakes and requeue_count == max_requeues) break;
             if (curr.key.load(.monotonic) != key_from) {
+                link = &curr.next;
+                current = curr.next;
+                previous = curr;
+                continue;
+            }
+
+            // Skip entries that are filtered out.
+            if (!filter.checkToken(curr.token)) {
                 link = &curr.next;
                 current = curr.next;
                 previous = curr;
@@ -703,6 +740,24 @@ pub fn requeue(
     return .{ .wake_count = wake_count, .requeue_count = requeue_count };
 }
 
+/// Requeues waiters from `key_from` to `key_to`.
+///
+/// Checks if the value behind `key_from` equals `expect`, in which case up to a maximum of
+/// `max_wakes` waiters are woken up from `key_from` and a maximum of `max_requeues` waiters
+/// are requeued from the `key_from` queue to the `key_to` queue. If the value does not match
+/// the function returns `error.Invalid`.
+pub fn requeue(
+    self: *Self,
+    key_from: *const anyopaque,
+    key_to: *const anyopaque,
+    key_size: usize,
+    expect: u64,
+    max_wakes: usize,
+    max_requeues: usize,
+) error{Invalid}!RequeueResult {
+    return self.requeueFilter(key_from, key_to, key_size, expect, max_wakes, max_requeues, .all);
+}
+
 // Taken from the rust parking lot implementation.
 const SingleLatchTest = struct {
     semaphore: atomic.Value(isize) = .init(0),
@@ -744,7 +799,7 @@ const SingleLatchTest = struct {
 
         while (true) {
             const current = self.semaphore.load(.seq_cst);
-            self.pl.wait(self.semaphoreAddr(), @sizeOf(isize), @bitCast(current), null) catch continue;
+            self.pl.wait(self.semaphoreAddr(), @sizeOf(isize), @bitCast(current), 0, null) catch continue;
             break;
         }
     }

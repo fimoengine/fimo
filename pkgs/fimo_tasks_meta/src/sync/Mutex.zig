@@ -6,6 +6,7 @@
 //!
 //! Mutex can be statically initialized and is `@sizeOf(u8)` large.
 //! Use `lock()` or `tryLock()` to enter the critical section and `unlock()` to leave it.
+// Taken from https://github.com/rust-lang/rust/blob/master/library/std/src/sys/sync/mutex/futex.rs
 
 const std = @import("std");
 const atomic = std.atomic;
@@ -20,240 +21,110 @@ const task = @import("../task.zig");
 const yield = task.yield;
 const TaskId = task.Id;
 const testing = @import("../testing.zig");
-const ParkingLot = @import("ParkingLot.zig");
+const Futex = @import("Futex.zig");
 
 const Mutex = @This();
 
-impl: BargingLock = .{},
+state: atomic.Value(u8) = .init(0),
+
+const UNLOCKED: u8 = 0;
+const LOCKED: u8 = 1; // locked, no other threads waiting
+const CONTENDED: u8 = 2; // locked, and other threads waiting (contended)
 
 /// Tries to acquire the mutex without blocking the caller's task.
 ///
 /// Returns `false` if the calling task would have to block to acquire it.
 /// Otherwise, returns `true` and the caller should `unlock()` the Mutex to release it.
 pub fn tryLock(self: *Mutex) bool {
-    return self.impl.tryLock();
+    return self.state.cmpxchgStrong(UNLOCKED, LOCKED, .acquire, .monotonic) == null;
 }
 
 /// Acquires the mutex, blocking the caller's task until it can.
 ///
-/// Once acquired, call `unlock()` or `unlockFair()` on the Mutex to release it.
+/// Once acquired, call `unlock()` on the Mutex to release it.
 pub fn lock(self: *Mutex, provider: anytype) void {
-    self.impl.lock(provider);
+    if (self.state.cmpxchgStrong(UNLOCKED, LOCKED, .acquire, .monotonic)) |_|
+        self.lockContended(provider, null) catch unreachable;
 }
 
 /// Tries to acquire the mutex, blocking the caller's task until it can or the timeout is reached.
 ///
-/// Once acquired, call `unlock()` or `unlockFair()` on the Mutex to release it.
+/// Once acquired, call `unlock()` on the Mutex to release it.
 pub fn timedLock(self: *Mutex, provider: anytype, timeout: Duration) error{Timeout}!void {
-    self.impl.timedLock(provider, timeout);
+    if (self.state.cmpxchgStrong(UNLOCKED, LOCKED, .acquire, .monotonic)) |_|
+        try self.lockContended(provider, Instant.now().addSaturating(timeout));
+}
+
+fn lockContended(self: *Mutex, provider: anytype, timeout: ?Instant) error{Timeout}!void {
+    @branchHint(.cold);
+    // Spin first to speed things up if the lock is released quickly.
+    var state = self.spin();
+
+    // If it's unlocked now, attempt to take the lock
+    // without marking it as contended.
+    if (state == UNLOCKED) state = self.state.cmpxchgStrong(
+        UNLOCKED,
+        LOCKED,
+        .acquire,
+        .monotonic,
+    ) orelse return;
+
+    while (true) {
+        // Put the lock in contended state.
+        // We avoid an unnecessary write if it as already set to CONTENDED,
+        // to be friendlier for the caches.
+        if (state != CONTENDED and self.state.swap(CONTENDED, .acquire) == UNLOCKED) {
+            // We changed it from UNLOCKED to CONTENDED, so we just successfully locked it.
+            return;
+        }
+
+        // Wait for the futex to change state, assuming it is still CONTENDED.
+        if (timeout) |t|
+            Futex.TypedHelper(u8).timedWait(provider, &self.state, CONTENDED, 0, t) catch |err| switch (err) {
+                error.Timeout => return error.Timeout,
+                error.Invalid => {},
+            }
+        else
+            Futex.TypedHelper(u8).wait(provider, &self.state, CONTENDED, 0) catch {};
+
+        // Spin again after waking up.
+        state = self.spin();
+    }
+}
+
+fn spin(self: *Mutex) u8 {
+    var s: u8 = 100;
+    while (true) {
+        // We only use `load` (and not `swap` or `compare_exchange`)
+        // while spinning, to be easier on the caches.
+        const state = self.state.load(.monotonic);
+
+        // We stop spinning when the mutex is UNLOCKED,
+        // but also when it's CONTENDED.
+        if (state != LOCKED or s == 0) {
+            return state;
+        }
+
+        atomic.spinLoopHint();
+        s -= 1;
+    }
 }
 
 /// Releases the mutex which was previously acquired.
 pub fn unlock(self: *Mutex, provider: anytype) void {
-    self.impl.unlock(provider);
+    if (self.state.swap(UNLOCKED, .release) == CONTENDED)
+        // We only wake up one thread. When that thread locks the mutex, it
+        // will mark the mutex as CONTENDED (see lockContended above),
+        // which makes sure that any other waiting threads will also be
+        // woken up eventually.
+        self.wake(provider);
 }
 
-/// Releases the mutex which was previously acquired with a fair unlocking mechanism.
-pub fn unlockFair(self: *Mutex, provider: anytype) void {
-    self.impl.unlockFair(provider);
+fn wake(self: *Mutex, provider: anytype) void {
+    _ = Futex.wake(provider, &self.state, 1);
 }
 
-/// BargingLock from the WebKit blog post with spinning in the slow path.
-const BargingLock = extern struct {
-    state: atomic.Value(u8) = .init(unlocked),
-
-    const unlocked: u8 = 0b00;
-    const is_locked_bit: u8 = 0b01;
-    const has_parked_bit: u8 = 0b10;
-
-    pub const handoff_token: ParkingLot.UnparkToken = @enumFromInt(1);
-
-    inline fn tryLock(self: *BargingLock) bool {
-        var state = self.state.load(.monotonic);
-        while (state & is_locked_bit == 0) {
-            state = self.state.cmpxchgWeak(
-                state,
-                state | is_locked_bit,
-                .acquire,
-                .monotonic,
-            ) orelse return true;
-        }
-        return false;
-    }
-
-    inline fn lock(self: *BargingLock, provider: anytype) void {
-        if (self.state.cmpxchgWeak(unlocked, is_locked_bit, .acquire, .monotonic) != null) {
-            _ = self.lockSlow(provider, null);
-        }
-    }
-
-    inline fn timedLock(
-        self: *BargingLock,
-        provider: anytype,
-        timeout: Duration,
-    ) error{Timeout}!void {
-        if (self.state.cmpxchgWeak(unlocked, is_locked_bit, .acquire, .monotonic) != null) {
-            const timeout_time = Instant.now().addSaturating(timeout);
-            if (!self.lockSlow(provider, timeout_time)) return error.Timeout;
-        }
-    }
-
-    inline fn unlock(self: *BargingLock, provider: anytype) void {
-        if (self.state.cmpxchgWeak(is_locked_bit, unlocked, .release, .monotonic) != null) {
-            self.unlockSlow(provider, false);
-        }
-    }
-
-    inline fn unlockFair(self: *BargingLock, provider: anytype) void {
-        if (self.state.cmpxchgWeak(is_locked_bit, unlocked, .release, .monotonic) != null) {
-            self.unlockSlow(provider, true);
-        }
-    }
-
-    fn lockSlow(self: *BargingLock, provider: anytype, timeout: ?Instant) bool {
-        @branchHint(.cold);
-        // The WebKit developers observed an optimum at 40 spins for the Intel architecture.
-        const spin_limit: usize = 40;
-
-        var spin_count: usize = 0;
-        var state = self.state.load(.monotonic);
-        while (true) {
-            // Fast path
-            if (state & is_locked_bit == 0) {
-                state = self.state.cmpxchgWeak(
-                    state,
-                    state | is_locked_bit,
-                    .acquire,
-                    .monotonic,
-                ) orelse return true;
-                continue;
-            }
-
-            // Yield to the scheduler if there is no contention.
-            if (state & has_parked_bit == 0 and spin_count < spin_limit) {
-                spin_count += 1;
-                yield(provider);
-                state = self.state.load(.monotonic);
-                continue;
-            }
-
-            // Notify other tasks that we will park.
-            if (state & has_parked_bit == 0) {
-                if (self.state.cmpxchgWeak(state, state | has_parked_bit, .monotonic, .monotonic)) |x| {
-                    state = x;
-                    continue;
-                }
-            }
-
-            const Validation = struct {
-                ptr: *BargingLock,
-                fn f(this: *@This()) bool {
-                    return this.ptr.state.load(.monotonic) == is_locked_bit | has_parked_bit;
-                }
-            };
-            const BeforeSleep = struct {
-                fn f(this: *@This()) void {
-                    _ = this;
-                }
-            };
-            const TimedOut = struct {
-                ptr: *BargingLock,
-                fn f(this: *@This(), key: *const anyopaque, is_last: bool) void {
-                    _ = key;
-                    if (is_last) {
-                        _ = this.ptr.state.fetchAnd(~has_parked_bit, .monotonic);
-                    }
-                }
-            };
-            const result = ParkingLot.park(
-                provider,
-                self,
-                Validation{ .ptr = self },
-                Validation.f,
-                BeforeSleep{},
-                BeforeSleep.f,
-                TimedOut{ .ptr = self },
-                TimedOut.f,
-                .default,
-                timeout,
-            );
-            switch (result.type) {
-                // If the lock was passed to us by another task we are done
-                .unparked => if (result.token == handoff_token) return true,
-                // The state changed, retry.
-                .invalid => {},
-                //
-                .timed_out => return false,
-            }
-
-            // Retry.
-            spin_count = 0;
-            state = self.state.load(.monotonic);
-        }
-    }
-
-    fn unlockSlow(self: *BargingLock, provider: anytype, comptime force_fair: bool) void {
-        @branchHint(.cold);
-
-        var state = self.state.load(.monotonic);
-        while (true) {
-            // Fast path
-            if (state == is_locked_bit) {
-                state = self.state.cmpxchgWeak(
-                    is_locked_bit,
-                    unlocked,
-                    .release,
-                    .monotonic,
-                ) orelse return;
-                continue;
-            }
-
-            const Callback = struct {
-                ptr: *BargingLock,
-                fn f(this: *@This(), result: ParkingLot.UnparkResult) ParkingLot.UnparkToken {
-                    // If we do a fair unlock we pass the ownership of the lock directly to
-                    // the unparked task without unlocking the mutex.
-                    if (result.unparked_tasks != 0 and (force_fair or result.be_fair)) {
-                        if (!result.has_more_tasks) {
-                            this.ptr.state.store(is_locked_bit, .monotonic);
-                        }
-                        return handoff_token;
-                    }
-
-                    if (result.has_more_tasks) {
-                        this.ptr.state.store(has_parked_bit, .release);
-                    } else {
-                        this.ptr.state.store(unlocked, .release);
-                    }
-                    return .default;
-                }
-            };
-            _ = ParkingLot.unparkOne(provider, self, Callback{ .ptr = self }, Callback.f);
-            return;
-        }
-    }
-
-    /// Implementation detail of `Condition`.
-    pub inline fn markParkedILocked(self: *BargingLock) bool {
-        var state = self.state.load(.monotonic);
-        while (true) {
-            if (state & is_locked_bit == 0) return false;
-            state = self.state.cmpxchgWeak(
-                state,
-                state | has_parked_bit,
-                .monotonic,
-                .monotonic,
-            ) orelse return true;
-        }
-    }
-
-    /// Implementation detail of `Condition`.
-    pub inline fn markParked(self: *BargingLock) void {
-        _ = self.state.fetchOr(has_parked_bit, .monotonic);
-    }
-};
-
-test "smoke test (threads)" {
+test "Mutex: smoke test (threads)" {
     var ctx = try testing.initTestContext();
     defer ctx.deinit();
 
@@ -268,7 +139,7 @@ test "smoke test (threads)" {
     mutex.unlock(&ctx);
 }
 
-test "smoke test (tasks)" {
+test "Mutex: smoke test (tasks)" {
     try testing.initTestContextInTask(struct {
         fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
             _ = err;
@@ -302,7 +173,7 @@ const NonAtomicCounter = struct {
     }
 };
 
-test "many uncontended (threads)" {
+test "Mutex: many uncontended (threads)" {
     var ctx = try testing.initTestContext();
     defer ctx.deinit();
 
@@ -332,7 +203,7 @@ test "many uncontended (threads)" {
     for (runners) |r| try std.testing.expectEqual(r.counter.get(), num_increments);
 }
 
-test "many uncontended (tasks)" {
+test "Mutex: many uncontended (tasks)" {
     try testing.initTestContextInTask(struct {
         fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
             const num_threads = 4;
@@ -390,7 +261,7 @@ test "many uncontended (tasks)" {
     }.f);
 }
 
-test "many contended (threads)" {
+test "Mutex: many contended (threads)" {
     var ctx = try testing.initTestContext();
     defer ctx.deinit();
 
@@ -425,7 +296,7 @@ test "many contended (threads)" {
     try std.testing.expectEqual(runner.counter.get(), num_increments * num_threads);
 }
 
-test "many contended (tasks)" {
+test "Mutex: many contended (tasks)" {
     try testing.initTestContextInTask(struct {
         fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
             const num_threads = 4;

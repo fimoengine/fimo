@@ -46,14 +46,14 @@ pub const Fence = extern struct {
                 )) |_| continue;
             }
 
-            Futex(u8).wait(provider, &self.state, contended);
+            Futex.TypedHelper(u8).wait(provider, &self.state, contended, 0) catch {};
         }
     }
 
     /// Wakes all waiters of the fence.
     pub fn signal(self: *Fence, provider: anytype) void {
         const state = self.state.swap(signaled, .release);
-        if (state & contended != 0) Futex(u8).wake(provider, &self.state, std.math.maxInt(usize));
+        if (state & contended != 0) _ = Futex.wake(provider, &self.state, std.math.maxInt(usize));
     }
 
     /// Resets the state of the fence to be unsignaled.
@@ -67,28 +67,23 @@ pub const Fence = extern struct {
 pub const TimelineSemaphore = extern struct {
     state: atomic.Value(u64) = .init(0),
 
-    pub const has_waiters: usize = 1 << 63;
-    const value_mask: usize = ~has_waiters;
-
     /// Initializes the semaphore with a custom initial value.
-    pub fn init(value: u63) TimelineSemaphore {
+    pub fn init(value: u64) TimelineSemaphore {
         return .{ .state = .init(value) };
     }
 
     /// Returns the current counter of the semaphore.
-    pub fn counter(self: *const TimelineSemaphore) u63 {
-        const curr_value = self.state.load(.acquire) & value_mask;
-        return @truncate(curr_value);
+    pub fn counter(self: *const TimelineSemaphore) u64 {
+        return self.state.load(.acquire);
     }
 
     /// Checks if the semaphore is signaled with a count greater or equal to `value`.
-    pub fn isSignaled(self: *const TimelineSemaphore, value: u63) bool {
-        const curr_value = self.state.load(.acquire) & value_mask;
-        return curr_value >= value;
+    pub fn isSignaled(self: *const TimelineSemaphore, value: u64) bool {
+        return self.state.load(.acquire) >= value;
     }
 
     /// Blocks the caller until the semaphore reaches a count greater or equal to `value`.
-    pub fn wait(self: *TimelineSemaphore, provider: anytype, value: u63) void {
+    pub fn wait(self: *TimelineSemaphore, provider: anytype, value: u64) void {
         if (!self.isSignaled(value)) _ = self.waitSlow(provider, value, null);
     }
 
@@ -96,7 +91,7 @@ pub const TimelineSemaphore = extern struct {
     pub fn timedWait(
         self: *TimelineSemaphore,
         provider: anytype,
-        value: u63,
+        value: u64,
         timeout: Duration,
     ) error{Timeout}!void {
         if (!self.isSignaled(value)) {
@@ -105,130 +100,79 @@ pub const TimelineSemaphore = extern struct {
         }
     }
 
-    fn waitSlow(self: *TimelineSemaphore, provider: anytype, value: u63, timeout: ?Instant) bool {
+    fn waitSlow(self: *TimelineSemaphore, provider: anytype, value: u64, timeout: ?Instant) bool {
         @branchHint(.cold);
-        const required: u64 = value;
         var state = self.state.load(.monotonic);
         while (true) {
-            if (state & value_mask >= value) {
+            if (state >= value) {
                 _ = self.state.load(.acquire);
                 return true;
             }
 
-            if (state & has_waiters == 0) {
-                if (self.state.cmpxchgWeak(
+            if (timeout) |t| {
+                Futex.TypedHelper(u64).timedWait(
+                    provider,
+                    &self.state,
                     state,
-                    state | has_waiters,
-                    .monotonic,
-                    .monotonic,
-                )) |s| {
-                    state = s;
-                    continue;
-                }
+                    if (comptime @sizeOf(u64) <= @sizeOf(usize)) value else @intFromPtr(&value),
+                    t,
+                ) catch |err| switch (err) {
+                    error.Invalid => {
+                        state = self.state.load(.monotonic);
+                        continue;
+                    },
+                    error.Timeout => return false,
+                };
+            } else {
+                Futex.TypedHelper(u64).wait(
+                    provider,
+                    &self.state,
+                    state,
+                    if (comptime @sizeOf(u64) <= @sizeOf(usize)) value else @intFromPtr(&value),
+                ) catch |err| switch (err) {
+                    error.Invalid => {
+                        state = self.state.load(.monotonic);
+                        continue;
+                    },
+                };
             }
 
-            const Validation = struct {
-                ptr: *const atomic.Value(u64),
-                value: u64,
-                fn f(this: *@This()) bool {
-                    return this.ptr.load(.monotonic) <= this.value | has_waiters;
-                }
-            };
-            const BeforeSleep = struct {
-                fn f(this: *@This()) void {
-                    _ = this;
-                }
-            };
-            const TimedOut = struct {
-                ptr: *atomic.Value(u64),
-                fn f(this: *@This(), key: *const anyopaque, is_last: bool) void {
-                    _ = key;
-                    if (is_last) {
-                        _ = this.ptr.fetchAnd(~has_waiters, .monotonic);
-                    }
-                }
-            };
-            const result = ParkingLot.park(
-                provider,
-                self,
-                Validation{ .ptr = &self.state, .value = value },
-                Validation.f,
-                BeforeSleep{},
-                BeforeSleep.f,
-                TimedOut{ .ptr = &self.state },
-                TimedOut.f,
-                @enumFromInt(@intFromPtr(&required)),
-                timeout,
-            );
-            switch (result.type) {
-                // If we were unparked, the count must have been correct.
-                .unparked => return true,
-                // The state changed, retry.
-                .invalid => {},
-                .timed_out => return false,
-            }
-
-            state = self.state.load(.monotonic);
+            return true;
         }
     }
 
     /// Sets the internal value of the semaphore, possibly waking waiting tasks.
     ///
     /// `value` must be greater than the current value of the semaphore.
-    pub fn signal(self: *TimelineSemaphore, provider: anytype, value: u63) void {
-        const state = self.state.load(.monotonic);
-        std.debug.assert(state & value_mask < value);
-        if (state & has_waiters != 0 or
-            self.state.cmpxchgWeak(state, value, .release, .monotonic) != null)
-            self.signalSlow(provider, value);
-    }
+    pub fn signal(self: *TimelineSemaphore, provider: anytype, value: u64) void {
+        std.debug.assert(self.state.load(.monotonic) < value);
+        self.state.store(value, .release);
 
-    fn signalSlow(self: *TimelineSemaphore, provider: anytype, value: u63) void {
-        @branchHint(.cold);
-
-        var state = self.state.load(.monotonic);
-        while (true) {
-            // If there are no waiters we can set the value directly.
-            std.debug.assert(state & value_mask < value);
-            if (state & has_waiters == 0) {
-                state = self.state.cmpxchgWeak(
-                    state,
-                    value,
-                    .release,
-                    .monotonic,
-                ) orelse return;
-                continue;
+        const filter = if (comptime @sizeOf(u64) <= @sizeOf(usize))
+            // @as(u64, token) <= @as(u64, value)
+            Futex.Filter{
+                .op = .{
+                    .token_op = .noop,
+                    .token_type = .u64,
+                    .cmp_op = .le,
+                    .cmp_arg_op = .noop,
+                },
+                .token_mask = ~@as(usize, 0),
+                .cmp_arg = value,
             }
-
-            const Filter = struct {
-                count: u64,
-                fn f(this: *@This(), token: ParkingLot.ParkToken) ParkingLot.FilterOp {
-                    const required: *const u64 = @ptrFromInt(@intFromEnum(token));
-                    if (required.* <= this.count) return .unpark;
-                    return .skip;
-                }
+        else
+            // @as(*const u64, token).* <= @as(*const u64, value).*
+            Futex.Filter{
+                .op = .{
+                    .token_op = .deref,
+                    .token_type = .u64,
+                    .cmp_op = .le,
+                    .cmp_arg_op = .deref,
+                },
+                .token_mask = ~@as(usize, 0),
+                .cmp_arg = @intFromPtr(&value),
             };
-            const Callback = struct {
-                ptr: *atomic.Value(u64),
-                value: u64,
-                fn f(this: *@This(), result: ParkingLot.UnparkResult) ParkingLot.UnparkToken {
-                    if (result.has_more_tasks) {
-                        this.ptr.store(this.value | has_waiters, .release);
-                    } else {
-                        this.ptr.store(this.value, .release);
-                    }
-                    return .default;
-                }
-            };
-            _ = ParkingLot.unparkFilter(
-                provider,
-                &self.state,
-                Filter{ .count = value },
-                Filter.f,
-                Callback{ .ptr = &self.state, .value = value },
-                Callback.f,
-            );
-        }
+        _ = Futex.wakeFilter(provider, &self.state, std.math.maxInt(usize), filter);
     }
 };
 

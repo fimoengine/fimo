@@ -395,8 +395,8 @@ pub fn addSystems(self: *SystemGroup, ids: []const SystemId) !void {
     defer self.system_graph.mutex.unlock(instance);
 
     const universe = Universe.getUniverse();
-    universe.rwlock.lockShared(instance);
-    defer universe.rwlock.unlockShared(instance);
+    universe.rwlock.lockRead(instance);
+    defer universe.rwlock.unlockRead(instance);
 
     for (ids) |id| {
         if (!universe.systems.contains(id)) @panic("invalid system");

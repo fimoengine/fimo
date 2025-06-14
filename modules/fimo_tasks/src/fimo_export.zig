@@ -53,12 +53,10 @@ pub const Instance = blk: {
         .withExport(.{ .symbol = symbols.task_local_set }, &taskLocalSet)
         .withExport(.{ .symbol = symbols.task_local_get }, &taskLocalGet)
         .withExport(.{ .symbol = symbols.task_local_clear }, &taskLocalClear)
-        .withExport(.{ .symbol = symbols.parking_lot_park }, &parkingLotPark)
-        .withExport(.{ .symbol = symbols.parking_lot_park_multiple }, &parkingLotParkMultiple)
-        .withExport(.{ .symbol = symbols.parking_lot_unpark_one }, &parkingLotUnparkOne)
-        .withExport(.{ .symbol = symbols.parking_lot_unpark_all }, &parkingLotUnparkAll)
-        .withExport(.{ .symbol = symbols.parking_lot_unpark_filter }, &parkingLotUnparkFilter)
-        .withExport(.{ .symbol = symbols.parking_lot_unpark_requeue }, &parkingLotUnparkRequeue)
+        .withExport(.{ .symbol = symbols.futex_wait }, &futexWait)
+        .withExport(.{ .symbol = symbols.futex_waitv }, &futexWaitv)
+        .withExport(.{ .symbol = symbols.futex_wake }, &futexWake)
+        .withExport(.{ .symbol = symbols.futex_requeue }, &futexRequeue)
         .withStateSync(State, State.init, State.deinit)
         .exportModule();
 };
@@ -380,113 +378,71 @@ fn taskLocalClear(key: *const fimo_tasks_meta.task_local.OpaqueKey) callconv(.c)
     task.clearLocal(key);
 }
 
-fn parkingLotPark(
+fn futexWait(
     key: *const anyopaque,
-    validation_data: *anyopaque,
-    validation: *const fn (data: *anyopaque) callconv(.c) bool,
-    before_sleep_data: *anyopaque,
-    before_sleep: *const fn (data: *anyopaque) callconv(.c) void,
-    timed_out_data: *anyopaque,
-    timed_out: *const fn (
-        data: *anyopaque,
-        key: *const anyopaque,
-        is_last: bool,
-    ) callconv(.c) void,
-    token: fimo_tasks_meta.sync.ParkingLot.ParkToken,
+    key_size: usize,
+    expect: u64,
+    token: usize,
     timeout: ?*const fimo_std.c.FimoInstant,
-) callconv(.c) fimo_tasks_meta.sync.ParkingLot.ParkResult {
-    return State.global_state.runtime.lot.park(
+) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
+    State.global_state.runtime.futex.wait(
         key,
-        validation_data,
-        validation,
-        before_sleep_data,
-        before_sleep,
-        timed_out_data,
-        timed_out,
+        key_size,
+        expect,
         token,
         if (timeout) |t| Instant.initC(t.*) else null,
-    );
+    ) catch |err| switch (err) {
+        error.Invalid => return .Invalid,
+        error.Timeout => return .Timeout,
+    };
+    return .Ok;
 }
 
-fn parkingLotParkMultiple(
-    keys: [*]const *const anyopaque,
+fn futexWaitv(
+    keys: [*]const fimo_tasks_meta.sync.Futex.KeyExpect,
     key_count: usize,
-    validation_data: *anyopaque,
-    validation: *const fn (data: *anyopaque, key_index: usize) callconv(.c) bool,
-    before_sleep_data: *anyopaque,
-    before_sleep: *const fn (data: *anyopaque) callconv(.c) void,
-    token: fimo_tasks_meta.sync.ParkingLot.ParkToken,
     timeout: ?*const fimo_std.c.FimoInstant,
-) callconv(.c) fimo_tasks_meta.sync.ParkingLot.ParkMultipleResult {
-    return State.global_state.runtime.lot.parkMultiple(
+    wake_index: *usize,
+) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
+    wake_index.* = State.global_state.runtime.futex.waitv(
         keys[0..key_count],
-        validation_data,
-        validation,
-        before_sleep_data,
-        before_sleep,
-        token,
         if (timeout) |t| Instant.initC(t.*) else null,
-    );
+    ) catch |err| switch (err) {
+        error.KeyError => return .KeyError,
+        error.Invalid => return .Invalid,
+        error.Timeout => return .Timeout,
+    };
+    return .Ok;
 }
 
-fn parkingLotUnparkOne(
+fn futexWake(
     key: *const anyopaque,
-    callback_data: *anyopaque,
-    callback: *const fn (
-        data: *anyopaque,
-        result: fimo_tasks_meta.sync.ParkingLot.UnparkResult,
-    ) callconv(.c) fimo_tasks_meta.sync.ParkingLot.UnparkToken,
-) callconv(.c) fimo_tasks_meta.sync.ParkingLot.UnparkResult {
-    return State.global_state.runtime.lot.unparkOne(key, callback_data, callback);
-}
-
-fn parkingLotUnparkAll(
-    key: *const anyopaque,
-    token: fimo_tasks_meta.sync.ParkingLot.UnparkToken,
+    max_waiters: usize,
+    filter: fimo_tasks_meta.sync.Futex.Filter,
 ) callconv(.c) usize {
-    return State.global_state.runtime.lot.unparkAll(key, token);
+    return State.global_state.runtime.futex.wakeFilter(key, max_waiters, filter);
 }
 
-fn parkingLotUnparkFilter(
-    key: *const anyopaque,
-    filter_data: *anyopaque,
-    filter: *const fn (
-        data: *anyopaque,
-        token: fimo_tasks_meta.sync.ParkingLot.ParkToken,
-    ) callconv(.c) fimo_tasks_meta.sync.ParkingLot.FilterOp,
-    callback_data: *anyopaque,
-    callback: *const fn (
-        data: *anyopaque,
-        result: fimo_tasks_meta.sync.ParkingLot.UnparkResult,
-    ) callconv(.c) fimo_tasks_meta.sync.ParkingLot.UnparkToken,
-) callconv(.c) fimo_tasks_meta.sync.ParkingLot.UnparkResult {
-    return State.global_state.runtime.lot.unparkFilter(
-        key,
-        filter_data,
-        filter,
-        callback_data,
-        callback,
-    );
-}
-
-fn parkingLotUnparkRequeue(
+fn futexRequeue(
     key_from: *const anyopaque,
     key_to: *const anyopaque,
-    validate_data: *anyopaque,
-    validate: *const fn (data: *anyopaque) callconv(.c) fimo_tasks_meta.sync.ParkingLot.RequeueOp,
-    callback_data: *anyopaque,
-    callback: *const fn (
-        data: *anyopaque,
-        op: fimo_tasks_meta.sync.ParkingLot.RequeueOp,
-        result: fimo_tasks_meta.sync.ParkingLot.UnparkResult,
-    ) callconv(.c) fimo_tasks_meta.sync.ParkingLot.UnparkToken,
-) callconv(.c) fimo_tasks_meta.sync.ParkingLot.UnparkResult {
-    return State.global_state.runtime.lot.unparkRequeue(
+    key_size: usize,
+    expect: u64,
+    max_wakes: usize,
+    max_requeues: usize,
+    filter: fimo_tasks_meta.sync.Futex.Filter,
+    result: *fimo_tasks_meta.sync.Futex.RequeueResult,
+) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
+    result.* = State.global_state.runtime.futex.requeueFilter(
         key_from,
         key_to,
-        validate_data,
-        validate,
-        callback_data,
-        callback,
-    );
+        key_size,
+        expect,
+        max_wakes,
+        max_requeues,
+        filter,
+    ) catch |err| switch (err) {
+        error.Invalid => return .Invalid,
+    };
+    return .Ok;
 }

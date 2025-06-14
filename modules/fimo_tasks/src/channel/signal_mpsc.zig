@@ -284,7 +284,7 @@ const ReceiverImpl = struct {
 
     fn wait(self: Self, futex: *Futex, timeout: ?Instant) WaitError!void {
         const k = try self.prepareWait();
-        return futex.wait(k.key, k.key_size, k.expect, timeout) catch |err| switch (err) {
+        return futex.wait(k.key, k.key_size, k.expect, 0, timeout) catch |err| switch (err) {
             error.Invalid => WaitError.Retry,
             error.Timeout => WaitError.Timeout,
         };

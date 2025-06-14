@@ -1,6 +1,6 @@
 //! Condition variables are used with a Mutex to efficiently wait for an arbitrary condition to occur.
 //! It does this by atomically unlocking the mutex, blocking the thread until notified, and finally re-locking the mutex.
-//! Condition can be statically initialized and is at most `@sizeOf(*anyopaque)` large.
+//! Condition can be statically initialized and is at most `@sizeOf(u32)` large.
 const std = @import("std");
 const atomic = std.atomic;
 const math = std.math;
@@ -10,11 +10,12 @@ const time = fimo_std.time;
 const Duration = time.Duration;
 const Instant = time.Instant;
 
+const Futex = @import("Futex.zig");
 const Mutex = @import("Mutex.zig");
-const ParkingLot = @import("ParkingLot.zig");
 
 const Condition = @This();
-state: atomic.Value(?*Mutex) = .init(null),
+
+futex: atomic.Value(u32) = .init(0),
 
 /// Atomically releases the Mutex, blocks the caller task, then re-acquires the Mutex on return.
 /// "Atomically" here refers to accesses done on the Condition after acquiring the Mutex.
@@ -67,16 +68,16 @@ pub fn timedWait(
 /// The blocked task must be sequenced before this call with respect to acquiring the same Mutex in order to be observable for unblocking.
 /// `signal()` can be called with or without the relevant Mutex being acquired and have no "effect" if there's no observable blocked threads.
 pub fn signal(self: *Condition, provider: anytype) void {
-    const mutex = self.state.load(.monotonic) orelse return;
-    self.signalSlow(provider, mutex);
+    _ = self.futex.fetchAdd(1, .monotonic);
+    _ = Futex.wake(provider, &self.futex, 1);
 }
 
 /// Unblocks all tasks currently blocked in a call to `wait()` or `timedWait()` with a given Mutex.
 /// The blocked tasks must be sequenced before this call with respect to acquiring the same Mutex in order to be observable for unblocking.
 /// `broadcast()` can be called with or without the relevant Mutex being acquired and have no "effect" if there's no observable blocked threads.
 pub fn broadcast(self: *Condition, provider: anytype) void {
-    const mutex = self.state.load(.monotonic) orelse return;
-    self.broadcastSlow(provider, mutex);
+    _ = self.futex.fetchAdd(1, .monotonic);
+    _ = Futex.wake(provider, &self.futex, std.math.maxInt(usize));
 }
 
 fn waitInternal(
@@ -85,139 +86,20 @@ fn waitInternal(
     mutex: *Mutex,
     timeout: ?Instant,
 ) error{Timeout}!void {
-    const Validation = struct {
-        condition: *Condition,
-        mutex: *Mutex,
-        fn f(this: *@This()) bool {
-            if (this.condition.state.load(.monotonic)) |state| {
-                if (state != this.mutex) {
-                    @panic("attempted to use a condition variable with more than one mutex");
-                }
-            } else {
-                this.condition.state.store(this.mutex, .monotonic);
-            }
-            return true;
+    // Examine the notification counter _before_ we unlock the mutex.
+    const futex_value = self.futex.load(.monotonic);
+
+    // Unlock the mutex before going to sleep.
+    mutex.unlock(provider);
+    defer mutex.lock(provider);
+
+    // Wait, but only if there hasn't been any
+    // notification since we unlocked the mutex.
+    if (timeout) |t|
+        Futex.TypedHelper(u32).timedWait(provider, &self.futex, futex_value, 0, t) catch |err| switch (err) {
+            error.Timeout => return error.Timeout,
+            error.Invalid => {},
         }
-    };
-    const BeforeSleep = struct {
-        provider: @TypeOf(provider),
-        mutex: *Mutex,
-        fn f(this: *@This()) void {
-            this.mutex.unlock(this.provider);
-        }
-    };
-    const TimedOut = struct {
-        condition: *Condition,
-        was_requeued: *bool,
-        fn f(this: *@This(), key: *const anyopaque, is_last: bool) void {
-            this.was_requeued.* = key != this.condition;
-            if (!this.was_requeued.* and is_last) this.condition.state.store(null, .monotonic);
-        }
-    };
-
-    var was_requeued: bool = false;
-    const result = ParkingLot.park(
-        provider,
-        self,
-        Validation{ .condition = self, .mutex = mutex },
-        Validation.f,
-        BeforeSleep{ .provider = provider, .mutex = mutex },
-        BeforeSleep.f,
-        TimedOut{ .condition = self, .was_requeued = &was_requeued },
-        TimedOut.f,
-        .default,
-        timeout,
-    );
-
-    // Relock the mutex.
-    if (result.token != @FieldType(Mutex, "impl").handoff_token) mutex.lock(provider);
-    if (!(result.type == .unparked or was_requeued)) return error.Timeout;
-}
-
-fn signalSlow(self: *Condition, provider: anytype, mutex: *Mutex) void {
-    @branchHint(.cold);
-
-    const Validate = struct {
-        condition: *Condition,
-        mutex: *Mutex,
-        fn f(this: *@This()) ParkingLot.RequeueOp {
-            if (this.condition.state.load(.monotonic) != this.mutex) return ParkingLot.RequeueOp{};
-
-            // If the mutex is unlocked we unpark one task, otherwise we requeue it onto the mutex.
-            return if (this.mutex.impl.markParkedILocked())
-                ParkingLot.RequeueOp{ .num_tasks_to_requeue = 1 }
-            else
-                ParkingLot.RequeueOp{ .num_tasks_to_unpark = 1 };
-        }
-    };
-    const Callback = struct {
-        condition: *Condition,
-        fn f(
-            this: *@This(),
-            op: ParkingLot.RequeueOp,
-            result: ParkingLot.UnparkResult,
-        ) ParkingLot.UnparkToken {
-            _ = op;
-            // If there aren't any waiters left we clear the state of the condition.
-            if (!result.has_more_tasks) this.condition.state.store(null, .monotonic);
-            return .default;
-        }
-    };
-
-    _ = ParkingLot.unparkRequeue(
-        provider,
-        self,
-        mutex,
-        Validate{ .condition = self, .mutex = mutex },
-        Validate.f,
-        Callback{ .condition = self },
-        Callback.f,
-    );
-}
-
-fn broadcastSlow(self: *Condition, provider: anytype, mutex: *Mutex) void {
-    @branchHint(.cold);
-
-    const Validate = struct {
-        condition: *Condition,
-        mutex: *Mutex,
-        fn f(this: *@This()) ParkingLot.RequeueOp {
-            if (this.condition.state.load(.monotonic) != this.mutex) return ParkingLot.RequeueOp{};
-            this.condition.state.store(null, .monotonic);
-
-            // If the mutex is unlocked we unpark one task otherwise we requeue the remaining tasks
-            // onto the mutex.
-            return if (this.mutex.impl.markParkedILocked())
-                ParkingLot.RequeueOp{ .num_tasks_to_requeue = math.maxInt(usize) }
-            else
-                ParkingLot.RequeueOp{
-                    .num_tasks_to_unpark = 1,
-                    .num_tasks_to_requeue = math.maxInt(usize),
-                };
-        }
-    };
-    const Callback = struct {
-        mutex: *Mutex,
-        fn f(
-            this: *@This(),
-            op: ParkingLot.RequeueOp,
-            result: ParkingLot.UnparkResult,
-        ) ParkingLot.UnparkToken {
-            // Mark the mutex as parked, if we requeued one task onto the mutex.
-            if (op.num_tasks_to_unpark == 1 and result.requeued_tasks != 0) {
-                this.mutex.impl.markParked();
-            }
-            return .default;
-        }
-    };
-
-    _ = ParkingLot.unparkRequeue(
-        provider,
-        self,
-        mutex,
-        Validate{ .condition = self, .mutex = mutex },
-        Validate.f,
-        Callback{ .mutex = mutex },
-        Callback.f,
-    );
+    else
+        Futex.TypedHelper(u32).wait(provider, &self.futex, futex_value, 0) catch {};
 }

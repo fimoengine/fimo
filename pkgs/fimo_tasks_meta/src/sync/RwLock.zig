@@ -1,5 +1,5 @@
-//! Reader-writer lock with upgrade capabilities.
-// Taken from https://github.com/Amanieu/parking_lot/blob/87ce756554e7a89808b22333563beb5d338bc572/src/raw_rwlock.rs
+//! Reader-writer lock.
+// Taken from https://github.com/rust-lang/rust/blob/master/library/std/src/sys/sync/rwlock/futex.rs
 
 const std = @import("std");
 const atomic = std.atomic;
@@ -7,750 +7,365 @@ const atomic = std.atomic;
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 
-const future = @import("../future.zig");
-const pool = @import("../pool.zig");
-const task = @import("../task.zig");
-const yield = task.yield;
-const testing = @import("../testing.zig");
-const ParkingLot = @import("ParkingLot.zig");
-const ParkToken = ParkingLot.ParkToken;
-const UnparkToken = ParkingLot.UnparkToken;
+const Futex = @import("Futex.zig");
 
 const Self = @This();
 
-state: atomic.Value(usize) = .init(0),
+// The state consists of a 30-bit reader counter, a 'readers waiting' flag, and a 'writers waiting' flag.
+// Bits 0..30:
+//   0: Unlocked
+//   1..=0x3FFF_FFFE: Locked by N readers
+//   0x3FFF_FFFF: Write locked
+// Bit 30: Readers are waiting on this futex.
+// Bit 31: Writers are waiting on the writer_notify futex.
+state: atomic.Value(u32) = .init(0),
+// The 'condition variable' to notify writers through.
+// Incremented on every signal.
+writer_notify: atomic.Value(u32) = .init(0),
 
-// There is at least one task in the main queue.
-const parked_bit: usize = 0b0001;
-// There is a parked task holding writer_bit. writer_bit must be set.
-const writer_parked_bit: usize = 0b0010;
-// A reader is holding an upgradable lock. The reader count must be non-zero and
-// writer_bit must not be set.
-const upgradable_bit: usize = 0b0100;
-// If the reader count is zero: a writer is currently holding an exclusive lock.
-// Otherwise: a writer is waiting for the remaining readers to exit the lock.
-const writer_bit: usize = 0b1000;
-// Mask of bits used to count readers.
-const readers_mask: usize = ~@as(usize, 0b1111);
-// Base unit for counting readers.
-const one_reader: usize = 0b10000;
+const READ_LOCKED: u32 = 1;
+const MASK: u32 = (1 << 30) - 1;
+const WRITE_LOCKED: u32 = MASK;
+const DOWNGRADE: u32 = READ_LOCKED -% WRITE_LOCKED;
+const MAX_READERS: u32 = MASK - 1;
+const READERS_WAITING: u32 = 1 << 30;
+const WRITERS_WAITING: u32 = 1 << 31;
 
-// Token idicating what type of lock a queued task is trying to acquire.
-const token_shared: ParkToken = @enumFromInt(one_reader);
-const token_exclusive: ParkToken = @enumFromInt(writer_bit);
-const token_upgradable: ParkToken = @enumFromInt(one_reader | upgradable_bit);
-
-const token_handoff: UnparkToken = @enumFromInt(1);
-
-/// Blocks until exclusive lock ownership is acquired.
-pub fn lockExclusive(self: *Self, provider: anytype) void {
-    if (self.state.cmpxchgWeak(0, writer_bit, .acquire, .monotonic)) |_| {
-        self.lockExclusiveSlow(provider);
-    }
+fn isUnlocked(state: u32) bool {
+    return state & MASK == 0;
 }
 
-fn lockExclusiveSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    const TryLock = struct {
-        fn f(this: *Self, state: *usize) bool {
-            while (true) {
-                if (state.* & (writer_bit | upgradable_bit) != 0) return false;
-
-                // Grab writer_bit if it isn't set, even if there are parked tasks.
-                state.* = this.state.cmpxchgWeak(
-                    state.*,
-                    state.* | writer_bit,
-                    .acquire,
-                    .monotonic,
-                ) orelse return true;
-            }
-        }
-    };
-
-    // Step 1: grab exclusive ownership of writer_bit.
-    self.lockCommon(provider, token_exclusive, self, TryLock.f, writer_bit | upgradable_bit);
-
-    // Step 2: wait for all remaining readers to exit the lock.
-    self.waitForReaders(provider);
+fn isWriteLocked(state: u32) bool {
+    return state & MASK == WRITE_LOCKED;
 }
 
-/// Attempts to obtain exclusive lock ownership.
-/// Returns `true` if the lock is obtained, `false` otherwise.
-pub fn tryLockExclusive(self: *Self) bool {
-    return self.state.cmpxchgWeak(0, writer_bit, .acquire, .monotonic) == null;
+fn hasReadersWaiting(state: u32) bool {
+    return state & READERS_WAITING != 0;
 }
 
-/// Releases a held exclusive lock. Asserts the lock is held exclusively.
-pub fn unlockExclusive(self: *Self, provider: anytype) void {
-    if (self.state.cmpxchgWeak(writer_bit, 0, .release, .monotonic)) |_| {
-        self.unlockExclusiveSlow(provider);
-    }
+fn hasWritersWaiting(state: u32) bool {
+    return state & WRITERS_WAITING != 0;
 }
 
-fn unlockExclusiveSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    // There are tasks to unpark. Try to unpark as many as we can.
-    const Callback = struct {
-        ptr: *Self,
-        fn f(
-            this: @This(),
-            new_state: usize,
-            result: ParkingLot.UnparkResult,
-        ) ParkingLot.UnparkToken {
-            // If we are using a fair unlock then we should keep the
-            // rwlock locked and hand it off to the unparked task.
-            var new_s = new_state;
-            if (result.unparked_tasks != 0 and result.be_fair) {
-                if (result.has_more_tasks) {
-                    new_s |= parked_bit;
-                }
-                this.ptr.state.store(new_s, .release);
-                return token_handoff;
-            } else {
-                // Clear the parked bit if there are no more parked tasks.
-                if (result.has_more_tasks) {
-                    this.ptr.state.store(parked_bit, .release);
-                } else {
-                    this.ptr.state.store(0, .release);
-                }
-                return .default;
-            }
-        }
-    };
-    self.wakeParkedTasks(provider, 0, Callback{ .ptr = self }, Callback.f);
+fn isReadLockable(state: u32) bool {
+    // This also returns false if the counter could overflow if we tried to read lock it.
+    //
+    // We don't allow read-locking if there's readers waiting, even if the lock is unlocked
+    // and there's no writers waiting. The only situation when this happens is after unlocking,
+    // at which point the unlocking thread might be waking up writers, which have priority over readers.
+    // The unlocking thread will clear the readers waiting bit and wake up readers, if necessary.
+    return state & MASK < MAX_READERS and !hasReadersWaiting(state) and !hasWritersWaiting(state);
 }
 
-/// Obtains shared lock ownership. Blocks if another thread has exclusive ownership.
-/// May block if another thread is attempting to get exclusive ownership.
-pub fn lockShared(self: *Self, provider: anytype) void {
-    if (!self.tryLockSharedFast()) {
-        self.lockSharedSlow(provider);
-    }
+fn isReadLockableAfterWakeup(state: u32) bool {
+    // We make a special case for checking if we can read-lock _after_ a reader thread that went to
+    // sleep has been woken up by a call to `downgrade`.
+    //
+    // `downgrade` will wake up all readers and place the lock in read mode. Thus, there should be
+    // no readers waiting and the lock should be read-locked (not write-locked or unlocked).
+    //
+    // Note that we do not check if any writers are waiting. This is because a call to `downgrade`
+    // implies that the caller wants other readers to read the value protected by the lock. If we
+    // did not allow readers to acquire the lock before writers after a `downgrade`, then only the
+    // original writer would be able to read the value, thus defeating the purpose of `downgrade`.
+    return state & MASK < MAX_READERS and
+        !hasReadersWaiting(state) and
+        !isWriteLocked(state) and
+        !isUnlocked(state);
 }
 
-fn lockSharedSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    const TryLock = struct {
-        fn f(this: *Self, state: *usize) bool {
-            var spin_count: usize = 0;
-            const spin_limit = 10;
-            while (true) {
-                // This is the same condition as tryLockSharedFast
-                if (state.* & writer_bit != 0) return false;
-                _ = this.state.cmpxchgWeak(
-                    state.*,
-                    state.* + one_reader,
-                    .acquire,
-                    .monotonic,
-                ) orelse return true;
-                if (spin_count < spin_limit) {
-                    spin_count += 1;
-                    for (0..(@as(usize, 1) << @truncate(spin_count))) |_| std.atomic.spinLoopHint();
-                }
-                state.* = this.state.load(.monotonic);
-            }
-        }
-    };
-    self.lockCommon(provider, token_shared, self, TryLock.f, writer_bit);
+fn hasReachedMaxReaders(state: u32) bool {
+    return state & MASK == MAX_READERS;
 }
 
 /// Attempts to obtain shared lock ownership.
 /// Returns `true` if the lock is obtained, `false` otherwise.
-pub fn tryLockShared(self: *Self) bool {
-    if (self.tryLockSharedFast()) return true;
-    return self.tryLockSharedSlow();
-}
-
-fn tryLockSharedFast(self: *Self) bool {
-    const state = self.state.load(.monotonic);
-
-    // We can't allow grabbing a shared lock if there is a writer, even if
-    // the writer is still waiting for the remaining readers to exit.
-    if (state & writer_bit != 0) return false;
-    const new_state = std.math.add(usize, state, one_reader) catch return false;
-    return self.state.cmpxchgWeak(state, new_state, .acquire, .monotonic) == null;
-}
-
-fn tryLockSharedSlow(self: *Self) bool {
-    @branchHint(.cold);
-    var state = self.state.load(.monotonic);
+pub fn tryLockRead(self: *Self) bool {
+    var state = self.state.load(.acquire);
     while (true) {
-        // This mirrors the condition in tryLockSharedFast
-        if (state & writer_bit != 0) return false;
+        if (!isReadLockable(state)) return false;
         state = self.state.cmpxchgWeak(
             state,
-            state + one_reader,
+            state + READ_LOCKED,
             .acquire,
             .monotonic,
         ) orelse return true;
     }
+}
+
+/// Obtains shared lock ownership. Blocks if another thread has exclusive ownership.
+/// May block if another thread is attempting to get exclusive ownership.
+pub fn lockRead(self: *Self, provider: anytype) void {
+    const state = self.state.load(.monotonic);
+    if (!isReadLockable(state) or self.state.cmpxchgWeak(
+        state,
+        state + READ_LOCKED,
+        .acquire,
+        .monotonic,
+    ) != null) self.lockReadContended(provider);
 }
 
 /// Releases a held shared lock.
-pub fn unlockShared(self: *Self, provider: anytype) void {
-    const state = self.state.fetchSub(one_reader, .release);
-    if (state & (readers_mask | writer_parked_bit) == (one_reader | writer_parked_bit)) {
-        self.unlockSharedSlow(provider);
-    }
+pub fn unlockRead(self: *Self, provider: anytype) void {
+    const state = self.state.fetchSub(READ_LOCKED, .release) - READ_LOCKED;
+
+    // It's impossible for a reader to be waiting on a read-locked RwLock,
+    // except if there is also a writer waiting.
+    std.debug.assert(!hasReadersWaiting(state) or hasWritersWaiting(state));
+
+    // Wake up a writer if we were the last reader and there's a writer waiting.
+    if (isUnlocked(state) and hasWritersWaiting(state)) self.wakeWriterOrReaders(provider, state);
 }
 
-fn unlockSharedSlow(self: *Self, provider: anytype) void {
+fn lockReadContended(self: *Self, provider: anytype) void {
     @branchHint(.cold);
-    const Callback = struct {
-        ptr: *Self,
-        fn f(this: *@This(), result: ParkingLot.UnparkResult) ParkingLot.UnparkToken {
-            _ = result;
-            _ = this.ptr.state.fetchAnd(~writer_parked_bit, .monotonic);
-            return .default;
+    var has_slept = false;
+    var state = self.spinRead();
+
+    while (true) {
+        // If we have just been woken up, first check for a `downgrade` call.
+        // Otherwise, if we can read-lock it, lock it.
+        if ((has_slept and isReadLockableAfterWakeup(state)) or isReadLockable(state)) {
+            state = self.state.cmpxchgWeak(
+                state,
+                state + READ_LOCKED,
+                .acquire,
+                .monotonic,
+            ) orelse return;
+            continue;
         }
-    };
-    // At this point writer_parked_bit is set and reader_mask is empty. We
-    // just need to wake up a potentially sleeping pending writer.
-    // Using the 2nd key at addr + 1.
-    _ = ParkingLot.unparkOne(
-        provider,
-        @ptrFromInt(@intFromPtr(self) + 1),
-        Callback{ .ptr = self },
-        Callback.f,
-    );
-}
 
-/// Obtains upgradable lock ownership.
-/// Blocks if another task has exclusive or upgradable ownership.
-/// May block if another thread is attempting to get exclusive ownership.
-pub fn lockUpgradable(self: *Self, provider: anytype) void {
-    if (!self.tryLockUpgradableFast()) {
-        self.lockUpgradableSlow(provider);
-    }
-}
+        // Check for overflow.
+        if (hasReachedMaxReaders(state)) @panic("too many active read locks on RwLock");
 
-fn lockUpgradableSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    const TryLock = struct {
-        fn f(this: *Self, state: *usize) bool {
-            var spin_count: usize = 0;
-            const spin_limit = 10;
-            while (true) {
-                if (state.* & (writer_bit | upgradable_bit) != 0) return false;
-                _ = this.state.cmpxchgWeak(
-                    state.*,
-                    state.* + (one_reader | upgradable_bit),
-                    .acquire,
-                    .monotonic,
-                ) orelse return true;
-                if (spin_count < spin_limit) {
-                    spin_count += 1;
-                    for (0..(@as(usize, 1) << @truncate(spin_count))) |_| std.atomic.spinLoopHint();
-                }
-                state.* = this.state.load(.monotonic);
+        // Make sure the readers waiting bit is set before we go to sleep.
+        if (!hasReadersWaiting(state)) {
+            if (self.state.cmpxchgWeak(state, state | READERS_WAITING, .monotonic, .monotonic)) |s| {
+                state = s;
+                continue;
             }
         }
-    };
-    self.lockCommon(provider, token_upgradable, self, TryLock.f, writer_bit | upgradable_bit);
+
+        // Wait for the state to change.
+        Futex.TypedHelper(u32).wait(provider, &self.state, state | READERS_WAITING, 0) catch {};
+        has_slept = true;
+
+        // Spin again after waking up.
+        state = self.spinRead();
+    }
 }
 
-/// Attempts to obtain upgradable lock ownership.
+/// Attempts to obtain exclusive lock ownership.
 /// Returns `true` if the lock is obtained, `false` otherwise.
-pub fn tryLockUpgradable(self: *Self) bool {
-    if (self.tryLockUpgradableFast()) return true;
-    return self.tryLockUpgradableSlow();
-}
-
-fn tryLockUpgradableFast(self: *Self) bool {
-    const state = self.state.load(.monotonic);
-    // We can't grab an upgradable lock if there is already a writer or upgradable reader.
-    if (state & (writer_bit | upgradable_bit) != 0) return false;
-
-    const new_state = std.math.add(usize, state, one_reader | upgradable_bit) catch return false;
-    return self.state.cmpxchgWeak(state, new_state, .acquire, .monotonic) == null;
-}
-
-fn tryLockUpgradableSlow(self: *Self) bool {
-    @branchHint(.cold);
-    var state = self.state.load(.monotonic);
+pub fn tryLockWrite(self: *Self) bool {
+    var state = self.state.load(.acquire);
     while (true) {
-        // This mirrors the condition in tryLockUpgradableFast.
-        if (state & (writer_bit | upgradable_bit) != 0) return false;
+        if (!isUnlocked(state)) return false;
         state = self.state.cmpxchgWeak(
             state,
-            state + (one_reader | upgradable_bit),
+            state + WRITE_LOCKED,
             .acquire,
             .monotonic,
         ) orelse return true;
     }
 }
 
-/// Releases a held upgradable lock.
-pub fn unlockUpgradable(self: *Self, provider: anytype) void {
-    const state = self.state.load(.monotonic);
-    if (state & parked_bit == 0) {
-        if (self.state.cmpxchgWeak(
-            state,
-            state - (one_reader | upgradable_bit),
-            .release,
-            .monotonic,
-        ) == null) return;
-    }
-    self.unlockUpgradableSlow(provider);
+/// Blocks until exclusive lock ownership is acquired.
+pub fn lockWrite(self: *Self, provider: anytype) void {
+    if (self.state.cmpxchgWeak(0, WRITE_LOCKED, .acquire, .monotonic)) |_|
+        self.lockWriteContended(provider);
 }
 
-fn unlockUpgradableSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    // Just release the lock if there are no parked tasks.
-    var state = self.state.load(.monotonic);
-    while (state & parked_bit == 0) {
-        state = self.state.cmpxchgWeak(
-            state,
-            state - (one_reader | upgradable_bit),
-            .release,
-            .monotonic,
-        ) orelse return;
-    }
+/// Releases a held exclusive lock. Asserts the lock is held exclusively.
+pub fn unlockWrite(self: *Self, provider: anytype) void {
+    const state = self.state.fetchSub(WRITE_LOCKED, .release) - WRITE_LOCKED;
 
-    // There are tasks to unpark. Try to unpark as many as we can.
-    const Callback = struct {
-        ptr: *Self,
-        fn f(
-            this: @This(),
-            new_state: usize,
-            result: ParkingLot.UnparkResult,
-        ) ParkingLot.UnparkToken {
-            // If we are using a fair unlock then we should keep the
-            // rwlock locked and hand it off to the unparked tasks.
-            var s = this.ptr.state.load(.monotonic);
-            if (result.be_fair) {
-                // Fall back to normal unpark on overflow.
-                while (std.math.add(
-                    usize,
-                    s - (one_reader | upgradable_bit),
-                    new_state,
-                ) catch null) |n| {
-                    var ns = n;
-                    if (result.has_more_tasks) {
-                        ns |= parked_bit;
-                    } else {
-                        ns &= ~parked_bit;
-                    }
-                    s = this.ptr.state.cmpxchgWeak(
-                        s,
-                        ns,
-                        .monotonic,
-                        .monotonic,
-                    ) orelse return token_handoff;
-                }
-            }
+    std.debug.assert(isUnlocked(state));
 
-            // Otherwise just release the upgradable lock and update parked_bit.
-            while (true) {
-                var ns = s - (one_reader | upgradable_bit);
-                if (result.has_more_tasks) {
-                    ns |= parked_bit;
-                } else {
-                    ns &= ~parked_bit;
-                }
-                s = this.ptr.state.cmpxchgWeak(
-                    s,
-                    ns,
-                    .monotonic,
-                    .monotonic,
-                ) orelse return .default;
-            }
-        }
-    };
-    self.wakeParkedTasks(provider, 0, Callback{ .ptr = self }, Callback.f);
-}
-
-/// Upgrades a held upgradable lock to an exclusive lock.
-pub fn upgradeToExclusive(self: *Self, provider: anytype) void {
-    const state = self.state.fetchSub((one_reader | upgradable_bit) - writer_bit, .acquire);
-    if (state & readers_mask != one_reader) {
-        self.upgradeToExclusiveSlow(provider);
-    }
-}
-
-fn upgradeToExclusiveSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    self.waitForReaders(provider);
-}
-
-/// Attempts to upgrade a held upgradable lock to an exclusive lock without blocking.
-pub fn tryUpgradeToExclusive(self: *Self) bool {
-    if (self.state.cmpxchgWeak(
-        one_reader | upgradable_bit,
-        writer_bit,
-        .acquire,
-        .monotonic,
-    ) == null) return true;
-    return self.tryUpgradeToExclusiveSlow();
-}
-
-fn tryUpgradeToExclusiveSlow(self: *Self) bool {
-    @branchHint(.cold);
-    var state = self.state.load(.monotonic);
-    while (true) {
-        if (state & readers_mask != one_reader) return false;
-        state = self.state.cmpxchgWeak(
-            state,
-            state - (one_reader | upgradable_bit) + writer_bit,
-            .monotonic,
-            .monotonic,
-        ) orelse return true;
-    }
+    if (hasWritersWaiting(state) or hasReadersWaiting(state))
+        self.wakeWriterOrReaders(provider, state);
 }
 
 /// Downgrades a held exclusive lock to a shared lock.
-pub fn downgradeToShared(self: *Self, provider: anytype) void {
-    const state = self.state.fetchAdd(one_reader - writer_bit, .release);
-    if (state & parked_bit != 0) self.downgradeToSharedSlow(provider);
-}
+pub fn downgrade(self: *Self, provider: anytype) void {
+    // Removes all write bits and adds a single read bit.
+    const state = self.state.fetchAdd(DOWNGRADE, .release);
+    std.debug.assert(isWriteLocked(state));
 
-fn downgradeToSharedSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    // There are tasks to unpark. Try to unpark as many as we can.
-    const Callback = struct {
-        ptr: *Self,
-        fn f(
-            this: @This(),
-            new_state: usize,
-            result: ParkingLot.UnparkResult,
-        ) ParkingLot.UnparkToken {
-            _ = new_state;
-            if (!result.has_more_tasks) {
-                _ = this.ptr.state.fetchAnd(~parked_bit, .monotonic);
-            }
-            return .default;
-        }
-    };
-    self.wakeParkedTasks(
-        provider,
-        one_reader,
-        Callback{ .ptr = self },
-        Callback.f,
-    );
-}
-
-/// Downgrades a held exclusive lock to an upgradable lock.
-pub fn downgradeToUpgradable(self: *Self, provider: anytype) void {
-    const state = self.state.fetchAdd((one_reader | upgradable_bit) - writer_bit, .release);
-    if (state & parked_bit != 0) self.downgradeToUpgradableSlow(provider);
-}
-
-fn downgradeToUpgradableSlow(self: *Self, provider: anytype) void {
-    @branchHint(.cold);
-    // There are tasks to unpark. Try to unpark as many as we can.
-    const Callback = struct {
-        ptr: *Self,
-        fn f(
-            this: @This(),
-            new_state: usize,
-            result: ParkingLot.UnparkResult,
-        ) ParkingLot.UnparkToken {
-            _ = new_state;
-            if (!result.has_more_tasks) {
-                _ = this.ptr.state.fetchAnd(~parked_bit, .monotonic);
-            }
-            return .default;
-        }
-    };
-    self.wakeParkedTasks(
-        provider,
-        one_reader | upgradable_bit,
-        Callback{ .ptr = self },
-        Callback.f,
-    );
-}
-
-/// Downgrades a held upgradable lock to a shared lock.
-pub fn downgradeUpgradableToShared(self: *Self, provider: anytype) void {
-    const state = self.state.fetchSub(upgradable_bit, .monotonic);
-    if (state & parked_bit != 0) self.downgradeToSharedSlow(provider);
-}
-
-fn wakeParkedTasks(
-    self: *Self,
-    provider: anytype,
-    new_state: usize,
-    callback_args: anytype,
-    callback: fn (@TypeOf(callback_args), usize, ParkingLot.UnparkResult) ParkingLot.UnparkToken,
-) void {
-    // We must wake up at least one upgrader or writer if there is one,
-    // otherwise they may end up parked indefinitely since unlock_shared
-    // does not call wakeParkedTasks.
-    const Filter = struct {
-        new_state: *usize,
-        fn f(this: *@This(), token: ParkToken) ParkingLot.FilterOp {
-            const s = this.new_state.*;
-
-            // If we are waking up a writer, don't wake anything else.
-            if (s & writer_bit != 0) return .stop;
-
-            // Otherwise wake *all* readers and one upgrader/writer.
-            if (@intFromEnum(token) & (upgradable_bit | writer_bit) != 0 and
-                s & upgradable_bit != 0)
-            {
-                // Skip writers and upgradable readers if we already have
-                // a writer/upgradable reader.
-                return .skip;
-            } else {
-                this.new_state.* = s + @intFromEnum(token);
-                return .unpark;
-            }
-        }
-    };
-    const Callback = struct {
-        new_state: *usize,
-        args: @TypeOf(callback_args),
-        fn f(this: *@This(), result: ParkingLot.UnparkResult) ParkingLot.UnparkToken {
-            return callback(this.args, this.new_state.*, result);
-        }
-    };
-    var new_s = new_state;
-    _ = ParkingLot.unparkFilter(
-        provider,
-        self,
-        Filter{ .new_state = &new_s },
-        Filter.f,
-        Callback{ .new_state = &new_s, .args = callback_args },
-        Callback.f,
-    );
-}
-
-fn waitForReaders(
-    self: *Self,
-    provider: anytype,
-) void {
-    // At this point writer_bit is already set, we just need to wait for the
-    // remaining readers to exit the lock.
-    var spin_count: usize = 0;
-    const spin_yield_limit: usize = 3;
-    const spin_limit: usize = 10;
-    var state = self.state.load(.acquire);
-    while (state & readers_mask != 0) {
-        if (spin_count < spin_limit) {
-            spin_count += 1;
-            if (spin_count < spin_yield_limit) {
-                for (0..(@as(usize, 1) << @truncate(spin_count))) |_| atomic.spinLoopHint();
-            } else yield(provider);
-            state = self.state.load(.acquire);
-            continue;
-        }
-
-        // Set the parked bit.
-        if (state & writer_parked_bit == 0) {
-            if (self.state.cmpxchgWeak(
-                state,
-                state | writer_parked_bit,
-                .acquire,
-                .acquire,
-            )) |s| {
-                state = s;
-                continue;
-            }
-        }
-
-        const Validation = struct {
-            ptr: *Self,
-            fn f(this: *@This()) bool {
-                const s = this.ptr.state.load(.monotonic);
-                return (s & readers_mask != 0) and s & writer_parked_bit != 0;
-            }
-        };
-        const BeforeSleep = struct {
-            fn f(this: *@This()) void {
-                _ = this;
-            }
-        };
-        const TimedOut = struct {
-            fn f(this: *@This(), key: *const anyopaque, is_last: bool) void {
-                _ = this;
-                _ = key;
-                _ = is_last;
-                unreachable;
-            }
-        };
-        const result = ParkingLot.park(
-            provider,
-            @ptrFromInt(@intFromPtr(self) + 1),
-            Validation{ .ptr = self },
-            Validation.f,
-            BeforeSleep{},
-            BeforeSleep.f,
-            TimedOut{},
-            TimedOut.f,
-            token_exclusive,
-            null,
-        );
-        switch (result.type) {
-            // We still need to re-check the state if we are unparked
-            // since a previous writer timing-out could have allowed
-            // another reader to sneak in before we parked.
-            .unparked, .invalid => state = self.state.load(.acquire),
-            // Timeout is not possible.
-            .timed_out => unreachable,
-        }
+    if (hasReadersWaiting(state)) {
+        // Since we had the exclusive lock, nobody else can unset this bit.
+        _ = self.state.fetchSub(READERS_WAITING, .monotonic);
+        _ = Futex.wake(provider, &self.state, std.math.maxInt(usize));
     }
 }
 
-fn lockCommon(
-    self: *Self,
-    provider: anytype,
-    token: ParkToken,
-    try_lock_args: anytype,
-    try_lock: fn (@TypeOf(try_lock_args), *usize) bool,
-    validate_flags: usize,
-) void {
-    var spin_count: usize = 0;
-    const spin_yield_limit: usize = 3;
-    const spin_limit: usize = 10;
-    var state = self.state.load(.monotonic);
+fn lockWriteContended(self: *Self, provider: anytype) void {
+    @branchHint(.cold);
+    var state = self.spinWrite();
+    var other_writers_waiting: u32 = 0;
+
     while (true) {
-        // Attempt to grab the lock.
-        if (try_lock(try_lock_args, &state)) return;
-
-        // If there are no parked tasks, try spinning a few times.
-        if (state & (parked_bit | writer_parked_bit) == 0 and spin_count < spin_limit) {
-            spin_count += 1;
-            if (spin_count < spin_yield_limit) {
-                for (0..(@as(usize, 1) << @truncate(spin_count))) |_| atomic.spinLoopHint();
-            } else yield(provider);
-            state = self.state.load(.monotonic);
+        // If it's unlocked, we try to lock it.
+        if (isUnlocked(state)) {
+            state = self.state.cmpxchgWeak(
+                state,
+                state | WRITE_LOCKED | other_writers_waiting,
+                .acquire,
+                .monotonic,
+            ) orelse return;
             continue;
         }
 
-        // Set the parked bit.
-        if (state & parked_bit == 0) {
-            if (self.state.cmpxchgWeak(state, state | parked_bit, .monotonic, .monotonic)) |s| {
+        // Set the waiting bit indicating that we're waiting on it.
+        if (!hasWritersWaiting(state)) {
+            if (self.state.cmpxchgWeak(state, state | WRITERS_WAITING, .monotonic, .monotonic)) |s| {
                 state = s;
                 continue;
             }
         }
 
-        // Park our task until we are woken up by an unlock.
-        const Validation = struct {
-            ptr: *Self,
-            validate_flags: usize,
-            fn f(this: *@This()) bool {
-                const s = this.ptr.state.load(.monotonic);
-                return (s & parked_bit != 0) and (s & this.validate_flags != 0);
-            }
-        };
-        const BeforeSleep = struct {
-            fn f(this: *@This()) void {
-                _ = this;
-            }
-        };
-        const TimedOut = struct {
-            fn f(this: *@This(), key: *const anyopaque, is_last: bool) void {
-                _ = this;
-                _ = key;
-                _ = is_last;
-                unreachable;
-            }
-        };
-        const result = ParkingLot.park(
-            provider,
-            self,
-            Validation{ .ptr = self, .validate_flags = validate_flags },
-            Validation.f,
-            BeforeSleep{},
-            BeforeSleep.f,
-            TimedOut{},
-            TimedOut.f,
-            token,
-            fimo_std.time.Instant.now().addSaturating(.initSeconds(2)),
-        );
-        switch (result.type) {
-            // We were unparked. Return if the lock was passed to us.
-            .unparked => if (result.token == token_handoff) return,
-            // The validation failed, retry.
-            .invalid => {},
-            // Timeout is not possible.
-            .timed_out => unreachable,
-        }
+        // Other writers might be waiting now too, so we should make sure
+        // we keep that bit on once we manage lock it.
+        other_writers_waiting = WRITERS_WAITING;
 
-        spin_count = 0;
+        // Examine the notification counter before we check if `state` has changed,
+        // to make sure we don't miss any notifications.
+        const seq = self.writer_notify.load(.acquire);
+
+        // Don't go to sleep if the lock has become available,
+        // or if the writers waiting bit is no longer set.
         state = self.state.load(.monotonic);
+        if (isUnlocked(state) or !hasWritersWaiting(state)) continue;
+
+        // Wait for the state to change.
+        Futex.TypedHelper(u32).wait(provider, &self.writer_notify, seq, 0) catch {};
+
+        // Spin again after waking up.
+        state = self.spinWrite();
     }
 }
 
-test "smoke test (threads)" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+/// Wakes up waiting threads after unlocking.
+///
+/// If both are waiting, this will wake up only one writer, but will fall
+/// back to waking up readers if there was no writer to wake up.
+fn wakeWriterOrReaders(self: *Self, provider: anytype, s: u32) void {
+    @branchHint(.cold);
+    var state = s;
+    if (!isUnlocked(state)) @panic("expected an unlocked RwLock");
 
-    var rwl = Self{};
+    // The readers waiting bit might be turned on at any point now,
+    // since readers will block when there's anything waiting.
+    // Writers will just lock the lock though, regardless of the waiting bits,
+    // so we don't have to worry about the writer waiting bit.
+    //
+    // If the lock gets locked in the meantime, we don't have to do
+    // anything, because then the thread that locked the lock will take
+    // care of waking up waiters when it unlocks.
 
-    rwl.lockExclusive(ctx);
-    try std.testing.expect(!rwl.tryLockExclusive());
-    try std.testing.expect(!rwl.tryLockShared());
-    try std.testing.expect(!rwl.tryLockUpgradable());
-    rwl.unlockExclusive(ctx);
+    // If only writers are waiting, wake one of them up.
+    if (state == WRITERS_WAITING) {
+        state = self.state.cmpxchgWeak(state, 0, .monotonic, .monotonic) orelse {
+            _ = self.wakeWriter(provider);
+            return;
+        };
+    }
 
-    try std.testing.expect(rwl.tryLockExclusive());
-    try std.testing.expect(!rwl.tryLockShared());
-    try std.testing.expect(!rwl.tryLockUpgradable());
-    rwl.unlockExclusive(ctx);
+    // If both writers and readers are waiting, leave the readers waiting
+    // and only wake up one writer.
+    if (state == READERS_WAITING + WRITERS_WAITING) {
+        if (self.state.cmpxchgWeak(state, READERS_WAITING, .monotonic, .monotonic)) |_| return;
+        if (self.wakeWriter(provider)) return;
+        // No writers were actually blocked on futex_wait, so we continue
+        // to wake up readers instead, since we can't be sure if we notified a writer.
+        state = READERS_WAITING;
+    }
 
-    rwl.lockShared(ctx);
-    try std.testing.expect(!rwl.tryLockExclusive());
-    try std.testing.expect(rwl.tryLockShared());
-    try std.testing.expect(rwl.tryLockUpgradable());
-    rwl.unlockUpgradable(ctx);
-    rwl.unlockShared(ctx);
-    rwl.unlockShared(ctx);
-
-    try std.testing.expect(rwl.tryLockShared());
-    try std.testing.expect(!rwl.tryLockExclusive());
-    try std.testing.expect(rwl.tryLockShared());
-    try std.testing.expect(rwl.tryLockUpgradable());
-    rwl.unlockUpgradable(ctx);
-    rwl.unlockShared(ctx);
-    rwl.unlockShared(ctx);
-
-    rwl.lockExclusive(ctx);
-    rwl.unlockExclusive(ctx);
+    // If readers are waiting, wake them all up.
+    if (state == READERS_WAITING) {
+        if (self.state.cmpxchgWeak(state, 0, .monotonic, .monotonic) == null)
+            _ = Futex.wake(provider, &self.state, std.math.maxInt(usize));
+    }
 }
 
-test "smoke test (tasks)" {
+/// This wakes one writer and returns true if we woke up a writer that was
+/// blocked on futex_wait.
+///
+/// If this returns false, it might still be the case that we notified a
+/// writer that was about to go to sleep.
+fn wakeWriter(self: *Self, provider: anytype) bool {
+    _ = self.writer_notify.fetchAdd(1, .release);
+    return Futex.wake(provider, &self.writer_notify, 1) != 0;
+}
+
+/// Spin for a while, but stop directly at the given condition.
+fn spinUntil(self: *Self, f: fn (state: u32) bool) u32 {
+    var spin: u8 = 100;
+    while (true) {
+        const state = self.state.load(.monotonic);
+        if (f(state) or spin == 0) return state;
+        std.atomic.spinLoopHint();
+        spin -= 1;
+    }
+}
+
+fn spinWrite(self: *Self) u32 {
+    // Stop spinning when it's unlocked or when there's waiting writers, to keep things somewhat fair.
+    return self.spinUntil(struct {
+        fn f(state: u32) bool {
+            return isUnlocked(state) or hasWritersWaiting(state);
+        }
+    }.f);
+}
+
+fn spinRead(self: *Self) u32 {
+    // Stop spinning when it's unlocked or read locked, or when there's waiting threads.
+    return self.spinUntil(struct {
+        fn f(state: u32) bool {
+            return !isWriteLocked(state) or hasReadersWaiting(state) or hasWritersWaiting(state);
+        }
+    }.f);
+}
+
+test "RwLock: smoke test (tasks)" {
+    const testing = @import("../testing.zig");
+
     try testing.initTestContextInTask(struct {
         fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
             _ = err;
 
             var rwl = Self{};
 
-            rwl.lockExclusive(ctx);
-            try std.testing.expect(!rwl.tryLockExclusive());
-            try std.testing.expect(!rwl.tryLockShared());
-            try std.testing.expect(!rwl.tryLockUpgradable());
-            rwl.unlockExclusive(ctx);
+            rwl.lockWrite(ctx);
+            try std.testing.expect(!rwl.tryLockWrite());
+            try std.testing.expect(!rwl.tryLockRead());
+            rwl.unlockWrite(ctx);
 
-            try std.testing.expect(rwl.tryLockExclusive());
-            try std.testing.expect(!rwl.tryLockShared());
-            try std.testing.expect(!rwl.tryLockUpgradable());
-            rwl.unlockExclusive(ctx);
+            try std.testing.expect(rwl.tryLockWrite());
+            try std.testing.expect(!rwl.tryLockRead());
+            rwl.unlockWrite(ctx);
 
-            rwl.lockShared(ctx);
-            try std.testing.expect(!rwl.tryLockExclusive());
-            try std.testing.expect(rwl.tryLockShared());
-            try std.testing.expect(rwl.tryLockUpgradable());
-            rwl.unlockUpgradable(ctx);
-            rwl.unlockShared(ctx);
-            rwl.unlockShared(ctx);
+            rwl.lockRead(ctx);
+            try std.testing.expect(!rwl.tryLockWrite());
+            try std.testing.expect(rwl.tryLockRead());
+            rwl.unlockRead(ctx);
+            rwl.unlockRead(ctx);
 
-            try std.testing.expect(rwl.tryLockShared());
-            try std.testing.expect(!rwl.tryLockExclusive());
-            try std.testing.expect(rwl.tryLockShared());
-            try std.testing.expect(rwl.tryLockUpgradable());
-            rwl.unlockUpgradable(ctx);
-            rwl.unlockShared(ctx);
-            rwl.unlockShared(ctx);
+            try std.testing.expect(rwl.tryLockRead());
+            try std.testing.expect(!rwl.tryLockWrite());
+            try std.testing.expect(rwl.tryLockRead());
+            rwl.unlockRead(ctx);
+            rwl.unlockRead(ctx);
 
-            rwl.lockExclusive(ctx);
-            rwl.unlockExclusive(ctx);
+            rwl.lockWrite(ctx);
+            rwl.unlockWrite(ctx);
         }
     }.f);
 }
 
-test "concurrent access (threads)" {
+test "RwLock: concurrent access (threads)" {
+    const testing = @import("../testing.zig");
+
     var ctx = try testing.initTestContext();
     defer ctx.deinit();
 
@@ -771,8 +386,8 @@ test "concurrent access (threads)" {
 
         fn reader(self: *@This()) !void {
             while (true) {
-                self.rwl.lockShared(self.ctx);
-                defer self.rwl.unlockShared(self.ctx);
+                self.rwl.lockRead(self.ctx);
+                defer self.rwl.unlockRead(self.ctx);
 
                 if (self.writes >= num_writes or self.reads.load(.unordered) >= num_reads)
                     break;
@@ -788,8 +403,8 @@ test "concurrent access (threads)" {
             var rnd = prng.random();
 
             while (true) {
-                self.rwl.lockExclusive(self.ctx);
-                defer self.rwl.unlockExclusive(self.ctx);
+                self.rwl.lockWrite(self.ctx);
+                defer self.rwl.unlockWrite(self.ctx);
 
                 if (self.writes >= num_writes)
                     break;
@@ -832,7 +447,13 @@ test "concurrent access (threads)" {
     try std.testing.expectEqual(num_writes, runner.writes);
 }
 
-test "concurrent access (tasks)" {
+test "RwLock: concurrent access (tasks)" {
+    const task = @import("../task.zig");
+    const yield = task.yield;
+    const pool = @import("../pool.zig");
+    const future = @import("../future.zig");
+    const testing = @import("../testing.zig");
+
     try testing.initTestContextInTask(struct {
         fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
             const executor = pool.Pool.current(ctx).?;
@@ -855,8 +476,8 @@ test "concurrent access (tasks)" {
 
                 fn reader(self: *@This()) void {
                     while (true) {
-                        self.rwl.lockShared(self.ctx);
-                        defer self.rwl.unlockShared(self.ctx);
+                        self.rwl.lockRead(self.ctx);
+                        defer self.rwl.unlockRead(self.ctx);
 
                         if (self.writes >= num_writes or self.reads.load(.unordered) >= num_reads)
                             break;
@@ -872,8 +493,8 @@ test "concurrent access (tasks)" {
                     var rnd = prng.random();
 
                     while (true) {
-                        self.rwl.lockExclusive(self.ctx);
-                        defer self.rwl.unlockExclusive(self.ctx);
+                        self.rwl.lockWrite(self.ctx);
+                        defer self.rwl.unlockWrite(self.ctx);
 
                         if (self.writes >= num_writes)
                             break;
