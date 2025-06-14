@@ -1280,6 +1280,25 @@ pub const Builder = struct {
                 if (v.layout != .@"extern" and v.layout != .@"packed") break :blk .{ .@"opaque" = .{} };
                 if (v.is_tuple) break :blk .{ .@"opaque" = .{} };
 
+                if (v.layout == .@"packed") {
+                    const Int = v.backing_integer.?;
+                    const int_info = @typeInfo(Int).int;
+
+                    const size: usize = @sizeOf(Int);
+                    const bitsize: u3 = @bitSizeOf(Int) % 8;
+                    const alignment: u8 = @intCast(std.math.log2_int(u16, @alignOf(Int)));
+
+                    break :blk .{
+                        .int = .{
+                            .size = size,
+                            .bitsize = bitsize,
+                            .alignment = alignment,
+                            .bits = int_info.bits,
+                            .signedness = int_info.signedness,
+                        },
+                    };
+                }
+
                 var fields_tmp: [v.fields.len]Impl.Type.StructField = undefined;
                 for (v.fields, &fields_tmp) |src, *dst| {
                     dst.name = src.name;

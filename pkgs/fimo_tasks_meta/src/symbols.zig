@@ -25,6 +25,7 @@ const ParkMultipleResult = ParkingLot.ParkMultipleResult;
 const UnparkResult = ParkingLot.UnparkResult;
 const RequeueOp = ParkingLot.RequeueOp;
 const FilterOp = ParkingLot.FilterOp;
+const Futex = @import("sync/Futex.zig");
 const task = @import("task.zig");
 const TaskId = task.Id;
 const task_local = @import("task_local.zig");
@@ -47,12 +48,10 @@ pub const all_symbols = .{
     task_local_set,
     task_local_get,
     task_local_clear,
-    parking_lot_park,
-    parking_lot_park_multiple,
-    parking_lot_unpark_one,
-    parking_lot_unpark_all,
-    parking_lot_unpark_filter,
-    parking_lot_unpark_requeue,
+    futex_wait,
+    futex_waitv,
+    futex_wake,
+    futex_requeue,
 };
 
 pub const task_id = Symbol{
@@ -133,83 +132,54 @@ pub const task_local_clear = Symbol{
     .T = fn (key: *const TssKey) callconv(.c) void,
 };
 
-pub const parking_lot_park = Symbol{
-    .name = "parking_lot_park",
+pub const futex_wait = Symbol{
+    .name = "futex_wait",
     .namespace = symbol_namespace,
     .version = Context.context_version,
     .T = fn (
         key: *const anyopaque,
-        validation_data: *anyopaque,
-        validation: *const fn (data: *anyopaque) callconv(.c) bool,
-        before_sleep_data: *anyopaque,
-        before_sleep: *const fn (data: *anyopaque) callconv(.c) void,
-        timed_out_data: *anyopaque,
-        timed_out: *const fn (
-            data: *anyopaque,
-            key: *const anyopaque,
-            is_last: bool,
-        ) callconv(.c) void,
-        token: ParkToken,
+        key_size: usize,
+        expect: u64,
+        token: usize,
         timeout: ?*const Instant,
-    ) callconv(.c) ParkResult,
+    ) callconv(.c) Futex.Status,
 };
-pub const parking_lot_park_multiple = Symbol{
-    .name = "parking_lot_park_multiple",
+
+pub const futex_waitv = Symbol{
+    .name = "futex_waitv",
     .namespace = symbol_namespace,
     .version = Context.context_version,
     .T = fn (
-        keys: [*]const *const anyopaque,
+        keys: [*]const Futex.KeyExpect,
         key_count: usize,
-        validation_data: *anyopaque,
-        validation: *const fn (data: *anyopaque, key_index: usize) callconv(.c) bool,
-        before_sleep_data: *anyopaque,
-        before_sleep: *const fn (data: *anyopaque) callconv(.c) void,
-        token: ParkToken,
         timeout: ?*const Instant,
-    ) callconv(.c) ParkMultipleResult,
+        wake_index: *usize,
+    ) callconv(.c) Futex.Status,
 };
-pub const parking_lot_unpark_one = Symbol{
-    .name = "parking_lot_unpark_one",
+
+pub const futex_wake = Symbol{
+    .name = "futex_wake",
     .namespace = symbol_namespace,
     .version = Context.context_version,
     .T = fn (
         key: *const anyopaque,
-        callback_data: *anyopaque,
-        callback: *const fn (data: *anyopaque, result: UnparkResult) callconv(.c) UnparkToken,
-    ) callconv(.c) UnparkResult,
+        max_waiters: usize,
+        filter: Futex.Filter,
+    ) callconv(.c) usize,
 };
-pub const parking_lot_unpark_all = Symbol{
-    .name = "parking_lot_unpark_all",
-    .namespace = symbol_namespace,
-    .version = Context.context_version,
-    .T = fn (key: *const anyopaque, token: UnparkToken) callconv(.c) usize,
-};
-pub const parking_lot_unpark_filter = Symbol{
-    .name = "parking_lot_unpark_filter",
-    .namespace = symbol_namespace,
-    .version = Context.context_version,
-    .T = fn (
-        key: *const anyopaque,
-        filter_data: *anyopaque,
-        filter: *const fn (data: *anyopaque, token: ParkToken) callconv(.c) FilterOp,
-        callback_data: *anyopaque,
-        callback: *const fn (data: *anyopaque, result: UnparkResult) callconv(.c) UnparkToken,
-    ) callconv(.c) UnparkResult,
-};
-pub const parking_lot_unpark_requeue = Symbol{
-    .name = "parking_lot_unpark_requeue",
+
+pub const futex_requeue = Symbol{
+    .name = "futex_requeue",
     .namespace = symbol_namespace,
     .version = Context.context_version,
     .T = fn (
         key_from: *const anyopaque,
         key_to: *const anyopaque,
-        validate_data: *anyopaque,
-        validate: *const fn (data: *anyopaque) callconv(.c) RequeueOp,
-        callback_data: *anyopaque,
-        callback: *const fn (
-            data: *anyopaque,
-            op: RequeueOp,
-            result: UnparkResult,
-        ) callconv(.c) UnparkToken,
-    ) callconv(.c) UnparkResult,
+        key_size: usize,
+        expect: u64,
+        max_wakes: usize,
+        max_requeues: usize,
+        filter: Futex.Filter,
+        result: *Futex.RequeueResult,
+    ) callconv(.c) Futex.Status,
 };

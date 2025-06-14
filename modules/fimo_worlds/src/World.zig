@@ -90,8 +90,8 @@ pub fn addResource(self: *World, id: ResourceId, value: *const anyopaque) !void 
     const instance = Universe.getInstance();
     const info = blk: {
         const universe = Universe.getUniverse();
-        universe.rwlock.lockShared(instance);
-        defer universe.rwlock.unlockShared(instance);
+        universe.rwlock.lockRead(instance);
+        defer universe.rwlock.unlockRead(instance);
 
         const i = universe.resources.get(id) orelse @panic("invalid resource");
         _ = i.references.fetchAdd(1, .monotonic);
@@ -111,8 +111,8 @@ pub fn addResource(self: *World, id: ResourceId, value: *const anyopaque) !void 
     const resource = std.mem.bytesAsValue(Resource, memory);
     resource.* = Resource{ .info = info, .value_ptr = value_slice.ptr };
 
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
     if (self.resources.contains(id)) return error.Duplicate;
     try self.resources.put(allocator, id, resource);
     Universe.logDebug("added `{}` to `{*}`", .{ id, self }, @src());
@@ -122,8 +122,8 @@ pub fn removeResource(self: *World, id: ResourceId, value: *anyopaque) !void {
     Universe.logDebug("removing `{}` from `{*}`", .{ id, self }, @src());
     const resource = blk: {
         const instance = Universe.getInstance();
-        self.rwlock.lockExclusive(instance);
-        defer self.rwlock.unlockExclusive(instance);
+        self.rwlock.lockWrite(instance);
+        defer self.rwlock.unlockWrite(instance);
 
         const res = self.resources.get(id) orelse @panic("invalid resource");
         if (res.references.load(.acquire) != 0) return error.InUse;
@@ -147,8 +147,8 @@ pub fn removeResource(self: *World, id: ResourceId, value: *anyopaque) !void {
 
 pub fn hasResource(self: *World, id: ResourceId) bool {
     const instance = Universe.getInstance();
-    self.rwlock.lockShared(instance);
-    defer self.rwlock.unlockShared(instance);
+    self.rwlock.lockRead(instance);
+    defer self.rwlock.unlockRead(instance);
     return self.resources.contains(id);
 }
 
@@ -179,8 +179,8 @@ pub fn lockResources(
 
     const instance = Universe.getInstance();
     {
-        self.rwlock.lockShared(instance);
-        defer self.rwlock.unlockShared(instance);
+        self.rwlock.lockRead(instance);
+        defer self.rwlock.unlockRead(instance);
 
         for (exclusive, 0..) |id, i| {
             if (std.mem.indexOfScalar(ResourceId, exclusive[i + 1 ..], id) != null) @panic("deadlock");
@@ -201,8 +201,8 @@ pub fn lockResources(
     std.mem.sort(Info, infos, {}, Info.lessThan);
     for (infos) |info| {
         switch (info.lock_type) {
-            .exclusive => info.resource.rwlock.lockExclusive(instance),
-            .shared => info.resource.rwlock.lockShared(instance),
+            .exclusive => info.resource.rwlock.lockWrite(instance),
+            .shared => info.resource.rwlock.lockRead(instance),
         }
         out[info.index] = info.resource.value_ptr;
     }
@@ -210,20 +210,20 @@ pub fn lockResources(
 
 pub fn unlockResourceExclusive(self: *World, id: ResourceId) void {
     const instance = Universe.getInstance();
-    self.rwlock.lockShared(instance);
-    defer self.rwlock.unlockShared(instance);
+    self.rwlock.lockRead(instance);
+    defer self.rwlock.unlockRead(instance);
 
     const resource = self.resources.get(id) orelse @panic("invalid resource");
     _ = resource.references.fetchSub(1, .monotonic);
-    resource.rwlock.unlockExclusive(instance);
+    resource.rwlock.unlockWrite(instance);
 }
 
 pub fn unlockResourceShared(self: *World, id: ResourceId) void {
     const instance = Universe.getInstance();
-    self.rwlock.lockShared(instance);
-    defer self.rwlock.unlockShared(instance);
+    self.rwlock.lockRead(instance);
+    defer self.rwlock.unlockRead(instance);
 
     const resource = self.resources.get(id) orelse @panic("invalid resource");
     _ = resource.references.fetchSub(1, .monotonic);
-    resource.rwlock.unlockShared(instance);
+    resource.rwlock.unlockRead(instance);
 }

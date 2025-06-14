@@ -109,8 +109,8 @@ pub fn deinit(self: *Self) void {
 
 pub fn notifyWorldInit(self: *Self) void {
     const instance = getInstance();
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
 
     if (self.isEmpty()) instance.ref();
     self.num_worlds += 1;
@@ -118,8 +118,8 @@ pub fn notifyWorldInit(self: *Self) void {
 
 pub fn notifyWorldDeinit(self: *Self) void {
     const instance = getInstance();
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
 
     self.num_worlds -= 1;
     if (self.isEmpty()) instance.unref();
@@ -127,8 +127,8 @@ pub fn notifyWorldDeinit(self: *Self) void {
 
 pub fn registerResource(self: *Self, options: RegisterResourceOptions) !ResourceId {
     const instance = getInstance();
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
 
     const was_empty = self.isEmpty();
     const info = try self.allocator.create(ResourceInfo);
@@ -160,8 +160,8 @@ pub fn registerResource(self: *Self, options: RegisterResourceOptions) !Resource
 
 pub fn unregisterResource(self: *Self, id: ResourceId) void {
     const instance = getInstance();
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
 
     const kv = self.resources.fetchSwapRemove(id) orelse @panic("invalid resource");
     const info = kv.value;
@@ -181,8 +181,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
     };
 
     const instance = getInstance();
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
 
     for (options.exclusive_resources, 0..) |id, i| {
         if (!self.resources.contains(id)) return error.NotFound;
@@ -276,8 +276,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
 
 pub fn unregisterSystem(self: *Self, id: SystemId) void {
     const instance = getInstance();
-    self.rwlock.lockExclusive(instance);
-    defer self.rwlock.unlockExclusive(instance);
+    self.rwlock.lockWrite(instance);
+    defer self.rwlock.unlockWrite(instance);
 
     const kv = self.systems.fetchSwapRemove(id) orelse @panic("invalid system");
     const info = kv.value;

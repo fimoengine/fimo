@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 const fimo_std = @import("fimo_std");
 const Tracing = fimo_std.Context.Tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const MetaParkingLot = fimo_tasks_meta.sync.ParkingLot;
 const meta_command_buffer = fimo_tasks_meta.command_buffer;
 const Entry = meta_command_buffer.Entry;
 const MetaCommandBuffer = meta_command_buffer.OpaqueCommandBuffer;
@@ -17,7 +16,7 @@ const StackSize = meta_pool.StackSize;
 const MetaWorker = meta_pool.Worker;
 const MetaPool = meta_pool.Pool;
 
-const ParkingLot = @import("ParkingLot.zig");
+const Futex = @import("Futex.zig");
 const Pool = @import("Pool.zig");
 const Task = @import("Task.zig");
 
@@ -576,10 +575,10 @@ fn broadcast(self: *Self) void {
     const state = self.state.swap(new_state, .release);
     std.debug.assert(state & status_mask == running);
 
-    // If there are waiting tasks, we unpark them.
+    // If there are waiting tasks, we wake them.
     if (state & waiting_bit != 0) {
-        const lot = &self.owner.runtime.lot;
-        _ = lot.unparkAll(&self.state, .default);
+        const futex = &self.owner.runtime.futex;
+        _ = futex.wake(&self.state, std.math.maxInt(usize));
     }
 
     // If there are waiting command buffers, we enqueue them to the pool.
@@ -661,7 +660,7 @@ fn waitOn(self: *Self) Handle.CompletionStatus {
         @src(),
     );
 
-    const lot = &self.owner.runtime.lot;
+    const futex = &self.owner.runtime.futex;
     var state = self.state.load(.monotonic);
     while (state & status_mask == running) {
         // Flag that we are waiting on this command buffer.
@@ -672,41 +671,12 @@ fn waitOn(self: *Self) Handle.CompletionStatus {
             }
         }
 
-        // Park the caller until we are notified.
-        const Validation = struct {
-            ptr: *Self,
-            fn f(this: @This()) bool {
-                return this.ptr.state.load(.monotonic) == running | waiting_bit;
-            }
+        // Wait for the futex to change state, assuming it is still `running | waiting_bit`.
+        futex.wait(&self.state, @sizeOf(u8), running | waiting_bit, 0, null) catch |err| switch (err) {
+            error.Invalid => {},
+            error.Timeout => unreachable,
         };
-        const BeforeSleep = struct {
-            fn f(this: @This()) void {
-                _ = this;
-            }
-        };
-        const TimedOut = struct {
-            fn f(this: @This(), key: *const anyopaque, is_last: bool) void {
-                _ = this;
-                _ = key;
-                _ = is_last;
-            }
-        };
-        const result = lot.park(
-            &self.state,
-            Validation{ .ptr = self },
-            Validation.f,
-            BeforeSleep{},
-            BeforeSleep.f,
-            TimedOut{},
-            TimedOut.f,
-            .default,
-            null,
-        );
-        switch (result.type) {
-            .unparked => break,
-            .invalid => state = self.state.load(.monotonic),
-            .timed_out => unreachable,
-        }
+        state = self.state.load(.monotonic);
     }
 
     state = self.state.load(.acquire);
