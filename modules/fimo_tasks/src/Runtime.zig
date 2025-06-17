@@ -85,10 +85,16 @@ pub fn getDefaultWorkerCount(self: *Self) usize {
     }
 }
 
-/// Returns the tracing subsystem of the owner instance.
-pub fn tracing(self: *Self) ?Tracing {
+/// Returns the context of the owner instance.
+pub fn getContext(self: *Self) ?Context {
     const instance = self.getInstance() orelse return null;
-    return instance.context().tracing();
+    return instance.context();
+}
+
+/// Returns the tracing subsystem of the owner instance.
+pub fn getTracing(self: *Self) ?Tracing {
+    const ctx = self.getContext() orelse return null;
+    return ctx.tracing();
 }
 
 /// Logs an error message.
@@ -98,7 +104,7 @@ pub fn logErr(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    if (self.tracing()) |tr| {
+    if (self.getTracing()) |tr| {
         tr.emitErrSimple(fmt, args, location);
     } else {
         std.log.err(fmt, args);
@@ -112,7 +118,7 @@ pub fn logDebug(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    if (self.tracing()) |tr| {
+    if (self.getTracing()) |tr| {
         tr.emitDebugSimple(fmt, args, location);
     } else {
         std.log.debug(fmt, args);

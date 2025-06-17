@@ -2,9 +2,10 @@
 #define FIMO_CONTEXT_H
 
 #include <fimo_std/error.h>
+#include <fimo_std/impl/context_version_.h>
 #include <fimo_std/utils.h>
 #include <fimo_std/version.h>
-#include <fimo_std/impl/context_version_.h>
+#include "error.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +67,12 @@ typedef struct FimoContextVTableV0 {
     /// function also destroys the reference. May only be called with a valid reference to the
     /// context.
     void (*release)(void *ctx);
+    /// Checks whether the context has an error stored for the current thread.
+    bool (*has_error_result)(void *ctx);
+    /// Replaces the thread local result stored in the context with a new one.
+    ///
+    /// The old result is returned.
+    FimoResult (*replace_result)(void *ctx, FimoResult new_result);
 } FimoContextCoreVTableV0;
 
 /// Initializes a new context with the given options.

@@ -11,6 +11,31 @@ use crate::{
 use core::panic;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
+/// Status code.
+///
+/// All positive values are interpreted as successfull operations.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Status(pub i32);
+
+impl Status {
+    /// Operation completed successfully
+    pub const OK: Self = Self(0);
+    /// Operation failed with an unspecified error.
+    ///
+    /// The specific error may be accessible through the context.
+    pub const FAILURE: Self = Self(-1);
+
+    /// Checks if the status indicates a success.
+    pub const fn is_ok(self) -> bool {
+        self.0 >= 0
+    }
+
+    /// Checks if the status indicates an error.
+    pub const fn is_error(self) -> bool {
+        self.0 < 0
+    }
+}
+
 handle!(pub handle ContextHandle: Send + Sync + Share);
 
 /// Virtual function table of a [`ContextView`].
@@ -69,6 +94,8 @@ pub struct VTableHeader {
 pub struct CoreVTableV0 {
     pub acquire: unsafe extern "C" fn(handle: ContextHandle),
     pub release: unsafe extern "C" fn(handle: ContextHandle),
+    pub has_error_result: unsafe extern "C" fn(handle: ContextHandle) -> bool,
+    pub replace_result: unsafe extern "C" fn(handle: ContextHandle, new: AnyResult) -> AnyResult,
 }
 
 /// View of the context of the fimo library.
@@ -117,6 +144,30 @@ impl ContextView<'_> {
     pub fn check_version(&self) -> error::Result {
         let f = self.vtable.header.check_version;
         unsafe { f(self.handle, &Self::CURRENT_VERSION).into() }
+    }
+
+    /// Checks whether the context has an error stored for the current thread.
+    pub fn has_error_result(&self) -> bool {
+        let f = self.vtable.core_v0.has_error_result;
+        unsafe { f(self.handle) }
+    }
+
+    /// Replaces the thread-local result stored in the context with a new one.
+    ///
+    /// The old result is returned.
+    pub fn replace_result(&self, with: error::Result) -> error::Result {
+        let f = self.vtable.core_v0.replace_result;
+        unsafe { f(self.handle, with.into()).into_result() }
+    }
+
+    /// Swaps out the thread-local result with the `Ok` result.
+    pub fn take_result(&self) -> error::Result {
+        self.replace_result(Ok(()))
+    }
+
+    /// Sets the thread-local result, destroying the old one.
+    pub fn set_result(&self, result: error::Result) {
+        _ = self.replace_result(result);
     }
 
     /// Promotes the context view to a context, by increasing the reference count.

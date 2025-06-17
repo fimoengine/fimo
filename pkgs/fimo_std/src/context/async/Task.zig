@@ -3,6 +3,7 @@ const AtomicValue = std.atomic.Value;
 const Mutex = std.Thread.Mutex;
 const DoublyLinkedList = std.DoublyLinkedList;
 
+const AnyResult = @import("../../AnyError.zig").AnyResult;
 const ProxyAsync = @import("../proxy_context/async.zig");
 const ProxyTracing = @import("../proxy_context/tracing.zig");
 const RefCount = @import("../RefCount.zig");
@@ -13,6 +14,7 @@ const Self = @This();
 sys: *System,
 refcount: RefCount = .{},
 call_stack: ProxyTracing.CallStack,
+local_result: AnyResult = .ok,
 
 mutex: Mutex = .{},
 state: State = .{},
@@ -394,6 +396,7 @@ fn unref(self: *Self) void {
     std.debug.assert(!state.waiter_locked);
     const ctx = self.sys.asContext();
     self.call_stack.deinit();
+    self.local_result.deinit();
     const allocator = self.sys.allocator;
     allocator.free(self.buffer);
     allocator.destroy(self);
@@ -498,7 +501,9 @@ pub fn poll(self: *Self) void {
     const main_stack = self.call_stack.replaceActive();
     ctx.tracing.resumeCurrentCallStack();
 
+    const old_result = ctx.replaceResult(self.local_result);
     const completed = self.poll_fn(self.data, self.asWaker(), self.result);
+    self.local_result = ctx.replaceResult(old_result);
 
     ctx.tracing.suspendCurrentCallStack(false);
     self.call_stack = main_stack.replaceActive();

@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
+const AnyResult = fimo_std.AnyError.AnyResult;
 const Tracing = fimo_std.Context.Tracing;
 const CallStack = Tracing.CallStack;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
@@ -34,6 +35,7 @@ stack: Stack,
 stack_size: StackSize,
 context: ?Context = null,
 call_stack: ?CallStack = null,
+local_result: AnyResult = .ok,
 local_keys: AutoArrayHashMapUnmanaged(*const anyopaque, LocalData) = .empty,
 msg: ?Pool.PrivateMessage = null,
 next: ?*Self = null,
@@ -60,7 +62,7 @@ pub fn ensureReady(self: *Self) void {
     std.debug.assert(self.call_stack == null);
 
     self.context = Context.init(self.stack.memory, &Worker.taskEntry);
-    if (self.owner.owner.runtime.tracing()) |tracing| self.call_stack = CallStack.init(tracing);
+    if (self.owner.owner.runtime.getTracing()) |tracing| self.call_stack = CallStack.init(tracing);
     self.state = .init;
 }
 
@@ -75,6 +77,7 @@ pub fn exit(self: *Self, is_abort: bool) void {
 pub fn afterExit(self: *Self, is_abort: bool) void {
     std.debug.assert(self.state == .stopped);
     if (self.call_stack) |cs| if (is_abort) cs.deinitAbort() else cs.deinit();
+    self.local_result.deinit();
     std.debug.assert(self.context != null);
     self.context = null;
 }
