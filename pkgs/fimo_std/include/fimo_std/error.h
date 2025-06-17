@@ -169,8 +169,20 @@ extern "C" {
 #define FIMO_EXDEV FIMO_RESULT_FROM_ERROR_CODE(FIMO_ERROR_CODE_XDEV)
 #define FIMO_EXFULL FIMO_RESULT_FROM_ERROR_CODE(FIMO_ERROR_CODE_XFULL)
 
+/// Status code.
+///
+/// All positive values are interpreted as successfull operations.
+typedef enum FimoStatus : FimoI32 {
+    /// Operation completed successfully
+    FIMO_STATUS_OK = 0,
+    /// Operation failed with an unspecified error.
+    ///
+    /// The specific error may be accessible through the context.
+    FIMO_STATUS_FAILURE = -1,
+} FimoStatus;
+
 /// Posix error codes.
-typedef enum FimoErrorCode: FimoI32 {
+typedef enum FimoErrorCode : FimoI32 {
     /// Operation completed successfully
     FIMO_ERROR_CODE_OK,
     /// Argument list too long

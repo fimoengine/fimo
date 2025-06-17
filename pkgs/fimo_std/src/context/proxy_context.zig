@@ -45,6 +45,29 @@ pub const TaggedOutStruct = extern struct {
     next: ?*TaggedOutStruct,
 };
 
+/// Status code.
+///
+/// All positive values are interpreted as successfull operations.
+pub const Status = enum(i32) {
+    /// Operation completed successfully
+    ok = 0,
+    /// Operation failed with an unspecified error.
+    ///
+    /// The specific error may be accessible through the context.
+    err = -1,
+    _,
+
+    /// Checks if the status indicates a success.
+    pub fn is_ok(self: Status) bool {
+        return @intFromEnum(self) >= 0;
+    }
+
+    /// Checks if the status indicates an error.
+    pub fn is_err(self: Status) bool {
+        return @intFromEnum(self) < 0;
+    }
+};
+
 /// VTable of the public fimo std context.
 pub const VTable = extern struct {
     header: CompatibilityContext.VTable,
@@ -58,8 +81,10 @@ pub const VTable = extern struct {
 ///
 /// Changing this definition is a breaking change.
 pub const CoreVTable = extern struct {
-    acquire: *const fn (ctx: *anyopaque) callconv(.C) void,
-    release: *const fn (ctx: *anyopaque) callconv(.C) void,
+    acquire: *const fn (ctx: *anyopaque) callconv(.c) void,
+    release: *const fn (ctx: *anyopaque) callconv(.c) void,
+    has_error_result: *const fn (ctx: *anyopaque) callconv(.c) bool,
+    replace_result: *const fn (ctx: *anyopaque, new: AnyResult) callconv(.c) AnyResult,
 };
 
 /// Minimal interface of the fimo std context.
@@ -172,6 +197,28 @@ pub fn unref(self: Self) void {
     self.vtable.core_v0.release(self.data);
 }
 
+/// Checks whether the context has an error stored for the current thread.
+pub fn hasErrorResult(self: Self) bool {
+    return self.vtable.core_v0.has_error_result(self.data);
+}
+
+/// Replaces the thread-local result stored in the context with a new one.
+///
+/// The old result is returned.
+pub fn replaceResult(self: Self, new: AnyResult) AnyResult {
+    return self.vtable.core_v0.replace_result(self.data, new);
+}
+
+/// Swaps out the thread-local result with the `ok` result.
+pub fn takeResult(self: Self) AnyResult {
+    return self.replaceResult(.ok);
+}
+
+/// Sets the thread-local result, destroying the old one.
+pub fn setResult(self: Self, new: AnyResult) void {
+    self.replaceResult(new).deinit();
+}
+
 /// Returns the interface to the tracing subsystem.
 pub fn tracing(self: Self) Tracing {
     return Tracing{ .context = self };
@@ -201,4 +248,36 @@ const ffi = struct {
 
 comptime {
     _ = ffi;
+}
+
+test "proxy_context: local error" {
+    const ctx = try Self.init(&.{});
+    defer ctx.unref();
+
+    try std.testing.expect(!ctx.hasErrorResult());
+    try std.testing.expectEqual(
+        ctx.replaceResult(.initErr(AnyError.initError(error.FfiError))),
+        AnyResult.ok,
+    );
+    try std.testing.expect(ctx.hasErrorResult());
+
+    const Runner = struct {
+        ctx: Self,
+        thread: std.Thread,
+        err: ?anyerror = null,
+
+        fn run(self: *@This()) !void {
+            errdefer |err| self.err = err;
+            try std.testing.expect(!self.ctx.hasErrorResult());
+            try std.testing.expectEqual(
+                self.ctx.replaceResult(.initErr(AnyError.initError(error.FfiError))),
+                AnyResult.ok,
+            );
+            try std.testing.expect(self.ctx.hasErrorResult());
+        }
+    };
+    var runner = Runner{ .ctx = ctx, .thread = undefined };
+    runner.thread = try std.Thread.spawn(.{}, Runner.run, .{&runner});
+    runner.thread.join();
+    if (runner.err) |err| return err;
 }

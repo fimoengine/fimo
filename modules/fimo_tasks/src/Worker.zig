@@ -232,7 +232,7 @@ pub fn taskEntry(tr: context_.Transfer) callconv(.c) noreturn {
     std.debug.assert(task.state == .init);
 
     {
-        const tracing = worker.pool.runtime.tracing();
+        const tracing = worker.pool.runtime.getTracing();
         const span = if (tracing) |tra| Tracing.Span.initTrace(
             tra,
             null,
@@ -256,7 +256,8 @@ pub fn run(self: *Self) void {
     defer _current = null;
 
     // Initialize the tracing for the worker.
-    const tracing = self.pool.runtime.tracing();
+    const ctx = self.pool.runtime.getContext();
+    const tracing = self.pool.runtime.getTracing();
     if (tracing) |tr| tr.registerThread();
     defer if (tracing) |tr| tr.unregisterThread();
 
@@ -297,10 +298,13 @@ pub fn run(self: *Self) void {
         swapCallStack(tracing, &self.call_stack, &task.call_stack, false);
 
         // Switch to the task's context.
+        var old_result: fimo_std.AnyError.AnyResult = undefined;
         std.debug.assert(self.context == null);
         const t_ctx = task.context.?;
         task.context = null;
+        if (ctx) |fimo_ctx| old_result = fimo_ctx.replaceResult(task.local_result);
         const tr = t_ctx.yieldTo(0);
+        if (ctx) |fimo_ctx| task.local_result = fimo_ctx.replaceResult(old_result);
         self.pool.runtime.logDebug("`{*}` switching to event loop", .{task}, @src());
         task.context = tr.context;
 

@@ -662,7 +662,7 @@ fn processEnqueueRequest(self: *Self, buffer: *CommandBuffer) void {
 }
 
 fn runEventLoop(self: *Self) void {
-    const tracing = self.runtime.tracing();
+    const tracing = self.runtime.getTracing();
     if (tracing) |tr| tr.registerThread();
     defer if (tracing) |tr| tr.unregisterThread();
 
