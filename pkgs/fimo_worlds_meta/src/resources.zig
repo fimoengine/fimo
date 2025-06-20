@@ -50,11 +50,8 @@ pub fn TypedResourceId(T: type) type {
 
             var id: ResourceId = undefined;
             const sym = symbols.resource_register.requestFrom(provider);
-            return switch (sym(&desc, &id)) {
-                .Ok => fromId(id),
-                .OperationFailed => error.RegisterFailed,
-                else => unreachable,
-            };
+            if (sym(&desc, &id).isErr()) return error.RegisterFailed;
+            return fromId(id);
         }
 
         /// Unregister the resource from the universe.

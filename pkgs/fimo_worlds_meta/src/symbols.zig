@@ -1,6 +1,7 @@
 const c = @import("c");
 const fimo_std = @import("fimo_std");
 const Symbol = fimo_std.Context.Module.Symbol;
+const Status = fimo_std.Context.Status;
 const context_version = fimo_std.Context.context_version;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
@@ -62,13 +63,6 @@ pub const all_symbols = .{
     world_allocator_free,
 };
 
-/// Errors of the c api of the package.
-pub const Error = enum(i32) {
-    Ok,
-    OperationFailed,
-    _,
-};
-
 pub const resource_register = Symbol{
     .name = "resource_register",
     .namespace = symbol_namespace,
@@ -76,7 +70,7 @@ pub const resource_register = Symbol{
     .T = fn (
         resource: *const RegisterResourceOptions.Descriptor,
         id: *ResourceId,
-    ) callconv(.c) Error,
+    ) callconv(.c) Status,
 };
 
 pub const resource_unregister = Symbol{
@@ -93,7 +87,7 @@ pub const system_register = Symbol{
     .T = fn (
         system: *const System.Descriptor,
         id: *SystemId,
-    ) callconv(.c) Error,
+    ) callconv(.c) Status,
 };
 
 pub const system_unregister = Symbol{
@@ -110,7 +104,7 @@ pub const system_group_create = Symbol{
     .T = fn (
         descriptor: *const SystemGroup.CreateOptions.Descriptor,
         group: **SystemGroup,
-    ) callconv(.c) Error,
+    ) callconv(.c) Status,
 };
 
 pub const system_group_destroy = Symbol{
@@ -145,7 +139,7 @@ pub const system_group_add_systems = Symbol{
     .name = "system_group_add_systems",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup, systems: ?[*]const SystemId, len: usize) callconv(.c) Error,
+    .T = fn (group: *SystemGroup, systems: ?[*]const SystemId, len: usize) callconv(.c) Status,
 };
 
 pub const system_group_remove_system = Symbol{
@@ -164,7 +158,7 @@ pub const system_group_schedule = Symbol{
         wait_on: ?[*]const *Fence,
         wait_on_len: usize,
         signal: ?*Fence,
-    ) callconv(.c) Error,
+    ) callconv(.c) Status,
 };
 
 pub const system_context_get_group = Symbol{
@@ -242,7 +236,7 @@ pub const world_create = Symbol{
     .name = "world_create",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (descriptor: *const CreateWorldOptions.Descriptor, world: **World) callconv(.c) Error,
+    .T = fn (descriptor: *const CreateWorldOptions.Descriptor, world: **World) callconv(.c) Status,
 };
 
 pub const world_destroy = Symbol{
@@ -277,14 +271,14 @@ pub const world_add_resource = Symbol{
     .name = "world_add_resource",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId, value: *const anyopaque) callconv(.c) Error,
+    .T = fn (world: *World, id: ResourceId, value: *const anyopaque) callconv(.c) Status,
 };
 
 pub const world_remove_resource = Symbol{
     .name = "world_remove_resource",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId, value: *anyopaque) callconv(.c) Error,
+    .T = fn (world: *World, id: ResourceId, value: *anyopaque) callconv(.c) Status,
 };
 
 pub const world_lock_resources = Symbol{
