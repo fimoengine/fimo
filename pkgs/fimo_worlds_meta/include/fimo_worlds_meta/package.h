@@ -3,7 +3,6 @@
 
 #include <fimo_std/impl/context_version_.h>
 
-#include <fimo_worlds_meta/errors.h>
 #include <fimo_worlds_meta/jobs.h>
 #include <fimo_worlds_meta/resources.h>
 #include <fimo_worlds_meta/systems.h>

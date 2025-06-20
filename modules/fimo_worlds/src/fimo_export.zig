@@ -3,6 +3,8 @@ const atomic = std.atomic;
 const builtin = @import("builtin");
 
 const fimo_std = @import("fimo_std");
+const AnyError = fimo_std.AnyError;
+const Status = fimo_std.Context.Status;
 const Module = fimo_std.Context.Module;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const pools = fimo_tasks_meta.pool;
@@ -12,7 +14,6 @@ const resources = fimo_worlds_meta.resources;
 const systems = fimo_worlds_meta.systems;
 const worlds = fimo_worlds_meta.worlds;
 const symbols = fimo_worlds_meta.symbols;
-const Error = symbols.Error;
 
 const System = @import("System.zig");
 const SystemGroup = @import("SystemGroup.zig");
@@ -123,13 +124,16 @@ const State = struct {
 fn resourceRegister(
     resource: *const resources.RegisterOptions.Descriptor,
     id: *resources.ResourceId,
-) callconv(.c) Error {
+) callconv(.c) Status {
     id.* = State.global_state.universe.registerResource(.{
         .label = if (resource.label_len != 0) resource.label.?[0..resource.label_len] else null,
         .size = resource.size,
         .alignment = .fromByteUnits(resource.alignment),
-    }) catch return .OperationFailed;
-    return .Ok;
+    }) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
+    return .ok;
 }
 
 fn resourceUnregister(id: resources.ResourceId) callconv(.c) void {
@@ -139,7 +143,7 @@ fn resourceUnregister(id: resources.ResourceId) callconv(.c) void {
 fn systemRegister(
     system: *const systems.System.Descriptor,
     id: *systems.SystemId,
-) callconv(.c) Error {
+) callconv(.c) Status {
     id.* = State.global_state.universe.registerSystem(.{
         .label = if (system.label_len != 0) system.label.?[0..system.label_len] else null,
         .exclusive_resources = if (system.exclusive_ids_len != 0)
@@ -169,8 +173,11 @@ fn systemRegister(
         .system_init = system.system_init,
         .system_deinit = system.system_deinit,
         .system_run = system.system_run,
-    }) catch return .OperationFailed;
-    return .Ok;
+    }) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
+    return .ok;
 }
 
 fn systemUnregister(id: systems.SystemId) callconv(.c) void {
@@ -180,14 +187,17 @@ fn systemUnregister(id: systems.SystemId) callconv(.c) void {
 fn systemGroupCreate(
     descriptor: *const systems.SystemGroup.CreateOptions.Descriptor,
     group: **systems.SystemGroup,
-) callconv(.c) Error {
+) callconv(.c) Status {
     const grp = SystemGroup.init(.{
         .label = if (descriptor.label_len != 0) descriptor.label.?[0..descriptor.label_len] else null,
         .executor = if (descriptor.pool) |p| p.* else null,
         .world = @ptrCast(@alignCast(descriptor.world)),
-    }) catch return .OperationFailed;
+    }) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
     group.* = @ptrCast(grp);
-    return .Ok;
+    return .ok;
 }
 
 fn systemGroupDestroy(group: *systems.SystemGroup) callconv(.c) void {
@@ -215,11 +225,14 @@ fn systemGroupAddSystems(
     group: *systems.SystemGroup,
     sys: ?[*]const systems.SystemId,
     len: usize,
-) callconv(.c) Error {
+) callconv(.c) Status {
     const ids = if (len != 0) sys.?[0..len] else &.{};
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    grp.addSystems(ids) catch return .OperationFailed;
-    return .Ok;
+    grp.addSystems(ids) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
+    return .ok;
 }
 
 fn systemGroupRemoveSystem(
@@ -236,11 +249,14 @@ fn systemGroupSchedule(
     wait_on: ?[*]const *Fence,
     wait_on_len: usize,
     signal: ?*Fence,
-) callconv(.c) Error {
+) callconv(.c) Status {
     const fences = if (wait_on_len != 0) wait_on.?[0..wait_on_len] else &.{};
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    grp.schedule(fences, signal) catch return .OperationFailed;
-    return .Ok;
+    grp.schedule(fences, signal) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
+    return .ok;
 }
 
 fn systemContextGetGroup(context: *systems.SystemContext) callconv(.c) *systems.SystemGroup {
@@ -308,13 +324,16 @@ fn systemContextAllocatorFree(
 fn worldCreate(
     descriptor: *const worlds.CreateOptions.Descriptor,
     world: **worlds.World,
-) callconv(.c) Error {
+) callconv(.c) Status {
     const w = World.init(.{
         .label = if (descriptor.label_len != 0) descriptor.label.?[0..descriptor.label_len] else null,
         .executor = if (descriptor.pool) |p| p.* else null,
-    }) catch return .OperationFailed;
+    }) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
     world.* = @ptrCast(w);
-    return .Ok;
+    return .ok;
 }
 
 fn worldDestroy(world: *worlds.World) callconv(.c) void {
@@ -342,20 +361,26 @@ fn worldAddResource(
     world: *worlds.World,
     id: resources.ResourceId,
     value: *const anyopaque,
-) callconv(.c) Error {
+) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
-    w.addResource(id, value) catch return .OperationFailed;
-    return .Ok;
+    w.addResource(id, value) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
+    return .ok;
 }
 
 fn worldRemoveResource(
     world: *worlds.World,
     id: resources.ResourceId,
     value: *anyopaque,
-) callconv(.c) Error {
+) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
-    w.removeResource(id, value) catch return .OperationFailed;
-    return .Ok;
+    w.removeResource(id, value) catch |err| {
+        getInstance().context().setResult(.initErr(.initError(err)));
+        return .err;
+    };
+    return .ok;
 }
 
 fn worldLockResources(

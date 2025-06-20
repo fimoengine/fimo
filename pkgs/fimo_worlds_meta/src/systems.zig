@@ -72,11 +72,7 @@ pub const SystemGroup = opaque {
 
         var group: *SystemGroup = undefined;
         const sym = symbols.system_group_create.requestFrom(provider);
-        switch (sym(&desc, &group)) {
-            .Ok => {},
-            .OperationFailed => error.InitFailed,
-            else => unreachable,
-        }
+        if (sym(&desc, &group).isErr()) return error.InitFailed;
     }
 
     /// Destroys the system group.
@@ -118,11 +114,7 @@ pub const SystemGroup = opaque {
         systems: []const SystemId,
     ) error{AddFailed}!void {
         const sym = symbols.system_group_add_systems.requestFrom(provider);
-        switch (sym(self, systems.ptr, systems.len)) {
-            .Ok => {},
-            .OperationFailed => error.AddFailed,
-            else => unreachable,
-        }
+        if (sym(self, systems.ptr, systems.len).isErr()) return error.AddFailed;
     }
 
     /// Removes a system from the group.
@@ -170,11 +162,7 @@ pub const SystemGroup = opaque {
         signal: ?*Fence,
     ) error{ScheduleFailed}!void {
         const sym = symbols.system_group_add_systems.requestFrom(provider);
-        switch (sym(self, wait_on.ptr, wait_on.len, signal)) {
-            .Ok => {},
-            .OperationFailed => error.ScheduleFailed,
-            else => unreachable,
-        }
+        if (sym(self, wait_on.ptr, wait_on.len, signal).isErr()) return error.ScheduleFailed;
     }
 
     /// Convenience function to schedule and wait until the completion of the group.
@@ -516,11 +504,8 @@ pub const System = struct {
 
         var id: SystemId = undefined;
         const sym = symbols.system_register.requestFrom(provider);
-        return switch (sym(&desc, &id)) {
-            .Ok => id,
-            .OperationFailed => error.RegisterFailed,
-            else => unreachable,
-        };
+        if (sym(&desc, &id).isErr()) return error.RegisterFailed;
+        return id;
     }
 
     /// A simple system using only a stateless function.

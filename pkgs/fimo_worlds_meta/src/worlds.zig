@@ -63,11 +63,8 @@ pub const World = opaque {
 
         var world: *World = undefined;
         const sym = symbols.world_create.requestFrom(provider);
-        return switch (sym(&desc, &world)) {
-            .Ok => world,
-            .OperationFailed => error.InitFailed,
-            else => unreachable,
-        };
+        if (sym(&desc, &world).isErr()) return error.InitFailed;
+        return world;
     }
 
     /// Destroys the world.
@@ -106,11 +103,7 @@ pub const World = opaque {
         value: *const anyopaque,
     ) error{AddFailed}!void {
         const sym = symbols.world_add_resource.requestFrom(provider);
-        return switch (sym(self, id, value)) {
-            .Ok => {},
-            .OperationFailed => error.AddFailed,
-            else => unreachable,
-        };
+        if (sym(self, id, value).isErr()) return error.AddFailed;
     }
 
     /// Removes the resource from the world.
@@ -121,11 +114,7 @@ pub const World = opaque {
         value: *anyopaque,
     ) error{RemoveFailed}!void {
         const sym = symbols.world_remove_resource.requestFrom(provider);
-        return switch (sym(self, id, value)) {
-            .Ok => {},
-            .OperationFailed => error.RemoveFailed,
-            else => unreachable,
-        };
+        if (sym(self, id, value).isErr()) return error.RemoveFailed;
     }
 
     /// Acquires a set of exclusive and shared resource references.

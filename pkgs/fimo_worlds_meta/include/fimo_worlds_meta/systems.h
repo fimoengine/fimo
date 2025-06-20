@@ -6,7 +6,6 @@
 #include <fimo_std/fimo.h>
 #include <fimo_tasks_meta/package.h>
 
-#include <fimo_worlds_meta/errors.h>
 #include <fimo_worlds_meta/jobs.h>
 #include <fimo_worlds_meta/resources.h>
 
@@ -75,7 +74,7 @@ typedef struct FimoWorldsMeta_SystemDescriptor {
     /// Alignment in bytes of the factory. Must be a power-of-two.
     FimoUSize factory_alignment;
     /// Optional function to call when destroying the factory.
-    void(*factory_destroy)(const void *factory);
+    void (*factory_destroy)(const void *factory);
 
     /// Size in bytes of the system state.
     FimoUSize system_size;
@@ -87,9 +86,9 @@ typedef struct FimoWorldsMeta_SystemDescriptor {
     /// as the system itself. The context provides additional utilities, like allocators.
     /// The state of the system must be written into the provided `system` pointer.
     /// On success, the function must return true.
-    bool(*system_create)(const void *factory, FimoWorldsMeta_SystemContext *context, void *system);
+    bool (*system_create)(const void *factory, FimoWorldsMeta_SystemContext *context, void *system);
     /// Optional function to call when destroying a system.
-    void(*system_destroy)(void *system);
+    void (*system_destroy)(void *system);
     /// Function called on each system run.
     ///
     /// The requested exclusive and shared resources are provided in the order defined by
@@ -99,12 +98,8 @@ typedef struct FimoWorldsMeta_SystemDescriptor {
     /// the current system. The system must signal the fence after it has completed. Failure
     /// of doing such will lead to a deadlock. The fence is guaranteed to not have any waiters
     /// until after the run function returns.
-    void(*system_run)(
-        void *system,
-        void *const *exclusive_resources,
-        void *const *shared_resources,
-        FimoWorldsMeta_Fence *fence
-    );
+    void (*system_run)(void *system, void *const *exclusive_resources, void *const *shared_resources,
+                       FimoWorldsMeta_Fence *fence);
 } FimoWorldsMeta_SystemDescriptor;
 
 /// Descriptor a a new system group.
@@ -150,67 +145,49 @@ typedef enum FimoWorldsMeta_SystemAllocatorStrategy : FimoI32 {
 /// Registers a new system with the universe.
 ///
 /// Registered resources may be added to system group of any world.
-typedef FimoWorldsMeta_Error(*FimoWorldsMeta_system_register)(
-    const FimoWorldsMeta_SystemDescriptor *system,
-    FimoWorldsMeta_SystemId *id
-);
+typedef FimoStatus (*FimoWorldsMeta_system_register)(const FimoWorldsMeta_SystemDescriptor *system,
+                                                     FimoWorldsMeta_SystemId *id);
 
 /// Unregisters the system from the universe.
 ///
 /// Once unregistered, the identifier is invalidated and may be reused by another system.
 /// The system must not be used explicitly by any world when this method is called.
-typedef void(*FimoWorldsMeta_system_unregister)(FimoWorldsMeta_SystemId id);
+typedef void (*FimoWorldsMeta_system_unregister)(FimoWorldsMeta_SystemId id);
 
 /// Initializes a new empty system group.
-typedef FimoWorldsMeta_Error(*FimoWorldsMeta_system_group_create)(
-    const FimoWorldsMeta_SystemGroupDescriptor *descriptor,
-    FimoWorldsMeta_SystemGroup **group
-);
+typedef FimoStatus (*FimoWorldsMeta_system_group_create)(const FimoWorldsMeta_SystemGroupDescriptor *descriptor,
+                                                         FimoWorldsMeta_SystemGroup **group);
 
 /// Destroys the system group.
 ///
 /// The caller is blocked until the group is destroyed. The group may not be running
 /// and must be empty.
-typedef void(*FimoWorldsMeta_system_group_destroy)(
-    FimoWorldsMeta_SystemGroup *group
-);
+typedef void (*FimoWorldsMeta_system_group_destroy)(FimoWorldsMeta_SystemGroup *group);
 
 /// Returns the world the group is contained in.
-typedef FimoWorldsMeta_World(*FimoWorldsMeta_system_group_get_world)(
-    FimoWorldsMeta_SystemGroup *group
-);
+typedef FimoWorldsMeta_World (*FimoWorldsMeta_system_group_get_world)(FimoWorldsMeta_SystemGroup *group);
 
 /// Returns the label of the system group.
-typedef const char*(*FimoWorldsMeta_system_group_get_label)(
-    FimoWorldsMeta_SystemGroup *group,
-    FimoUSize *len
-);
+typedef const char *(*FimoWorldsMeta_system_group_get_label)(FimoWorldsMeta_SystemGroup *group, FimoUSize *len);
 
 /// Returns a reference to the executor used by the group.
-typedef FimoTasksMeta_Pool(*FimoWorldsMeta_system_group_get_pool)(
-    FimoWorldsMeta_SystemGroup *group
-);
+typedef FimoTasksMeta_Pool (*FimoWorldsMeta_system_group_get_pool)(FimoWorldsMeta_SystemGroup *group);
 
 /// Adds a set of systems to the group.
 ///
 /// Already scheduled operations are not affected by the added systems.
 /// The operation may add systems transitively, if the systems specify an execution order.
-typedef FimoWorldsMeta_Error(*FimoWorldsMeta_system_group_add_systems)(
-    FimoWorldsMeta_SystemGroup *group,
-    const FimoWorldsMeta_SystemId *systems,
-    FimoUSize systems_len
-);
+typedef FimoStatus (*FimoWorldsMeta_system_group_add_systems)(FimoWorldsMeta_SystemGroup *group,
+                                                              const FimoWorldsMeta_SystemId *systems,
+                                                              FimoUSize systems_len);
 
 /// Removes a system from the group.
 ///
 /// Already scheduled systems will not be affected.
 /// This operation may remove systems added transitively. The caller may provide a reference to
 /// a fence via `signal`, to be notified when the system has been removed from the group.
-typedef void(*FimoWorldsMeta_system_group_remove_system)(
-    FimoWorldsMeta_SystemGroup *group,
-    FimoWorldsMeta_SystemId id,
-    FimoWorldsMeta_Fence *signal
-);
+typedef void (*FimoWorldsMeta_system_group_remove_system)(FimoWorldsMeta_SystemGroup *group, FimoWorldsMeta_SystemId id,
+                                                          FimoWorldsMeta_Fence *signal);
 
 /// Schedules to run all systems contained in the group.
 ///
@@ -221,37 +198,26 @@ typedef void(*FimoWorldsMeta_system_group_remove_system)(
 /// Each schedule operation is assigned to one generation of the system group, which is an index
 /// that is increased by one each time the group finishes executing all systems. Multiple generations
 /// are run sequentially.
-typedef FimoWorldsMeta_Error(*FimoWorldsMeta_system_group_schedule)(
-    FimoWorldsMeta_SystemGroup *group,
-    FimoWorldsMeta_Fence *const *wait_on,
-    FimoUSize wait_on_len,
-    FimoWorldsMeta_Fence *signal
-);
+typedef FimoStatus (*FimoWorldsMeta_system_group_schedule)(FimoWorldsMeta_SystemGroup *group,
+                                                           FimoWorldsMeta_Fence *const *wait_on, FimoUSize wait_on_len,
+                                                           FimoWorldsMeta_Fence *signal);
 
 /// Returns the group the system is contained in.
-typedef FimoWorldsMeta_SystemGroup*(*FimoWorldsMeta_system_context_get_group)(
-    FimoWorldsMeta_SystemContext *context
-);
+typedef FimoWorldsMeta_SystemGroup *(*FimoWorldsMeta_system_context_get_group)(FimoWorldsMeta_SystemContext *context);
 
 /// Returns the current generation of system group.
 ///
 /// The generation is increased by one each time the group finishes executing all systems.
-typedef FimoUSize(*FimoWorldsMeta_system_context_get_generation)(
-    FimoWorldsMeta_SystemContext *context
-);
+typedef FimoUSize (*FimoWorldsMeta_system_context_get_generation)(FimoWorldsMeta_SystemContext *context);
 
 /// Allocates a new buffer using the specified allocation strategy.
 ///
 /// The buffer has a size of `size` and is aligned to `alignment`.
 /// `ret_addr` is optionally provided as the first return address of the allocation call stack.
 /// If the value is 0 it means no return address has been provided.
-typedef void*(*FimoWorldsMeta_system_context_allocator_alloc)(
-    FimoWorldsMeta_SystemContext *context,
-    FimoWorldsMeta_SystemAllocatorStrategy strategy,
-    FimoUSize size,
-    FimoUSize alignment,
-    FimoUSize ret_addr
-);
+typedef void *(*FimoWorldsMeta_system_context_allocator_alloc)(FimoWorldsMeta_SystemContext *context,
+                                                               FimoWorldsMeta_SystemAllocatorStrategy strategy,
+                                                               FimoUSize size, FimoUSize alignment, FimoUSize ret_addr);
 
 /// Attempt to expand or shrink the memory in place.
 ///
@@ -260,15 +226,10 @@ typedef void*(*FimoWorldsMeta_system_context_allocator_alloc)(
 /// A result of `true` indicates the resize was successful and the allocation now has the same
 /// address but a size of `new_size`. `ret_addr` is optionally provided as the first return address
 /// of the allocation call stack. If the value is 0 it means no return address has been provided.
-typedef bool(*FimoWorldsMeta_system_context_allocator_resize)(
-    FimoWorldsMeta_SystemContext *context,
-    FimoWorldsMeta_SystemAllocatorStrategy strategy,
-    void *ptr,
-    FimoUSize size,
-    FimoUSize alignment,
-    FimoUSize new_size,
-    FimoUSize ret_addr
-);
+typedef bool (*FimoWorldsMeta_system_context_allocator_resize)(FimoWorldsMeta_SystemContext *context,
+                                                               FimoWorldsMeta_SystemAllocatorStrategy strategy,
+                                                               void *ptr, FimoUSize size, FimoUSize alignment,
+                                                               FimoUSize new_size, FimoUSize ret_addr);
 
 /// Attempt to expand or shrink memory, allowing relocation.
 ///
@@ -276,15 +237,10 @@ typedef bool(*FimoWorldsMeta_system_context_allocator_resize)(
 /// `size` must equal the size requested from the most recent `alloc`, `resize` or `remap`.
 /// `ret_addr` is optionally provided as the first return address of the allocation call stack.
 /// If the value is 0 it means no return address has been provided.
-typedef void*(*FimoWorldsMeta_system_context_allocator_remap)(
-    FimoWorldsMeta_SystemContext *context,
-    FimoWorldsMeta_SystemAllocatorStrategy strategy,
-    void *ptr,
-    FimoUSize size,
-    FimoUSize alignment,
-    FimoUSize new_size,
-    FimoUSize ret_addr
-);
+typedef void *(*FimoWorldsMeta_system_context_allocator_remap)(FimoWorldsMeta_SystemContext *context,
+                                                               FimoWorldsMeta_SystemAllocatorStrategy strategy,
+                                                               void *ptr, FimoUSize size, FimoUSize alignment,
+                                                               FimoUSize new_size, FimoUSize ret_addr);
 
 /// Free and invalidate a region of memory.
 ///
@@ -292,14 +248,10 @@ typedef void*(*FimoWorldsMeta_system_context_allocator_remap)(
 /// `size` must equal the size requested from the most recent `alloc`, `resize` or `remap`.
 /// `ret_addr` is optionally provided as the first return address of the allocation call stack.
 /// If the value is 0 it means no return address has been provided.
-typedef void*(*FimoWorldsMeta_system_context_allocator_free)(
-    FimoWorldsMeta_SystemContext *context,
-    FimoWorldsMeta_SystemAllocatorStrategy strategy,
-    void *ptr,
-    FimoUSize size,
-    FimoUSize alignment,
-    FimoUSize ret_addr
-);
+typedef void *(*FimoWorldsMeta_system_context_allocator_free)(FimoWorldsMeta_SystemContext *context,
+                                                              FimoWorldsMeta_SystemAllocatorStrategy strategy,
+                                                              void *ptr, FimoUSize size, FimoUSize alignment,
+                                                              FimoUSize ret_addr);
 
 #ifdef __cplusplus
 }

@@ -3,8 +3,6 @@
 
 #include <fimo_std/fimo.h>
 
-#include <fimo_worlds_meta/errors.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,16 +29,14 @@ typedef struct FimoWorldsMeta_ResourceDescriptor {
 /// Registers a new resource to the universe.
 ///
 /// Registered resources may be instantiated by any world that knows its id.
-typedef FimoWorldsMeta_Error(*FimoWorldsMeta_resource_register)(
-    const FimoWorldsMeta_ResourceDescriptor *resource,
-    FimoWorldsMeta_ResourceId *id
-);
+typedef FimoStatus (*FimoWorldsMeta_resource_register)(const FimoWorldsMeta_ResourceDescriptor *resource,
+                                                       FimoWorldsMeta_ResourceId *id);
 
 /// Unregister the resource from the universe.
 ///
 /// Once unregistered, the identifier is invalidated and may be reused by another resouce.
 /// The resource must not be used by any world when this method is called.
-typedef void(*FimoWorldsMeta_resource_unregister)(FimoWorldsMeta_ResourceId id);
+typedef void (*FimoWorldsMeta_resource_unregister)(FimoWorldsMeta_ResourceId id);
 
 #ifdef __cplusplus
 }

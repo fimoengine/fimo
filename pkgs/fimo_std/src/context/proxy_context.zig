@@ -58,12 +58,12 @@ pub const Status = enum(i32) {
     _,
 
     /// Checks if the status indicates a success.
-    pub fn is_ok(self: Status) bool {
+    pub fn isOk(self: Status) bool {
         return @intFromEnum(self) >= 0;
     }
 
     /// Checks if the status indicates an error.
-    pub fn is_err(self: Status) bool {
+    pub fn isErr(self: Status) bool {
         return @intFromEnum(self) < 0;
     }
 };
