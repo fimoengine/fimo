@@ -252,46 +252,49 @@ pub fn WorldAllocator(Provider: type) type {
     };
 }
 
-test "world: smoke test" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+test "World: smoke test" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const world = try World.init(&ctx, .{ .label = "test-world" });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
 
-    const label = world.getLabel(&ctx).?;
+    const label = world.getLabel(GlobalCtx).?;
     try std.testing.expectEqualSlices(u8, "test-world", label);
 }
 
-test "world: custom pool" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+test "World: custom pool" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
     var err: ?AnyError = null;
     defer if (err) |e| e.deinit();
 
-    const executor = try Pool.init(&ctx, &.{}, &err);
+    const executor = try Pool.init(GlobalCtx, &.{}, &err);
     defer {
         executor.requestClose();
         executor.unref();
     }
 
-    const world = try World.init(&ctx, .{ .label = "test-world", .pool = executor });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world", .pool = executor });
+    defer world.deinit(GlobalCtx);
 
-    const ex = world.getPool(&ctx);
+    const ex = world.getPool(GlobalCtx);
     defer ex.unref();
     try std.testing.expectEqual(executor.id(), ex.id());
 }
 
-test "world allocator: base" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+test "WorldAllocator: base" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const world = try World.init(&ctx, .{ .label = "test-world" });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
 
-    var world_allocator = world.getAllocator(&ctx);
+    var world_allocator = world.getAllocator(GlobalCtx);
     const allocator = world_allocator.allocator();
 
     try std.heap.testAllocator(allocator);
@@ -300,14 +303,15 @@ test "world allocator: base" {
     try std.heap.testAllocatorAlignedShrink(allocator);
 }
 
-test "world allocator: auto free memory" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+test "WorldAllocator: auto free memory" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const world = try World.init(&ctx, .{ .label = "test-world" });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
 
-    var world_allocator = world.getAllocator(&ctx);
+    var world_allocator = world.getAllocator(GlobalCtx);
     const allocator = world_allocator.allocator();
 
     _ = try allocator.alloc(u8, 100);
