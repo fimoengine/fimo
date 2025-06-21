@@ -198,6 +198,10 @@ typedef void (*FimoWorldsMeta_system_group_remove_system)(FimoWorldsMeta_SystemG
 /// Each schedule operation is assigned to one generation of the system group, which is an index
 /// that is increased by one each time the group finishes executing all systems. Multiple generations
 /// are run sequentially.
+///
+/// Note that the system group must acquire the resources for the contained systems before executing
+/// them. The manner in which this is accomplished is unspecified. A valid implementation would be
+/// to lock all resources for the entire system group exclusively before starting its execution.
 typedef FimoStatus (*FimoWorldsMeta_system_group_schedule)(FimoWorldsMeta_SystemGroup *group,
                                                            FimoWorldsMeta_Fence *const *wait_on, FimoUSize wait_on_len,
                                                            FimoWorldsMeta_Fence *signal);

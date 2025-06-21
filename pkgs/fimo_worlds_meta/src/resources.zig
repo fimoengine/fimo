@@ -131,66 +131,68 @@ pub fn TypedResourceId(T: type) type {
 }
 
 test "resource: smoke test" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const id1 = try TypedResourceId(i32).register(&ctx, .{ .label = "resource-1" });
-    defer id1.unregister(&ctx);
+    const id1 = try TypedResourceId(i32).register(GlobalCtx, .{ .label = "resource-1" });
+    defer id1.unregister(GlobalCtx);
 
-    const id2 = try TypedResourceId(i32).register(&ctx, .{ .label = "resource-2" });
-    defer id2.unregister(&ctx);
+    const id2 = try TypedResourceId(i32).register(GlobalCtx, .{ .label = "resource-2" });
+    defer id2.unregister(GlobalCtx);
     try std.testing.expect(id1 != id2);
 }
 
 test "resource: add to world" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const id = try TypedResourceId(i32).register(&ctx, .{ .label = "resource-1" });
-    defer id.unregister(&ctx);
+    const id = try TypedResourceId(i32).register(GlobalCtx, .{ .label = "resource-1" });
+    defer id.unregister(GlobalCtx);
 
-    const world = try World.init(&ctx, .{ .label = "test-world" });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
 
     const value: i32 = 5;
-    try std.testing.expect(!id.existsInWorld(&ctx, world));
-    try id.addToWorld(&ctx, world, value);
-    defer _ = id.removeFromWorld(&ctx, world) catch unreachable;
-    try std.testing.expect(id.existsInWorld(&ctx, world));
+    try std.testing.expect(!id.existsInWorld(GlobalCtx, world));
+    try id.addToWorld(GlobalCtx, world, value);
+    defer _ = id.removeFromWorld(GlobalCtx, world) catch unreachable;
+    try std.testing.expect(id.existsInWorld(GlobalCtx, world));
 
-    const ptr = id.lockInWorldExclusive(&ctx, world);
-    defer id.unlockInWorldExclusive(&ctx, world);
+    const ptr = id.lockInWorldExclusive(GlobalCtx, world);
+    defer id.unlockInWorldExclusive(GlobalCtx, world);
     try std.testing.expectEqual(value, ptr.*);
 }
 
 test "resource: unique lock" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const id = try TypedResourceId(usize).register(&ctx, .{ .label = "resource-1" });
-    defer id.unregister(&ctx);
+    const id = try TypedResourceId(usize).register(GlobalCtx, .{ .label = "resource-1" });
+    defer id.unregister(GlobalCtx);
 
-    const world = try World.init(&ctx, .{ .label = "test-world" });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
 
-    const executor = world.getPool(&ctx);
+    const executor = world.getPool(GlobalCtx);
     defer executor.unref();
 
-    try id.addToWorld(&ctx, world, 0);
-    defer _ = id.removeFromWorld(&ctx, world) catch unreachable;
+    try id.addToWorld(GlobalCtx, world, 0);
+    defer _ = id.removeFromWorld(GlobalCtx, world) catch unreachable;
 
     const num_jobs = 4;
     const iterations = 1000;
 
     const Runner = struct {
-        ctx: *const testing.TestContext,
         id: TypedResourceId(usize),
         world: *World,
 
         fn run(self: @This()) void {
             for (0..iterations) |_| {
-                const ptr = self.id.lockInWorldExclusive(self.ctx, self.world);
-                defer self.id.unlockInWorldExclusive(self.ctx, self.world);
+                const ptr = self.id.lockInWorldExclusive(GlobalCtx, self.world);
+                defer self.id.unlockInWorldExclusive(GlobalCtx, self.world);
                 ptr.* += 1;
             }
         }
@@ -198,37 +200,38 @@ test "resource: unique lock" {
 
     var fences = [_]Fence{.{}} ** num_jobs;
     for (&fences) |*fence| try Job.go(
-        &ctx,
+        GlobalCtx,
         Runner.run,
-        .{.{ .ctx = &ctx, .id = id, .world = world }},
+        .{.{ .id = id, .world = world }},
         .{
             .allocator = std.testing.allocator,
             .executor = executor,
             .signal = .{ .fence = fence },
         },
     );
-    for (&fences) |*fence| fence.wait(&ctx);
+    for (&fences) |*fence| fence.wait(GlobalCtx);
 
-    const ptr = id.lockInWorldExclusive(&ctx, world);
-    defer id.unlockInWorldExclusive(&ctx, world);
+    const ptr = id.lockInWorldExclusive(GlobalCtx, world);
+    defer id.unlockInWorldExclusive(GlobalCtx, world);
     try std.testing.expectEqual(num_jobs * iterations, ptr.*);
 }
 
 test "resource: shared lock" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
 
-    const id = try TypedResourceId(usize).register(&ctx, .{ .label = "resource-1" });
-    defer id.unregister(&ctx);
+    const id = try TypedResourceId(usize).register(GlobalCtx, .{ .label = "resource-1" });
+    defer id.unregister(GlobalCtx);
 
-    const world = try World.init(&ctx, .{ .label = "test-world" });
-    defer world.deinit(&ctx);
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
 
-    const executor = world.getPool(&ctx);
+    const executor = world.getPool(GlobalCtx);
     defer executor.unref();
 
-    try id.addToWorld(&ctx, world, 0);
-    defer _ = id.removeFromWorld(&ctx, world) catch unreachable;
+    try id.addToWorld(GlobalCtx, world, 0);
+    defer _ = id.removeFromWorld(GlobalCtx, world) catch unreachable;
 
     const num_writers: usize = 2;
     const num_readers: usize = 4;
@@ -236,7 +239,6 @@ test "resource: shared lock" {
     const num_reads: usize = num_writes * 2;
 
     const Runner = struct {
-        ctx: *const testing.TestContext,
         world: *World,
 
         writes: TypedResourceId(usize),
@@ -250,8 +252,8 @@ test "resource: shared lock" {
 
         fn reader(self: *Self) void {
             while (true) {
-                const writes = self.writes.lockInWorldShared(self.ctx, self.world);
-                defer self.writes.unlockInWorldShared(self.ctx, self.world);
+                const writes = self.writes.lockInWorldShared(GlobalCtx, self.world);
+                defer self.writes.unlockInWorldShared(GlobalCtx, self.world);
 
                 if (writes.* >= num_writes or self.reads.load(.unordered) >= num_reads)
                     break;
@@ -267,8 +269,8 @@ test "resource: shared lock" {
             var rnd = prng.random();
 
             while (true) {
-                const writes = self.writes.lockInWorldExclusive(self.ctx, self.world);
-                defer self.writes.unlockInWorldExclusive(self.ctx, self.world);
+                const writes = self.writes.lockInWorldExclusive(GlobalCtx, self.world);
+                defer self.writes.unlockInWorldExclusive(GlobalCtx, self.world);
 
                 if (writes.* >= num_writes)
                     break;
@@ -278,11 +280,11 @@ test "resource: shared lock" {
                 const term1 = rnd.int(usize);
                 self.term1 = term1;
 
-                fimo_tasks_meta.task.yield(self.ctx);
+                fimo_tasks_meta.task.yield(GlobalCtx);
 
                 const term2 = rnd.int(usize);
                 self.term2 = term2;
-                fimo_tasks_meta.task.yield(self.ctx);
+                fimo_tasks_meta.task.yield(GlobalCtx);
 
                 self.term_sum = term1 +% term2;
                 writes.* += 1;
@@ -291,35 +293,35 @@ test "resource: shared lock" {
 
         fn check(self: *const Self) void {
             const term_sum = self.term_sum;
-            fimo_tasks_meta.task.yield(self.ctx);
+            fimo_tasks_meta.task.yield(GlobalCtx);
 
             const term2 = self.term2;
-            fimo_tasks_meta.task.yield(self.ctx);
+            fimo_tasks_meta.task.yield(GlobalCtx);
 
             const term1 = self.term1;
             std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;
         }
     };
 
-    var runner = Runner{ .ctx = &ctx, .world = world, .writes = id };
+    var runner = Runner{ .world = world, .writes = id };
     var fences = [_]Fence{.{}} ** (num_writers + num_readers);
 
     for (fences[0..num_writers], 0..) |*f, i| try Job.go(
-        &ctx,
+        GlobalCtx,
         Runner.writer,
         .{ &runner, i },
         .{ .allocator = std.testing.allocator, .executor = executor, .signal = .{ .fence = f } },
     );
     for (fences[num_writers..]) |*f| try Job.go(
-        &ctx,
+        GlobalCtx,
         Runner.reader,
         .{&runner},
         .{ .allocator = std.testing.allocator, .executor = executor, .signal = .{ .fence = f } },
     );
 
-    for (&fences) |*fence| fence.wait(&ctx);
+    for (&fences) |*fence| fence.wait(GlobalCtx);
 
-    const writes = id.lockInWorldShared(&ctx, world);
-    defer id.unlockInWorldShared(&ctx, world);
+    const writes = id.lockInWorldShared(GlobalCtx, world);
+    defer id.unlockInWorldShared(GlobalCtx, world);
     try std.testing.expectEqual(num_writes, writes.*);
 }

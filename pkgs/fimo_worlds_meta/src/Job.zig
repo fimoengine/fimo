@@ -205,7 +205,7 @@ pub const SpawnOptions = struct {
     /// Information required for a wait/signal operation on a semaphore.
     pub const TimelineSemaphoreInfo = struct {
         semaphore: *TimelineSemaphore,
-        counter: u63,
+        counter: u64,
     };
 
     /// Object that can be signaled at the end of a job.
@@ -233,28 +233,30 @@ pub fn go(
     ) catch return error.SpawnFailed;
     const Wrapper = struct {
         fn start(
-            prov: @TypeOf(provider),
+            prov: if (@TypeOf(provider) == type) void else @TypeOf(provider),
             wait: []*Fence,
             wait_sem: []SpawnOptions.TimelineSemaphoreInfo,
             args_: std.meta.ArgsTuple(@TypeOf(function)),
         ) void {
-            for (wait) |f| f.wait(prov);
-            for (wait_sem) |i| i.semaphore.wait(prov, i.counter);
+            const p = if (@TypeOf(provider) == type) provider else prov;
+            for (wait) |f| f.wait(p);
+            for (wait_sem) |i| i.semaphore.wait(p, i.counter);
             @call(.auto, function, args_);
         }
 
         fn cleanup(
-            prov: @TypeOf(provider),
+            prov: if (@TypeOf(provider) == type) void else @TypeOf(provider),
             allocator: Allocator,
             f: []*Fence,
             sem: []SpawnOptions.TimelineSemaphoreInfo,
             signal: ?SpawnOptions.SignalObject,
         ) void {
+            const p = if (@TypeOf(provider) == type) provider else prov;
             allocator.free(f);
             allocator.free(sem);
             if (signal) |s| switch (s) {
-                .fence => |x| x.signal(prov),
-                .timeline_semaphore => |x| x.semaphore.signal(prov, x.counter),
+                .fence => |x| x.signal(p),
+                .timeline_semaphore => |x| x.semaphore.signal(p, x.counter),
                 else => unreachable,
             };
         }
@@ -266,9 +268,9 @@ pub fn go(
     future.goWithCleanup(
         options.executor,
         Wrapper.start,
-        .{ provider, fences, semaphores, args },
+        .{ if (@TypeOf(provider) == type) {} else provider, fences, semaphores, args },
         Wrapper.cleanup,
-        .{ provider, options.allocator, fences, semaphores, options.signal },
+        .{ if (@TypeOf(provider) == type) {} else provider, options.allocator, fences, semaphores, options.signal },
         .{
             .allocator = options.allocator,
             .label = options.label,

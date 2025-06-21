@@ -2,6 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 
+const fimo_std = @import("fimo_std");
+const AnyError = fimo_std.AnyError;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 
@@ -11,6 +13,7 @@ const resources = @import("resources.zig");
 const TypedResourceId = resources.TypedResourceId;
 const ResourceId = resources.ResourceId;
 const symbols = @import("symbols.zig");
+const testing = @import("testing.zig");
 const worlds = @import("worlds.zig");
 const World = worlds.World;
 
@@ -73,6 +76,7 @@ pub const SystemGroup = opaque {
         var group: *SystemGroup = undefined;
         const sym = symbols.system_group_create.requestFrom(provider);
         if (sym(&desc, &group).isErr()) return error.InitFailed;
+        return group;
     }
 
     /// Destroys the system group.
@@ -81,7 +85,7 @@ pub const SystemGroup = opaque {
     /// and must be empty.
     pub fn deinit(self: *SystemGroup, provider: anytype) void {
         const sym = symbols.system_group_destroy.requestFrom(provider);
-        return sym(self);
+        sym(self);
     }
 
     /// Returns the world the group is contained in.
@@ -93,7 +97,7 @@ pub const SystemGroup = opaque {
     /// Returns the label of the system group.
     pub fn getLabel(self: *SystemGroup, provider: anytype) ?[]const u8 {
         var len: usize = undefined;
-        const sym = symbols.system_group_get_world.requestFrom(provider);
+        const sym = symbols.system_group_get_label.requestFrom(provider);
         if (sym(self, &len)) |label| return label[0..len];
         return null;
     }
@@ -155,13 +159,17 @@ pub const SystemGroup = opaque {
     /// Each schedule operation is assigned to one generation of the system group, which is an index
     /// that is increased by one each time the group finishes executing all systems. Multiple generations
     /// are run sequentially.
+    ///
+    /// Note that the system group must acquire the resources for the contained systems before executing
+    /// them. The manner in which this is accomplished is unspecified. A valid implementation would be
+    /// to lock all resources for the entire system group exclusively before starting its execution.
     pub fn schedule(
         self: *SystemGroup,
         provider: anytype,
         wait_on: []const *Fence,
         signal: ?*Fence,
     ) error{ScheduleFailed}!void {
-        const sym = symbols.system_group_add_systems.requestFrom(provider);
+        const sym = symbols.system_group_schedule.requestFrom(provider);
         if (sym(self, wait_on.ptr, wait_on.len, signal).isErr()) return error.ScheduleFailed;
     }
 
@@ -178,6 +186,94 @@ pub const SystemGroup = opaque {
         fence.wait(provider);
     }
 };
+
+test "SystemGroup: smoke test" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
+    defer group.deinit(GlobalCtx);
+    try std.testing.expectEqual(world, group.getWorld(GlobalCtx));
+
+    const world_ex = world.getPool(GlobalCtx);
+    defer world_ex.unref();
+    const group_ex = group.getPool(GlobalCtx);
+    defer group_ex.unref();
+    try std.testing.expectEqual(world_ex.id(), group_ex.id());
+
+    const label = group.getLabel(GlobalCtx).?;
+    try std.testing.expectEqualSlices(u8, "test-group", label);
+}
+
+test "SystemGroup: custom pool" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    var err: ?AnyError = null;
+    defer if (err) |e| e.deinit();
+
+    const executor = try Pool.init(GlobalCtx, &.{}, &err);
+    defer {
+        executor.requestClose();
+        executor.unref();
+    }
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group", .pool = executor });
+    defer group.deinit(GlobalCtx);
+
+    const ex = group.getPool(GlobalCtx);
+    defer ex.unref();
+    try std.testing.expectEqual(executor.id(), ex.id());
+}
+
+test "SystemGroup: schedule" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
+    defer group.deinit(GlobalCtx);
+
+    const resource = try TypedResourceId(u32).register(GlobalCtx, .{ .label = "test-resource" });
+    defer resource.unregister(GlobalCtx);
+
+    try resource.addToWorld(GlobalCtx, world, 0);
+    defer _ = resource.removeFromWorld(GlobalCtx, world) catch unreachable;
+
+    const Sys = System.simple(struct {
+        fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct { a: *u32 }) void {
+            _ = ctx;
+            _ = exclusive;
+            shared.a.* += 1;
+        }
+    }.run);
+    const sys = try Sys.register(GlobalCtx, "test-system", {}, .{}, .{resource}, &.{}, &.{});
+    defer sys.unregister(GlobalCtx);
+
+    try group.addSytems(GlobalCtx, &.{sys});
+    defer group.removeSystem(GlobalCtx, sys);
+
+    try group.schedule(GlobalCtx, &.{}, null);
+    try group.schedule(GlobalCtx, &.{}, null);
+    try group.schedule(GlobalCtx, &.{}, null);
+    try group.schedule(GlobalCtx, &.{}, null);
+    try group.run(GlobalCtx, &.{});
+
+    const ptr = resource.lockInWorldShared(GlobalCtx, world);
+    defer resource.unlockInWorldShared(GlobalCtx, world);
+    try std.testing.expectEqual(5, ptr.*);
+}
 
 /// Context of an instantiated system in a system group.
 pub const SystemContext = opaque {
@@ -356,15 +452,14 @@ pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStra
 /// Interface of a system.
 pub const System = struct {
     FactoryT: type,
-    deinit_factory: ?*const fn (factory: ?*anyopaque) callconv(.c) void,
+    deinit_factory: ?*const fn (factory: ?*const anyopaque) callconv(.c) void,
 
     SystemT: type,
     ExclusiveResourceIdsT: type,
     SharedResourceIdsT: type,
     init: *const fn (
         factory: ?*const anyopaque,
-        world: *World,
-        group: *SystemGroup,
+        context: *SystemContext,
         system: ?*anyopaque,
     ) callconv(.c) bool,
     deinit: ?*const fn (system: ?*anyopaque) callconv(.c) void,
@@ -372,7 +467,8 @@ pub const System = struct {
         system: ?*anyopaque,
         unique_resources: ?[*]const *anyopaque,
         shared_resources: ?[*]const *anyopaque,
-    ) callconv(.c) ?*Fence,
+        deferred_fence: *Fence,
+    ) callconv(.c) void,
 
     /// Descriptor of a system dependency.
     pub const Dependency = extern struct {
@@ -470,8 +566,8 @@ pub const System = struct {
         factory: self.FactoryT,
         exclusive_ids: self.ExclusiveResourceIdsT,
         shared_ids: self.SharedResourceIdsT,
-        before: []Dependency,
-        after: []Dependency,
+        before: []const Dependency,
+        after: []const Dependency,
     ) error{RegisterFailed}!SystemId {
         var exclusive: [exclusive_ids.len]ResourceId = undefined;
         inline for (0..exclusive.len) |i| exclusive[i] = exclusive_ids[i].asId();
@@ -511,11 +607,11 @@ pub const System = struct {
     /// A simple system using only a stateless function.
     pub fn simple(comptime runFn: anytype) System {
         const run_info = @typeInfo(@TypeOf(runFn)).@"fn";
-        if (run_info.params.len != 3)
-            @compileError("The system run function must take three parameters.");
-        const ExclusiveArgs = run_info.params[1];
-        const SharedArgs = run_info.params[2];
-        const has_signal = run_info.return_type.? != void;
+        if (run_info.params.len != 3 and run_info.params.len != 4)
+            @compileError("The system run function must take three or four parameters.");
+        const ExclusiveArgs = run_info.params[1].type.?;
+        const SharedArgs = run_info.params[2].type.?;
+        const has_signal = run_info.params.len == 4;
 
         const Wrapper = struct {
             context: *SystemContext,
@@ -525,12 +621,12 @@ pub const System = struct {
                 return .{ .context = context };
             }
 
-            fn run(self: *@This(), exclusive: ExclusiveArgs, shared: SharedArgs) ?*Fence {
-                if (has_signal) {
-                    return runFn(self.context, exclusive, shared);
+            fn run(self: *@This(), exclusive: ExclusiveArgs, shared: SharedArgs, deferred_fence: *Fence) void {
+                if (comptime has_signal) {
+                    runFn(self.context, exclusive, shared, deferred_fence);
                 } else {
                     runFn(self.context, exclusive, shared);
-                    return null;
+                    deferred_fence.state.store(Fence.signaled, .release);
                 }
             }
         };
@@ -542,7 +638,7 @@ pub const System = struct {
     pub fn complex(
         FactoryT: type,
         SystemT: type,
-        comptime deinitFactoryFn: ?fn (factory: *FactoryT) void,
+        comptime deinitFactoryFn: ?fn (factory: *const FactoryT) void,
         comptime initFn: fn (
             factory: *const FactoryT,
             context: *SystemContext,
@@ -551,16 +647,16 @@ pub const System = struct {
         comptime runFn: anytype,
     ) System {
         const run_info = @typeInfo(@TypeOf(runFn)).@"fn";
-        if (run_info.params.len != 3)
-            @compileError("The system run function must take three parameters.");
+        if (run_info.params.len != 3 and run_info.params.len != 4)
+            @compileError("The system run function must take three or four parameters.");
         if (run_info.params[0].type.? != *SystemT)
             @compileError("The first argument of the run function must be a pointer to the state");
 
-        const ExclusiveArgs = run_info.params[1];
-        const SharedArgs = run_info.params[2];
-        const has_signal = run_info.return_type.? != void;
+        const ExclusiveArgs = run_info.params[1].type.?;
+        const SharedArgs = run_info.params[2].type.?;
+        const has_signal = run_info.params.len == 4;
 
-        const ExclusiveResourceIdsT = if (@sizeOf(ExclusiveArgs) == 0) struct {} else blk: {
+        const ExclusiveResourceIdsT = if (@sizeOf(ExclusiveArgs) == 0) std.meta.Tuple(&.{}) else blk: {
             const fields = @typeInfo(ExclusiveArgs).@"struct".fields;
             var types: [fields.len]type = undefined;
             for (0..fields.len) |i| {
@@ -569,10 +665,10 @@ pub const System = struct {
                 if (T != *Resource) @compileError("Resource parameters must be non-const pointers");
                 types[i] = TypedResourceId(Resource);
             }
-            break :blk std.meta.Tuple(types);
+            break :blk std.meta.Tuple(&types);
         };
 
-        const SharedResourceIdsT = if (@sizeOf(SharedArgs) == 0) struct {} else blk: {
+        const SharedResourceIdsT = if (@sizeOf(SharedArgs) == 0) std.meta.Tuple(&.{}) else blk: {
             const fields = @typeInfo(SharedArgs).@"struct".fields;
             var types: [fields.len]type = undefined;
             for (0..fields.len) |i| {
@@ -581,11 +677,11 @@ pub const System = struct {
                 if (T != *Resource) @compileError("Resource parameters must be non-const pointers");
                 types[i] = TypedResourceId(Resource);
             }
-            break :blk std.meta.Tuple(types);
+            break :blk std.meta.Tuple(&types);
         };
 
         const Wrapper = struct {
-            fn deinitFactory(factory: ?*anyopaque) callconv(.c) void {
+            fn deinitFactory(factory: ?*const anyopaque) callconv(.c) void {
                 const f = deinitFactoryFn.?;
                 if (comptime @sizeOf(FactoryT) != 0)
                     f(@ptrCast(@alignCast(factory.?)))
@@ -622,7 +718,8 @@ pub const System = struct {
                 system: ?*anyopaque,
                 exclusive_resources: ?[*]const *anyopaque,
                 shared_resources: ?[*]const *anyopaque,
-            ) callconv(.c) ?*Fence {
+                deferred_fence: *Fence,
+            ) callconv(.c) void {
                 const sys: *SystemT = if (comptime @sizeOf(SystemT) != 0)
                     @ptrCast(@alignCast(system.?))
                 else
@@ -631,24 +728,24 @@ pub const System = struct {
                 if (comptime @sizeOf(ExclusiveArgs) == 0) exclusive = ExclusiveArgs{} else {
                     const arr = exclusive_resources.?;
                     const fields = std.meta.fields(ExclusiveArgs);
-                    inline for (0..fields.len) |i| {
-                        exclusive[i] = @ptrCast(@alignCast(arr[i]));
+                    inline for (fields, 0..) |field, i| {
+                        @field(exclusive, field.name) = @ptrCast(@alignCast(arr[i]));
                     }
                 }
                 var shared: SharedArgs = undefined;
                 if (comptime @sizeOf(SharedArgs) == 0) shared = SharedArgs{} else {
                     const arr = shared_resources.?;
                     const fields = std.meta.fields(SharedArgs);
-                    inline for (0..fields.len) |i| {
-                        shared[i] = @ptrCast(@alignCast(arr[i]));
+                    inline for (fields, 0..) |field, i| {
+                        @field(shared, field.name) = @ptrCast(@alignCast(arr[i]));
                     }
                 }
 
                 if (comptime has_signal) {
-                    return runFn(sys, exclusive, shared);
+                    runFn(sys, exclusive, shared, deferred_fence);
                 } else {
                     runFn(sys, exclusive, shared);
-                    return null;
+                    deferred_fence.state.store(Fence.signaled, .release);
                 }
             }
         };
@@ -665,3 +762,107 @@ pub const System = struct {
         };
     }
 };
+
+test "System: system definitions" {
+    const TupleTester = struct {
+        fn assertTuple(comptime expected: anytype, comptime Actual: type) void {
+            const info = @typeInfo(Actual);
+            if (info != .@"struct")
+                @compileError("Expected struct type");
+            if (!info.@"struct".is_tuple)
+                @compileError("Struct type must be a tuple type");
+
+            const fields_list = std.meta.fields(Actual);
+            if (expected.len != fields_list.len)
+                @compileError("Argument count mismatch");
+
+            inline for (fields_list, 0..) |fld, i| {
+                if (expected[i] != fld.type) {
+                    @compileError("Field " ++ fld.name ++ " expected to be type " ++ @typeName(expected[i]) ++ ", but was type " ++ @typeName(fld.type));
+                }
+            }
+        }
+    };
+
+    const Dummy = struct {
+        fn simple0(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
+            _ = ctx;
+            _ = exclusive;
+            _ = shared;
+        }
+        fn simple1(ctx: *SystemContext, exclusive: struct { *i32, *u32 }, shared: struct {}) void {
+            _ = ctx;
+            _ = exclusive;
+            _ = shared;
+        }
+        fn simple2(ctx: *SystemContext, exclusive: struct {}, shared: struct { *i32, *u32 }) void {
+            _ = ctx;
+            _ = exclusive;
+            _ = shared;
+        }
+        fn simple3(ctx: *SystemContext, exclusive: struct { *i32, *u32 }, shared: struct { *f32 }) void {
+            _ = ctx;
+            _ = exclusive;
+            _ = shared;
+        }
+    };
+
+    const Simple0 = System.simple(Dummy.simple0);
+    TupleTester.assertTuple(.{}, Simple0.ExclusiveResourceIdsT);
+    TupleTester.assertTuple(.{}, Simple0.SharedResourceIdsT);
+
+    const Simple1 = System.simple(Dummy.simple1);
+    TupleTester.assertTuple(.{ TypedResourceId(i32), TypedResourceId(u32) }, Simple1.ExclusiveResourceIdsT);
+    TupleTester.assertTuple(.{}, Simple1.SharedResourceIdsT);
+
+    const Simple2 = System.simple(Dummy.simple2);
+    TupleTester.assertTuple(.{}, Simple2.ExclusiveResourceIdsT);
+    TupleTester.assertTuple(.{ TypedResourceId(i32), TypedResourceId(u32) }, Simple2.SharedResourceIdsT);
+
+    const Simple3 = System.simple(Dummy.simple3);
+    TupleTester.assertTuple(.{ TypedResourceId(i32), TypedResourceId(u32) }, Simple3.ExclusiveResourceIdsT);
+    TupleTester.assertTuple(.{TypedResourceId(f32)}, Simple3.SharedResourceIdsT);
+}
+
+test "System: smoke test" {
+    const Dummy = System.simple(struct {
+        fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
+            _ = ctx;
+            _ = exclusive;
+            _ = shared;
+        }
+    }.run);
+
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const sys0 = try Dummy.register(GlobalCtx, "system-0", {}, .{}, .{}, &.{}, &.{});
+    defer sys0.unregister(GlobalCtx);
+}
+
+test "System: cyclic dependency" {
+    if (true) return error.SkipZigTest;
+
+    const Dummy = System.simple(struct {
+        fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
+            _ = ctx;
+            _ = exclusive;
+            _ = shared;
+        }
+    }.run);
+
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const sys0 = try Dummy.register(GlobalCtx, "system-0", {}, .{}, .{}, &.{}, &.{});
+    defer sys0.unregister(GlobalCtx);
+
+    const sys1 = try Dummy.register(GlobalCtx, "system-1", {}, .{}, .{}, &.{}, &.{.{ .system = sys0 }});
+    defer sys1.unregister(GlobalCtx);
+
+    const sys2 = Dummy.register(GlobalCtx, "system-2", {}, .{}, .{}, &.{.{ .system = sys0 }}, &.{.{ .system = sys1 }}) catch return;
+    sys2.unregister(GlobalCtx);
+    try std.testing.expect(false);
+}

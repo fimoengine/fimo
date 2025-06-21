@@ -446,6 +446,10 @@ pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !voi
             .allocator = universe.allocator,
             .label = self.label,
             .fences = fences,
+            .semaphores = &.{.{
+                .semaphore = &self.system_graph.schedule_semaphore,
+                .counter = generation,
+            }},
             .signal = if (fence) |f| .{ .fence = f } else null,
         },
     );
