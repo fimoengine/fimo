@@ -142,6 +142,9 @@ pub fn completeTask(self: *Self, task: *Task, is_error: bool) void {
                 .{ task, self },
                 @src(),
             );
+            const stack_allocator = self.owner.getStackAllocator(task.stack_size).?;
+            stack_allocator.deallocate(task.stack);
+
             self.entry_status[task.entry_index] = .processed;
             if (is_error) self.abortFromIndex(task.entry_index);
             self.progressCompleted();
