@@ -28,11 +28,10 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
             .windows => {
                 if (context.rootModuleTarget().abi == .msvc) {
                     context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_arm64_aapcs_pe_armasm.asm"));
-                    context.root_module.addAssemblyFile(context_path.path(b, "asm/make_arm64_aapcs_pe_armasm.asm"));
                     context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_arm64_aapcs_pe_armasm.asm"));
                 }
             },
-            .macos => {
+            .macos, .ios, .watchos, .tvos, .visionos => {
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_arm64_aapcs_macho_gas.S"));
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/make_arm64_aapcs_macho_gas.S"));
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_arm64_aapcs_macho_gas.S"));
@@ -43,24 +42,15 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_arm64_aapcs_elf_gas.S"));
             },
         },
-        .riscv64 => {
-            context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_riscv64_sysv_elf_gas.S"));
-            context.root_module.addAssemblyFile(context_path.path(b, "asm/make_riscv64_sysv_elf_gas.S"));
-            context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_riscv64_sysv_elf_gas.S"));
-        },
         .x86_64 => switch (context.rootModuleTarget().os.tag) {
             .windows => {
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_x86_64_ms_pe_clang_gas.S"));
-                context.root_module.addAssemblyFile(context_path.path(b, "asm/make_x86_64_ms_pe_clang_gas.S"));
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_x86_64_ms_pe_clang_gas.S"));
             },
-            .macos => {
-                context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_i386_x86_64_sysv_macho_gas.S"));
+            .macos, .ios, .watchos, .tvos, .visionos => {
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_x86_64_sysv_macho_gas.S"));
-                context.root_module.addAssemblyFile(context_path.path(b, "asm/make_i386_x86_64_sysv_macho_gas.S"));
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/make_x86_64_sysv_macho_gas.S"));
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_x86_64_sysv_macho_gas.S"));
-                context.root_module.addAssemblyFile(context_path.path(b, "asm/ontop_i386_x86_64_sysv_macho_gas.S"));
             },
             else => {
                 context.root_module.addAssemblyFile(context_path.path(b, "asm/jump_x86_64_sysv_elf_gas.S"));

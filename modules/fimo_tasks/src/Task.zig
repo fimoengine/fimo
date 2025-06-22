@@ -61,7 +61,7 @@ pub fn ensureReady(self: *Self) void {
     std.debug.assert(self.context == null);
     std.debug.assert(self.call_stack == null);
 
-    self.context = Context.init(self.stack.memory, &Worker.taskEntry);
+    self.context = Context.init(.forStack(self.stack), &Worker.taskEntry);
     if (self.owner.owner.runtime.getTracing()) |tracing| self.call_stack = CallStack.init(tracing);
     self.state = .init;
 }
@@ -79,6 +79,7 @@ pub fn afterExit(self: *Self, is_abort: bool) void {
     if (self.call_stack) |cs| if (is_abort) cs.deinitAbort() else cs.deinit();
     self.local_result.deinit();
     std.debug.assert(self.context != null);
+    self.stack.updateCommitedSizeFromContext(self.context.?);
     self.context = null;
 }
 

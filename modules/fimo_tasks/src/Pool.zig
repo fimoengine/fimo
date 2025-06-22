@@ -106,15 +106,14 @@ pub const StackAllocator = struct {
     waiters_tail: ?*CommandBuffer = null,
     cold_freelist: ArrayListUnmanaged(Stack) = .empty,
     hot_freelist: ArrayListUnmanaged(Stack) = .empty,
+    deallocation_cache: ArrayListUnmanaged(Stack) = .empty,
 
     pub const Error = error{Block} || Allocator.Error;
 
     pub fn allocate(self: *StackAllocator) Error!Stack {
+        if (self.deallocation_cache.pop()) |stack| return stack;
         if (self.hot_freelist.pop()) |stack| return stack;
-        if (self.cold_freelist.pop()) |stack| {
-            stack.transitionHot();
-            return stack;
-        }
+        if (self.cold_freelist.pop()) |stack| return stack;
 
         if (self.allocated == self.max_allocated) return error.Block;
         const stack = try Stack.init(self.size);
@@ -123,14 +122,10 @@ pub const StackAllocator = struct {
     }
 
     pub fn deallocate(self: *StackAllocator, stack: Stack) void {
-        if (self.hot_freelist.items.len < self.hot_freelist.capacity) {
-            self.hot_freelist.appendAssumeCapacity(stack);
-        } else if (self.cold_freelist.items.len < self.cold_freelist.capacity) {
-            stack.transitionCold();
-            self.cold_freelist.appendAssumeCapacity(stack);
+        if (self.deallocation_cache.items.len < self.deallocation_cache.capacity) {
+            self.deallocation_cache.appendAssumeCapacity(stack);
         } else {
-            stack.deinit();
-            self.allocated -= 1;
+            self.deallocateStackNoCache(stack);
         }
         self.signal();
     }
@@ -156,6 +151,21 @@ pub const StackAllocator = struct {
             self.waiters_head = next;
             if (next == null) self.waiters_tail = null;
             waiter.enqueueToPool();
+        }
+    }
+
+    fn clearCache(self: *StackAllocator) void {
+        while (self.deallocation_cache.pop()) |stack| self.deallocateStackNoCache(stack);
+    }
+
+    fn deallocateStackNoCache(self: *StackAllocator, stack: Stack) void {
+        if (self.hot_freelist.items.len < self.hot_freelist.capacity) {
+            self.hot_freelist.appendAssumeCapacity(stack);
+        } else if (self.cold_freelist.items.len < self.cold_freelist.capacity) {
+            self.cold_freelist.appendAssumeCapacity(stack.transitionCold());
+        } else {
+            stack.deinit();
+            self.allocated -= 1;
         }
     }
 };
@@ -227,6 +237,7 @@ pub fn init(options: InitOptions) !*Self {
             for (stack_allocator.hot_freelist.items) |stack| stack.deinit();
             stack_allocator.cold_freelist.deinit(allocator);
             stack_allocator.hot_freelist.deinit(allocator);
+            stack_allocator.deallocation_cache.deinit(allocator);
         }
         allocator.free(self.stack_allocators);
     }
@@ -238,12 +249,12 @@ pub fn init(options: InitOptions) !*Self {
         };
         al.cold_freelist = try ArrayListUnmanaged(Stack).initCapacity(allocator, stack.cold);
         al.hot_freelist = try ArrayListUnmanaged(Stack).initCapacity(allocator, stack.hot);
+        al.deallocation_cache = try ArrayListUnmanaged(Stack).initCapacity(allocator, options.worker_count * 2);
 
         const preallocated_hot = @min(stack.hot, stack.preallocated);
         const preallocated_cold = @min(stack.cold, stack.preallocated - preallocated_hot);
         for (0..preallocated_cold) |_| {
             const s = try Stack.init(al.size);
-            s.transitionCold();
             al.cold_freelist.appendAssumeCapacity(s);
         }
         for (0..preallocated_hot) |_| {
@@ -705,6 +716,9 @@ fn runEventLoop(self: *Self) void {
             curr_msg = rx.tryRecv() catch null;
         }
 
+        // Clear the cached stacks.
+        for (self.stack_allocators) |*al| al.clearCache();
+
         // Compute the next timeout and wake timed out waiters.
         next_timeout = max_timeout;
         const now = Instant.now();
@@ -760,8 +774,10 @@ fn runEventLoop(self: *Self) void {
     for (self.stack_allocators) |*stack_allocator| {
         for (stack_allocator.hot_freelist.items) |stack| stack.deinit();
         for (stack_allocator.cold_freelist.items) |stack| stack.deinit();
+        for (stack_allocator.deallocation_cache.items) |stack| stack.deinit();
         stack_allocator.hot_freelist.deinit(self.allocator);
         stack_allocator.cold_freelist.deinit(self.allocator);
+        stack_allocator.deallocation_cache.deinit(self.allocator);
     }
     self.allocator.free(self.stack_allocators);
     self.stack_allocators = &.{};

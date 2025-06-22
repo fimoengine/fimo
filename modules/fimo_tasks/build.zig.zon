@@ -6,8 +6,8 @@
             .path = "../../tools/build-internals",
         },
         .context = .{
-            .url = "git+https://github.com/boostorg/context#boost-1.87.0",
-            .hash = "122009893042c6626f0a48b8b9e25dc8f57fe19ed31f3955fcdbcc47cc4e92d9a3f1",
+            .url = "git+https://github.com/boostorg/context#boost-1.88.0",
+            .hash = "N-V-__8AABULGgBHBYkz_t6_qyRzDoIG-1xDz6mHJcUVFDL0",
         },
     },
     .paths = .{
