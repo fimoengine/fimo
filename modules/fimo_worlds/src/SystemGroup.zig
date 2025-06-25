@@ -19,7 +19,7 @@ const Job = fimo_worlds_meta.Job;
 const Fence = Job.Fence;
 const TimelineSemaphore = Job.TimelineSemaphore;
 const SystemId = fimo_worlds_meta.systems.SystemId;
-const ResourceId = fimo_worlds_meta.resources.ResourceId;
+const Resource = fimo_worlds_meta.resources.Resource;
 
 const heap = @import("heap.zig");
 const System = @import("System.zig");
@@ -42,7 +42,7 @@ const Graph = struct {
     next_generation: usize = 0,
     schedule_semaphore: TimelineSemaphore = .{},
     entries: []Entry = &.{},
-    resources: AutoArrayHashMapUnmanaged(ResourceId, *anyopaque) = .empty,
+    resources: AutoArrayHashMapUnmanaged(*Resource, *anyopaque) = .empty,
     arena: ArenaAllocator = .init(std.heap.page_allocator),
     systems: AutoArrayHashMapUnmanaged(SystemId, *System) = .empty,
     deinit_list: DoublyLinkedList = .{},

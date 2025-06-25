@@ -10,7 +10,7 @@ const Job = @import("Job.zig");
 const Fence = Job.Fence;
 const resources = @import("resources.zig");
 const RegisterResourceOptions = resources.RegisterOptions;
-const ResourceId = resources.ResourceId;
+const Resource = resources.Resource;
 const systems = @import("systems.zig");
 const SystemId = systems.SystemId;
 const SystemGroup = systems.SystemGroup;
@@ -69,7 +69,7 @@ pub const resource_register = Symbol{
     .version = context_version,
     .T = fn (
         resource: *const RegisterResourceOptions.Descriptor,
-        id: *ResourceId,
+        handle: **Resource,
     ) callconv(.c) Status,
 };
 
@@ -77,7 +77,7 @@ pub const resource_unregister = Symbol{
     .name = "resource_unregister",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (id: ResourceId) callconv(.c) void,
+    .T = fn (handle: *Resource) callconv(.c) void,
 };
 
 pub const system_register = Symbol{
@@ -264,21 +264,21 @@ pub const world_has_resource = Symbol{
     .name = "world_has_resource",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId) callconv(.c) bool,
+    .T = fn (world: *World, handle: *Resource) callconv(.c) bool,
 };
 
 pub const world_add_resource = Symbol{
     .name = "world_add_resource",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId, value: *const anyopaque) callconv(.c) Status,
+    .T = fn (world: *World, handle: *Resource, value: *const anyopaque) callconv(.c) Status,
 };
 
 pub const world_remove_resource = Symbol{
     .name = "world_remove_resource",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId, value: *anyopaque) callconv(.c) Status,
+    .T = fn (world: *World, handle: *Resource, value: *anyopaque) callconv(.c) Status,
 };
 
 pub const world_lock_resources = Symbol{
@@ -287,10 +287,10 @@ pub const world_lock_resources = Symbol{
     .version = context_version,
     .T = fn (
         world: *World,
-        exclusive_ids: [*]const ResourceId,
-        exclusive_ids_len: usize,
-        shared_ids: [*]const ResourceId,
-        shared_ids_len: usize,
+        exclusive_handles: [*]const *Resource,
+        exclusive_handles_len: usize,
+        shared_handles: [*]const *Resource,
+        shared_handles_len: usize,
         out_resources: [*]*anyopaque,
     ) callconv(.c) void,
 };
@@ -299,14 +299,14 @@ pub const world_unlock_resource_exclusive = Symbol{
     .name = "world_unlock_resource_exclusive",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId) callconv(.c) void,
+    .T = fn (world: *World, handle: *Resource) callconv(.c) void,
 };
 
 pub const world_unlock_resource_shared = Symbol{
     .name = "world_unlock_resource_shared",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World, id: ResourceId) callconv(.c) void,
+    .T = fn (world: *World, handle: *Resource) callconv(.c) void,
 };
 
 pub const world_allocator_alloc = Symbol{

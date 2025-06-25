@@ -45,13 +45,13 @@ typedef struct FimoWorldsMeta_SystemDescriptor {
     /// Length in characters of the system label.
     FimoUSize label_len;
     /// Optional array of resources to require with exclusive access.
-    const FimoWorldsMeta_ResourceId *exclusive_ids;
+    const FimoWorldsMeta_ResourceHandle *exclusive_handles;
     /// Length of the `exclusive_ids` array.
-    FimoUSize exclusive_ids_len;
+    FimoUSize exclusive_handles_len;
     /// Optional array of resources to require with shared access.
-    const FimoWorldsMeta_ResourceId *shared_ids;
+    const FimoWorldsMeta_ResourceHandle *shared_handles;
     /// Length of the `shared_ids` array.
-    FimoUSize shared_ids_len;
+    FimoUSize shared_handles_len;
     /// Optional array of systems to depend on.
     ///
     /// The system will start executing after all systems have been executed.

@@ -9,7 +9,7 @@ const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const Pool = fimo_tasks_meta.pool.Pool;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
-const ResourceId = fimo_worlds_meta.resources.ResourceId;
+const Resource = fimo_worlds_meta.resources.Resource;
 
 const heap = @import("heap.zig");
 const SystemGroup = @import("SystemGroup.zig");
@@ -23,9 +23,9 @@ executor: Pool,
 inherited_executor: bool,
 allocator: heap.TracingAllocator,
 system_group_count: atomic.Value(usize) = .init(0),
-resources: AutoArrayHashMapUnmanaged(ResourceId, *Resource) = .empty,
+resources: AutoArrayHashMapUnmanaged(*Resource, *ResourceValue) = .empty,
 
-const Resource = struct {
+const ResourceValue = struct {
     rwlock: RwLock = .{},
     value_ptr: *anyopaque,
     info: *Universe.ResourceInfo,
@@ -86,48 +86,48 @@ pub fn deinit(self: *World) void {
     Universe.getUniverse().notifyWorldDeinit();
 }
 
-pub fn addResource(self: *World, id: ResourceId, value: *const anyopaque) !void {
+pub fn addResource(self: *World, handle: *Resource, value: *const anyopaque) !void {
     const instance = Universe.getInstance();
     const info = blk: {
         const universe = Universe.getUniverse();
         universe.rwlock.lockRead(instance);
         defer universe.rwlock.unlockRead(instance);
 
-        const i = universe.resources.get(id) orelse @panic("invalid resource");
+        const i = universe.resources.get(handle) orelse @panic("invalid resource");
         _ = i.references.fetchAdd(1, .monotonic);
         break :blk i;
     };
     errdefer _ = info.references.fetchSub(1, .monotonic);
 
     const allocator = self.allocator.allocator();
-    const value_start = std.mem.alignForward(usize, @sizeOf(Resource), info.alignment.toByteUnits());
+    const value_start = std.mem.alignForward(usize, @sizeOf(ResourceValue), info.alignment.toByteUnits());
     const memory_len = value_start + info.size;
-    const memory = try allocator.alignedAlloc(u8, .of(Resource), memory_len);
+    const memory = try allocator.alignedAlloc(u8, .of(ResourceValue), memory_len);
     errdefer allocator.free(memory);
 
     const value_slice = memory[value_start..];
     @memcpy(value_slice, @as([*]const u8, @ptrCast(value))[0..info.size]);
 
-    const resource = std.mem.bytesAsValue(Resource, memory);
-    resource.* = Resource{ .info = info, .value_ptr = value_slice.ptr };
+    const resource = std.mem.bytesAsValue(ResourceValue, memory);
+    resource.* = ResourceValue{ .info = info, .value_ptr = value_slice.ptr };
 
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
-    if (self.resources.contains(id)) return error.Duplicate;
-    try self.resources.put(allocator, id, resource);
-    Universe.logDebug("added `{}` to `{*}`", .{ id, self }, @src());
+    if (self.resources.contains(handle)) return error.Duplicate;
+    try self.resources.put(allocator, handle, resource);
+    Universe.logDebug("added `{}` to `{*}`", .{ handle, self }, @src());
 }
 
-pub fn removeResource(self: *World, id: ResourceId, value: *anyopaque) !void {
-    Universe.logDebug("removing `{}` from `{*}`", .{ id, self }, @src());
+pub fn removeResource(self: *World, handle: *Resource, value: *anyopaque) !void {
+    Universe.logDebug("removing `{}` from `{*}`", .{ handle, self }, @src());
     const resource = blk: {
         const instance = Universe.getInstance();
         self.rwlock.lockWrite(instance);
         defer self.rwlock.unlockWrite(instance);
 
-        const res = self.resources.get(id) orelse @panic("invalid resource");
+        const res = self.resources.get(handle) orelse @panic("invalid resource");
         if (res.references.load(.acquire) != 0) return error.InUse;
-        _ = self.resources.swapRemove(id);
+        _ = self.resources.swapRemove(handle);
         break :blk res;
     };
 
@@ -138,36 +138,36 @@ pub fn removeResource(self: *World, id: ResourceId, value: *anyopaque) !void {
     );
 
     const allocator = self.allocator.allocator();
-    const value_start = std.mem.alignForward(usize, @sizeOf(Resource), info.alignment.toByteUnits());
+    const value_start = std.mem.alignForward(usize, @sizeOf(ResourceValue), info.alignment.toByteUnits());
     const memory_len = value_start + info.size;
     const memory = std.mem.asBytes(resource).ptr[0..memory_len];
     allocator.free(memory);
     _ = info.references.fetchSub(1, .monotonic);
 }
 
-pub fn hasResource(self: *World, id: ResourceId) bool {
+pub fn hasResource(self: *World, handle: *Resource) bool {
     const instance = Universe.getInstance();
     self.rwlock.lockRead(instance);
     defer self.rwlock.unlockRead(instance);
-    return self.resources.contains(id);
+    return self.resources.contains(handle);
 }
 
 pub fn lockResources(
     self: *World,
-    exclusive: []const ResourceId,
-    shared: []const ResourceId,
+    exclusive: []const *Resource,
+    shared: []const *Resource,
     out: []*anyopaque,
 ) void {
     if (out.len != exclusive.len + shared.len) @panic("buffer size mismatch");
 
     const Info = struct {
         index: usize,
-        id: ResourceId,
-        resource: *Resource,
+        handle: *Resource,
+        resource: *ResourceValue,
         lock_type: enum { exclusive, shared },
         fn lessThan(ctx: void, a: @This(), b: @This()) bool {
             _ = ctx;
-            return @intFromEnum(a.id) < @intFromEnum(b.id);
+            return @intFromPtr(a.handle) < @intFromPtr(b.handle);
         }
     };
 
@@ -182,19 +182,19 @@ pub fn lockResources(
         self.rwlock.lockRead(instance);
         defer self.rwlock.unlockRead(instance);
 
-        for (exclusive, 0..) |id, i| {
-            if (std.mem.indexOfScalar(ResourceId, exclusive[i + 1 ..], id) != null) @panic("deadlock");
-            const resource = self.resources.get(id) orelse @panic("invalid resource");
+        for (exclusive, 0..) |handle, i| {
+            if (std.mem.indexOfScalar(*Resource, exclusive[i + 1 ..], handle) != null) @panic("deadlock");
+            const resource = self.resources.get(handle) orelse @panic("invalid resource");
             _ = resource.references.fetchAdd(1, .monotonic);
-            infos[i] = Info{ .index = i, .id = id, .resource = resource, .lock_type = .exclusive };
+            infos[i] = Info{ .index = i, .handle = handle, .resource = resource, .lock_type = .exclusive };
         }
-        for (shared, 0..) |id, i| {
-            if (std.mem.indexOfScalar(ResourceId, shared[i + 1 ..], id) != null) @panic("duplicate");
-            if (std.mem.indexOfScalar(ResourceId, exclusive, id) != null) @panic("deadlock");
-            const resource = self.resources.get(id) orelse @panic("invalid resource");
+        for (shared, 0..) |handle, i| {
+            if (std.mem.indexOfScalar(*Resource, shared[i + 1 ..], handle) != null) @panic("duplicate");
+            if (std.mem.indexOfScalar(*Resource, exclusive, handle) != null) @panic("deadlock");
+            const resource = self.resources.get(handle) orelse @panic("invalid resource");
             _ = resource.references.fetchAdd(1, .monotonic);
             const idx = exclusive.len + i;
-            infos[idx] = Info{ .index = idx, .id = id, .resource = resource, .lock_type = .shared };
+            infos[idx] = Info{ .index = idx, .handle = handle, .resource = resource, .lock_type = .shared };
         }
     }
 
@@ -208,22 +208,22 @@ pub fn lockResources(
     }
 }
 
-pub fn unlockResourceExclusive(self: *World, id: ResourceId) void {
+pub fn unlockResourceExclusive(self: *World, handle: *Resource) void {
     const instance = Universe.getInstance();
     self.rwlock.lockRead(instance);
     defer self.rwlock.unlockRead(instance);
 
-    const resource = self.resources.get(id) orelse @panic("invalid resource");
+    const resource = self.resources.get(handle) orelse @panic("invalid resource");
     _ = resource.references.fetchSub(1, .monotonic);
     resource.rwlock.unlockWrite(instance);
 }
 
-pub fn unlockResourceShared(self: *World, id: ResourceId) void {
+pub fn unlockResourceShared(self: *World, handle: *Resource) void {
     const instance = Universe.getInstance();
     self.rwlock.lockRead(instance);
     defer self.rwlock.unlockRead(instance);
 
-    const resource = self.resources.get(id) orelse @panic("invalid resource");
+    const resource = self.resources.get(handle) orelse @panic("invalid resource");
     _ = resource.references.fetchSub(1, .monotonic);
     resource.rwlock.unlockRead(instance);
 }

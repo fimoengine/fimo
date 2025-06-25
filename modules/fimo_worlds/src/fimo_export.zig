@@ -123,9 +123,9 @@ const State = struct {
 
 fn resourceRegister(
     resource: *const resources.RegisterOptions.Descriptor,
-    id: *resources.ResourceId,
+    handle: **resources.Resource,
 ) callconv(.c) Status {
-    id.* = State.global_state.universe.registerResource(.{
+    handle.* = State.global_state.universe.registerResource(.{
         .label = if (resource.label_len != 0) resource.label.?[0..resource.label_len] else null,
         .size = resource.size,
         .alignment = .fromByteUnits(resource.alignment),
@@ -136,8 +136,8 @@ fn resourceRegister(
     return .ok;
 }
 
-fn resourceUnregister(id: resources.ResourceId) callconv(.c) void {
-    State.global_state.universe.unregisterResource(id);
+fn resourceUnregister(handle: *resources.Resource) callconv(.c) void {
+    State.global_state.universe.unregisterResource(handle);
 }
 
 fn systemRegister(
@@ -146,12 +146,12 @@ fn systemRegister(
 ) callconv(.c) Status {
     id.* = State.global_state.universe.registerSystem(.{
         .label = if (system.label_len != 0) system.label.?[0..system.label_len] else null,
-        .exclusive_resources = if (system.exclusive_ids_len != 0)
-            system.exclusive_ids.?[0..system.exclusive_ids_len]
+        .exclusive_resources = if (system.exclusive_handles_len != 0)
+            system.exclusive_handles.?[0..system.exclusive_handles_len]
         else
             &.{},
-        .shared_resources = if (system.shared_ids_len != 0)
-            system.shared_ids.?[0..system.shared_ids_len]
+        .shared_resources = if (system.shared_handles_len != 0)
+            system.shared_handles.?[0..system.shared_handles_len]
         else
             &.{},
         .before = if (system.before_len != 0)
@@ -352,18 +352,18 @@ fn worldGetPool(world: *worlds.World) callconv(.c) pools.Pool {
     return w.executor.ref();
 }
 
-fn worldHasResource(world: *worlds.World, id: resources.ResourceId) callconv(.c) bool {
+fn worldHasResource(world: *worlds.World, handle: *resources.Resource) callconv(.c) bool {
     const w: *World = @ptrCast(@alignCast(world));
-    return w.hasResource(id);
+    return w.hasResource(handle);
 }
 
 fn worldAddResource(
     world: *worlds.World,
-    id: resources.ResourceId,
+    handle: *resources.Resource,
     value: *const anyopaque,
 ) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
-    w.addResource(id, value) catch |err| {
+    w.addResource(handle, value) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -372,11 +372,11 @@ fn worldAddResource(
 
 fn worldRemoveResource(
     world: *worlds.World,
-    id: resources.ResourceId,
+    handle: *resources.Resource,
     value: *anyopaque,
 ) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
-    w.removeResource(id, value) catch |err| {
+    w.removeResource(handle, value) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -385,29 +385,29 @@ fn worldRemoveResource(
 
 fn worldLockResources(
     world: *worlds.World,
-    exclusive_ids: [*]const resources.ResourceId,
-    exclusive_ids_len: usize,
-    shared_ids: [*]const resources.ResourceId,
-    shared_ids_len: usize,
+    exclusive_handles: [*]const *resources.Resource,
+    exclusive_handles_len: usize,
+    shared_handles: [*]const *resources.Resource,
+    shared_handles_len: usize,
     out_resources: [*]*anyopaque,
 ) callconv(.c) void {
-    const len = exclusive_ids_len + shared_ids_len;
-    const exclusive = exclusive_ids[0..exclusive_ids_len];
-    const shared = shared_ids[0..shared_ids_len];
+    const len = exclusive_handles_len + shared_handles_len;
+    const exclusive = exclusive_handles[0..exclusive_handles_len];
+    const shared = shared_handles[0..shared_handles_len];
     const out = out_resources[0..len];
 
     const w: *World = @ptrCast(@alignCast(world));
     w.lockResources(exclusive, shared, out);
 }
 
-fn worldUnlockResourceExclusive(world: *worlds.World, id: resources.ResourceId) callconv(.c) void {
+fn worldUnlockResourceExclusive(world: *worlds.World, handle: *resources.Resource) callconv(.c) void {
     const w: *World = @ptrCast(@alignCast(world));
-    w.unlockResourceExclusive(id);
+    w.unlockResourceExclusive(handle);
 }
 
-fn worldUnlockResourceShared(world: *worlds.World, id: resources.ResourceId) callconv(.c) void {
+fn worldUnlockResourceShared(world: *worlds.World, handle: *resources.Resource) callconv(.c) void {
     const w: *World = @ptrCast(@alignCast(world));
-    w.unlockResourceShared(id);
+    w.unlockResourceShared(handle);
 }
 
 fn worldAllocatorAlloc(
