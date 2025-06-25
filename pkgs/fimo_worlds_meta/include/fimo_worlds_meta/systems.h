@@ -15,8 +15,8 @@ extern "C" {
 
 typedef struct FimoWorldsMeta_World FimoWorldsMeta_World;
 
-/// A unique identifier for a registered system.
-typedef FimoUSize FimoWorldsMeta_SystemId;
+/// A unique handle to a registered system.
+typedef struct FimoWorldsMeta_System *FimoWorldsMeta_SystemHandle;
 
 /// A group of systems that can be scheduled together.
 typedef struct FimoWorldsMeta_SystemGroup FimoWorldsMeta_SystemGroup;
@@ -27,7 +27,7 @@ typedef struct FimoWorldsMeta_SystemContext FimoWorldsMeta_SystemContext;
 /// Descriptor of a system dependency.
 typedef struct FimoWorldsMeta_SystemDependency {
     /// System to depend on / be depended from.
-    FimoWorldsMeta_SystemId system;
+    FimoWorldsMeta_SystemHandle system;
     /// Whether to ignore any deferred subjob of the system.
     ///
     /// If set to `true`, the system will start after the other systems `run`
@@ -146,13 +146,13 @@ typedef enum FimoWorldsMeta_SystemAllocatorStrategy : FimoI32 {
 ///
 /// Registered resources may be added to system group of any world.
 typedef FimoStatus (*FimoWorldsMeta_system_register)(const FimoWorldsMeta_SystemDescriptor *system,
-                                                     FimoWorldsMeta_SystemId *id);
+                                                     FimoWorldsMeta_SystemHandle *handle);
 
 /// Unregisters the system from the universe.
 ///
 /// Once unregistered, the identifier is invalidated and may be reused by another system.
 /// The system must not be used explicitly by any world when this method is called.
-typedef void (*FimoWorldsMeta_system_unregister)(FimoWorldsMeta_SystemId id);
+typedef void (*FimoWorldsMeta_system_unregister)(FimoWorldsMeta_SystemHandle handle);
 
 /// Initializes a new empty system group.
 typedef FimoStatus (*FimoWorldsMeta_system_group_create)(const FimoWorldsMeta_SystemGroupDescriptor *descriptor,
@@ -178,7 +178,7 @@ typedef FimoTasksMeta_Pool (*FimoWorldsMeta_system_group_get_pool)(FimoWorldsMet
 /// Already scheduled operations are not affected by the added systems.
 /// The operation may add systems transitively, if the systems specify an execution order.
 typedef FimoStatus (*FimoWorldsMeta_system_group_add_systems)(FimoWorldsMeta_SystemGroup *group,
-                                                              const FimoWorldsMeta_SystemId *systems,
+                                                              const FimoWorldsMeta_SystemHandle *systems,
                                                               FimoUSize systems_len);
 
 /// Removes a system from the group.
@@ -186,7 +186,8 @@ typedef FimoStatus (*FimoWorldsMeta_system_group_add_systems)(FimoWorldsMeta_Sys
 /// Already scheduled systems will not be affected.
 /// This operation may remove systems added transitively. The caller may provide a reference to
 /// a fence via `signal`, to be notified when the system has been removed from the group.
-typedef void (*FimoWorldsMeta_system_group_remove_system)(FimoWorldsMeta_SystemGroup *group, FimoWorldsMeta_SystemId id,
+typedef void (*FimoWorldsMeta_system_group_remove_system)(FimoWorldsMeta_SystemGroup *group,
+                                                          FimoWorldsMeta_SystemHandle handle,
                                                           FimoWorldsMeta_Fence *signal);
 
 /// Schedules to run all systems contained in the group.

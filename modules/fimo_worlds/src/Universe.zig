@@ -11,8 +11,8 @@ const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
 const Resource = fimo_worlds_meta.resources.Resource;
-const SystemId = fimo_worlds_meta.systems.SystemId;
-const Dependency = fimo_worlds_meta.systems.System.Dependency;
+const System = fimo_worlds_meta.systems.System;
+const Dependency = fimo_worlds_meta.systems.Declaration.Dependency;
 
 const fimo_export = @import("fimo_export.zig");
 const Instance = fimo_export.Instance;
@@ -23,9 +23,7 @@ rwlock: RwLock = .{},
 allocator: Allocator,
 num_worlds: usize = 0,
 resources: AutoArrayHashMapUnmanaged(*Resource, *ResourceInfo) = .empty,
-next_system: SystemId = @enumFromInt(0),
-free_systems: ArrayListUnmanaged(SystemId) = .empty,
-systems: AutoArrayHashMapUnmanaged(SystemId, *SystemInfo) = .empty,
+systems: AutoArrayHashMapUnmanaged(*System, *SystemInfo) = .empty,
 
 pub const RegisterResourceOptions = struct {
     label: ?[]const u8 = null,
@@ -68,7 +66,6 @@ pub const ResourceInfo = struct {
 };
 
 pub const SystemInfo = struct {
-    id: SystemId,
     label: []u8,
     exclusive_resources: []*Resource,
     shared_resources: []*Resource,
@@ -94,13 +91,16 @@ pub const SystemInfo = struct {
         shared_resources: ?[*]const *anyopaque,
         deferred_signal: *fimo_worlds_meta.Job.Fence,
     ) callconv(.c) void,
+
+    pub fn id(self: *SystemInfo) *System {
+        return @ptrCast(self);
+    }
 };
 
 pub fn deinit(self: *Self) void {
     if (self.resources.count() != 0) @panic("resources not empty");
     if (self.systems.count() != 0) @panic("systems not empty");
     self.resources.deinit(self.allocator);
-    self.free_systems.deinit(self.allocator);
     self.systems.deinit(self.allocator);
 }
 
@@ -139,11 +139,11 @@ pub fn registerResource(self: *Self, options: RegisterResourceOptions) !*Resourc
     info.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
     errdefer self.allocator.free(info.label);
 
-    const id: *Resource = @ptrCast(info);
-    try self.resources.put(self.allocator, id, info);
+    const handle: *Resource = @ptrCast(info);
+    try self.resources.put(self.allocator, handle, info);
 
     if (was_empty) instance.ref();
-    return id;
+    return handle;
 }
 
 pub fn unregisterResource(self: *Self, handle: *Resource) void {
@@ -161,7 +161,7 @@ pub fn unregisterResource(self: *Self, handle: *Resource) void {
     if (self.isEmpty()) instance.unref();
 }
 
-pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
+pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
     errdefer if (options.factory_deinit) |f| {
         const factory = options.factory orelse &.{};
         f(factory.ptr);
@@ -195,7 +195,6 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
     const info = try self.allocator.create(SystemInfo);
     errdefer self.allocator.destroy(info);
     info.* = .{
-        .id = undefined,
         .label = undefined,
         .exclusive_resources = undefined,
         .shared_resources = undefined,
@@ -233,18 +232,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
         break :blk dupeSlice;
     } else null;
 
-    const id, const from_list = if (self.free_systems.getLastOrNull()) |x|
-        .{ x, true }
-    else
-        .{ self.next_system, false };
-    info.id = id;
-    try self.systems.put(self.allocator, id, info);
-
-    if (from_list)
-        _ = self.free_systems.pop()
-    else {
-        self.next_system = @enumFromInt(@intFromEnum(self.next_system) + 1);
-    }
+    const handle: *System = @ptrCast(info);
+    try self.systems.put(self.allocator, handle, info);
 
     for (options.exclusive_resources) |id2| {
         const res = self.resources.get(id2).?;
@@ -258,15 +247,15 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
     for (info.after) |dep| _ = self.systems.get(dep.system).?.references.fetchAdd(1, .monotonic);
 
     if (was_empty) instance.ref();
-    return id;
+    return handle;
 }
 
-pub fn unregisterSystem(self: *Self, id: SystemId) void {
+pub fn unregisterSystem(self: *Self, handle: *System) void {
     const instance = getInstance();
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
 
-    const kv = self.systems.fetchSwapRemove(id) orelse @panic("invalid system");
+    const kv = self.systems.fetchSwapRemove(handle) orelse @panic("invalid system");
     const info = kv.value;
     if (info.references.load(.acquire) != 0) @panic("system in use");
     if (info.factory_deinit) |f| if (info.factory) |factory| f(factory.ptr);
@@ -289,7 +278,6 @@ pub fn unregisterSystem(self: *Self, id: SystemId) void {
     self.allocator.free(info.after);
     if (info.factory) |factory| self.allocator.rawFree(factory, info.factory_alignment, @returnAddress());
     self.allocator.destroy(info);
-    self.free_systems.append(self.allocator, id) catch @panic("oom");
 
     if (self.isEmpty()) instance.unref();
 }

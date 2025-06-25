@@ -18,7 +18,7 @@ const fimo_worlds_meta = @import("fimo_worlds_meta");
 const Job = fimo_worlds_meta.Job;
 const Fence = Job.Fence;
 const TimelineSemaphore = Job.TimelineSemaphore;
-const SystemId = fimo_worlds_meta.systems.SystemId;
+const MetaSystem = fimo_worlds_meta.systems.System;
 const Resource = fimo_worlds_meta.resources.Resource;
 
 const heap = @import("heap.zig");
@@ -44,7 +44,7 @@ const Graph = struct {
     entries: []Entry = &.{},
     resources: AutoArrayHashMapUnmanaged(*Resource, *anyopaque) = .empty,
     arena: ArenaAllocator = .init(std.heap.page_allocator),
-    systems: AutoArrayHashMapUnmanaged(SystemId, *System) = .empty,
+    systems: AutoArrayHashMapUnmanaged(*MetaSystem, *System) = .empty,
     deinit_list: DoublyLinkedList = .{},
 
     fn clearDeinitList(self: *Graph) void {
@@ -56,12 +56,12 @@ const Graph = struct {
 
     fn addSystem(
         self: *Graph,
-        id: SystemId,
+        handle: *MetaSystem,
         universe: *const Universe,
         group: *SystemGroup,
         weak: bool,
     ) !void {
-        if (self.systems.get(id)) |sys| {
+        if (self.systems.get(handle)) |sys| {
             if (!weak) {
                 std.debug.assert(sys.weak);
                 sys.weak = false;
@@ -71,7 +71,7 @@ const Graph = struct {
 
         var before_count: usize = 0;
         var after_count: usize = 0;
-        const info = universe.systems.get(id) orelse unreachable;
+        const info = universe.systems.get(handle) orelse unreachable;
         errdefer {
             for (info.after[0..after_count]) |sys| {
                 var fence = Fence{};
@@ -96,12 +96,12 @@ const Graph = struct {
 
         const sys = try System.init(group, info, weak);
         errdefer sys.deinit();
-        try self.systems.put(universe.allocator, id, sys);
+        try self.systems.put(universe.allocator, handle, sys);
         self.dirty = true;
     }
 
-    fn removeSystem(self: *Graph, id: SystemId, fence: ?*Fence) void {
-        const entry = self.systems.fetchSwapRemove(id) orelse {
+    fn removeSystem(self: *Graph, handle: *MetaSystem, fence: ?*Fence) void {
+        const entry = self.systems.fetchSwapRemove(handle) orelse {
             std.debug.assert(fence == null);
             return;
         };
@@ -110,11 +110,11 @@ const Graph = struct {
         while (sys.references.count() != 0) {
             const dep = sys.references.values()[0];
             sys.removeReference(dep);
-            if (sys.isUnloadable()) self.removeSystem(dep.info.id, null);
+            if (sys.isUnloadable()) self.removeSystem(dep.info.id(), null);
         }
         while (sys.referenced_by.count() != 0) {
             const dep = sys.referenced_by.values()[0];
-            self.removeSystem(dep.info.id, null);
+            self.removeSystem(dep.info.id(), null);
         }
 
         if (!self.schedule_semaphore.isSignaled(@truncate(self.next_generation))) {
@@ -147,7 +147,7 @@ const Graph = struct {
                 for (sys.info.before) |dep| if (dep.ignore_deferred) break :blk false;
                 for (sys.referenced_by.values()) |by| {
                     for (by.info.after) |dep| {
-                        if (dep.system == sys.info.id and dep.ignore_deferred) break :blk false;
+                        if (dep.system == sys.info.id() and dep.ignore_deferred) break :blk false;
                     }
                 }
                 break :blk true;
@@ -160,7 +160,7 @@ const Graph = struct {
             }
             for (sys.referenced_by.values()) |by| {
                 for (by.info.before) |dep| {
-                    if (dep.system != sys.info.id or dep.ignore_deferred) continue;
+                    if (dep.system != sys.info.id() or dep.ignore_deferred) continue;
                     try sys.deferred_dep.put(allocator, dep.system, self.systems.get(dep.system).?);
                 }
             }
@@ -189,11 +189,11 @@ const Graph = struct {
             fn toposort(
                 graph: *Graph,
                 tasks: *ArrayListUnmanaged(@This()),
-                markers: *AutoArrayHashMapUnmanaged(SystemId, usize),
-                id: SystemId,
+                markers: *AutoArrayHashMapUnmanaged(*MetaSystem, usize),
+                handle: *MetaSystem,
                 sys: *System,
             ) usize {
-                if (markers.get(id)) |idx| return idx;
+                if (markers.get(handle)) |idx| return idx;
                 var generation: usize = 0;
                 for (sys.info.after) |dep| {
                     const dep_sys = graph.systems.get(dep.system).?;
@@ -202,7 +202,7 @@ const Graph = struct {
                 }
                 for (sys.referenced_by.values()) |by| {
                     for (by.info.before) |dep| {
-                        if (dep.system != sys.info.id) continue;
+                        if (dep.system != sys.info.id()) continue;
                         const dep_sys = graph.systems.get(dep.system).?;
                         const idx = toposort(graph, tasks, markers, dep.system, dep_sys);
                         generation = @max(generation, tasks.items[idx].generation + 1);
@@ -226,7 +226,7 @@ const Graph = struct {
 
         // Perform a topological sort to find a correct execution order for the systems.
         var systems_it = self.systems.iterator();
-        var markers = AutoArrayHashMapUnmanaged(SystemId, usize).empty;
+        var markers = AutoArrayHashMapUnmanaged(*MetaSystem, usize).empty;
         try markers.ensureTotalCapacity(allocator, self.systems.count());
         var tasks = try ArrayListUnmanaged(TaskInfo).initCapacity(allocator, self.systems.count());
         while (systems_it.next()) |entry| {
@@ -242,12 +242,12 @@ const Graph = struct {
         // Insert synchronization entries between the tasks.
         const ResourceInfo = struct {
             exclusive: bool = false,
-            referenced_by: ArrayListUnmanaged(SystemId) = .empty,
+            referenced_by: ArrayListUnmanaged(*MetaSystem) = .empty,
         };
         const resource_infos = try allocator.alloc(ResourceInfo, self.resources.count());
         for (resource_infos) |*info| info.* = .{};
 
-        var running_systems = AutoArrayHashMapUnmanaged(SystemId, usize).empty;
+        var running_systems = AutoArrayHashMapUnmanaged(*MetaSystem, usize).empty;
         var entries = try ArrayListUnmanaged(Entry).initCapacity(allocator, self.systems.count());
         for (tasks.items) |*task| {
             // Insert synchronization points if the system depends on other systems.
@@ -263,7 +263,7 @@ const Graph = struct {
             }
             for (task.system.referenced_by.values()) |by| {
                 for (by.info.before) |dep| {
-                    if (dep.system != task.system.info.id) continue;
+                    if (dep.system != task.system.info.id()) continue;
                     const entry = running_systems.fetchSwapRemove(dep.system) orelse continue;
                     const entry_idx = entry.value;
                     try entries.append(allocator, Entry{
@@ -291,7 +291,7 @@ const Graph = struct {
                 }
                 res_info.exclusive = true;
                 res_info.referenced_by.clearRetainingCapacity();
-                try res_info.referenced_by.append(allocator, task.system.info.id);
+                try res_info.referenced_by.append(allocator, task.system.info.id());
             }
 
             // Shared resources are synchronized if there is a writer.
@@ -312,11 +312,11 @@ const Graph = struct {
                     res_info.referenced_by.clearRetainingCapacity();
                 }
                 res_info.exclusive = false;
-                try res_info.referenced_by.append(allocator, task.system.info.id);
+                try res_info.referenced_by.append(allocator, task.system.info.id());
             }
 
             const entry_idx = entries.items.len;
-            try running_systems.put(allocator, task.system.info.id, entry_idx);
+            try running_systems.put(allocator, task.system.info.id(), entry_idx);
             try entries.append(allocator, Entry{
                 .tag = .enqueue_task,
                 .payload = .{ .enqueue_task = &task.task },
@@ -388,8 +388,8 @@ pub fn deinit(self: *SystemGroup) void {
     allocator.destroy(self);
 }
 
-pub fn addSystems(self: *SystemGroup, ids: []const SystemId) !void {
-    Universe.logDebug("adding `{any}` to `{*}`", .{ ids, self }, @src());
+pub fn addSystems(self: *SystemGroup, handles: []const *MetaSystem) !void {
+    Universe.logDebug("adding `{any}` to `{*}`", .{ handles, self }, @src());
     const instance = Universe.getInstance();
     self.system_graph.mutex.lock(instance);
     defer self.system_graph.mutex.unlock(instance);
@@ -398,31 +398,31 @@ pub fn addSystems(self: *SystemGroup, ids: []const SystemId) !void {
     universe.rwlock.lockRead(instance);
     defer universe.rwlock.unlockRead(instance);
 
-    for (ids) |id| {
+    for (handles) |id| {
         if (!universe.systems.contains(id)) @panic("invalid system");
         if (self.system_graph.systems.get(id)) |sys| {
             if (!sys.weak) return error.Duplicate;
         }
     }
-    for (ids, 0..) |id, i| {
-        errdefer for (ids[0..i]) |id2| {
+    for (handles, 0..) |handle, i| {
+        errdefer for (handles[0..i]) |id2| {
             var fence = Fence{};
             self.system_graph.removeSystem(id2, &fence);
             fence.wait(instance);
         };
-        try self.system_graph.addSystem(id, universe, self, false);
+        try self.system_graph.addSystem(handle, universe, self, false);
     }
 }
 
-pub fn removeSystem(self: *SystemGroup, id: SystemId, fence: *Fence) void {
-    Universe.logDebug("removing `{}` from `{*}`", .{ id, self }, @src());
+pub fn removeSystem(self: *SystemGroup, handle: *MetaSystem, fence: *Fence) void {
+    Universe.logDebug("removing `{}` from `{*}`", .{ handle, self }, @src());
     const instance = Universe.getInstance();
     self.system_graph.mutex.lock(instance);
     defer self.system_graph.mutex.unlock(instance);
 
-    const sys = self.system_graph.systems.get(id) orelse @panic("invalid system");
+    const sys = self.system_graph.systems.get(handle) orelse @panic("invalid system");
     if (sys.weak) @panic("invalid system");
-    self.system_graph.removeSystem(id, fence);
+    self.system_graph.removeSystem(handle, fence);
 }
 
 pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !void {
