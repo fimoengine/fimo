@@ -10,8 +10,8 @@ const Pool = fimo_tasks_meta.pool.Pool;
 const Job = @import("Job.zig");
 const Fence = Job.Fence;
 const resources = @import("resources.zig");
-const TypedResourceId = resources.TypedResourceId;
-const ResourceId = resources.ResourceId;
+const TypedResource = resources.TypedResource;
+const Resource = resources.Resource;
 const symbols = @import("symbols.zig");
 const testing = @import("testing.zig");
 const worlds = @import("worlds.zig");
@@ -245,7 +245,7 @@ test "SystemGroup: schedule" {
     const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
     defer group.deinit(GlobalCtx);
 
-    const resource = try TypedResourceId(u32).register(GlobalCtx, .{ .label = "test-resource" });
+    const resource = try TypedResource(u32).register(GlobalCtx, .{ .label = "test-resource" });
     defer resource.unregister(GlobalCtx);
 
     try resource.addToWorld(GlobalCtx, world, 0);
@@ -455,8 +455,8 @@ pub const System = struct {
     deinit_factory: ?*const fn (factory: ?*const anyopaque) callconv(.c) void,
 
     SystemT: type,
-    ExclusiveResourceIdsT: type,
-    SharedResourceIdsT: type,
+    ExclusiveResourceHandlesT: type,
+    SharedResourceHandlesT: type,
     init: *const fn (
         factory: ?*const anyopaque,
         context: *SystemContext,
@@ -491,13 +491,13 @@ pub const System = struct {
         /// Length in characters of the system label.
         label_len: usize,
         /// Optional array of resources to require with exclusive access.
-        exclusive_ids: ?[*]const ResourceId,
-        /// Length of the `exclusive_ids` array.
-        exclusive_ids_len: usize,
+        exclusive_handles: ?[*]const *Resource,
+        /// Length of the `exclusive_handles` array.
+        exclusive_handles_len: usize,
         /// Optional array of resources to require with shared access.
-        shared_ids: ?[*]const ResourceId,
-        /// Length of the `shared_ids` array.
-        shared_ids_len: usize,
+        shared_handles: ?[*]const *Resource,
+        /// Length of the `shared_handles` array.
+        shared_handles_len: usize,
         /// Optional array of systems to depend on.
         ///
         /// The system will start executing after all systems have been executed.
@@ -564,23 +564,23 @@ pub const System = struct {
         provider: anytype,
         label: ?[]const u8,
         factory: self.FactoryT,
-        exclusive_ids: self.ExclusiveResourceIdsT,
-        shared_ids: self.SharedResourceIdsT,
+        exclusive_handles: self.ExclusiveResourceHandlesT,
+        shared_handles: self.SharedResourceHandlesT,
         before: []const Dependency,
         after: []const Dependency,
     ) error{RegisterFailed}!SystemId {
-        var exclusive: [exclusive_ids.len]ResourceId = undefined;
-        inline for (0..exclusive.len) |i| exclusive[i] = exclusive_ids[i].asId();
-        var shared: [shared_ids.len]ResourceId = undefined;
-        inline for (0..shared.len) |i| shared[i] = shared_ids[i].asId();
+        var exclusive: [exclusive_handles.len]*Resource = undefined;
+        inline for (0..exclusive.len) |i| exclusive[i] = exclusive_handles[i].asUntyped();
+        var shared: [shared_handles.len]*Resource = undefined;
+        inline for (0..shared.len) |i| shared[i] = shared_handles[i].asUntyped();
         const desc = Descriptor{
             .next = null,
             .label = if (label) |l| l.ptr else null,
             .label_len = if (label) |l| l.len else 0,
-            .exclusive_ids = exclusive[0..].ptr,
-            .exclusive_ids_len = exclusive.len,
-            .shared_ids = shared[0..].ptr,
-            .shared_ids_len = shared.len,
+            .exclusive_handles = exclusive[0..].ptr,
+            .exclusive_handles_len = exclusive.len,
+            .shared_handles = shared[0..].ptr,
+            .shared_handles_len = shared.len,
             .before = before.ptr,
             .before_len = before.len,
             .after = after.ptr,
@@ -656,26 +656,26 @@ pub const System = struct {
         const SharedArgs = run_info.params[2].type.?;
         const has_signal = run_info.params.len == 4;
 
-        const ExclusiveResourceIdsT = if (@sizeOf(ExclusiveArgs) == 0) std.meta.Tuple(&.{}) else blk: {
+        const ExclusiveResourceHandlesT = if (@sizeOf(ExclusiveArgs) == 0) std.meta.Tuple(&.{}) else blk: {
             const fields = @typeInfo(ExclusiveArgs).@"struct".fields;
             var types: [fields.len]type = undefined;
             for (0..fields.len) |i| {
                 const T = fields[i].type;
-                const Resource = @typeInfo(T).pointer.child;
-                if (T != *Resource) @compileError("Resource parameters must be non-const pointers");
-                types[i] = TypedResourceId(Resource);
+                const ResourceValue = @typeInfo(T).pointer.child;
+                if (T != *ResourceValue) @compileError("Resource parameters must be non-const pointers");
+                types[i] = *TypedResource(ResourceValue);
             }
             break :blk std.meta.Tuple(&types);
         };
 
-        const SharedResourceIdsT = if (@sizeOf(SharedArgs) == 0) std.meta.Tuple(&.{}) else blk: {
+        const SharedResourceHandlesT = if (@sizeOf(SharedArgs) == 0) std.meta.Tuple(&.{}) else blk: {
             const fields = @typeInfo(SharedArgs).@"struct".fields;
             var types: [fields.len]type = undefined;
             for (0..fields.len) |i| {
                 const T = fields[i].type;
-                const Resource = @typeInfo(T).pointer.child;
-                if (T != *Resource) @compileError("Resource parameters must be non-const pointers");
-                types[i] = TypedResourceId(Resource);
+                const ResourceValue = @typeInfo(T).pointer.child;
+                if (T != *ResourceValue) @compileError("Resource parameters must be non-const pointers");
+                types[i] = *TypedResource(ResourceValue);
             }
             break :blk std.meta.Tuple(&types);
         };
@@ -754,8 +754,8 @@ pub const System = struct {
             .FactoryT = FactoryT,
             .deinit_factory = if (deinitFactoryFn != null) &Wrapper.deinitFactory else null,
             .SystemT = SystemT,
-            .ExclusiveResourceIdsT = ExclusiveResourceIdsT,
-            .SharedResourceIdsT = SharedResourceIdsT,
+            .ExclusiveResourceHandlesT = ExclusiveResourceHandlesT,
+            .SharedResourceHandlesT = SharedResourceHandlesT,
             .init = &Wrapper.init,
             .deinit = if (deinitFn != null) &Wrapper.deinit else null,
             .run = &Wrapper.run,
@@ -808,20 +808,20 @@ test "System: system definitions" {
     };
 
     const Simple0 = System.simple(Dummy.simple0);
-    TupleTester.assertTuple(.{}, Simple0.ExclusiveResourceIdsT);
-    TupleTester.assertTuple(.{}, Simple0.SharedResourceIdsT);
+    TupleTester.assertTuple(.{}, Simple0.ExclusiveResourceHandlesT);
+    TupleTester.assertTuple(.{}, Simple0.SharedResourceHandlesT);
 
     const Simple1 = System.simple(Dummy.simple1);
-    TupleTester.assertTuple(.{ TypedResourceId(i32), TypedResourceId(u32) }, Simple1.ExclusiveResourceIdsT);
-    TupleTester.assertTuple(.{}, Simple1.SharedResourceIdsT);
+    TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple1.ExclusiveResourceHandlesT);
+    TupleTester.assertTuple(.{}, Simple1.SharedResourceHandlesT);
 
     const Simple2 = System.simple(Dummy.simple2);
-    TupleTester.assertTuple(.{}, Simple2.ExclusiveResourceIdsT);
-    TupleTester.assertTuple(.{ TypedResourceId(i32), TypedResourceId(u32) }, Simple2.SharedResourceIdsT);
+    TupleTester.assertTuple(.{}, Simple2.ExclusiveResourceHandlesT);
+    TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple2.SharedResourceHandlesT);
 
     const Simple3 = System.simple(Dummy.simple3);
-    TupleTester.assertTuple(.{ TypedResourceId(i32), TypedResourceId(u32) }, Simple3.ExclusiveResourceIdsT);
-    TupleTester.assertTuple(.{TypedResourceId(f32)}, Simple3.SharedResourceIdsT);
+    TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple3.ExclusiveResourceHandlesT);
+    TupleTester.assertTuple(.{*TypedResource(f32)}, Simple3.SharedResourceHandlesT);
 }
 
 test "System: smoke test" {

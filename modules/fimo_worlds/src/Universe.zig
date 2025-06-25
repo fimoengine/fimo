@@ -10,7 +10,7 @@ const Tracing = fimo_std.Context.Tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
-const ResourceId = fimo_worlds_meta.resources.ResourceId;
+const Resource = fimo_worlds_meta.resources.Resource;
 const SystemId = fimo_worlds_meta.systems.SystemId;
 const Dependency = fimo_worlds_meta.systems.System.Dependency;
 
@@ -22,9 +22,7 @@ const Self = @This();
 rwlock: RwLock = .{},
 allocator: Allocator,
 num_worlds: usize = 0,
-next_resource: ResourceId = @enumFromInt(0),
-free_resources: ArrayListUnmanaged(ResourceId) = .empty,
-resources: AutoArrayHashMapUnmanaged(ResourceId, *ResourceInfo) = .empty,
+resources: AutoArrayHashMapUnmanaged(*Resource, *ResourceInfo) = .empty,
 next_system: SystemId = @enumFromInt(0),
 free_systems: ArrayListUnmanaged(SystemId) = .empty,
 systems: AutoArrayHashMapUnmanaged(SystemId, *SystemInfo) = .empty,
@@ -37,8 +35,8 @@ pub const RegisterResourceOptions = struct {
 
 pub const RegisterSystemOptions = struct {
     label: ?[]const u8 = null,
-    exclusive_resources: []const ResourceId = &.{},
-    shared_resources: []const ResourceId = &.{},
+    exclusive_resources: []const *Resource = &.{},
+    shared_resources: []const *Resource = &.{},
     before: []const Dependency = &.{},
     after: []const Dependency = &.{},
 
@@ -72,8 +70,8 @@ pub const ResourceInfo = struct {
 pub const SystemInfo = struct {
     id: SystemId,
     label: []u8,
-    exclusive_resources: []ResourceId,
-    shared_resources: []ResourceId,
+    exclusive_resources: []*Resource,
+    shared_resources: []*Resource,
     before: []Dependency,
     after: []Dependency,
     references: atomic.Value(usize) = .init(0),
@@ -101,7 +99,6 @@ pub const SystemInfo = struct {
 pub fn deinit(self: *Self) void {
     if (self.resources.count() != 0) @panic("resources not empty");
     if (self.systems.count() != 0) @panic("systems not empty");
-    self.free_resources.deinit(self.allocator);
     self.resources.deinit(self.allocator);
     self.free_systems.deinit(self.allocator);
     self.systems.deinit(self.allocator);
@@ -125,7 +122,7 @@ pub fn notifyWorldDeinit(self: *Self) void {
     if (self.isEmpty()) instance.unref();
 }
 
-pub fn registerResource(self: *Self, options: RegisterResourceOptions) !ResourceId {
+pub fn registerResource(self: *Self, options: RegisterResourceOptions) !*Resource {
     const instance = getInstance();
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
@@ -142,34 +139,24 @@ pub fn registerResource(self: *Self, options: RegisterResourceOptions) !Resource
     info.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
     errdefer self.allocator.free(info.label);
 
-    const id, const from_list = if (self.free_resources.getLastOrNull()) |x|
-        .{ x, true }
-    else
-        .{ self.next_resource, false };
+    const id: *Resource = @ptrCast(info);
     try self.resources.put(self.allocator, id, info);
-
-    if (from_list)
-        _ = self.free_resources.pop()
-    else {
-        self.next_resource = @enumFromInt(@intFromEnum(self.next_resource) + 1);
-    }
 
     if (was_empty) instance.ref();
     return id;
 }
 
-pub fn unregisterResource(self: *Self, id: ResourceId) void {
+pub fn unregisterResource(self: *Self, handle: *Resource) void {
     const instance = getInstance();
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
 
-    const kv = self.resources.fetchSwapRemove(id) orelse @panic("invalid resource");
+    const kv = self.resources.fetchSwapRemove(handle) orelse @panic("invalid resource");
     const info = kv.value;
     if (info.references.load(.acquire) != 0) @panic("resource in use");
 
     self.allocator.free(info.label);
     self.allocator.destroy(info);
-    self.free_resources.append(self.allocator, id) catch @panic("oom");
 
     if (self.isEmpty()) instance.unref();
 }
@@ -184,16 +171,16 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
 
-    for (options.exclusive_resources, 0..) |id, i| {
-        if (!self.resources.contains(id)) return error.NotFound;
-        if (std.mem.indexOfScalar(ResourceId, options.exclusive_resources[i + 1 ..], id) != null)
+    for (options.exclusive_resources, 0..) |handle, i| {
+        if (!self.resources.contains(handle)) return error.NotFound;
+        if (std.mem.indexOfScalar(*Resource, options.exclusive_resources[i + 1 ..], handle) != null)
             return error.Deadlock;
     }
-    for (options.shared_resources, 0..) |id, i| {
-        if (!self.resources.contains(id)) return error.NotFound;
-        if (std.mem.indexOfScalar(ResourceId, options.exclusive_resources, id) != null)
+    for (options.shared_resources, 0..) |handle, i| {
+        if (!self.resources.contains(handle)) return error.NotFound;
+        if (std.mem.indexOfScalar(*Resource, options.exclusive_resources, handle) != null)
             return error.Deadlock;
-        if (std.mem.indexOfScalar(ResourceId, options.shared_resources[i + 1 ..], id) != null)
+        if (std.mem.indexOfScalar(*Resource, options.shared_resources[i + 1 ..], handle) != null)
             return error.Duplicate;
     }
     for (options.before) |dep| if (!self.systems.contains(dep.system)) return error.NotFound;
@@ -226,9 +213,9 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !SystemId {
 
     info.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
     errdefer self.allocator.free(info.label);
-    info.exclusive_resources = try self.allocator.dupe(ResourceId, options.exclusive_resources);
+    info.exclusive_resources = try self.allocator.dupe(*Resource, options.exclusive_resources);
     errdefer self.allocator.free(info.exclusive_resources);
-    info.shared_resources = try self.allocator.dupe(ResourceId, options.shared_resources);
+    info.shared_resources = try self.allocator.dupe(*Resource, options.shared_resources);
     errdefer self.allocator.free(info.shared_resources);
     info.before = try self.allocator.dupe(Dependency, options.before);
     errdefer self.allocator.free(info.before);

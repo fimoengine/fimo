@@ -8,7 +8,7 @@ const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 
 const resources = @import("resources.zig");
-const ResourceId = resources.ResourceId;
+const Resource = resources.Resource;
 const symbols = @import("symbols.zig");
 const systems = @import("systems.zig");
 const SystemGroup = systems.SystemGroup;
@@ -90,71 +90,71 @@ pub const World = opaque {
     }
 
     /// Checks if the resource is instantiated in the world.
-    pub fn hasResource(self: *World, provider: anytype, id: ResourceId) bool {
+    pub fn hasResource(self: *World, provider: anytype, handle: *Resource) bool {
         const sym = symbols.world_has_resource.requestFrom(provider);
-        return sym(self, id);
+        return sym(self, handle);
     }
 
     /// Adds the resource to the world.
     pub fn addResource(
         self: *World,
         provider: anytype,
-        id: ResourceId,
+        handle: *Resource,
         value: *const anyopaque,
     ) error{AddFailed}!void {
         const sym = symbols.world_add_resource.requestFrom(provider);
-        if (sym(self, id, value).isErr()) return error.AddFailed;
+        if (sym(self, handle, value).isErr()) return error.AddFailed;
     }
 
     /// Removes the resource from the world.
     pub fn removeResource(
         self: *World,
         provider: anytype,
-        id: ResourceId,
+        handle: *Resource,
         value: *anyopaque,
     ) error{RemoveFailed}!void {
         const sym = symbols.world_remove_resource.requestFrom(provider);
-        if (sym(self, id, value).isErr()) return error.RemoveFailed;
+        if (sym(self, handle, value).isErr()) return error.RemoveFailed;
     }
 
     /// Acquires a set of exclusive and shared resource references.
     ///
     /// The pointers to the resources are written into `out_resources`, where the indices
-    /// `0..exclusive_ids_len` contain the resources in the `exclusive_ids` list, while the
-    /// indices `exclusive_ids.len..exclusive_ids.len+shared_ids.len` contain the remaining
-    /// resources from the `shared_ids` list.
+    /// `0..exclusive_handles.len` contain the resources in the `exclusive_ids` list, while the
+    /// indices `exclusive_handles.len..exclusive_handles.len+shared_handles.len` contain the
+    /// remaining resources from the `shared_handles` list.
     ///
     /// The locks to the resources are acquired in increasing resource id order.
     /// The caller will block until all resources are locked.
     pub fn lockResourcesRaw(
         self: *World,
         provider: anytype,
-        exclusive_ids: []const ResourceId,
-        shared_ids: []const ResourceId,
+        exclusive_handles: []const *Resource,
+        shared_handles: []const *Resource,
         out_resources: []*anyopaque,
     ) void {
-        std.debug.assert(exclusive_ids.len + shared_ids.len <= out_resources.len);
+        std.debug.assert(exclusive_handles.len + shared_handles.len <= out_resources.len);
         const sym = symbols.world_lock_resources.requestFrom(provider);
         sym(
             self,
-            exclusive_ids.ptr,
-            exclusive_ids.len,
-            shared_ids.ptr,
-            shared_ids.len,
+            exclusive_handles.ptr,
+            exclusive_handles.len,
+            shared_handles.ptr,
+            shared_handles.len,
             out_resources.ptr,
         );
     }
 
     /// Unlocks an exclusive resource lock.
-    pub fn unlockResourceExclusive(self: *World, provider: anytype, id: ResourceId) void {
+    pub fn unlockResourceExclusive(self: *World, provider: anytype, handle: *Resource) void {
         const sym = symbols.world_unlock_resource_exclusive.requestFrom(provider);
-        return sym(self, id);
+        return sym(self, handle);
     }
 
     /// Unlocks a shared resource lock.
-    pub fn unlockResourceShared(self: *World, provider: anytype, id: ResourceId) void {
+    pub fn unlockResourceShared(self: *World, provider: anytype, handle: *Resource) void {
         const sym = symbols.world_unlock_resource_shared.requestFrom(provider);
-        return sym(self, id);
+        return sym(self, handle);
     }
 
     /// Adds a new empty system group to the world.

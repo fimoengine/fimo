@@ -23,23 +23,19 @@ pub const RegisterOptions = struct {
     };
 };
 
-/// A resource id with an unknown resource type.
-pub const ResourceId = enum(usize) {
-    _,
-};
+/// A resource handle with an unknown resource type.
+pub const Resource = opaque {};
 
-/// A unique identifier of a registered resource.
-pub fn TypedResourceId(T: type) type {
-    return enum(usize) {
-        _,
-
-        const Self = @This();
-        pub const Resource = T;
+/// A handle to a registered resource.
+pub fn TypedResource(T: type) type {
+    return opaque {
+        pub const Self = @This();
+        pub const ResourceType = T;
 
         /// Registers a new resource to the universe.
         ///
         /// Registered resources may be instantiated by any world that knows its id.
-        pub fn register(provider: anytype, options: RegisterOptions) error{RegisterFailed}!Self {
+        pub fn register(provider: anytype, options: RegisterOptions) error{RegisterFailed}!*Self {
             const desc = RegisterOptions.Descriptor{
                 .next = null,
                 .label = if (options.label) |l| l.ptr else null,
@@ -48,54 +44,54 @@ pub fn TypedResourceId(T: type) type {
                 .alignment = @alignOf(T),
             };
 
-            var id: ResourceId = undefined;
+            var handle: *Resource = undefined;
             const sym = symbols.resource_register.requestFrom(provider);
-            if (sym(&desc, &id).isErr()) return error.RegisterFailed;
-            return fromId(id);
+            if (sym(&desc, &handle).isErr()) return error.RegisterFailed;
+            return fromUntyped(handle);
         }
 
         /// Unregister the resource from the universe.
         ///
         /// Once unregistered, the identifier is invalidated and may be reused by another resouce.
         /// The resource must not be used by any world when this method is called.
-        pub fn unregister(self: @This(), provider: anytype) void {
+        pub fn unregister(self: *Self, provider: anytype) void {
             const sym = symbols.resource_unregister.requestFrom(provider);
-            return sym(self.asId());
+            return sym(self.asUntyped());
         }
 
         /// Casts the typed identifier to an untyped one.
-        pub fn asId(self: Self) ResourceId {
-            return @enumFromInt(@intFromEnum(self));
+        pub fn asUntyped(self: *Self) *Resource {
+            return @ptrCast(self);
         }
 
-        /// Casts the untyped identifier to a typed one.
-        pub fn fromId(id: ResourceId) Self {
-            return @enumFromInt(@intFromEnum(id));
+        /// Casts the untyped handle to a typed one.
+        pub fn fromUntyped(handle: *Resource) *Self {
+            return @ptrCast(handle);
         }
 
         /// Checks if the resource is instantiated in the world.
-        pub fn existsInWorld(self: Self, provider: anytype, world: *World) bool {
-            return world.hasResource(provider, self.asId());
+        pub fn existsInWorld(self: *Self, provider: anytype, world: *World) bool {
+            return world.hasResource(provider, self.asUntyped());
         }
 
         /// Adds the resource to the world.
         pub fn addToWorld(
-            self: Self,
+            self: *Self,
             provider: anytype,
             world: *World,
             value: T,
         ) error{AddFailed}!void {
-            return world.addResource(provider, self.asId(), &value);
+            return world.addResource(provider, self.asUntyped(), &value);
         }
 
         /// Removes the resource from the world.
         pub fn removeFromWorld(
-            self: Self,
+            self: *Self,
             provider: anytype,
             world: *World,
         ) error{RemoveFailed}!T {
             var value: T = undefined;
-            try world.removeResource(provider, self.asId(), &value);
+            try world.removeResource(provider, self.asUntyped(), &value);
             return value;
         }
 
@@ -103,29 +99,29 @@ pub fn TypedResourceId(T: type) type {
         ///
         /// The caller will block until there are no active shared or exlusive references to the
         /// resource.
-        pub fn lockInWorldExclusive(self: Self, provider: anytype, world: *World) *T {
+        pub fn lockInWorldExclusive(self: *Self, provider: anytype, world: *World) *T {
             var out: *anyopaque = undefined;
-            world.lockResourcesRaw(provider, &.{self.asId()}, &.{}, (&out)[0..1]);
+            world.lockResourcesRaw(provider, &.{self.asUntyped()}, &.{}, (&out)[0..1]);
             return @ptrCast(@alignCast(out));
         }
 
         /// Returns a shared reference to the resource in the world.
         ///
         /// The caller will block until there are no active exlusive references to the resource.
-        pub fn lockInWorldShared(self: Self, provider: anytype, world: *World) *T {
+        pub fn lockInWorldShared(self: *Self, provider: anytype, world: *World) *T {
             var out: *anyopaque = undefined;
-            world.lockResourcesRaw(provider, &.{}, &.{self.asId()}, (&out)[0..1]);
+            world.lockResourcesRaw(provider, &.{}, &.{self.asUntyped()}, (&out)[0..1]);
             return @ptrCast(@alignCast(out));
         }
 
         /// Unlocks an exclusive resource lock in the world.
-        pub fn unlockInWorldExclusive(self: Self, provider: anytype, world: *World) void {
-            world.unlockResourceExclusive(provider, self.asId());
+        pub fn unlockInWorldExclusive(self: *Self, provider: anytype, world: *World) void {
+            world.unlockResourceExclusive(provider, self.asUntyped());
         }
 
         /// Unlocks a shared resource lock in the world.
-        pub fn unlockInWorldShared(self: Self, provider: anytype, world: *World) void {
-            world.unlockResourceShared(provider, self.asId());
+        pub fn unlockInWorldShared(self: *Self, provider: anytype, world: *World) void {
+            world.unlockResourceShared(provider, self.asUntyped());
         }
     };
 }
@@ -135,12 +131,12 @@ test "resource: smoke test" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const id1 = try TypedResourceId(i32).register(GlobalCtx, .{ .label = "resource-1" });
-    defer id1.unregister(GlobalCtx);
+    const handle_1 = try TypedResource(i32).register(GlobalCtx, .{ .label = "resource-1" });
+    defer handle_1.unregister(GlobalCtx);
 
-    const id2 = try TypedResourceId(i32).register(GlobalCtx, .{ .label = "resource-2" });
-    defer id2.unregister(GlobalCtx);
-    try std.testing.expect(id1 != id2);
+    const handle_2 = try TypedResource(i32).register(GlobalCtx, .{ .label = "resource-2" });
+    defer handle_2.unregister(GlobalCtx);
+    try std.testing.expect(handle_1 != handle_2);
 }
 
 test "resource: add to world" {
@@ -148,20 +144,20 @@ test "resource: add to world" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const id = try TypedResourceId(i32).register(GlobalCtx, .{ .label = "resource-1" });
-    defer id.unregister(GlobalCtx);
+    const handle = try TypedResource(i32).register(GlobalCtx, .{ .label = "resource-1" });
+    defer handle.unregister(GlobalCtx);
 
     const world = try World.init(GlobalCtx, .{ .label = "test-world" });
     defer world.deinit(GlobalCtx);
 
     const value: i32 = 5;
-    try std.testing.expect(!id.existsInWorld(GlobalCtx, world));
-    try id.addToWorld(GlobalCtx, world, value);
-    defer _ = id.removeFromWorld(GlobalCtx, world) catch unreachable;
-    try std.testing.expect(id.existsInWorld(GlobalCtx, world));
+    try std.testing.expect(!handle.existsInWorld(GlobalCtx, world));
+    try handle.addToWorld(GlobalCtx, world, value);
+    defer _ = handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    try std.testing.expect(handle.existsInWorld(GlobalCtx, world));
 
-    const ptr = id.lockInWorldExclusive(GlobalCtx, world);
-    defer id.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = handle.lockInWorldExclusive(GlobalCtx, world);
+    defer handle.unlockInWorldExclusive(GlobalCtx, world);
     try std.testing.expectEqual(value, ptr.*);
 }
 
@@ -170,8 +166,8 @@ test "resource: unique lock" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const id = try TypedResourceId(usize).register(GlobalCtx, .{ .label = "resource-1" });
-    defer id.unregister(GlobalCtx);
+    const handle = try TypedResource(usize).register(GlobalCtx, .{ .label = "resource-1" });
+    defer handle.unregister(GlobalCtx);
 
     const world = try World.init(GlobalCtx, .{ .label = "test-world" });
     defer world.deinit(GlobalCtx);
@@ -179,20 +175,20 @@ test "resource: unique lock" {
     const executor = world.getPool(GlobalCtx);
     defer executor.unref();
 
-    try id.addToWorld(GlobalCtx, world, 0);
-    defer _ = id.removeFromWorld(GlobalCtx, world) catch unreachable;
+    try handle.addToWorld(GlobalCtx, world, 0);
+    defer _ = handle.removeFromWorld(GlobalCtx, world) catch unreachable;
 
     const num_jobs = 4;
     const iterations = 1000;
 
     const Runner = struct {
-        id: TypedResourceId(usize),
+        handle: *TypedResource(usize),
         world: *World,
 
         fn run(self: @This()) void {
             for (0..iterations) |_| {
-                const ptr = self.id.lockInWorldExclusive(GlobalCtx, self.world);
-                defer self.id.unlockInWorldExclusive(GlobalCtx, self.world);
+                const ptr = self.handle.lockInWorldExclusive(GlobalCtx, self.world);
+                defer self.handle.unlockInWorldExclusive(GlobalCtx, self.world);
                 ptr.* += 1;
             }
         }
@@ -202,7 +198,7 @@ test "resource: unique lock" {
     for (&fences) |*fence| try Job.go(
         GlobalCtx,
         Runner.run,
-        .{.{ .id = id, .world = world }},
+        .{.{ .handle = handle, .world = world }},
         .{
             .allocator = std.testing.allocator,
             .executor = executor,
@@ -211,8 +207,8 @@ test "resource: unique lock" {
     );
     for (&fences) |*fence| fence.wait(GlobalCtx);
 
-    const ptr = id.lockInWorldExclusive(GlobalCtx, world);
-    defer id.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = handle.lockInWorldExclusive(GlobalCtx, world);
+    defer handle.unlockInWorldExclusive(GlobalCtx, world);
     try std.testing.expectEqual(num_jobs * iterations, ptr.*);
 }
 
@@ -221,8 +217,8 @@ test "resource: shared lock" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const id = try TypedResourceId(usize).register(GlobalCtx, .{ .label = "resource-1" });
-    defer id.unregister(GlobalCtx);
+    const handle = try TypedResource(usize).register(GlobalCtx, .{ .label = "resource-1" });
+    defer handle.unregister(GlobalCtx);
 
     const world = try World.init(GlobalCtx, .{ .label = "test-world" });
     defer world.deinit(GlobalCtx);
@@ -230,8 +226,8 @@ test "resource: shared lock" {
     const executor = world.getPool(GlobalCtx);
     defer executor.unref();
 
-    try id.addToWorld(GlobalCtx, world, 0);
-    defer _ = id.removeFromWorld(GlobalCtx, world) catch unreachable;
+    try handle.addToWorld(GlobalCtx, world, 0);
+    defer _ = handle.removeFromWorld(GlobalCtx, world) catch unreachable;
 
     const num_writers: usize = 2;
     const num_readers: usize = 4;
@@ -241,7 +237,7 @@ test "resource: shared lock" {
     const Runner = struct {
         world: *World,
 
-        writes: TypedResourceId(usize),
+        writes: *TypedResource(usize),
         reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
         term1: usize = 0,
@@ -303,7 +299,7 @@ test "resource: shared lock" {
         }
     };
 
-    var runner = Runner{ .world = world, .writes = id };
+    var runner = Runner{ .world = world, .writes = handle };
     var fences = [_]Fence{.{}} ** (num_writers + num_readers);
 
     for (fences[0..num_writers], 0..) |*f, i| try Job.go(
@@ -321,7 +317,7 @@ test "resource: shared lock" {
 
     for (&fences) |*fence| fence.wait(GlobalCtx);
 
-    const writes = id.lockInWorldShared(GlobalCtx, world);
-    defer id.unlockInWorldShared(GlobalCtx, world);
+    const writes = handle.lockInWorldShared(GlobalCtx, world);
+    defer handle.unlockInWorldShared(GlobalCtx, world);
     try std.testing.expectEqual(num_writes, writes.*);
 }

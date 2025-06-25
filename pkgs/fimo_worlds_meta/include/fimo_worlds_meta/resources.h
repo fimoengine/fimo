@@ -9,8 +9,8 @@ extern "C" {
 
 typedef struct FimoWorldsMeta_World FimoWorldsMeta_World;
 
-/// A unique identifier of a registered resource.
-typedef FimoUSize FimoWorldsMeta_ResourceId;
+/// A unique handle to a registered resource.
+typedef struct FimoWorldsMeta_Resource *FimoWorldsMeta_ResourceHandle;
 
 /// Descriptor of a new resource.
 typedef struct FimoWorldsMeta_ResourceDescriptor {
@@ -28,15 +28,15 @@ typedef struct FimoWorldsMeta_ResourceDescriptor {
 
 /// Registers a new resource to the universe.
 ///
-/// Registered resources may be instantiated by any world that knows its id.
+/// Registered resources may be instantiated by any world that knows its handle.
 typedef FimoStatus (*FimoWorldsMeta_resource_register)(const FimoWorldsMeta_ResourceDescriptor *resource,
-                                                       FimoWorldsMeta_ResourceId *id);
+                                                       FimoWorldsMeta_ResourceHandle *handle);
 
 /// Unregister the resource from the universe.
 ///
 /// Once unregistered, the identifier is invalidated and may be reused by another resouce.
 /// The resource must not be used by any world when this method is called.
-typedef void (*FimoWorldsMeta_resource_unregister)(FimoWorldsMeta_ResourceId id);
+typedef void (*FimoWorldsMeta_resource_unregister)(FimoWorldsMeta_ResourceHandle handle);
 
 #ifdef __cplusplus
 }

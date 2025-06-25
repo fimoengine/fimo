@@ -47,37 +47,38 @@ typedef const char *(*FimoWorldsMeta_world_get_label)(FimoWorldsMeta_World *worl
 typedef FimoTasksMeta_Pool (*FimoWorldsMeta_world_get_pool)(FimoWorldsMeta_World *world);
 
 /// Checks if the resource is instantiated in the world.
-typedef bool (*FimoWorldsMeta_world_has_resource)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceId id);
+typedef bool (*FimoWorldsMeta_world_has_resource)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceHandle handle);
 
 /// Adds the resource to the world.
-typedef FimoStatus (*FimoWorldsMeta_world_add_resource)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceId id,
-                                                        const void *value);
+typedef FimoStatus (*FimoWorldsMeta_world_add_resource)(FimoWorldsMeta_World *world,
+                                                        FimoWorldsMeta_ResourceHandle handle, const void *value);
 
 /// Removes the resource from the world.
-typedef FimoStatus (*FimoWorldsMeta_world_remove_resource)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceId id,
-                                                           void *value);
+typedef FimoStatus (*FimoWorldsMeta_world_remove_resource)(FimoWorldsMeta_World *world,
+                                                           FimoWorldsMeta_ResourceHandle handle, void *value);
 
 /// Acquires a set of exclusive and shared resource references.
 ///
 /// The pointers to the resources are written into `out_resources`, where the indices
-/// `0..exclusive_ids_len` contain the resources in the `exclusive_ids` list, while the
-/// indices `exclusive_ids.len..exclusive_ids.len+shared_ids.len` contain the remaining
-/// resources from the `shared_ids` list.
+/// `0..exclusive_handles_len` contain the resources in the `exclusive_handles` list, while the
+/// indices `exclusive_handles_len..exclusive_handles_len+shared_handles_len` contain the remaining
+/// resources from the `shared_handles` list.
 ///
-/// The locks to the resources are acquired in increasing resource id order.
+/// The locks to the resources are acquired in ascending resource handle order.
 /// The caller will block until all resources are locked.
 typedef void(FimoWorldsMeta_world_lock_resources)(FimoWorldsMeta_World *world,
-                                                  const FimoWorldsMeta_ResourceId *exclusive_ids,
-                                                  FimoUSize exclusive_ids_len,
-                                                  const FimoWorldsMeta_ResourceId *shared_ids, FimoUSize shared_ids_len,
-                                                  void **resources);
+                                                  const FimoWorldsMeta_ResourceHandle *exclusive_handles,
+                                                  FimoUSize exclusive_handles_len,
+                                                  const FimoWorldsMeta_ResourceHandle *shared_handles,
+                                                  FimoUSize shared_handles_len, void **resources);
 
 /// Unlocks an exclusive resource lock.
 typedef void (*FimoWorldsMeta_world_unlock_resource_exclusive)(FimoWorldsMeta_World *world,
-                                                               FimoWorldsMeta_ResourceId id);
+                                                               FimoWorldsMeta_ResourceHandle handle);
 
 /// Unlocks a shared resource lock.
-typedef void (*FimoWorldsMeta_world_unlock_resource_shared)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceId id);
+typedef void (*FimoWorldsMeta_world_unlock_resource_shared)(FimoWorldsMeta_World *world,
+                                                            FimoWorldsMeta_ResourceHandle handle);
 
 /// Allocates a new buffer.
 ///
