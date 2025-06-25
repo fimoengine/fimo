@@ -17,15 +17,13 @@ const testing = @import("testing.zig");
 const worlds = @import("worlds.zig");
 const World = worlds.World;
 
-/// A unique identifier for a registered system.
-pub const SystemId = enum(usize) {
-    _,
-
+/// A unique handle to a registered system.
+pub const System = opaque {
     /// Unregisters the system from the universe.
     ///
     /// Once unregistered, the identifier is invalidated and may be reused by another system.
     /// The system must not be used explicitly by any world when this method is called.
-    pub fn unregister(self: SystemId, provider: anytype) void {
+    pub fn unregister(self: *System, provider: anytype) void {
         const sym = symbols.system_unregister.requestFrom(provider);
         return sym(self);
     }
@@ -115,7 +113,7 @@ pub const SystemGroup = opaque {
     pub fn addSytems(
         self: *SystemGroup,
         provider: anytype,
-        systems: []const SystemId,
+        systems: []const *System,
     ) error{AddFailed}!void {
         const sym = symbols.system_group_add_systems.requestFrom(provider);
         if (sym(self, systems.ptr, systems.len).isErr()) return error.AddFailed;
@@ -128,10 +126,10 @@ pub const SystemGroup = opaque {
     pub fn removeSystem(
         self: *SystemGroup,
         provider: anytype,
-        id: SystemId,
+        handle: *System,
     ) void {
         var fence = Fence{};
-        self.removeSystemAsync(provider, id, &fence);
+        self.removeSystemAsync(provider, handle, &fence);
         fence.wait(provider);
     }
 
@@ -143,11 +141,11 @@ pub const SystemGroup = opaque {
     pub fn removeSystemAsync(
         self: *SystemGroup,
         provider: anytype,
-        id: SystemId,
+        handle: *System,
         signal: *Fence,
     ) void {
         const sym = symbols.system_group_remove_system.requestFrom(provider);
-        return sym(self, id, signal);
+        return sym(self, handle, signal);
     }
 
     /// Schedules to run all systems contained in the group.
@@ -251,7 +249,7 @@ test "SystemGroup: schedule" {
     try resource.addToWorld(GlobalCtx, world, 0);
     defer _ = resource.removeFromWorld(GlobalCtx, world) catch unreachable;
 
-    const Sys = System.simple(struct {
+    const Sys = Declaration.simple(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct { a: *u32 }) void {
             _ = ctx;
             _ = exclusive;
@@ -450,7 +448,7 @@ pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStra
 }
 
 /// Interface of a system.
-pub const System = struct {
+pub const Declaration = struct {
     FactoryT: type,
     deinit_factory: ?*const fn (factory: ?*const anyopaque) callconv(.c) void,
 
@@ -473,7 +471,7 @@ pub const System = struct {
     /// Descriptor of a system dependency.
     pub const Dependency = extern struct {
         /// System to depend on / be depended from.
-        system: SystemId,
+        system: *System,
         /// Whether to ignore any deferred subjob of the system.
         ///
         /// If set to `true`, the system will start after the other systems `run`
@@ -560,7 +558,7 @@ pub const System = struct {
     ///
     /// Registered resources may be added to system group of any world.
     pub fn register(
-        comptime self: System,
+        comptime self: Declaration,
         provider: anytype,
         label: ?[]const u8,
         factory: self.FactoryT,
@@ -568,7 +566,7 @@ pub const System = struct {
         shared_handles: self.SharedResourceHandlesT,
         before: []const Dependency,
         after: []const Dependency,
-    ) error{RegisterFailed}!SystemId {
+    ) error{RegisterFailed}!*System {
         var exclusive: [exclusive_handles.len]*Resource = undefined;
         inline for (0..exclusive.len) |i| exclusive[i] = exclusive_handles[i].asUntyped();
         var shared: [shared_handles.len]*Resource = undefined;
@@ -598,14 +596,14 @@ pub const System = struct {
             .system_run = self.run,
         };
 
-        var id: SystemId = undefined;
+        var handle: *System = undefined;
         const sym = symbols.system_register.requestFrom(provider);
-        if (sym(&desc, &id).isErr()) return error.RegisterFailed;
-        return id;
+        if (sym(&desc, &handle).isErr()) return error.RegisterFailed;
+        return handle;
     }
 
     /// A simple system using only a stateless function.
-    pub fn simple(comptime runFn: anytype) System {
+    pub fn simple(comptime runFn: anytype) Declaration {
         const run_info = @typeInfo(@TypeOf(runFn)).@"fn";
         if (run_info.params.len != 3 and run_info.params.len != 4)
             @compileError("The system run function must take three or four parameters.");
@@ -645,7 +643,7 @@ pub const System = struct {
         ) anyerror!SystemT,
         comptime deinitFn: ?fn (system: *SystemT) void,
         comptime runFn: anytype,
-    ) System {
+    ) Declaration {
         const run_info = @typeInfo(@TypeOf(runFn)).@"fn";
         if (run_info.params.len != 3 and run_info.params.len != 4)
             @compileError("The system run function must take three or four parameters.");
@@ -807,25 +805,25 @@ test "System: system definitions" {
         }
     };
 
-    const Simple0 = System.simple(Dummy.simple0);
+    const Simple0 = Declaration.simple(Dummy.simple0);
     TupleTester.assertTuple(.{}, Simple0.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{}, Simple0.SharedResourceHandlesT);
 
-    const Simple1 = System.simple(Dummy.simple1);
+    const Simple1 = Declaration.simple(Dummy.simple1);
     TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple1.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{}, Simple1.SharedResourceHandlesT);
 
-    const Simple2 = System.simple(Dummy.simple2);
+    const Simple2 = Declaration.simple(Dummy.simple2);
     TupleTester.assertTuple(.{}, Simple2.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple2.SharedResourceHandlesT);
 
-    const Simple3 = System.simple(Dummy.simple3);
+    const Simple3 = Declaration.simple(Dummy.simple3);
     TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple3.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{*TypedResource(f32)}, Simple3.SharedResourceHandlesT);
 }
 
 test "System: smoke test" {
-    const Dummy = System.simple(struct {
+    const Dummy = Declaration.simple(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
             _ = ctx;
             _ = exclusive;
@@ -844,7 +842,7 @@ test "System: smoke test" {
 test "System: cyclic dependency" {
     if (true) return error.SkipZigTest;
 
-    const Dummy = System.simple(struct {
+    const Dummy = Declaration.simple(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
             _ = ctx;
             _ = exclusive;

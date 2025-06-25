@@ -141,10 +141,10 @@ fn resourceUnregister(handle: *resources.Resource) callconv(.c) void {
 }
 
 fn systemRegister(
-    system: *const systems.System.Descriptor,
-    id: *systems.SystemId,
+    system: *const systems.Declaration.Descriptor,
+    handle: **systems.System,
 ) callconv(.c) Status {
-    id.* = State.global_state.universe.registerSystem(.{
+    handle.* = State.global_state.universe.registerSystem(.{
         .label = if (system.label_len != 0) system.label.?[0..system.label_len] else null,
         .exclusive_resources = if (system.exclusive_handles_len != 0)
             system.exclusive_handles.?[0..system.exclusive_handles_len]
@@ -180,8 +180,8 @@ fn systemRegister(
     return .ok;
 }
 
-fn systemUnregister(id: systems.SystemId) callconv(.c) void {
-    State.global_state.universe.unregisterSystem(id);
+fn systemUnregister(handle: *systems.System) callconv(.c) void {
+    State.global_state.universe.unregisterSystem(handle);
 }
 
 fn systemGroupCreate(
@@ -223,12 +223,12 @@ fn systemGroupGetPool(group: *systems.SystemGroup) callconv(.c) pools.Pool {
 
 fn systemGroupAddSystems(
     group: *systems.SystemGroup,
-    sys: ?[*]const systems.SystemId,
+    sys: ?[*]const *systems.System,
     len: usize,
 ) callconv(.c) Status {
-    const ids = if (len != 0) sys.?[0..len] else &.{};
+    const handles = if (len != 0) sys.?[0..len] else &.{};
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    grp.addSystems(ids) catch |err| {
+    grp.addSystems(handles) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -237,11 +237,11 @@ fn systemGroupAddSystems(
 
 fn systemGroupRemoveSystem(
     group: *systems.SystemGroup,
-    id: systems.SystemId,
+    handle: *systems.System,
     signal: *Fence,
 ) callconv(.c) void {
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    grp.removeSystem(id, signal);
+    grp.removeSystem(handle, signal);
 }
 
 fn systemGroupSchedule(

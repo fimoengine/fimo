@@ -12,11 +12,6 @@ const resources = @import("resources.zig");
 const RegisterResourceOptions = resources.RegisterOptions;
 const Resource = resources.Resource;
 const systems = @import("systems.zig");
-const SystemId = systems.SystemId;
-const SystemGroup = systems.SystemGroup;
-const SystemContext = systems.SystemContext;
-const AllocatorStrategy = systems.AllocatorStrategy;
-const System = systems.System;
 const worlds = @import("worlds.zig");
 const CreateWorldOptions = worlds.CreateOptions;
 const World = worlds.World;
@@ -85,8 +80,8 @@ pub const system_register = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        system: *const System.Descriptor,
-        id: *SystemId,
+        system: *const systems.Declaration.Descriptor,
+        handle: **systems.System,
     ) callconv(.c) Status,
 };
 
@@ -94,7 +89,7 @@ pub const system_unregister = Symbol{
     .name = "system_unregister",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (id: SystemId) callconv(.c) void,
+    .T = fn (handle: *systems.System) callconv(.c) void,
 };
 
 pub const system_group_create = Symbol{
@@ -102,8 +97,8 @@ pub const system_group_create = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        descriptor: *const SystemGroup.CreateOptions.Descriptor,
-        group: **SystemGroup,
+        descriptor: *const systems.SystemGroup.CreateOptions.Descriptor,
+        group: **systems.SystemGroup,
     ) callconv(.c) Status,
 };
 
@@ -111,42 +106,50 @@ pub const system_group_destroy = Symbol{
     .name = "system_group_destroy",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup) callconv(.c) void,
+    .T = fn (group: *systems.SystemGroup) callconv(.c) void,
 };
 
 pub const system_group_get_world = Symbol{
     .name = "system_group_get_world",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup) callconv(.c) *World,
+    .T = fn (group: *systems.SystemGroup) callconv(.c) *World,
 };
 
 pub const system_group_get_label = Symbol{
     .name = "system_group_get_label",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup, len: *usize) callconv(.c) ?[*]const u8,
+    .T = fn (group: *systems.SystemGroup, len: *usize) callconv(.c) ?[*]const u8,
 };
 
 pub const system_group_get_pool = Symbol{
     .name = "system_group_get_pool",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup) callconv(.c) Pool,
+    .T = fn (group: *systems.SystemGroup) callconv(.c) Pool,
 };
 
 pub const system_group_add_systems = Symbol{
     .name = "system_group_add_systems",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup, systems: ?[*]const SystemId, len: usize) callconv(.c) Status,
+    .T = fn (
+        group: *systems.SystemGroup,
+        systems: ?[*]const *systems.System,
+        len: usize,
+    ) callconv(.c) Status,
 };
 
 pub const system_group_remove_system = Symbol{
     .name = "system_group_remove_system",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *SystemGroup, id: SystemId, signal: *Fence) callconv(.c) void,
+    .T = fn (
+        group: *systems.SystemGroup,
+        handle: *systems.System,
+        signal: *Fence,
+    ) callconv(.c) void,
 };
 
 pub const system_group_schedule = Symbol{
@@ -154,7 +157,7 @@ pub const system_group_schedule = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        group: *SystemGroup,
+        group: *systems.SystemGroup,
         wait_on: ?[*]const *Fence,
         wait_on_len: usize,
         signal: ?*Fence,
@@ -165,14 +168,14 @@ pub const system_context_get_group = Symbol{
     .name = "system_context_get_group",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (context: *SystemContext) callconv(.c) *SystemGroup,
+    .T = fn (context: *systems.SystemContext) callconv(.c) *systems.SystemGroup,
 };
 
 pub const system_context_get_generation = Symbol{
     .name = "system_context_get_generation",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (context: *SystemContext) callconv(.c) usize,
+    .T = fn (context: *systems.SystemContext) callconv(.c) usize,
 };
 
 pub const system_context_allocator_alloc = Symbol{
@@ -180,8 +183,8 @@ pub const system_context_allocator_alloc = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        context: *SystemContext,
-        strategy: AllocatorStrategy,
+        context: *systems.SystemContext,
+        strategy: systems.AllocatorStrategy,
         len: usize,
         alignment: usize,
         ret_addr: usize,
@@ -193,8 +196,8 @@ pub const system_context_allocator_resize = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        context: *SystemContext,
-        strategy: AllocatorStrategy,
+        context: *systems.SystemContext,
+        strategy: systems.AllocatorStrategy,
         ptr: ?[*]u8,
         len: usize,
         alignment: usize,
@@ -208,8 +211,8 @@ pub const system_context_allocator_remap = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        context: *SystemContext,
-        strategy: AllocatorStrategy,
+        context: *systems.SystemContext,
+        strategy: systems.AllocatorStrategy,
         ptr: ?[*]u8,
         len: usize,
         alignment: usize,
@@ -223,8 +226,8 @@ pub const system_context_allocator_free = Symbol{
     .namespace = symbol_namespace,
     .version = context_version,
     .T = fn (
-        context: *SystemContext,
-        strategy: AllocatorStrategy,
+        context: *systems.SystemContext,
+        strategy: systems.AllocatorStrategy,
         ptr: ?[*]u8,
         len: usize,
         alignment: usize,

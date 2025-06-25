@@ -7,7 +7,7 @@ const DoublyLinkedList = std.DoublyLinkedList;
 
 const fimo_worlds_meta = @import("fimo_worlds_meta");
 const AllocatorStrategy = fimo_worlds_meta.systems.AllocatorStrategy;
-const SystemId = fimo_worlds_meta.systems.SystemId;
+const MetaSystem = fimo_worlds_meta.systems.System;
 const Fence = fimo_worlds_meta.Job.Fence;
 
 const heap = @import("heap.zig");
@@ -23,13 +23,13 @@ info: *Universe.SystemInfo,
 weak: bool,
 node: DoublyLinkedList.Node = .{},
 waiters: SinglyLinkedList = .{},
-references: AutoArrayHashMapUnmanaged(SystemId, *System) = .empty,
-referenced_by: AutoArrayHashMapUnmanaged(SystemId, *System) = .empty,
+references: AutoArrayHashMapUnmanaged(*MetaSystem, *System) = .empty,
+referenced_by: AutoArrayHashMapUnmanaged(*MetaSystem, *System) = .empty,
 
 value_ptr: *anyopaque,
 merge_deferred: bool = false,
 deferred_fence: Fence = .{},
-deferred_dep: AutoArrayHashMapUnmanaged(SystemId, *System) = .empty,
+deferred_dep: AutoArrayHashMapUnmanaged(*MetaSystem, *System) = .empty,
 resources: []*anyopaque,
 arena_allocator: ArenaAllocator,
 tracing_allocator: TracingAllocator,
@@ -102,8 +102,8 @@ pub fn deinit(self: *System) void {
 }
 
 pub fn addReference(self: *System, sys: *System) void {
-    const id = self.info.id;
-    const sys_id = sys.info.id;
+    const id = self.info.id();
+    const sys_id = sys.info.id();
     std.debug.assert(!self.references.contains(sys_id));
     std.debug.assert(!sys.referenced_by.contains(id));
 
@@ -114,8 +114,8 @@ pub fn addReference(self: *System, sys: *System) void {
 }
 
 pub fn removeReference(self: *System, sys: *System) void {
-    const id = self.info.id;
-    const sys_id = sys.info.id;
+    const id = self.info.id();
+    const sys_id = sys.info.id();
     std.debug.assert(self.references.contains(sys_id));
     std.debug.assert(sys.referenced_by.contains(id));
 
