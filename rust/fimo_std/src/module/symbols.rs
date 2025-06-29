@@ -218,7 +218,7 @@ where
     /// Constructs a new `SliceRef`.
     pub const fn new(value: &'a [T]) -> Self
     where
-        U: ~const slice_private::SliceLength,
+        U: [const] slice_private::SliceLength,
     {
         if value.is_empty() {
             Self {
@@ -238,7 +238,7 @@ where
     /// Constructs a `&[T]` from the `SliceRef`.
     pub const fn as_slice(&self) -> &[T]
     where
-        U: ~const slice_private::SliceLength,
+        U: [const] slice_private::SliceLength,
     {
         match self.ptr {
             Some(ptr) => {
@@ -253,7 +253,7 @@ where
     /// Constructs a `&[T]` from the `SliceRef`.
     pub const fn into_slice(self) -> &'a [T]
     where
-        U: ~const slice_private::SliceLength,
+        U: [const] slice_private::SliceLength,
     {
         match self.ptr {
             Some(ptr) => {

@@ -8,12 +8,11 @@ const AnyError = fimo_std.AnyError;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const Pool = fimo_tasks_meta.pool.Pool;
-const fimo_worlds_meta = @import("fimo_worlds_meta");
-const Resource = fimo_worlds_meta.resources.Resource;
 
 const heap = @import("heap.zig");
 const SystemGroup = @import("SystemGroup.zig");
 const Universe = @import("Universe.zig");
+const Resource = Universe.Resource;
 
 const World = @This();
 
@@ -28,7 +27,6 @@ resources: AutoArrayHashMapUnmanaged(*Resource, *ResourceValue) = .empty,
 const ResourceValue = struct {
     rwlock: RwLock = .{},
     value_ptr: *anyopaque,
-    info: *Universe.ResourceInfo,
     references: atomic.Value(usize) = .init(0),
 };
 
@@ -88,28 +86,27 @@ pub fn deinit(self: *World) void {
 
 pub fn addResource(self: *World, handle: *Resource, value: *const anyopaque) !void {
     const instance = Universe.getInstance();
-    const info = blk: {
+    {
         const universe = Universe.getUniverse();
         universe.rwlock.lockRead(instance);
         defer universe.rwlock.unlockRead(instance);
 
-        const i = universe.resources.get(handle) orelse @panic("invalid resource");
-        _ = i.references.fetchAdd(1, .monotonic);
-        break :blk i;
-    };
-    errdefer _ = info.references.fetchSub(1, .monotonic);
+        if (!universe.resources.contains(handle)) @panic("invalid resource");
+        _ = handle.references.fetchAdd(1, .monotonic);
+    }
+    errdefer _ = handle.references.fetchSub(1, .monotonic);
 
     const allocator = self.allocator.allocator();
-    const value_start = std.mem.alignForward(usize, @sizeOf(ResourceValue), info.alignment.toByteUnits());
-    const memory_len = value_start + info.size;
+    const value_start = std.mem.alignForward(usize, @sizeOf(ResourceValue), handle.alignment.toByteUnits());
+    const memory_len = value_start + handle.size;
     const memory = try allocator.alignedAlloc(u8, .of(ResourceValue), memory_len);
     errdefer allocator.free(memory);
 
     const value_slice = memory[value_start..];
-    @memcpy(value_slice, @as([*]const u8, @ptrCast(value))[0..info.size]);
+    @memcpy(value_slice, @as([*]const u8, @ptrCast(value))[0..handle.size]);
 
     const resource = std.mem.bytesAsValue(ResourceValue, memory);
-    resource.* = ResourceValue{ .info = info, .value_ptr = value_slice.ptr };
+    resource.* = ResourceValue{ .value_ptr = value_slice.ptr };
 
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
@@ -131,18 +128,17 @@ pub fn removeResource(self: *World, handle: *Resource, value: *anyopaque) !void 
         break :blk res;
     };
 
-    const info = resource.info;
     @memcpy(
-        @as([*]u8, @ptrCast(value))[0..info.size],
-        @as([*]const u8, @ptrCast(resource.value_ptr))[0..info.size],
+        @as([*]u8, @ptrCast(value))[0..handle.size],
+        @as([*]const u8, @ptrCast(resource.value_ptr))[0..handle.size],
     );
 
     const allocator = self.allocator.allocator();
-    const value_start = std.mem.alignForward(usize, @sizeOf(ResourceValue), info.alignment.toByteUnits());
-    const memory_len = value_start + info.size;
+    const value_start = std.mem.alignForward(usize, @sizeOf(ResourceValue), handle.alignment.toByteUnits());
+    const memory_len = value_start + handle.size;
     const memory = std.mem.asBytes(resource).ptr[0..memory_len];
     allocator.free(memory);
-    _ = info.references.fetchSub(1, .monotonic);
+    _ = handle.references.fetchSub(1, .monotonic);
 }
 
 pub fn hasResource(self: *World, handle: *Resource) bool {
