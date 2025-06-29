@@ -10,9 +10,6 @@ const Tracing = fimo_std.Context.Tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
-const Resource = fimo_worlds_meta.resources.Resource;
-const System = fimo_worlds_meta.systems.System;
-const Dependency = fimo_worlds_meta.systems.Declaration.Dependency;
 
 const fimo_export = @import("fimo_export.zig");
 const Instance = fimo_export.Instance;
@@ -22,8 +19,8 @@ const Self = @This();
 rwlock: RwLock = .{},
 allocator: Allocator,
 num_worlds: usize = 0,
-resources: AutoArrayHashMapUnmanaged(*Resource, *ResourceInfo) = .empty,
-systems: AutoArrayHashMapUnmanaged(*System, *SystemInfo) = .empty,
+resources: AutoArrayHashMapUnmanaged(*Resource, void) = .empty,
+systems: AutoArrayHashMapUnmanaged(*System, void) = .empty,
 
 pub const RegisterResourceOptions = struct {
     label: ?[]const u8 = null,
@@ -35,8 +32,8 @@ pub const RegisterSystemOptions = struct {
     label: ?[]const u8 = null,
     exclusive_resources: []const *Resource = &.{},
     shared_resources: []const *Resource = &.{},
-    before: []const Dependency = &.{},
-    after: []const Dependency = &.{},
+    before: []const System.Dependency = &.{},
+    after: []const System.Dependency = &.{},
 
     factory: ?[]const u8,
     factory_alignment: Alignment,
@@ -58,14 +55,14 @@ pub const RegisterSystemOptions = struct {
     ) callconv(.c) void,
 };
 
-pub const ResourceInfo = struct {
+pub const Resource = struct {
     label: []u8,
     size: usize,
     alignment: Alignment,
     references: atomic.Value(usize) = .init(0),
 };
 
-pub const SystemInfo = struct {
+pub const System = struct {
     label: []u8,
     exclusive_resources: []*Resource,
     shared_resources: []*Resource,
@@ -92,9 +89,10 @@ pub const SystemInfo = struct {
         deferred_signal: *fimo_worlds_meta.Job.Fence,
     ) callconv(.c) void,
 
-    pub fn id(self: *SystemInfo) *System {
-        return @ptrCast(self);
-    }
+    pub const Dependency = extern struct {
+        system: *System,
+        ignore_deferred: bool = false,
+    };
 };
 
 pub fn deinit(self: *Self) void {
@@ -128,22 +126,20 @@ pub fn registerResource(self: *Self, options: RegisterResourceOptions) !*Resourc
     defer self.rwlock.unlockWrite(instance);
 
     const was_empty = self.isEmpty();
-    const info = try self.allocator.create(ResourceInfo);
-    errdefer self.allocator.destroy(info);
-    info.* = .{
+    const handle = try self.allocator.create(Resource);
+    errdefer self.allocator.destroy(handle);
+    handle.* = .{
         .label = undefined,
         .size = options.size,
         .alignment = options.alignment,
     };
 
-    info.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
-    errdefer self.allocator.free(info.label);
-
-    const handle: *Resource = @ptrCast(info);
-    try self.resources.put(self.allocator, handle, info);
+    handle.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
+    errdefer self.allocator.free(handle.label);
+    try self.resources.put(self.allocator, handle, {});
 
     if (was_empty) instance.ref();
-    return handle;
+    return @ptrCast(handle);
 }
 
 pub fn unregisterResource(self: *Self, handle: *Resource) void {
@@ -151,12 +147,11 @@ pub fn unregisterResource(self: *Self, handle: *Resource) void {
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
 
-    const kv = self.resources.fetchSwapRemove(handle) orelse @panic("invalid resource");
-    const info = kv.value;
-    if (info.references.load(.acquire) != 0) @panic("resource in use");
+    if (!self.resources.swapRemove(handle)) @panic("invalid resource");
+    if (handle.references.load(.acquire) != 0) @panic("resource in use");
 
-    self.allocator.free(info.label);
-    self.allocator.destroy(info);
+    self.allocator.free(handle.label);
+    self.allocator.destroy(handle);
 
     if (self.isEmpty()) instance.unref();
 }
@@ -183,7 +178,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         if (std.mem.indexOfScalar(*Resource, options.shared_resources[i + 1 ..], handle) != null)
             return error.Duplicate;
     }
-    for (options.before) |dep| if (!self.systems.contains(dep.system)) return error.NotFound;
+    for (options.before) |dep| if (!self.systems.contains(dep.system))
+        return error.NotFound;
     for (options.after) |dep| {
         if (!self.systems.contains(dep.system)) return error.NotFound;
         for (options.before) |dep2| {
@@ -192,7 +188,7 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
     }
 
     const was_empty = self.isEmpty();
-    const info = try self.allocator.create(SystemInfo);
+    const info = try self.allocator.create(System);
     errdefer self.allocator.destroy(info);
     info.* = .{
         .label = undefined,
@@ -216,9 +212,9 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
     errdefer self.allocator.free(info.exclusive_resources);
     info.shared_resources = try self.allocator.dupe(*Resource, options.shared_resources);
     errdefer self.allocator.free(info.shared_resources);
-    info.before = try self.allocator.dupe(Dependency, options.before);
+    info.before = try self.allocator.dupe(System.Dependency, options.before);
     errdefer self.allocator.free(info.before);
-    info.after = try self.allocator.dupe(Dependency, options.after);
+    info.after = try self.allocator.dupe(System.Dependency, options.after);
     errdefer self.allocator.free(info.after);
 
     info.factory = if (options.factory) |factory| blk: {
@@ -231,23 +227,27 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         @memcpy(dupeSlice, factory);
         break :blk dupeSlice;
     } else null;
+    try self.systems.put(self.allocator, info, {});
 
-    const handle: *System = @ptrCast(info);
-    try self.systems.put(self.allocator, handle, info);
-
-    for (options.exclusive_resources) |id2| {
-        const res = self.resources.get(id2).?;
+    for (options.exclusive_resources) |res| {
+        std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchAdd(1, .monotonic);
     }
-    for (options.shared_resources) |id2| {
-        const res = self.resources.get(id2).?;
+    for (options.shared_resources) |res| {
+        std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchAdd(1, .monotonic);
     }
-    for (info.before) |dep| _ = self.systems.get(dep.system).?.references.fetchAdd(1, .monotonic);
-    for (info.after) |dep| _ = self.systems.get(dep.system).?.references.fetchAdd(1, .monotonic);
+    for (info.before) |dep| {
+        std.debug.assert(self.systems.contains(dep.system));
+        _ = dep.system.references.fetchAdd(1, .monotonic);
+    }
+    for (info.after) |dep| {
+        std.debug.assert(self.systems.contains(dep.system));
+        _ = dep.system.references.fetchAdd(1, .monotonic);
+    }
 
     if (was_empty) instance.ref();
-    return handle;
+    return info;
 }
 
 pub fn unregisterSystem(self: *Self, handle: *System) void {
@@ -255,29 +255,30 @@ pub fn unregisterSystem(self: *Self, handle: *System) void {
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
 
-    const kv = self.systems.fetchSwapRemove(handle) orelse @panic("invalid system");
-    const info = kv.value;
-    if (info.references.load(.acquire) != 0) @panic("system in use");
-    if (info.factory_deinit) |f| if (info.factory) |factory| f(factory.ptr);
+    if (!self.systems.swapRemove(handle)) @panic("invalid system");
+    if (handle.references.load(.acquire) != 0) @panic("system in use");
+    if (handle.factory_deinit) |f| if (handle.factory) |factory| f(factory.ptr);
 
-    for (info.exclusive_resources) |id2| {
-        const res = self.resources.get(id2).?;
+    for (handle.exclusive_resources) |res_handle| {
+        const res: *Resource = @alignCast(@ptrCast(res_handle));
+        std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchSub(1, .monotonic);
     }
-    for (info.shared_resources) |id2| {
-        const res = self.resources.get(id2).?;
+    for (handle.shared_resources) |res_handle| {
+        const res: *Resource = @alignCast(@ptrCast(res_handle));
+        std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchSub(1, .monotonic);
     }
-    for (info.before) |dep| _ = self.systems.get(dep.system).?.references.fetchSub(1, .monotonic);
-    for (info.after) |dep| _ = self.systems.get(dep.system).?.references.fetchSub(1, .monotonic);
+    for (handle.before) |dep| _ = dep.system.references.fetchSub(1, .monotonic);
+    for (handle.after) |dep| _ = dep.system.references.fetchSub(1, .monotonic);
 
-    self.allocator.free(info.label);
-    self.allocator.free(info.exclusive_resources);
-    self.allocator.free(info.shared_resources);
-    self.allocator.free(info.before);
-    self.allocator.free(info.after);
-    if (info.factory) |factory| self.allocator.rawFree(factory, info.factory_alignment, @returnAddress());
-    self.allocator.destroy(info);
+    self.allocator.free(handle.label);
+    self.allocator.free(handle.exclusive_resources);
+    self.allocator.free(handle.shared_resources);
+    self.allocator.free(handle.before);
+    self.allocator.free(handle.after);
+    if (handle.factory) |factory| self.allocator.rawFree(factory, handle.factory_alignment, @returnAddress());
+    self.allocator.destroy(handle);
 
     if (self.isEmpty()) instance.unref();
 }

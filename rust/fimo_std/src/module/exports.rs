@@ -356,7 +356,7 @@ unsafe impl Sync for SymbolExport<'_> {}
 
 impl<'a> SymbolExport<'a> {
     /// Constructs a new `SymbolExport`.
-    pub const fn new<T: ~const SymbolPointer + 'a>(
+    pub const fn new<T: [const] SymbolPointer + 'a>(
         symbol: T::Target<'a>,
         version: Version<'a>,
         name: &'a CStr,

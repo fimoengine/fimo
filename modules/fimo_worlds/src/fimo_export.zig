@@ -15,7 +15,7 @@ const systems = fimo_worlds_meta.systems;
 const worlds = fimo_worlds_meta.worlds;
 const symbols = fimo_worlds_meta.symbols;
 
-const System = @import("System.zig");
+const SystemContext = @import("SystemContext.zig");
 const SystemGroup = @import("SystemGroup.zig");
 const Universe = @import("Universe.zig");
 const World = @import("World.zig");
@@ -125,41 +125,41 @@ fn resourceRegister(
     resource: *const resources.RegisterOptions.Descriptor,
     handle: **resources.Resource,
 ) callconv(.c) Status {
-    handle.* = State.global_state.universe.registerResource(.{
+    handle.* = @ptrCast(State.global_state.universe.registerResource(.{
         .label = if (resource.label_len != 0) resource.label.?[0..resource.label_len] else null,
         .size = resource.size,
         .alignment = .fromByteUnits(resource.alignment),
     }) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
-    };
+    });
     return .ok;
 }
 
 fn resourceUnregister(handle: *resources.Resource) callconv(.c) void {
-    State.global_state.universe.unregisterResource(handle);
+    State.global_state.universe.unregisterResource(@ptrCast(@alignCast(handle)));
 }
 
 fn systemRegister(
     system: *const systems.Declaration.Descriptor,
     handle: **systems.System,
 ) callconv(.c) Status {
-    handle.* = State.global_state.universe.registerSystem(.{
+    handle.* = @ptrCast(State.global_state.universe.registerSystem(.{
         .label = if (system.label_len != 0) system.label.?[0..system.label_len] else null,
         .exclusive_resources = if (system.exclusive_handles_len != 0)
-            system.exclusive_handles.?[0..system.exclusive_handles_len]
+            @ptrCast(@alignCast(system.exclusive_handles.?[0..system.exclusive_handles_len]))
         else
             &.{},
         .shared_resources = if (system.shared_handles_len != 0)
-            system.shared_handles.?[0..system.shared_handles_len]
+            @ptrCast(@alignCast(system.shared_handles.?[0..system.shared_handles_len]))
         else
             &.{},
         .before = if (system.before_len != 0)
-            system.before.?[0..system.before_len]
+            @ptrCast(@alignCast(system.before.?[0..system.before_len]))
         else
             &.{},
         .after = if (system.after_len != 0)
-            system.after.?[0..system.after_len]
+            @ptrCast(@alignCast(system.after.?[0..system.after_len]))
         else
             &.{},
         .factory = if (system.factory_size != 0)
@@ -176,12 +176,12 @@ fn systemRegister(
     }) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
-    };
+    });
     return .ok;
 }
 
 fn systemUnregister(handle: *systems.System) callconv(.c) void {
-    State.global_state.universe.unregisterSystem(handle);
+    State.global_state.universe.unregisterSystem(@ptrCast(@alignCast(handle)));
 }
 
 fn systemGroupCreate(
@@ -228,7 +228,7 @@ fn systemGroupAddSystems(
 ) callconv(.c) Status {
     const handles = if (len != 0) sys.?[0..len] else &.{};
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    grp.addSystems(handles) catch |err| {
+    grp.addSystems(@ptrCast(@alignCast(handles))) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -241,7 +241,7 @@ fn systemGroupRemoveSystem(
     signal: *Fence,
 ) callconv(.c) void {
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    grp.removeSystem(handle, signal);
+    grp.removeSystem(@ptrCast(@alignCast(handle)), signal);
 }
 
 fn systemGroupSchedule(
@@ -260,12 +260,12 @@ fn systemGroupSchedule(
 }
 
 fn systemContextGetGroup(context: *systems.SystemContext) callconv(.c) *systems.SystemGroup {
-    const sys: *System = @ptrCast(@alignCast(context));
+    const sys: *SystemContext = @ptrCast(@alignCast(context));
     return @ptrCast(sys.group);
 }
 
 fn systemContextGetGeneration(context: *systems.SystemContext) callconv(.c) usize {
-    const sys: *System = @ptrCast(@alignCast(context));
+    const sys: *SystemContext = @ptrCast(@alignCast(context));
     return sys.group.generation;
 }
 
@@ -276,7 +276,7 @@ fn systemContextAllocatorAlloc(
     alignment: usize,
     ret_addr: usize,
 ) callconv(.c) ?[*]u8 {
-    const sys: *System = @ptrCast(@alignCast(context));
+    const sys: *SystemContext = @ptrCast(@alignCast(context));
     return sys.allocator(strategy).rawAlloc(len, .fromByteUnits(alignment), ret_addr);
 }
 
@@ -289,7 +289,7 @@ fn systemContextAllocatorResize(
     new_len: usize,
     ret_addr: usize,
 ) callconv(.c) bool {
-    const sys: *System = @ptrCast(@alignCast(context));
+    const sys: *SystemContext = @ptrCast(@alignCast(context));
     const memory: []u8 = if (ptr) |p| p[0..len] else &.{};
     return sys.allocator(strategy).rawResize(memory, .fromByteUnits(alignment), new_len, ret_addr);
 }
@@ -303,7 +303,7 @@ fn systemContextAllocatorRemap(
     new_len: usize,
     ret_addr: usize,
 ) callconv(.c) ?[*]u8 {
-    const sys: *System = @ptrCast(@alignCast(context));
+    const sys: *SystemContext = @ptrCast(@alignCast(context));
     const memory: []u8 = if (ptr) |p| p[0..len] else &.{};
     return sys.allocator(strategy).rawRemap(memory, .fromByteUnits(alignment), new_len, ret_addr);
 }
@@ -316,7 +316,7 @@ fn systemContextAllocatorFree(
     alignment: usize,
     ret_addr: usize,
 ) callconv(.c) void {
-    const sys: *System = @ptrCast(@alignCast(context));
+    const sys: *SystemContext = @ptrCast(@alignCast(context));
     const memory: []u8 = if (ptr) |p| p[0..len] else &.{};
     sys.allocator(strategy).rawFree(memory, .fromByteUnits(alignment), ret_addr);
 }
@@ -354,7 +354,7 @@ fn worldGetPool(world: *worlds.World) callconv(.c) pools.Pool {
 
 fn worldHasResource(world: *worlds.World, handle: *resources.Resource) callconv(.c) bool {
     const w: *World = @ptrCast(@alignCast(world));
-    return w.hasResource(handle);
+    return w.hasResource(@ptrCast(@alignCast(handle)));
 }
 
 fn worldAddResource(
@@ -363,7 +363,7 @@ fn worldAddResource(
     value: *const anyopaque,
 ) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
-    w.addResource(handle, value) catch |err| {
+    w.addResource(@ptrCast(@alignCast(handle)), value) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -376,7 +376,7 @@ fn worldRemoveResource(
     value: *anyopaque,
 ) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
-    w.removeResource(handle, value) catch |err| {
+    w.removeResource(@ptrCast(@alignCast(handle)), value) catch |err| {
         getInstance().context().setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -397,17 +397,17 @@ fn worldLockResources(
     const out = out_resources[0..len];
 
     const w: *World = @ptrCast(@alignCast(world));
-    w.lockResources(exclusive, shared, out);
+    w.lockResources(@ptrCast(@alignCast(exclusive)), @ptrCast(@alignCast(shared)), out);
 }
 
 fn worldUnlockResourceExclusive(world: *worlds.World, handle: *resources.Resource) callconv(.c) void {
     const w: *World = @ptrCast(@alignCast(world));
-    w.unlockResourceExclusive(handle);
+    w.unlockResourceExclusive(@ptrCast(@alignCast(handle)));
 }
 
 fn worldUnlockResourceShared(world: *worlds.World, handle: *resources.Resource) callconv(.c) void {
     const w: *World = @ptrCast(@alignCast(world));
-    w.unlockResourceShared(handle);
+    w.unlockResourceShared(@ptrCast(@alignCast(handle)));
 }
 
 fn worldAllocatorAlloc(
