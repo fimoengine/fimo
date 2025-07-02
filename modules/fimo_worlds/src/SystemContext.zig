@@ -23,8 +23,7 @@ sys: *System,
 weak: bool,
 node: DoublyLinkedList.Node = .{},
 waiters: SinglyLinkedList = .{},
-references: AutoArrayHashMapUnmanaged(*System, *SystemContext) = .empty,
-referenced_by: AutoArrayHashMapUnmanaged(*System, *SystemContext) = .empty,
+reference_count: usize = 0,
 
 value_ptr: *anyopaque,
 merge_deferred: bool = false,
@@ -64,15 +63,6 @@ pub fn init(group: *SystemGroup, sys: *System, weak: bool) !*SystemContext {
         .tracing_allocator = tracing_allocator,
     };
 
-    for (sys.before) |dep| {
-        const dep_sys = group.system_graph.systems.get(dep.system).?;
-        ctx.addReference(dep_sys);
-    }
-    for (sys.after) |dep| {
-        const dep_sys = group.system_graph.systems.get(dep.system).?;
-        ctx.addReference(dep_sys);
-    }
-
     _ = sys.references.fetchAdd(1, .monotonic);
     errdefer _ = sys.references.fetchSub(1, .monotonic);
 
@@ -83,14 +73,11 @@ pub fn init(group: *SystemGroup, sys: *System, weak: bool) !*SystemContext {
 }
 
 pub fn deinit(self: *SystemContext) void {
-    std.debug.assert(self.references.count() == 0);
-    std.debug.assert(self.referenced_by.count() == 0);
-
-    const info = self.sys;
+    const sys = self.sys;
     var waiters = self.waiters;
     var tracing_allocator = self.tracing_allocator;
-    if (info.system_deinit) |f| f(self.value_ptr);
-    _ = info.references.fetchSub(1, .monotonic);
+    if (sys.system_deinit) |f| f(self.value_ptr);
+    _ = sys.references.fetchSub(1, .monotonic);
 
     const instance = Universe.getInstance();
     while (waiters.popFirst()) |n| {
@@ -99,28 +86,6 @@ pub fn deinit(self: *SystemContext) void {
     }
     self.arena_allocator.deinit();
     tracing_allocator.deinit();
-}
-
-pub fn addReference(self: *SystemContext, sys: *SystemContext) void {
-    std.debug.assert(!self.references.contains(sys.sys));
-    std.debug.assert(!sys.referenced_by.contains(self.sys));
-
-    const all = self.tracing_allocator.allocator();
-    const sys_all = sys.tracing_allocator.allocator();
-    self.references.put(all, sys.sys, sys) catch @panic("oom");
-    sys.referenced_by.put(sys_all, self.sys, self) catch @panic("oom");
-}
-
-pub fn removeReference(self: *SystemContext, sys: *SystemContext) void {
-    std.debug.assert(self.references.contains(sys.sys));
-    std.debug.assert(sys.referenced_by.contains(self.sys));
-
-    _ = self.references.swapRemove(sys.sys);
-    _ = sys.referenced_by.swapRemove(self.sys);
-}
-
-pub fn isUnloadable(self: *SystemContext) bool {
-    return self.weak and self.referenced_by.count() == 0;
 }
 
 pub fn run(self: *SystemContext) void {

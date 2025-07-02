@@ -66,9 +66,13 @@ pub const System = struct {
     label: []u8,
     exclusive_resources: []*Resource,
     shared_resources: []*Resource,
-    before: []Dependency,
-    after: []Dependency,
     references: atomic.Value(usize) = .init(0),
+
+    rwlock: RwLock = .{},
+    static_before_count: usize,
+    static_after_count: usize,
+    before: AutoArrayHashMapUnmanaged(*System, Link),
+    after: AutoArrayHashMapUnmanaged(*System, Link),
 
     factory: ?[]u8,
     factory_alignment: Alignment,
@@ -88,6 +92,19 @@ pub const System = struct {
         shared_resources: ?[*]const *anyopaque,
         deferred_signal: *fimo_worlds_meta.Job.Fence,
     ) callconv(.c) void,
+
+    pub const Flags = packed struct(usize) {
+        weak: bool = false,
+        ignore_deferred: bool = false,
+        reserved: u62 = undefined,
+    };
+
+    pub const Link = packed struct(usize) {
+        implicit: bool,
+        weak: bool = false,
+        ignore_deferred: bool = false,
+        reserved: u61 = undefined,
+    };
 
     pub const Dependency = extern struct {
         system: *System,
@@ -178,24 +195,65 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         if (std.mem.indexOfScalar(*Resource, options.shared_resources[i + 1 ..], handle) != null)
             return error.Duplicate;
     }
-    for (options.before) |dep| if (!self.systems.contains(dep.system))
-        return error.NotFound;
+
+    var before: AutoArrayHashMapUnmanaged(*System, System.Link) = .empty;
+    errdefer before.deinit(self.allocator);
+    try before.ensureTotalCapacity(self.allocator, options.before.len);
+
+    var after: AutoArrayHashMapUnmanaged(*System, System.Link) = .empty;
+    errdefer after.deinit(self.allocator);
+    try after.ensureTotalCapacity(self.allocator, options.after.len);
+
+    for (options.before) |dep| {
+        if (!self.systems.contains(dep.system)) return error.NotFound;
+        if (before.contains(dep.system)) return error.Duplicate;
+        before.putAssumeCapacity(
+            dep.system,
+            .{ .implicit = false, .ignore_deferred = dep.ignore_deferred },
+        );
+    }
     for (options.after) |dep| {
         if (!self.systems.contains(dep.system)) return error.NotFound;
-        for (options.before) |dep2| {
-            if (dep.system == dep2.system) return error.Deadlock;
+        if (before.contains(dep.system)) return error.Deadlock;
+        if (after.contains(dep.system)) return error.Duplicate;
+        after.putAssumeCapacity(
+            dep.system,
+            .{ .implicit = false, .ignore_deferred = dep.ignore_deferred },
+        );
+    }
+
+    // Check if it introduces a new cycle.
+    {
+        var stack: ArrayListUnmanaged(*System) = .empty;
+        defer stack.deinit(self.allocator);
+        var visited: AutoArrayHashMapUnmanaged(*System, void) = .empty;
+        defer visited.deinit(self.allocator);
+
+        try stack.appendSlice(self.allocator, after.keys());
+        for (after.keys()) |sys| try visited.put(self.allocator, sys, {});
+        while (stack.pop()) |sys| {
+            if (before.contains(sys)) return error.Deadlock;
+            sys.rwlock.lockRead(instance);
+            defer sys.rwlock.unlockRead(instance);
+            for (sys.after.keys(), sys.after.values()) |s, l| {
+                if (l.implicit or visited.contains(s)) continue;
+                try visited.put(self.allocator, s, {});
+                try stack.append(self.allocator, s);
+            }
         }
     }
 
     const was_empty = self.isEmpty();
-    const info = try self.allocator.create(System);
-    errdefer self.allocator.destroy(info);
-    info.* = .{
+    const sys = try self.allocator.create(System);
+    errdefer self.allocator.destroy(sys);
+    sys.* = .{
         .label = undefined,
         .exclusive_resources = undefined,
         .shared_resources = undefined,
-        .before = undefined,
-        .after = undefined,
+        .static_before_count = before.count(),
+        .static_after_count = after.count(),
+        .before = before,
+        .after = after,
         .factory = undefined,
         .factory_alignment = options.factory_alignment,
         .factory_deinit = options.factory_deinit,
@@ -206,18 +264,55 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         .system_run = options.system_run,
     };
 
-    info.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
-    errdefer self.allocator.free(info.label);
-    info.exclusive_resources = try self.allocator.dupe(*Resource, options.exclusive_resources);
-    errdefer self.allocator.free(info.exclusive_resources);
-    info.shared_resources = try self.allocator.dupe(*Resource, options.shared_resources);
-    errdefer self.allocator.free(info.shared_resources);
-    info.before = try self.allocator.dupe(System.Dependency, options.before);
-    errdefer self.allocator.free(info.before);
-    info.after = try self.allocator.dupe(System.Dependency, options.after);
-    errdefer self.allocator.free(info.after);
+    sys.label = try self.allocator.dupe(u8, options.label orelse "<unlabelled>");
+    errdefer self.allocator.free(sys.label);
+    sys.exclusive_resources = try self.allocator.dupe(*Resource, options.exclusive_resources);
+    errdefer self.allocator.free(sys.exclusive_resources);
+    sys.shared_resources = try self.allocator.dupe(*Resource, options.shared_resources);
+    errdefer self.allocator.free(sys.shared_resources);
 
-    info.factory = if (options.factory) |factory| blk: {
+    errdefer {
+        for (before.keys()) |sys2| {
+            sys2.rwlock.lockWrite(instance);
+            defer sys2.rwlock.unlockWrite(instance);
+            _ = sys2.after.swapRemove(sys);
+        }
+        for (after.keys()) |sys2| {
+            sys2.rwlock.lockWrite(instance);
+            defer sys2.rwlock.unlockWrite(instance);
+            _ = sys2.before.swapRemove(sys);
+        }
+    }
+    sys.rwlock.lockWrite(instance);
+    defer sys.rwlock.unlockWrite(instance);
+    for (before.keys(), before.values()) |sys2, link| {
+        sys2.rwlock.lockWrite(instance);
+        defer sys2.rwlock.unlockWrite(instance);
+        try sys2.after.put(
+            self.allocator,
+            sys,
+            .{
+                .implicit = true,
+                .weak = true,
+                .ignore_deferred = link.ignore_deferred,
+            },
+        );
+    }
+    for (after.keys(), after.values()) |sys2, link| {
+        sys2.rwlock.lockWrite(instance);
+        defer sys2.rwlock.unlockWrite(instance);
+        try sys2.before.put(
+            self.allocator,
+            sys,
+            .{
+                .implicit = true,
+                .weak = true,
+                .ignore_deferred = link.ignore_deferred,
+            },
+        );
+    }
+
+    sys.factory = if (options.factory) |factory| blk: {
         const dupe = self.allocator.rawAlloc(
             factory.len,
             options.factory_alignment,
@@ -227,7 +322,7 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         @memcpy(dupeSlice, factory);
         break :blk dupeSlice;
     } else null;
-    try self.systems.put(self.allocator, info, {});
+    try self.systems.put(self.allocator, sys, {});
 
     for (options.exclusive_resources) |res| {
         std.debug.assert(self.resources.contains(res));
@@ -237,48 +332,55 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchAdd(1, .monotonic);
     }
-    for (info.before) |dep| {
-        std.debug.assert(self.systems.contains(dep.system));
-        _ = dep.system.references.fetchAdd(1, .monotonic);
-    }
-    for (info.after) |dep| {
-        std.debug.assert(self.systems.contains(dep.system));
-        _ = dep.system.references.fetchAdd(1, .monotonic);
-    }
 
     if (was_empty) instance.ref();
-    return info;
+    return sys;
 }
 
-pub fn unregisterSystem(self: *Self, handle: *System) void {
+pub fn unregisterSystem(self: *Self, sys: *System) void {
     const instance = getInstance();
     self.rwlock.lockWrite(instance);
     defer self.rwlock.unlockWrite(instance);
 
-    if (!self.systems.swapRemove(handle)) @panic("invalid system");
-    if (handle.references.load(.acquire) != 0) @panic("system in use");
-    if (handle.factory_deinit) |f| if (handle.factory) |factory| f(factory.ptr);
+    sys.rwlock.lockWrite(instance);
 
-    for (handle.exclusive_resources) |res_handle| {
-        const res: *Resource = @alignCast(@ptrCast(res_handle));
+    if (!self.systems.swapRemove(sys)) @panic("invalid system");
+    if (sys.before.count() != sys.static_before_count) @panic("system referenced");
+    if (sys.after.count() != sys.static_after_count) @panic("system referenced");
+    if (sys.references.load(.acquire) != 0) @panic("system in use");
+    if (sys.factory_deinit) |f| if (sys.factory) |factory| f(factory.ptr);
+
+    for (sys.exclusive_resources) |res| {
         std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchSub(1, .monotonic);
     }
-    for (handle.shared_resources) |res_handle| {
-        const res: *Resource = @alignCast(@ptrCast(res_handle));
+    for (sys.shared_resources) |res| {
         std.debug.assert(self.resources.contains(res));
         _ = res.references.fetchSub(1, .monotonic);
     }
-    for (handle.before) |dep| _ = dep.system.references.fetchSub(1, .monotonic);
-    for (handle.after) |dep| _ = dep.system.references.fetchSub(1, .monotonic);
 
-    self.allocator.free(handle.label);
-    self.allocator.free(handle.exclusive_resources);
-    self.allocator.free(handle.shared_resources);
-    self.allocator.free(handle.before);
-    self.allocator.free(handle.after);
-    if (handle.factory) |factory| self.allocator.rawFree(factory, handle.factory_alignment, @returnAddress());
-    self.allocator.destroy(handle);
+    for (sys.before.keys(), sys.before.values()) |sys2, link| {
+        if (link.implicit) @panic("system referenced");
+        sys2.rwlock.lockWrite(instance);
+        defer sys2.rwlock.unlockWrite(instance);
+        const entry = sys2.after.fetchSwapRemove(sys) orelse unreachable;
+        std.debug.assert(entry.value.implicit);
+    }
+    for (sys.after.keys(), sys.after.values()) |sys2, link| {
+        if (link.implicit) @panic("system referenced");
+        sys2.rwlock.lockWrite(instance);
+        defer sys2.rwlock.unlockWrite(instance);
+        const entry = sys2.before.fetchSwapRemove(sys) orelse unreachable;
+        std.debug.assert(entry.value.implicit);
+    }
+
+    self.allocator.free(sys.label);
+    self.allocator.free(sys.exclusive_resources);
+    self.allocator.free(sys.shared_resources);
+    sys.before.deinit(self.allocator);
+    sys.after.deinit(self.allocator);
+    if (sys.factory) |factory| self.allocator.rawFree(factory, sys.factory_alignment, @returnAddress());
+    self.allocator.destroy(sys);
 
     if (self.isEmpty()) instance.unref();
 }

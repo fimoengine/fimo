@@ -840,8 +840,6 @@ test "System: smoke test" {
 }
 
 test "System: cyclic dependency" {
-    if (true) return error.SkipZigTest;
-
     const Dummy = Declaration.simple(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
             _ = ctx;
