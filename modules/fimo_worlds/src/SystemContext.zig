@@ -92,7 +92,7 @@ pub fn run(self: *SystemContext) void {
     self.deferred_fence.reset();
     for (self.deferred_dep.values()) |dep| dep.deferred_fence.wait(Universe.getInstance());
     const exclusive = self.resources[0..self.sys.exclusive_resources.len];
-    const shared = self.resources[exclusive.len..self.sys.shared_resources.len];
+    const shared = self.resources[exclusive.len..];
     self.sys.system_run(self.value_ptr, exclusive.ptr, shared.ptr, &self.deferred_fence);
     _ = self.arena_allocator.reset(.free_all);
 

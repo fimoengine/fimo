@@ -179,15 +179,15 @@ const Graph = struct {
 
             // The deferred pass can be merged if no other system depends on the deferred pass.
             ctx.merge_deferred = blk: {
-                for (ctx.sys.after.values()) |link| if (link.ignore_deferred) break :blk false;
+                for (ctx.sys.before.values()) |link| if (link.ignore_deferred) break :blk false;
                 break :blk true;
             };
 
             // Register the deferred pass dependencies.
-            for (ctx.sys.after.keys(), ctx.sys.after.values()) |dep, link| {
+            for (ctx.sys.before.keys(), ctx.sys.before.values()) |dep, link| {
                 if (link.ignore_deferred) continue;
                 const dep_ctx = self.systems.get(dep) orelse {
-                    std.debug.assert(link.weak);
+                    std.debug.assert(link.implicit or link.weak);
                     continue;
                 };
                 try ctx.deferred_dep.put(allocator, dep, dep_ctx);
@@ -225,9 +225,9 @@ const Graph = struct {
                 var generation: usize = 0;
                 ctx.sys.rwlock.lockRead(Universe.getInstance());
                 defer ctx.sys.rwlock.unlockRead(Universe.getInstance());
-                for (ctx.sys.after.keys(), ctx.sys.after.values()) |dep, link| {
+                for (ctx.sys.before.keys(), ctx.sys.before.values()) |dep, link| {
                     const dep_ctx = graph.systems.get(dep) orelse {
-                        std.debug.assert(link.weak);
+                        std.debug.assert(link.implicit or link.weak);
                         continue;
                     };
                     const idx = toposort(graph, tasks, markers, dep, dep_ctx);
@@ -279,7 +279,7 @@ const Graph = struct {
             defer task.ctx.sys.rwlock.unlockRead(instance);
 
             // Insert synchronization points if the system depends on other systems.
-            for (task.ctx.sys.after.keys()) |dep| {
+            for (task.ctx.sys.before.keys()) |dep| {
                 const entry = running_systems.fetchSwapRemove(dep) orelse continue;
                 const entry_idx = entry.value;
                 try entries.append(allocator, Entry{

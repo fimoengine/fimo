@@ -24,16 +24,27 @@ typedef struct FimoWorldsMeta_SystemGroup FimoWorldsMeta_SystemGroup;
 /// Context of an instantiated system in a system group.
 typedef struct FimoWorldsMeta_SystemContext FimoWorldsMeta_SystemContext;
 
-/// Descriptor of a system dependency.
-typedef struct FimoWorldsMeta_SystemDependency {
-    /// System to depend on / be depended from.
-    FimoWorldsMeta_SystemHandle system;
+/// Flags for a system dependency.
+typedef enum FimoWorldsMeta_SystemDependencyFlags : FimoUSize {
+    /// Whether to treat the dependency as a weak dependency.
+    ///
+    /// Weak dependencies impose order constraints on the system scheduler, but
+    /// don't force the inclusion of the dependency. In other words, a weak
+    /// dependency can be thought of as an optional dependency.
+    FIMO_WORLDS_META_SYSTEM_DEPENDENCY_FLAGS_WEAK = 0b01,
     /// Whether to ignore any deferred subjob of the system.
     ///
     /// If set to `true`, the system will start after the other systems `run`
     /// function is run to completion. Otherwise, the system will start after
     /// all subjobs of the system also complete their execution.
-    bool ignore_deferred;
+    FIMO_WORLDS_META_SYSTEM_DEPENDENCY_FLAGS_IGNORE_DEFERRED = 0b10,
+} FimoWorldsMeta_SystemDependencyFlags;
+
+/// Descriptor of a system dependency.
+typedef struct FimoWorldsMeta_SystemDependency {
+    /// System to depend on / be depended from.
+    FimoWorldsMeta_SystemHandle system;
+    FimoWorldsMeta_SystemDependencyFlags flags;
 } FimoWorldsMeta_SystemDependency;
 
 /// Descriptor of a new system.

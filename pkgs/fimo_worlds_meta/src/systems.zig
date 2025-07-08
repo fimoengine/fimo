@@ -249,14 +249,14 @@ test "SystemGroup: schedule" {
     try resource.addToWorld(GlobalCtx, world, 0);
     defer _ = resource.removeFromWorld(GlobalCtx, world) catch unreachable;
 
-    const Sys = Declaration.simple(struct {
+    const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct { a: *u32 }) void {
             _ = ctx;
             _ = exclusive;
             shared.a.* += 1;
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, "test-system", {}, .{}, .{resource}, &.{}, &.{});
+    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .shared = .{resource} });
     defer sys.unregister(GlobalCtx);
 
     try group.addSytems(GlobalCtx, &.{sys});
@@ -428,10 +428,10 @@ pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStra
             );
         }
 
-        fn free(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+        fn free(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(this));
             const sym = symbols.system_context_allocator_free.requestFrom(self.provider);
-            return sym(
+            sym(
                 self.context,
                 strategy,
                 memory.ptr,
@@ -447,12 +447,185 @@ pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStra
     };
 }
 
+test "SystemContext: transient allocator" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
+    defer group.deinit(GlobalCtx);
+
+    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
+    defer error_handle.unregister(GlobalCtx);
+    try error_handle.addToWorld(GlobalCtx, world, null);
+    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+
+    const Sys = Declaration.initFunctor(struct {
+        fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
+            _ = shared;
+            testAlloc(ctx) catch |err| {
+                exclusive.err.* = err;
+            };
+        }
+        fn testAlloc(ctx: *SystemContext) !void {
+            var allocator = ctx.getTransientAllocator(GlobalCtx);
+            try std.heap.testAllocator(allocator.allocator());
+            try std.heap.testAllocatorAligned(allocator.allocator());
+            try std.heap.testAllocatorLargeAlignment(allocator.allocator());
+            try std.heap.testAllocatorAlignedShrink(allocator.allocator());
+        }
+    }.run);
+    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister(GlobalCtx);
+
+    try group.addSytems(GlobalCtx, &.{sys});
+    defer group.removeSystem(GlobalCtx, sys);
+    try group.run(GlobalCtx, &.{});
+
+    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
+    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    if (ptr.*) |err| return err;
+}
+
+test "SystemContext: single generation allocator" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
+    defer group.deinit(GlobalCtx);
+
+    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
+    defer error_handle.unregister(GlobalCtx);
+    try error_handle.addToWorld(GlobalCtx, world, null);
+    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+
+    const Sys = Declaration.initFunctor(struct {
+        fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
+            _ = shared;
+            testAlloc(ctx) catch |err| {
+                exclusive.err.* = err;
+            };
+        }
+        fn testAlloc(ctx: *SystemContext) !void {
+            var allocator = ctx.getSingleGenerationAllocator(GlobalCtx);
+            try std.heap.testAllocator(allocator.allocator());
+            try std.heap.testAllocatorAligned(allocator.allocator());
+            try std.heap.testAllocatorLargeAlignment(allocator.allocator());
+            try std.heap.testAllocatorAlignedShrink(allocator.allocator());
+        }
+    }.run);
+    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister(GlobalCtx);
+
+    try group.addSytems(GlobalCtx, &.{sys});
+    defer group.removeSystem(GlobalCtx, sys);
+    try group.run(GlobalCtx, &.{});
+
+    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
+    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    if (ptr.*) |err| return err;
+}
+
+test "SystemContext: multi generation allocator" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
+    defer group.deinit(GlobalCtx);
+
+    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
+    defer error_handle.unregister(GlobalCtx);
+    try error_handle.addToWorld(GlobalCtx, world, null);
+    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+
+    const Sys = Declaration.initFunctor(struct {
+        fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
+            _ = shared;
+            testAlloc(ctx) catch |err| {
+                exclusive.err.* = err;
+            };
+        }
+        fn testAlloc(ctx: *SystemContext) !void {
+            var allocator = ctx.getMultiGenerationAllocator(GlobalCtx);
+            try std.heap.testAllocator(allocator.allocator());
+            try std.heap.testAllocatorAligned(allocator.allocator());
+            try std.heap.testAllocatorLargeAlignment(allocator.allocator());
+            try std.heap.testAllocatorAlignedShrink(allocator.allocator());
+        }
+    }.run);
+    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister(GlobalCtx);
+
+    try group.addSytems(GlobalCtx, &.{sys});
+    defer group.removeSystem(GlobalCtx, sys);
+    try group.run(GlobalCtx, &.{});
+
+    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
+    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    if (ptr.*) |err| return err;
+}
+
+test "SystemContext: persistent allocator" {
+    const GlobalCtx = testing.GlobalCtx;
+    try GlobalCtx.init();
+    defer GlobalCtx.deinit();
+
+    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
+    defer world.deinit(GlobalCtx);
+
+    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
+    defer group.deinit(GlobalCtx);
+
+    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
+    defer error_handle.unregister(GlobalCtx);
+    try error_handle.addToWorld(GlobalCtx, world, null);
+    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+
+    const Sys = Declaration.initFunctor(struct {
+        fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
+            _ = shared;
+            testAlloc(ctx) catch |err| {
+                exclusive.err.* = err;
+            };
+        }
+        fn testAlloc(ctx: *SystemContext) !void {
+            var allocator = ctx.getSystemPersistentAllocator(GlobalCtx);
+            try std.heap.testAllocator(allocator.allocator());
+            try std.heap.testAllocatorAligned(allocator.allocator());
+            try std.heap.testAllocatorLargeAlignment(allocator.allocator());
+            try std.heap.testAllocatorAlignedShrink(allocator.allocator());
+        }
+    }.run);
+    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister(GlobalCtx);
+
+    try group.addSytems(GlobalCtx, &.{sys});
+    defer group.removeSystem(GlobalCtx, sys);
+    try group.run(GlobalCtx, &.{});
+
+    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
+    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    if (ptr.*) |err| return err;
+}
+
 /// Interface of a system.
 pub const Declaration = struct {
-    FactoryT: type,
+    Options: type,
+    Factory: type,
+    System: type,
     deinit_factory: ?*const fn (factory: ?*const anyopaque) callconv(.c) void,
 
-    SystemT: type,
     ExclusiveResourceHandlesT: type,
     SharedResourceHandlesT: type,
     init: *const fn (
@@ -468,16 +641,32 @@ pub const Declaration = struct {
         deferred_fence: *Fence,
     ) callconv(.c) void,
 
-    /// Descriptor of a system dependency.
-    pub const Dependency = extern struct {
-        /// System to depend on / be depended from.
-        system: *System,
+    /// Flags for a system dependency.
+    pub const Flags = packed struct(usize) {
+        /// Whether to treat the dependency as a weak dependency.
+        ///
+        /// Weak dependencies impose order constraints on the system scheduler, but
+        /// don't force the inclusion of the dependency. In other words, a weak
+        /// dependency can be thought of as an optional dependency.
+        weak: bool = false,
         /// Whether to ignore any deferred subjob of the system.
         ///
         /// If set to `true`, the system will start after the other systems `run`
         /// function is run to completion. Otherwise, the system will start after
         /// all subjobs of the system also complete their execution.
         ignore_deferred: bool = false,
+        reserved: @Type(.{ .int = .{
+            .bits = @bitSizeOf(usize) - 2,
+            .signedness = .unsigned,
+        } }) = undefined,
+    };
+
+    /// Descriptor of a system dependency.
+    pub const Dependency = extern struct {
+        /// System to depend on / be depended from.
+        system: *System,
+        /// Options of the dependency.
+        flags: Flags = .{},
     };
 
     /// Descriptor of a new system.
@@ -560,37 +749,39 @@ pub const Declaration = struct {
     pub fn register(
         comptime self: Declaration,
         provider: anytype,
-        label: ?[]const u8,
-        factory: self.FactoryT,
-        exclusive_handles: self.ExclusiveResourceHandlesT,
-        shared_handles: self.SharedResourceHandlesT,
-        before: []const Dependency,
-        after: []const Dependency,
+        options: self.Options,
     ) error{RegisterFailed}!*System {
-        var exclusive: [exclusive_handles.len]*Resource = undefined;
-        inline for (0..exclusive.len) |i| exclusive[i] = exclusive_handles[i].asUntyped();
-        var shared: [shared_handles.len]*Resource = undefined;
-        inline for (0..shared.len) |i| shared[i] = shared_handles[i].asUntyped();
+        const exclusive = if (@hasField(self.Options, "exclusive")) blk: {
+            var arr: [options.exclusive.len]*Resource = undefined;
+            inline for (0..arr.len) |i| arr[i] = options.exclusive[i].asUntyped();
+            break :blk arr;
+        } else @as([0]*Resource, .{});
+        const shared = if (@hasField(self.Options, "shared")) blk: {
+            var arr: [options.shared.len]*Resource = undefined;
+            inline for (0..arr.len) |i| arr[i] = options.shared[i].asUntyped();
+            break :blk arr;
+        } else @as([0]*Resource, .{});
+
         const desc = Descriptor{
             .next = null,
-            .label = if (label) |l| l.ptr else null,
-            .label_len = if (label) |l| l.len else 0,
+            .label = if (options.label) |l| l.ptr else null,
+            .label_len = if (options.label) |l| l.len else 0,
             .exclusive_handles = exclusive[0..].ptr,
             .exclusive_handles_len = exclusive.len,
             .shared_handles = shared[0..].ptr,
             .shared_handles_len = shared.len,
-            .before = before.ptr,
-            .before_len = before.len,
-            .after = after.ptr,
-            .after_len = after.len,
+            .before = options.before.ptr,
+            .before_len = options.before.len,
+            .after = options.after.ptr,
+            .after_len = options.after.len,
 
-            .factory = &factory,
-            .factory_size = @sizeOf(self.FactoryT),
-            .factory_alignment = @alignOf(self.FactoryT),
+            .factory = if (@hasField(self.Options, "factory")) &options.factory else null,
+            .factory_size = @sizeOf(self.Factory),
+            .factory_alignment = @alignOf(self.Factory),
             .factory_deinit = self.deinit_factory,
 
-            .system_size = @sizeOf(self.SystemT),
-            .system_alignment = @alignOf(self.SystemT),
+            .system_size = @sizeOf(self.System),
+            .system_alignment = @alignOf(self.System),
             .system_init = self.init,
             .system_deinit = self.deinit,
             .system_run = self.run,
@@ -603,7 +794,7 @@ pub const Declaration = struct {
     }
 
     /// A simple system using only a stateless function.
-    pub fn simple(comptime runFn: anytype) Declaration {
+    pub fn initFunctor(comptime runFn: anytype) Declaration {
         const run_info = @typeInfo(@TypeOf(runFn)).@"fn";
         if (run_info.params.len != 3 and run_info.params.len != 4)
             @compileError("The system run function must take three or four parameters.");
@@ -614,12 +805,11 @@ pub const Declaration = struct {
         const Wrapper = struct {
             context: *SystemContext,
 
-            fn init(factory: *const void, context: *SystemContext) !@This() {
-                _ = factory;
+            pub fn init(context: *SystemContext) !@This() {
                 return .{ .context = context };
             }
 
-            fn run(self: *@This(), exclusive: ExclusiveArgs, shared: SharedArgs, deferred_fence: *Fence) void {
+            pub fn run(self: *@This(), exclusive: ExclusiveArgs, shared: SharedArgs, deferred_fence: *Fence) void {
                 if (comptime has_signal) {
                     runFn(self.context, exclusive, shared, deferred_fence);
                 } else {
@@ -628,100 +818,205 @@ pub const Declaration = struct {
                 }
             }
         };
-
-        return complex(void, Wrapper, null, Wrapper.init, null, Wrapper.run);
+        return initSimple(Wrapper);
     }
 
-    /// Constructs a new instance from a factory.
-    pub fn complex(
-        FactoryT: type,
-        SystemT: type,
-        comptime deinitFactoryFn: ?fn (factory: *const FactoryT) void,
-        comptime initFn: fn (
-            factory: *const FactoryT,
-            context: *SystemContext,
-        ) anyerror!SystemT,
-        comptime deinitFn: ?fn (system: *SystemT) void,
-        comptime runFn: anytype,
-    ) Declaration {
-        const run_info = @typeInfo(@TypeOf(runFn)).@"fn";
+    /// A system with custom initialization and deinitialization logic.
+    pub fn initSimple(T: type) Declaration {
+        if (!@hasDecl(T, "run")) @compileError(@typeName(T) ++ " does not contain a `run` function");
+        const run_info = @typeInfo(@TypeOf(T.run)).@"fn";
         if (run_info.params.len != 3 and run_info.params.len != 4)
             @compileError("The system run function must take three or four parameters.");
-        if (run_info.params[0].type.? != *SystemT)
-            @compileError("The first argument of the run function must be a pointer to the state");
+        if (run_info.params[0].type.? != *T)
+            @compileError("The first argument of the run function must be a pointer to " ++ @typeName(T));
 
         const ExclusiveArgs = run_info.params[1].type.?;
         const SharedArgs = run_info.params[2].type.?;
         const has_signal = run_info.params.len == 4;
 
-        const ExclusiveResourceHandlesT = if (@sizeOf(ExclusiveArgs) == 0) std.meta.Tuple(&.{}) else blk: {
+        const Factory = struct {
+            const F = @This();
+            pub const System = struct {
+                sys: T,
+
+                const S = @This();
+
+                pub fn init(factory: *const F, context: *SystemContext) !S {
+                    _ = factory;
+                    return .{ .sys = try T.init(context) };
+                }
+
+                pub const deinit = if (std.meta.hasFn(T, "deinit"))
+                    struct {
+                        fn f(self: *S) void {
+                            self.sys.deinit();
+                        }
+                    }.f
+                else
+                    undefined;
+
+                pub fn run(
+                    self: *S,
+                    exclusive: ExclusiveArgs,
+                    shared: SharedArgs,
+                    deferred_fence: *Fence,
+                ) void {
+                    if (comptime has_signal) {
+                        self.sys.run(exclusive, shared, deferred_fence);
+                    } else {
+                        self.sys.run(exclusive, shared);
+                        deferred_fence.state.store(Fence.signaled, .release);
+                    }
+                }
+            };
+        };
+        return initFactory(Factory);
+    }
+
+    /// A system with a custom system factory.
+    pub fn initFactory(T: type) Declaration {
+        if (!@hasDecl(T, "System") or @TypeOf(T.System) != type)
+            @compileError(@typeName(T) ++ " does not define a `System` type");
+
+        const Sys = T.System;
+        if (!@hasDecl(Sys, "run")) @compileError(@typeName(Sys) ++ " does not contain a `run` function");
+        const run_info = @typeInfo(@TypeOf(Sys.run)).@"fn";
+        if (run_info.params.len != 3 and run_info.params.len != 4)
+            @compileError("The system run function must take three or four parameters.");
+        if (run_info.params[0].type.? != *Sys)
+            @compileError("The first argument of the run function must be a pointer to " ++ @typeName(Sys));
+
+        const ExclusiveArgs = run_info.params[1].type.?;
+        const SharedArgs = run_info.params[2].type.?;
+        const has_signal = run_info.params.len == 4;
+
+        const ExclusiveResourceHandles = if (@sizeOf(ExclusiveArgs) == 0) std.meta.Tuple(&.{}) else blk: {
             const fields = @typeInfo(ExclusiveArgs).@"struct".fields;
             var types: [fields.len]type = undefined;
             for (0..fields.len) |i| {
-                const T = fields[i].type;
-                const ResourceValue = @typeInfo(T).pointer.child;
-                if (T != *ResourceValue) @compileError("Resource parameters must be non-const pointers");
+                const F = fields[i].type;
+                const ResourceValue = @typeInfo(F).pointer.child;
+                if (F != *ResourceValue) @compileError("Resource parameters must be non-const pointers");
                 types[i] = *TypedResource(ResourceValue);
             }
             break :blk std.meta.Tuple(&types);
         };
 
-        const SharedResourceHandlesT = if (@sizeOf(SharedArgs) == 0) std.meta.Tuple(&.{}) else blk: {
+        const SharedResourceHandles = if (@sizeOf(SharedArgs) == 0) std.meta.Tuple(&.{}) else blk: {
             const fields = @typeInfo(SharedArgs).@"struct".fields;
             var types: [fields.len]type = undefined;
             for (0..fields.len) |i| {
-                const T = fields[i].type;
-                const ResourceValue = @typeInfo(T).pointer.child;
-                if (T != *ResourceValue) @compileError("Resource parameters must be non-const pointers");
+                const F = fields[i].type;
+                const ResourceValue = @typeInfo(F).pointer.child;
+                if (F != *ResourceValue) @compileError("Resource parameters must be non-const pointers");
                 types[i] = *TypedResource(ResourceValue);
             }
             break :blk std.meta.Tuple(&types);
         };
 
-        const Wrapper = struct {
-            fn deinitFactory(factory: ?*const anyopaque) callconv(.c) void {
-                const f = deinitFactoryFn.?;
-                if (comptime @sizeOf(FactoryT) != 0)
-                    f(@ptrCast(@alignCast(factory.?)))
-                else
-                    f(&FactoryT{});
-            }
+        const Options = blk: {
+            var fields_arr: [6]std.builtin.Type.StructField = undefined;
+            var fields = std.ArrayListUnmanaged(std.builtin.Type.StructField).initBuffer(&fields_arr);
+            const default_dependency_slice: []const Dependency = &.{};
+            fields.appendAssumeCapacity(.{
+                .name = "label",
+                .type = ?[]const u8,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(?[]const u8),
+            });
+            if (@sizeOf(T) != 0) fields.appendAssumeCapacity(.{
+                .name = "factory",
+                .type = T,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(T),
+            });
+            if (@sizeOf(ExclusiveResourceHandles) != 0) fields.appendAssumeCapacity(.{
+                .name = "exclusive",
+                .type = ExclusiveResourceHandles,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(ExclusiveResourceHandles),
+            });
+            if (@sizeOf(SharedResourceHandles) != 0) fields.appendAssumeCapacity(.{
+                .name = "shared",
+                .type = SharedResourceHandles,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(SharedResourceHandles),
+            });
+            fields.appendAssumeCapacity(.{
+                .name = "before",
+                .type = []const Dependency,
+                .default_value_ptr = @ptrCast(&default_dependency_slice),
+                .is_comptime = false,
+                .alignment = @alignOf([]const Dependency),
+            });
+            fields.appendAssumeCapacity(.{
+                .name = "after",
+                .type = []const Dependency,
+                .default_value_ptr = @ptrCast(&default_dependency_slice),
+                .is_comptime = false,
+                .alignment = @alignOf([]const Dependency),
+            });
 
-            fn init(
+            break :blk @Type(.{ .@"struct" = .{
+                .layout = .auto,
+                .decls = &.{},
+                .fields = fields.items,
+                .is_tuple = false,
+            } });
+        };
+
+        const Wrapper = struct {
+            const deinitFactory = if (std.meta.hasFn(T, "deinit")) struct {
+                fn f(factory: ?*const anyopaque) callconv(.c) void {
+                    const fact: *const T = if (comptime @sizeOf(T) != 0)
+                        @ptrCast(@alignCast(factory))
+                    else
+                        &T{};
+                    fact.deinit();
+                }
+            }.f else undefined;
+
+            fn initSys(
                 factory: ?*const anyopaque,
                 context: *SystemContext,
                 system: ?*anyopaque,
             ) callconv(.c) bool {
-                const fact: *const FactoryT = if (comptime @sizeOf(FactoryT) != 0)
-                    @ptrCast(@alignCast(factory.?))
+                const fact: *const T = if (comptime @sizeOf(T) != 0)
+                    @ptrCast(@alignCast(factory))
                 else
-                    &FactoryT{};
-                const sys: *SystemT = if (comptime @sizeOf(SystemT) != 0)
-                    @ptrCast(@alignCast(system.?))
+                    &T{};
+                const sys: *Sys = if (comptime @sizeOf(Sys) != 0)
+                    @ptrCast(@alignCast(system))
                 else
-                    &SystemT{};
-                sys.* = initFn(fact, context) catch return false;
+                    &Sys{};
+                sys.* = Sys.init(fact, context) catch return false;
                 return true;
             }
 
-            fn deinit(system: ?*anyopaque) callconv(.c) void {
-                const f = deinitFn.?;
-                if (comptime @sizeOf(SystemT) != 0)
-                    f(@ptrCast(@alignCast(system.?)))
-                else
-                    f(&SystemT{});
-            }
+            const deinitSys = if (std.meta.hasFn(Sys, "deinit")) struct {
+                fn f(system: ?*anyopaque) callconv(.c) void {
+                    const sys: *Sys = if (comptime @sizeOf(Sys) != 0)
+                        @ptrCast(@alignCast(system))
+                    else
+                        &Sys{};
+                    sys.deinit();
+                }
+            }.f else undefined;
 
-            fn run(
+            fn runSys(
                 system: ?*anyopaque,
                 exclusive_resources: ?[*]const *anyopaque,
                 shared_resources: ?[*]const *anyopaque,
                 deferred_fence: *Fence,
             ) callconv(.c) void {
-                const sys: *SystemT = if (comptime @sizeOf(SystemT) != 0)
-                    @ptrCast(@alignCast(system.?))
+                const sys: *Sys = if (comptime @sizeOf(Sys) != 0)
+                    @ptrCast(@alignCast(system))
                 else
-                    &SystemT{};
+                    &Sys{};
                 var exclusive: ExclusiveArgs = undefined;
                 if (comptime @sizeOf(ExclusiveArgs) == 0) exclusive = ExclusiveArgs{} else {
                     const arr = exclusive_resources.?;
@@ -740,23 +1035,24 @@ pub const Declaration = struct {
                 }
 
                 if (comptime has_signal) {
-                    runFn(sys, exclusive, shared, deferred_fence);
+                    sys.run(exclusive, shared, deferred_fence);
                 } else {
-                    runFn(sys, exclusive, shared);
+                    sys.run(exclusive, shared);
                     deferred_fence.state.store(Fence.signaled, .release);
                 }
             }
         };
 
         return .{
-            .FactoryT = FactoryT,
-            .deinit_factory = if (deinitFactoryFn != null) &Wrapper.deinitFactory else null,
-            .SystemT = SystemT,
-            .ExclusiveResourceHandlesT = ExclusiveResourceHandlesT,
-            .SharedResourceHandlesT = SharedResourceHandlesT,
-            .init = &Wrapper.init,
-            .deinit = if (deinitFn != null) &Wrapper.deinit else null,
-            .run = &Wrapper.run,
+            .Options = Options,
+            .Factory = T,
+            .deinit_factory = if (std.meta.hasFn(Wrapper, "deinitFactory")) &Wrapper.deinitFactory else null,
+            .System = Sys,
+            .ExclusiveResourceHandlesT = ExclusiveResourceHandles,
+            .SharedResourceHandlesT = SharedResourceHandles,
+            .init = &Wrapper.initSys,
+            .deinit = if (std.meta.hasFn(Wrapper, "deinitSys")) &Wrapper.deinitSys else null,
+            .run = &Wrapper.runSys,
         };
     }
 };
@@ -805,25 +1101,25 @@ test "System: system definitions" {
         }
     };
 
-    const Simple0 = Declaration.simple(Dummy.simple0);
+    const Simple0 = Declaration.initFunctor(Dummy.simple0);
     TupleTester.assertTuple(.{}, Simple0.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{}, Simple0.SharedResourceHandlesT);
 
-    const Simple1 = Declaration.simple(Dummy.simple1);
+    const Simple1 = Declaration.initFunctor(Dummy.simple1);
     TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple1.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{}, Simple1.SharedResourceHandlesT);
 
-    const Simple2 = Declaration.simple(Dummy.simple2);
+    const Simple2 = Declaration.initFunctor(Dummy.simple2);
     TupleTester.assertTuple(.{}, Simple2.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple2.SharedResourceHandlesT);
 
-    const Simple3 = Declaration.simple(Dummy.simple3);
+    const Simple3 = Declaration.initFunctor(Dummy.simple3);
     TupleTester.assertTuple(.{ *TypedResource(i32), *TypedResource(u32) }, Simple3.ExclusiveResourceHandlesT);
     TupleTester.assertTuple(.{*TypedResource(f32)}, Simple3.SharedResourceHandlesT);
 }
 
 test "System: smoke test" {
-    const Dummy = Declaration.simple(struct {
+    const Dummy = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
             _ = ctx;
             _ = exclusive;
@@ -835,12 +1131,12 @@ test "System: smoke test" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const sys0 = try Dummy.register(GlobalCtx, "system-0", {}, .{}, .{}, &.{}, &.{});
+    const sys0 = try Dummy.register(GlobalCtx, .{ .label = "system-0" });
     defer sys0.unregister(GlobalCtx);
 }
 
 test "System: cyclic dependency" {
-    const Dummy = Declaration.simple(struct {
+    const Dummy = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct {}) void {
             _ = ctx;
             _ = exclusive;
@@ -852,13 +1148,17 @@ test "System: cyclic dependency" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const sys0 = try Dummy.register(GlobalCtx, "system-0", {}, .{}, .{}, &.{}, &.{});
+    const sys0 = try Dummy.register(GlobalCtx, .{ .label = "system-0" });
     defer sys0.unregister(GlobalCtx);
 
-    const sys1 = try Dummy.register(GlobalCtx, "system-1", {}, .{}, .{}, &.{}, &.{.{ .system = sys0 }});
+    const sys1 = try Dummy.register(GlobalCtx, .{ .label = "system-1", .after = &.{.{ .system = sys0 }} });
     defer sys1.unregister(GlobalCtx);
 
-    const sys2 = Dummy.register(GlobalCtx, "system-2", {}, .{}, .{}, &.{.{ .system = sys0 }}, &.{.{ .system = sys1 }}) catch return;
+    const sys2 = Dummy.register(GlobalCtx, .{
+        .label = "system-1",
+        .before = &.{.{ .system = sys0 }},
+        .after = &.{.{ .system = sys1 }},
+    }) catch return;
     sys2.unregister(GlobalCtx);
     try std.testing.expect(false);
 }

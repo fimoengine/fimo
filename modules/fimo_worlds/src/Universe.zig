@@ -93,12 +93,6 @@ pub const System = struct {
         deferred_signal: *fimo_worlds_meta.Job.Fence,
     ) callconv(.c) void,
 
-    pub const Flags = packed struct(usize) {
-        weak: bool = false,
-        ignore_deferred: bool = false,
-        reserved: u62 = undefined,
-    };
-
     pub const Link = packed struct(usize) {
         implicit: bool,
         weak: bool = false,
@@ -108,7 +102,7 @@ pub const System = struct {
 
     pub const Dependency = extern struct {
         system: *System,
-        ignore_deferred: bool = false,
+        flags: fimo_worlds_meta.systems.Declaration.Flags = .{},
     };
 };
 
@@ -209,7 +203,11 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         if (before.contains(dep.system)) return error.Duplicate;
         before.putAssumeCapacity(
             dep.system,
-            .{ .implicit = false, .ignore_deferred = dep.ignore_deferred },
+            .{
+                .implicit = false,
+                .weak = dep.flags.weak,
+                .ignore_deferred = dep.flags.ignore_deferred,
+            },
         );
     }
     for (options.after) |dep| {
@@ -218,7 +216,11 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         if (after.contains(dep.system)) return error.Duplicate;
         after.putAssumeCapacity(
             dep.system,
-            .{ .implicit = false, .ignore_deferred = dep.ignore_deferred },
+            .{
+                .implicit = false,
+                .weak = dep.flags.weak,
+                .ignore_deferred = dep.flags.ignore_deferred,
+            },
         );
     }
 
@@ -293,7 +295,7 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
             sys,
             .{
                 .implicit = true,
-                .weak = true,
+                .weak = link.weak,
                 .ignore_deferred = link.ignore_deferred,
             },
         );
@@ -306,7 +308,7 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
             sys,
             .{
                 .implicit = true,
-                .weak = true,
+                .weak = link.weak,
                 .ignore_deferred = link.ignore_deferred,
             },
         );
