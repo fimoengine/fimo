@@ -66,8 +66,8 @@ comptime {
     _ = Instance;
 }
 
-extern "winmm" fn timeBeginPeriod(uPeriod: c_uint) callconv(std.os.windows.WINAPI) c_uint;
-extern "winmm" fn timeEndPeriod(uPeriod: c_uint) callconv(std.os.windows.WINAPI) c_uint;
+extern "winmm" fn timeBeginPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
+extern "winmm" fn timeEndPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
 
 const State = struct {
     debug_allocator: switch (builtin.mode) {

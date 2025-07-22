@@ -10,7 +10,7 @@ const os_ext = switch (builtin.target.os.tag) {
     .windows => struct {
         pub extern "kernel32" fn GetSystemTimeAsFileTime(
             lpSystemTimeAsFileTime: *std.os.windows.FILETIME,
-        ) callconv(std.os.windows.WINAPI) void;
+        ) callconv(.winapi) void;
     },
     else => struct {},
 };

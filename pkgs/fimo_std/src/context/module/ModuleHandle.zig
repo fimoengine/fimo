@@ -39,7 +39,7 @@ const Inner = if (builtin.os.tag == .windows)
             dwFlags: windows.DWORD,
             lpModuleName: ?windows.LPCWSTR,
             phModule: *windows.HMODULE,
-        ) callconv(windows.WINAPI) windows.BOOL;
+        ) callconv(.winapi) windows.BOOL;
     }
 else
     struct {
@@ -49,7 +49,7 @@ else
             dli_sname: ?[*:0]const u8,
             dli_saddr: ?*anyopaque,
         };
-        extern "c" fn dladdr(addr: *const anyopaque, info: *Dl_info) callconv(.C) c_int;
+        extern "c" fn dladdr(addr: *const anyopaque, info: *Dl_info) callconv(.c) c_int;
     };
 
 pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const anyopaque) !*Self {

@@ -627,7 +627,7 @@ pub const Builder = struct {
                     }.map,
                 ).intoFuture();
                 var err: ?AnyError = null;
-                return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
+                return mapped_fut.enqueue(ctx.context().async(), null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
                     return EnqueueError(*anyopaque);
@@ -757,7 +757,7 @@ pub const Builder = struct {
                     }.f,
                 ).intoFuture();
                 var err: ?AnyError = null;
-                return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
+                return mapped_fut.enqueue(ctx.context().async(), null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
                     return EnqueueError(?*anyopaque);
@@ -844,7 +844,7 @@ pub const Builder = struct {
                     Fallible(void).wrap,
                 ).intoFuture();
                 var err: ?AnyError = null;
-                return mapped_fut.enqueue(ctx.context().@"async"(), null, &err) catch {
+                return mapped_fut.enqueue(ctx.context().async(), null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
                     return EnqueueError(void);
@@ -944,13 +944,8 @@ pub const Builder = struct {
             pub fn path(this: @This()) Path {
                 return Path.initC(this.ffi);
             }
-            pub fn format(
-                this: @This(),
-                comptime fmt: []const u8,
-                options: std.fmt.FormatOptions,
-                out_stream: anytype,
-            ) !void {
-                try this.path().format(fmt, options, out_stream);
+            pub fn format(this: @This(), w: *std.Io.Writer) std.Io.Writer.Error!void {
+                try this.path().format(w);
             }
         };
 

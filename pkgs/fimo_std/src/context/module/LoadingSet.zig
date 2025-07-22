@@ -39,8 +39,8 @@ symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashCon
 
 pub const Callback = struct {
     data: ?*anyopaque,
-    on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.C) void,
-    on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) void,
+    on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.c) void,
+    on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) void,
 };
 
 const ModuleInfo = struct {
@@ -270,7 +270,7 @@ const LoadGraph = struct {
                 } else if (sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
                     sys.logWarn(
                         "instance is missing required symbol...skipping," ++
-                            " instance='{s}', symbol='{s}', namespace='{s}', version='{}'",
+                            " instance='{s}', symbol='{s}', namespace='{s}', version='{f}'",
                         .{ name, imp_name, imp_ns, imp_ver },
                         @src(),
                     );
@@ -507,7 +507,7 @@ fn addModuleInner(
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
             self.context.module.sys.logError(
-                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{}'",
+                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{f}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
             );
@@ -519,7 +519,7 @@ fn addModuleInner(
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
             self.context.module.sys.logError(
-                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{}'",
+                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{f}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
             );
@@ -581,7 +581,7 @@ fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{Inv
     }
     if (!Context.ProxyContext.context_version.isCompatibleWith(@"export".getVersion())) {
         sys.logWarn(
-            "incompatible context version, got='{}', required='{}'",
+            "incompatible context version, got='{f}', required='{f}'",
             .{ Context.ProxyContext.context_version, @"export".getVersion() },
             @src(),
         );
@@ -884,7 +884,7 @@ fn addModulesFromLocal(
     filter_fn: *const fn (
         @"export": *const ProxyModule.Export,
         data: ?*anyopaque,
-    ) callconv(.C) ProxyModule.LoadingSet.FilterRequest,
+    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
     bin_ptr: *const anyopaque,
 ) !void {
@@ -922,7 +922,7 @@ const LoadOp = FSMFuture(struct {
 
         return Async.Task.initFuture(
             @TypeOf(f),
-            &load_graph.set.context.@"async".sys,
+            &load_graph.set.context.async.sys,
             &f,
         );
     }
@@ -1087,8 +1087,8 @@ const LoadOp = FSMFuture(struct {
                     if (self.err) |*e| {
                         sys.logWarn(
                             "instance construction error...skipping," ++
-                                " instance='{s}', error='{dbg}:{}'",
-                            .{ self.name, e.*, e.* },
+                                " instance='{s}', error='{f}:{f}'",
+                            .{ self.name, std.fmt.alt(e.*, .formatName), e.* },
                             @src(),
                         );
                         e.deinit();
@@ -1144,8 +1144,8 @@ const LoadOp = FSMFuture(struct {
                     if (self.err) |*e| {
                         sys.logWarn(
                             "instance `on_start` error...skipping," ++
-                                " instance='{s}', error='{dbg}:{}'",
-                            .{ self.name, e.*, e.* },
+                                " instance='{s}', error='{f}:{f}'",
+                            .{ self.name, std.fmt.alt(e.*, .formatName), e.* },
                             @src(),
                         );
                         e.deinit();
@@ -1213,7 +1213,7 @@ const CommitOp = FSMFuture(struct {
 
         return Async.Task.initFuture(
             @TypeOf(f),
-            &set.context.@"async".sys,
+            &set.context.async.sys,
             &f,
         ) catch |e| Async.initErrorFuture(void, e);
     }
@@ -1366,7 +1366,7 @@ const VTableImpl = struct {
         const version_ = Version.initC(version);
 
         self.logTrace(
-            "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{}'",
+            "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{f}'",
             .{ self, name_, namespace_, version_ },
             @src(),
         );
@@ -1378,8 +1378,8 @@ const VTableImpl = struct {
     fn addCallback(
         this: *anyopaque,
         module: [*:0]const u8,
-        on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.C) void,
-        on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.C) void,
+        on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.c) void,
+        on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) void,
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         data: ?*anyopaque,
     ) callconv(.c) AnyResult {
@@ -1453,7 +1453,7 @@ const VTableImpl = struct {
         const path_ = Path.initC(path);
 
         self.logTrace(
-            "adding modules to loading set, set='{*}', path='{}'",
+            "adding modules to loading set, set='{*}', path='{f}'",
             .{ self, path_ },
             @src(),
         );
@@ -1480,7 +1480,7 @@ const VTableImpl = struct {
         iterator_fn: *const fn (
             f: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) bool,
             data: ?*anyopaque,
-        ) callconv(.C) void,
+        ) callconv(.c) void,
         bin_ptr: *const anyopaque,
     ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));

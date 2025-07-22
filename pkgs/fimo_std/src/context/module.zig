@@ -82,7 +82,7 @@ pub fn addLoadingSet(self: *Self, err: *?AnyError) !EnqueuedFuture(Fallible(*Loa
     errdefer fut.deinit();
     return Async.Task.initFuture(
         @TypeOf(fut),
-        &self.asContext().@"async".sys,
+        &self.asContext().async.sys,
         &fut,
         err,
     );
@@ -107,7 +107,7 @@ pub fn findInstanceBySymbol(
     version: Version,
 ) System.SystemError!*const ProxyModule.Info {
     self.logTrace(
-        "searching for symbol owner, name='{s}', namespace='{s}', version='{}'",
+        "searching for symbol owner, name='{s}', namespace='{s}', version='{f}'",
         .{ name, namespace, version },
         @src(),
     );
@@ -246,7 +246,7 @@ const VTableImpl = struct {
     fn addPseudoInstance(
         ptr: *anyopaque,
         instance: **const ProxyModule.PseudoInstance,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         instance.* = ctx.module.addPseudoInstance() catch |e| {
             if (@errorReturnTrace()) |tr|
@@ -258,7 +258,7 @@ const VTableImpl = struct {
     fn addLoadingSet(
         ptr: *anyopaque,
         set: *ProxyModule.LoadingSet,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         set.* = LoadingSet.init(ctx) catch |e| {
             if (@errorReturnTrace()) |tr|
@@ -271,7 +271,7 @@ const VTableImpl = struct {
         ptr: *anyopaque,
         name: [*:0]const u8,
         info: **const ProxyModule.Info,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         info.* = ctx.module.findInstanceByName(std.mem.span(name)) catch |e| {
             if (@errorReturnTrace()) |tr|
@@ -286,7 +286,7 @@ const VTableImpl = struct {
         namespace: [*:0]const u8,
         version: c.FimoVersion,
         info: **const ProxyModule.Info,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         info.* = ctx.module.findInstanceBySymbol(
             std.mem.span(name),
@@ -303,12 +303,12 @@ const VTableImpl = struct {
         ptr: *anyopaque,
         namespace: [*:0]const u8,
         exists: *bool,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         exists.* = ctx.module.queryNamespace(std.mem.span(namespace));
         return AnyResult.ok;
     }
-    fn pruneInstances(ptr: *anyopaque) callconv(.C) AnyResult {
+    fn pruneInstances(ptr: *anyopaque) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.pruneInstances() catch |e| {
             if (@errorReturnTrace()) |tr|
@@ -324,7 +324,7 @@ const VTableImpl = struct {
         @"type": *ProxyModule.ParameterType,
         read_group: *ProxyModule.ParameterAccessGroup,
         write_group: *ProxyModule.ParameterAccessGroup,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         const info = ctx.module.queryParameter(
             std.mem.span(owner),
@@ -345,7 +345,7 @@ const VTableImpl = struct {
         @"type": ProxyModule.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.readParameter(
             value,
@@ -365,7 +365,7 @@ const VTableImpl = struct {
         @"type": ProxyModule.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const ctx = Context.fromProxyPtr(ptr);
         ctx.module.writeParameter(
             value,

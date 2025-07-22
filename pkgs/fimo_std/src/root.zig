@@ -1,7 +1,6 @@
 const std = @import("std");
 
 pub const c = @import("c");
-const visualizers = @import("visualizers");
 
 pub const AnyError = @import("AnyError.zig");
 const context = @import("context.zig");
@@ -18,5 +17,4 @@ comptime {
     _ = path;
     _ = time;
     _ = Version;
-    _ = visualizers;
 }
