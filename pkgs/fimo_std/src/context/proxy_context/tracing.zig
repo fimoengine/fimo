@@ -394,15 +394,14 @@ pub fn stackTraceFormatter(
         } else |_| written.* = buffer_len;
         return;
     };
-    var stream = std.io.fixedBufferStream(buf);
-    var writer = std.io.countingWriter(stream.writer());
+    var writer: std.io.Writer = .fixed(buf);
     std.debug.writeStackTrace(
         stack_trace.*,
-        writer.writer(),
+        &writer,
         debug_info,
         .no_color,
     ) catch |err| switch (err) {
-        error.NoSpaceLeft => {},
+        error.WriteFailed => {},
         else => {
             if (std.fmt.bufPrint(
                 buf,
@@ -413,7 +412,7 @@ pub fn stackTraceFormatter(
             } else |_| written.* = buffer_len;
         },
     };
-    written.* = @intCast(writer.bytes_written);
+    written.* = @intCast(writer.buffered().len);
 }
 
 /// A subscriber for tracing events.
@@ -1223,7 +1222,6 @@ const DefaultSubscriber = struct {
     const allocator = std.heap.c_allocator;
     threadlocal var print_buffer = std.mem.zeroes([Self.print_buffer_len + overlength_correction.len:0]u8);
     const print_buffer_len = 1024;
-    var mutex: std.Thread.Mutex = .{};
 
     const ansi_color_red: []const u8 = "\x1b[31m";
     const ansi_color_green: []const u8 = "\x1b[32m";
@@ -1406,11 +1404,10 @@ const DefaultSubscriber = struct {
             std.mem.copyForwards(u8, rest_buffer, overlength_correction[correction_start..]);
         }
 
-        Self.mutex.lock();
-        defer Self.mutex.unlock();
-
-        const writer = std.io.getStdErr().writer();
-        writer.print("{s}", .{Self.print_buffer[0..cursor]}) catch {};
+        var buffer: [64]u8 = undefined;
+        const stderr = std.debug.lockStderrWriter(&buffer);
+        defer std.debug.unlockStderrWriter();
+        stderr.writeAll(Self.print_buffer[0..cursor]) catch {};
     }
 
     fn flush(self: *const Self) void {

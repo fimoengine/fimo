@@ -94,14 +94,8 @@ pub fn parse(text: []const u8) !Version {
     return initSemanticVersion(sem);
 }
 
-/// Formats the version.
-pub fn format(
-    self: Version,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    out_stream: anytype,
-) !void {
-    return self.intoSemanticVersion().format(fmt, options, out_stream);
+pub fn format(self: Version, w: *std.Io.Writer) std.Io.Writer.Error!void {
+    try self.intoSemanticVersion().format(w);
 }
 
 test format {
@@ -140,7 +134,7 @@ test format {
         "1.0.0+0.build.1-rc.10000aaa-kk-0.1",
         "5.4.0-1018-raspi",
         "5.7.123",
-    }) |valid| try std.testing.expectFmt(valid, "{}", .{try parse(valid)});
+    }) |valid| try std.testing.expectFmt(valid, "{f}", .{try parse(valid)});
 
     // Invalid version strings should be rejected.
     for ([_][]const u8{
@@ -207,12 +201,12 @@ test format {
     // Valid version string that may overflow.
     const big_valid = "99999999999999999999999.999999999999999999.99999999999999999";
     if (parse(big_valid)) |ver| {
-        try std.testing.expectFmt(big_valid, "{}", .{ver});
+        try std.testing.expectFmt(big_valid, "{f}", .{ver});
     } else |err| try std.testing.expect(err == error.Overflow);
 
     // Invalid version string that may overflow.
     const big_invalid = "99999999999999999999999.999999999999999999.99999999999999999----RC-SNAPSHOT.12.09.1--------------------------------..12";
-    if (parse(big_invalid)) |ver| std.debug.panic("expected error, found {}", .{ver}) else |_| {}
+    if (parse(big_invalid)) |ver| std.debug.panic("expected error, found {f}", .{ver}) else |_| {}
 }
 
 // ----------------------------------------------------
@@ -275,7 +269,7 @@ const ffi = struct {
         v.build = null;
         v.build_len = 0;
         const buffer = str[0..str_len];
-        if (std.fmt.bufPrint(buffer, "{}", .{v})) |b| {
+        if (std.fmt.bufPrint(buffer, "{f}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
             return AnyResult.ok;
@@ -290,7 +284,7 @@ const ffi = struct {
     ) AnyResult {
         const v = Version.initC(version.*);
         const buffer = str[0..str_len];
-        if (std.fmt.bufPrint(buffer, "{}", .{v})) |b| {
+        if (std.fmt.bufPrint(buffer, "{f}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
             return AnyResult.ok;

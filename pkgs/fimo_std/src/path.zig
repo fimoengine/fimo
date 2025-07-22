@@ -148,16 +148,8 @@ pub const PathBuffer = struct {
         try testing.expectEqualStrings("/", buf.asPath().raw);
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: Self,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{}", .{self.buffer});
+    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try self.buffer.format(w);
     }
 };
 
@@ -324,16 +316,8 @@ pub const PathBufferUnmanaged = struct {
         } else return false;
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: Self,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{s}", .{self.buffer.items});
+    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.buffer.items);
     }
 };
 
@@ -431,16 +415,8 @@ pub const OwnedPath = struct {
         return buffer.toManaged(self.allocator);
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: Self,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{}", .{self.path});
+    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try self.path.format(w);
     }
 };
 
@@ -517,16 +493,8 @@ pub const OwnedPathUnmanaged = struct {
         return PathBufferUnmanaged{ .buffer = buffer };
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: Self,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{s}", .{self.raw});
+    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.raw);
     }
 };
 
@@ -578,16 +546,8 @@ pub const OwnedOsPath = struct {
         return self.path.asOsPath();
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: OwnedOsPath,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{}", .{self.path});
+    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try self.path.format(w);
     }
 };
 
@@ -648,16 +608,8 @@ pub const OwnedOsPathUnmanaged = struct {
         return OwnedOsPath{ .path = self, .allocator = allocator };
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: OwnedOsPathUnmanaged,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{s}", .{self.raw});
+    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.raw);
     }
 };
 
@@ -675,16 +627,8 @@ pub const OsPath = struct {
         return c.FimoOSPath{ .path = self.raw.ptr, .length = self.raw.len };
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: OsPath,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{s}", .{self.raw});
+    pub fn format(self: OsPath, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(@ptrCast(self.raw));
     }
 };
 
@@ -1445,16 +1389,8 @@ pub const Path = struct {
         try std.testing.expect(it.nextBack() == null);
     }
 
-    /// Formats the path.
-    pub fn format(
-        self: Path,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        _ = fmt;
-        try std.fmt.format(out_stream, "{s}", .{self.raw});
+    pub fn format(self: Path, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.raw);
     }
 };
 

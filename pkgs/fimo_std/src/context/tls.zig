@@ -17,7 +17,7 @@ const PosixTlsImpl = struct {
 
     const Self = @This();
 
-    fn init(destructor: ?*const fn (ptr: *anyopaque) callconv(.C) void) TlsError!Self {
+    fn init(destructor: ?*const fn (ptr: *anyopaque) callconv(.c) void) TlsError!Self {
         var self = Self{ .key = undefined };
         switch (c.pthread_key_create(&self.key, @ptrCast(destructor))) {
             .SUCCESS => return self,
@@ -61,13 +61,12 @@ const WindowsTlsImpl = struct {
 
     const Self = @This();
     const max_indices_per_process = 1088;
-    const WINAPI = windows.WINAPI;
-    var dtors = [_]?*const fn (*anyopaque) callconv(.C) void{null} ** max_indices_per_process;
+    var dtors = [_]?*const fn (*anyopaque) callconv(.c) void{null} ** max_indices_per_process;
 
-    extern "kernel32" fn TlsAlloc() callconv(WINAPI) windows.DWORD;
-    extern "kernel32" fn TlsFree(index: windows.DWORD) callconv(WINAPI) windows.BOOL;
-    extern "kernel32" fn TlsGetValue(index: windows.DWORD) callconv(WINAPI) ?windows.LPVOID;
-    extern "kernel32" fn TlsSetValue(index: windows.DWORD, value: ?windows.LPVOID) callconv(WINAPI) windows.BOOL;
+    extern "kernel32" fn TlsAlloc() callconv(.winapi) windows.DWORD;
+    extern "kernel32" fn TlsFree(index: windows.DWORD) callconv(.winapi) windows.BOOL;
+    extern "kernel32" fn TlsGetValue(index: windows.DWORD) callconv(.winapi) ?windows.LPVOID;
+    extern "kernel32" fn TlsSetValue(index: windows.DWORD, value: ?windows.LPVOID) callconv(.winapi) windows.BOOL;
 
     const Data = struct {
         value: ?*anyopaque = null,
@@ -108,7 +107,7 @@ const WindowsTlsImpl = struct {
             }
         }
 
-        fn tss_callback(handle: ?windows.PVOID, dwReason: windows.DWORD, pv: ?windows.PVOID) callconv(WINAPI) void {
+        fn tss_callback(handle: ?windows.PVOID, dwReason: windows.DWORD, pv: ?windows.PVOID) callconv(.winapi) void {
             _ = handle;
             _ = pv;
 
@@ -120,7 +119,7 @@ const WindowsTlsImpl = struct {
         }
     };
 
-    fn init(destructor: ?*const fn (ptr: *anyopaque) callconv(.C) void) TlsError!Self {
+    fn init(destructor: ?*const fn (ptr: *anyopaque) callconv(.c) void) TlsError!Self {
         const self = Self{ .tls = TlsAlloc() };
         if (self.tls == windows.TLS_OUT_OF_INDEXES) {
             return error.TlsSlotsQuotaExceeded;
@@ -164,7 +163,7 @@ const WindowsTlsImpl = struct {
 const UnsupportedTlsImpl = struct {
     const Self = @This();
 
-    fn init(destructor: ?*const fn (ptr: *anyopaque) callconv(.C) void) TlsError!Self {
+    fn init(destructor: ?*const fn (ptr: *anyopaque) callconv(.c) void) TlsError!Self {
         unsupported(.{destructor});
     }
 
@@ -199,7 +198,7 @@ pub fn Tls(comptime T: type) type {
 
         const Self = @This();
 
-        pub fn init(destructor: ?*const fn (ptr: *T) callconv(.C) void) TlsError!Self {
+        pub fn init(destructor: ?*const fn (ptr: *T) callconv(.c) void) TlsError!Self {
             return Self{ .impl = try Impl.init(@ptrCast(destructor)) };
         }
 
@@ -220,7 +219,7 @@ pub fn Tls(comptime T: type) type {
 
 test "per thread data" {
     const tls = try Tls(usize).init(&struct {
-        fn f(ptr: *usize) callconv(.C) void {
+        fn f(ptr: *usize) callconv(.c) void {
             std.testing.allocator.destroy(ptr);
         }
     }.f);
@@ -248,7 +247,7 @@ test "per thread data" {
 
 test "tls destructor on thread exit" {
     const destructor = struct {
-        fn f(ptr: *std.atomic.Value(usize)) callconv(.C) void {
+        fn f(ptr: *std.atomic.Value(usize)) callconv(.c) void {
             _ = ptr.fetchAdd(1, .monotonic);
         }
     }.f;

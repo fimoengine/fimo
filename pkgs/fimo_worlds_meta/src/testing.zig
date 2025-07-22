@@ -65,15 +65,15 @@ const TestContext = struct {
 
         var err: ?fimo_std.AnyError = null;
         errdefer if (err) |e| {
-            ctx.tracing().emitErrSimple("{}", .{e}, @src());
+            ctx.tracing().emitErrSimple("{f}", .{e}, @src());
             e.deinit();
         };
 
-        errdefer Async.EventLoop.flushWithCurrentThread(ctx.@"async"(), &err) catch unreachable;
-        const event_loop = try Async.EventLoop.init(ctx.@"async"(), &err);
+        errdefer Async.EventLoop.flushWithCurrentThread(ctx.async(), &err) catch unreachable;
+        const event_loop = try Async.EventLoop.init(ctx.async(), &err);
         errdefer event_loop.join();
 
-        const async_ctx = try Async.BlockingContext.init(ctx.@"async"(), &err);
+        const async_ctx = try Async.BlockingContext.init(ctx.async(), &err);
         defer async_ctx.deinit();
 
         const set = try Module.LoadingSet.init(ctx.module(), &err);
@@ -125,7 +125,7 @@ const TestContext = struct {
         var err: ?fimo_std.AnyError = null;
         self.ctx.module().pruneInstances(&err) catch unreachable;
         self.event_loop.join();
-        Async.EventLoop.flushWithCurrentThread(self.ctx.@"async"(), &err) catch unreachable;
+        Async.EventLoop.flushWithCurrentThread(self.ctx.async(), &err) catch unreachable;
         self.ctx.tracing().unregisterThread();
         self.ctx.unref();
     }

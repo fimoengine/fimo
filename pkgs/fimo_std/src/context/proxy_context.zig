@@ -97,7 +97,7 @@ pub const CompatibilityContext = struct {
         check_version: *const fn (
             ctx: *anyopaque,
             version: *const c.FimoVersion,
-        ) callconv(.C) AnyResult,
+        ) callconv(.c) AnyResult,
     };
 
     /// Initializes the object from a ffi object.

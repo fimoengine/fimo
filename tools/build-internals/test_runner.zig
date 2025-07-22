@@ -24,7 +24,7 @@ pub fn main() !void {
     var skip: usize = 0;
     var leak: usize = 0;
 
-    const printer = Printer.init();
+    var printer = Printer.init();
     printer.fmt("\r\x1b[0K", .{}); // beginning of line and clear to end of line
 
     for (builtin.test_functions) |t| {
@@ -101,7 +101,7 @@ pub fn main() !void {
         printer.status(.fail, "{d} test{s} leaked\n", .{ leak, if (leak != 1) "s" else "" });
     }
     printer.fmt("\n", .{});
-    try slowest.display(printer);
+    try slowest.display(&printer);
     printer.fmt("\n", .{});
     std.posix.exit(if (fail == 0) 0 else 1);
 }
@@ -111,24 +111,23 @@ const Printer = struct {
 
     fn init() Printer {
         return .{
-            .out = std.io.getStdErr().writer(),
+            .out = std.fs.File.stderr().writer(&.{}),
         };
     }
 
-    fn fmt(self: Printer, comptime format: []const u8, args: anytype) void {
-        std.fmt.format(self.out, format, args) catch unreachable;
+    fn fmt(self: *Printer, comptime format: []const u8, args: anytype) void {
+        self.out.interface.print(format, args) catch @panic("print failed?!");
     }
 
-    fn status(self: Printer, s: Status, comptime format: []const u8, args: anytype) void {
+    fn status(self: *Printer, s: Status, comptime format: []const u8, args: anytype) void {
         const color = switch (s) {
             .pass => "\x1b[32m",
             .fail => "\x1b[31m",
             .skip => "\x1b[33m",
             else => "",
         };
-        const out = self.out;
-        out.writeAll(color) catch @panic("writeAll failed?!");
-        std.fmt.format(out, format, args) catch @panic("std.fmt.format failed?!");
+        self.out.interface.writeAll(color) catch @panic("writeAll failed?!");
+        self.fmt(format, args);
         self.fmt("\x1b[0m", .{});
     }
 };
@@ -199,7 +198,7 @@ const SlowTracker = struct {
         return ns;
     }
 
-    fn display(self: *SlowTracker, printer: Printer) !void {
+    fn display(self: *SlowTracker, printer: *Printer) !void {
         var slowest = self.slowest;
         const count = slowest.count();
         printer.fmt("Slowest {d} test{s}: \n", .{ count, if (count != 1) "s" else "" });

@@ -46,7 +46,7 @@ pub const Symbol = struct {
     dtor: ?*const fn (
         ctx: *const ProxyModule.OpaqueInstance,
         symbol: *anyopaque,
-    ) callconv(.C) void,
+    ) callconv(.c) void,
 
     fn destroySymbol(self: *const Symbol, ctx: *const ProxyModule.OpaqueInstance) void {
         if (self.dtor) |dtor| {
@@ -677,7 +677,7 @@ fn removeDependency(self: *const Self, info: *const ProxyModule.Info) !void {
 
 fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
     self.logTrace(
-        "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{}'",
+        "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{f}'",
         .{ self.info.name, name, namespace, version },
         @src(),
     );
@@ -834,7 +834,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
         }).intoFuture();
         var enqueued = try Async.Task.initFuture(
             @TypeOf(f),
-            &context.@"async".sys,
+            &context.async.sys,
             &f,
         );
 
@@ -913,11 +913,11 @@ const EnqueueUnloadOp = FSMFuture(struct {
 // ----------------------------------------------------
 
 const InfoVTableImpl = struct {
-    fn ref(info: *const ProxyModule.Info) callconv(.C) void {
+    fn ref(info: *const ProxyModule.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         x.ref();
     }
-    fn unref(info: *const ProxyModule.Info) callconv(.C) void {
+    fn unref(info: *const ProxyModule.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         x.unref();
     }
@@ -927,20 +927,20 @@ const InfoVTableImpl = struct {
         defer inner.unlock();
         inner.enqueueUnload() catch |e| @panic(@errorName(e));
     }
-    fn isLoaded(info: *const ProxyModule.Info) callconv(.C) bool {
+    fn isLoaded(info: *const ProxyModule.Info) callconv(.c) bool {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
         return !inner.isDetached();
     }
-    fn tryRefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) bool {
+    fn tryRefInstanceStrong(info: *const ProxyModule.Info) callconv(.c) bool {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
         inner.refStrong() catch return false;
         return true;
     }
-    fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.C) void {
+    fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
@@ -1313,13 +1313,13 @@ pub const StartInstanceOp = FSMFuture(struct {
 // ----------------------------------------------------
 
 const InstanceVTableImpl = struct {
-    fn ref(ctx: *const ProxyModule.OpaqueInstance) callconv(.C) void {
+    fn ref(ctx: *const ProxyModule.OpaqueInstance) callconv(.c) void {
         const x = Self.fromInstancePtr(ctx);
         const inner = x.lock();
         defer inner.unlock();
         inner.refStrong() catch unreachable;
     }
-    fn unref(ctx: *const ProxyModule.OpaqueInstance) callconv(.C) void {
+    fn unref(ctx: *const ProxyModule.OpaqueInstance) callconv(.c) void {
         const x = Self.fromInstancePtr(ctx);
         const inner = x.lock();
         defer inner.unlock();
@@ -1456,7 +1456,7 @@ const InstanceVTableImpl = struct {
         @"type": ProxyModule.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const module_ = std.mem.span(module);
         const parameter_ = std.mem.span(parameter);
@@ -1474,7 +1474,7 @@ const InstanceVTableImpl = struct {
         @"type": ProxyModule.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.C) AnyResult {
+    ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const module_ = std.mem.span(module);
         const parameter_ = std.mem.span(parameter);

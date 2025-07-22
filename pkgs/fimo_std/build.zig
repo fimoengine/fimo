@@ -7,7 +7,6 @@ pub fn configure(b: *build_internals.FimoBuild) void {
     // Generate additional build files.
     const wf = b.build.addWriteFiles();
     const context_version = generateVersion(b.build, wf);
-    const visualizers = generateGDBScripts(b.build, wf);
 
     const headers = b.build.addWriteFiles();
     _ = headers.addCopyDirectory(b.build.path("include/"), ".", .{});
@@ -31,7 +30,6 @@ pub fn configure(b: *build_internals.FimoBuild) void {
     });
     module.addImport("c", translate_c.createModule());
     module.addImport("context_version", context_version);
-    module.addImport("visualizers", visualizers);
     module.addIncludePath(headers.getDirectory());
 
     const pkg = b.addPackage(.{
@@ -52,7 +50,6 @@ pub fn configure(b: *build_internals.FimoBuild) void {
             });
             t.addImport("c", translate_c.createModule());
             t.addImport("context_version", context_version);
-            t.addImport("visualizers", visualizers);
             t.addIncludePath(headers.getDirectory());
 
             break :blk t;
@@ -174,54 +171,4 @@ fn generateVersion(
     const options = b.addOptions();
     options.addOption(std.SemanticVersion, "version", build_internals.fimo_version);
     return options.createModule();
-}
-
-fn generateGDBScripts(
-    b: *std.Build,
-    wf: *std.Build.Step.WriteFile,
-) *std.Build.Module {
-    const gdbscript_to_zig_exe = b.addExecutable(.{
-        .name = "gdbscript_to_zig",
-        .root_source_file = b.path("tools/gdbscript_to_zig.zig"),
-        .target = b.graph.host,
-        .optimize = .Debug,
-    });
-
-    var dir = b.build_root.handle.openDir("visualizers/gdb", .{ .iterate = true }) catch |err| {
-        std.debug.panic("unable to open '{}visualizers/gdb' directory: {s}", .{
-            b.build_root,
-            @errorName(err),
-        });
-    };
-    defer dir.close();
-
-    var root_file_bytes = std.ArrayList(u8).init(b.allocator);
-    defer root_file_bytes.deinit();
-    root_file_bytes.appendSlice("const builtin = @import(\"builtin\");\n\n") catch unreachable;
-    root_file_bytes.appendSlice("comptime {\n") catch unreachable;
-    root_file_bytes.appendSlice("\tif (builtin.os.tag != .windows and !builtin.target.os.tag.isDarwin()) {\n") catch unreachable;
-
-    var it = dir.iterateAssumeFirstIteration();
-    while (it.next() catch @panic("failed to read dir")) |entry| {
-        if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".py")) {
-            continue;
-        }
-
-        const out_basename = b.fmt("{s}.zig", .{std.fs.path.stem(entry.name)});
-        const out_path = b.fmt("zig_visualizers/{s}", .{out_basename});
-        const cmd = b.addRunArtifact(gdbscript_to_zig_exe);
-
-        root_file_bytes.appendSlice(b.fmt(
-            "\t\t_ = @import(\"{s}\");\n",
-            .{out_basename},
-        )) catch unreachable;
-
-        _ = wf.addCopyFile(cmd.addOutputFileArg(out_basename), out_path);
-        cmd.addFileArg(b.path(b.fmt("visualizers/gdb/{s}", .{entry.name})));
-    }
-
-    root_file_bytes.appendSlice("\t}\n") catch unreachable;
-    root_file_bytes.appendSlice("}\n") catch unreachable;
-    const root_file = wf.add("zig_visualizers/root.zig", root_file_bytes.items);
-    return b.createModule(.{ .root_source_file = root_file });
 }

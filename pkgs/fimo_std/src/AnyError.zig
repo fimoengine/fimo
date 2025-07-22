@@ -27,7 +27,7 @@ const anyerror_vtable = VTable{
     .name = anyerror_string,
     .description = anyerror_string,
 };
-fn anyerror_string(ptr: ?*anyopaque) callconv(.C) ErrorString {
+fn anyerror_string(ptr: ?*anyopaque) callconv(.c) ErrorString {
     const err_int: std.meta.Int(.unsigned, @bitSizeOf(anyerror)) = @intCast(@intFromPtr(ptr));
     const err = @errorFromInt(err_int);
     return ErrorString.init(@errorName(err));
@@ -39,7 +39,7 @@ export const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE = VTable{
     .name = static_string_string,
     .description = static_string_string,
 };
-fn static_string_string(ptr: ?*anyopaque) callconv(.C) ErrorString {
+fn static_string_string(ptr: ?*anyopaque) callconv(.c) ErrorString {
     const str: [*:0]const u8 = @constCast(@alignCast(@ptrCast(ptr.?)));
     return ErrorString.init(str);
 }
@@ -50,11 +50,11 @@ export const FIMO_IMPL_RESULT_ERROR_CODE_VTABLE = VTable{
     .name = error_code_name,
     .description = error_code_description,
 };
-fn error_code_name(ptr: ?*anyopaque) callconv(.C) ErrorString {
+fn error_code_name(ptr: ?*anyopaque) callconv(.c) ErrorString {
     const code: ErrorCode = @enumFromInt(@intFromPtr(ptr));
     return ErrorString.init(code.name());
 }
-fn error_code_description(ptr: ?*anyopaque) callconv(.C) ErrorString {
+fn error_code_description(ptr: ?*anyopaque) callconv(.c) ErrorString {
     const code: ErrorCode = @enumFromInt(@intFromPtr(ptr));
     return ErrorString.init(code.description());
 }
@@ -65,12 +65,12 @@ export const FIMO_IMPL_RESULT_SYSTEM_ERROR_CODE_VTABLE = VTable{
     .name = system_error_code_name,
     .description = system_error_code_description,
 };
-fn system_error_code_name(ptr: ?*anyopaque) callconv(.C) ErrorString {
+fn system_error_code_name(ptr: ?*anyopaque) callconv(.c) ErrorString {
     const code: SystemErrorCode = @intCast(@intFromPtr(ptr));
     return ErrorString.initFmt(std.heap.c_allocator, "SystemError({})", .{code}) catch |e|
         Self.initError(e).name();
 }
-fn system_error_code_description(ptr: ?*anyopaque) callconv(.C) ErrorString {
+fn system_error_code_description(ptr: ?*anyopaque) callconv(.c) ErrorString {
     const code: SystemErrorCode = @intCast(@intFromPtr(ptr));
     switch (builtin.target.os.tag) {
         .windows => {
@@ -202,36 +202,22 @@ pub const AnyResult = extern struct {
         return FIMO_IMPL_RESULT_OK_DESCRIPTION;
     }
 
-    /// Formats the result.
-    ///
-    /// # Format specifiers
-    ///
-    /// * `{}`: Prints the result description.
-    /// * `{dbg}`: Prints the result name.
-    pub fn format(
-        self: *const AnyResult,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = options;
-
-        const debug = comptime parse_fmt: {
-            if (fmt.len == 0) {
-                break :parse_fmt false;
-            } else if (std.mem.eql(u8, fmt, "dbg")) {
-                break :parse_fmt true;
-            } else {
-                @compileError("expected {}, or {dbg}, found {" ++ fmt ++ "}");
-            }
-        };
-
-        const string = if (debug) self.name() else self.description();
-        defer string.deinit();
+    pub fn formatName(self: AnyResult, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        const str = self.name();
+        defer str.deinit();
         if (self.isOk())
-            try writer.print("AnyResult.ok(\"{}\")", .{string.string()})
+            try w.print("AnyResult.ok(\"{s}\")", .{str.string()})
         else
-            try writer.print("AnyResult.err(\"{}\")", .{string.string()});
+            try w.print("AnyResult.err(\"{s}\")", .{str.string()});
+    }
+
+    pub fn format(self: AnyResult, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        const str = self.description();
+        defer str.deinit();
+        if (self.isOk())
+            try w.print("AnyResult.ok(\"{s}\")", .{str.string()})
+        else
+            try w.print("AnyResult.err(\"{s}\")", .{str.string()});
     }
 };
 
@@ -346,33 +332,16 @@ pub fn description(self: *const Self) ErrorString {
     return self.vtable.description(self.data);
 }
 
-/// Formats the error.
-///
-/// # Format specifiers
-///
-/// * `{}`: Prints the error description.
-/// * `{dbg}`: Prints the error name.
-pub fn format(
-    self: *const Self,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = options;
+pub fn formatName(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+    const str = self.name();
+    defer str.deinit();
+    try w.writeAll(str.string());
+}
 
-    const debug = comptime parse_fmt: {
-        if (fmt.len == 0) {
-            break :parse_fmt false;
-        } else if (std.mem.eql(u8, fmt, "dbg")) {
-            break :parse_fmt true;
-        } else {
-            @compileError("expected {}, or {dbg}, found {" ++ fmt ++ "}");
-        }
-    };
-
-    const string = if (debug) self.name() else self.description();
-    defer string.deinit();
-    try writer.writeAll(string.string());
+pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
+    const str = self.description();
+    defer str.deinit();
+    try w.writeAll(str.string());
 }
 
 /// Posix error codes.
@@ -643,32 +612,12 @@ pub const ErrorCode = enum(i32) {
         };
     }
 
-    /// Formats the error code.
-    ///
-    /// # Format specifiers
-    ///
-    /// * `{}`: Prints the error code description.
-    /// * `{dbg}`: Prints the error code name.
-    pub fn format(
-        self: ErrorCode,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = options;
+    pub fn formatName(self: ErrorCode, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.name());
+    }
 
-        const debug = comptime parse_fmt: {
-            if (fmt.len == 0) {
-                break :parse_fmt false;
-            } else if (std.mem.eql(u8, fmt, "dbg")) {
-                break :parse_fmt true;
-            } else {
-                @compileError("expected {}, or {dbg}, found {" ++ fmt ++ "}");
-            }
-        };
-
-        const string = if (debug) self.name() else self.description();
-        try writer.writeAll(string);
+    pub fn format(self: ErrorCode, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.description());
     }
 
     export fn fimo_error_code_name(code: c.FimoErrorCode) [*:0]const u8 {
@@ -730,7 +679,7 @@ pub const ErrorString = extern struct {
             }
 
             const free_func = struct {
-                fn free(ptr_c: [*c]const u8) callconv(.C) void {
+                fn free(ptr_c: [*c]const u8) callconv(.c) void {
                     const ptr: [*:0]u8 = @ptrCast(@constCast(ptr_c));
                     const buffer_begin = ptr - @sizeOf(std.mem.Allocator);
                     const all = std.mem.bytesToValue(
@@ -759,7 +708,7 @@ pub const ErrorString = extern struct {
             return ErrorString.init(err ++ "\x00");
         } else {
             const free_func = struct {
-                fn free(ptr_c: [*c]const u8) callconv(.C) void {
+                fn free(ptr_c: [*c]const u8) callconv(.c) void {
                     const ptr: [*:0]u8 = @ptrCast(@constCast(ptr_c));
                     const buff = std.mem.span(ptr);
                     allocator.free(buff);
@@ -800,7 +749,7 @@ pub const ErrorString = extern struct {
             }
 
             const free_func = struct {
-                fn free(ptr_c: [*c]const u8) callconv(.C) void {
+                fn free(ptr_c: [*c]const u8) callconv(.c) void {
                     const ptr: [*:0]u8 = @ptrCast(@constCast(ptr_c));
                     const buffer_begin = ptr - @sizeOf(std.mem.Allocator);
                     const all = std.mem.bytesToValue(
@@ -811,10 +760,11 @@ pub const ErrorString = extern struct {
                     all.free(buffer_begin[0..buffer_len :0]);
                 }
             }.free;
-            const buff = try std.fmt.allocPrintZ(
+            const buff = try std.fmt.allocPrintSentinel(
                 allocator,
                 std.mem.zeroes([@sizeOf(std.mem.Allocator)]u8) ++ fmt,
                 args,
+                0,
             );
             @as(*align(1) std.mem.Allocator, @ptrCast(buff.ptr)).* = allocator;
             return ErrorString{
@@ -830,13 +780,13 @@ pub const ErrorString = extern struct {
             return ErrorString.init(err);
         } else {
             const free_func = struct {
-                fn free(ptr_c: [*c]const u8) callconv(.C) void {
+                fn free(ptr_c: [*c]const u8) callconv(.c) void {
                     const ptr: [*:0]u8 = @ptrCast(@constCast(ptr_c));
                     const buff = std.mem.span(ptr);
                     allocator.free(buff);
                 }
             }.free;
-            const buff = try std.fmt.allocPrintZ(allocator, fmt, args);
+            const buff = try std.fmt.allocPrintSentinel(allocator, fmt, args, 0);
             return ErrorString{
                 .data = buff.ptr,
                 .deinit_fn = free_func,
@@ -878,15 +828,7 @@ pub const ErrorString = extern struct {
         return std.mem.span(self.data);
     }
 
-    /// Formats the string.
-    pub fn format(
-        self: *const ErrorString,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("{s}", .{self.string()});
+    pub fn format(self: ErrorString, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.writeAll(self.string());
     }
 };
