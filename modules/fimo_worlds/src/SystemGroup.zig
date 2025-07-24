@@ -179,7 +179,7 @@ const Graph = struct {
 
             // The deferred pass can be merged if no other system depends on the deferred pass.
             ctx.merge_deferred = blk: {
-                for (ctx.sys.before.values()) |link| if (link.ignore_deferred) break :blk false;
+                for (ctx.sys.after.values()) |link| if (link.ignore_deferred) break :blk false;
                 break :blk true;
             };
 

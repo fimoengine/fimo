@@ -81,7 +81,7 @@ pub fn TypedResource(T: type) type {
             world: *World,
             value: T,
         ) error{AddFailed}!void {
-            return world.addResource(provider, self.asUntyped(), &value);
+            return world.addResource(provider, self.asUntyped(), @ptrCast(&value));
         }
 
         /// Removes the resource from the world.
@@ -91,7 +91,7 @@ pub fn TypedResource(T: type) type {
             world: *World,
         ) error{RemoveFailed}!T {
             var value: T = undefined;
-            try world.removeResource(provider, self.asUntyped(), &value);
+            try world.removeResource(provider, self.asUntyped(), @ptrCast(&value));
             return value;
         }
 
