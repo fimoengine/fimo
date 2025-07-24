@@ -4,8 +4,9 @@ const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
 const AnyResult = fimo_std.AnyError.AnyResult;
-const Tracing = fimo_std.Context.Tracing;
-const CallStack = Tracing.CallStack;
+const ctx = fimo_std.ctx;
+const tracing = fimo_std.tracing;
+const CallStack = tracing.CallStack;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const meta_pool = fimo_tasks_meta.pool;
 const StackSize = meta_pool.StackSize;
@@ -62,7 +63,7 @@ pub fn ensureReady(self: *Self) void {
     std.debug.assert(self.call_stack == null);
 
     self.context = Context.init(.forStack(self.stack), &Worker.taskEntry);
-    if (self.owner.owner.runtime.getTracing()) |tracing| self.call_stack = CallStack.init(tracing);
+    if (ctx.isInit()) self.call_stack = CallStack.init();
     self.state = .init;
 }
 

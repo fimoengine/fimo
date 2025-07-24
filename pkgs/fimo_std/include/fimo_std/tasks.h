@@ -1,5 +1,5 @@
-#ifndef FIMO_ASYNC_H
-#define FIMO_ASYNC_H
+#ifndef FIMO_TASKS_H
+#define FIMO_TASKS_H
 
 #include <stdalign.h>
 #include <stddef.h>
@@ -12,10 +12,10 @@
 extern "C" {
 #endif // __cplusplus
 
-/// VTable of a FimoAsyncEventLoop.
+/// VTable of a FimoTasksEventLoop.
 ///
 /// Adding fields to the VTable is not a breaking change.
-typedef struct FimoAsyncEventLoopVTable {
+typedef struct FimoTasksEventLoopVTable {
     /// Blocks the calling thread until the event loop queue is empty.
     ///
     /// Signals the event loop thread to finish processing the remaining tasks. The tasks may
@@ -28,34 +28,34 @@ typedef struct FimoAsyncEventLoopVTable {
     /// continue to enqueue new tasks. The caller will return immediately, after which it is not
     /// allowed to access the event loop.
     void (*detach)(void *data);
-} FimoAsyncEventLoopVTable;
+} FimoTasksEventLoopVTable;
 
 /// A handle to a running event loop.
 ///
 /// The event loop must either be joined or detached.
-typedef struct FimoAsyncEventLoop {
+typedef struct FimoTasksEventLoop {
     void *data;
-    const FimoAsyncEventLoopVTable *vtable;
-} FimoAsyncEventLoop;
+    const FimoTasksEventLoopVTable *vtable;
+} FimoTasksEventLoop;
 
-/// VTable of a FimoAsyncWaker.
+/// VTable of a FimoTasksWaker.
 ///
 /// Changing the VTable is a breaking change.
-typedef struct FimoAsyncWakerVTableV0 FimoAsyncWakerVTableV0;
+typedef struct FimoTasksWakerVTableV0 FimoTasksWakerVTableV0;
 
 /// A waker for asynchronous tasks.
 ///
 /// Wakers are the main building block of the async runtime, where their main job is signaling that
 /// a task may make progress and may therefore be polled again. A task is allowed to assume, that
 /// no progress can be made, if its waker is not signaled.
-typedef struct FimoAsyncWaker {
+typedef struct FimoTasksWaker {
     void *data;
-    const FimoAsyncWakerVTableV0 *vtable;
-} FimoAsyncWaker;
+    const FimoTasksWakerVTableV0 *vtable;
+} FimoTasksWaker;
 
-struct FimoAsyncWakerVTableV0 {
+struct FimoTasksWakerVTableV0 {
     /// Increases the reference count of the waker.
-    FimoAsyncWaker (*acquire)(void *data);
+    FimoTasksWaker (*acquire)(void *data);
     /// Decreases the reference count of the waker.
     void (*release)(void *data);
     /// Signals the task bound to the waker and decreases the reference count.
@@ -66,28 +66,28 @@ struct FimoAsyncWakerVTableV0 {
     const void *next;
 };
 
-/// VTable of a FimoAsyncBlockingContext.
+/// VTable of a FimoTasksBlockingContext.
 ///
 /// Changing the VTable is not a breaking change.
-typedef struct FimoAsyncBlockingContextVTable {
+typedef struct FimoTasksBlockingContextVTable {
     /// Releases the context.
     void (*release)(void *data);
     /// Returns a non-owning reference to the waker for this context.
     ///
     /// The waker will unblock the thread once it has been notified.
-    FimoAsyncWaker (*waker_ref)(void *data);
+    FimoTasksWaker (*waker_ref)(void *data);
     /// Blocks the current thread until it is notified by the waker.
     void (*block_until_notified)(void *data);
-} FimoAsyncBlockingContextVTable;
+} FimoTasksBlockingContextVTable;
 
 /// A context that blocks the current thread until it is notified.
 ///
 /// The context is intended to be used by threads other than the event loop thread, as they are not
 /// bound to a waker. Using this context inside the event loop will result in a deadlock.
-typedef struct FimoAsyncBlockingContext {
+typedef struct FimoTasksBlockingContext {
     void *data;
-    const FimoAsyncBlockingContextVTable *vtable;
-} FimoAsyncBlockingContext;
+    const FimoTasksBlockingContextVTable *vtable;
+} FimoTasksBlockingContext;
 
 /// Defines the type of a future with the specified state and return types.
 ///
@@ -108,46 +108,46 @@ typedef struct FimoAsyncBlockingContext {
 ///
 /// Polling a completed future will result in undefined behavior. The future may not be moved once
 /// it has been polled, as its state may be self-referential.
-#define FIMO_ASYNC_FUTURE(T, R)                                 \
-    struct {                                                    \
-        T data;                                                 \
-        bool (*poll)(T *data, FimoAsyncWaker waker, R *result); \
-        void (*release)(T *data);                               \
+#define FIMO_TASKS_FUTURE(T, R)                                                                                        \
+    struct {                                                                                                           \
+        T data;                                                                                                        \
+        bool (*poll)(T * data, FimoTasksWaker waker, R *result);                                                       \
+        void (*release)(T * data);                                                                                     \
     }
 
 /// Defines the type of an enqueued future with the specified return type.
-#define FIMO_ASYNC_ENQUEUED_FUTURE(R) FIMO_ASYNC_FUTURE(void*, R)
+#define FIMO_TASKS_ENQUEUED_FUTURE(R) FIMO_TASKS_FUTURE(void *, R)
 
 /// Defines a pair of a FimoResult and a T.
-#define FIMO_ASYNC_FALLIBLE(T)    \
-    struct {                      \
-        FimoResult result;        \
-        T value;                  \
+#define FIMO_TASKS_FALLIBLE(T)                                                                                         \
+    struct {                                                                                                           \
+        FimoResult result;                                                                                             \
+        T value;                                                                                                       \
     }
 
 /// An enqueued future with an unknown result type.
-typedef FIMO_ASYNC_ENQUEUED_FUTURE(void) FimoAsyncOpaqueFuture;
+typedef FIMO_TASKS_ENQUEUED_FUTURE(void) FimoTasksOpaqueFuture;
 
 /// VTable of the async subsystem.
 ///
-/// Changing the VTable is a breaking change.
-typedef struct FimoAsyncVTableV0 {
+/// Changing this definition is a breaking change.
+typedef struct FimoTasksVTable {
     /// Utilize the current thread to complete all tasks in the event loop.
     ///
     /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
     /// the context can not be destroyed until the queue is empty. Upon the completion of all
     /// tasks, the funtion will return to the caller.
-    FimoResult (*run_to_completion)(void *ctx);
+    FimoResult (*run_to_completion)();
     /// Initializes a new event loop.
     ///
     /// There can only be one event loop at a time, and it will keep the context alive until it
     /// completes its execution.
-    FimoResult (*start_event_loop)(void *ctx, FimoAsyncEventLoop *loop);
+    FimoResult (*start_event_loop)(FimoTasksEventLoop *loop);
     /// Initializes a new blocking context.
     ///
     /// The context provides the utilities required to await the completion of a future, by
     /// blocking a waiting thread and providing a waker to resume it.
-    FimoResult (*context_new_blocking)(void *ctx, FimoAsyncBlockingContext *context);
+    FimoResult (*context_new_blocking)(FimoTasksBlockingContext *context);
     /// Enqueues a new custom future to the event loop.
     ///
     /// Unlike normal futures, enqueues futures may be polled immediately. The future will allocate
@@ -161,15 +161,15 @@ typedef struct FimoAsyncVTableV0 {
     /// result value. The former will be called unconditionally at an appropiate time, whereas the
     /// result will only be cleaned up if the caller releases the constructed future before polling
     /// it to completion.
-    FimoResult (*future_enqueue)(void *ctx, const void *data, FimoUSize data_size, FimoUSize data_alignment,
-                                 FimoUSize result_size, FimoUSize result_alignment,
-                                 bool (*poll)(void *data, FimoAsyncWaker waker, void *result),
+    FimoResult (*future_enqueue)(const void *data, FimoUSize data_size, FimoUSize data_alignment, FimoUSize result_size,
+                                 FimoUSize result_alignment,
+                                 bool (*poll)(void *data, FimoTasksWaker waker, void *result),
                                  void (*release_data)(void *data), void (*release_result)(void *data),
-                                 FimoAsyncOpaqueFuture *enqueued_future);
-} FimoAsyncVTableV0;
+                                 FimoTasksOpaqueFuture *enqueued_future);
+} FimoTasksVTable;
 
 #ifdef __cplusplus
 }
 #endif // __cplusplus
 
-#endif // FIMO_ASYNC_H
+#endif // FIMO_TASKS_H

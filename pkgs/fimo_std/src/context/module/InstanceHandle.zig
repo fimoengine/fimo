@@ -7,16 +7,16 @@ const c = @import("c");
 
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
+const Context = @import("../../context.zig");
+const pub_modules = @import("../../modules.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
+const pub_tasks = @import("../../tasks.zig");
+const EnqueuedFuture = pub_tasks.EnqueuedFuture;
+const FSMFuture = pub_tasks.FSMFuture;
+const Fallible = pub_tasks.Fallible;
 const Version = @import("../../Version.zig");
 const Async = @import("../async.zig");
-const ProxyContext = @import("../proxy_context.zig");
-const ProxyAsync = @import("../proxy_context/async.zig");
-const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
-const FSMFuture = ProxyAsync.FSMFuture;
-const Fallible = ProxyAsync.Fallible;
-const ProxyModule = @import("../proxy_context/module.zig");
 const RefCount = @import("../RefCount.zig");
 const LoadingSet = @import("LoadingSet.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
@@ -28,7 +28,7 @@ const Self = @This();
 sys: *System,
 inner: Inner,
 type: InstanceType,
-info: ProxyModule.Info,
+info: pub_modules.Info,
 ref_count: RefCount = .{},
 
 pub const InstanceType = enum { regular, pseudo };
@@ -44,11 +44,11 @@ pub const Symbol = struct {
     version: Version,
     symbol: *const anyopaque,
     dtor: ?*const fn (
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         symbol: *anyopaque,
     ) callconv(.c) void,
 
-    fn destroySymbol(self: *const Symbol, ctx: *const ProxyModule.OpaqueInstance) void {
+    fn destroySymbol(self: *const Symbol, ctx: *const pub_modules.OpaqueInstance) void {
         if (self.dtor) |dtor| {
             dtor(ctx, @constCast(self.symbol));
         }
@@ -71,15 +71,15 @@ pub const InstanceHandleError = error{
 pub const Parameter = struct {
     inner: Data,
     owner: *Self,
-    read_group: ProxyModule.ParameterAccessGroup,
-    write_group: ProxyModule.ParameterAccessGroup,
-    proxy: ProxyModule.OpaqueParameter,
+    read_group: pub_modules.ParameterAccessGroup,
+    write_group: pub_modules.ParameterAccessGroup,
+    proxy: pub_modules.OpaqueParameter,
     read_fn: *const fn (
-        data: ProxyModule.OpaqueParameterData,
+        data: pub_modules.OpaqueParameterData,
         value: *anyopaque,
     ) callconv(.c) void,
     write_fn: *const fn (
-        data: ProxyModule.OpaqueParameterData,
+        data: pub_modules.OpaqueParameterData,
         value: *const anyopaque,
     ) callconv(.c) void,
 
@@ -95,7 +95,7 @@ pub const Parameter = struct {
             i64: std.atomic.Value(i64),
         },
 
-        fn @"type"(self: *const @This()) ProxyModule.ParameterType {
+        fn @"type"(self: *const @This()) pub_modules.ParameterType {
             return switch (self.value) {
                 .u8 => .u8,
                 .u16 => .u16,
@@ -134,7 +134,7 @@ pub const Parameter = struct {
             }
         }
 
-        fn asProxyParameter(self: *@This()) ProxyModule.OpaqueParameterData {
+        fn asProxyParameter(self: *@This()) pub_modules.OpaqueParameterData {
             return .{
                 .data = self,
                 .vtable = &param_data_vtable,
@@ -145,23 +145,23 @@ pub const Parameter = struct {
     fn init(
         owner: *Self,
         inner: Data,
-        read_group: ProxyModule.ParameterAccessGroup,
-        write_group: ProxyModule.ParameterAccessGroup,
+        read_group: pub_modules.ParameterAccessGroup,
+        write_group: pub_modules.ParameterAccessGroup,
         read_fn: ?*const fn (
-            data: ProxyModule.OpaqueParameterData,
+            data: pub_modules.OpaqueParameterData,
             value: *anyopaque,
         ) callconv(.c) void,
         write_fn: ?*const fn (
-            data: ProxyModule.OpaqueParameterData,
+            data: pub_modules.OpaqueParameterData,
             value: *const anyopaque,
         ) callconv(.c) void,
     ) Allocator.Error!*Parameter {
         const Wrapper = struct {
-            fn read(this: ProxyModule.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
+            fn read(this: pub_modules.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
                 const self: *Data = @alignCast(@ptrCast(this.data));
                 self.readTo(value);
             }
-            fn write(this: ProxyModule.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
+            fn write(this: pub_modules.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
                 const self: *Data = @alignCast(@ptrCast(this.data));
                 self.writeFrom(value);
             }
@@ -184,7 +184,7 @@ pub const Parameter = struct {
 
     pub fn checkType(
         self: *const Parameter,
-        ty: ProxyModule.ParameterType,
+        ty: pub_modules.ParameterType,
     ) ParameterError!void {
         if (!(self.inner.type() == ty)) return error.InvalidParameterType;
     }
@@ -198,20 +198,20 @@ pub const Parameter = struct {
     }
 
     fn checkReadDependency(self: *const Parameter, reader: *const Inner) ParameterError!void {
-        const min_permission = ProxyModule.ParameterAccessGroup.dependency;
+        const min_permission = pub_modules.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.read_group) > @intFromEnum(min_permission)) return error.NotPermitted;
         const owner_name = std.mem.span(self.owner.info.name);
         if (!reader.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
     fn checkWriteDependency(self: *const Parameter, writer: *const Inner) ParameterError!void {
-        const min_permission = ProxyModule.ParameterAccessGroup.dependency;
+        const min_permission = pub_modules.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.write_group) > @intFromEnum(min_permission)) return error.NotPermitted;
         const owner_name = std.mem.span(self.owner.info.name);
         if (!writer.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
-    pub fn @"type"(self: *const Parameter) ProxyModule.ParameterType {
+    pub fn @"type"(self: *const Parameter) pub_modules.ParameterType {
         return self.inner.type();
     }
 
@@ -232,10 +232,10 @@ pub const Inner = struct {
     dependents_count: usize = 0,
     is_detached: bool = false,
     unload_requested: bool = false,
-    unload_waiter: ?ProxyAsync.Waker = null,
+    unload_waiter: ?pub_tasks.Waker = null,
     handle: ?*ModuleHandle = null,
-    @"export": ?*const ProxyModule.Export = null,
-    instance: ?*const ProxyModule.OpaqueInstance = null,
+    @"export": ?*const pub_modules.Export = null,
+    instance: ?*const pub_modules.OpaqueInstance = null,
     string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
     symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, Symbol, SymbolRef.Id.HashContext, false) = .{},
     parameters: std.StringArrayHashMapUnmanaged(*Parameter) = .{},
@@ -277,7 +277,7 @@ pub const Inner = struct {
         try EnqueueUnloadOp.Data.init(x);
     }
 
-    fn checkAsyncUnload(self: *Inner, waiter: ProxyAsync.Waker) enum { noop, wait, unload } {
+    fn checkAsyncUnload(self: *Inner, waiter: pub_tasks.Waker) enum { noop, wait, unload } {
         if (self.isDetached()) return .noop;
         std.debug.assert(self.unload_waiter == null);
         if (self.canUnload()) return .unload;
@@ -472,12 +472,9 @@ fn init(
     license: ?[]const u8,
     module_path: ?[]const u8,
     handle: *ModuleHandle,
-    @"export": ?*const ProxyModule.Export,
+    @"export": ?*const pub_modules.Export,
     @"type": InstanceType,
 ) InstanceHandleError!*Self {
-    sys.asContext().ref();
-    errdefer sys.asContext().unref();
-
     var arena = ArenaAllocator.init(sys.allocator);
     errdefer arena.deinit();
     const allocator = arena.allocator();
@@ -506,8 +503,8 @@ fn init(
     return self;
 }
 
-pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoInstance {
-    const iterator = &ProxyModule.exports.ExportIter.fimo_impl_module_export_iterator;
+pub fn initPseudoInstance(sys: *System, name: []const u8) !*pub_modules.PseudoInstance {
+    const iterator = &pub_modules.exports.ExportIter.fimo_impl_module_export_iterator;
     const handle = try ModuleHandle.initLocal(sys.allocator, iterator, iterator);
     errdefer handle.unref();
 
@@ -524,11 +521,11 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
     );
     errdefer instance_handle.unref();
 
-    const instance = try instance_handle.inner.arena.allocator().create(ProxyModule.PseudoInstance);
+    const instance = try instance_handle.inner.arena.allocator().create(pub_modules.PseudoInstance);
     comptime {
-        std.debug.assert(@sizeOf(ProxyModule.PseudoInstance) == @sizeOf(ProxyModule.OpaqueInstance));
-        std.debug.assert(@alignOf(ProxyModule.PseudoInstance) == @alignOf(ProxyModule.OpaqueInstance));
-        std.debug.assert(@offsetOf(ProxyModule.PseudoInstance, "instance") == 0);
+        std.debug.assert(@sizeOf(pub_modules.PseudoInstance) == @sizeOf(pub_modules.OpaqueInstance));
+        std.debug.assert(@alignOf(pub_modules.PseudoInstance) == @alignOf(pub_modules.OpaqueInstance));
+        std.debug.assert(@offsetOf(pub_modules.PseudoInstance, "instance") == 0);
     }
     instance.* = .{
         .instance = .{
@@ -538,7 +535,7 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
             .imports_ = null,
             .exports_ = null,
             .info = &instance_handle.info,
-            .context_ = sys.asContext().asProxy().intoC(),
+            .handle = &Context.handle,
             .state_ = null,
         },
     };
@@ -547,12 +544,12 @@ pub fn initPseudoInstance(sys: *System, name: []const u8) !*ProxyModule.PseudoIn
     return instance;
 }
 
-pub fn fromInstancePtr(instance: *const ProxyModule.OpaqueInstance) *const Self {
+pub fn fromInstancePtr(instance: *const pub_modules.OpaqueInstance) *const Self {
     std.debug.assert(instance.vtable == &instance_vtable);
     return fromInfoPtr(instance.info);
 }
 
-pub fn fromInfoPtr(info: *const ProxyModule.Info) *const Self {
+pub fn fromInfoPtr(info: *const pub_modules.Info) *const Self {
     return @fieldParentPtr("info", @constCast(info));
 }
 
@@ -575,10 +572,7 @@ fn unref(self: *const Self) void {
 
     const inner = this.lock();
     if (!inner.isDetached()) inner.detach();
-
-    const sys = this.sys;
     inner.arena.deinit();
-    sys.asContext().unref();
 }
 
 pub fn lock(self: *const Self) *Inner {
@@ -631,7 +625,7 @@ fn removeNamespace(self: *const Self, namespace: []const u8) !void {
     self.sys.unrefNamespace(namespace);
 }
 
-fn addDependency(self: *const Self, info: *const ProxyModule.Info) !void {
+fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
     self.logTrace(
         "adding dependency to instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
@@ -653,7 +647,7 @@ fn addDependency(self: *const Self, info: *const ProxyModule.Info) !void {
     try self.sys.linkInstances(inner, info_inner);
 }
 
-fn removeDependency(self: *const Self, info: *const ProxyModule.Info) !void {
+fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
     self.logTrace(
         "removing dependency from instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
@@ -715,7 +709,7 @@ fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, versio
 fn readParameter(
     self: *const Self,
     value: *anyopaque,
-    @"type": ProxyModule.ParameterType,
+    @"type": pub_modules.ParameterType,
     module: []const u8,
     parameter: []const u8,
 ) ParameterError!void {
@@ -739,7 +733,7 @@ fn readParameter(
 fn writeParameter(
     self: *const Self,
     value: *const anyopaque,
-    @"type": ProxyModule.ParameterType,
+    @"type": pub_modules.ParameterType,
     module: []const u8,
     parameter: []const u8,
 ) ParameterError!void {
@@ -765,21 +759,21 @@ fn writeParameter(
 // ----------------------------------------------------
 
 const ParamVTableImpl = struct {
-    fn @"type"(data: *const ProxyModule.OpaqueParameter) callconv(.c) ProxyModule.ParameterType {
+    fn @"type"(data: *const pub_modules.OpaqueParameter) callconv(.c) pub_modules.ParameterType {
         const self: *const Parameter = @fieldParentPtr("proxy", data);
         return self.type();
     }
-    fn read(data: *const ProxyModule.OpaqueParameter, value: *anyopaque) callconv(.c) void {
+    fn read(data: *const pub_modules.OpaqueParameter, value: *anyopaque) callconv(.c) void {
         const self: *const Parameter = @fieldParentPtr("proxy", data);
         return self.readTo(value);
     }
-    fn write(data: *ProxyModule.OpaqueParameter, value: *const anyopaque) callconv(.c) void {
+    fn write(data: *pub_modules.OpaqueParameter, value: *const anyopaque) callconv(.c) void {
         const self: *Parameter = @fieldParentPtr("proxy", data);
         return self.writeFrom(value);
     }
 };
 
-const param_vtable = ProxyModule.OpaqueParameter.VTable{
+const param_vtable = pub_modules.OpaqueParameter.VTable{
     .type = &ParamVTableImpl.type,
     .read = &ParamVTableImpl.read,
     .write = &ParamVTableImpl.write,
@@ -790,7 +784,7 @@ const param_vtable = ProxyModule.OpaqueParameter.VTable{
 // ----------------------------------------------------
 
 const ParamDataVTableImpl = struct {
-    fn @"type"(data: *anyopaque) callconv(.c) ProxyModule.ParameterType {
+    fn @"type"(data: *anyopaque) callconv(.c) pub_modules.ParameterType {
         const self: *Parameter.Data = @alignCast(@ptrCast(data));
         return self.type();
     }
@@ -804,7 +798,7 @@ const ParamDataVTableImpl = struct {
     }
 };
 
-const param_data_vtable = ProxyModule.OpaqueParameterData.VTable{
+const param_data_vtable = pub_modules.OpaqueParameterData.VTable{
     .type = &ParamDataVTableImpl.type,
     .read = &ParamDataVTableImpl.read,
     .write = &ParamDataVTableImpl.write,
@@ -846,12 +840,12 @@ const EnqueueUnloadOp = FSMFuture(struct {
         return self.ret;
     }
 
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind0(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         self.handle.unref();
     }
 
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         self.handle.logTrace(
             "attempting to unload instance, instance=`{s}`",
             .{self.handle.info.name},
@@ -882,12 +876,12 @@ const EnqueueUnloadOp = FSMFuture(struct {
         }
     }
 
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = self;
         _ = reason;
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) void {
+    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) void {
         _ = waker;
 
         const sys = self.handle.sys;
@@ -913,34 +907,34 @@ const EnqueueUnloadOp = FSMFuture(struct {
 // ----------------------------------------------------
 
 const InfoVTableImpl = struct {
-    fn ref(info: *const ProxyModule.Info) callconv(.c) void {
+    fn ref(info: *const pub_modules.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         x.ref();
     }
-    fn unref(info: *const ProxyModule.Info) callconv(.c) void {
+    fn unref(info: *const pub_modules.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         x.unref();
     }
-    fn markUnloadable(info: *const ProxyModule.Info) callconv(.c) void {
+    fn markUnloadable(info: *const pub_modules.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
         inner.enqueueUnload() catch |e| @panic(@errorName(e));
     }
-    fn isLoaded(info: *const ProxyModule.Info) callconv(.c) bool {
+    fn isLoaded(info: *const pub_modules.Info) callconv(.c) bool {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
         return !inner.isDetached();
     }
-    fn tryRefInstanceStrong(info: *const ProxyModule.Info) callconv(.c) bool {
+    fn tryRefInstanceStrong(info: *const pub_modules.Info) callconv(.c) bool {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
         inner.refStrong() catch return false;
         return true;
     }
-    fn unrefInstanceStrong(info: *const ProxyModule.Info) callconv(.c) void {
+    fn unrefInstanceStrong(info: *const pub_modules.Info) callconv(.c) void {
         const x = Self.fromInfoPtr(info);
         const inner = x.lock();
         defer inner.unlock();
@@ -948,7 +942,7 @@ const InfoVTableImpl = struct {
     }
 };
 
-const info_vtable = ProxyModule.Info.VTable{
+const info_vtable = pub_modules.Info.VTable{
     .ref = &InfoVTableImpl.ref,
     .unref = &InfoVTableImpl.unref,
     .mark_unloadable = &InfoVTableImpl.markUnloadable,
@@ -984,18 +978,18 @@ pub const InitExportedOp = FSMFuture(struct {
     ///     1. wait for export future
     ///     2. goto 3
     sys: *System,
-    set: ProxyModule.LoadingSet,
-    @"export": *const ProxyModule.Export,
+    set: pub_modules.LoadingSet,
+    @"export": *const pub_modules.Export,
     handle: *ModuleHandle,
     err: *?AnyError,
     instance_handle: *Self = undefined,
     inner: *Inner = undefined,
-    instance: *ProxyModule.OpaqueInstance = undefined,
+    instance: *pub_modules.OpaqueInstance = undefined,
     state_future: EnqueuedFuture(Fallible(?*anyopaque)) = undefined,
     dyn_export_index: usize = 0,
     exports: []*const anyopaque = undefined,
     dyn_export_future: EnqueuedFuture(Fallible(*anyopaque)) = undefined,
-    ret: Error!*ProxyModule.OpaqueInstance = undefined,
+    ret: Error!*pub_modules.OpaqueInstance = undefined,
 
     pub const Error = (InstanceHandleError || AnyError.Error);
     pub const __no_abort = true;
@@ -1005,11 +999,11 @@ pub const InitExportedOp = FSMFuture(struct {
         self.ret = err;
     }
 
-    pub fn __ret(self: *@This()) Error!*ProxyModule.OpaqueInstance {
+    pub fn __ret(self: *@This()) Error!*pub_modules.OpaqueInstance {
         return self.ret;
     }
 
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) Error!ProxyAsync.FSMOpExt(@This()) {
+    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) Error!pub_tasks.FSMOpExt(@This()) {
         _ = waker;
 
         const instance_handle = try Self.init(
@@ -1034,7 +1028,7 @@ pub const InitExportedOp = FSMFuture(struct {
         inner.refStrong() catch unreachable;
         errdefer inner.unrefStrong();
 
-        const instance = try instance_handle.inner.arena.allocator().create(ProxyModule.OpaqueInstance);
+        const instance = try instance_handle.inner.arena.allocator().create(pub_modules.OpaqueInstance);
         instance.* = .{
             .vtable = &instance_vtable,
             .parameters_ = null,
@@ -1042,7 +1036,7 @@ pub const InitExportedOp = FSMFuture(struct {
             .imports_ = null,
             .exports_ = null,
             .info = &instance_handle.info,
-            .context_ = self.sys.asContext().asProxy().intoC(),
+            .handle = &Context.handle,
             .state_ = null,
         };
         inner.instance = instance;
@@ -1051,7 +1045,7 @@ pub const InitExportedOp = FSMFuture(struct {
 
         // Init parameters.
         const exp_parameters = self.@"export".getParameters();
-        const parameters = try allocator.alloc(*ProxyModule.OpaqueParameter, exp_parameters.len);
+        const parameters = try allocator.alloc(*pub_modules.OpaqueParameter, exp_parameters.len);
         instance.parameters_ = @ptrCast(parameters.ptr);
         for (exp_parameters, parameters) |src, *dst| {
             const data = Parameter.Data{
@@ -1139,13 +1133,13 @@ pub const InitExportedOp = FSMFuture(struct {
         return .{ .transition = 2 };
     }
 
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         if (reason != .completed) self.inner.unrefStrong();
         self.inner.unlock();
         if (reason != .completed) self.instance_handle.unref();
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) Error!ProxyAsync.FSMOp {
+    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) Error!pub_tasks.FSMOp {
         errdefer self.state_future.deinit();
         switch (self.state_future.poll(waker)) {
             .ready => |result| {
@@ -1160,7 +1154,7 @@ pub const InitExportedOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) Error!void {
+    pub fn __state2(self: *@This(), waker: pub_tasks.Waker) Error!void {
         _ = waker;
         const @"export" = self.@"export";
         const inner = self.inner;
@@ -1186,7 +1180,7 @@ pub const InitExportedOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state3(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state3(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         _ = waker;
         // Check if there is another dynamic export.
         const exp_dyn_exports = self.@"export".getDynamicSymbolExports();
@@ -1203,11 +1197,11 @@ pub const InitExportedOp = FSMFuture(struct {
         return .next;
     }
 
-    pub fn __unwind4(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind4(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         if (reason != .completed) self.dyn_export_future.deinit();
     }
 
-    pub fn __state4(self: *@This(), waker: ProxyAsync.Waker) Error!ProxyAsync.FSMOpExt(@This()) {
+    pub fn __state4(self: *@This(), waker: pub_tasks.Waker) Error!pub_tasks.FSMOpExt(@This()) {
         // Wait for the future and jump back to the loop in state 3.
         switch (self.dyn_export_future.poll(waker)) {
             .ready => |result| {
@@ -1245,9 +1239,9 @@ pub const StartInstanceOp = FSMFuture(struct {
     inner: *Inner,
     sys: *System,
     err: *?AnyError,
-    @"export": *const ProxyModule.Export,
-    instance: *const ProxyModule.OpaqueInstance,
-    future: ProxyAsync.EnqueuedFuture(ProxyAsync.Fallible(void)) = undefined,
+    @"export": *const pub_modules.Export,
+    instance: *const pub_modules.OpaqueInstance,
+    future: pub_tasks.EnqueuedFuture(pub_tasks.Fallible(void)) = undefined,
     ret: AnyError.Error!void = undefined,
 
     pub const __no_abort = true;
@@ -1277,7 +1271,7 @@ pub const StartInstanceOp = FSMFuture(struct {
         });
     }
 
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         _ = waker;
         if (self.@"export".getStartEventModifier()) |event| {
             self.inner.unlock();
@@ -1289,12 +1283,12 @@ pub const StartInstanceOp = FSMFuture(struct {
         return .ret;
     }
 
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         self.future.deinit();
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) AnyError.Error!ProxyAsync.FSMOp {
+    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) AnyError.Error!pub_tasks.FSMOp {
         switch (self.future.poll(waker)) {
             .ready => |result| {
                 self.sys.mutex.lock();
@@ -1313,20 +1307,20 @@ pub const StartInstanceOp = FSMFuture(struct {
 // ----------------------------------------------------
 
 const InstanceVTableImpl = struct {
-    fn ref(ctx: *const ProxyModule.OpaqueInstance) callconv(.c) void {
+    fn ref(ctx: *const pub_modules.OpaqueInstance) callconv(.c) void {
         const x = Self.fromInstancePtr(ctx);
         const inner = x.lock();
         defer inner.unlock();
         inner.refStrong() catch unreachable;
     }
-    fn unref(ctx: *const ProxyModule.OpaqueInstance) callconv(.c) void {
+    fn unref(ctx: *const pub_modules.OpaqueInstance) callconv(.c) void {
         const x = Self.fromInstancePtr(ctx);
         const inner = x.lock();
         defer inner.unlock();
         inner.unrefStrong();
     }
     fn queryNamespace(
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         namespace: [*:0]const u8,
         has_dependency: *bool,
         is_static: *bool,
@@ -1352,7 +1346,7 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn addNamespace(
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         namespace: [*:0]const u8,
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
@@ -1366,7 +1360,7 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn removeNamespace(
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         namespace: [*:0]const u8,
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
@@ -1380,8 +1374,8 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn queryDependency(
-        ctx: *const ProxyModule.OpaqueInstance,
-        info: *const ProxyModule.Info,
+        ctx: *const pub_modules.OpaqueInstance,
+        info: *const pub_modules.Info,
         has_dependency: *bool,
         is_static: *bool,
     ) callconv(.c) AnyResult {
@@ -1406,8 +1400,8 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn addDependency(
-        ctx: *const ProxyModule.OpaqueInstance,
-        info: *const ProxyModule.Info,
+        ctx: *const pub_modules.OpaqueInstance,
+        info: *const pub_modules.Info,
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
 
@@ -1419,8 +1413,8 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn removeDependency(
-        ctx: *const ProxyModule.OpaqueInstance,
-        info: *const ProxyModule.Info,
+        ctx: *const pub_modules.OpaqueInstance,
+        info: *const pub_modules.Info,
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
 
@@ -1432,10 +1426,10 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn loadSymbol(
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         name: [*:0]const u8,
         namespace: [*:0]const u8,
-        version: c.FimoVersion,
+        version: Version.CVersion,
         symbol: **const anyopaque,
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
@@ -1451,9 +1445,9 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn readParameter(
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         value: *anyopaque,
-        @"type": ProxyModule.ParameterType,
+        @"type": pub_modules.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
     ) callconv(.c) AnyResult {
@@ -1469,9 +1463,9 @@ const InstanceVTableImpl = struct {
         return AnyResult.ok;
     }
     fn writeParameter(
-        ctx: *const ProxyModule.OpaqueInstance,
+        ctx: *const pub_modules.OpaqueInstance,
         value: *const anyopaque,
-        @"type": ProxyModule.ParameterType,
+        @"type": pub_modules.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
     ) callconv(.c) AnyResult {
@@ -1488,7 +1482,7 @@ const InstanceVTableImpl = struct {
     }
 };
 
-const instance_vtable = ProxyModule.OpaqueInstance.VTable{
+const instance_vtable = pub_modules.OpaqueInstance.VTable{
     .ref = &InstanceVTableImpl.ref,
     .unref = &InstanceVTableImpl.unref,
     .query_namespace = &InstanceVTableImpl.queryNamespace,

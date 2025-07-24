@@ -1,10 +1,10 @@
 //! Tracing subsystem.
 use crate::{
-    context::{Context, ContextHandle, ContextView, TypeId},
+    context::{ConfigId, Handle},
     handle,
     module::symbols::{AssertSharable, Share, SliceRef, StrRef},
     time::Time,
-    utils::{ConstNonNull, OpaqueHandle, Unsafe, Viewable},
+    utils::{ConstNonNull, OpaqueHandle, Unsafe},
 };
 use std::{
     ffi::CStr,
@@ -20,11 +20,10 @@ use std::{
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
-    pub create_call_stack: unsafe extern "C" fn(handle: ContextHandle) -> CallStack,
-    pub suspend_current_call_stack: unsafe extern "C" fn(handle: ContextHandle, block: bool),
-    pub resume_current_call_stack: unsafe extern "C" fn(handle: ContextHandle),
+    pub create_call_stack: unsafe extern "C" fn() -> CallStack,
+    pub suspend_current_call_stack: unsafe extern "C" fn(block: bool),
+    pub resume_current_call_stack: unsafe extern "C" fn(),
     pub create_span: unsafe extern "C" fn(
-        handle: ContextHandle,
         desc: &SpanDescriptor,
         formatter: unsafe extern "C" fn(
             buffer: NonNull<u8>,
@@ -35,7 +34,6 @@ pub struct VTableV0 {
         data: Option<ConstNonNull<()>>,
     ) -> Span,
     pub emit_event: unsafe extern "C" fn(
-        handle: ContextHandle,
         event: &Event,
         formatter: unsafe extern "C" fn(
             buffer: NonNull<u8>,
@@ -45,69 +43,54 @@ pub struct VTableV0 {
         ),
         data: Option<ConstNonNull<()>>,
     ),
-    pub is_enabled: unsafe extern "C" fn(handle: ContextHandle) -> bool,
-    pub register_thread: unsafe extern "C" fn(handle: ContextHandle),
-    pub unregister_thread: unsafe extern "C" fn(handle: ContextHandle),
-    pub flush: unsafe extern "C" fn(handle: ContextHandle),
+    pub is_enabled: unsafe extern "C" fn() -> bool,
+    pub register_thread: unsafe extern "C" fn(),
+    pub unregister_thread: unsafe extern "C" fn(),
+    pub flush: unsafe extern "C" fn(),
 }
 
-/// Definition of the tracing subsystem.
-pub trait TracingSubsystem: Copy {
-    /// Emits a new event.
-    ///
-    /// The message may be cut of, if the length exceeds the internal formatting buffer size.
-    fn emit_event(self, event: &Event, arguments: Arguments<'_>);
-
-    /// Checks whether the tracing subsystem is enabled.
-    ///
-    /// This function can be used to check whether to call into the subsystem at all. Calling this
-    /// function is not necessary, as the remaining functions of the backend are guaranteed to
-    /// return default values, in case the backend is disabled.
-    fn is_enabled(self) -> bool;
-
-    /// Flushes the streams used for tracing.
-    ///
-    /// If successful, any unwritten data is written out by the individual subscribers.
-    fn flush(self);
+/// Emits a new event.
+///
+/// The message may be cut of, if the length exceeds the internal formatting buffer size.
+#[inline(always)]
+pub fn emit_event(event: &Event, arguments: Arguments<'_>) {
+    let handle = unsafe { Handle::get_handle() };
+    let f = handle.tracing_v0.emit_event;
+    unsafe {
+        f(
+            event,
+            Formatter::format_into_buffer,
+            Some(ConstNonNull::new_unchecked(&raw const arguments).cast()),
+        );
+    }
 }
 
-impl<'a, T> TracingSubsystem for T
-where
-    T: Viewable<ContextView<'a>>,
-{
-    #[inline(always)]
-    fn emit_event(self, event: &Event, arguments: Arguments<'_>) {
-        let ctx = self.view();
-        let f = ctx.vtable.tracing_v0.emit_event;
-        unsafe {
-            f(
-                ctx.handle,
-                event,
-                Formatter::format_into_buffer,
-                Some(ConstNonNull::new_unchecked(&raw const arguments).cast()),
-            );
-        }
-    }
+/// Checks whether the tracing subsystem is enabled.
+///
+/// This function can be used to check whether to call into the subsystem at all. Calling this
+/// function is not necessary, as the remaining functions of the backend are guaranteed to
+/// return default values, in case the backend is disabled.
+#[inline(always)]
+pub fn is_enabled() -> bool {
+    let handle = unsafe { Handle::get_handle() };
+    let f = handle.tracing_v0.is_enabled;
+    unsafe { f() }
+}
 
-    #[inline(always)]
-    fn is_enabled(self) -> bool {
-        let ctx = self.view();
-        let f = ctx.vtable.tracing_v0.is_enabled;
-        unsafe { f(ctx.handle) }
-    }
-
-    #[inline(always)]
-    fn flush(self) {
-        let ctx = self.view();
-        let f = ctx.vtable.tracing_v0.flush;
-        unsafe { f(ctx.handle) }
-    }
+/// Flushes the streams used for tracing.
+///
+/// If successful, any unwritten data is written out by the individual subscribers.
+#[inline(always)]
+pub fn flush() {
+    let handle = unsafe { Handle::get_handle() };
+    let f = handle.tracing_v0.flush;
+    unsafe { f() }
 }
 
 /// Constructs a new [`Span`].
 #[macro_export]
 macro_rules! tracing_span {
-    ($ctx:expr, name: $name:literal, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
+    (name: $name:literal, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
         {
             const METADATA: &'static $crate::tracing::Metadata = $crate::tracing_metadata!(
                 name: $name,
@@ -116,10 +99,10 @@ macro_rules! tracing_span {
             );
             const DESCRIPTOR: &'static $crate::tracing::SpanDescriptor =
                 &$crate::tracing::SpanDescriptor::new(METADATA);
-            $crate::tracing::Span::new($ctx, DESCRIPTOR, core::format_args!($($arg)+))
+            $crate::tracing::Span::new(DESCRIPTOR, core::format_args!($($arg)+))
         }
     };
-    ($ctx:expr, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
+    (target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {
         {
             const METADATA: &'static $crate::tracing::Metadata = $crate::tracing_metadata!(
                 target: $target,
@@ -127,18 +110,18 @@ macro_rules! tracing_span {
             );
             const DESCRIPTOR: &'static $crate::tracing::SpanDescriptor =
                 &$crate::tracing::SpanDescriptor::new(METADATA);
-            $crate::tracing::Span::new($ctx, DESCRIPTOR, core::format_args!($($arg)+))
+            $crate::tracing::Span::new(DESCRIPTOR, core::format_args!($($arg)+))
         };
     };
-    ($ctx:expr, lvl: $lvl:expr, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, target: "", lvl: $lvl, $($arg)+)
+    (lvl: $lvl:expr, $($arg:tt)+) => {
+        $crate::tracing_span!(target: "", lvl: $lvl, $($arg)+)
     };
 }
 
 /// Emits a new [`Event`].
 #[macro_export]
 macro_rules! tracing_emit {
-    ($ctx:expr, name: $name:literal, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {{
+    (name: $name:literal, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {{
         use $crate::tracing::TracingSubsystem;
         const METADATA: &'static $crate::tracing::Metadata = $crate::tracing_metadata!(
             name: $name,
@@ -146,19 +129,18 @@ macro_rules! tracing_emit {
             lvl: $lvl
         );
         const EVENT: &'static $crate::tracing::Event = &$crate::tracing::Event::new(METADATA);
-        $ctx.emit_event(EVENT, core::format_args!($($arg)+));
+        $crate::tracing::emit_event(EVENT, core::format_args!($($arg)+));
     }};
-    ($ctx:expr, target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {{
-        use $crate::tracing::TracingSubsystem;
+    (target: $target:literal, lvl: $lvl:expr, $($arg:tt)+) => {{
         const METADATA: &'static $crate::tracing::Metadata = $crate::tracing_metadata!(
             target: $target,
             lvl: $lvl
         );
         const EVENT: &'static $crate::tracing::Event = &$crate::tracing::Event::new(METADATA);
-        $ctx.emit_event(EVENT, core::format_args!($($arg)+));
+        $crate::tracing::emit_event(EVENT, core::format_args!($($arg)+));
     }};
-    ($ctx:expr, lvl: $lvl:expr, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, target: "", lvl: $lvl, $($arg)+)
+    (lvl: $lvl:expr, $($arg:tt)+) => {
+        $crate::tracing_emit!(target: "", lvl: $lvl, $($arg)+)
     };
 }
 
@@ -214,140 +196,140 @@ macro_rules! tracing_metadata {
 /// Emits a new [`Level::Error`] event.
 #[macro_export]
 macro_rules! emit_error {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(name: $name, target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, lvl: $crate::tracing::Level::Error, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_emit!(lvl: $crate::tracing::Level::Error, $($arg)+);
     };
 }
 
 /// Emits a new [`Level::Warn`] event.
 #[macro_export]
 macro_rules! emit_warn {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(name: $name, target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, lvl: $crate::tracing::Level::Warn, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_emit!(lvl: $crate::tracing::Level::Warn, $($arg)+);
     };
 }
 
 /// Emits a new [`Level::Info`] event.
 #[macro_export]
 macro_rules! emit_info {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(name: $name, target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, lvl: $crate::tracing::Level::Info, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_emit!(lvl: $crate::tracing::Level::Info, $($arg)+);
     };
 }
 
 /// Emits a new [`Level::Debug`] event.
 #[macro_export]
 macro_rules! emit_debug {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(name: $name, target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, lvl: $crate::tracing::Level::Debug, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_emit!(lvl: $crate::tracing::Level::Debug, $($arg)+);
     };
 }
 
 /// Emits a new [`Level::Trace`] event.
 #[macro_export]
 macro_rules! emit_trace {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(name: $name, target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_emit!(target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_emit!($ctx, lvl: $crate::tracing::Level::Trace, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_emit!(lvl: $crate::tracing::Level::Trace, $($arg)+);
     };
 }
 
 /// Constructs a new [`Level::Error`] span.
 #[macro_export]
 macro_rules! span_error {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(name: $name, target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(target: $target, lvl: $crate::tracing::Level::Error, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, lvl: $crate::tracing::Level::Error, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_span!(lvl: $crate::tracing::Level::Error, $($arg)+);
     };
 }
 
 /// Constructs a new [`Level::Warn`] span.
 #[macro_export]
 macro_rules! span_warn {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(name: $name, target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(target: $target, lvl: $crate::tracing::Level::Warn, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, lvl: $crate::tracing::Level::Warn, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_span!(lvl: $crate::tracing::Level::Warn, $($arg)+);
     };
 }
 
 /// Constructs a new [`Level::Info`] span.
 #[macro_export]
 macro_rules! span_info {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(name: $name, target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(target: $target, lvl: $crate::tracing::Level::Info, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, lvl: $crate::tracing::Level::Info, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_span!(lvl: $crate::tracing::Level::Info, $($arg)+);
     };
 }
 
 /// Constructs a new [`Level::Debug`] span.
 #[macro_export]
 macro_rules! span_debug {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(name: $name, target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(target: $target, lvl: $crate::tracing::Level::Debug, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, lvl: $crate::tracing::Level::Debug, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_span!(lvl: $crate::tracing::Level::Debug, $($arg)+);
     };
 }
 
 /// Constructs a new [`Level::Trace`] span.
 #[macro_export]
 macro_rules! span_trace {
-    ($ctx:expr, name: $name:literal, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, name: $name, target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
+    (name: $name:literal, target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(name: $name, target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
     };
-    ($ctx:expr, target: $target:literal, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
+    (target: $target:literal, $($arg:tt)+) => {
+        $crate::tracing_span!(target: $target, lvl: $crate::tracing::Level::Trace, $($arg)+);
     };
-    ($ctx:expr, $($arg:tt)+) => {
-        $crate::tracing_span!($ctx, lvl: $crate::tracing::Level::Trace, $($arg)+);
+    ($($arg:tt)+) => {
+        $crate::tracing_span!(lvl: $crate::tracing::Level::Trace, $($arg)+);
     };
 }
 
@@ -530,16 +512,11 @@ impl Span {
     ///
     /// If successful, the newly created span is used as the context for succeeding events. The
     /// message may be cut of, if the length exceeds the internal formatting buffer size.
-    pub fn new(
-        ctx: impl Viewable<ContextView<'_>>,
-        span_descriptor: &'static SpanDescriptor,
-        arguments: Arguments<'_>,
-    ) -> Self {
-        let ctx = ctx.view();
-        let f = ctx.vtable.tracing_v0.create_span;
+    pub fn new(span_descriptor: &'static SpanDescriptor, arguments: Arguments<'_>) -> Self {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.tracing_v0.create_span;
         unsafe {
             f(
-                ctx.handle,
                 span_descriptor,
                 Formatter::format_into_buffer,
                 Some(ConstNonNull::new_unchecked(&raw const arguments).cast()),
@@ -632,10 +609,10 @@ impl CallStack {
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
     /// be the active call stack.
     #[inline(always)]
-    pub fn new(ctx: impl Viewable<ContextView<'_>>) -> Self {
-        let ctx = ctx.view();
-        let f = ctx.vtable.tracing_v0.create_call_stack;
-        unsafe { f(ctx.handle) }
+    pub fn new() -> Self {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.tracing_v0.create_call_stack;
+        unsafe { f() }
     }
 
     /// Unwinds and destroys a call stack.
@@ -679,10 +656,10 @@ impl CallStack {
     /// can optionally also be marked as blocked. In that case, the call stack must be unblocked
     /// prior to resumption.
     #[inline(always)]
-    pub fn suspend_current(ctx: impl Viewable<ContextView<'_>>, block: bool) {
-        let ctx = ctx.view();
-        let f = ctx.vtable.tracing_v0.suspend_current_call_stack;
-        unsafe { f(ctx.handle, block) }
+    pub fn suspend_current(block: bool) {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.tracing_v0.suspend_current_call_stack;
+        unsafe { f(block) }
     }
 
     /// Marks the current call stack as being resumed.
@@ -690,10 +667,16 @@ impl CallStack {
     /// Once resumed, the call stack can be used to trace messages. To be successful, the current
     /// call stack must be suspended and unblocked.
     #[inline(always)]
-    pub fn resume_current(ctx: impl Viewable<ContextView<'_>>) {
-        let ctx = ctx.view();
-        let f = ctx.vtable.tracing_v0.resume_current_call_stack;
-        unsafe { f(ctx.handle) }
+    pub fn resume_current() {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.tracing_v0.resume_current_call_stack;
+        unsafe { f() }
+    }
+}
+
+impl Default for CallStack {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -706,7 +689,7 @@ impl Drop for CallStack {
 
 /// RAII access provider to the [`TracingSubsystem`] for a thread.
 #[derive(Debug)]
-pub struct ThreadAccess(Context);
+pub struct ThreadAccess(PhantomData<()>);
 
 sa::assert_impl_all!(ThreadAccess: Send, Sync, Share);
 
@@ -717,21 +700,27 @@ impl ThreadAccess {
     /// will behave as if the backend was disabled. Once registered, the calling thread gains access
     /// to the tracing subsystem and is assigned a new empty call stack.
     #[inline(always)]
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Self {
+    pub fn new() -> Self {
         unsafe {
-            let ctx = ctx.view();
-            let f = ctx.vtable.tracing_v0.register_thread;
-            f(ctx.handle);
-            Self(ctx.to_context())
+            let handle = Handle::get_handle();
+            let f = handle.tracing_v0.register_thread;
+            f();
+            Self(PhantomData)
         }
+    }
+}
+
+impl Default for ThreadAccess {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Drop for ThreadAccess {
     fn drop(&mut self) {
-        let ctx = self.0.view();
-        let f = ctx.vtable.tracing_v0.unregister_thread;
-        unsafe { f(ctx.handle) }
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.tracing_v0.unregister_thread;
+        unsafe { f() }
     }
 }
 
@@ -1116,9 +1105,8 @@ pub fn default_subscriber() -> OpaqueSubscriber {
 pub struct Config<'a> {
     /// # Safety
     ///
-    /// Must be [`TypeId::TracingConfig`].
-    pub id: Unsafe<TypeId>,
-    pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
+    /// Must be [`ConfigId::TracingConfig`].
+    pub id: Unsafe<ConfigId>,
     pub format_buffer_length: Option<NonZeroUsize>,
     pub max_level: Level,
     pub subscribers: SliceRef<'a, OpaqueSubscriber>,
@@ -1132,8 +1120,7 @@ impl<'a> Config<'a> {
     pub const fn new() -> Self {
         unsafe {
             Self {
-                id: Unsafe::new(TypeId::TracingConfig),
-                next: None,
+                id: Unsafe::new(ConfigId::TracingConfig),
                 format_buffer_length: None,
                 max_level: if cfg!(debug_assertions) {
                     Level::Debug

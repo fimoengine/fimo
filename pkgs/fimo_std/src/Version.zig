@@ -2,8 +2,6 @@
 
 const std = @import("std");
 
-const c = @import("c");
-
 major: usize,
 minor: usize,
 patch: usize,
@@ -13,6 +11,16 @@ build: ?[*]const u8 = null,
 build_len: usize = 0,
 
 const Version = @This();
+
+pub const CVersion = extern struct {
+    major: usize,
+    minor: usize,
+    patch: usize,
+    pre: ?[*]const u8 = null,
+    pre_len: usize = 0,
+    build: ?[*]const u8 = null,
+    build_len: usize = 0,
+};
 
 /// Initializes the object from a semantic version.
 pub fn initSemanticVersion(version: std.SemanticVersion) Version {
@@ -43,7 +51,7 @@ pub fn intoSemanticVersion(self: Version) std.SemanticVersion {
 }
 
 /// Initializes the object from a ffi version.
-pub fn initC(version: c.FimoVersion) Version {
+pub fn initC(version: CVersion) Version {
     return Version{
         .major = version.major,
         .minor = version.minor,
@@ -56,8 +64,8 @@ pub fn initC(version: c.FimoVersion) Version {
 }
 
 /// Casts the object to a ffi version.
-pub fn intoC(self: Version) c.FimoVersion {
-    return c.FimoVersion{
+pub fn intoC(self: Version) CVersion {
+    return CVersion{
         .major = self.major,
         .minor = self.minor,
         .patch = self.patch,
@@ -226,7 +234,7 @@ const ffi = struct {
     export fn fimo_version_parse_str(
         str: [*]const u8,
         str_len: usize,
-        version: *c.FimoVersion,
+        version: *CVersion,
     ) AnyResult {
         const text = str[0..str_len];
         if (Version.parse(text)) |v| {
@@ -235,18 +243,14 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_version_str_len(
-        version: *const c.FimoVersion,
-    ) usize {
+    export fn fimo_version_str_len(version: *const CVersion) usize {
         const major_len: usize = numDigits(version.major);
         const minor_len: usize = numDigits(version.minor);
         const patch_len: usize = numDigits(version.patch);
         return major_len + minor_len + patch_len + 2;
     }
 
-    export fn fimo_version_str_len_full(
-        version: *const c.FimoVersion,
-    ) usize {
+    export fn fimo_version_str_len_full(version: *const CVersion) usize {
         const v = Version.initC(version.*);
         var len: usize = 0;
         len += numDigits(v.major);
@@ -258,7 +262,7 @@ const ffi = struct {
     }
 
     export fn fimo_version_write_str(
-        version: *const c.FimoVersion,
+        version: *const CVersion,
         str: [*]u8,
         str_len: usize,
         written: ?*usize,
@@ -277,7 +281,7 @@ const ffi = struct {
     }
 
     export fn fimo_version_write_str_full(
-        version: *const c.FimoVersion,
+        version: *const CVersion,
         str: [*]u8,
         str_len: usize,
         written: ?*usize,
@@ -291,10 +295,7 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_version_cmp(
-        lhs: *const c.FimoVersion,
-        rhs: *const c.FimoVersion,
-    ) c_int {
+    export fn fimo_version_cmp(lhs: *const CVersion, rhs: *const CVersion) c_int {
         const l = Version.initC(lhs.*);
         const r = Version.initC(rhs.*);
         return switch (l.order(r)) {
@@ -304,10 +305,7 @@ const ffi = struct {
         };
     }
 
-    export fn fimo_version_compatible(
-        got: *const c.FimoVersion,
-        required: *const c.FimoVersion,
-    ) bool {
+    export fn fimo_version_compatible(got: *const CVersion, required: *const CVersion) bool {
         const g = Version.initC(got.*);
         const r = Version.initC(required.*);
         return g.isCompatibleWith(r);

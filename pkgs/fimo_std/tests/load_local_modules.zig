@@ -4,44 +4,44 @@ const testing = std.testing;
 const fimo_std = @import("fimo_std");
 const Version = fimo_std.Version;
 const Path = fimo_std.path.Path;
-const Context = fimo_std.Context;
-const Tracing = Context.Tracing;
-const Module = Context.Module;
-const Async = Context.Async;
+const ctx = fimo_std.ctx;
+const tracing = fimo_std.tracing;
+const modules = fimo_std.modules;
+const tasks = fimo_std.tasks;
 
-const A0 = Module.Symbol{
+const A0 = modules.Symbol{
     .name = "a_export_0",
     .version = Version.parse("0.1.0") catch unreachable,
     .T = i32,
 };
-const A1 = Module.Symbol{
+const A1 = modules.Symbol{
     .name = "a_export_1",
     .version = Version.parse("0.1.0") catch unreachable,
     .T = i32,
 };
-const B0 = Module.Symbol{
+const B0 = modules.Symbol{
     .name = "b_export_0",
     .namespace = "b",
     .version = Version.parse("0.1.0") catch unreachable,
     .T = i32,
 };
-const B1 = Module.Symbol{
+const B1 = modules.Symbol{
     .name = "b_export_1",
     .namespace = "b",
     .version = Version.parse("0.1.0") catch unreachable,
     .T = i32,
 };
 
-fn initCModule(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !void {
+fn initCModule(oinst: *const modules.OpaqueInstance, set: modules.LoadingSet) !void {
     _ = set;
-    const ctx: *const C = @alignCast(@ptrCast(octx));
-    ctx.context().tracing().emitInfoSimple(
+    const inst: *const C = @alignCast(@ptrCast(oinst));
+    tracing.emitInfoSimple(
         "initializing instance: name='{s}'",
-        .{ctx.info.name},
+        .{inst.info.name},
         @src(),
     );
 
-    const parameters = ctx.parameters();
+    const parameters = inst.parameters();
     try testing.expectEqual(0, parameters.pub_pub.read());
     try testing.expectEqual(1, parameters.pub_dep.read());
     try testing.expectEqual(2, parameters.pub_pri.read());
@@ -62,54 +62,42 @@ fn initCModule(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !void
     parameters.pri_dep.write(7);
     parameters.pri_pri.write(8);
 
-    const resources = ctx.resources();
-    ctx.context().tracing().emitTraceSimple("empty: '{f}'", .{resources.empty}, @src());
-    ctx.context().tracing().emitTraceSimple("a: '{f}'", .{resources.a}, @src());
-    ctx.context().tracing().emitTraceSimple("b: '{f}'", .{resources.b}, @src());
-    ctx.context().tracing().emitTraceSimple("img: '{f}'", .{resources.img}, @src());
+    const resources = inst.resources();
+    tracing.emitTraceSimple("empty: '{f}'", .{resources.empty}, @src());
+    tracing.emitTraceSimple("a: '{f}'", .{resources.a}, @src());
+    tracing.emitTraceSimple("b: '{f}'", .{resources.b}, @src());
+    tracing.emitTraceSimple("img: '{f}'", .{resources.img}, @src());
 
-    const imports = ctx.imports();
+    const imports = inst.imports();
     try testing.expectEqual(imports.@"0".*, 5);
     try testing.expectEqual(imports.@"1".*, 10);
     try testing.expectEqual(imports.b0.*, -2);
     try testing.expectEqual(imports.b1.*, 77);
 
-    try testing.expectEqual(5, ctx.provideSymbol(A0).*);
-    try testing.expectEqual(10, ctx.provideSymbol(A1).*);
-    try testing.expectEqual(-2, ctx.provideSymbol(B0).*);
-    try testing.expectEqual(77, ctx.provideSymbol(B1).*);
+    try testing.expectEqual(5, inst.provideSymbol(A0).*);
+    try testing.expectEqual(10, inst.provideSymbol(A1).*);
+    try testing.expectEqual(-2, inst.provideSymbol(B0).*);
+    try testing.expectEqual(77, inst.provideSymbol(B1).*);
 
-    try testing.expectEqual(5, A0.requestFrom(ctx).*);
-    try testing.expectEqual(10, A1.requestFrom(ctx).*);
-    try testing.expectEqual(-2, B0.requestFrom(ctx).*);
-    try testing.expectEqual(77, B1.requestFrom(ctx).*);
+    try testing.expectEqual(5, A0.requestFrom(inst).*);
+    try testing.expectEqual(10, A1.requestFrom(inst).*);
+    try testing.expectEqual(-2, B0.requestFrom(inst).*);
+    try testing.expectEqual(77, B1.requestFrom(inst).*);
 }
 
-fn deinitCModule(inst: *const Module.OpaqueInstance) void {
-    inst.context().tracing().emitInfoSimple(
-        "deinitializing instance: name='{s}'",
-        .{inst.info.name},
-        @src(),
-    );
+fn deinitCModule(inst: *const modules.OpaqueInstance) void {
+    tracing.emitInfoSimple("deinitializing instance: name='{s}'", .{inst.info.name}, @src());
 }
 
-fn startCModule(inst: *const Module.OpaqueInstance) !void {
-    inst.context().tracing().emitInfoSimple(
-        "starting instance: name='{s}'",
-        .{inst.info.name},
-        @src(),
-    );
+fn startCModule(inst: *const modules.OpaqueInstance) !void {
+    tracing.emitInfoSimple("starting instance: name='{s}'", .{inst.info.name}, @src());
 }
 
-fn stopCModule(inst: *const Module.OpaqueInstance) void {
-    inst.context().tracing().emitInfoSimple(
-        "stopping instance: name='{s}'",
-        .{inst.info.name},
-        @src(),
-    );
+fn stopCModule(inst: *const modules.OpaqueInstance) void {
+    tracing.emitInfoSimple("stopping instance: name='{s}'", .{inst.info.name}, @src());
 }
 
-const A = Module.exports.Builder
+const A = modules.exports.Builder
     .init("a")
     .withDescription("Test module a")
     .withAuthor("fimo")
@@ -118,7 +106,7 @@ const A = Module.exports.Builder
     .withExport(.{ .symbol = A1 }, &10)
     .exportModule();
 
-const B = Module.exports.Builder
+const B = modules.exports.Builder
     .init("b")
     .withDescription("Test module b")
     .withAuthor("fimo")
@@ -127,7 +115,7 @@ const B = Module.exports.Builder
     .withExport(.{ .symbol = B1, .name = "b1" }, &77)
     .exportModule();
 
-const C = Module.exports.Builder
+const C = modules.exports.Builder
     .init("c")
     .withDescription("Test module c")
     .withAuthor("fimo")
@@ -207,39 +195,39 @@ comptime {
 }
 
 pub fn main() !void {
-    const tracing_cfg = Tracing.Config{
+    const tracing_cfg = tracing.Config{
         .max_level = .trace,
-        .subscribers = &.{Tracing.default_subscriber},
+        .subscribers = &.{tracing.default_subscriber},
         .subscriber_count = 1,
     };
     defer tracing_cfg.deinit();
-    const init_options: [:null]const ?*const Context.TaggedInStruct = &.{@ptrCast(&tracing_cfg)};
+    const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
 
-    const ctx = try Context.init(init_options);
-    defer ctx.unref();
+    try ctx.init(init_options);
+    defer ctx.deinit();
 
     var err: ?fimo_std.AnyError = null;
     defer if (err) |e| e.deinit();
 
-    ctx.tracing().registerThread();
-    defer ctx.tracing().unregisterThread();
+    tracing.registerThread();
+    defer tracing.unregisterThread();
 
-    defer Async.EventLoop.flushWithCurrentThread(ctx.async(), &err) catch unreachable;
-    const event_loop = try Async.EventLoop.init(ctx.async(), &err);
+    defer tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
+    const event_loop = try tasks.EventLoop.init(&err);
     defer event_loop.join();
 
-    const async_ctx = try Async.BlockingContext.init(ctx.async(), &err);
+    const async_ctx = try tasks.BlockingContext.init(&err);
     defer async_ctx.deinit();
 
-    defer ctx.module().pruneInstances(&err) catch unreachable;
+    defer modules.pruneInstances(&err) catch unreachable;
 
-    const set = try Module.LoadingSet.init(ctx.module(), &err);
+    const set = try modules.LoadingSet.init(&err);
     defer set.unref();
 
     try set.addModulesFromLocal(
         &{},
         struct {
-            fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterRequest {
+            fn f(@"export": *const modules.Export, data: *const void) modules.LoadingSet.FilterRequest {
                 _ = @"export";
                 _ = data;
                 return .load;
@@ -251,14 +239,14 @@ pub fn main() !void {
     try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
     var instance_init = true;
-    const instance = try Module.PseudoInstance.init(ctx.module(), &err);
+    const instance = try modules.PseudoInstance.init(&err);
     defer if (instance_init) instance.deinit();
 
-    const a = try Module.Info.findByName(ctx.module(), "a", &err);
+    const a = try modules.Info.findByName("a", &err);
     defer a.unref();
-    const b = try Module.Info.findByName(ctx.module(), "b", &err);
+    const b = try modules.Info.findByName("b", &err);
     defer b.unref();
-    const c = try Module.Info.findByName(ctx.module(), "c", &err);
+    const c = try modules.Info.findByName("c", &err);
     defer c.unref();
 
     try testing.expect(a.isLoaded());

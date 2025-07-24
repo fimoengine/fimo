@@ -6,7 +6,7 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
-const Tracing = fimo_std.Context.Tracing;
+const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
@@ -400,19 +400,13 @@ pub fn getInstance() *const Instance {
     return fimo_export.getInstance();
 }
 
-/// Returns the tracing subsystem of the owner instance.
-pub fn tracing() Tracing {
-    const instance = getInstance();
-    return instance.context().tracing();
-}
-
 /// Logs an error message.
 pub fn logErr(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    tracing().emitErrSimple(fmt, args, location);
+    tracing.emitErrSimple(fmt, args, location);
 }
 
 /// Logs a debug message.
@@ -421,5 +415,5 @@ pub fn logDebug(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    tracing().emitDebugSimple(fmt, args, location);
+    tracing.emitDebugSimple(fmt, args, location);
 }

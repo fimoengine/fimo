@@ -6,7 +6,8 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
-const Tracing = fimo_std.Context.Tracing;
+const ctx = fimo_std.ctx;
+const tracing = fimo_std.tracing;
 const AnyError = fimo_std.AnyError;
 const AnyResult = AnyError.AnyResult;
 const time = fimo_std.time;
@@ -673,12 +674,10 @@ fn processEnqueueRequest(self: *Self, buffer: *CommandBuffer) void {
 }
 
 fn runEventLoop(self: *Self) void {
-    const tracing = self.runtime.getTracing();
-    if (tracing) |tr| tr.registerThread();
-    defer if (tracing) |tr| tr.unregisterThread();
+    if (ctx.isInit()) tracing.registerThread();
+    defer if (ctx.isInit()) tracing.unregisterThread();
 
-    const span = if (tracing) |tr| Tracing.Span.initTrace(
-        tr,
+    const span = if (ctx.isInit()) tracing.Span.initTrace(
         null,
         null,
         @src(),

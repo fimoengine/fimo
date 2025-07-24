@@ -1,7 +1,7 @@
 //! Definition of module instances.
 
 use crate::{
-    context::ContextView,
+    context::Handle,
     error::{AnyError, AnyResult},
     module::{
         info::InfoView,
@@ -372,7 +372,7 @@ where
     pub imports: Option<&'a I>,
     pub exports: Option<&'a E>,
     pub info: Pin<&'a InfoView<'a>>,
-    pub context: ContextView<'a>,
+    pub handle: &'a Handle,
     pub state: Option<Pin<&'a S>>,
     _pinned: PhantomData<PhantomPinned>,
     _private: PhantomData<&'a ()>,
@@ -409,7 +409,7 @@ where
             imports: Option<&'a I>,
             exports: Option<&'a E>,
             info: Pin<&'a InfoView<'a>>,
-            context: ContextView<'a>,
+            handle: &'a Handle,
             state: Option<Pin<&'a S>>,
         ) {
             let this = Self {
@@ -419,7 +419,7 @@ where
                 imports,
                 exports,
                 info,
-                context,
+                handle,
                 state,
                 _pinned: PhantomData,
                 _private: PhantomData,
@@ -510,10 +510,10 @@ where
 
     /// Returns a view to the context.
     #[inline(always)]
-    pub const fn context(self: Pin<&Self>) -> ContextView<'_> {
+    pub const fn handle(self: Pin<&Self>) -> &'a Handle {
         unsafe {
             let this = Pin::into_inner_unchecked(self);
-            this.context
+            this.handle
         }
     }
 
@@ -641,11 +641,11 @@ impl OpaqueInstanceView<'_> {
 
     /// Returns a view to the context.
     #[inline(always)]
-    pub const fn context(self: Pin<&Self>) -> ContextView<'_> {
+    pub const fn handle(self: Pin<&Self>) -> &'_ Handle {
         unsafe {
             let inner = Pin::into_inner_unchecked(self);
             let inner = Pin::new_unchecked(&inner.0);
-            inner.context()
+            inner.handle()
         }
     }
 
@@ -752,8 +752,8 @@ where
 
     /// Returns a view to the context.
     #[inline(always)]
-    pub const fn context(&self) -> ContextView<'_> {
-        self.0.context()
+    pub const fn handle(&self) -> &'_ Handle {
+        self.0.handle()
     }
 
     /// Returns a reference to the state of the instance.
@@ -851,12 +851,12 @@ impl PseudoInstance {
     /// module. This is a problem, as the constructor of the context won't be assigned a module
     /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
     /// instances, i.e., module handles without an associated module.
-    pub fn new(ctx: impl Viewable<ContextView<'_>>) -> Result<Self, AnyError> {
+    pub fn new() -> Result<Self, AnyError> {
         unsafe {
             let mut out = MaybeUninit::uninit();
-            let ctx = ctx.view();
-            let f = ctx.vtable.module_v0.new_pseudo_instance;
-            f(ctx.handle, &mut out).into_result()?;
+            let handle = Handle::get_handle();
+            let f = handle.module_v0.new_pseudo_instance;
+            f(&mut out).into_result()?;
             Ok(out.assume_init())
         }
     }
@@ -893,8 +893,8 @@ impl PseudoInstance {
 
     /// Returns a view to the context.
     #[inline(always)]
-    pub const fn context(&self) -> ContextView<'_> {
-        self.0.context()
+    pub const fn handle(&self) -> &'_ Handle {
+        self.0.handle()
     }
 
     /// Returns a reference to the state of the instance.
@@ -1057,8 +1057,8 @@ macro_rules! instance {
 
             /// Returns a view to the context.
             #[inline(always)]
-            pub const fn context(self: core::pin::Pin<&Self>) -> $crate::context::ContextView<'_> {
-                self.view_inner().context()
+            pub const fn handle(self: core::pin::Pin<&Self>) -> &'_ $crate::context::Handle {
+                self.view_inner().handle()
             }
 
             /// Returns a reference to the state of the instance.
@@ -1131,8 +1131,8 @@ macro_rules! instance {
 
             /// Returns a view to the context.
             #[inline(always)]
-            pub const fn context(&self) -> $crate::context::ContextView<'_> {
-                self.0.context()
+            pub const fn handle(&self) -> &'_ $crate::context::Handle {
+                self.0.handle()
             }
 
             /// Returns a reference to the state of the instance.

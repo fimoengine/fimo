@@ -2,7 +2,6 @@
 
 use crate::{
     r#async::{EnqueuedFuture, Fallible},
-    context::ContextView,
     module::{
         info::Info,
         instance::{GenericInstance, OpaqueInstanceView, Stage0InstanceView, Stage1InstanceView},
@@ -747,7 +746,7 @@ impl<'a> Export<'a> {
 
         Self {
             next: None,
-            version: ContextView::CURRENT_VERSION,
+            version: crate::context::CURRENT_VERSION,
             name: StrRef::new(name),
             description,
             author,

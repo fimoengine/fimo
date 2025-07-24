@@ -8,16 +8,17 @@ const c = @import("c");
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const Context = @import("../../context.zig");
+const pub_ctx = @import("../../ctx.zig");
+const pub_modules = @import("../../modules.zig");
 const Path = @import("../../path.zig").Path;
 const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
+const pub_tasks = @import("../../tasks.zig");
+const EnqueuedFuture = pub_tasks.EnqueuedFuture;
+const FSMFuture = pub_tasks.FSMFuture;
+const Fallible = pub_tasks.Fallible;
 const Version = @import("../../Version.zig");
 const Async = @import("../async.zig");
 const graph = @import("../graph.zig");
-const ProxyAsync = @import("../proxy_context/async.zig");
-const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
-const FSMFuture = ProxyAsync.FSMFuture;
-const Fallible = ProxyAsync.Fallible;
-const ProxyModule = @import("../proxy_context/module.zig");
 const RefCount = @import("../RefCount.zig");
 const InstanceHandle = @import("InstanceHandle.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
@@ -39,8 +40,8 @@ symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashCon
 
 pub const Callback = struct {
     data: ?*anyopaque,
-    on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.c) void,
-    on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) void,
+    on_success: *const fn (info: *const pub_modules.Info, data: ?*anyopaque) callconv(.c) void,
+    on_error: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) void,
 };
 
 const ModuleInfo = struct {
@@ -51,23 +52,23 @@ const ModuleInfo = struct {
 
     const Status = union(enum) {
         unloaded: struct {
-            @"export": *const ProxyModule.Export,
-            owner: ?*const ProxyModule.OpaqueInstance,
+            @"export": *const pub_modules.Export,
+            owner: ?*const pub_modules.OpaqueInstance,
         },
         err: struct {
-            @"export": *const ProxyModule.Export,
-            owner: ?*const ProxyModule.OpaqueInstance,
+            @"export": *const pub_modules.Export,
+            owner: ?*const pub_modules.OpaqueInstance,
         },
         loaded: struct {
-            info: *const ProxyModule.Info,
+            info: *const pub_modules.Info,
         },
     };
 
     fn init(
         allocator: Allocator,
-        @"export": *const ProxyModule.Export,
+        @"export": *const pub_modules.Export,
         handle: *ModuleHandle,
-        owner: ?*const ProxyModule.OpaqueInstance,
+        owner: ?*const pub_modules.OpaqueInstance,
     ) !ModuleInfo {
         handle.ref();
         if (owner) |o| {
@@ -131,7 +132,7 @@ const ModuleInfo = struct {
         while (self.callbacks.pop()) |cb| cb.on_error(status.@"export", cb.data);
     }
 
-    pub fn signalSuccess(self: *ModuleInfo, info: *const ProxyModule.Info) void {
+    pub fn signalSuccess(self: *ModuleInfo, info: *const pub_modules.Info) void {
         const status = self.status.unloaded;
         status.@"export".deinit();
         if (status.owner) |owner| {
@@ -156,12 +157,12 @@ const LoadGraph = struct {
         null,
     ),
     enqueue_count: usize = 0,
-    waiter: ?ProxyAsync.Waker = null,
+    waiter: ?pub_tasks.Waker = null,
 
     const Node = struct {
         module: []const u8,
-        waiter: ?ProxyAsync.Waker = null,
-        fut: ?ProxyAsync.EnqueuedFuture(void) = null,
+        waiter: ?pub_tasks.Waker = null,
+        fut: ?pub_tasks.EnqueuedFuture(void) = null,
 
         fn deinit(self: *Node) void {
             std.debug.assert(self.waiter == null);
@@ -362,7 +363,7 @@ const LoadGraph = struct {
         }
     }
 
-    fn waitForCompletion(self: *LoadGraph, waker: ProxyAsync.Waker) enum { done, wait } {
+    fn waitForCompletion(self: *LoadGraph, waker: pub_tasks.Waker) enum { done, wait } {
         if (self.enqueue_count == 0) return .done;
         self.notify();
         self.waiter = waker.ref();
@@ -382,15 +383,12 @@ const LoadGraph = struct {
     }
 };
 
-pub fn init(context: *Context) !ProxyModule.LoadingSet {
+pub fn init(context: *Context) !pub_modules.LoadingSet {
     context.module.sys.logTrace("creating new loading set", .{}, @src());
 
     const sys = &context.module.sys;
     sys.lock();
     defer sys.unlock();
-
-    context.ref();
-    errdefer context.unref();
 
     var arena = ArenaAlloactor.init(sys.allocator);
     errdefer arena.deinit();
@@ -417,9 +415,7 @@ fn unref(self: *@This()) void {
     self.symbols.clearRetainingCapacity();
 
     var arena = self.arena;
-    const context = self.context;
     arena.deinit();
-    context.unref();
 }
 
 pub fn lock(self: *Self) void {
@@ -430,7 +426,7 @@ pub fn unlock(self: *Self) void {
     self.mutex.unlock();
 }
 
-pub fn asProxySet(self: *Self) ProxyModule.LoadingSet {
+pub fn asProxySet(self: *Self) pub_modules.LoadingSet {
     return .{
         .data = self,
         .vtable = &vtable,
@@ -498,8 +494,8 @@ fn getSymbol(self: *const Self, name: []const u8, ns: []const u8, version: Versi
 fn addModuleInner(
     self: *Self,
     module_handle: *ModuleHandle,
-    @"export": *const ProxyModule.Export,
-    owner: ?*const ProxyModule.OpaqueInstance,
+    @"export": *const pub_modules.Export,
+    owner: ?*const pub_modules.OpaqueInstance,
 ) !void {
     if (self.getModuleInfo(@"export".getName()) != null) return error.Duplicate;
     for (@"export".getSymbolExports()) |exp| {
@@ -574,15 +570,15 @@ fn addModuleInner(
     if (self.active_load_graph) |g| g.notify();
 }
 
-fn validate_export(sys: *System, @"export": *const ProxyModule.Export) error{InvalidExport}!void {
+fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{InvalidExport}!void {
     if (@"export".next != null) {
         sys.logWarn("the next field is reserved for future use", .{}, @src());
         return error.InvalidExport;
     }
-    if (!Context.ProxyContext.context_version.isCompatibleWith(@"export".getVersion())) {
+    if (!pub_ctx.context_version.isCompatibleWith(@"export".getVersion())) {
         sys.logWarn(
             "incompatible context version, got='{f}', required='{f}'",
-            .{ Context.ProxyContext.context_version, @"export".getVersion() },
+            .{ pub_ctx.context_version, @"export".getVersion() },
             @src(),
         );
         return error.InvalidExport;
@@ -807,13 +803,13 @@ const AppendModulesData = struct {
     err: ?Allocator.Error = null,
     filter_data: ?*anyopaque,
     filter_fn: *const fn (
-        @"export": *const ProxyModule.Export,
+        @"export": *const pub_modules.Export,
         data: ?*anyopaque,
-    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
-    exports: std.ArrayListUnmanaged(*const ProxyModule.Export) = .{},
+    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+    exports: std.ArrayListUnmanaged(*const pub_modules.Export) = .{},
 };
 
-fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) callconv(.c) bool {
+fn appendModules(@"export": *const pub_modules.Export, o_data: ?*anyopaque) callconv(.c) bool {
     const data: *AppendModulesData = @alignCast(@ptrCast(o_data));
     validate_export(data.sys, @"export") catch {
         data.sys.logWarn("skipping export", .{}, @src());
@@ -834,7 +830,7 @@ fn appendModules(@"export": *const ProxyModule.Export, o_data: ?*anyopaque) call
 fn addModule(
     self: *Self,
     owner_inner: *InstanceHandle.Inner,
-    @"export": *const ProxyModule.Export,
+    @"export": *const pub_modules.Export,
 ) !void {
     try validate_export(&self.context.module.sys, @"export");
     try self.addModuleInner(owner_inner.handle.?, @"export", owner_inner.instance.?);
@@ -844,9 +840,9 @@ fn addModulesFromHandle(
     self: *Self,
     module_handle: *ModuleHandle,
     filter_fn: *const fn (
-        @"export": *const ProxyModule.Export,
+        @"export": *const pub_modules.Export,
         data: ?*anyopaque,
-    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
 ) !void {
     var append_data = AppendModulesData{
@@ -868,9 +864,9 @@ fn addModulesFromPath(
     self: *Self,
     path: Path,
     filter_fn: *const fn (
-        @"export": *const ProxyModule.Export,
+        @"export": *const pub_modules.Export,
         data: ?*anyopaque,
-    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
 ) !void {
     const module_handle = try ModuleHandle.initPath(self.context.allocator, path);
@@ -882,9 +878,9 @@ fn addModulesFromLocal(
     self: *Self,
     iterator_fn: ModuleHandle.IteratorFn,
     filter_fn: *const fn (
-        @"export": *const ProxyModule.Export,
+        @"export": *const pub_modules.Export,
         data: ?*anyopaque,
-    ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
     bin_ptr: *const anyopaque,
 ) !void {
@@ -907,7 +903,7 @@ const LoadOp = FSMFuture(struct {
     name: [:0]const u8 = undefined,
     err: ?AnyError = null,
     instance_future: InstanceHandle.InitExportedOp = undefined,
-    instance: *ProxyModule.OpaqueInstance = undefined,
+    instance: *pub_modules.OpaqueInstance = undefined,
     start_instance_future: InstanceHandle.StartInstanceOp = undefined,
     ret: void = {},
 
@@ -936,7 +932,7 @@ const LoadOp = FSMFuture(struct {
         return self.ret;
     }
 
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind0(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
 
         self.load_graph.set.lock();
@@ -950,7 +946,7 @@ const LoadOp = FSMFuture(struct {
         self.load_graph.dequeueModule();
     }
 
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         const set = self.load_graph.set;
         const sys = set.asSys();
 
@@ -1026,7 +1022,7 @@ const LoadOp = FSMFuture(struct {
         return .next;
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) void {
+    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) void {
         _ = waker;
 
         const set = self.load_graph.set;
@@ -1068,7 +1064,7 @@ const LoadOp = FSMFuture(struct {
         });
     }
 
-    pub fn __unwind2(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind2(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         const set = self.load_graph.set;
         const sys = set.asSys();
@@ -1078,7 +1074,7 @@ const LoadOp = FSMFuture(struct {
         sys.unlock();
     }
 
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state2(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         const set = self.load_graph.set;
         const sys = set.asSys();
         switch (self.instance_future.poll(waker)) {
@@ -1111,7 +1107,7 @@ const LoadOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state3(self: *@This(), waker: ProxyAsync.Waker) void {
+    pub fn __state3(self: *@This(), waker: pub_tasks.Waker) void {
         _ = waker;
         const set = self.load_graph.set;
         const sys = set.asSys();
@@ -1124,12 +1120,12 @@ const LoadOp = FSMFuture(struct {
         self.start_instance_future = inner.start(sys, &self.err);
     }
 
-    pub fn __unwind4(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind4(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         self.start_instance_future.deinit();
     }
 
-    pub fn __state4(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state4(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         const set = self.load_graph.set;
         const sys = set.asSys();
         const instance = self.instance;
@@ -1227,12 +1223,12 @@ const CommitOp = FSMFuture(struct {
         return self.ret;
     }
 
-    pub fn __unwind0(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind0(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         self.set.unref();
     }
 
-    pub fn __state0(self: *@This(), waker: ProxyAsync.Waker) !ProxyAsync.FSMOp {
+    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) !pub_tasks.FSMOp {
         self.set.asSys().lock();
         defer self.set.asSys().unlock();
 
@@ -1257,7 +1253,7 @@ const CommitOp = FSMFuture(struct {
         return .next;
     }
 
-    pub fn __unwind1(self: *@This(), reason: ProxyAsync.FSMUnwindReason) void {
+    pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         self.set.asSys().lock();
         defer self.set.asSys().unlock();
@@ -1275,7 +1271,7 @@ const CommitOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state1(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         waker.wake();
 
         self.set.lock();
@@ -1295,7 +1291,7 @@ const CommitOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state2(self: *@This(), waker: ProxyAsync.Waker) ProxyAsync.FSMOp {
+    pub fn __state2(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         self.set.lock();
         defer self.set.unlock();
 
@@ -1358,7 +1354,7 @@ const VTableImpl = struct {
         this: *anyopaque,
         name: [*:0]const u8,
         namespace: [*:0]const u8,
-        version: c.FimoVersion,
+        version: Version.CVersion,
     ) callconv(.c) bool {
         const self: *Self = @alignCast(@ptrCast(this));
         const name_ = std.mem.span(name);
@@ -1378,8 +1374,8 @@ const VTableImpl = struct {
     fn addCallback(
         this: *anyopaque,
         module: [*:0]const u8,
-        on_success: *const fn (info: *const ProxyModule.Info, data: ?*anyopaque) callconv(.c) void,
-        on_error: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) void,
+        on_success: *const fn (info: *const pub_modules.Info, data: ?*anyopaque) callconv(.c) void,
+        on_error: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) void,
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         data: ?*anyopaque,
     ) callconv(.c) AnyResult {
@@ -1413,8 +1409,8 @@ const VTableImpl = struct {
     }
     fn addModule(
         this: *anyopaque,
-        owner: *const ProxyModule.OpaqueInstance,
-        @"export": *const ProxyModule.Export,
+        owner: *const pub_modules.OpaqueInstance,
+        @"export": *const pub_modules.Export,
     ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
 
@@ -1443,9 +1439,9 @@ const VTableImpl = struct {
         this: *anyopaque,
         path: c.FimoUTF8Path,
         filter_fn: *const fn (
-            module: *const ProxyModule.Export,
+            module: *const pub_modules.Export,
             data: ?*anyopaque,
-        ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
+        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
     ) callconv(.c) AnyResult {
@@ -1472,13 +1468,13 @@ const VTableImpl = struct {
     fn addModulesFromLocal(
         this: *anyopaque,
         filter_fn: *const fn (
-            module: *const ProxyModule.Export,
+            module: *const pub_modules.Export,
             data: ?*anyopaque,
-        ) callconv(.c) ProxyModule.LoadingSet.FilterRequest,
+        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
         iterator_fn: *const fn (
-            f: *const fn (module: *const ProxyModule.Export, data: ?*anyopaque) callconv(.c) bool,
+            f: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) bool,
             data: ?*anyopaque,
         ) callconv(.c) void,
         bin_ptr: *const anyopaque,
@@ -1513,7 +1509,7 @@ const VTableImpl = struct {
     }
 };
 
-const vtable = ProxyModule.LoadingSet.VTable{
+const vtable = pub_modules.LoadingSet.VTable{
     .ref = &VTableImpl.ref,
     .unref = &VTableImpl.unref,
     .query_module = &VTableImpl.queryModule,

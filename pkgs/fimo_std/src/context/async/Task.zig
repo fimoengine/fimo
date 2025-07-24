@@ -4,8 +4,9 @@ const Mutex = std.Thread.Mutex;
 const DoublyLinkedList = std.DoublyLinkedList;
 
 const AnyResult = @import("../../AnyError.zig").AnyResult;
-const ProxyAsync = @import("../proxy_context/async.zig");
-const ProxyTracing = @import("../proxy_context/tracing.zig");
+const ctx = @import("../../context.zig");
+const pub_tasks = @import("../../tasks.zig");
+const pub_tracing = @import("../../tracing.zig");
 const RefCount = @import("../RefCount.zig");
 const System = @import("System.zig");
 
@@ -13,12 +14,12 @@ const Self = @This();
 
 sys: *System,
 refcount: RefCount = .{},
-call_stack: ProxyTracing.CallStack,
+call_stack: pub_tracing.CallStack,
 local_result: AnyResult = .ok,
 
 mutex: Mutex = .{},
 state: State = .{},
-waiter: ?ProxyAsync.Waker = null,
+waiter: ?pub_tasks.Waker = null,
 node: DoublyLinkedList.Node = .{},
 
 result_size: usize,
@@ -28,7 +29,7 @@ buffer: []u8,
 
 poll_fn: *const fn (
     data: ?*anyopaque,
-    waker: ProxyAsync.Waker,
+    waker: pub_tasks.Waker,
     result: ?*anyopaque,
 ) callconv(.c) bool,
 cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
@@ -36,7 +37,7 @@ cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
 
 const State = struct {
     state: AtomicValue(u8) = AtomicValue(u8).init(@bitCast(Bits{})),
-    waiter: ProxyAsync.Waker = undefined,
+    waiter: pub_tasks.Waker = undefined,
 
     // W(X): Written by X
     // WO(X): Written once by X
@@ -221,7 +222,7 @@ const State = struct {
         self.unlock_waiter(true);
     }
 
-    fn wait(self: *@This(), waiter: ProxyAsync.Waker) enum { noop, consume } {
+    fn wait(self: *@This(), waiter: pub_tasks.Waker) enum { noop, consume } {
         const state: Bits = self.lock_waiter();
         std.debug.assert(!state.consumed);
         std.debug.assert(!state.detached);
@@ -248,11 +249,11 @@ pub fn initFuture(
     comptime T: type,
     sys: *System,
     future: *const T,
-) !ProxyAsync.EnqueuedFuture(T.Result) {
+) !pub_tasks.EnqueuedFuture(T.Result) {
     const Wrapper = struct {
         fn poll(
             data: ?*anyopaque,
-            waker: ProxyAsync.Waker,
+            waker: pub_tasks.Waker,
             result: ?*anyopaque,
         ) callconv(.c) bool {
             const this: *T = @alignCast(@ptrCast(data));
@@ -303,14 +304,12 @@ pub fn init(
     result_alignment: usize,
     poll_fn: *const fn (
         data: ?*anyopaque,
-        waker: ProxyAsync.Waker,
+        waker: pub_tasks.Waker,
         result: ?*anyopaque,
     ) callconv(.c) bool,
     cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
     cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-) !ProxyAsync.OpaqueFuture {
-    sys.asContext().ref();
-    errdefer sys.asContext().unref();
+) !pub_tasks.OpaqueFuture {
     const allocator = sys.allocator;
 
     const buffer_align: usize = @max(data_alignment, result_alignment);
@@ -373,7 +372,7 @@ pub fn init(
     std.debug.assert(op == .enqueue);
     self.enqueueAndIncreaseCount();
 
-    const future = ProxyAsync.ExternFuture(*@This(), anyopaque){
+    const future = pub_tasks.ExternFuture(*@This(), anyopaque){
         .data = self,
         .poll_fn = &pollPublic,
         .cleanup_fn = &deinitPublic,
@@ -394,18 +393,16 @@ fn unref(self: *Self) void {
     std.debug.assert(state.consumed);
     std.debug.assert(!state.waiting);
     std.debug.assert(!state.waiter_locked);
-    const ctx = self.sys.asContext();
     self.call_stack.deinit();
     self.local_result.deinit();
     const allocator = self.sys.allocator;
     allocator.free(self.buffer);
     allocator.destroy(self);
-    ctx.unref();
 }
 
-fn asWaker(self: *Self) ProxyAsync.Waker {
+fn asWaker(self: *Self) pub_tasks.Waker {
     const Wrapper = struct {
-        fn ref(data: ?*anyopaque) callconv(.c) ProxyAsync.Waker {
+        fn ref(data: ?*anyopaque) callconv(.c) pub_tasks.Waker {
             const this: *Self = @alignCast(@ptrCast(data));
             this.ref();
             return this.asWaker();
@@ -425,7 +422,7 @@ fn asWaker(self: *Self) ProxyAsync.Waker {
         }
     };
 
-    const waker_vtable = ProxyAsync.Waker.VTable{
+    const waker_vtable = pub_tasks.Waker.VTable{
         .ref = &Wrapper.ref,
         .unref = &Wrapper.unref,
         .wake = &Wrapper.wake,
@@ -446,11 +443,7 @@ fn notify(self: *Self) void {
     }
 }
 
-fn pollPublic(
-    self_ptr: **Self,
-    waker: ProxyAsync.Waker,
-    result: ?*anyopaque,
-) callconv(.c) bool {
+fn pollPublic(self_ptr: **Self, waker: pub_tasks.Waker, result: ?*anyopaque) callconv(.c) bool {
     const self = self_ptr.*;
     if (self.state.wait(waker) == .noop) return false;
 
@@ -496,18 +489,17 @@ fn enqueue(self: *Self) void {
 }
 
 pub fn poll(self: *Self) void {
-    const ctx = self.sys.asContext();
-    ctx.tracing.suspendCurrentCallStack(false);
+    ctx.global.tracing.suspendCurrentCallStack(false);
     const main_stack = self.call_stack.replaceActive();
-    ctx.tracing.resumeCurrentCallStack();
+    ctx.global.tracing.resumeCurrentCallStack();
 
     const old_result = ctx.replaceResult(self.local_result);
     const completed = self.poll_fn(self.data, self.asWaker(), self.result);
     self.local_result = ctx.replaceResult(old_result);
 
-    ctx.tracing.suspendCurrentCallStack(false);
+    ctx.global.tracing.suspendCurrentCallStack(false);
     self.call_stack = main_stack.replaceActive();
-    ctx.tracing.resumeCurrentCallStack();
+    ctx.global.tracing.resumeCurrentCallStack();
 
     switch (self.state.dequeue(completed)) {
         .noop => {},

@@ -4,8 +4,10 @@ const builtin = @import("builtin");
 
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
-const Status = fimo_std.Context.Status;
-const Module = fimo_std.Context.Module;
+const Status = fimo_std.ctx.Status;
+const ctx = fimo_std.ctx;
+const modules = fimo_std.modules;
+const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const pools = fimo_tasks_meta.pool;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
@@ -22,7 +24,7 @@ const World = @import("World.zig");
 
 pub const Instance = blk: {
     @setEvalBranchQuota(100000);
-    break :blk Module.exports.Builder.init("fimo_worlds")
+    break :blk modules.exports.Builder.init("fimo_worlds")
         .withDescription("Multi-threaded state processing")
         .withLicense("MIT OR APACHE 2.0")
         .withMultipleImports(fimo_tasks_meta.symbols.all_symbols)
@@ -80,15 +82,11 @@ const State = struct {
     var global_state: State = undefined;
     var global_instance: atomic.Value(?*const Instance) = .init(null);
 
-    fn init(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !*State {
+    fn init(oinst: *const modules.OpaqueInstance, set: modules.LoadingSet) !*State {
         _ = set;
-        const ctx: *const Instance = @ptrCast(@alignCast(octx));
-        if (global_instance.cmpxchgStrong(null, ctx, .monotonic, .monotonic)) |_| {
-            ctx.context().tracing().emitErrSimple(
-                "`fimo_worlds` is already initialized",
-                .{},
-                @src(),
-            );
+        const inst: *const Instance = @ptrCast(@alignCast(oinst));
+        if (global_instance.cmpxchgStrong(null, inst, .monotonic, .monotonic)) |_| {
+            tracing.emitErrSimple("`fimo_worlds` is already initialized", .{}, @src());
             return error.AlreadyInitialized;
         }
 
@@ -104,9 +102,9 @@ const State = struct {
         return &global_state;
     }
 
-    fn deinit(octx: *const Module.OpaqueInstance, state: *State) void {
-        const ctx: *const Instance = @ptrCast(@alignCast(octx));
-        if (global_instance.cmpxchgStrong(ctx, null, .monotonic, .monotonic)) |_|
+    fn deinit(oinst: *const modules.OpaqueInstance, state: *State) void {
+        const inst: *const Instance = @ptrCast(@alignCast(oinst));
+        if (global_instance.cmpxchgStrong(inst, null, .monotonic, .monotonic)) |_|
             @panic("already deinit");
         std.debug.assert(state == &global_state);
 
@@ -130,7 +128,7 @@ fn resourceRegister(
         .size = resource.size,
         .alignment = .fromByteUnits(resource.alignment),
     }) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     });
     return .ok;
@@ -174,7 +172,7 @@ fn systemRegister(
         .system_deinit = system.system_deinit,
         .system_run = system.system_run,
     }) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     });
     return .ok;
@@ -193,7 +191,7 @@ fn systemGroupCreate(
         .executor = if (descriptor.pool) |p| p.* else null,
         .world = @ptrCast(@alignCast(descriptor.world)),
     }) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
     group.* = @ptrCast(grp);
@@ -229,7 +227,7 @@ fn systemGroupAddSystems(
     const handles = if (len != 0) sys.?[0..len] else &.{};
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
     grp.addSystems(@ptrCast(@alignCast(handles))) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
     return .ok;
@@ -253,7 +251,7 @@ fn systemGroupSchedule(
     const fences = if (wait_on_len != 0) wait_on.?[0..wait_on_len] else &.{};
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
     grp.schedule(fences, signal) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
     return .ok;
@@ -329,7 +327,7 @@ fn worldCreate(
         .label = if (descriptor.label_len != 0) descriptor.label.?[0..descriptor.label_len] else null,
         .executor = if (descriptor.pool) |p| p.* else null,
     }) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
     world.* = @ptrCast(w);
@@ -364,7 +362,7 @@ fn worldAddResource(
 ) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
     w.addResource(@ptrCast(@alignCast(handle)), value) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
     return .ok;
@@ -377,7 +375,7 @@ fn worldRemoveResource(
 ) callconv(.c) Status {
     const w: *World = @ptrCast(@alignCast(world));
     w.removeResource(@ptrCast(@alignCast(handle)), value) catch |err| {
-        getInstance().context().setResult(.initErr(.initError(err)));
+        ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
     return .ok;

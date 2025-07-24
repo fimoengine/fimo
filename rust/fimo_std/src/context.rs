@@ -3,9 +3,6 @@
 use crate::{
     bindings,
     error::{self, AnyError, AnyResult},
-    handle,
-    module::symbols::{AssertSharable, Share},
-    utils::{View, Viewable},
     version::Version,
 };
 use core::panic;
@@ -36,13 +33,14 @@ impl Status {
     }
 }
 
-handle!(pub handle ContextHandle: Send + Sync + Share);
-
-/// Virtual function table of a [`ContextView`].
+/// Handle to the global functions implemented by the context.
+///
+/// Is not intended to be instantiated outside of the current module, as it may gain additional
+/// fields without being considered a breaking change.
 #[repr(C)]
 #[derive(Debug)]
-pub struct VTable {
-    pub header: VTableHeader,
+pub struct Handle {
+    pub get_version: unsafe extern "C" fn() -> Version<'static>,
     pub core_v0: CoreVTableV0,
     pub tracing_v0: crate::tracing::VTableV0,
     pub module_v0: crate::module::VTableV0,
@@ -50,9 +48,13 @@ pub struct VTable {
     _private: PhantomData<()>,
 }
 
-impl VTable {
+static COUNTER: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+static HANDLE: std::sync::atomic::AtomicPtr<Handle> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+impl Handle {
     cfg_internal! {
-        /// Constructs a new `VTable`.
+        /// Constructs a new `Handle`.
         ///
         /// # Unstable
         ///
@@ -62,14 +64,14 @@ impl VTable {
         ///
         /// [unstable]: crate#unstable-features
         pub const fn new(
-            header: VTableHeader,
+            get_version: extern "C" fn() -> Version<'static>,
             core_v0: CoreVTableV0,
             tracing_v0: crate::tracing::VTableV0,
             module_v0: crate::module::VTableV0,
             async_v0: crate::r#async::VTableV0
         ) -> Self {
             Self {
-                header,
+                get_version,
                 core_v0,
                 tracing_v0,
                 module_v0,
@@ -78,164 +80,160 @@ impl VTable {
             }
         }
     }
-}
 
-/// Abi-stable header of the virtual function table of a [`ContextView`].
-#[repr(C)]
-#[derive(Debug)]
-pub struct VTableHeader {
-    pub check_version:
-        unsafe extern "C" fn(handle: ContextHandle, version: &Version<'_>) -> AnyResult,
+    #[doc(hidden)]
+    pub fn register(&'static self) {
+        COUNTER.clear_poison();
+        let mut counter = COUNTER.lock().unwrap();
+        let old = HANDLE.load(std::sync::atomic::Ordering::Relaxed);
+        if old.is_null() {
+            debug_assert!(*counter == 0);
+            HANDLE
+                .compare_exchange(
+                    old,
+                    (&raw const *self).cast_mut(),
+                    std::sync::atomic::Ordering::Release,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+                .unwrap();
+        } else {
+            debug_assert!(*counter != 0);
+        }
+        *counter += 1;
+    }
+
+    #[doc(hidden)]
+    pub unsafe fn unregister() {
+        let mut counter = COUNTER.lock().unwrap();
+        *counter -= 1;
+        if *counter == 0 {
+            HANDLE.store(std::ptr::null_mut(), std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    pub(crate) unsafe fn get_handle<'a>() -> &'a Self {
+        let handle = HANDLE.load(std::sync::atomic::Ordering::Acquire);
+        unsafe { handle.cast_const().as_ref().unwrap() }
+    }
 }
 
 /// Core virtual function table of a [`ContextView`].
 #[repr(C)]
 #[derive(Debug)]
 pub struct CoreVTableV0 {
-    pub acquire: unsafe extern "C" fn(handle: ContextHandle),
-    pub release: unsafe extern "C" fn(handle: ContextHandle),
-    pub has_error_result: unsafe extern "C" fn(handle: ContextHandle) -> bool,
-    pub replace_result: unsafe extern "C" fn(handle: ContextHandle, new: AnyResult) -> AnyResult,
+    pub deinit: unsafe extern "C" fn(),
+    pub has_error_result: unsafe extern "C" fn() -> bool,
+    pub replace_result: unsafe extern "C" fn(new: AnyResult) -> AnyResult,
 }
 
-/// View of the context of the fimo library.
-///
-/// The context is a reference counted pointer, providing access to the different subsystems of the
-/// fimo library, like the tracing, or module subsystems. To avoid naming conflicts, each subsystem
-/// is exposed through an own trait.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ContextView<'a> {
-    pub handle: ContextHandle,
-    pub vtable: &'a AssertSharable<VTable>,
-    _private: PhantomData<()>,
-}
-
-sa::assert_impl_all!(ContextView<'_>: Send, Sync);
-sa::assert_impl_all!(ContextView<'static>: Share);
-
-impl ContextView<'_> {
-    /// Current `Context` version of the library.
-    pub const CURRENT_VERSION: Version<'static> = {
-        let major = bindings::FIMO_CONTEXT_VERSION_MAJOR as usize;
-        let minor = bindings::FIMO_CONTEXT_VERSION_MINOR as usize;
-        let patch = bindings::FIMO_CONTEXT_VERSION_PATCH as usize;
-        let pre = if bindings::FIMO_CONTEXT_VERSION_PRE.is_empty() {
-            None
-        } else {
-            match bindings::FIMO_CONTEXT_VERSION_PRE.to_str() {
-                Ok(x) => Some(x),
-                Err(_) => panic!("invalid pre release string"),
-            }
-        };
-        let build = if bindings::FIMO_CONTEXT_VERSION_BUILD.is_empty() {
-            None
-        } else {
-            match bindings::FIMO_CONTEXT_VERSION_BUILD.to_str() {
-                Ok(x) => Some(x),
-                Err(_) => panic!("invalid build string"),
-            }
-        };
-
-        Version::new_full(major, minor, patch, pre, build)
+/// Current context version of the library.
+pub const CURRENT_VERSION: Version<'static> = {
+    let major = bindings::FIMO_CONTEXT_VERSION_MAJOR as usize;
+    let minor = bindings::FIMO_CONTEXT_VERSION_MINOR as usize;
+    let patch = bindings::FIMO_CONTEXT_VERSION_PATCH as usize;
+    let pre = if bindings::FIMO_CONTEXT_VERSION_PRE.is_empty() {
+        None
+    } else {
+        match bindings::FIMO_CONTEXT_VERSION_PRE.to_str() {
+            Ok(x) => Some(x),
+            Err(_) => panic!("invalid pre release string"),
+        }
+    };
+    let build = if bindings::FIMO_CONTEXT_VERSION_BUILD.is_empty() {
+        None
+    } else {
+        match bindings::FIMO_CONTEXT_VERSION_BUILD.to_str() {
+            Ok(x) => Some(x),
+            Err(_) => panic!("invalid build string"),
+        }
     };
 
-    /// Checks that the version of the `Context` is compatible.
-    pub fn check_version(&self) -> error::Result {
-        let f = self.vtable.header.check_version;
-        unsafe { f(self.handle, &Self::CURRENT_VERSION).into() }
-    }
+    Version::new_full(major, minor, patch, pre, build)
+};
 
-    /// Checks whether the context has an error stored for the current thread.
-    pub fn has_error_result(&self) -> bool {
-        let f = self.vtable.core_v0.has_error_result;
-        unsafe { f(self.handle) }
-    }
-
-    /// Replaces the thread-local result stored in the context with a new one.
-    ///
-    /// The old result is returned.
-    pub fn replace_result(&self, with: error::Result) -> error::Result {
-        let f = self.vtable.core_v0.replace_result;
-        unsafe { f(self.handle, with.into()).into_result() }
-    }
-
-    /// Swaps out the thread-local result with the `Ok` result.
-    pub fn take_result(&self) -> error::Result {
-        self.replace_result(Ok(()))
-    }
-
-    /// Sets the thread-local result, destroying the old one.
-    pub fn set_result(&self, result: error::Result) {
-        _ = self.replace_result(result);
-    }
-
-    /// Promotes the context view to a context, by increasing the reference count.
-    pub fn to_context(&self) -> Context {
-        let f = self.vtable.core_v0.acquire;
-        unsafe {
-            f(self.handle);
-        }
-        Context(ContextView {
-            handle: self.handle,
-            vtable: unsafe {
-                std::mem::transmute::<&AssertSharable<_>, &'static AssertSharable<_>>(self.vtable)
-            },
-            _private: PhantomData,
-        })
-    }
+/// Returns the version of the instantiated context.
+pub fn get_version() -> Version<'static> {
+    let handle = unsafe { Handle::get_handle() };
+    let f = handle.get_version;
+    unsafe { f() }
 }
 
-impl View for ContextView<'_> {}
+/// Checks whether the context has an error stored for the current thread.
+pub fn has_error_result() -> bool {
+    let handle = unsafe { Handle::get_handle() };
+    let f = handle.core_v0.has_error_result;
+    unsafe { f() }
+}
+
+/// Replaces the thread-local result stored in the context with a new one.
+///
+/// The old result is returned.
+pub fn replace_result(with: error::Result) -> error::Result {
+    let handle = unsafe { Handle::get_handle() };
+    let f = handle.core_v0.replace_result;
+    unsafe { f(with.into()).into_result() }
+}
+
+/// Swaps out the thread-local result with the `Ok` result.
+pub fn take_result() -> error::Result {
+    replace_result(Ok(()))
+}
+
+/// Sets the thread-local result, destroying the old one.
+pub fn set_result(result: error::Result) {
+    _ = replace_result(result);
+}
 
 #[link(name = "fimo_std", kind = "static")]
 unsafe extern "C" {
     fn fimo_context_init(
-        options: *mut *const bindings::FimoBaseStructIn,
-        ctx: &mut MaybeUninit<Context>,
+        options: *mut *const bindings::FimoConfigHead,
+        ctx: &mut MaybeUninit<&'static Handle>,
     ) -> AnyResult;
 }
 
 /// Context of the fimo library.
-///
-/// The context is a reference counted pointer, providing access to the different subsystems of the
-/// fimo library, like the tracing, or module subsystems. To avoid naming conflicts, each subsystem
-/// is exposed through an own trait.
 #[repr(transparent)]
 #[derive(Debug)]
-pub struct Context(ContextView<'static>);
-
-sa::assert_impl_all!(Context: Send, Sync, Share);
+pub struct Context {
+    cleanup: bool,
+}
 
 impl Context {
-    /// Constructs a new `Context` with the default options.
+    /// Initializes a new context with the default options.
+    ///
+    /// Only one context may exist at a time.
     pub fn new() -> Result<Self, AnyError> {
         let mut ctx = MaybeUninit::uninit();
         unsafe {
             fimo_context_init(std::ptr::null_mut(), &mut ctx).into_result()?;
-            Ok(ctx.assume_init())
+            Handle::register(ctx.assume_init());
+            Ok(Self { cleanup: false })
         }
     }
-}
 
-impl Clone for Context {
-    fn clone(&self) -> Self {
-        self.view().to_context()
-    }
-}
-
-impl<'a> Viewable<ContextView<'a>> for &'a Context {
-    fn view(self) -> ContextView<'a> {
-        self.0
+    /// Indicates that the context must clear all resources uppon dropping of this type.
+    ///
+    /// Dropping may block until all resources have been cleaned up.
+    ///
+    /// # Safety
+    ///
+    /// Since the context is a global, the caller must ensure that noone is using the
+    /// context when the value is dropped.
+    pub unsafe fn enable_cleanup(&mut self) {
+        self.cleanup = true;
     }
 }
 
 impl Drop for Context {
     fn drop(&mut self) {
-        unsafe {
-            let view = self.view();
-            let f = view.vtable.core_v0.release;
-            f(view.handle);
+        if self.cleanup {
+            unsafe {
+                let handle = Handle::get_handle();
+                let f = handle.core_v0.deinit;
+                f();
+                Handle::unregister();
+            }
         }
     }
 }
@@ -244,7 +242,7 @@ impl Drop for Context {
 #[repr(i32)]
 #[non_exhaustive]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub enum TypeId {
+pub enum ConfigId {
     TracingConfig,
     ModuleConfig,
 }
@@ -277,10 +275,12 @@ impl<'a> ContextBuilder<'a> {
         self
     }
 
-    /// Builds the context.
+    /// Initializes the context.
+    ///
+    /// Only one context may exist at a time.
     pub fn build(self) -> Result<Context, AnyError> {
         let mut counter = 0;
-        let mut options: [*const bindings::FimoBaseStructIn; 3] = [core::ptr::null(); 3];
+        let mut options: [*const bindings::FimoConfigHead; 3] = [core::ptr::null(); 3];
         if let Some(cfg) = self.tracing.as_ref() {
             options[counter] = (&raw const *cfg).cast();
             counter += 1;
@@ -296,7 +296,8 @@ impl<'a> ContextBuilder<'a> {
             let mut ctx = MaybeUninit::uninit();
             unsafe {
                 fimo_context_init(options.as_mut_ptr(), &mut ctx).into_result()?;
-                Ok(ctx.assume_init())
+                Handle::register(ctx.assume_init());
+                Ok(Context { cleanup: false })
             }
         }
     }

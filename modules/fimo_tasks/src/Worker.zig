@@ -6,9 +6,10 @@ const fimo_std = @import("fimo_std");
 const time = fimo_std.time;
 const Instant = time.Instant;
 const Duration = time.Duration;
-const Tracing = fimo_std.Context.Tracing;
-const Span = Tracing.Span;
-const CallStack = Tracing.CallStack;
+const ctx = fimo_std.ctx;
+const tracing = fimo_std.tracing;
+const Span = tracing.Span;
+const CallStack = tracing.CallStack;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const meta_pool = fimo_tasks_meta.pool;
 const MetaWorker = meta_pool.Worker;
@@ -208,18 +209,17 @@ fn sendToPool(self: *Self, task: *Task, msg: Pool.PrivateMessage) void {
 }
 
 fn swapCallStack(
-    tracing: ?Tracing,
     active: *?CallStack,
     next: *?CallStack,
     mark_blocked: bool,
 ) void {
-    const tr = tracing orelse return;
+    if (!ctx.isInit()) return;
     std.debug.assert(active.* == null);
-    CallStack.suspendCurrent(tr, mark_blocked);
+    CallStack.suspendCurrent(mark_blocked);
     const stack = next.*.?;
     next.* = null;
     active.* = stack.replaceActive();
-    CallStack.resumeCurrent(tr);
+    CallStack.resumeCurrent();
 }
 
 pub fn taskEntry(tr: context_.Transfer) callconv(.c) noreturn {
@@ -232,9 +232,7 @@ pub fn taskEntry(tr: context_.Transfer) callconv(.c) noreturn {
     std.debug.assert(task.state == .init);
 
     {
-        const tracing = worker.pool.runtime.getTracing();
-        const span = if (tracing) |tra| Tracing.Span.initTrace(
-            tra,
+        const span = if (ctx.isInit()) tracing.Span.initTrace(
             null,
             null,
             @src(),
@@ -256,13 +254,10 @@ pub fn run(self: *Self) void {
     defer _current = null;
 
     // Initialize the tracing for the worker.
-    const ctx = self.pool.runtime.getContext();
-    const tracing = self.pool.runtime.getTracing();
-    if (tracing) |tr| tr.registerThread();
-    defer if (tracing) |tr| tr.unregisterThread();
+    if (ctx.isInit()) tracing.registerThread();
+    defer if (ctx.isInit()) tracing.unregisterThread();
 
-    const span = if (tracing) |tr| Tracing.Span.initTrace(
-        tr,
+    const span = if (ctx.isInit()) tracing.Span.initTrace(
         null,
         null,
         @src(),
@@ -295,16 +290,16 @@ pub fn run(self: *Self) void {
 
         // Switch to the task's call stack.
         self.pool.runtime.logDebug("switching to `{*}`", .{task}, @src());
-        swapCallStack(tracing, &self.call_stack, &task.call_stack, false);
+        swapCallStack(&self.call_stack, &task.call_stack, false);
 
         // Switch to the task's context.
         var old_result: fimo_std.AnyError.AnyResult = undefined;
         std.debug.assert(self.context == null);
         const t_ctx = task.context.?;
         task.context = null;
-        if (ctx) |fimo_ctx| old_result = fimo_ctx.replaceResult(task.local_result);
+        if (ctx.isInit()) old_result = ctx.replaceResult(task.local_result);
         const tr = t_ctx.yieldTo(0);
-        if (ctx) |fimo_ctx| task.local_result = fimo_ctx.replaceResult(old_result);
+        if (ctx.isInit()) task.local_result = ctx.replaceResult(old_result);
         self.pool.runtime.logDebug("`{*}` switching to event loop", .{task}, @src());
         task.context = tr.context;
 
@@ -317,7 +312,7 @@ pub fn run(self: *Self) void {
         switch (request.*) {
             .complete => {
                 // Switch back to the event loop call stack.
-                swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
+                swapCallStack(&task.call_stack, &self.call_stack, false);
                 task.afterExit(false);
                 _ = self.private_task_count.fetchSub(1, .monotonic);
                 self.pool.runtime.logDebug("`{*}` completed", .{task}, @src());
@@ -333,7 +328,7 @@ pub fn run(self: *Self) void {
             },
             .abort => {
                 // Switch back to the event loop call stack.
-                swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
+                swapCallStack(&task.call_stack, &self.call_stack, false);
                 task.afterExit(true);
                 _ = self.private_task_count.fetchSub(1, .monotonic);
                 self.pool.runtime.logDebug("`{*}` aborted", .{task}, @src());
@@ -349,7 +344,7 @@ pub fn run(self: *Self) void {
             },
             .yield => {
                 // Switch back to the event loop call stack.
-                swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
+                swapCallStack(&task.call_stack, &self.call_stack, false);
                 self.pool.runtime.logDebug("`{*}` yielded", .{task}, @src());
 
                 // Push the task back onto the local queue.
@@ -360,7 +355,7 @@ pub fn run(self: *Self) void {
                 // If the timeout has already expired, the operation is equivalent to a yield.
                 if (Instant.now().order(msg.timeout) != .lt) {
                     // Switch back to the event loop call stack.
-                    swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
+                    swapCallStack(&task.call_stack, &self.call_stack, false);
                     self.pool.runtime.logDebug("`{*}` sleeping, but timeout expired", .{task}, @src());
 
                     // Push the task back onto the local queue.
@@ -370,7 +365,7 @@ pub fn run(self: *Self) void {
                 }
 
                 // Switch back to the event loop call stack and block.
-                swapCallStack(tracing, &task.call_stack, &self.call_stack, true);
+                swapCallStack(&task.call_stack, &self.call_stack, true);
                 self.pool.runtime.logDebug("`{*}` sleeping", .{task}, @src());
 
                 self.sendToPool(task, .{
@@ -390,7 +385,7 @@ pub fn run(self: *Self) void {
                     msg.timed_out.* = true;
 
                     // Switch back to the event loop call stack.
-                    swapCallStack(tracing, &task.call_stack, &self.call_stack, false);
+                    swapCallStack(&task.call_stack, &self.call_stack, false);
                     self.pool.runtime.logDebug("`{*}` waiting, but timeout expired", .{task}, @src());
 
                     // Push the task back onto the local queue.
@@ -400,7 +395,7 @@ pub fn run(self: *Self) void {
                 };
 
                 // Switch back to the event loop call stack.
-                swapCallStack(tracing, &task.call_stack, &self.call_stack, true);
+                swapCallStack(&task.call_stack, &self.call_stack, true);
                 self.pool.runtime.logDebug("`{*}` waiting", .{task}, @src());
 
                 self.sendToPool(task, .{

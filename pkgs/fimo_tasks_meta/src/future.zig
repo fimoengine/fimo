@@ -3,11 +3,10 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const fimo_std = @import("fimo_std");
-const Async = fimo_std.Context.Async;
-const Waker = Async.Waker;
-const Poll = Async.Poll;
-const BlockingContext = Async.BlockingContext;
-const EnqueuedFuture = Async.EnqueuedFuture;
+const Waker = fimo_std.tasks.Waker;
+const Poll = fimo_std.tasks.Poll;
+const BlockingContext = fimo_std.tasks.BlockingContext;
+const EnqueuedFuture = fimo_std.tasks.EnqueuedFuture;
 const AnyError = fimo_std.AnyError;
 const AnyResult = AnyError.AnyResult;
 
@@ -66,7 +65,7 @@ pub fn Future(Result: type) type {
         }
 
         /// Awaits for the completion of the future and returns the result.
-        pub fn @"await"(self: *const @This()) AwaitResult {
+        pub fn await(self: *const @This()) AwaitResult {
             return switch (self.handle.waitOn()) {
                 .completed => self.result.*,
                 .aborted => error.Aborted,
@@ -478,7 +477,7 @@ test "pollable future" {
     defer future.deinit();
     var fut = future.intoFuture();
 
-    const awaiter = try Async.BlockingContext.init(ctx.ctx.@"async"(), &err);
+    const awaiter = try fimo_std.tasks.BlockingContext.init(&err);
     defer awaiter.deinit();
     try std.testing.expectEqual(15, fut.awaitBlockingBorrow(awaiter));
 }

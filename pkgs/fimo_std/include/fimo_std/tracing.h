@@ -79,7 +79,7 @@ typedef struct FimoTracingMetadata {
     /// Pointer to a possible extension.
     ///
     /// Reserved for future use. Must be `NULL`.
-    const FimoBaseStructIn *next;
+    const void *next;
     /// Name of the event.
     ///
     /// Must not be `NULL`.
@@ -143,7 +143,7 @@ typedef struct FimoTracingEvent {
     /// Pointer to a possible extension.
     ///
     /// Reserved for future use. Must be `NULL`.
-    const FimoBaseStructIn *next;
+    const void *next;
     /// Metadata of the event.
     ///
     /// Must not be `NULL`.
@@ -219,12 +219,8 @@ extern const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER;
 typedef struct FimoTracingConfig {
     /// Type of the struct.
     ///
-    /// Must be `FIMO_STRUCT_TYPE_TRACING_CONFIG`.
-    FimoStructType type;
-    /// Pointer to a possible extension.
-    ///
-    /// Reserved for future use. Must be `NULL`.
-    const void *next;
+    /// Must be `FIMO_CONFIG_ID_TRACING`.
+    FimoConfigId id;
     /// Length in characters of the per-call-stack buffer used when formatting mesasges.
     FimoUSize format_buffer_size;
     /// Maximum level for which to consume tracing events.
@@ -237,8 +233,8 @@ typedef struct FimoTracingConfig {
 
 /// VTable of the tracing subsystem.
 ///
-/// Changing the VTable is a breaking change.
-typedef struct FimoTracingVTableV0 {
+/// Changing this definition is a breaking change.
+typedef struct FimoTracingVTable {
     /// Creates a new empty call stack.
     ///
     /// If successful, the new call stack is marked as suspended. The new call stack is not set to
@@ -291,7 +287,7 @@ typedef struct FimoTracingVTableV0 {
     ///
     /// If successful, any unwritten data is written out by the individual subscribers.
     void (*flush)(void *ctx);
-} FimoTracingVTableV0;
+} FimoTracingVTable;
 
 #ifdef __cplusplus
 }

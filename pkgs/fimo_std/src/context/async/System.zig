@@ -32,8 +32,8 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn asContext(self: *Self) *Context {
-    const @"async": *Async = @fieldParentPtr("sys", self);
-    return @"async".asContext();
+    const async: *Async = @fieldParentPtr("sys", self);
+    return async.asContext();
 }
 
 pub fn startEventLoop(self: *Self, exit_on_completion: bool) !void {
@@ -62,15 +62,7 @@ pub fn startEventLoopThread(self: *Self) !Thread {
         self.should_quit = false;
     }
 
-    const f = struct {
-        fn f(this: *Self) !void {
-            this.asContext().ref();
-            defer this.asContext().unref();
-
-            this.executorEventLoop();
-        }
-    }.f;
-    return Thread.spawn(.{}, f, .{self});
+    return Thread.spawn(.{}, executorEventLoop, .{self});
 }
 
 pub fn stopEventLoop(self: *Self) void {

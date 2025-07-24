@@ -699,7 +699,7 @@ fn generate_export(
                             };
                             unsafe {
                                 ::fimo_std::r#async::Future::new(fut)
-                                    .enqueue_unchecked(instance.context())
+                                    .enqueue_unchecked()
                                     .expect("could not enqueue future")
                             }
                         }
@@ -769,7 +769,7 @@ fn generate_export(
                         };
                         unsafe {
                             ::fimo_std::r#async::Future::new(fut)
-                                .enqueue_unchecked(instance.context())
+                                .enqueue_unchecked()
                                 .expect("could not enqueue future")
                         }
                     }
@@ -821,7 +821,7 @@ fn generate_export(
                         };
                         unsafe {
                             ::fimo_std::r#async::Future::new(fut)
-                                .enqueue_unchecked(instance.context())
+                                .enqueue_unchecked()
                                 .expect("could not enqueue future")
                         }
                     }

@@ -1,24 +1,24 @@
 const std = @import("std");
 
 const time = @import("../../time.zig");
-const ProxyTracing = @import("../proxy_context/tracing.zig");
+const pub_tracing = @import("../../tracing.zig");
 const Tracing = @import("../tracing.zig");
 const TracingError = Tracing.TracingError;
 const CallStack = @import("CallStack.zig");
 
 const Self = @This();
 
-metadata: *const ProxyTracing.Metadata,
+metadata: *const pub_tracing.Metadata,
 parent_cursor: usize,
-parent_max_level: ProxyTracing.Level,
+parent_max_level: pub_tracing.Level,
 next: ?*Self = null,
 previous: ?*Self,
 owner: *CallStack,
 
 pub fn init(
     owner: *CallStack,
-    desc: *const ProxyTracing.SpanDesc,
-    formatter: *const ProxyTracing.Formatter,
+    desc: *const pub_tracing.SpanDesc,
+    formatter: *const pub_tracing.Formatter,
     data: ?*const anyopaque,
 ) *Self {
     const rest_buffer = owner.buffer[owner.cursor..];
@@ -127,7 +127,7 @@ pub fn deinitAbortUnchecked(self: *Self) void {
     self.owner.owner.allocator.destroy(self);
 }
 
-pub fn asProxySpan(self: *Self) ProxyTracing.Span {
+pub fn asProxySpan(self: *Self) pub_tracing.Span {
     return .{
         .handle = self,
         .vtable = &vtable,
@@ -147,12 +147,12 @@ const DummyVTableImpl = struct {
     }
 };
 
-pub const dummy_span = ProxyTracing.Span{
+pub const dummy_span = pub_tracing.Span{
     .handle = @ptrFromInt(1),
     .vtable = &dummy_vtable,
 };
 
-const dummy_vtable = ProxyTracing.Span.VTable{
+const dummy_vtable = pub_tracing.Span.VTable{
     .deinit = &DummyVTableImpl.deinit,
     .deinit_abort = &DummyVTableImpl.deinitAbort,
 };
@@ -172,7 +172,7 @@ const VTableImpl = struct {
     }
 };
 
-const vtable = ProxyTracing.Span.VTable{
+const vtable = pub_tracing.Span.VTable{
     .deinit = &VTableImpl.deinit,
     .deinit_abort = &VTableImpl.deinitAbort,
 };

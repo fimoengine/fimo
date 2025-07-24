@@ -1,9 +1,9 @@
 //! Module subsystem.
 
 use crate::{
-    context::{ContextHandle, ContextView, TypeId},
+    context::{ConfigId, Handle},
     error::{AnyError, AnyResult},
-    utils::{ConstNonNull, OpaqueHandle, Unsafe, Viewable},
+    utils::{ConstNonNull, OpaqueHandle, Unsafe},
     version::Version,
 };
 use std::{
@@ -35,37 +35,24 @@ use symbols::{SliceRef, StrRef};
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
-    pub profile: unsafe extern "C" fn(handle: ContextHandle) -> Profile,
-    pub features: unsafe extern "C" fn(
-        handle: ContextHandle,
-        &mut MaybeUninit<Option<ConstNonNull<FeatureStatus>>>,
-    ) -> usize,
-    pub new_pseudo_instance: unsafe extern "C" fn(
-        handle: ContextHandle,
-        out: &mut MaybeUninit<PseudoInstance>,
-    ) -> AnyResult,
-    pub new_loading_set:
-        unsafe extern "C" fn(handle: ContextHandle, out: &mut MaybeUninit<LoadingSet>) -> AnyResult,
-    pub find_instance_by_name: unsafe extern "C" fn(
-        handle: ContextHandle,
-        name: StrRef<'_>,
-        out: &mut MaybeUninit<Info>,
-    ) -> AnyResult,
+    pub profile: unsafe extern "C" fn() -> Profile,
+    pub features:
+        unsafe extern "C" fn(&mut MaybeUninit<Option<ConstNonNull<FeatureStatus>>>) -> usize,
+    pub new_pseudo_instance:
+        unsafe extern "C" fn(out: &mut MaybeUninit<PseudoInstance>) -> AnyResult,
+    pub new_loading_set: unsafe extern "C" fn(out: &mut MaybeUninit<LoadingSet>) -> AnyResult,
+    pub find_instance_by_name:
+        unsafe extern "C" fn(name: StrRef<'_>, out: &mut MaybeUninit<Info>) -> AnyResult,
     pub find_instance_by_symbol: unsafe extern "C" fn(
-        handle: ContextHandle,
         name: StrRef<'_>,
         namespace: StrRef<'_>,
         version: Version<'_>,
         out: &mut MaybeUninit<Info>,
     ) -> AnyResult,
-    pub namespace_exists: unsafe extern "C" fn(
-        handle: ContextHandle,
-        namespace: StrRef<'_>,
-        out: &mut MaybeUninit<bool>,
-    ) -> AnyResult,
-    pub prune_instances: unsafe extern "C" fn(handle: ContextHandle) -> AnyResult,
+    pub namespace_exists:
+        unsafe extern "C" fn(namespace: StrRef<'_>, out: &mut MaybeUninit<bool>) -> AnyResult,
+    pub prune_instances: unsafe extern "C" fn() -> AnyResult,
     pub query_parameter: unsafe extern "C" fn(
-        handle: ContextHandle,
         module: StrRef<'_>,
         parameter: StrRef<'_>,
         r#type: &mut MaybeUninit<ParameterType>,
@@ -73,14 +60,12 @@ pub struct VTableV0 {
         write_group: &mut MaybeUninit<ParameterAccessGroup>,
     ) -> AnyResult,
     pub read_parameter: unsafe extern "C" fn(
-        handle: ContextHandle,
         value: NonNull<()>,
         r#type: ParameterType,
         module: StrRef<'_>,
         parameter: StrRef<'_>,
     ) -> AnyResult,
     pub write_parameter: unsafe extern "C" fn(
-        handle: ContextHandle,
         value: ConstNonNull<()>,
         r#type: ParameterType,
         module: StrRef<'_>,
@@ -88,187 +73,155 @@ pub struct VTableV0 {
     ) -> AnyResult,
 }
 
-/// Definition of the module subsystem.
-pub trait ModuleSubsystem: Copy {
-    /// Returns the active profile of the module subsystem.
-    fn profile(self) -> Profile;
-
-    /// Returns the status of all features known to the subsystem.
-    fn features<'this>(self) -> &'this [FeatureStatus]
-    where
-        Self: 'this;
-
-    /// Checks for the presence of a namespace in the module backend.
-    ///
-    /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-    fn namespace_exists(self, namespace: &CStr) -> Result<bool, AnyError>;
-
-    /// Unloads all unused instances.
-    ///
-    /// After calling this function, all unreferenced instances are unloaded.
-    fn prune_instances(self) -> Result<(), AnyError>;
-
-    /// Queries the info of a module parameter.
-    ///
-    /// This function can be used to query the datatype, the read access, and the write access of a
-    /// module parameter. This function fails, if the parameter can not be found.
-    fn query_parameter(self, module: &CStr, parameter: &CStr) -> Result<ParameterInfo, AnyError>;
-
-    /// Reads a module parameter with public read access.
-    ///
-    /// Reads the value of a module parameter with public read access. The operation fails, if the
-    /// parameter does not exist, or if the parameter does not allow reading with a public access.
-    fn read_parameter<P: ParameterCast>(
-        self,
-        module: &CStr,
-        parameter: &CStr,
-    ) -> Result<P, AnyError>;
-
-    /// Sets a module parameter with public write access.
-    ///
-    /// Sets the value of a module parameter with public write access. The operation fails, if the
-    /// parameter does not exist, or if the parameter does not allow writing with a public access.
-    fn write_parameter<P: ParameterCast>(
-        self,
-        value: P,
-        module: &CStr,
-        parameter: &CStr,
-    ) -> Result<(), AnyError>;
+/// Returns the active profile of the module subsystem.
+#[inline(always)]
+pub fn profile() -> Profile {
+    unsafe {
+        let handle = Handle::get_handle();
+        (handle.module_v0.profile)()
+    }
 }
 
-impl<'a, T> ModuleSubsystem for T
-where
-    T: Viewable<ContextView<'a>>,
-{
-    fn profile(self) -> Profile {
-        unsafe {
-            let ctx = self.view();
-            (ctx.vtable.module_v0.profile)(ctx.handle)
+/// Returns the status of all features known to the subsystem.
+#[inline(always)]
+pub fn features() -> Box<[FeatureStatus]> {
+    unsafe {
+        let mut out = MaybeUninit::uninit();
+        let handle = Handle::get_handle();
+        let len = (handle.module_v0.features)(&mut out);
+        let ptr = out.assume_init();
+        if len == 0 {
+            (&[] as &[_]).into()
+        } else {
+            let ptr = ptr.unwrap();
+            std::slice::from_raw_parts(ptr.as_ptr(), len).into()
         }
     }
+}
 
-    fn features<'this>(self) -> &'this [FeatureStatus]
-    where
-        Self: 'this,
-    {
-        unsafe {
-            let mut out = MaybeUninit::uninit();
-            let ctx = self.view();
-            let len = (ctx.vtable.module_v0.features)(ctx.handle, &mut out);
-            let ptr = out.assume_init();
-            if len == 0 {
-                &[]
-            } else {
-                let ptr = ptr.unwrap();
-                std::slice::from_raw_parts(ptr.as_ptr(), len)
-            }
-        }
+/// Checks for the presence of a namespace in the module backend.
+///
+/// A namespace exists, if at least one loaded module exports one symbol in said namespace.
+#[inline(always)]
+pub fn namespace_exists(namespace: &CStr) -> Result<bool, AnyError> {
+    unsafe {
+        let mut out = MaybeUninit::uninit();
+        let handle = Handle::get_handle();
+        let f = handle.module_v0.namespace_exists;
+        f(namespace.into(), &mut out).into_result()?;
+        Ok(out.assume_init())
     }
+}
 
-    fn namespace_exists(self, namespace: &CStr) -> Result<bool, AnyError> {
-        unsafe {
-            let mut out = MaybeUninit::uninit();
-            let ctx = self.view();
-            let f = ctx.vtable.module_v0.namespace_exists;
-            f(ctx.handle, namespace.into(), &mut out).into_result()?;
-            Ok(out.assume_init())
-        }
+/// Unloads all unused instances.
+///
+/// After calling this function, all unreferenced instances are unloaded.
+#[inline(always)]
+pub fn prune_instances() -> Result<(), AnyError> {
+    unsafe {
+        let handle = Handle::get_handle();
+        let f = handle.module_v0.prune_instances;
+        f().into_result()
     }
+}
 
-    fn prune_instances(self) -> Result<(), AnyError> {
-        unsafe {
-            let ctx = self.view();
-            let f = ctx.vtable.module_v0.prune_instances;
-            f(ctx.handle).into_result()
-        }
+/// Queries the info of a module parameter.
+///
+/// This function can be used to query the datatype, the read access, and the write access of a
+/// module parameter. This function fails, if the parameter can not be found.
+#[inline(always)]
+pub fn query_parameter(module: &CStr, parameter: &CStr) -> Result<ParameterInfo, AnyError> {
+    unsafe {
+        let mut r#type = MaybeUninit::uninit();
+        let mut read_group = MaybeUninit::uninit();
+        let mut write_group = MaybeUninit::uninit();
+        let handle = Handle::get_handle();
+        let f = handle.module_v0.query_parameter;
+        f(
+            module.into(),
+            parameter.into(),
+            &mut r#type,
+            &mut read_group,
+            &mut write_group,
+        )
+        .into_result()?;
+
+        let r#type = r#type.assume_init();
+        let read_group = read_group.assume_init();
+        let write_group = write_group.assume_init();
+        Ok(ParameterInfo {
+            type_: r#type,
+            read: read_group,
+            write: write_group,
+        })
     }
+}
 
-    fn query_parameter(self, module: &CStr, parameter: &CStr) -> Result<ParameterInfo, AnyError> {
-        unsafe {
-            let mut r#type = MaybeUninit::uninit();
-            let mut read_group = MaybeUninit::uninit();
-            let mut write_group = MaybeUninit::uninit();
-            let ctx = self.view();
-            let f = ctx.vtable.module_v0.query_parameter;
-            f(
-                ctx.handle,
-                module.into(),
-                parameter.into(),
-                &mut r#type,
-                &mut read_group,
-                &mut write_group,
-            )
-            .into_result()?;
+/// Reads a module parameter with public read access.
+///
+/// Reads the value of a module parameter with public read access. The operation fails, if the
+/// parameter does not exist, or if the parameter does not allow reading with a public access.
+#[inline(always)]
+pub fn read_parameter<P: ParameterCast>(module: &CStr, parameter: &CStr) -> Result<P, AnyError> {
+    unsafe {
+        let mut out = MaybeUninit::<P::Repr>::uninit();
+        let handle = Handle::get_handle();
+        (handle.module_v0.read_parameter)(
+            NonNull::new_unchecked(out.as_mut_ptr()).cast(),
+            P::Repr::TYPE,
+            module.into(),
+            parameter.into(),
+        )
+        .into_result()?;
 
-            let r#type = r#type.assume_init();
-            let read_group = read_group.assume_init();
-            let write_group = write_group.assume_init();
-            Ok(ParameterInfo {
-                type_: r#type,
-                read: read_group,
-                write: write_group,
-            })
-        }
+        Ok(P::from_repr(out.assume_init()))
     }
+}
 
-    fn read_parameter<P: ParameterCast>(
-        self,
-        module: &CStr,
-        parameter: &CStr,
-    ) -> Result<P, AnyError> {
-        unsafe {
-            let mut out = MaybeUninit::<P::Repr>::uninit();
-            let ctx = self.view();
-            (ctx.vtable.module_v0.read_parameter)(
-                ctx.handle,
-                NonNull::new_unchecked(out.as_mut_ptr()).cast(),
-                P::Repr::TYPE,
-                module.into(),
-                parameter.into(),
-            )
-            .into_result()?;
-
-            Ok(P::from_repr(out.assume_init()))
-        }
-    }
-
-    fn write_parameter<P: ParameterCast>(
-        self,
-        value: P,
-        module: &CStr,
-        parameter: &CStr,
-    ) -> Result<(), AnyError> {
-        unsafe {
-            let value = ManuallyDrop::new(value.into_repr());
-            let ctx = self.view();
-            (ctx.vtable.module_v0.write_parameter)(
-                ctx.handle,
-                ConstNonNull::new_unchecked(&raw const *value).cast(),
-                P::Repr::TYPE,
-                module.into(),
-                parameter.into(),
-            )
-            .into_result()
-        }
+/// Sets a module parameter with public write access.
+///
+/// Sets the value of a module parameter with public write access. The operation fails, if the
+/// parameter does not exist, or if the parameter does not allow writing with a public access.
+#[inline(always)]
+pub fn write_parameter<P: ParameterCast>(
+    value: P,
+    module: &CStr,
+    parameter: &CStr,
+) -> Result<(), AnyError> {
+    unsafe {
+        let value = ManuallyDrop::new(value.into_repr());
+        let handle = Handle::get_handle();
+        (handle.module_v0.write_parameter)(
+            ConstNonNull::new_unchecked(&raw const *value).cast(),
+            P::Repr::TYPE,
+            module.into(),
+            parameter.into(),
+        )
+        .into_result()
     }
 }
 
 /// Helper struct that prunes all unused instances on drop.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct PruneInstancesOnDrop<'a>(ContextView<'a>);
+pub struct PruneInstancesOnDrop(PhantomData<()>);
 
-impl<'a> PruneInstancesOnDrop<'a> {
+impl PruneInstancesOnDrop {
     /// Constructs a new instance of the dropper.
-    pub fn new<T: Viewable<ContextView<'a>>>(ctx: T) -> Self {
-        let view = ctx.view();
-        PruneInstancesOnDrop(view)
+    pub fn new() -> Self {
+        PruneInstancesOnDrop(PhantomData)
     }
 }
 
-impl Drop for PruneInstancesOnDrop<'_> {
+impl Default for PruneInstancesOnDrop {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for PruneInstancesOnDrop {
     fn drop(&mut self) {
-        self.0.prune_instances().expect("could not prune instances");
+        prune_instances().expect("could not prune instances");
     }
 }
 
@@ -348,9 +301,8 @@ pub struct FeatureStatus {
 pub struct Config<'a> {
     /// # Safety
     ///
-    /// Must be [`TypeId::ModuleConfig`].
-    pub id: Unsafe<TypeId>,
-    pub next: Option<OpaqueHandle<dyn Send + Sync + 'a>>,
+    /// Must be [`ConfigId::ModuleConfig`].
+    pub id: Unsafe<ConfigId>,
     pub profile: Profile,
     pub features: SliceRef<'a, FeatureRequest>,
     _private: PhantomData<()>,
@@ -361,8 +313,7 @@ impl<'a> Config<'a> {
     pub const fn new() -> Self {
         unsafe {
             Self {
-                id: Unsafe::new(TypeId::ModuleConfig),
-                next: None,
+                id: Unsafe::new(ConfigId::ModuleConfig),
                 profile: if cfg!(debug_assertions) {
                     Profile::Dev
                 } else {

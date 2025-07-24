@@ -3,7 +3,7 @@ const std = @import("std");
 const c = @import("c");
 
 const time = @import("../../time.zig");
-const ProxyTracing = @import("../proxy_context/tracing.zig");
+const pub_tracing = @import("../../tracing.zig");
 const Tracing = @import("../tracing.zig");
 const TracingError = Tracing.TracingError;
 const StackFrame = @import("StackFrame.zig");
@@ -18,14 +18,13 @@ state: packed struct(u8) {
 } = .{},
 buffer: []u8,
 cursor: usize = 0,
-max_level: ProxyTracing.Level,
+max_level: pub_tracing.Level,
 call_stacks: std.ArrayListUnmanaged(*anyopaque),
 start_frame: ?*StackFrame = null,
 end_frame: ?*StackFrame = null,
 owner: *Tracing,
 
 pub fn init(owner: *Tracing) *Self {
-    owner.asContext().ref();
     const call_stack = owner.allocator.create(
         Self,
     ) catch |err| @panic(@errorName(err));
@@ -68,7 +67,6 @@ pub fn deinit(self: *Self) void {
     self.call_stacks.deinit(self.owner.allocator);
     owner.allocator.free(self.buffer);
     owner.allocator.destroy(self);
-    owner.asContext().unref();
 }
 
 fn deinitUnbound(self: *Self) void {
@@ -94,7 +92,6 @@ fn deinitAbort(self: *Self) void {
     self.call_stacks.deinit(self.owner.allocator);
     owner.allocator.free(self.buffer);
     owner.allocator.destroy(self);
-    owner.asContext().unref();
 }
 
 pub fn bind(self: *Self) void {
@@ -157,10 +154,10 @@ pub fn @"resume"(self: *Self) void {
 
 pub fn pushSpan(
     self: *Self,
-    desc: *const ProxyTracing.SpanDesc,
-    formatter: *const ProxyTracing.Formatter,
+    desc: *const pub_tracing.SpanDesc,
+    formatter: *const pub_tracing.Formatter,
     data: ?*const anyopaque,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
     defer self.mutex.unlock();
     if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
@@ -178,8 +175,8 @@ pub fn pushSpan(
 
 pub fn emitEvent(
     self: *Self,
-    event: *const ProxyTracing.Event,
-    formatter: *const ProxyTracing.Formatter,
+    event: *const pub_tracing.Event,
+    formatter: *const pub_tracing.Formatter,
     data: ?*const anyopaque,
 ) void {
     if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
@@ -208,7 +205,7 @@ pub fn emitEvent(
     }
 }
 
-pub fn asProxy(self: *Self) ProxyTracing.CallStack {
+pub fn asProxy(self: *Self) pub_tracing.CallStack {
     return .{
         .handle = self,
         .vtable = &vtable,
@@ -226,7 +223,7 @@ const DummyVTableImpl = struct {
     fn deinitAbort(handle: *anyopaque) callconv(.c) void {
         std.debug.assert(handle == dummy_call_stack.handle);
     }
-    fn replaceActive(handle: *anyopaque) callconv(.c) ProxyTracing.CallStack {
+    fn replaceActive(handle: *anyopaque) callconv(.c) pub_tracing.CallStack {
         std.debug.assert(handle == dummy_call_stack.handle);
         return dummy_call_stack;
     }
@@ -235,12 +232,12 @@ const DummyVTableImpl = struct {
     }
 };
 
-pub const dummy_call_stack = ProxyTracing.CallStack{
+pub const dummy_call_stack = pub_tracing.CallStack{
     .handle = @ptrFromInt(1),
     .vtable = &dummy_vtable,
 };
 
-const dummy_vtable = ProxyTracing.CallStack.VTable{
+const dummy_vtable = pub_tracing.CallStack.VTable{
     .deinit = &DummyVTableImpl.deinit,
     .deinit_abort = &DummyVTableImpl.deinitAbort,
     .replace_active = &DummyVTableImpl.replaceActive,
@@ -260,7 +257,7 @@ const VTableImpl = struct {
         const self: *Self = @alignCast(@ptrCast(handle));
         self.deinitAbort();
     }
-    fn replaceActive(handle: *anyopaque) callconv(.c) ProxyTracing.CallStack {
+    fn replaceActive(handle: *anyopaque) callconv(.c) pub_tracing.CallStack {
         const self: *Self = @alignCast(@ptrCast(handle));
         const tracing = self.owner;
         if (!tracing.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
@@ -281,7 +278,7 @@ const VTableImpl = struct {
     }
 };
 
-const vtable = ProxyTracing.CallStack.VTable{
+const vtable = pub_tracing.CallStack.VTable{
     .deinit = &VTableImpl.deinit,
     .deinit_abort = &VTableImpl.deinitAbort,
     .replace_active = &VTableImpl.replaceActive,

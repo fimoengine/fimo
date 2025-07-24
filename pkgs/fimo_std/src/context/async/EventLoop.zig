@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
 
-const ProxyAsync = @import("../proxy_context/async.zig");
+const pub_tasks = @import("../../tasks.zig");
 const System = @import("System.zig");
 
 const Self = @This();
@@ -10,21 +10,18 @@ const Self = @This();
 sys: *System,
 thread: Thread,
 
-pub fn init(sys: *System) !ProxyAsync.EventLoop {
-    sys.asContext().ref();
-    errdefer sys.asContext().unref();
-
+pub fn init(sys: *System) !pub_tasks.EventLoop {
     const loop = try sys.allocator.create(Self);
     errdefer sys.allocator.destroy(loop);
 
     loop.sys = sys;
     loop.thread = try sys.startEventLoopThread();
 
-    const loop_vtable = ProxyAsync.EventLoop.VTable{
+    const loop_vtable = pub_tasks.EventLoop.VTable{
         .join = &Self.join,
         .detach = &Self.detach,
     };
-    return ProxyAsync.EventLoop{
+    return pub_tasks.EventLoop{
         .data = loop,
         .vtable = &loop_vtable,
     };
@@ -37,7 +34,6 @@ fn join(ptr: ?*anyopaque) callconv(.c) void {
 
     const sys = self.sys;
     sys.allocator.destroy(self);
-    sys.asContext().unref();
 }
 
 fn detach(ptr: ?*anyopaque) callconv(.c) void {
@@ -47,5 +43,4 @@ fn detach(ptr: ?*anyopaque) callconv(.c) void {
 
     const sys = self.sys;
     sys.allocator.destroy(self);
-    sys.asContext().unref();
 }

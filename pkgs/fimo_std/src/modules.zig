@@ -1,25 +1,23 @@
-//! Public interface of the module subsystem.
-
+//! Modules subsystem of the context.
+//!
+//! Requires an initialized global context.
 const std = @import("std");
 const builtin = @import("builtin");
 
 const c = @import("c");
 
-const AnyError = @import("../../AnyError.zig");
+const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Path = @import("../../path.zig").Path;
-const Version = @import("../../Version.zig");
-const Context = @import("../proxy_context.zig");
-const Async = @import("async.zig");
-const EnqueuedFuture = Async.EnqueuedFuture;
-const Fallible = Async.Fallible;
-pub const DebugInfo = @import("module/DebugInfo.zig");
-pub const exports = @import("module/exports.zig");
+const ctx = @import("ctx.zig");
+pub const DebugInfo = @import("modules/DebugInfo.zig");
+pub const exports = @import("modules/exports.zig");
 pub const Export = exports.Export;
+const path = @import("path.zig");
+const tasks = @import("tasks.zig");
+const EnqueuedFuture = tasks.EnqueuedFuture;
+const Fallible = tasks.Fallible;
+const Version = @import("Version.zig");
 
-context: Context,
-
-const Module = @This();
 /// Data type of a module parameter.
 pub const ParameterType = enum(i32) {
     u8,
@@ -218,16 +216,12 @@ pub const Symbol = struct {
         return obj.provideSymbol(symbol);
     }
 
-    pub fn format(
-        self: Symbol,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        out_stream: anytype,
-    ) !void {
-        _ = options;
-        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, self);
-        if (self.namespace.len != 0) try std.fmt.format(out_stream, "{s}::", .{self.namespace});
-        try std.fmt.format(out_stream, "{s}@v{}", .{ self.name, self.version });
+    pub fn format(self: Symbol, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        if (self.namespace.len != 0) {
+            try w.print("{s}::{s}@v{}", .{ self.namespace, self.name, self.version });
+        } else {
+            try w.print("{s}@v{}", .{ self.name, self.version });
+        }
     }
 };
 
@@ -321,7 +315,7 @@ test SymbolGroup {
 
 /// Info of a loaded module instance.
 pub const Info = extern struct {
-    next: ?*Context.TaggedInStruct = null,
+    next: ?*anyopaque = null,
     name: [*:0]const u8,
     description: ?[*:0]const u8 = null,
     author: ?[*:0]const u8 = null,
@@ -383,10 +377,10 @@ pub const Info = extern struct {
     ///
     /// Queries a module by its unique name. The returned `Info` instance will have its reference
     /// count increased.
-    pub fn findByName(ctx: Module, module: [:0]const u8, err: *?AnyError) AnyError.Error!*const Info {
+    pub fn findByName(module: [:0]const u8, err: *?AnyError) AnyError.Error!*const Info {
         var info: *const Info = undefined;
-        try ctx.context.vtable.module_v0.find_by_name(ctx.context.data, module.ptr, &info)
-            .intoErrorUnion(err);
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.find_by_name(module.ptr, &info).intoErrorUnion(err);
         return info;
     }
 
@@ -395,15 +389,14 @@ pub const Info = extern struct {
     /// Queries the module that exported the specified symbol. The returned `Info` instance will
     /// have its reference count increased.
     pub fn findBySymbol(
-        ctx: Module,
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
         err: *?AnyError,
     ) AnyError.Error!*const Info {
         var info: *const Info = undefined;
-        try ctx.context.vtable.module_v0.find_by_symbol(
-            ctx.context.data,
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.find_by_symbol(
             name.ptr,
             namespace.ptr,
             version.intoC(),
@@ -454,7 +447,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
         else
             *const Self.Exports,
         info: *const Info,
-        context_: c.FimoContext,
+        handle: *const ctx.Handle,
         state_: if (@sizeOf(Self.State) == 0) ?*Self.State else *Self.State,
 
         const Self = @This();
@@ -505,7 +498,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 ctx: *const OpaqueInstance,
                 name: [*:0]const u8,
                 namespace: [*:0]const u8,
-                version: c.FimoVersion,
+                version: Version.CVersion,
                 symbol: **const anyopaque,
             ) callconv(.c) AnyResult,
             read_parameter: *const fn (
@@ -554,11 +547,6 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 self.exports_ orelse &Self.Exports{}
             else
                 self.exports_;
-        }
-
-        /// Returns the contained context without increasing the reference count.
-        pub fn context(self: *const @This()) Context {
-            return Context.initC(self.context_);
         }
 
         /// Returns the instance state.
@@ -834,10 +822,10 @@ pub const PseudoInstance = extern struct {
     /// module. This is a problem, as the constructor of the context won't be assigned a module
     /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
     /// instances, i.e., module handles without an associated module.
-    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!*const PseudoInstance {
+    pub fn init(err: *?AnyError) AnyError.Error!*const PseudoInstance {
         var instance: *const PseudoInstance = undefined;
-        try ctx.context.vtable.module_v0.pseudo_module_new(ctx.context.data, &instance)
-            .intoErrorUnion(err);
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.pseudo_module_new(&instance).intoErrorUnion(err);
         return instance;
     }
 
@@ -1034,7 +1022,7 @@ pub const LoadingSet = extern struct {
             ctx: *anyopaque,
             symbol: [*:0]const u8,
             namespace: [*:0]const u8,
-            version: c.FimoVersion,
+            version: Version.CVersion,
         ) callconv(.c) bool,
         add_callback: *const fn (
             ctx: *anyopaque,
@@ -1077,9 +1065,10 @@ pub const LoadingSet = extern struct {
     /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
     /// to determine a suitable load order. A loading set is a utility to facilitate this process,
     /// by automatically computing a suitable load order for a batch of modules.
-    pub fn init(ctx: Module, err: *?AnyError) AnyError.Error!LoadingSet {
+    pub fn init(err: *?AnyError) AnyError.Error!LoadingSet {
         var set: LoadingSet = undefined;
-        try ctx.context.vtable.module_v0.set_new(ctx.context.data, &set).intoErrorUnion(err);
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.set_new(&set).intoErrorUnion(err);
         return set;
     }
 
@@ -1229,7 +1218,7 @@ pub const LoadingSet = extern struct {
     /// In case of an error, no modules are appended to the set.
     pub fn addModulesFromPath(
         self: LoadingSet,
-        path: Path,
+        p: path.Path,
         obj: anytype,
         comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterRequest,
         comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
@@ -1251,7 +1240,7 @@ pub const LoadingSet = extern struct {
             }
         };
         return self.addModulesFromPathCustom(
-            path,
+            p,
             @constCast(obj),
             Callbacks.f,
             if (filter_deinit != null) &Callbacks.deinit else null,
@@ -1273,7 +1262,7 @@ pub const LoadingSet = extern struct {
     /// In case of an error, no modules are appended to the set.
     pub fn addModulesFromPathCustom(
         self: LoadingSet,
-        path: Path,
+        p: path.Path,
         filter_data: ?*anyopaque,
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
@@ -1281,7 +1270,7 @@ pub const LoadingSet = extern struct {
     ) AnyError.Error!void {
         try self.vtable.add_modules_from_path(
             self.data,
-            path.intoC(),
+            p.intoC(),
             filter,
             filter_deinit,
             filter_data,
@@ -1399,8 +1388,7 @@ pub const FeatureStatus = extern struct {
 
 /// Configuration for the module subsystem.
 pub const Config = extern struct {
-    id: Context.TypeId = .module_config,
-    next: ?*const void = null,
+    id: ctx.ConfigId = .modules,
     /// Feature profile of the subsystem.
     profile: Profile = switch (builtin.mode) {
         .Debug => .dev,
@@ -1416,33 +1404,20 @@ pub const Config = extern struct {
 ///
 /// Changing the VTable is a breaking change.
 pub const VTable = extern struct {
-    profile: *const fn (ctx: *anyopaque) callconv(.c) Profile,
-    features: *const fn (ctx: *anyopaque, features: *?[*]const FeatureStatus) callconv(.c) usize,
-    pseudo_module_new: *const fn (
-        ctx: *anyopaque,
-        instance: **const PseudoInstance,
-    ) callconv(.c) AnyResult,
-    set_new: *const fn (ctx: *anyopaque, fut: *LoadingSet) callconv(.c) AnyResult,
-    find_by_name: *const fn (
-        ctx: *anyopaque,
-        name: [*:0]const u8,
-        info: **const Info,
-    ) callconv(.c) AnyResult,
+    profile: *const fn () callconv(.c) Profile,
+    features: *const fn (features: *?[*]const FeatureStatus) callconv(.c) usize,
+    pseudo_module_new: *const fn (instance: **const PseudoInstance) callconv(.c) AnyResult,
+    set_new: *const fn (fut: *LoadingSet) callconv(.c) AnyResult,
+    find_by_name: *const fn (name: [*:0]const u8, info: **const Info) callconv(.c) AnyResult,
     find_by_symbol: *const fn (
-        ctx: *anyopaque,
         name: [*:0]const u8,
         namespace: [*:0]const u8,
-        version: c.FimoVersion,
+        version: Version.CVersion,
         info: **const Info,
     ) callconv(.c) AnyResult,
-    namespace_exists: *const fn (
-        ctx: *anyopaque,
-        namespace: [*:0]const u8,
-        exists: *bool,
-    ) callconv(.c) AnyResult,
-    prune_instances: *const fn (ctx: *anyopaque) callconv(.c) AnyResult,
+    namespace_exists: *const fn (namespace: [*:0]const u8, exists: *bool) callconv(.c) AnyResult,
+    prune_instances: *const fn () callconv(.c) AnyResult,
     query_parameter: *const fn (
-        ctx: *anyopaque,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
         type: *ParameterType,
@@ -1450,14 +1425,12 @@ pub const VTable = extern struct {
         write_group: *ParameterAccessGroup,
     ) callconv(.c) AnyResult,
     read_parameter: *const fn (
-        ctx: *anyopaque,
         value: *anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
     ) callconv(.c) AnyResult,
     write_parameter: *const fn (
-        ctx: *anyopaque,
         value: *const anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
@@ -1466,14 +1439,16 @@ pub const VTable = extern struct {
 };
 
 /// Returns the active profile of the module subsystem.
-pub fn profile(self: Module) Profile {
-    return self.context.vtable.module_v0.profile(self.context.data);
+pub fn profile() Profile {
+    const handle = ctx.Handle.getHandle();
+    return handle.modules_v0.profile();
 }
 
 /// Returns the status of all features known to the subsystem.
-pub fn features(self: Module) []const FeatureStatus {
+pub fn features() []const FeatureStatus {
     var ptr: ?[*]const FeatureStatus = undefined;
-    const len = self.context.vtable.module_v0.features(self.context.data, &ptr);
+    const handle = ctx.Handle.getHandle();
+    const len = handle.modules_v0.features(&ptr);
     if (ptr) |p| return p[0..len];
     return &.{};
 }
@@ -1481,17 +1456,10 @@ pub fn features(self: Module) []const FeatureStatus {
 /// Checks for the presence of a namespace in the module subsystem.
 ///
 /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-pub fn namespaceExists(
-    self: Module,
-    namespace: [:0]const u8,
-    err: *?AnyError,
-) AnyError.Error!bool {
+pub fn namespaceExists(namespace: [:0]const u8, err: *?AnyError) AnyError.Error!bool {
     var exists: bool = undefined;
-    try self.context.vtable.module_v0.namespace_exists(
-        self.context.data,
-        namespace.ptr,
-        &exists,
-    ).intoErrorUnion(err);
+    const handle = ctx.Handle.getHandle();
+    try handle.modules_v0.namespace_exists(namespace.ptr, &exists).intoErrorUnion(err);
     return exists;
 }
 
@@ -1499,11 +1467,9 @@ pub fn namespaceExists(
 ///
 /// Tries to unload all instances that are not referenced by any other modules. If the instance is
 /// still referenced, this will mark the instance as unloadable and enqueue it for unloading.
-pub fn pruneInstances(
-    self: Module,
-    err: *?AnyError,
-) AnyError.Error!void {
-    try self.context.vtable.module_v0.prune_instances(self.context.data).intoErrorUnion(err);
+pub fn pruneInstances(err: *?AnyError) AnyError.Error!void {
+    const handle = ctx.Handle.getHandle();
+    try handle.modules_v0.prune_instances().intoErrorUnion(err);
 }
 
 /// Queries the info of a module parameter.
@@ -1511,7 +1477,6 @@ pub fn pruneInstances(
 /// This function can be used to query the datatype, the read access, and the write access of a
 /// module parameter. This function fails, if the parameter can not be found.
 pub fn queryParameter(
-    self: Module,
     module: [:0]const u8,
     parameter: [:0]const u8,
     err: *?AnyError,
@@ -1519,8 +1484,8 @@ pub fn queryParameter(
     var tag: ParameterType = undefined;
     var read_group: ParameterAccessGroup = undefined;
     var write_group: ParameterAccessGroup = undefined;
-    try self.context.vtable.module_v0.query_parameter(
-        self.context.data,
+    const handle = ctx.Handle.getHandle();
+    try handle.modules_v0.query_parameter(
         module.ptr,
         parameter.ptr,
         &tag,
@@ -1539,7 +1504,6 @@ pub fn queryParameter(
 /// Reads the value of a module parameter with public read access. The operation fails, if the
 /// parameter does not exist, or if the parameter does not allow reading with a public access.
 pub fn readParameter(
-    self: Module,
     comptime T: type,
     module: [:0]const u8,
     parameter: [:0]const u8,
@@ -1557,8 +1521,8 @@ pub fn readParameter(
         32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
         64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
     };
-    try self.context.vtable.module_v0.read_parameter(
-        self.context.data,
+    const handle = ctx.Handle.getHandle();
+    try handle.modules_v0.read_parameter(
         &value,
         value_type,
         module.ptr,
@@ -1572,7 +1536,6 @@ pub fn readParameter(
 /// Sets the value of a module parameter with public write access. The operation fails, if the
 /// parameter does not exist, or if the parameter does not allow writing with a public access.
 pub fn writeParameter(
-    self: Module,
     comptime T: type,
     value: T,
     module: [:0]const u8,
@@ -1590,8 +1553,8 @@ pub fn writeParameter(
         32 => if (@typeInfo(T).int.signedness == .signed) .i32 else .u32,
         64 => if (@typeInfo(T).int.signedness == .signed) .i64 else .u64,
     };
-    try self.context.vtable.module_v0.write_parameter(
-        self.context.data,
+    const handle = ctx.Handle.getHandle();
+    try handle.modules_v0.write_parameter(
         &value,
         value_type,
         module.ptr,

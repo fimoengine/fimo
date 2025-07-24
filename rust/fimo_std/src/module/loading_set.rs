@@ -6,7 +6,7 @@ use std::{mem::MaybeUninit, pin::Pin};
 use crate::{
     r#async::{EnqueuedFuture, Fallible},
     bindings,
-    context::ContextView,
+    context::Handle,
     error::{AnyError, AnyResult},
     handle,
     module::{
@@ -15,7 +15,7 @@ use crate::{
         instance::{GenericInstance, OpaqueInstanceView},
         symbols::{AssertSharable, Share, StrRef, SymbolInfo},
     },
-    utils::{ConstNonNull, OpaqueHandle, Viewable},
+    utils::{ConstNonNull, OpaqueHandle},
     version::Version,
 };
 
@@ -479,12 +479,12 @@ sa::assert_impl_all!(LoadingSet: Send, Sync, Share);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new(ctx: impl Viewable<ContextView<'_>>) -> Result<Self, AnyError> {
+    pub fn new() -> Result<Self, AnyError> {
         unsafe {
             let mut out = MaybeUninit::uninit();
-            let ctx = ctx.view();
-            let f = ctx.vtable.module_v0.new_loading_set;
-            f(ctx.handle, &mut out).into_result()?;
+            let handle = Handle::get_handle();
+            let f = handle.module_v0.new_loading_set;
+            f(&mut out).into_result()?;
             Ok(out.assume_init())
         }
     }

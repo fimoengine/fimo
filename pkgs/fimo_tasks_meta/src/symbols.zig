@@ -3,12 +3,10 @@ const std = @import("std");
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 const AnyResult = AnyError.AnyResult;
-const Context = fimo_std.Context;
-const Module = Context.Module;
-const Symbol = Module.Symbol;
-const c = fimo_std.c;
-const Duration = c.FimoDuration;
-const Instant = c.FimoInstant;
+const ctx = fimo_std.ctx;
+const Symbol = fimo_std.modules.Symbol;
+const Duration = fimo_std.time.compat.Duration;
+const Instant = fimo_std.time.compat.Instant;
 
 const pool = @import("pool.zig");
 const Pool = pool.Pool;
@@ -57,62 +55,62 @@ pub const all_symbols = .{
 pub const task_id = Symbol{
     .name = "task_id",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (id: *TaskId) callconv(.c) bool,
 };
 pub const worker_id = Symbol{
     .name = "worker_id",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (id: *Worker) callconv(.c) bool,
 };
 pub const worker_pool = Symbol{
     .name = "worker_pool",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (pool: *Pool) callconv(.c) bool,
 };
 pub const worker_pool_by_id = Symbol{
     .name = "worker_pool_by_id",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (id: PoolId, pool: *Pool) callconv(.c) bool,
 };
 pub const query_worker_pools = Symbol{
     .name = "query_worker_pools",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (query: *Query) callconv(.c) AnyResult,
 };
 pub const create_worker_pool = Symbol{
     .name = "create_worker_pool",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (config: *const PoolConfig, pool: *Pool) callconv(.c) AnyResult,
 };
 pub const yield = Symbol{
     .name = "yield",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn () callconv(.c) void,
 };
 pub const abort = Symbol{
     .name = "abort",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn () callconv(.c) void,
 };
 pub const sleep = Symbol{
     .name = "sleep",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (duration: Duration) callconv(.c) void,
 };
 
 pub const task_local_set = Symbol{
     .name = "task_local_set",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (
         key: *const TssKey,
         value: ?*anyopaque,
@@ -122,20 +120,20 @@ pub const task_local_set = Symbol{
 pub const task_local_get = Symbol{
     .name = "task_local_get",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (key: *const TssKey) callconv(.c) ?*anyopaque,
 };
 pub const task_local_clear = Symbol{
     .name = "task_local_clear",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (key: *const TssKey) callconv(.c) void,
 };
 
 pub const futex_wait = Symbol{
     .name = "futex_wait",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (
         key: *const anyopaque,
         key_size: usize,
@@ -148,7 +146,7 @@ pub const futex_wait = Symbol{
 pub const futex_waitv = Symbol{
     .name = "futex_waitv",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (
         keys: [*]const Futex.KeyExpect,
         key_count: usize,
@@ -160,7 +158,7 @@ pub const futex_waitv = Symbol{
 pub const futex_wake = Symbol{
     .name = "futex_wake",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (
         key: *const anyopaque,
         max_waiters: usize,
@@ -171,7 +169,7 @@ pub const futex_wake = Symbol{
 pub const futex_requeue = Symbol{
     .name = "futex_requeue",
     .namespace = symbol_namespace,
-    .version = Context.context_version,
+    .version = ctx.context_version,
     .T = fn (
         key_from: *const anyopaque,
         key_to: *const anyopaque,

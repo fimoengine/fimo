@@ -47,8 +47,8 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
                 extern "C" fn(_, _) -> _,
             >::new(add))
         },
-        |instance: Pin<&Stage1InstanceView<'_, AView<'_>>>, _f| {
-            emit_info!(instance.context(), "dropping \"a2\"");
+        |_instance: Pin<&Stage1InstanceView<'_, AView<'_>>>, _f| {
+            emit_info!("dropping \"a2\"");
         },
     )
     .build();
@@ -181,10 +181,10 @@ impl CState {
         parameters.pri_pri().write(8);
 
         let resources = instance.resources();
-        emit_info!(instance.context(), "empty: {}", resources.empty());
-        emit_info!(instance.context(), "a: {}", resources.a());
-        emit_info!(instance.context(), "b: {}", resources.b());
-        emit_info!(instance.context(), "img: {}", resources.img());
+        emit_info!("empty: {}", resources.empty());
+        emit_info!("a: {}", resources.a());
+        emit_info!("b: {}", resources.b());
+        emit_info!("img: {}", resources.img());
 
         let imports = instance.imports();
         assert_eq!(**imports.a0(), 5);
@@ -193,7 +193,7 @@ impl CState {
         assert_eq!(**imports.b1(), 77);
 
         let info = instance.info();
-        emit_info!(instance.context(), "{info:?}");
+        emit_info!("{info:?}");
 
         Ok(NonNull::from(&CState))
     }
@@ -201,48 +201,41 @@ impl CState {
     fn deinit(_instance: Pin<&Stage0InstanceView<'_, CView<'_>>>, _value: NonNull<Self>) {}
 
     async fn on_start(instance: Pin<&CView<'_>>) -> Result<(), std::convert::Infallible> {
-        emit_info!(
-            instance.context(),
-            "starting instance: {:?}",
-            instance.info()
-        );
+        emit_info!("starting instance: {:?}", instance.info());
         Ok(())
     }
 
     fn on_stop(instance: Pin<&CView<'_>>) {
-        emit_info!(
-            instance.context(),
-            "stopping instance: {:?}",
-            instance.info()
-        );
+        emit_info!("stopping instance: {:?}", instance.info());
     }
 }
 
 #[test]
 fn load_modules() -> Result<(), AnyError> {
-    let context = ContextBuilder::new()
+    let mut context = ContextBuilder::new()
         .with_tracing_config(
             Config::default()
                 .with_max_level(Level::Trace)
                 .with_subscribers(&[default_subscriber()]),
         )
         .build()?;
+    unsafe { context.enable_cleanup() };
 
-    let _access = ThreadAccess::new(&context);
-    let _event_loop = EventLoop::new(&context)?;
+    let _access = ThreadAccess::new();
+    let _event_loop = EventLoop::new()?;
 
-    let blocking = BlockingContext::new(&context)?;
+    let blocking = BlockingContext::new()?;
     blocking.block_on(async move {
-        let _prune = PruneInstancesOnDrop::new(&context);
+        let _prune = PruneInstancesOnDrop::new();
 
-        let set = LoadingSet::new(&context)?;
+        let set = LoadingSet::new()?;
         set.view().add_modules_from_local(|_| FilterRequest::Load)?;
         set.view().commit().await?;
 
-        let instance = PseudoInstance::new(&context)?;
-        let a = Info::find_by_name(&context, c"a")?;
-        let b = Info::find_by_name(&context, c"b")?;
-        let c = Info::find_by_name(&context, c"c")?;
+        let instance = PseudoInstance::new()?;
+        let a = Info::find_by_name(c"a")?;
+        let b = Info::find_by_name(c"b")?;
+        let c = Info::find_by_name(c"c")?;
         assert!(instance.info().is_loaded());
         assert!(a.view().is_loaded());
         assert!(b.view().is_loaded());

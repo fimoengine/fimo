@@ -4,12 +4,12 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
 const Context = @import("../../context.zig");
+const pub_modules = @import("../../modules.zig");
+const pub_tasks = @import("../../tasks.zig");
 const Version = @import("../../Version.zig");
 const Async = @import("../async.zig");
 const graph = @import("../graph.zig");
 const Module = @import("../module.zig");
-const ProxyAsync = @import("../proxy_context/async.zig");
-const ProxyModule = @import("../proxy_context/module.zig");
 const tmp_path = @import("../tmp_path.zig");
 const InstanceHandle = @import("InstanceHandle.zig");
 const LoadingSet = @import("LoadingSet.zig");
@@ -21,17 +21,17 @@ const Self = @This();
 mutex: Mutex = .{},
 allocator: Allocator,
 arena: ArenaAllocator,
-profile: ProxyModule.Profile,
-features: [feature_count]ProxyModule.FeatureStatus,
+profile: pub_modules.Profile,
+features: [feature_count]pub_modules.FeatureStatus,
 state: enum { idle, loading_set } = .idle,
 loading_set_waiters: std.ArrayListUnmanaged(LoadingSetWaiter) = .{},
-dep_graph: graph.GraphUnmanaged(*const ProxyModule.OpaqueInstance, void),
+dep_graph: graph.GraphUnmanaged(*const pub_modules.OpaqueInstance, void),
 string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
 instances: std.StringArrayHashMapUnmanaged(InstanceRef) = .{},
 namespaces: std.StringArrayHashMapUnmanaged(NamespaceInfo) = .{},
 symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashContext, false) = .{},
 
-const feature_count = std.meta.fields(ProxyModule.FeatureTag).len;
+const feature_count = std.meta.fields(pub_modules.FeatureTag).len;
 
 pub const SystemError = error{
     InUse,
@@ -50,12 +50,12 @@ pub const SystemInitError = error{
 
 pub const LoadingSetWaiter = struct {
     waiter: *anyopaque,
-    waker: ProxyAsync.Waker,
+    waker: pub_tasks.Waker,
 };
 
 const InstanceRef = struct {
     id: graph.NodeId,
-    instance: *const ProxyModule.OpaqueInstance,
+    instance: *const pub_modules.OpaqueInstance,
 };
 
 const NamespaceInfo = struct {
@@ -65,12 +65,8 @@ const NamespaceInfo = struct {
 
 pub fn init(
     ctx: *const Context,
-    config: *const ProxyModule.Config,
+    config: *const pub_modules.Config,
 ) (SystemInitError || tmp_path.TmpDirError)!Self {
-    if (config.next != null) {
-        ctx.tracing.emitErrSimple("`next` field of the config is reserved", .{}, @src());
-        return SystemInitError.InvalidConfig;
-    }
     const profile = switch (config.profile) {
         .release, .dev => |x| x,
         else => |x| {
@@ -78,7 +74,7 @@ pub fn init(
             return SystemInitError.InvalidConfig;
         },
     };
-    var feature_status: [feature_count]ProxyModule.FeatureStatus = @splat(undefined);
+    var feature_status: [feature_count]pub_modules.FeatureStatus = @splat(undefined);
     for (&feature_status, 0..) |*status, i| {
         status.tag = @enumFromInt(i);
         status.flag = .off;
@@ -116,7 +112,7 @@ pub fn init(
         .profile = profile,
         .features = feature_status,
         .dep_graph = graph.GraphUnmanaged(
-            *const ProxyModule.OpaqueInstance,
+            *const pub_modules.OpaqueInstance,
             void,
         ).init(null, null),
     };

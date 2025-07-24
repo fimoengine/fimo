@@ -1,18 +1,28 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const c = @import("c");
 
 pub const AnyError = @import("AnyError.zig");
 const context = @import("context.zig");
-pub const Context = context.ProxyContext;
+pub const ctx = @import("ctx.zig");
+pub const modules = @import("modules.zig");
 pub const path = @import("path.zig");
+pub const tasks = @import("tasks.zig");
 pub const time = @import("time.zig");
+pub const tracing = @import("tracing.zig");
 pub const Version = @import("Version.zig");
 
 comptime {
-    _ = c;
+    if (builtin.is_test) {
+        _ = c;
+        _ = ctx;
+        _ = modules;
+        _ = tasks;
+        _ = tracing;
+    }
+
     _ = context;
-    _ = Context;
     _ = AnyError;
     _ = path;
     _ = time;

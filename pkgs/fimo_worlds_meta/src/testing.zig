@@ -2,14 +2,14 @@ const std = @import("std");
 
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
-const Context = fimo_std.Context;
-const Async = Context.Async;
-const Tracing = Context.Tracing;
-const Module = Context.Module;
-const Symbol = Module.Symbol;
-const SymbolWrapper = Module.SymbolWrapper;
-const SymbolGroup = Module.SymbolGroup;
-const PseudoInstance = Module.PseudoInstance;
+const ctx = fimo_std.ctx;
+const modules = fimo_std.modules;
+const tracing = fimo_std.tracing;
+const tasks = fimo_std.tasks;
+const Symbol = modules.Symbol;
+const SymbolWrapper = modules.SymbolWrapper;
+const SymbolGroup = modules.SymbolGroup;
+const PseudoInstance = modules.PseudoInstance;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 
 const symbols = @import("symbols.zig");
@@ -19,70 +19,68 @@ comptime {
 }
 
 pub const GlobalCtx = struct {
-    var ctx: ?TestContext = null;
+    var t_ctx: ?TestContext = null;
 
     pub fn init(self: @This()) !void {
         _ = self;
-        if (ctx != null) @panic("context already initialized");
-        ctx = try .init();
+        if (t_ctx != null) @panic("context already initialized");
+        t_ctx = try .init();
     }
 
     pub fn deinit(self: @This()) void {
         _ = self;
-        if (ctx) |*c| {
+        if (t_ctx) |*c| {
             c.deinit();
-            ctx = null;
+            t_ctx = null;
         } else @panic("not initialized");
     }
 
     pub fn provideSymbol(self: @This(), comptime symbol: Symbol) *const symbol.T {
         _ = self;
-        if (ctx) |*c| return symbol.requestFrom(c);
+        if (t_ctx) |*c| return symbol.requestFrom(c);
         @panic("not initialized");
     }
 }{};
 
 const TestContext = struct {
-    ctx: Context,
-    event_loop: Async.EventLoop,
+    event_loop: tasks.EventLoop,
     instance: *const PseudoInstance,
     symbols: SymbolGroup(symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols),
 
     fn init() !@This() {
-        const tracing_cfg = Tracing.Config{
+        const tracing_cfg = tracing.Config{
             .max_level = .warn,
-            .subscribers = &.{Tracing.default_subscriber},
+            .subscribers = &.{tracing.default_subscriber},
             .subscriber_count = 1,
         };
         defer tracing_cfg.deinit();
-        const init_options: [:null]const ?*const Context.TaggedInStruct = &.{@ptrCast(&tracing_cfg)};
+        const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
+        try ctx.init(init_options);
+        errdefer ctx.deinit();
 
-        const ctx = try Context.init(init_options);
-        errdefer ctx.unref();
-
-        ctx.tracing().registerThread();
-        errdefer ctx.tracing().unregisterThread();
+        tracing.registerThread();
+        errdefer tracing.unregisterThread();
 
         var err: ?fimo_std.AnyError = null;
         errdefer if (err) |e| {
-            ctx.tracing().emitErrSimple("{f}", .{e}, @src());
+            tracing.emitErrSimple("{f}", .{e}, @src());
             e.deinit();
         };
 
-        errdefer Async.EventLoop.flushWithCurrentThread(ctx.async(), &err) catch unreachable;
-        const event_loop = try Async.EventLoop.init(ctx.async(), &err);
+        errdefer tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
+        const event_loop = try tasks.EventLoop.init(&err);
         errdefer event_loop.join();
 
-        const async_ctx = try Async.BlockingContext.init(ctx.async(), &err);
+        const async_ctx = try tasks.BlockingContext.init(&err);
         defer async_ctx.deinit();
 
-        const set = try Module.LoadingSet.init(ctx.module(), &err);
+        const set = try modules.LoadingSet.init(&err);
         defer set.unref();
 
         try set.addModulesFromLocal(
             &{},
             struct {
-                fn f(@"export": *const Module.Export, data: *const void) Module.LoadingSet.FilterRequest {
+                fn f(@"export": *const modules.Export, data: *const void) modules.LoadingSet.FilterRequest {
                     _ = @"export";
                     _ = data;
                     return .load;
@@ -93,21 +91,20 @@ const TestContext = struct {
         );
         try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap(&err);
 
-        const instance = try Module.PseudoInstance.init(ctx.module(), &err);
+        const instance = try modules.PseudoInstance.init(&err);
         errdefer instance.deinit();
 
-        const tasks = try Module.Info.findByName(ctx.module(), "fimo_tasks", &err);
-        defer tasks.unref();
-        const worlds = try Module.Info.findByName(ctx.module(), "fimo_worlds", &err);
-        defer worlds.unref();
+        const tasks_info = try modules.Info.findByName("fimo_tasks", &err);
+        defer tasks_info.unref();
+        const worlds_info = try modules.Info.findByName("fimo_worlds", &err);
+        defer worlds_info.unref();
 
-        try instance.addDependency(tasks, &err);
-        try instance.addDependency(worlds, &err);
+        try instance.addDependency(tasks_info, &err);
+        try instance.addDependency(worlds_info, &err);
         try instance.addNamespace(symbols.symbol_namespace, &err);
         try instance.addNamespace(fimo_tasks_meta.symbols.symbol_namespace, &err);
 
         const test_ctx = @This(){
-            .ctx = ctx,
             .event_loop = event_loop,
             .instance = instance,
             .symbols = try instance.loadSymbolGroup(
@@ -123,11 +120,11 @@ const TestContext = struct {
         self.instance.deinit();
 
         var err: ?fimo_std.AnyError = null;
-        self.ctx.module().pruneInstances(&err) catch unreachable;
+        modules.pruneInstances(&err) catch unreachable;
         self.event_loop.join();
-        Async.EventLoop.flushWithCurrentThread(self.ctx.async(), &err) catch unreachable;
-        self.ctx.tracing().unregisterThread();
-        self.ctx.unref();
+        tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
+        tracing.unregisterThread();
+        ctx.deinit();
     }
 
     pub fn provideSymbol(self: *const @This(), comptime symbol: Symbol) *const symbol.T {

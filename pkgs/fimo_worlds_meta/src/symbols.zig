@@ -1,8 +1,7 @@
-const c = @import("c");
 const fimo_std = @import("fimo_std");
-const Symbol = fimo_std.Context.Module.Symbol;
-const Status = fimo_std.Context.Status;
-const context_version = fimo_std.Context.context_version;
+const Symbol = fimo_std.modules.Symbol;
+const Status = fimo_std.ctx.Status;
+const context_version = fimo_std.ctx.context_version;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 

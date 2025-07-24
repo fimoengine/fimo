@@ -4,7 +4,7 @@ const Thread = std.Thread;
 const Mutex = Thread.Mutex;
 const Condition = Thread.Condition;
 
-const ProxyAsync = @import("../proxy_context/async.zig");
+const pub_tasks = @import("../../tasks.zig");
 const RefCount = @import("../RefCount.zig");
 const System = @import("System.zig");
 
@@ -18,10 +18,7 @@ cvar: Condition = .{},
 notified: bool = false,
 waiter: ?Thread.Id = null,
 
-pub fn init(sys: *System) Allocator.Error!ProxyAsync.BlockingContext {
-    sys.asContext().ref();
-    errdefer sys.asContext().unref();
-
+pub fn init(sys: *System) Allocator.Error!pub_tasks.BlockingContext {
     const self = try sys.allocator.create(Self);
     errdefer sys.allocator.destroy(self);
     self.* = .{ .sys = sys };
@@ -31,7 +28,7 @@ pub fn init(sys: *System) Allocator.Error!ProxyAsync.BlockingContext {
             const this: *Self = @alignCast(@ptrCast(ptr));
             this.unref();
         }
-        fn waker_ref(ptr: ?*anyopaque) callconv(.c) ProxyAsync.Waker {
+        fn waker_ref(ptr: ?*anyopaque) callconv(.c) pub_tasks.Waker {
             const this: *Self = @alignCast(@ptrCast(ptr));
             return this.asWaker();
         }
@@ -41,13 +38,13 @@ pub fn init(sys: *System) Allocator.Error!ProxyAsync.BlockingContext {
         }
     };
 
-    const context_vtable = ProxyAsync.BlockingContext.VTable{
+    const context_vtable = pub_tasks.BlockingContext.VTable{
         .deinit = &Wrapper.deinit,
         .waker_ref = &Wrapper.waker_ref,
         .block_until_notified = &Wrapper.block_until_notified,
     };
 
-    return ProxyAsync.BlockingContext{
+    return pub_tasks.BlockingContext{
         .data = self,
         .vtable = &context_vtable,
     };
@@ -63,12 +60,11 @@ fn unref(self: *Self) void {
 
     const sys = self.sys;
     sys.allocator.destroy(self);
-    sys.asContext().unref();
 }
 
-fn asWaker(self: *Self) ProxyAsync.Waker {
+fn asWaker(self: *Self) pub_tasks.Waker {
     const Wrapper = struct {
-        fn ref(data: ?*anyopaque) callconv(.c) ProxyAsync.Waker {
+        fn ref(data: ?*anyopaque) callconv(.c) pub_tasks.Waker {
             const this: *Self = @alignCast(@ptrCast(data));
             this.ref();
             return this.asWaker();
@@ -88,7 +84,7 @@ fn asWaker(self: *Self) ProxyAsync.Waker {
         }
     };
 
-    const waker_vtable = ProxyAsync.Waker.VTable{
+    const waker_vtable = pub_tasks.Waker.VTable{
         .ref = &Wrapper.ref,
         .unref = &Wrapper.unref,
         .wake = &Wrapper.wake,

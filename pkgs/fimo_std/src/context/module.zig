@@ -1,29 +1,26 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const c = @import("c");
-
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const Context = @import("../context.zig");
+const pub_modules = @import("../modules.zig");
 const Path = @import("../path.zig").Path;
+const pub_tasks = @import("../tasks.zig");
+const EnqueuedFuture = pub_tasks.EnqueuedFuture;
+const Fallible = pub_tasks.Fallible;
 const Version = @import("../Version.zig");
 const Async = @import("async.zig");
 const InstanceHandle = @import("module/InstanceHandle.zig");
 const LoadingSet = @import("module/LoadingSet.zig");
 const ModuleHandle = @import("module/ModuleHandle.zig");
 const System = @import("module/System.zig");
-const ProxyAsync = @import("proxy_context/async.zig");
-const EnqueuedFuture = ProxyAsync.EnqueuedFuture;
-const Fallible = ProxyAsync.Fallible;
-const ProxyModule = @import("proxy_context/module.zig");
-const ProxyContext = @import("proxy_context.zig");
 
 const Self = @This();
 
 sys: System,
 
-pub fn init(ctx: *Context, config: *const ProxyModule.Config) !Self {
+pub fn init(ctx: *Context, config: *const pub_modules.Config) !Self {
     return Self{ .sys = try System.init(ctx, config) };
 }
 
@@ -43,7 +40,7 @@ fn logTrace(self: *Self, comptime fmt: []const u8, args: anytype, location: std.
 ///
 /// The pseudo instance provides access to the subsystem for non-instances, and is mainly intended
 /// for bootstrapping.
-pub fn addPseudoInstance(self: *Self) !*const ProxyModule.PseudoInstance {
+pub fn addPseudoInstance(self: *Self) !*const pub_modules.PseudoInstance {
     self.logTrace("adding new pseudo instance", .{}, @src());
     self.sys.lock();
     defer self.sys.unlock();
@@ -89,7 +86,7 @@ pub fn addLoadingSet(self: *Self, err: *?AnyError) !EnqueuedFuture(Fallible(*Loa
 }
 
 /// Searches for an instance by its name.
-pub fn findInstanceByName(self: *Self, name: []const u8) System.SystemError!*const ProxyModule.Info {
+pub fn findInstanceByName(self: *Self, name: []const u8) System.SystemError!*const pub_modules.Info {
     self.logTrace("searching for instance, name='{s}'", .{name}, @src());
     self.sys.lock();
     defer self.sys.unlock();
@@ -105,7 +102,7 @@ pub fn findInstanceBySymbol(
     name: []const u8,
     namespace: []const u8,
     version: Version,
-) System.SystemError!*const ProxyModule.Info {
+) System.SystemError!*const pub_modules.Info {
     self.logTrace(
         "searching for symbol owner, name='{s}', namespace='{s}', version='{f}'",
         .{ name, namespace, version },
@@ -150,9 +147,9 @@ pub fn queryParameter(
     owner: []const u8,
     parameter: []const u8,
 ) error{NotFound}!struct {
-    type: ProxyModule.ParameterType,
-    read_group: ProxyModule.ParameterAccessGroup,
-    write_group: ProxyModule.ParameterAccessGroup,
+    type: pub_modules.ParameterType,
+    read_group: pub_modules.ParameterAccessGroup,
+    write_group: pub_modules.ParameterAccessGroup,
 } {
     self.logTrace(
         "querying parameter, owner='{s}', parameter='{s}'",
@@ -179,7 +176,7 @@ pub fn queryParameter(
 pub fn readParameter(
     self: *Self,
     value: *anyopaque,
-    @"type": ProxyModule.ParameterType,
+    @"type": pub_modules.ParameterType,
     owner: []const u8,
     parameter: []const u8,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
@@ -206,7 +203,7 @@ pub fn readParameter(
 pub fn writeParameter(
     self: *Self,
     value: *const anyopaque,
-    @"type": ProxyModule.ParameterType,
+    @"type": pub_modules.ParameterType,
     owner: []const u8,
     parameter: []const u8,
 ) (InstanceHandle.ParameterError || error{ FfiError, NotFound })!void {
@@ -234,104 +231,91 @@ pub fn writeParameter(
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn profile(ptr: *anyopaque) callconv(.c) ProxyModule.Profile {
-        const ctx = Context.fromProxyPtr(ptr);
-        return ctx.module.sys.profile;
+    fn profile() callconv(.c) pub_modules.Profile {
+        std.debug.assert(Context.is_init);
+        return Context.global.module.sys.profile;
     }
-    fn features(ptr: *anyopaque, out: *?[*]const ProxyModule.FeatureStatus) callconv(.c) usize {
-        const ctx = Context.fromProxyPtr(ptr);
-        out.* = &ctx.module.sys.features;
-        return ctx.module.sys.features.len;
+    fn features(out: *?[*]const pub_modules.FeatureStatus) callconv(.c) usize {
+        std.debug.assert(Context.is_init);
+        out.* = &Context.global.module.sys.features;
+        return Context.global.module.sys.features.len;
     }
-    fn addPseudoInstance(
-        ptr: *anyopaque,
-        instance: **const ProxyModule.PseudoInstance,
-    ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        instance.* = ctx.module.addPseudoInstance() catch |e| {
+    fn addPseudoInstance(instance: **const pub_modules.PseudoInstance) callconv(.c) AnyResult {
+        std.debug.assert(Context.is_init);
+        instance.* = Context.global.module.addPseudoInstance() catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
-    fn addLoadingSet(
-        ptr: *anyopaque,
-        set: *ProxyModule.LoadingSet,
-    ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        set.* = LoadingSet.init(ctx) catch |e| {
+    fn addLoadingSet(set: *pub_modules.LoadingSet) callconv(.c) AnyResult {
+        std.debug.assert(Context.is_init);
+        set.* = LoadingSet.init(&Context.global) catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
     fn findInstanceByName(
-        ptr: *anyopaque,
         name: [*:0]const u8,
-        info: **const ProxyModule.Info,
+        info: **const pub_modules.Info,
     ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        info.* = ctx.module.findInstanceByName(std.mem.span(name)) catch |e| {
+        std.debug.assert(Context.is_init);
+        info.* = Context.global.module.findInstanceByName(std.mem.span(name)) catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
     fn findInstanceBySymbol(
-        ptr: *anyopaque,
         name: [*:0]const u8,
         namespace: [*:0]const u8,
-        version: c.FimoVersion,
-        info: **const ProxyModule.Info,
+        version: Version.CVersion,
+        info: **const pub_modules.Info,
     ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        info.* = ctx.module.findInstanceBySymbol(
+        std.debug.assert(Context.is_init);
+        info.* = Context.global.module.findInstanceBySymbol(
             std.mem.span(name),
             std.mem.span(namespace),
             Version.initC(version),
         ) catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
-    fn queryNamespace(
-        ptr: *anyopaque,
-        namespace: [*:0]const u8,
-        exists: *bool,
-    ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        exists.* = ctx.module.queryNamespace(std.mem.span(namespace));
+    fn queryNamespace(namespace: [*:0]const u8, exists: *bool) callconv(.c) AnyResult {
+        std.debug.assert(Context.is_init);
+        exists.* = Context.global.module.queryNamespace(std.mem.span(namespace));
         return AnyResult.ok;
     }
-    fn pruneInstances(ptr: *anyopaque) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        ctx.module.pruneInstances() catch |e| {
+    fn pruneInstances() callconv(.c) AnyResult {
+        std.debug.assert(Context.is_init);
+        Context.global.module.pruneInstances() catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
     fn queryParameter(
-        ptr: *anyopaque,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
-        @"type": *ProxyModule.ParameterType,
-        read_group: *ProxyModule.ParameterAccessGroup,
-        write_group: *ProxyModule.ParameterAccessGroup,
+        @"type": *pub_modules.ParameterType,
+        read_group: *pub_modules.ParameterAccessGroup,
+        write_group: *pub_modules.ParameterAccessGroup,
     ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        const info = ctx.module.queryParameter(
+        std.debug.assert(Context.is_init);
+        const info = Context.global.module.queryParameter(
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         @"type".* = info.type;
@@ -340,48 +324,46 @@ const VTableImpl = struct {
         return AnyResult.ok;
     }
     fn readParameter(
-        ptr: *anyopaque,
         value: *anyopaque,
-        @"type": ProxyModule.ParameterType,
+        @"type": pub_modules.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
     ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        ctx.module.readParameter(
+        std.debug.assert(Context.is_init);
+        Context.global.module.readParameter(
             value,
             @"type",
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
     fn writeParameter(
-        ptr: *anyopaque,
         value: *const anyopaque,
-        @"type": ProxyModule.ParameterType,
+        @"type": pub_modules.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
     ) callconv(.c) AnyResult {
-        const ctx = Context.fromProxyPtr(ptr);
-        ctx.module.writeParameter(
+        std.debug.assert(Context.is_init);
+        Context.global.module.writeParameter(
             value,
             @"type",
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr|
-                ctx.tracing.emitStackTraceSimple(tr.*, @src());
+                Context.global.tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
     }
 };
 
-pub const vtable = ProxyModule.VTable{
+pub const vtable = pub_modules.VTable{
     .profile = &VTableImpl.profile,
     .features = &VTableImpl.features,
     .pseudo_module_new = &VTableImpl.addPseudoInstance,

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const fimo_std = @import("fimo_std");
+const tracing = fimo_std.tracing;
 const AnyError = fimo_std.AnyError;
 const time = fimo_std.time;
 const Instant = time.Instant;
@@ -130,7 +131,7 @@ test "abort" {
                 err,
             );
             defer future.deinit();
-            try std.testing.expectError(error.Aborted, future.@"await"());
+            try std.testing.expectError(error.Aborted, future.await());
         }
     }.f);
 }
@@ -164,7 +165,7 @@ test "short sleep" {
                 sleep(ctx, duration);
                 const elapsed = try Instant.elapsed(before_sleep);
                 try std.testing.expect(elapsed.order(duration) != .lt);
-                ctx.ctx.tracing().emitDebugSimple("slept for {}ms", .{elapsed.millis()}, @src());
+                tracing.emitDebugSimple("slept for {}ms", .{elapsed.millis()}, @src());
             }
         }
     }.f);

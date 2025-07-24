@@ -3,13 +3,13 @@ const windows = std.os.windows;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
+const pub_modules = @import("../../modules.zig");
 const Path = @import("../../path.zig").Path;
 const PathError = @import("../../path.zig").PathError;
 const OsPath = @import("../../path.zig").OsPath;
 const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const OwnedOsPathUnmanaged = @import("../../path.zig").OwnedOsPathUnmanaged;
-const ProxyModule = @import("../proxy_context/module.zig");
 const RefCount = @import("../RefCount.zig");
 
 const Self = @This();
@@ -26,7 +26,7 @@ pub const ModuleHandleError = error{
 
 pub const IteratorFn = *const fn (
     f: *const fn (
-        @"export": *const ProxyModule.Export,
+        @"export": *const pub_modules.Export,
         data: ?*anyopaque,
     ) callconv(.c) bool,
     data: ?*anyopaque,
@@ -119,7 +119,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         );
         errdefer owned_module_dir.deinit(allocator);
 
-        const is_current_module = iterator == &ProxyModule.exports.ExportIter.fimo_impl_module_export_iterator;
+        const is_current_module = iterator == &pub_modules.exports.ExportIter.fimo_impl_module_export_iterator;
         const module_path: ?[*:0]const u8 = if (is_current_module)
             null
         else

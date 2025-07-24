@@ -1,8 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const c = @import("c");
-
 const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 
@@ -63,6 +61,22 @@ pub const SubSecondMicros = std.math.IntFittingRange(0, micros_per_sec - 1);
 /// Integer type capable of storing the number of nanoseconds in a second.
 pub const SubSecondNanos = std.math.IntFittingRange(0, nanos_per_sec - 1);
 
+/// Redeclaration of the C-API types.
+pub const compat = struct {
+    pub const Duration = extern struct {
+        secs: u64,
+        nanos: u32,
+    };
+    pub const Time = extern struct {
+        secs: u64,
+        nanos: u32,
+    };
+    pub const Instant = extern struct {
+        secs: u64,
+        nanos: u32,
+    };
+};
+
 /// A span of time.
 pub const Duration = struct {
     /// Number of seconds.
@@ -83,7 +97,7 @@ pub const Duration = struct {
     };
 
     /// Initializes the object from a ffi duration.
-    pub fn initC(duration: c.FimoDuration) Duration {
+    pub fn initC(duration: compat.Duration) Duration {
         return Duration{
             .secs = @intCast(duration.secs),
             .sub_sec_nanos = @intCast(duration.nanos),
@@ -91,8 +105,8 @@ pub const Duration = struct {
     }
 
     /// Casts the object to a ffi duration.
-    pub fn intoC(self: Duration) c.FimoDuration {
-        return c.FimoDuration{
+    pub fn intoC(self: Duration) compat.Duration {
+        return compat.Duration{
             .secs = @intCast(self.secs),
             .nanos = @intCast(self.sub_sec_nanos),
         };
@@ -241,7 +255,7 @@ pub const Time = struct {
     };
 
     /// Initializes the object from a ffi time.
-    pub fn initC(time: c.FimoTime) Time {
+    pub fn initC(time: compat.Time) Time {
         return Time{
             .secs = @intCast(time.secs),
             .sub_sec_nanos = @intCast(time.nanos),
@@ -249,8 +263,8 @@ pub const Time = struct {
     }
 
     /// Casts the object to a ffi time.
-    pub fn intoC(self: Time) c.FimoTime {
-        return c.FimoTime{
+    pub fn intoC(self: Time) compat.Time {
+        return compat.Time{
             .secs = @intCast(self.secs),
             .nanos = @intCast(self.sub_sec_nanos),
         };
@@ -359,7 +373,7 @@ pub const Instant = struct {
     };
 
     /// Initializes the object from a ffi time.
-    pub fn initC(time: c.FimoInstant) Instant {
+    pub fn initC(time: compat.Instant) Instant {
         return Instant{
             .secs = @intCast(time.secs),
             .sub_sec_nanos = @intCast(time.nanos),
@@ -367,8 +381,8 @@ pub const Instant = struct {
     }
 
     /// Casts the object to a ffi time.
-    pub fn intoC(self: Instant) c.FimoInstant {
-        return c.FimoInstant{
+    pub fn intoC(self: Instant) compat.Instant {
+        return compat.Instant{
             .secs = @intCast(self.secs),
             .nanos = @intCast(self.sub_sec_nanos),
         };
@@ -471,50 +485,50 @@ pub const Instant = struct {
 // ----------------------------------------------------
 
 const ffi = struct {
-    export fn fimo_duration_zero() c.FimoDuration {
+    export fn fimo_duration_zero() compat.Duration {
         return Duration.Zero.intoC();
     }
 
-    export fn fimo_duration_max() c.FimoDuration {
+    export fn fimo_duration_max() compat.Duration {
         return Duration.Max.intoC();
     }
 
-    export fn fimo_duration_from_seconds(seconds: u64) c.FimoDuration {
+    export fn fimo_duration_from_seconds(seconds: u64) compat.Duration {
         return Duration.initSeconds(seconds).intoC();
     }
 
-    export fn fimo_duration_from_millis(millis: u64) c.FimoDuration {
+    export fn fimo_duration_from_millis(millis: u64) compat.Duration {
         return Duration.initMillis(millis).intoC();
     }
 
-    export fn fimo_duration_from_nanos(nanos: u64) c.FimoDuration {
+    export fn fimo_duration_from_nanos(nanos: u64) compat.Duration {
         return Duration.initNanos(nanos).intoC();
     }
 
-    export fn fimo_duration_is_zero(duration: *const c.FimoDuration) bool {
+    export fn fimo_duration_is_zero(duration: *const compat.Duration) bool {
         const d = Duration.initC(duration.*);
         return d.isZero();
     }
 
-    export fn fimo_duration_as_secs(duration: *const c.FimoDuration) u64 {
+    export fn fimo_duration_as_secs(duration: *const compat.Duration) u64 {
         return duration.secs;
     }
 
-    export fn fimo_duration_subsec_millis(duration: *const c.FimoDuration) u32 {
+    export fn fimo_duration_subsec_millis(duration: *const compat.Duration) u32 {
         const d = Duration.initC(duration.*);
         return d.subSecMillis();
     }
 
-    export fn fimo_duration_subsec_micros(duration: *const c.FimoDuration) u32 {
+    export fn fimo_duration_subsec_micros(duration: *const compat.Duration) u32 {
         const d = Duration.initC(duration.*);
         return d.subSecMicros();
     }
 
-    export fn fimo_duration_subsec_nanos(duration: *const c.FimoDuration) u32 {
+    export fn fimo_duration_subsec_nanos(duration: *const compat.Duration) u32 {
         return duration.nanos;
     }
 
-    export fn fimo_duration_as_millis(duration: *const c.FimoDuration, high: ?*u32) u64 {
+    export fn fimo_duration_as_millis(duration: *const compat.Duration, high: ?*u32) u64 {
         const d = Duration.initC(duration.*);
         const millis = d.millis();
 
@@ -524,7 +538,7 @@ const ffi = struct {
         return @truncate(millis);
     }
 
-    export fn fimo_duration_as_micros(duration: *const c.FimoDuration, high: ?*u32) u64 {
+    export fn fimo_duration_as_micros(duration: *const compat.Duration, high: ?*u32) u64 {
         const d = Duration.initC(duration.*);
         const micros = d.micros();
 
@@ -534,7 +548,7 @@ const ffi = struct {
         return @truncate(micros);
     }
 
-    export fn fimo_duration_as_nanos(duration: *const c.FimoDuration, high: ?*u32) u64 {
+    export fn fimo_duration_as_nanos(duration: *const compat.Duration, high: ?*u32) u64 {
         const d = Duration.initC(duration.*);
         const nanos = d.nanos();
 
@@ -544,7 +558,7 @@ const ffi = struct {
         return @truncate(nanos);
     }
 
-    export fn fimo_duration_cmp(lhs: *const c.FimoDuration, rhs: *const c.FimoDuration) i32 {
+    export fn fimo_duration_cmp(lhs: *const compat.Duration, rhs: *const compat.Duration) i32 {
         const d1 = Duration.initC(lhs.*);
         const d2 = Duration.initC(rhs.*);
         return switch (d1.order(d2)) {
@@ -555,9 +569,9 @@ const ffi = struct {
     }
 
     export fn fimo_duration_add(
-        lhs: *const c.FimoDuration,
-        rhs: *const c.FimoDuration,
-        out: *c.FimoDuration,
+        lhs: *const compat.Duration,
+        rhs: *const compat.Duration,
+        out: *compat.Duration,
     ) AnyResult {
         const d1 = Duration.initC(lhs.*);
         const d2 = Duration.initC(rhs.*);
@@ -568,18 +582,18 @@ const ffi = struct {
     }
 
     export fn fimo_duration_saturating_add(
-        lhs: *const c.FimoDuration,
-        rhs: *const c.FimoDuration,
-    ) c.FimoDuration {
+        lhs: *const compat.Duration,
+        rhs: *const compat.Duration,
+    ) compat.Duration {
         const d1 = Duration.initC(lhs.*);
         const d2 = Duration.initC(rhs.*);
         return d1.addSaturating(d2).intoC();
     }
 
     export fn fimo_duration_sub(
-        lhs: *const c.FimoDuration,
-        rhs: *const c.FimoDuration,
-        out: *c.FimoDuration,
+        lhs: *const compat.Duration,
+        rhs: *const compat.Duration,
+        out: *compat.Duration,
     ) AnyResult {
         const d1 = Duration.initC(lhs.*);
         const d2 = Duration.initC(rhs.*);
@@ -590,19 +604,19 @@ const ffi = struct {
     }
 
     export fn fimo_duration_saturating_sub(
-        lhs: *const c.FimoDuration,
-        rhs: *const c.FimoDuration,
-    ) c.FimoDuration {
+        lhs: *const compat.Duration,
+        rhs: *const compat.Duration,
+    ) compat.Duration {
         const d1 = Duration.initC(lhs.*);
         const d2 = Duration.initC(rhs.*);
         return d1.subSaturating(d2).intoC();
     }
 
-    export fn fimo_time_now() c.FimoTime {
+    export fn fimo_time_now() compat.Time {
         return Time.now().intoC();
     }
 
-    export fn fimo_time_elapsed(time_point: *const c.FimoTime, out: *c.FimoDuration) AnyResult {
+    export fn fimo_time_elapsed(time_point: *const compat.Time, out: *compat.Duration) AnyResult {
         const t = Time.initC(time_point.*);
         if (t.elapsed()) |dur| {
             out.* = dur.intoC();
@@ -610,7 +624,7 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_time_cmp(lhs: *const c.FimoTime, rhs: *const c.FimoTime) i32 {
+    export fn fimo_time_cmp(lhs: *const compat.Time, rhs: *const compat.Time) i32 {
         const d1 = Time.initC(lhs.*);
         const d2 = Time.initC(rhs.*);
         return switch (d1.order(d2)) {
@@ -621,9 +635,9 @@ const ffi = struct {
     }
 
     export fn fimo_time_duration_since(
-        time_point: *const c.FimoTime,
-        earlier_time_point: *const c.FimoTime,
-        out: *c.FimoDuration,
+        time_point: *const compat.Time,
+        earlier_time_point: *const compat.Time,
+        out: *compat.Duration,
     ) AnyResult {
         const t1 = Time.initC(time_point.*);
         const t2 = Time.initC(earlier_time_point.*);
@@ -634,9 +648,9 @@ const ffi = struct {
     }
 
     export fn fimo_time_add(
-        time_point: *const c.FimoTime,
-        duration: *const c.FimoDuration,
-        out: *c.FimoTime,
+        time_point: *const compat.Time,
+        duration: *const compat.Duration,
+        out: *compat.Time,
     ) AnyResult {
         const t = Time.initC(time_point.*);
         const d = Duration.initC(duration.*);
@@ -647,18 +661,18 @@ const ffi = struct {
     }
 
     export fn fimo_time_saturating_add(
-        time_point: *const c.FimoTime,
-        duration: *const c.FimoDuration,
-    ) c.FimoTime {
+        time_point: *const compat.Time,
+        duration: *const compat.Duration,
+    ) compat.Time {
         const t = Time.initC(time_point.*);
         const d = Duration.initC(duration.*);
         return t.addSaturating(d).intoC();
     }
 
     export fn fimo_time_sub(
-        time_point: *const c.FimoTime,
-        duration: *const c.FimoDuration,
-        out: *c.FimoTime,
+        time_point: *const compat.Time,
+        duration: *const compat.Duration,
+        out: *compat.Time,
     ) AnyResult {
         const t = Time.initC(time_point.*);
         const d = Duration.initC(duration.*);
@@ -669,21 +683,21 @@ const ffi = struct {
     }
 
     export fn fimo_time_saturating_sub(
-        time_point: *const c.FimoTime,
-        duration: *const c.FimoDuration,
-    ) c.FimoTime {
+        time_point: *const compat.Time,
+        duration: *const compat.Duration,
+    ) compat.Time {
         const t = Time.initC(time_point.*);
         const d = Duration.initC(duration.*);
         return t.subSaturating(d).intoC();
     }
 
-    export fn fimo_instant_now() c.FimoInstant {
+    export fn fimo_instant_now() compat.Instant {
         return Instant.now().intoC();
     }
 
     export fn fimo_instant_elapsed(
-        time_point: *const c.FimoInstant,
-        out: *c.FimoDuration,
+        time_point: *const compat.Instant,
+        out: *compat.Duration,
     ) AnyResult {
         const t = Instant.initC(time_point.*);
         if (t.elapsed()) |dur| {
@@ -692,7 +706,7 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_instant_cmp(lhs: *const c.FimoInstant, rhs: *const c.FimoInstant) i32 {
+    export fn fimo_instant_cmp(lhs: *const compat.Instant, rhs: *const compat.Instant) i32 {
         const d1 = Instant.initC(lhs.*);
         const d2 = Instant.initC(rhs.*);
         return switch (d1.order(d2)) {
@@ -703,9 +717,9 @@ const ffi = struct {
     }
 
     export fn fimo_instant_duration_since(
-        time_point: *const c.FimoInstant,
-        earlier_time_point: *const c.FimoInstant,
-        out: *c.FimoDuration,
+        time_point: *const compat.Instant,
+        earlier_time_point: *const compat.Instant,
+        out: *compat.Duration,
     ) AnyResult {
         const t1 = Instant.initC(time_point.*);
         const t2 = Instant.initC(earlier_time_point.*);
@@ -716,9 +730,9 @@ const ffi = struct {
     }
 
     export fn fimo_instant_add(
-        time_point: *const c.FimoInstant,
-        duration: *const c.FimoDuration,
-        out: *c.FimoInstant,
+        time_point: *const compat.Instant,
+        duration: *const compat.Duration,
+        out: *compat.Instant,
     ) AnyResult {
         const t = Instant.initC(time_point.*);
         const d = Duration.initC(duration.*);
@@ -729,18 +743,18 @@ const ffi = struct {
     }
 
     export fn fimo_instant_saturating_add(
-        time_point: *const c.FimoInstant,
-        duration: *const c.FimoDuration,
-    ) c.FimoInstant {
+        time_point: *const compat.Instant,
+        duration: *const compat.Duration,
+    ) compat.Instant {
         const t = Instant.initC(time_point.*);
         const d = Duration.initC(duration.*);
         return t.addSaturating(d).intoC();
     }
 
     export fn fimo_instant_sub(
-        time_point: *const c.FimoInstant,
-        duration: *const c.FimoDuration,
-        out: *c.FimoInstant,
+        time_point: *const compat.Instant,
+        duration: *const compat.Duration,
+        out: *compat.Instant,
     ) AnyResult {
         const t = Instant.initC(time_point.*);
         const d = Duration.initC(duration.*);
@@ -751,9 +765,9 @@ const ffi = struct {
     }
 
     export fn fimo_instant_saturating_sub(
-        time_point: *const c.FimoInstant,
-        duration: *const c.FimoDuration,
-    ) c.FimoInstant {
+        time_point: *const compat.Instant,
+        duration: *const compat.Duration,
+    ) compat.Instant {
         const t = Instant.initC(time_point.*);
         const d = Duration.initC(duration.*);
         return t.subSaturating(d).intoC();

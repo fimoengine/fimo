@@ -1,7 +1,7 @@
 //! Definition of module infos.
 
 use crate::{
-    context::ContextView,
+    context::Handle,
     error::AnyError,
     module::symbols::{AssertSharable, Share, StrRef},
     utils::{OpaqueHandle, View, Viewable},
@@ -270,15 +270,12 @@ impl Info {
     ///
     /// Queries a module by its unique name. The returned `Info` instance will have its reference
     /// count increased.
-    pub fn find_by_name(
-        ctx: impl Viewable<ContextView<'_>>,
-        name: &CStr,
-    ) -> Result<Self, AnyError> {
-        let ctx = ctx.view();
+    pub fn find_by_name(name: &CStr) -> Result<Self, AnyError> {
         let mut out = MaybeUninit::uninit();
-        let f = ctx.vtable.module_v0.find_instance_by_name;
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.module_v0.find_instance_by_name;
         unsafe {
-            f(ctx.handle, StrRef::new(name), &mut out).into_result()?;
+            f(StrRef::new(name), &mut out).into_result()?;
             Ok(out.assume_init())
         }
     }
@@ -288,18 +285,17 @@ impl Info {
     /// Queries the module that exported the specified symbol. The returned `Info` instance will
     /// have its reference count increased.
     pub fn find_by_symbol_raw(
-        ctx: impl Viewable<ContextView<'_>>,
         name: &CStr,
         namespace: &CStr,
         version: Version<'_>,
     ) -> Result<Self, AnyError> {
-        let ctx = ctx.view();
         let mut out = MaybeUninit::uninit();
-        let f = ctx.vtable.module_v0.find_instance_by_symbol;
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.module_v0.find_instance_by_symbol;
         unsafe {
             let name = StrRef::new(name);
             let namespace = StrRef::new(namespace);
-            f(ctx.handle, name, namespace, version, &mut out).into_result()?;
+            f(name, namespace, version, &mut out).into_result()?;
             Ok(out.assume_init())
         }
     }

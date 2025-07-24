@@ -1,20 +1,14 @@
-//! Public interface of async subsystem.
+//! Async subsystem of the context.
 //!
-//! The async subsystem presents a simple single threaded event loop.
-//! The event loop is mainly designed to handle internal tasks, like
-//! handling of module events, but also supports arbitrary user tasks.
-
+//! Exposes a simple single threaded event loop for arbitrary tasks.
+//! Requires an initialized global context.
 const std = @import("std");
 
-const c = @import("c");
-
-const AnyError = @import("../../AnyError.zig");
+const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Context = @import("../proxy_context.zig");
+const ctx = @import("ctx.zig");
 
-context: Context,
-
-const AsyncExecutor = @This();
+const SelfTy = @This();
 
 /// A handle to an event loop, executing futures.
 pub const EventLoop = extern struct {
@@ -33,10 +27,10 @@ pub const EventLoop = extern struct {
     ///
     /// There can only be one event loop at a time, and it will keep/ the context alive until it
     /// completes its execution.
-    pub fn init(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!EventLoop {
+    pub fn init(err: *?AnyError) AnyError.Error!EventLoop {
         var loop: EventLoop = undefined;
-        try ctx.context.vtable.async_v0.start_event_loop(ctx.context.data, &loop)
-            .intoErrorUnion(err);
+        const handle = ctx.Handle.getHandle();
+        try handle.tasks_v0.start_event_loop(&loop).intoErrorUnion(err);
         return loop;
     }
 
@@ -45,8 +39,9 @@ pub const EventLoop = extern struct {
     /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
     /// the context can not be destroyed until the queue is empty. Upon the completion of all
     /// tasks, the funtion will return to the caller.
-    pub fn flushWithCurrentThread(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!void {
-        try ctx.context.vtable.async_v0.run_to_completion(ctx.context.data).intoErrorUnion(err);
+    pub fn flushWithCurrentThread(err: *?AnyError) AnyError.Error!void {
+        const handle = ctx.Handle.getHandle();
+        try handle.tasks_v0.run_to_completion().intoErrorUnion(err);
     }
 
     /// Signals the event loop to complete the remaining jobs and exit afterwards.
@@ -117,10 +112,10 @@ pub const BlockingContext = extern struct {
     };
 
     /// Initializes a new blocking context.
-    pub fn init(ctx: AsyncExecutor, err: *?AnyError) AnyError.Error!BlockingContext {
+    pub fn init(err: *?AnyError) AnyError.Error!BlockingContext {
         var context: BlockingContext = undefined;
-        try ctx.context.vtable.async_v0.context_new_blocking(ctx.context.data, &context)
-            .intoErrorUnion(err);
+        const handle = ctx.Handle.getHandle();
+        try handle.tasks_v0.context_new_blocking(&context).intoErrorUnion(err);
         return context;
     }
 
@@ -221,16 +216,16 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
         /// The context must provide a generic method called `awaitFuture`, that takes the return
         /// type as the first parameter and a pointer to the future as the second parameter, and
         /// blocks the current task until the future polls as ready.
-        pub fn awaitBlockingBorrow(self: *@This(), ctx: anytype) U {
-            return ctx.awaitFuture(U, self);
+        pub fn awaitBlockingBorrow(self: *@This(), context: anytype) U {
+            return context.awaitFuture(U, self);
         }
 
         /// Awaits for the completion of the future using the specified context.
         ///
         /// Like `awaitBlockingBorrow`, but this method takes ownership of the future.
-        pub fn awaitBlocking(self: @This(), ctx: anytype) U {
+        pub fn awaitBlocking(self: @This(), context: anytype) U {
             var this = self;
-            const result = this.awaitBlockingBorrow(ctx);
+            const result = this.awaitBlockingBorrow(context);
             this.deinit();
             return result;
         }
@@ -245,7 +240,6 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
         /// Polling the new future will block the current task.
         pub fn enqueue(
             self: @This(),
-            ctx: AsyncExecutor,
             comptime deinit_result_fn: ?fn (*U) void,
             err: *?AnyError,
         ) AnyError.Error!EnqueuedFuture(U) {
@@ -273,8 +267,8 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
             };
 
             var enqueued: OpaqueFuture = undefined;
-            try ctx.context.vtable.async_v0.future_enqueue(
-                ctx.context.data,
+            const handle = ctx.Handle.getHandle();
+            try handle.tasks_v0.future_enqueue(
                 std.mem.asBytes(&self),
                 @sizeOf(@This()),
                 @alignOf(@This()),
@@ -309,7 +303,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
         cleanup_fn: ?*const fn (data: OptT) callconv(.c) void,
 
         pub const Result = U;
-        pub const Future = AsyncExecutor.Future(@This(), U, poll, deinit);
+        pub const Future = SelfTy.Future(@This(), U, poll, deinit);
 
         /// Initializes a new future.
         pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
@@ -382,7 +376,7 @@ pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
         data: ?T,
 
         pub const Result = T;
-        pub const Future = AsyncExecutor.Future(
+        pub const Future = SelfTy.Future(
             @This(),
             T,
             poll,
@@ -423,7 +417,7 @@ pub fn MapFuture(comptime T: type, comptime U: type, map_fn: anytype) type {
         data: T,
 
         pub const Result = U;
-        pub const Future = AsyncExecutor.Future(@This(), U, poll, deinit);
+        pub const Future = SelfTy.Future(@This(), U, poll, deinit);
 
         pub fn init(data: T) @This() {
             return .{ .data = data };
@@ -521,7 +515,7 @@ pub fn FSMFuture(comptime T: type) type {
 
         pub const Data = T;
         pub const Result = U;
-        pub const Future = AsyncExecutor.Future(
+        pub const Future = SelfTy.Future(
             @This(),
             U,
             poll,
@@ -721,15 +715,14 @@ pub fn Fallible(comptime T: type) type {
     };
 }
 
-/// VTable of the async subsystem.
+/// base VTable of the async subsystem.
 ///
-/// Changing the VTable is a breaking change.
+/// Changing this definition is a breaking change.
 pub const VTable = extern struct {
-    run_to_completion: *const fn (ctx: *anyopaque) callconv(.c) AnyResult,
-    start_event_loop: *const fn (ctx: *anyopaque, loop: *EventLoop) callconv(.c) AnyResult,
-    context_new_blocking: *const fn (ctx: *anyopaque, context: *BlockingContext) callconv(.c) AnyResult,
+    run_to_completion: *const fn () callconv(.c) AnyResult,
+    start_event_loop: *const fn (loop: *EventLoop) callconv(.c) AnyResult,
+    context_new_blocking: *const fn (context: *BlockingContext) callconv(.c) AnyResult,
     future_enqueue: *const fn (
-        ctx: *anyopaque,
         data: ?[*]const u8,
         data_size: usize,
         data_alignment: usize,

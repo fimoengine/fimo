@@ -5,7 +5,7 @@ const c = @import("c");
 
 const Context = @import("../context.zig");
 const time = @import("../time.zig");
-const ProxyTracing = @import("proxy_context/tracing.zig");
+const pub_tracing = @import("../tracing.zig");
 const tls = @import("tls.zig");
 const CallStack = @import("tracing/CallStack.zig");
 const StackFrame = @import("tracing/StackFrame.zig");
@@ -13,14 +13,14 @@ const StackFrame = @import("tracing/StackFrame.zig");
 const Tracing = @This();
 
 allocator: Allocator,
-subscribers: []ProxyTracing.Subscriber,
+subscribers: []pub_tracing.Subscriber,
 buffer_size: usize,
-max_level: ProxyTracing.Level,
+max_level: pub_tracing.Level,
 thread_data: tls.Tls(ThreadData),
 thread_count: std.atomic.Value(usize),
 
 /// Initializes the tracing subsystem.
-pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (Allocator.Error || tls.TlsError)!Tracing {
+pub fn init(allocator: Allocator, config: ?*const pub_tracing.Config) (Allocator.Error || tls.TlsError)!Tracing {
     var self = Tracing{
         .allocator = allocator,
         .subscribers = undefined,
@@ -32,15 +32,15 @@ pub fn init(allocator: Allocator, config: ?*const ProxyTracing.Config) (Allocato
 
     if (config) |cfg| {
         const subscribers = if (cfg.subscribers) |s| s[0..cfg.subscriber_count] else @as(
-            []ProxyTracing.Subscriber,
+            []pub_tracing.Subscriber,
             &.{},
         );
-        self.subscribers = try allocator.dupe(ProxyTracing.Subscriber, subscribers);
+        self.subscribers = try allocator.dupe(pub_tracing.Subscriber, subscribers);
         for (self.subscribers) |sub| sub.ref();
         self.buffer_size = if (cfg.format_buffer_len != 0) cfg.format_buffer_len else 1024;
         self.max_level = cfg.max_level;
     } else {
-        self.subscribers = try allocator.dupe(ProxyTracing.Subscriber, &.{});
+        self.subscribers = try allocator.dupe(pub_tracing.Subscriber, &.{});
         self.buffer_size = 0;
         self.max_level = .off;
     }
@@ -81,7 +81,7 @@ pub fn asContext(self: *Tracing) *Context {
 ///
 /// If successful, the new call stack is marked as suspended. The new call stack is not set to be
 /// the active call stack.
-pub fn createCallStack(self: *Tracing) ProxyTracing.CallStack {
+pub fn createCallStack(self: *Tracing) pub_tracing.CallStack {
     if (!self.isEnabled()) return CallStack.dummy_call_stack;
     const call_stack = CallStack.init(self);
     return call_stack.asProxy();
@@ -127,11 +127,11 @@ pub inline fn pushSpan(
     args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
-    level: ProxyTracing.Level,
+    level: pub_tracing.Level,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     const desc = &struct {
-        var desc = ProxyTracing.SpanDesc{
+        var desc = pub_tracing.SpanDesc{
             .metadata = &.{
                 .name = name orelse location.fn_name,
                 .target = target orelse location.module,
@@ -143,7 +143,7 @@ pub inline fn pushSpan(
     }.desc;
     return self.pushSpanCustom(
         desc,
-        ProxyTracing.stdFormatter(fmt, @TypeOf(args)),
+        pub_tracing.stdFormatter(fmt, @TypeOf(args)),
         &args,
     );
 }
@@ -162,7 +162,7 @@ pub inline fn pushSpanErr(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -187,7 +187,7 @@ pub inline fn pushSpanWarn(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -212,7 +212,7 @@ pub inline fn pushSpanInfo(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -237,7 +237,7 @@ pub inline fn pushSpanDebug(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -262,7 +262,7 @@ pub inline fn pushSpanTrace(
     name: ?[:0]const u8,
     target: ?[:0]const u8,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpan(
         fmt,
         args,
@@ -285,7 +285,7 @@ pub inline fn pushSpanErrSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpanErr(
         fmt,
         args,
@@ -307,7 +307,7 @@ pub inline fn pushSpanWarnSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpanWarn(
         fmt,
         args,
@@ -329,7 +329,7 @@ pub inline fn pushSpanInfoSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpanInfo(
         fmt,
         args,
@@ -351,7 +351,7 @@ pub inline fn pushSpanDebugSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpanDebug(
         fmt,
         args,
@@ -373,7 +373,7 @@ pub inline fn pushSpanTraceSimple(
     comptime fmt: []const u8,
     args: anytype,
     location: std.builtin.SourceLocation,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     return self.pushSpanTrace(
         fmt,
         args,
@@ -393,10 +393,10 @@ pub inline fn pushSpanTraceSimple(
 /// This function may panic, if the current thread is not registered with the subsystem.
 pub fn pushSpanCustom(
     self: *const Tracing,
-    desc: *const ProxyTracing.SpanDesc,
-    formatter: *const ProxyTracing.Formatter,
+    desc: *const pub_tracing.SpanDesc,
+    formatter: *const pub_tracing.Formatter,
     data: ?*const anyopaque,
-) ProxyTracing.Span {
+) pub_tracing.Span {
     if (!self.isEnabled()) return StackFrame.dummy_span;
     if (!self.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
     const d = self.thread_data.get().?;
@@ -413,10 +413,10 @@ pub fn emitEvent(
     args: anytype,
     name: ?[:0]const u8,
     target: ?[:0]const u8,
-    level: ProxyTracing.Level,
+    level: pub_tracing.Level,
     location: std.builtin.SourceLocation,
 ) void {
-    const event = ProxyTracing.Event{
+    const event = pub_tracing.Event{
         .metadata = &.{
             .name = name orelse location.fn_name,
             .target = target orelse location.module,
@@ -427,7 +427,7 @@ pub fn emitEvent(
     };
     self.emitEventCustom(
         &event,
-        ProxyTracing.stdFormatter(fmt, @TypeOf(args)),
+        pub_tracing.stdFormatter(fmt, @TypeOf(args)),
         &args,
     );
 }
@@ -647,7 +647,7 @@ pub fn emitStackTrace(
     stack_trace: std.builtin.StackTrace,
     location: std.builtin.SourceLocation,
 ) void {
-    const event = ProxyTracing.Event{
+    const event = pub_tracing.Event{
         .metadata = &.{
             .name = name orelse location.fn_name,
             .target = target orelse location.module,
@@ -658,7 +658,7 @@ pub fn emitStackTrace(
     };
     self.emitEventCustom(
         &event,
-        ProxyTracing.stackTraceFormatter,
+        pub_tracing.stackTraceFormatter,
         &stack_trace,
     );
 }
@@ -685,8 +685,8 @@ pub fn emitStackTraceSimple(
 /// the message after reaching that specified size.
 pub fn emitEventCustom(
     self: *const Tracing,
-    event: *const ProxyTracing.Event,
-    formatter: *const ProxyTracing.Formatter,
+    event: *const pub_tracing.Event,
+    formatter: *const pub_tracing.Formatter,
     data: ?*const anyopaque,
 ) void {
     if (!self.wouldTrace(event.metadata)) return;
@@ -710,7 +710,7 @@ pub fn isEnabledForCurrentThread(self: *const Tracing) bool {
 }
 
 /// Checks whether an event or span with the provided metadata would lead to a tracing operation.
-pub fn wouldTrace(self: *const Tracing, metadata: *const ProxyTracing.Metadata) bool {
+pub fn wouldTrace(self: *const Tracing, metadata: *const pub_tracing.Metadata) bool {
     if (!self.isEnabledForCurrentThread()) return false;
     return @intFromEnum(self.max_level) >= @intFromEnum(metadata.level);
 }
@@ -790,55 +790,53 @@ const ThreadData = struct {
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn createCallStack(ptr: *anyopaque) callconv(.c) ProxyTracing.CallStack {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        return ctx.tracing.createCallStack();
+    fn createCallStack() callconv(.c) pub_tracing.CallStack {
+        std.debug.assert(Context.is_init);
+        return Context.global.tracing.createCallStack();
     }
-    fn suspendCurrentCallStack(ptr: *anyopaque, mark_blocked: bool) callconv(.c) void {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.suspendCurrentCallStack(mark_blocked);
+    fn suspendCurrentCallStack(mark_blocked: bool) callconv(.c) void {
+        std.debug.assert(Context.is_init);
+        Context.global.tracing.suspendCurrentCallStack(mark_blocked);
     }
-    fn resumeCurrentCallStack(ptr: *anyopaque) callconv(.c) void {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.resumeCurrentCallStack();
+    fn resumeCurrentCallStack() callconv(.c) void {
+        std.debug.assert(Context.is_init);
+        Context.global.tracing.resumeCurrentCallStack();
     }
     fn pushSpan(
-        ptr: *anyopaque,
-        desc: *const ProxyTracing.SpanDesc,
-        formatter: *const ProxyTracing.Formatter,
+        desc: *const pub_tracing.SpanDesc,
+        formatter: *const pub_tracing.Formatter,
         data: ?*const anyopaque,
-    ) callconv(.c) ProxyTracing.Span {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        return ctx.tracing.pushSpanCustom(desc, formatter, data);
+    ) callconv(.c) pub_tracing.Span {
+        std.debug.assert(Context.is_init);
+        return Context.global.tracing.pushSpanCustom(desc, formatter, data);
     }
     fn emitEvent(
-        ptr: *anyopaque,
-        event: *const ProxyTracing.Event,
-        formatter: *const ProxyTracing.Formatter,
+        event: *const pub_tracing.Event,
+        formatter: *const pub_tracing.Formatter,
         data: ?*const anyopaque,
     ) callconv(.c) void {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.emitEventCustom(event, formatter, data);
+        std.debug.assert(Context.is_init);
+        Context.global.tracing.emitEventCustom(event, formatter, data);
     }
-    fn isEnabled(ptr: *anyopaque) callconv(.c) bool {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        return ctx.tracing.isEnabled();
+    fn isEnabled() callconv(.c) bool {
+        std.debug.assert(Context.is_init);
+        return Context.global.tracing.isEnabled();
     }
-    fn registerThread(ptr: *anyopaque) callconv(.c) void {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.registerThread();
+    fn registerThread() callconv(.c) void {
+        std.debug.assert(Context.is_init);
+        Context.global.tracing.registerThread();
     }
-    fn unregisterThread(ptr: *anyopaque) callconv(.c) void {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.unregisterThread();
+    fn unregisterThread() callconv(.c) void {
+        std.debug.assert(Context.is_init);
+        Context.global.tracing.unregisterThread();
     }
-    fn flush(ptr: *anyopaque) callconv(.c) void {
-        const ctx: *Context = @alignCast(@ptrCast(ptr));
-        ctx.tracing.flush();
+    fn flush() callconv(.c) void {
+        std.debug.assert(Context.is_init);
+        Context.global.tracing.flush();
     }
 };
 
-pub const vtable = ProxyTracing.VTable{
+pub const vtable = pub_tracing.VTable{
     .create_call_stack = &VTableImpl.createCallStack,
     .suspend_current_call_stack = &VTableImpl.suspendCurrentCallStack,
     .resume_current_call_stack = &VTableImpl.resumeCurrentCallStack,

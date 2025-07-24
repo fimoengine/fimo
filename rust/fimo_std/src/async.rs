@@ -1,7 +1,7 @@
 //! Async subsystem.
 
 use crate::{
-    context::{ContextHandle, ContextView},
+    context::Handle,
     error::{AnyError, AnyResult, private},
     handle,
     module::symbols::{AssertSharable, Share},
@@ -19,18 +19,13 @@ use std::{
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
-    pub run_to_completion: unsafe extern "C" fn(handle: ContextHandle) -> AnyResult,
-    pub start_event_loop: unsafe extern "C" fn(
-        handle: ContextHandle,
-        event_loop: &mut MaybeUninit<EventLoop>,
-    ) -> AnyResult,
-    pub new_blocking_context: unsafe extern "C" fn(
-        handle: ContextHandle,
-        context: &mut MaybeUninit<BlockingContext>,
-    ) -> AnyResult,
+    pub run_to_completion: unsafe extern "C" fn() -> AnyResult,
+    pub start_event_loop:
+        unsafe extern "C" fn(event_loop: &mut MaybeUninit<EventLoop>) -> AnyResult,
+    pub new_blocking_context:
+        unsafe extern "C" fn(context: &mut MaybeUninit<BlockingContext>) -> AnyResult,
     #[allow(clippy::type_complexity)]
     pub enqueue_future: unsafe extern "C" fn(
-        handle: ContextHandle,
         data: Option<ConstNonNull<u8>>,
         data_len: usize,
         data_alignment: usize,
@@ -98,13 +93,13 @@ impl EventLoop {
     ///
     /// There can only be one event loop at a time, and it will keep the context alive until it
     /// completes its execution.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
-        let ctx = ctx.view();
-        let f = ctx.vtable.async_v0.start_event_loop;
+    pub fn new() -> Result<Self, AnyError> {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.async_v0.start_event_loop;
 
         let mut out = MaybeUninit::uninit();
         unsafe {
-            f(ctx.handle, &mut out).into_result()?;
+            f(&mut out).into_result()?;
             Ok(out.assume_init())
         }
     }
@@ -114,12 +109,10 @@ impl EventLoop {
     /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
     /// the context can not be destroyed until the queue is empty. Upon the completion of all tasks,
     /// the function will return to the caller.
-    pub fn flush_with_current_thread<'a, T: Viewable<ContextView<'a>>>(
-        ctx: T,
-    ) -> Result<(), AnyError> {
-        let ctx = ctx.view();
-        let f = ctx.vtable.async_v0.run_to_completion;
-        unsafe { f(ctx.handle).into_result() }
+    pub fn flush_with_current_thread() -> Result<(), AnyError> {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.async_v0.run_to_completion;
+        unsafe { f().into_result() }
     }
 
     /// Signals the event loop to complete the remaining jobs and exit afterward.
@@ -329,10 +322,7 @@ impl<T, R> Future<T, R> {
     ///
     /// This function does not check that the future can be sent to another thread, or that it lives
     /// long enough.
-    pub unsafe fn enqueue_unchecked(
-        self,
-        ctx: ContextView<'_>,
-    ) -> Result<EnqueuedFuture<R>, AnyError> {
+    pub unsafe fn enqueue_unchecked(self) -> Result<EnqueuedFuture<R>, AnyError> {
         extern "C" fn poll<T, R>(
             data: Option<NonNull<()>>,
             waker: WakerView<'_>,
@@ -358,12 +348,12 @@ impl<T, R> Future<T, R> {
         }
 
         let this = ManuallyDrop::new(self);
-        let f = ctx.vtable.async_v0.enqueue_future;
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.async_v0.enqueue_future;
         let mut out = MaybeUninit::uninit();
 
         unsafe {
             f(
-                ctx.handle,
                 Some(ConstNonNull::new_unchecked(&raw const this).cast()),
                 size_of::<Self>(),
                 align_of::<Self>(),
@@ -391,12 +381,12 @@ impl<T, R> Future<T, R> {
     }
 
     /// Enqueues the future on the subsystem.
-    pub fn enqueue(self, ctx: ContextView<'_>) -> Result<EnqueuedFuture<R>, AnyError>
+    pub fn enqueue(self) -> Result<EnqueuedFuture<R>, AnyError>
     where
         T: Send + 'static,
         R: Send + 'static,
     {
-        unsafe { self.enqueue_unchecked(ctx) }
+        unsafe { self.enqueue_unchecked() }
     }
 
     fn poll_ffi(self: Pin<&mut Self>, waker: WakerView<'_>) -> Poll<R> {
@@ -649,13 +639,13 @@ sa::assert_impl_all!(BlockingContext: Send, Share);
 
 impl BlockingContext {
     /// Constructs a new blocking context.
-    pub fn new<'a, T: Viewable<ContextView<'a>>>(ctx: T) -> Result<Self, AnyError> {
-        let ctx = ctx.view();
-        let f = ctx.vtable.async_v0.new_blocking_context;
+    pub fn new() -> Result<Self, AnyError> {
+        let handle = unsafe { Handle::get_handle() };
+        let f = handle.async_v0.new_blocking_context;
 
         let mut out = MaybeUninit::uninit();
         unsafe {
-            f(ctx.handle, &mut out).into_result()?;
+            f(&mut out).into_result()?;
             Ok(out.assume_init())
         }
     }
@@ -693,10 +683,10 @@ impl Drop for BlockingContext {
 }
 
 /// Block the thread until the future is ready.
-pub fn block_on<'a, T: Viewable<ContextView<'a>>, F>(ctx: T, fut: F) -> F::Output
+pub fn block_on<F>(fut: F) -> F::Output
 where
     F: IntoFuture,
 {
-    let context = BlockingContext::new(ctx).expect("blocking context creation failed");
+    let context = BlockingContext::new().expect("blocking context creation failed");
     context.block_on(fut)
 }

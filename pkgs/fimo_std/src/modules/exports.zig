@@ -4,29 +4,29 @@ const builtin = @import("builtin");
 
 const c = @import("c");
 
-const AnyError = @import("../../../AnyError.zig");
+const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Path = @import("../../../path.zig").Path;
-const Version = @import("../../../Version.zig");
-const Context = @import("../../proxy_context.zig");
-const Async = @import("../async.zig");
-const Fallible = Async.Fallible;
-const EnqueuedFuture = Async.EnqueuedFuture;
-const Module = @import("../module.zig");
+const ctx = @import("../ctx.zig");
+const modules = @import("../modules.zig");
+const path = @import("../path.zig");
+const tasks = @import("../tasks.zig");
+const Fallible = tasks.Fallible;
+const EnqueuedFuture = tasks.EnqueuedFuture;
+const Version = @import("../Version.zig");
 
-const Self = @This();
+const ExportsRoot = @This();
 
 /// Declaration of a module parameter.
 pub const Parameter = extern struct {
-    type: Module.ParameterType,
-    read_group: Module.ParameterAccessGroup = .private,
-    write_group: Module.ParameterAccessGroup = .private,
+    type: modules.ParameterType,
+    read_group: modules.ParameterAccessGroup = .private,
+    write_group: modules.ParameterAccessGroup = .private,
     read: ?*const fn (
-        data: Module.OpaqueParameterData,
+        data: modules.OpaqueParameterData,
         value: *anyopaque,
     ) callconv(.c) void = null,
     write: ?*const fn (
-        data: Module.OpaqueParameterData,
+        data: modules.OpaqueParameterData,
         value: *const anyopaque,
     ) callconv(.c) void = null,
     name: [*:0]const u8,
@@ -54,7 +54,7 @@ pub const Namespace = extern struct {
 
 /// Declaration of a module symbol import.
 pub const SymbolImport = extern struct {
-    version: c.FimoVersion,
+    version: Version.CVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
 };
@@ -70,7 +70,7 @@ pub const SymbolLinkage = enum(i32) {
 pub const SymbolExport = extern struct {
     symbol: *const anyopaque,
     linkage: SymbolLinkage,
-    version: c.FimoVersion,
+    version: Version.CVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
 };
@@ -78,14 +78,14 @@ pub const SymbolExport = extern struct {
 /// Declaration of a dynamic module symbol export.
 pub const DynamicSymbolExport = extern struct {
     constructor: *const fn (
-        ctx: *const Module.OpaqueInstance,
+        ctx: *const modules.OpaqueInstance,
     ) callconv(.c) EnqueuedFuture(Fallible(*anyopaque)),
     destructor: *const fn (
-        ctx: *const Module.OpaqueInstance,
+        ctx: *const modules.OpaqueInstance,
         symbol: *anyopaque,
     ) callconv(.c) void,
     linkage: SymbolLinkage,
-    version: c.FimoVersion,
+    version: Version.CVersion,
     name: [*:0]const u8,
     namespace: [*:0]const u8 = "",
 };
@@ -123,7 +123,7 @@ pub const Modifier = extern struct {
     ///
     /// The instance will acquire a static dependency to the provided instance. Multiple
     /// dependencies may be provided.
-    pub const Dependency = Module.Info;
+    pub const Dependency = modules.Info;
 
     /// Accessor to the debug info of a module.
     ///
@@ -131,7 +131,7 @@ pub const Modifier = extern struct {
     /// tracing. May only be specified once.
     pub const DebugInfo = extern struct {
         data: ?*anyopaque,
-        construct: *const fn (ptr: ?*anyopaque, info: *Module.DebugInfo) callconv(.c) AnyResult,
+        construct: *const fn (ptr: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) AnyResult,
     };
 
     /// A constructor and destructor for the state of a module.
@@ -142,11 +142,11 @@ pub const Modifier = extern struct {
     /// deinitialized. May only be specified once.
     pub const InstanceState = extern struct {
         init: *const fn (
-            ctx: *const Module.OpaqueInstance,
-            set: Module.LoadingSet,
+            ctx: *const modules.OpaqueInstance,
+            set: modules.LoadingSet,
         ) callconv(.c) EnqueuedFuture(Fallible(?*anyopaque)),
         deinit: *const fn (
-            ctx: *const Module.OpaqueInstance,
+            ctx: *const modules.OpaqueInstance,
             state: ?*anyopaque,
         ) callconv(.c) void,
     };
@@ -156,7 +156,7 @@ pub const Modifier = extern struct {
     /// The event will be dispatched immediately after the instance has been loaded. An error will
     /// result in the destruction of the instance. May only be specified once.
     pub const StartEvent = extern struct {
-        on_event: *const fn (ctx: *const Module.OpaqueInstance) callconv(.c) EnqueuedFuture(Fallible(void)),
+        on_event: *const fn (ctx: *const modules.OpaqueInstance) callconv(.c) EnqueuedFuture(Fallible(void)),
     };
 
     /// A listener for the stop event of the instance.
@@ -164,14 +164,14 @@ pub const Modifier = extern struct {
     /// The event will be dispatched immediately before any exports are deinitialized. May only be
     /// specified once.
     pub const StopEvent = extern struct {
-        on_event: *const fn (ctx: *const Module.OpaqueInstance) callconv(.c) void,
+        on_event: *const fn (ctx: *const modules.OpaqueInstance) callconv(.c) void,
     };
 };
 
 /// Declaration of a module export.
 pub const Export = extern struct {
-    next: ?*Context.TaggedInStruct = null,
-    version: c.FimoVersion = Context.context_version.intoC(),
+    next: ?*anyopaque = null,
+    version: Version.CVersion = ctx.context_version.intoC(),
     name: [*:0]const u8,
     description: ?[*:0]const u8 = null,
     author: ?[*:0]const u8 = null,
@@ -320,11 +320,11 @@ pub const Builder = struct {
         &.{.{ .debug_info = {} }}
     else
         &.{},
-    debug_info: ?Module.DebugInfo.Builder = if (!builtin.strip_debug_info) .{} else null,
+    debug_info: ?modules.DebugInfo.Builder = if (!builtin.strip_debug_info) .{} else null,
     stateType: type = void,
-    instance_state: ?Self.Modifier.InstanceState = null,
-    start_event: ?Self.Modifier.StartEvent = null,
-    stop_event: ?Self.Modifier.StopEvent = null,
+    instance_state: ?ExportsRoot.Modifier.InstanceState = null,
+    start_event: ?ExportsRoot.Modifier.StartEvent = null,
+    stop_event: ?ExportsRoot.Modifier.StopEvent = null,
 
     pub const Parameter = struct {
         name: []const u8,
@@ -339,46 +339,46 @@ pub const Builder = struct {
             i32: i32,
             i64: i64,
         },
-        read_group: Module.ParameterAccessGroup = .private,
-        write_group: Module.ParameterAccessGroup = .private,
+        read_group: modules.ParameterAccessGroup = .private,
+        write_group: modules.ParameterAccessGroup = .private,
         read: ?*const fn (
-            data: Module.OpaqueParameterData,
+            data: modules.OpaqueParameterData,
             value: *anyopaque,
         ) callconv(.c) void = null,
         write: ?*const fn (
-            data: Module.OpaqueParameterData,
+            data: modules.OpaqueParameterData,
             value: *const anyopaque,
         ) callconv(.c) void = null,
     };
 
     pub const Resource = struct {
         name: [:0]const u8,
-        path: Path,
+        path: path.Path,
     };
 
     pub const SymbolImport = struct {
         name: ?[:0]const u8 = null,
-        symbol: Module.Symbol,
+        symbol: modules.Symbol,
     };
 
     pub const SymbolExportOptions = struct {
-        symbol: Module.Symbol,
+        symbol: modules.Symbol,
         name: ?[:0]const u8 = null,
         linkage: SymbolLinkage = .global,
     };
 
     const SymbolExport = struct {
-        symbol: Module.Symbol,
+        symbol: modules.Symbol,
         name: ?[:0]const u8,
         linkage: SymbolLinkage,
         value: union(enum) {
             static: *const anyopaque,
             dynamic: struct {
                 initFn: *const fn (
-                    ctx: *const Module.OpaqueInstance,
+                    ctx: *const modules.OpaqueInstance,
                 ) callconv(.c) EnqueuedFuture(Fallible(*anyopaque)),
                 deinitFn: *const fn (
-                    ctx: *const Module.OpaqueInstance,
+                    ctx: *const modules.OpaqueInstance,
                     symbol: *anyopaque,
                 ) callconv(.c) void,
             },
@@ -393,13 +393,13 @@ pub const Builder = struct {
         _,
     };
 
-    fn EnqueueError(comptime T: type) Async.EnqueuedFuture(Fallible(T)) {
+    fn EnqueueError(comptime T: type) tasks.EnqueuedFuture(Fallible(T)) {
         return .{
             .data = @constCast(@ptrCast(&{})),
             .poll_fn = &struct {
                 fn f(
                     data: **anyopaque,
-                    waker: Async.Waker,
+                    waker: tasks.Waker,
                     res: *Fallible(T),
                 ) callconv(.c) bool {
                     _ = data;
@@ -604,8 +604,8 @@ pub const Builder = struct {
         comptime self: Builder,
         comptime options: SymbolExportOptions,
         comptime Fut: type,
-        comptime initFn: fn (ctx: *const Module.OpaqueInstance) Fut,
-        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *options.symbol.T) void,
+        comptime initFn: fn (ctx: *const modules.OpaqueInstance) Fut,
+        comptime deinitFn: fn (ctx: *const modules.OpaqueInstance, symbol: *options.symbol.T) void,
     ) Builder {
         const Result = Fut.Result;
         switch (@typeInfo(Result)) {
@@ -614,9 +614,9 @@ pub const Builder = struct {
         }
         const Wrapper = struct {
             fn wrapInit(
-                ctx: *const Module.OpaqueInstance,
-            ) callconv(.c) Async.EnqueuedFuture(Fallible(*anyopaque)) {
-                const fut = initFn(ctx).intoFuture();
+                context: *const modules.OpaqueInstance,
+            ) callconv(.c) tasks.EnqueuedFuture(Fallible(*anyopaque)) {
+                const fut = initFn(context).intoFuture();
                 var mapped_fut = fut.map(
                     Fallible(*anyopaque),
                     struct {
@@ -627,17 +627,17 @@ pub const Builder = struct {
                     }.map,
                 ).intoFuture();
                 var err: ?AnyError = null;
-                return mapped_fut.enqueue(ctx.context().async(), null, &err) catch {
+                return mapped_fut.enqueue(null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
                     return EnqueueError(*anyopaque);
                 };
             }
             fn wrapDeinit(
-                ctx: *const Module.OpaqueInstance,
+                context: *const modules.OpaqueInstance,
                 symbol_ptr: *anyopaque,
             ) callconv(.c) void {
-                return deinitFn(ctx, @alignCast(@ptrCast(symbol_ptr)));
+                return deinitFn(context, @alignCast(@ptrCast(symbol_ptr)));
             }
         };
 
@@ -659,20 +659,20 @@ pub const Builder = struct {
     pub fn withDynamicExportSync(
         comptime self: Builder,
         comptime options: SymbolExportOptions,
-        comptime initFn: fn (ctx: *const Module.OpaqueInstance) anyerror!*options.symbol.T,
-        comptime deinitFn: fn (ctx: *const Module.OpaqueInstance, symbol: *options.symbol.T) void,
+        comptime initFn: fn (ctx: *const modules.OpaqueInstance) anyerror!*options.symbol.T,
+        comptime deinitFn: fn (ctx: *const modules.OpaqueInstance, symbol: *options.symbol.T) void,
     ) Builder {
         const Wrapper = struct {
-            instance: *const Module.OpaqueInstance,
+            instance: *const modules.OpaqueInstance,
 
             const Result = anyerror!*options.symbol.T;
-            const Future = Async.Future(@This(), Result, poll, null);
+            const Future = tasks.Future(@This(), Result, poll, null);
 
-            fn init(instance: *const Module.OpaqueInstance) Future {
+            fn init(instance: *const modules.OpaqueInstance) Future {
                 return Future.init(.{ .instance = instance });
             }
 
-            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!*options.symbol.T) {
+            fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(anyerror!*options.symbol.T) {
                 _ = waker;
                 return .{ .ready = initFn(this.instance) };
             }
@@ -704,7 +704,7 @@ pub const Builder = struct {
     pub fn withDebugInfo(comptime self: Builder) Builder {
         if (self.debug_info != null) return self;
 
-        var debug_info = Module.DebugInfo.Builder{};
+        var debug_info = modules.DebugInfo.Builder{};
         for (self.imports) |sym| debug_info.addImport(sym.symbol.T);
         for (self.exports) |sym| {
             if (sym.value == .static)
@@ -723,7 +723,7 @@ pub const Builder = struct {
     pub fn withState(
         comptime self: Builder,
         comptime Fut: type,
-        comptime initFn: fn (*const Module.OpaqueInstance, Module.LoadingSet) Fut,
+        comptime initFn: fn (*const modules.OpaqueInstance, modules.LoadingSet) Fut,
         comptime deinitFn: anytype,
     ) Builder {
         const Result = Fut.Result;
@@ -739,10 +739,10 @@ pub const Builder = struct {
         };
         const Wrapper = struct {
             fn wrapInit(
-                ctx: *const Module.OpaqueInstance,
-                set: Module.LoadingSet,
-            ) callconv(.c) Async.EnqueuedFuture(Fallible(?*anyopaque)) {
-                const fut = initFn(ctx, set).intoFuture();
+                context: *const modules.OpaqueInstance,
+                set: modules.LoadingSet,
+            ) callconv(.c) tasks.EnqueuedFuture(Fallible(?*anyopaque)) {
+                const fut = initFn(context, set).intoFuture();
                 var mapped_fut = fut.map(
                     Fallible(?*anyopaque),
                     struct {
@@ -757,7 +757,7 @@ pub const Builder = struct {
                     }.f,
                 ).intoFuture();
                 var err: ?AnyError = null;
-                return mapped_fut.enqueue(ctx.context().async(), null, &err) catch {
+                return mapped_fut.enqueue(null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
                     return EnqueueError(?*anyopaque);
@@ -765,16 +765,16 @@ pub const Builder = struct {
             }
 
             fn wrapDeinit(
-                ctx: *const Module.OpaqueInstance,
+                context: *const modules.OpaqueInstance,
                 data: ?*anyopaque,
             ) callconv(.c) void {
                 if (comptime @sizeOf(T) == 0) {
-                    const f: fn (*const Module.OpaqueInstance) void = deinitFn;
-                    f(ctx);
+                    const f: fn (*const modules.OpaqueInstance) void = deinitFn;
+                    f(context);
                 } else {
-                    const f: fn (*const Module.OpaqueInstance, *T) void = deinitFn;
+                    const f: fn (*const modules.OpaqueInstance, *T) void = deinitFn;
                     const state: *T = @alignCast(@ptrCast(data));
-                    f(ctx, state);
+                    f(context, state);
                 }
             }
         };
@@ -799,23 +799,23 @@ pub const Builder = struct {
     ) Builder {
         const Ret = if (comptime @sizeOf(T) == 0) void else *T;
         const Wrapper = struct {
-            instance: *const Module.OpaqueInstance,
-            set: Module.LoadingSet,
+            instance: *const modules.OpaqueInstance,
+            set: modules.LoadingSet,
 
             const Result = anyerror!Ret;
-            const Future = Async.Future(@This(), Result, poll, null);
+            const Future = tasks.Future(@This(), Result, poll, null);
 
-            fn init(instance: *const Module.OpaqueInstance, set: Module.LoadingSet) Future {
+            fn init(instance: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
                 return Future.init(.{ .instance = instance, .set = set });
             }
 
-            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!Ret) {
+            fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(anyerror!Ret) {
                 _ = waker;
                 if (comptime @sizeOf(T) == 0) {
-                    const f: fn (*const Module.OpaqueInstance, Module.LoadingSet) anyerror!void = initFn;
+                    const f: fn (*const modules.OpaqueInstance, modules.LoadingSet) anyerror!void = initFn;
                     return .{ .ready = f(this.instance, this.set) };
                 } else {
-                    const f: fn (*const Module.OpaqueInstance, Module.LoadingSet) anyerror!*T = initFn;
+                    const f: fn (*const modules.OpaqueInstance, modules.LoadingSet) anyerror!*T = initFn;
                     return .{ .ready = f(this.instance, this.set) };
                 }
             }
@@ -826,7 +826,7 @@ pub const Builder = struct {
     pub fn withOnStartEvent(
         comptime self: Builder,
         comptime Fut: type,
-        comptime f: fn (ctx: *const Module.OpaqueInstance) Fut,
+        comptime f: fn (ctx: *const modules.OpaqueInstance) Fut,
     ) Builder {
         const Result = Fut.Result;
         const T: type = switch (@typeInfo(Result)) {
@@ -836,15 +836,15 @@ pub const Builder = struct {
         std.debug.assert(T == void);
         const Wrapper = struct {
             fn wrapF(
-                ctx: *const Module.OpaqueInstance,
-            ) callconv(.c) Async.EnqueuedFuture(Fallible(void)) {
-                const fut = f(ctx).intoFuture();
+                context: *const modules.OpaqueInstance,
+            ) callconv(.c) tasks.EnqueuedFuture(Fallible(void)) {
+                const fut = f(context).intoFuture();
                 var mapped_fut = fut.map(
                     Fallible(void),
                     Fallible(void).wrap,
                 ).intoFuture();
                 var err: ?AnyError = null;
-                return mapped_fut.enqueue(ctx.context().async(), null, &err) catch {
+                return mapped_fut.enqueue(null, &err) catch {
                     mapped_fut.deinit();
                     err.?.deinit();
                     return EnqueueError(void);
@@ -863,19 +863,19 @@ pub const Builder = struct {
     /// Adds an `on_start` event to the module.
     pub fn withOnStartEventSync(
         comptime self: Builder,
-        comptime f: fn (ctx: *const Module.OpaqueInstance) anyerror!void,
+        comptime f: fn (ctx: *const modules.OpaqueInstance) anyerror!void,
     ) Builder {
         const Wrapper = struct {
-            instance: *const Module.OpaqueInstance,
+            instance: *const modules.OpaqueInstance,
 
             const Result = anyerror!void;
-            const Future = Async.Future(@This(), Result, poll, null);
+            const Future = tasks.Future(@This(), Result, poll, null);
 
-            fn init(instance: *const Module.OpaqueInstance) Future {
+            fn init(instance: *const modules.OpaqueInstance) Future {
                 return Future.init(.{ .instance = instance });
             }
 
-            fn poll(this: *@This(), waker: Async.Waker) Async.Poll(anyerror!void) {
+            fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(anyerror!void) {
                 _ = waker;
                 return .{ .ready = f(this.instance) };
             }
@@ -886,14 +886,14 @@ pub const Builder = struct {
     /// Adds an `on_stop` event to the module.
     pub fn withOnStopEvent(
         comptime self: Builder,
-        comptime f: fn (ctx: *const Module.OpaqueInstance) void,
+        comptime f: fn (ctx: *const modules.OpaqueInstance) void,
     ) Builder {
         if (self.stop_event != null)
             @compileError("the `on_stop` event is already defined");
 
         const wrapped = struct {
-            fn wrapper(ctx: *const Module.OpaqueInstance) callconv(.c) void {
-                f(ctx);
+            fn wrapper(context: *const modules.OpaqueInstance) callconv(.c) void {
+                f(context);
             }
         }.wrapper;
 
@@ -918,7 +918,7 @@ pub const Builder = struct {
             };
             f.* = std.builtin.Type.StructField{
                 .name = p.member_name,
-                .type = *Module.Parameter(pType),
+                .type = *modules.Parameter(pType),
                 .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(*anyopaque),
@@ -938,14 +938,14 @@ pub const Builder = struct {
     fn ResourceTable(comptime self: Builder) type {
         const PathWrapper = extern struct {
             ffi: c.FimoUTF8Path,
-            pub fn cStr(this: @This()) [:0]const u8 {
+            pub fn getCStr(this: @This()) [:0]const u8 {
                 return this.ffi.path[0..this.ffi.length :0];
             }
-            pub fn path(this: @This()) Path {
-                return Path.initC(this.ffi);
+            pub fn getPath(this: @This()) path.Path {
+                return path.Path.initC(this.ffi);
             }
             pub fn format(this: @This(), w: *std.Io.Writer) std.Io.Writer.Error!void {
-                try this.path().format(w);
+                try this.getPath().format(w);
             }
         };
 
@@ -1036,10 +1036,10 @@ pub const Builder = struct {
         return @Type(t);
     }
 
-    fn SymbolProvider(comptime self: Builder) fn (anytype, comptime Module.Symbol) *const anyopaque {
+    fn SymbolProvider(comptime self: Builder) fn (anytype, comptime modules.Symbol) *const anyopaque {
         const SymbolInfo = struct {
             name: [:0]const u8,
-            symbol: Module.Symbol,
+            symbol: modules.Symbol,
             location: enum { imp, exp },
         };
         var infos: [self.imports.len + self.exports.len]SymbolInfo = undefined;
@@ -1074,7 +1074,7 @@ pub const Builder = struct {
         }
         const infos_c = infos;
         return struct {
-            fn provide(instance: anytype, comptime symbol: Module.Symbol) *const anyopaque {
+            fn provide(instance: anytype, comptime symbol: modules.Symbol) *const anyopaque {
                 const name, const location = comptime blk: {
                     for (&infos_c) |info| {
                         if (std.mem.eql(u8, info.symbol.name, symbol.name) and
@@ -1097,10 +1097,10 @@ pub const Builder = struct {
         }.provide;
     }
 
-    fn ffiParameters(comptime self: Builder) []const Self.Parameter {
-        var parameters: [self.parameters.len]Self.Parameter = undefined;
+    fn ffiParameters(comptime self: Builder) []const ExportsRoot.Parameter {
+        var parameters: [self.parameters.len]ExportsRoot.Parameter = undefined;
         for (self.parameters, &parameters) |src, *dst| {
-            dst.* = Self.Parameter{
+            dst.* = ExportsRoot.Parameter{
                 .name = src.name ++ "\x00",
                 .read_group = src.read_group,
                 .write_group = src.write_group,
@@ -1132,10 +1132,10 @@ pub const Builder = struct {
         return &parameters_c;
     }
 
-    fn ffiResources(comptime self: Builder) []const Self.Resource {
-        var resources: [self.resources.len]Self.Resource = undefined;
+    fn ffiResources(comptime self: Builder) []const ExportsRoot.Resource {
+        var resources: [self.resources.len]ExportsRoot.Resource = undefined;
         for (self.resources, &resources) |src, *dst| {
-            dst.* = Self.Resource{
+            dst.* = ExportsRoot.Resource{
                 .path = src.path.raw ++ "\x00",
             };
         }
@@ -1154,10 +1154,10 @@ pub const Builder = struct {
         return &namespaces_c;
     }
 
-    fn ffiImports(comptime self: Builder) []const Self.SymbolImport {
-        var imports: [self.imports.len]Self.SymbolImport = undefined;
+    fn ffiImports(comptime self: Builder) []const ExportsRoot.SymbolImport {
+        var imports: [self.imports.len]ExportsRoot.SymbolImport = undefined;
         for (self.imports, &imports) |src, *dst| {
-            dst.* = Self.SymbolImport{
+            dst.* = ExportsRoot.SymbolImport{
                 .name = src.symbol.name,
                 .namespace = src.symbol.namespace,
                 .version = src.symbol.version.intoC(),
@@ -1167,7 +1167,7 @@ pub const Builder = struct {
         return &imports_c;
     }
 
-    fn ffiExports(comptime self: Builder) []const Self.SymbolExport {
+    fn ffiExports(comptime self: Builder) []const ExportsRoot.SymbolExport {
         var count: usize = 0;
         for (self.exports) |exp| {
             if (exp.value != .static) continue;
@@ -1175,10 +1175,10 @@ pub const Builder = struct {
         }
 
         var i: usize = 0;
-        var exports: [count]Self.SymbolExport = undefined;
+        var exports: [count]ExportsRoot.SymbolExport = undefined;
         for (self.exports) |src| {
             if (src.value != .static) continue;
-            exports[i] = Self.SymbolExport{
+            exports[i] = ExportsRoot.SymbolExport{
                 .symbol = src.value.static,
                 .linkage = src.linkage,
                 .version = src.symbol.version.intoC(),
@@ -1216,14 +1216,14 @@ pub const Builder = struct {
         return &exports_c;
     }
 
-    fn ffiModifiers(comptime self: Builder) []const Self.Modifier {
-        var modifiers: [self.modifiers.len]Self.Modifier = undefined;
+    fn ffiModifiers(comptime self: Builder) []const ExportsRoot.Modifier {
+        var modifiers: [self.modifiers.len]ExportsRoot.Modifier = undefined;
         for (self.modifiers, &modifiers) |src, *dst| {
             switch (src) {
                 .debug_info => {
                     const debug_info = self.debug_info.?.build();
                     const construct = struct {
-                        fn f(data: ?*anyopaque, info: *Module.DebugInfo) callconv(.c) AnyResult {
+                        fn f(data: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) AnyResult {
                             _ = data;
                             info.* = debug_info.asFfi();
                             return AnyResult.ok;
@@ -1271,7 +1271,7 @@ pub const Builder = struct {
             }
         }
 
-        const modifiers_c: [self.modifiers.len]Self.Modifier = modifiers;
+        const modifiers_c: [self.modifiers.len]ExportsRoot.Modifier = modifiers;
         return &modifiers_c;
     }
 
@@ -1306,7 +1306,7 @@ pub const Builder = struct {
         };
         embedStaticModuleExport(exp);
 
-        return Module.Instance(.{
+        return modules.Instance(.{
             .ParametersType = self.ParameterTable(),
             .ResourcesType = self.ResourceTable(),
             .ImportsType = self.ImportTable(),

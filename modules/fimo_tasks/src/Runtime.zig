@@ -3,9 +3,9 @@ const Thread = std.Thread;
 const Allocator = std.mem.Allocator;
 
 const fimo_std = @import("fimo_std");
-const Context = fimo_std.Context;
-const Tracing = Context.Tracing;
-const Module = Context.Module;
+const ctx = fimo_std.ctx;
+const tracing = fimo_std.tracing;
+const modules = fimo_std.modules;
 
 const context = @import("context.zig");
 const fimo_export = @import("fimo_export.zig");
@@ -19,7 +19,7 @@ const Self = @This();
 allocator: Allocator,
 futex: Futex,
 pool_map: PoolMap = .{},
-instance: ?*const Module.OpaqueInstance = null,
+instance: ?*const modules.OpaqueInstance = null,
 
 /// Initializes a new unowned runtime instance.
 pub fn init(allocator: Allocator) Self {
@@ -85,18 +85,6 @@ pub fn getDefaultWorkerCount(self: *Self) usize {
     }
 }
 
-/// Returns the context of the owner instance.
-pub fn getContext(self: *Self) ?Context {
-    const instance = self.getInstance() orelse return null;
-    return instance.context();
-}
-
-/// Returns the tracing subsystem of the owner instance.
-pub fn getTracing(self: *Self) ?Tracing {
-    const ctx = self.getContext() orelse return null;
-    return ctx.tracing();
-}
-
 /// Logs an error message.
 pub fn logErr(
     self: *Self,
@@ -104,8 +92,9 @@ pub fn logErr(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    if (self.getTracing()) |tr| {
-        tr.emitErrSimple(fmt, args, location);
+    _ = self;
+    if (ctx.isInit()) {
+        tracing.emitErrSimple(fmt, args, location);
     } else {
         std.log.err(fmt, args);
     }
@@ -118,8 +107,9 @@ pub fn logDebug(
     args: anytype,
     location: std.builtin.SourceLocation,
 ) void {
-    if (self.getTracing()) |tr| {
-        tr.emitDebugSimple(fmt, args, location);
+    _ = self;
+    if (ctx.isInit()) {
+        tracing.emitDebugSimple(fmt, args, location);
     } else {
         std.log.debug(fmt, args);
     }

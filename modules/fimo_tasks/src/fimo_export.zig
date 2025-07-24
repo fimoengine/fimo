@@ -6,8 +6,8 @@ const builtin = @import("builtin");
 const fimo_std = @import("fimo_std");
 const AnyError = fimo_std.AnyError;
 const AnyResult = AnyError.AnyResult;
-const Context = fimo_std.Context;
-const Module = Context.Module;
+const modules = fimo_std.modules;
+const tracing = fimo_std.tracing;
 const time = fimo_std.time;
 const Duration = time.Duration;
 const Instant = time.Instant;
@@ -24,7 +24,7 @@ pub const default_worker_count: usize = 0; // One worker per cpu core.
 
 pub const Instance = blk: {
     @setEvalBranchQuota(100000);
-    break :blk Module.exports.Builder.init("fimo_tasks")
+    break :blk modules.exports.Builder.init("fimo_tasks")
         .withDescription("Multi-threaded tasks runtime")
         .withLicense("MIT OR APACHE 2.0")
         .withParameter(.{
@@ -79,20 +79,16 @@ const State = struct {
     var global_state: State = undefined;
     var global_instance: atomic.Value(?*const Instance) = .init(null);
 
-    fn init(octx: *const Module.OpaqueInstance, set: Module.LoadingSet) !*State {
+    fn init(octx: *const modules.OpaqueInstance, set: modules.LoadingSet) !*State {
         _ = set;
         const ctx: *const Instance = @ptrCast(@alignCast(octx));
         if (global_instance.cmpxchgStrong(null, ctx, .monotonic, .monotonic)) |_| {
-            ctx.context().tracing().emitErrSimple(
-                "`fimo_tasks` is already initialized",
-                .{},
-                @src(),
-            );
+            tracing.emitErrSimple("`fimo_tasks` is already initialized", .{}, @src());
             return error.AlreadyInitialized;
         }
         if (comptime builtin.target.os.tag == .windows) {
             if (timeBeginPeriod(1) != 0) {
-                ctx.context().tracing().emitWarnSimple(
+                tracing.emitWarnSimple(
                     "`timeBeginPeriod` failed, defaulting to default timer resolution",
                     .{},
                     @src(),
@@ -112,7 +108,7 @@ const State = struct {
         return &global_state;
     }
 
-    fn deinit(octx: *const Module.OpaqueInstance, state: *State) void {
+    fn deinit(octx: *const modules.OpaqueInstance, state: *State) void {
         const ctx: *const Instance = @ptrCast(@alignCast(octx));
         if (global_instance.cmpxchgStrong(ctx, null, .monotonic, .monotonic)) |_|
             @panic("already deinit");
@@ -355,7 +351,7 @@ fn abort() callconv(.c) void {
     Worker.abortTask();
 }
 
-fn sleep(duration: fimo_std.c.FimoDuration) callconv(.c) void {
+fn sleep(duration: fimo_std.time.compat.Duration) callconv(.c) void {
     Worker.sleep(Duration.initC(duration));
 }
 
@@ -383,7 +379,7 @@ fn futexWait(
     key_size: usize,
     expect: u64,
     token: usize,
-    timeout: ?*const fimo_std.c.FimoInstant,
+    timeout: ?*const fimo_std.time.compat.Instant,
 ) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
     State.global_state.runtime.futex.wait(
         key,
@@ -401,7 +397,7 @@ fn futexWait(
 fn futexWaitv(
     keys: [*]const fimo_tasks_meta.sync.Futex.KeyExpect,
     key_count: usize,
-    timeout: ?*const fimo_std.c.FimoInstant,
+    timeout: ?*const fimo_std.time.compat.Instant,
     wake_index: *usize,
 ) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
     wake_index.* = State.global_state.runtime.futex.waitv(
