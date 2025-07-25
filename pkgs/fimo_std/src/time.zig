@@ -421,6 +421,15 @@ pub const Instant = struct {
                     .sub_sec_nanos = @intCast(ns % nanos_per_sec),
                 };
             },
+            .macos, .ios, .tvos, .watchos, .visionos => {
+                const ts = std.posix.clock_gettime(
+                    .UPTIME_RAW,
+                ) catch @panic("UPTIME_RAW clock not supported");
+                return Instant{
+                    .secs = @intCast(ts.sec),
+                    .sub_sec_nanos = @intCast(ts.nsec),
+                };
+            },
             else => {
                 const ts = std.posix.clock_gettime(
                     .MONOTONIC,
