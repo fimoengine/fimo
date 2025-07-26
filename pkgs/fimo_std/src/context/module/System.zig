@@ -7,10 +7,10 @@ const Context = @import("../../context.zig");
 const pub_modules = @import("../../modules.zig");
 const pub_tasks = @import("../../tasks.zig");
 const Version = @import("../../Version.zig");
-const Async = @import("../async.zig");
 const graph = @import("../graph.zig");
-const Module = @import("../module.zig");
+const modules = @import("../modules.zig");
 const tmp_path = @import("../tmp_path.zig");
+const tracing = @import("../tracing.zig");
 const InstanceHandle = @import("InstanceHandle.zig");
 const LoadingSet = @import("LoadingSet.zig");
 const SymbolRef = @import("SymbolRef.zig");
@@ -33,21 +33,6 @@ symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashCon
 
 const feature_count = std.meta.fields(pub_modules.FeatureTag).len;
 
-pub const SystemError = error{
-    InUse,
-    Duplicate,
-    NotFound,
-    NotPermitted,
-    NotADependency,
-    CyclicDependency,
-    LoadingInProcess,
-    EnqueueError,
-} || Allocator.Error;
-
-pub const SystemInitError = error{
-    InvalidConfig,
-} || Allocator.Error;
-
 pub const LoadingSetWaiter = struct {
     waiter: *anyopaque,
     waker: pub_tasks.Waker,
@@ -63,15 +48,12 @@ const NamespaceInfo = struct {
     num_references: usize,
 };
 
-pub fn init(
-    ctx: *const Context,
-    config: *const pub_modules.Config,
-) (SystemInitError || tmp_path.TmpDirError)!Self {
+pub fn init(config: *const pub_modules.Config) !Self {
     const profile = switch (config.profile) {
         .release, .dev => |x| x,
         else => |x| {
-            ctx.tracing.emitErrSimple("unknown profile, profile='{}'", .{@intFromEnum(x)}, @src());
-            return SystemInitError.InvalidConfig;
+            tracing.emitErrSimple("unknown profile, profile='{}'", .{@intFromEnum(x)}, @src());
+            return error.InvalidConfig;
         },
     };
     var feature_status: [feature_count]pub_modules.FeatureStatus = @splat(undefined);
@@ -83,14 +65,14 @@ pub fn init(
         for (features[0..config.feature_count]) |request| switch (request.tag) {
             else => |tag| {
                 if (request.flag == .required) {
-                    ctx.tracing.emitErrSimple(
+                    tracing.emitErrSimple(
                         "unknown feature was marked as required, feature='{}'",
                         .{@intFromEnum(tag)},
                         @src(),
                     );
-                    return SystemInitError.InvalidConfig;
+                    return error.InvalidConfig;
                 }
-                ctx.tracing.emitErrSimple(
+                tracing.emitErrSimple(
                     "unknown feature...ignoring, feature='{}'",
                     .{@intFromEnum(tag)},
                     @src(),
@@ -99,7 +81,7 @@ pub fn init(
         };
     }
     for (&feature_status) |status| {
-        ctx.tracing.emitDebugSimple(
+        tracing.emitDebugSimple(
             "module subsystem feature=`{s}`, status=`{s}`",
             .{ @tagName(status.tag), @tagName(status.flag) },
             @src(),
@@ -107,8 +89,8 @@ pub fn init(
     }
 
     return Self{
-        .allocator = ctx.allocator,
-        .arena = ArenaAllocator.init(ctx.allocator),
+        .allocator = Context.allocator,
+        .arena = ArenaAllocator.init(Context.allocator),
         .profile = profile,
         .features = feature_status,
         .dep_graph = graph.GraphUnmanaged(
@@ -141,23 +123,6 @@ pub fn unlock(self: *Self) void {
     self.mutex.unlock();
 }
 
-pub fn asContext(self: *Self) *Context {
-    const module: *Module = @fieldParentPtr("sys", self);
-    return module.asContext();
-}
-
-pub fn logTrace(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
-    self.asContext().tracing.emitTraceSimple(fmt, args, location);
-}
-
-pub fn logWarn(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
-    self.asContext().tracing.emitWarnSimple(fmt, args, location);
-}
-
-pub fn logError(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
-    self.asContext().tracing.emitErrSimple(fmt, args, location);
-}
-
 fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
     if (self.string_cache.getKey(value)) |v| return v;
     const alloc = self.arena.allocator();
@@ -171,7 +136,7 @@ pub fn getInstance(self: *Self, name: []const u8) ?*InstanceRef {
     return self.instances.getPtr(name);
 }
 
-pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
+pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) !void {
     const handle = InstanceHandle.fromInnerPtr(inner);
     if (self.instances.contains(std.mem.span(handle.info.name))) return error.Duplicate;
 
@@ -249,7 +214,7 @@ pub fn addInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
     try self.instances.put(self.arena.allocator(), key, data);
 }
 
-pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!void {
+pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) !void {
     const handle = InstanceHandle.fromInnerPtr(inner);
     if (!inner.canUnload()) return error.NotPermitted;
     if (!self.instances.contains(std.mem.span(handle.info.name))) return error.NotFound;
@@ -281,11 +246,7 @@ pub fn removeInstance(self: *Self, inner: *InstanceHandle.Inner) SystemError!voi
     _ = self.dep_graph.removeNode(self.allocator, instance_id) catch |err| @panic(@errorName(err));
 }
 
-pub fn linkInstances(
-    self: *Self,
-    inner: *InstanceHandle.Inner,
-    other: *InstanceHandle.Inner,
-) (SystemError || InstanceHandle.InstanceHandleError)!void {
+pub fn linkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *InstanceHandle.Inner) !void {
     const handle = InstanceHandle.fromInnerPtr(inner);
     const other_handle = InstanceHandle.fromInnerPtr(other);
     if (inner.isDetached() or other.isDetached()) return error.NotFound;
@@ -318,7 +279,7 @@ pub fn linkInstances(
     try inner.addDependency(other, .dynamic);
 }
 
-pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *InstanceHandle.Inner) SystemError!void {
+pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *InstanceHandle.Inner) !void {
     const handle = InstanceHandle.fromInnerPtr(inner);
     const other_handle = InstanceHandle.fromInnerPtr(other);
 
@@ -338,7 +299,7 @@ pub fn unlinkInstances(self: *Self, inner: *InstanceHandle.Inner, other: *Instan
     inner.removeDependency(other) catch unreachable;
 }
 
-pub fn pruneInstances(self: *Self) SystemError!void {
+pub fn pruneInstances(self: *Self) !void {
     const nodes = self.dep_graph.sortTopological(self.allocator, .incoming) catch |err| switch (err) {
         Allocator.Error.OutOfMemory => return Allocator.Error.OutOfMemory,
         else => unreachable,
@@ -358,7 +319,7 @@ pub fn pruneInstances(self: *Self) SystemError!void {
             inner.enqueueUnload() catch return error.EnqueueError;
             continue;
         }
-        self.logTrace(
+        tracing.emitTraceSimple(
             "unloading unused instance, instance='{s}'",
             .{instance.info.name},
             @src(),
@@ -374,7 +335,7 @@ pub fn getNamespace(self: *Self, name: []const u8) ?*NamespaceInfo {
     return self.namespaces.getPtr(name);
 }
 
-fn ensureInitNamespace(self: *Self, name: []const u8) SystemError!void {
+fn ensureInitNamespace(self: *Self, name: []const u8) !void {
     if (std.mem.eql(u8, name, global_namespace)) return;
     if (self.namespaces.contains(name)) return;
 
@@ -392,7 +353,7 @@ fn cleanupUnusedNamespace(self: *Self, namespace: []const u8) void {
     }
 }
 
-pub fn refNamespace(self: *Self, name: []const u8) SystemError!void {
+pub fn refNamespace(self: *Self, name: []const u8) !void {
     if (std.mem.eql(u8, name, global_namespace)) return;
     const ns = self.getNamespace(name) orelse return error.NotFound;
     ns.num_references += 1;
@@ -421,7 +382,7 @@ fn addSymbol(
     namespace: []const u8,
     version: Version,
     owner: []const u8,
-) SystemError!void {
+) !void {
     if (self.getSymbol(name, namespace) != null) return error.Duplicate;
     const key = SymbolRef.Id{
         .name = try self.cacheString(name),

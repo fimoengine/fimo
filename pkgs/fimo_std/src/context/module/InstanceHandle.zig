@@ -16,8 +16,9 @@ const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const FSMFuture = pub_tasks.FSMFuture;
 const Fallible = pub_tasks.Fallible;
 const Version = @import("../../Version.zig");
-const Async = @import("../async.zig");
 const RefCount = @import("../RefCount.zig");
+const tasks = @import("../tasks.zig");
+const tracing = @import("../tracing.zig");
 const LoadingSet = @import("LoadingSet.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
 const SymbolRef = @import("SymbolRef.zig");
@@ -54,19 +55,6 @@ pub const Symbol = struct {
         }
     }
 };
-
-pub const ParameterError = error{
-    NotPermitted,
-    NotADependency,
-    InvalidParameterType,
-    NotFound,
-};
-
-pub const InstanceHandleError = error{
-    Detached,
-    NotFound,
-    InvalidParameterType,
-} || PathError || Allocator.Error;
 
 pub const Parameter = struct {
     inner: Data,
@@ -182,29 +170,26 @@ pub const Parameter = struct {
         return p;
     }
 
-    pub fn checkType(
-        self: *const Parameter,
-        ty: pub_modules.ParameterType,
-    ) ParameterError!void {
+    pub fn checkType(self: *const Parameter, ty: pub_modules.ParameterType) !void {
         if (!(self.inner.type() == ty)) return error.InvalidParameterType;
     }
 
-    pub fn checkReadPublic(self: *const Parameter) ParameterError!void {
+    pub fn checkReadPublic(self: *const Parameter) !void {
         if (!(self.read_group == .public)) return error.NotPermitted;
     }
 
-    pub fn checkWritePublic(self: *const Parameter) ParameterError!void {
+    pub fn checkWritePublic(self: *const Parameter) !void {
         if (!(self.write_group == .public)) return error.NotPermitted;
     }
 
-    fn checkReadDependency(self: *const Parameter, reader: *const Inner) ParameterError!void {
+    fn checkReadDependency(self: *const Parameter, reader: *const Inner) !void {
         const min_permission = pub_modules.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.read_group) > @intFromEnum(min_permission)) return error.NotPermitted;
         const owner_name = std.mem.span(self.owner.info.name);
         if (!reader.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
-    fn checkWriteDependency(self: *const Parameter, writer: *const Inner) ParameterError!void {
+    fn checkWriteDependency(self: *const Parameter, writer: *const Inner) !void {
         const min_permission = pub_modules.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.write_group) > @intFromEnum(min_permission)) return error.NotPermitted;
         const owner_name = std.mem.span(self.owner.info.name);
@@ -297,7 +282,7 @@ pub const Inner = struct {
         }
     }
 
-    pub fn refStrong(self: *Inner) InstanceHandleError!void {
+    pub fn refStrong(self: *Inner) !void {
         if (self.isDetached()) return error.Detached;
         self.strong_count += 1;
     }
@@ -327,7 +312,7 @@ pub const Inner = struct {
         return sym;
     }
 
-    fn addSymbol(self: *Inner, name: []const u8, namespace: []const u8, sym: Symbol) InstanceHandleError!void {
+    fn addSymbol(self: *Inner, name: []const u8, namespace: []const u8, sym: Symbol) !void {
         if (self.isDetached()) return error.Detached;
         const key = SymbolRef.Id{
             .name = try self.cacheString(name),
@@ -341,7 +326,7 @@ pub const Inner = struct {
         return self.parameters.get(name);
     }
 
-    fn addParameter(self: *Inner, name: []const u8, param: *Parameter) InstanceHandleError!void {
+    fn addParameter(self: *Inner, name: []const u8, param: *Parameter) !void {
         if (self.isDetached()) return error.Detached;
         const n = try self.cacheString(name);
         try self.parameters.put(self.arena.allocator(), n, param);
@@ -352,13 +337,13 @@ pub const Inner = struct {
         return self.namespaces.getPtr(name);
     }
 
-    pub fn addNamespace(self: *Inner, name: []const u8, @"type": DependencyType) InstanceHandleError!void {
+    pub fn addNamespace(self: *Inner, name: []const u8, @"type": DependencyType) !void {
         if (self.isDetached()) return error.Detached;
         const n = try self.cacheString(name);
         try self.namespaces.put(self.arena.allocator(), n, @"type");
     }
 
-    pub fn removeNamespace(self: *Inner, name: []const u8) InstanceHandleError!void {
+    pub fn removeNamespace(self: *Inner, name: []const u8) !void {
         if (self.isDetached()) return error.Detached;
         if (!self.namespaces.swapRemove(name)) return error.NotFound;
     }
@@ -368,7 +353,7 @@ pub const Inner = struct {
         return self.dependencies.getPtr(name);
     }
 
-    pub fn addDependency(self: *Inner, other: *Inner, @"type": DependencyType) InstanceHandleError!void {
+    pub fn addDependency(self: *Inner, other: *Inner, @"type": DependencyType) !void {
         std.debug.assert(self != other);
         if (self.isDetached() or other.isDetached()) return error.Detached;
 
@@ -387,7 +372,7 @@ pub const Inner = struct {
         other.dependents_count += 1;
     }
 
-    pub fn removeDependency(self: *Inner, other: *Inner) InstanceHandleError!void {
+    pub fn removeDependency(self: *Inner, other: *Inner) !void {
         std.debug.assert(self != other);
         if (self.isDetached()) return error.Detached;
         std.debug.assert(!other.isDetached());
@@ -474,7 +459,7 @@ fn init(
     handle: *ModuleHandle,
     @"export": ?*const pub_modules.Export,
     @"type": InstanceType,
-) InstanceHandleError!*Self {
+) !*Self {
     var arena = ArenaAllocator.init(sys.allocator);
     errdefer arena.deinit();
     const allocator = arena.allocator();
@@ -557,10 +542,6 @@ pub fn fromInnerPtr(inner: *Inner) *const Self {
     return @fieldParentPtr("inner", inner);
 }
 
-fn logTrace(self: *const Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
-    self.sys.logTrace(fmt, args, location);
-}
-
 fn ref(self: *const Self) void {
     const this: *Self = @constCast(self);
     this.ref_count.ref();
@@ -582,7 +563,7 @@ pub fn lock(self: *const Self) *Inner {
 }
 
 fn addNamespace(self: *const Self, namespace: []const u8) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "adding namespace to instance, instance='{s}', namespace='{s}'",
         .{ self.info.name, namespace },
         @src(),
@@ -604,7 +585,7 @@ fn addNamespace(self: *const Self, namespace: []const u8) !void {
 }
 
 fn removeNamespace(self: *const Self, namespace: []const u8) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "removing namespace from instance, instance='{s}', namespace='{s}'",
         .{ self.info.name, namespace },
         @src(),
@@ -626,7 +607,7 @@ fn removeNamespace(self: *const Self, namespace: []const u8) !void {
 }
 
 fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "adding dependency to instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
         @src(),
@@ -648,7 +629,7 @@ fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
 }
 
 fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "removing dependency from instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
         @src(),
@@ -670,7 +651,7 @@ fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
 }
 
 fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{f}'",
         .{ self.info.name, name, namespace, version },
         @src(),
@@ -712,8 +693,8 @@ fn readParameter(
     @"type": pub_modules.ParameterType,
     module: []const u8,
     parameter: []const u8,
-) ParameterError!void {
-    self.logTrace(
+) !void {
+    tracing.emitTraceSimple(
         "reading dependency parameter, reader='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
         .{ self.info.name, value, @tagName(@"type"), module, parameter },
         @src(),
@@ -736,8 +717,8 @@ fn writeParameter(
     @"type": pub_modules.ParameterType,
     module: []const u8,
     parameter: []const u8,
-) ParameterError!void {
-    self.logTrace(
+) !void {
+    tracing.emitTraceSimple(
         "writing dependency parameter, writer='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
         .{ self.info.name, value, @tagName(@"type"), module, parameter },
         @src(),
@@ -815,22 +796,17 @@ const EnqueueUnloadOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     fn init(handle: *const Self) !void {
-        handle.sys.logTrace(
+        tracing.emitTraceSimple(
             "enqueueing unload of instance, instance='{s}'",
             .{handle.info.name},
             @src(),
         );
         handle.ref();
 
-        const context = handle.sys.asContext();
         const f = EnqueueUnloadOp.init(@This(){
             .handle = handle,
         }).intoFuture();
-        var enqueued = try Async.Task.initFuture(
-            @TypeOf(f),
-            &context.async.sys,
-            &f,
-        );
+        var enqueued = try tasks.Task.initFuture(@TypeOf(f), &f);
 
         // Detaches the future.
         enqueued.deinit();
@@ -846,7 +822,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
     }
 
     pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
-        self.handle.logTrace(
+        tracing.emitTraceSimple(
             "attempting to unload instance, instance=`{s}`",
             .{self.handle.info.name},
             @src(),
@@ -856,7 +832,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
         defer inner.unlock();
         switch (inner.checkAsyncUnload(waker)) {
             .noop => {
-                self.handle.logTrace(
+                tracing.emitTraceSimple(
                     "skipping unload, already unloaded, instance=`{s}`",
                     .{self.handle.info.name},
                     @src(),
@@ -865,7 +841,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
                 return .ret;
             },
             .wait => {
-                self.handle.logTrace(
+                tracing.emitTraceSimple(
                     "unload blocked, instance=`{s}`",
                     .{self.handle.info.name},
                     @src(),
@@ -888,7 +864,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
         sys.lock();
         defer sys.unlock();
 
-        self.handle.logTrace(
+        tracing.emitTraceSimple(
             "unloading instance, instance=`{s}`",
             .{self.handle.info.name},
             @src(),
@@ -991,11 +967,11 @@ pub const InitExportedOp = FSMFuture(struct {
     dyn_export_future: EnqueuedFuture(Fallible(*anyopaque)) = undefined,
     ret: Error!*pub_modules.OpaqueInstance = undefined,
 
-    pub const Error = (InstanceHandleError || AnyError.Error);
+    pub const Error = anyerror;
     pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: Error) void {
-        if (trace) |tr| self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
@@ -1247,7 +1223,7 @@ pub const StartInstanceOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: AnyError.Error) void {
-        if (trace) |tr| self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
@@ -1327,7 +1303,7 @@ const InstanceVTableImpl = struct {
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
-        self.logTrace(
+        tracing.emitTraceSimple(
             "querying namespace info, instance='{s}', namespace='{s}'",
             .{ ctx.info.name, namespace },
             @src(),
@@ -1353,8 +1329,7 @@ const InstanceVTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
 
         self.addNamespace(namespace_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1367,8 +1342,7 @@ const InstanceVTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
 
         self.removeNamespace(namespace_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1381,7 +1355,7 @@ const InstanceVTableImpl = struct {
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const dependency = std.mem.span(info.name);
-        self.logTrace(
+        tracing.emitTraceSimple(
             "querying dependency info, instance='{s}', other='{s}'",
             .{ ctx.info.name, dependency },
             @src(),
@@ -1406,8 +1380,7 @@ const InstanceVTableImpl = struct {
         const self = Self.fromInstancePtr(ctx);
 
         self.addDependency(info) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1419,8 +1392,7 @@ const InstanceVTableImpl = struct {
         const self = Self.fromInstancePtr(ctx);
 
         self.removeDependency(info) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1438,8 +1410,7 @@ const InstanceVTableImpl = struct {
         const version_ = Version.initC(version);
 
         symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1456,8 +1427,7 @@ const InstanceVTableImpl = struct {
         const parameter_ = std.mem.span(parameter);
 
         self.readParameter(value, @"type", module_, parameter_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1474,8 +1444,7 @@ const InstanceVTableImpl = struct {
         const parameter_ = std.mem.span(parameter);
 
         self.writeParameter(value, @"type", module_, parameter_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;

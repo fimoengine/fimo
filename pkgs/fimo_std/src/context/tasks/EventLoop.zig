@@ -7,15 +7,13 @@ const System = @import("System.zig");
 
 const Self = @This();
 
-sys: *System,
 thread: Thread,
 
-pub fn init(sys: *System) !pub_tasks.EventLoop {
-    const loop = try sys.allocator.create(Self);
-    errdefer sys.allocator.destroy(loop);
+pub fn init() !pub_tasks.EventLoop {
+    const loop = try System.allocator.create(Self);
+    errdefer System.allocator.destroy(loop);
 
-    loop.sys = sys;
-    loop.thread = try sys.startEventLoopThread();
+    loop.thread = try System.startEventLoopThread();
 
     const loop_vtable = pub_tasks.EventLoop.VTable{
         .join = &Self.join,
@@ -29,18 +27,14 @@ pub fn init(sys: *System) !pub_tasks.EventLoop {
 
 fn join(ptr: ?*anyopaque) callconv(.c) void {
     const self: *Self = @alignCast(@ptrCast(ptr));
-    self.sys.stopEventLoop();
+    System.stopEventLoop();
     self.thread.join();
-
-    const sys = self.sys;
-    sys.allocator.destroy(self);
+    System.allocator.destroy(self);
 }
 
 fn detach(ptr: ?*anyopaque) callconv(.c) void {
     const self: *Self = @alignCast(@ptrCast(ptr));
-    self.sys.stopEventLoop();
+    System.stopEventLoop();
     self.thread.detach();
-
-    const sys = self.sys;
-    sys.allocator.destroy(self);
+    System.allocator.destroy(self);
 }

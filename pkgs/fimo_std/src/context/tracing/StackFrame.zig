@@ -2,8 +2,7 @@ const std = @import("std");
 
 const time = @import("../../time.zig");
 const pub_tracing = @import("../../tracing.zig");
-const Tracing = @import("../tracing.zig");
-const TracingError = Tracing.TracingError;
+const tracing = @import("../tracing.zig");
 const CallStack = @import("CallStack.zig");
 
 const Self = @This();
@@ -34,7 +33,7 @@ pub fn init(
     var num_created_spans: usize = 0;
 
     const now = time.Time.now();
-    for (owner.call_stacks.items, owner.owner.subscribers) |call_stack, subscriber| {
+    for (owner.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.createSpan(
             now,
             desc,
@@ -44,7 +43,7 @@ pub fn init(
         num_created_spans += 1;
     }
 
-    const frame = owner.owner.allocator.create(Self) catch |e| @panic(@errorName(e));
+    const frame = tracing.allocator.create(Self) catch |e| @panic(@errorName(e));
     frame.* = .{
         .metadata = desc.metadata,
         .parent_cursor = owner.cursor,
@@ -78,7 +77,7 @@ pub fn deinit(self: *Self) void {
     std.debug.assert(self.next == null);
 
     const now = time.Time.now();
-    for (self.owner.call_stacks.items, self.owner.owner.subscribers) |call_stack, subscriber| {
+    for (self.owner.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.destroySpan(now, call_stack, false);
     }
 
@@ -92,7 +91,7 @@ pub fn deinit(self: *Self) void {
         self.owner.end_frame = null;
     }
 
-    self.owner.owner.allocator.destroy(self);
+    tracing.allocator.destroy(self);
 }
 
 pub fn deinitAbort(self: *Self) void {
@@ -110,7 +109,7 @@ pub fn deinitAbort(self: *Self) void {
 
 pub fn deinitAbortUnchecked(self: *Self) void {
     const now = time.Time.now();
-    for (self.owner.call_stacks.items, self.owner.owner.subscribers) |call_stack, subscriber| {
+    for (self.owner.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.destroySpan(now, call_stack, true);
     }
 
@@ -124,7 +123,7 @@ pub fn deinitAbortUnchecked(self: *Self) void {
         self.owner.end_frame = null;
     }
 
-    self.owner.owner.allocator.destroy(self);
+    tracing.allocator.destroy(self);
 }
 
 pub fn asProxySpan(self: *Self) pub_tracing.Span {

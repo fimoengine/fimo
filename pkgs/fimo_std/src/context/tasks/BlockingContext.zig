@@ -10,7 +10,6 @@ const System = @import("System.zig");
 
 const Self = @This();
 
-sys: *System,
 refcount: RefCount = .{},
 
 mutex: Mutex = .{},
@@ -18,10 +17,10 @@ cvar: Condition = .{},
 notified: bool = false,
 waiter: ?Thread.Id = null,
 
-pub fn init(sys: *System) Allocator.Error!pub_tasks.BlockingContext {
-    const self = try sys.allocator.create(Self);
-    errdefer sys.allocator.destroy(self);
-    self.* = .{ .sys = sys };
+pub fn init() Allocator.Error!pub_tasks.BlockingContext {
+    const self = try System.allocator.create(Self);
+    errdefer System.allocator.destroy(self);
+    self.* = .{};
 
     const Wrapper = struct {
         fn deinit(ptr: ?*anyopaque) callconv(.c) void {
@@ -57,9 +56,7 @@ fn ref(self: *Self) void {
 fn unref(self: *Self) void {
     if (self.refcount.unref() == .noop) return;
     std.debug.assert(self.waiter == null);
-
-    const sys = self.sys;
-    sys.allocator.destroy(self);
+    System.allocator.destroy(self);
 }
 
 fn asWaker(self: *Self) pub_tasks.Waker {

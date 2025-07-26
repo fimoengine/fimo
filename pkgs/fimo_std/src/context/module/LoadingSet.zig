@@ -7,7 +7,7 @@ const c = @import("c");
 
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Context = @import("../../context.zig");
+const priv_context = @import("../../context.zig");
 const pub_ctx = @import("../../ctx.zig");
 const pub_modules = @import("../../modules.zig");
 const Path = @import("../../path.zig").Path;
@@ -17,9 +17,11 @@ const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const FSMFuture = pub_tasks.FSMFuture;
 const Fallible = pub_tasks.Fallible;
 const Version = @import("../../Version.zig");
-const Async = @import("../async.zig");
 const graph = @import("../graph.zig");
+const priv_modules = @import("../modules.zig");
 const RefCount = @import("../RefCount.zig");
+const tasks = @import("../tasks.zig");
+const tracing = @import("../tracing.zig");
 const InstanceHandle = @import("InstanceHandle.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
 const SymbolRef = @import("SymbolRef.zig");
@@ -29,7 +31,6 @@ const Self = @This();
 
 mutex: Mutex = .{},
 refcount: RefCount = .{},
-context: *Context,
 arena: ArenaAlloactor,
 active_commits: usize = 0,
 should_recreate_map: bool = false,
@@ -195,7 +196,7 @@ const LoadGraph = struct {
         set.ref();
         errdefer set.unref();
 
-        const allocator = set.asSys().allocator;
+        const allocator = priv_modules.sys.allocator;
         const g = try allocator.create(LoadGraph);
         g.* = .{ .set = set };
         return g;
@@ -204,7 +205,7 @@ const LoadGraph = struct {
     fn deinit(self: *LoadGraph) void {
         const set = self.set;
         defer set.unref();
-        const allocator = set.asSys().allocator;
+        const allocator = priv_modules.sys.allocator;
 
         var it = self.dependency_tree.nodesIterator();
         while (it.next()) |node| node.data_ptr.deinit();
@@ -222,7 +223,6 @@ const LoadGraph = struct {
         if (!set.should_recreate_map) return;
         set.should_recreate_map = false;
 
-        const sys = set.asSys();
         var module_it = set.modules.iterator();
         check: while (module_it.next()) |entry| {
             const name = entry.key_ptr.*;
@@ -231,7 +231,7 @@ const LoadGraph = struct {
             const info = entry.value_ptr;
             if (info.status != .unloaded) continue;
             errdefer |e| {
-                sys.logWarn(
+                tracing.emitWarnSimple(
                     "internal error loading instance, instance='{s}', error='{s}'",
                     .{ name, @errorName(e) },
                     @src(),
@@ -240,8 +240,8 @@ const LoadGraph = struct {
             }
 
             // Check that no other module with the same name is already loaded.
-            if (sys.getInstance(name) != null) {
-                sys.logWarn(
+            if (priv_modules.sys.getInstance(name) != null) {
+                tracing.emitWarnSimple(
                     "instance with the same name already exists...skipping, instance='{s}'",
                     .{name},
                     @src(),
@@ -259,7 +259,7 @@ const LoadGraph = struct {
                 if (set.getSymbol(imp_name, imp_ns, imp_ver)) |sym| {
                     const owner = set.getModuleInfo(sym.owner).?;
                     if (owner.status == .err) {
-                        sys.logWarn(
+                        tracing.emitWarnSimple(
                             "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
                                 " instance='{s}', dependency='{s}'",
                             .{ name, sym.owner },
@@ -268,8 +268,8 @@ const LoadGraph = struct {
                         info.signalError();
                         continue :check;
                     }
-                } else if (sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
-                    sys.logWarn(
+                } else if (priv_modules.sys.getSymbolCompatible(imp_name, imp_ns, imp_ver) == null) {
+                    tracing.emitWarnSimple(
                         "instance is missing required symbol...skipping," ++
                             " instance='{s}', symbol='{s}', namespace='{s}', version='{f}'",
                         .{ name, imp_name, imp_ns, imp_ver },
@@ -284,8 +284,8 @@ const LoadGraph = struct {
             for (info.status.unloaded.@"export".getSymbolExports()) |e| {
                 const e_name = std.mem.span(e.name);
                 const e_ns = std.mem.span(e.namespace);
-                if (sys.getSymbol(e_name, e_ns) != null) {
-                    sys.logWarn(
+                if (priv_modules.sys.getSymbol(e_name, e_ns) != null) {
+                    tracing.emitWarnSimple(
                         "instance exports duplicate symbol...skipping," ++
                             " instance='{s}', symbol='{s}', namespace='{s}'",
                         .{ name, e_name, e_ns },
@@ -298,8 +298,8 @@ const LoadGraph = struct {
             for (info.status.unloaded.@"export".getDynamicSymbolExports()) |e| {
                 const e_name = std.mem.span(e.name);
                 const e_ns = std.mem.span(e.namespace);
-                if (sys.getSymbol(e_name, e_ns) != null) {
-                    sys.logWarn(
+                if (priv_modules.sys.getSymbol(e_name, e_ns) != null) {
+                    tracing.emitWarnSimple(
                         "instance exports duplicate symbol...skipping," ++
                             " instance='{s}', symbol='{s}', namespace='{s}'",
                         .{ name, e_name, e_ns },
@@ -312,10 +312,10 @@ const LoadGraph = struct {
 
             // Create the node such that we can connect them in the next step.
             const id = try self.dependency_tree.addNode(
-                sys.allocator,
+                priv_modules.sys.allocator,
                 .{ .module = name },
             );
-            try self.modules.put(sys.allocator, name, id);
+            try self.modules.put(priv_modules.sys.allocator, name, id);
         }
 
         // Connect the nodes and spawn the task.
@@ -329,7 +329,7 @@ const LoadGraph = struct {
             const info = entry.value_ptr;
             if (info.status != .unloaded) continue;
             errdefer |e| {
-                sys.logWarn(
+                tracing.emitWarnSimple(
                     "internal error loading instance, instance='{s}', error='{s}'",
                     .{ name, @errorName(e) },
                     @src(),
@@ -345,7 +345,7 @@ const LoadGraph = struct {
                     const owner_id = self.modules.get(sym.owner);
                     const owner_info = set.getModuleInfo(sym.owner).?;
                     if (owner_id == null or owner_info.status == .err) {
-                        sys.asContext().tracing.emitWarnSimple(
+                        tracing.emitWarnSimple(
                             "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
                                 " instance='{s}', dependency='{s}'",
                             .{ name, sym.owner },
@@ -354,7 +354,7 @@ const LoadGraph = struct {
                         info.signalError();
                         continue :connect;
                     }
-                    _ = try self.dependency_tree.addEdge(sys.allocator, {}, id, owner_id.?);
+                    _ = try self.dependency_tree.addEdge(priv_modules.sys.allocator, {}, id, owner_id.?);
                 }
             }
 
@@ -383,10 +383,10 @@ const LoadGraph = struct {
     }
 };
 
-pub fn init(context: *Context) !pub_modules.LoadingSet {
-    context.module.sys.logTrace("creating new loading set", .{}, @src());
+pub fn init() !pub_modules.LoadingSet {
+    tracing.emitTraceSimple("creating new loading set", .{}, @src());
 
-    const sys = &context.module.sys;
+    const sys = &priv_modules.sys;
     sys.lock();
     defer sys.unlock();
 
@@ -395,7 +395,7 @@ pub fn init(context: *Context) !pub_modules.LoadingSet {
     const allocator = arena.allocator();
 
     const set = try allocator.create(Self);
-    set.* = .{ .arena = undefined, .context = context };
+    set.* = .{ .arena = undefined };
     set.arena = arena;
 
     return set.asProxySet();
@@ -431,14 +431,6 @@ pub fn asProxySet(self: *Self) pub_modules.LoadingSet {
         .data = self,
         .vtable = &vtable,
     };
-}
-
-fn asSys(self: *Self) *System {
-    return &self.context.module.sys;
-}
-
-fn logTrace(self: *Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
-    self.asSys().logTrace(fmt, args, location);
 }
 
 fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
@@ -502,7 +494,7 @@ fn addModuleInner(
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
-            self.context.module.sys.logError(
+            tracing.emitErrSimple(
                 "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{f}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
@@ -514,7 +506,7 @@ fn addModuleInner(
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
         if (self.getSymbolAny(name, namespace)) |sym| {
-            self.context.module.sys.logError(
+            tracing.emitErrSimple(
                 "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{f}'",
                 .{ sym.owner, name, namespace, sym.version },
                 @src(),
@@ -559,7 +551,7 @@ fn addModuleInner(
     }
 
     var module_info = try ModuleInfo.init(
-        self.context.allocator,
+        priv_context.allocator,
         @"export",
         module_handle,
         owner,
@@ -570,13 +562,13 @@ fn addModuleInner(
     if (self.active_load_graph) |g| g.notify();
 }
 
-fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{InvalidExport}!void {
+fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!void {
     if (@"export".next != null) {
-        sys.logWarn("the next field is reserved for future use", .{}, @src());
+        tracing.emitWarnSimple("the next field is reserved for future use", .{}, @src());
         return error.InvalidExport;
     }
     if (!pub_ctx.context_version.isCompatibleWith(@"export".getVersion())) {
-        sys.logWarn(
+        tracing.emitWarnSimple(
             "incompatible context version, got='{f}', required='{f}'",
             .{ pub_ctx.context_version, @"export".getVersion() },
             @src(),
@@ -586,7 +578,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
 
     var has_error = false;
     if (std.mem.startsWith(u8, @"export".getName(), "__")) {
-        sys.logWarn(
+        tracing.emitWarnSimple(
             "export uses reserved name, export='{s}'",
             .{@"export".name},
             @src(),
@@ -597,7 +589,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
     const namespaces = @"export".getNamespaceImports();
     for (namespaces, 0..) |ns, i| {
         if (std.mem.eql(u8, std.mem.span(ns.name), "")) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "can not import global namespace, export='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), ns.name, i },
                 @src(),
@@ -610,7 +602,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             if (std.mem.eql(u8, std.mem.span(ns.name), std.mem.span(x.name))) count += 1;
         }
         if (count > 1) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "duplicate namespace, export='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), ns.name, i },
                 @src(),
@@ -629,7 +621,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             }
         }
         if (!ns_found) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "required namespace not imported, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), imp.name, imp.namespace, i },
                 @src(),
@@ -643,7 +635,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
         if (std.mem.startsWith(u8, name, "__")) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "can not export a symbol with a reserved name, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
@@ -651,7 +643,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             has_error = true;
         }
         if (std.mem.startsWith(u8, name, "__")) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
@@ -659,7 +651,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             has_error = true;
         }
         if (exp.linkage != .global) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "unknown symbol linkage specified, export='{s}', symbol='{s}', ns='{s}', linkage='{}', index='{}'",
                 .{ @"export".getName(), name, namespace, @intFromEnum(exp.linkage), i },
                 @src(),
@@ -673,7 +665,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             if (std.mem.eql(u8, name, imp_name) and
                 std.mem.eql(u8, namespace, imp_namespace))
             {
-                sys.logWarn(
+                tracing.emitWarnSimple(
                     "can not import and export the same symbol, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                     .{ @"export".getName(), name, namespace, i },
                     @src(),
@@ -691,7 +683,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
                 std.mem.eql(u8, namespace, exp_namespace)) count += 1;
         }
         if (count > 1) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "duplicate export, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
@@ -705,7 +697,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
         const name = std.mem.span(exp.name);
         const namespace = std.mem.span(exp.namespace);
         if (std.mem.startsWith(u8, name, "__")) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "can not export a symbol with a reserved name, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
@@ -713,7 +705,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             has_error = true;
         }
         if (std.mem.startsWith(u8, name, "__")) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
@@ -721,7 +713,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             has_error = true;
         }
         if (exp.linkage != .global) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "unknown symbol linkage specified, export='{s}', symbol='{s}', ns='{s}', linkage='{}', index='{}'",
                 .{ @"export".getName(), name, namespace, @intFromEnum(exp.linkage), i },
                 @src(),
@@ -735,7 +727,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             if (std.mem.eql(u8, name, imp_name) and
                 std.mem.eql(u8, namespace, imp_namespace))
             {
-                sys.logWarn(
+                tracing.emitWarnSimple(
                     "can not import and export the same symbol, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                     .{ @"export".getName(), name, namespace, i },
                     @src(),
@@ -759,7 +751,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
                 std.mem.eql(u8, namespace, exp_namespace)) count += 1;
         }
         if (count > 1) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "duplicate export, export='{s}', symbol='{s}', ns='{s}', index='{}'",
                 .{ @"export".getName(), name, namespace, i },
                 @src(),
@@ -775,7 +767,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
             .debug_info, .instance_state, .start_event, .stop_event => {
                 for (modifiers[0..i]) |x| {
                     if (x.tag == mod.tag) {
-                        sys.logWarn(
+                        tracing.emitWarnSimple(
                             "the modifier may only appear once, export='{s}', modifier=`{s}`, index='{}'",
                             .{ @"export".getName(), @tagName(mod.tag), i },
                             @src(),
@@ -785,7 +777,7 @@ fn validate_export(sys: *System, @"export": *const pub_modules.Export) error{Inv
                 }
             },
             else => {
-                sys.logWarn(
+                tracing.emitWarnSimple(
                     "unknown modifier, export='{s}', modifier='{}', index='{}'",
                     .{ @"export".getName(), @intFromEnum(mod.tag), i },
                     @src(),
@@ -811,8 +803,8 @@ const AppendModulesData = struct {
 
 fn appendModules(@"export": *const pub_modules.Export, o_data: ?*anyopaque) callconv(.c) bool {
     const data: *AppendModulesData = @alignCast(@ptrCast(o_data));
-    validate_export(data.sys, @"export") catch {
-        data.sys.logWarn("skipping export", .{}, @src());
+    validate_export(@"export") catch {
+        tracing.emitWarnSimple("skipping export", .{}, @src());
         return true;
     };
 
@@ -832,7 +824,7 @@ fn addModule(
     owner_inner: *InstanceHandle.Inner,
     @"export": *const pub_modules.Export,
 ) !void {
-    try validate_export(&self.context.module.sys, @"export");
+    try validate_export(@"export");
     try self.addModuleInner(owner_inner.handle.?, @"export", owner_inner.instance.?);
 }
 
@@ -846,11 +838,11 @@ fn addModulesFromHandle(
     filter_data: ?*anyopaque,
 ) !void {
     var append_data = AppendModulesData{
-        .sys = &self.context.module.sys,
+        .sys = &priv_modules.sys,
         .filter_fn = filter_fn,
         .filter_data = filter_data,
     };
-    defer append_data.exports.deinit(self.context.allocator);
+    defer append_data.exports.deinit(priv_modules.sys.allocator);
     errdefer for (append_data.exports.items) |exp| exp.deinit();
     module_handle.iterator(&appendModules, &append_data);
     if (append_data.err) |err| return err;
@@ -869,7 +861,7 @@ fn addModulesFromPath(
     ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
     filter_data: ?*anyopaque,
 ) !void {
-    const module_handle = try ModuleHandle.initPath(self.context.allocator, path);
+    const module_handle = try ModuleHandle.initPath(priv_modules.sys.allocator, path);
     defer module_handle.unref();
     try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
 }
@@ -885,7 +877,7 @@ fn addModulesFromLocal(
     bin_ptr: *const anyopaque,
 ) !void {
     const module_handle = try ModuleHandle.initLocal(
-        self.context.allocator,
+        priv_modules.sys.allocator,
         iterator_fn,
         bin_ptr,
     );
@@ -915,16 +907,11 @@ const LoadOp = FSMFuture(struct {
             .load_graph = load_graph,
         };
         var f = LoadOp.init(data).intoFuture();
-
-        return Async.Task.initFuture(
-            @TypeOf(f),
-            &load_graph.set.context.async.sys,
-            &f,
-        );
+        return tasks.Task.initFuture(@TypeOf(f), &f);
     }
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
@@ -948,8 +935,6 @@ const LoadOp = FSMFuture(struct {
 
     pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         const set = self.load_graph.set;
-        const sys = set.asSys();
-
         set.lock();
         defer set.unlock();
 
@@ -961,11 +946,11 @@ const LoadOp = FSMFuture(struct {
 
         // Check that it is not part of a cycle.
         const is_cyclic = self.load_graph.dependency_tree.pathExists(
-            sys.allocator,
+            priv_modules.sys.allocator,
             self.node_id,
             self.node_id,
         ) catch |err| {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "internal error while verifying module dependencies...skipping," ++
                     " instance='{s}', error='{s}'",
                 .{ node.module, @errorName(err) },
@@ -975,7 +960,7 @@ const LoadOp = FSMFuture(struct {
             return .ret;
         };
         if (is_cyclic) {
-            sys.logWarn(
+            tracing.emitWarnSimple(
                 "module has a cyclic dependency...skipping, instance='{s}'",
                 .{node.module},
                 @src(),
@@ -1002,7 +987,7 @@ const LoadOp = FSMFuture(struct {
 
             switch (status) {
                 .err => {
-                    sys.logWarn(
+                    tracing.emitWarnSimple(
                         "instance can not be loaded due to an error loading one of its dependencies...skipping," ++
                             " instance='{s}', dependency='{s}'",
                         .{ node.module, dep_name },
@@ -1025,11 +1010,10 @@ const LoadOp = FSMFuture(struct {
     pub fn __state1(self: *@This(), waker: pub_tasks.Waker) void {
         _ = waker;
 
-        const set = self.load_graph.set;
-        const sys = set.asSys();
+        priv_modules.sys.lock();
+        errdefer priv_modules.sys.unlock();
 
-        sys.lock();
-        errdefer sys.unlock();
+        const set = self.load_graph.set;
         set.lock();
         errdefer set.unlock();
 
@@ -1040,7 +1024,7 @@ const LoadOp = FSMFuture(struct {
         };
         const info = set.getModuleInfo(node.module).?;
         self.name = std.mem.span(info.status.unloaded.@"export".name);
-        set.logTrace("loading instance, instance='{s}'", .{self.name}, @src());
+        tracing.emitTraceSimple("loading instance, instance='{s}'", .{self.name}, @src());
 
         // Recheck that all dependencies could be loaded.
         for (info.status.unloaded.@"export".getSymbolImports()) |i| {
@@ -1056,7 +1040,7 @@ const LoadOp = FSMFuture(struct {
         // Initialize the instance future.
         set.unlock();
         self.instance_future = InstanceHandle.InitExportedOp.init(.{
-            .sys = sys,
+            .sys = &priv_modules.sys,
             .set = set.asProxySet(),
             .@"export" = info.status.unloaded.@"export",
             .handle = info.handle,
@@ -1067,21 +1051,19 @@ const LoadOp = FSMFuture(struct {
     pub fn __unwind2(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
         const set = self.load_graph.set;
-        const sys = set.asSys();
 
         self.instance_future.deinit();
         set.unlock();
-        sys.unlock();
+        priv_modules.sys.unlock();
     }
 
     pub fn __state2(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         const set = self.load_graph.set;
-        const sys = set.asSys();
         switch (self.instance_future.poll(waker)) {
             .ready => |result| {
                 self.instance = result catch |err| {
                     if (self.err) |*e| {
-                        sys.logWarn(
+                        tracing.emitWarnSimple(
                             "instance construction error...skipping," ++
                                 " instance='{s}', error='{f}:{f}'",
                             .{ self.name, std.fmt.alt(e.*, .formatName), e.* },
@@ -1089,7 +1071,7 @@ const LoadOp = FSMFuture(struct {
                         );
                         e.deinit();
                     } else {
-                        sys.logWarn(
+                        tracing.emitWarnSimple(
                             "instance construction error...skipping," ++
                                 " instance='{s}', error='{s}'",
                             .{ self.name, @errorName(err) },
@@ -1110,14 +1092,13 @@ const LoadOp = FSMFuture(struct {
     pub fn __state3(self: *@This(), waker: pub_tasks.Waker) void {
         _ = waker;
         const set = self.load_graph.set;
-        const sys = set.asSys();
         const instance = self.instance;
 
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = instance_handle.lock();
 
         set.unlock();
-        self.start_instance_future = inner.start(sys, &self.err);
+        self.start_instance_future = inner.start(&priv_modules.sys, &self.err);
     }
 
     pub fn __unwind4(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
@@ -1127,7 +1108,6 @@ const LoadOp = FSMFuture(struct {
 
     pub fn __state4(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         const set = self.load_graph.set;
-        const sys = set.asSys();
         const instance = self.instance;
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
         const inner = @constCast(&instance_handle.inner);
@@ -1135,10 +1115,9 @@ const LoadOp = FSMFuture(struct {
         switch (self.start_instance_future.poll(waker)) {
             .ready => |result| {
                 result catch |e_| {
-                    if (@errorReturnTrace()) |tr|
-                        sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+                    if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
                     if (self.err) |*e| {
-                        sys.logWarn(
+                        tracing.emitWarnSimple(
                             "instance `on_start` error...skipping," ++
                                 " instance='{s}', error='{f}:{f}'",
                             .{ self.name, std.fmt.alt(e.*, .formatName), e.* },
@@ -1146,7 +1125,7 @@ const LoadOp = FSMFuture(struct {
                         );
                         e.deinit();
                     } else {
-                        sys.logWarn(
+                        tracing.emitWarnSimple(
                             "instance `on_start` error...skipping," ++
                                 " instance='{s}', error='{s}'",
                             .{ self.name, @errorName(e_) },
@@ -1164,16 +1143,15 @@ const LoadOp = FSMFuture(struct {
             .pending => return .yield,
         }
 
-        sys.addInstance(inner) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
-            sys.logWarn(
+        priv_modules.sys.addInstance(inner) catch |e| {
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            tracing.emitWarnSimple(
                 "internal error while adding instance...skipping," ++
                     " instance='{s}', error='{s}'",
                 .{ self.name, @errorName(e) },
                 @src(),
             );
-            inner.stop(sys);
+            inner.stop(&priv_modules.sys);
             inner.unrefStrong();
             inner.deinit();
             return .ret;
@@ -1182,7 +1160,7 @@ const LoadOp = FSMFuture(struct {
         defer inner.unrefStrong();
 
         set.getModuleInfo(self.name).?.signalSuccess(self.instance.info);
-        set.logTrace("instance loaded, instance='{s}'", .{self.name}, @src());
+        tracing.emitTraceSimple("instance loaded, instance='{s}'", .{self.name}, @src());
         return .ret;
     }
 });
@@ -1195,7 +1173,7 @@ const CommitOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     fn init(set: *Self) EnqueuedFuture(Fallible(void)) {
-        set.asSys().logTrace("commiting loading set, set='{*}'", .{set}, @src());
+        tracing.emitTraceSimple("commiting loading set, set='{*}'", .{set}, @src());
         set.ref();
         errdefer set.unref();
 
@@ -1207,15 +1185,11 @@ const CommitOp = FSMFuture(struct {
             Fallible(void).Wrapper(anyerror),
         );
 
-        return Async.Task.initFuture(
-            @TypeOf(f),
-            &set.context.async.sys,
-            &f,
-        ) catch |e| Async.initErrorFuture(void, e);
+        return tasks.Task.initFuture(@TypeOf(f), &f) catch |e| tasks.initErrorFuture(void, e);
     }
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: anyerror) void {
-        if (trace) |tr| self.set.context.tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
@@ -1229,22 +1203,22 @@ const CommitOp = FSMFuture(struct {
     }
 
     pub fn __state0(self: *@This(), waker: pub_tasks.Waker) !pub_tasks.FSMOp {
-        self.set.asSys().lock();
-        defer self.set.asSys().unlock();
+        priv_modules.sys.lock();
+        defer priv_modules.sys.unlock();
 
         self.set.lock();
         defer self.set.unlock();
 
         // Ensure that no two commit operations are running in parallel.
-        if (self.set.asSys().state == .loading_set) {
-            try self.set.asSys().loading_set_waiters.append(
-                self.set.asSys().allocator,
+        if (priv_modules.sys.state == .loading_set) {
+            try priv_modules.sys.loading_set_waiters.append(
+                priv_modules.sys.allocator,
                 .{ .waiter = self, .waker = waker.ref() },
             );
             return .yield;
         }
-        self.set.asSys().state = .loading_set;
-        errdefer self.set.asSys().state = .idle;
+        priv_modules.sys.state = .loading_set;
+        errdefer priv_modules.sys.state = .idle;
 
         self.load_graph = try LoadGraph.init(self.set);
         std.debug.assert(self.set.active_load_graph == null);
@@ -1255,8 +1229,8 @@ const CommitOp = FSMFuture(struct {
 
     pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
         _ = reason;
-        self.set.asSys().lock();
-        defer self.set.asSys().unlock();
+        priv_modules.sys.lock();
+        defer priv_modules.sys.unlock();
 
         self.set.lock();
         defer self.set.unlock();
@@ -1265,8 +1239,8 @@ const CommitOp = FSMFuture(struct {
         self.set.active_commits -= 1;
 
         self.load_graph.deinit();
-        self.set.asSys().state = .idle;
-        if (self.set.asSys().loading_set_waiters.pop()) |waiter| {
+        priv_modules.sys.state = .idle;
+        if (priv_modules.sys.loading_set_waiters.pop()) |waiter| {
             waiter.waker.wakeUnref();
         }
     }
@@ -1305,7 +1279,7 @@ const CommitOp = FSMFuture(struct {
         while (it.next()) |entry| {
             const name = entry.key_ptr.*;
             if (!self.load_graph.modules.contains(name)) {
-                self.set.asSys().logWarn(
+                tracing.emitWarnSimple(
                     "aborting load of instance due to internal error, instance='{s}', error='{s}'",
                     .{ name, @errorName(err) },
                     @src(),
@@ -1340,7 +1314,7 @@ const VTableImpl = struct {
         const self: *Self = @alignCast(@ptrCast(this));
         const module_ = std.mem.span(module);
 
-        self.logTrace(
+        tracing.emitTraceSimple(
             "querying loading set module, set='{*}', name='{s}'",
             .{ self, module_ },
             @src(),
@@ -1361,7 +1335,7 @@ const VTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
         const version_ = Version.initC(version);
 
-        self.logTrace(
+        tracing.emitTraceSimple(
             "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{f}'",
             .{ self, name_, namespace_, version_ },
             @src(),
@@ -1387,7 +1361,7 @@ const VTableImpl = struct {
             .on_error = on_error,
         };
 
-        self.logTrace(
+        tracing.emitTraceSimple(
             "adding callback to the loading set, set='{*}', module='{s}', callback='{}'",
             .{ self, module_, callback },
             @src(),
@@ -1400,8 +1374,7 @@ const VTableImpl = struct {
             const module_info = self.getModuleInfo(module_) orelse break :blk error.NotFound;
             module_info.appendCallback(callback) catch |err| break :blk err;
         } catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             if (on_abort) |f| f(data);
             return AnyError.initError(e).intoResult();
         };
@@ -1414,7 +1387,7 @@ const VTableImpl = struct {
     ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
 
-        self.logTrace(
+        tracing.emitTraceSimple(
             "adding module to the loading set, set='{*}', module='{s}'",
             .{ self, @"export".getName() },
             @src(),
@@ -1429,8 +1402,7 @@ const VTableImpl = struct {
             defer owner_inner.unlock();
             self.addModule(owner_inner, @"export") catch |err| break :blk err;
         } catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1448,7 +1420,7 @@ const VTableImpl = struct {
         const self: *Self = @alignCast(@ptrCast(this));
         const path_ = Path.initC(path);
 
-        self.logTrace(
+        tracing.emitTraceSimple(
             "adding modules to loading set, set='{*}', path='{f}'",
             .{ self, path_ },
             @src(),
@@ -1459,8 +1431,7 @@ const VTableImpl = struct {
         defer if (filter_deinit) |f| f(filter_data);
 
         self.addModulesFromPath(path_, filter_fn, filter_data) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1481,7 +1452,7 @@ const VTableImpl = struct {
     ) callconv(.c) AnyResult {
         const self: *Self = @alignCast(@ptrCast(this));
 
-        self.logTrace(
+        tracing.emitTraceSimple(
             "adding local modules to loading set, set='{*}'",
             .{self},
             @src(),
@@ -1497,8 +1468,7 @@ const VTableImpl = struct {
             filter_data,
             bin_ptr,
         ) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.context.tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;

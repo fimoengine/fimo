@@ -8,11 +8,11 @@ const ctx = @import("../../context.zig");
 const pub_tasks = @import("../../tasks.zig");
 const pub_tracing = @import("../../tracing.zig");
 const RefCount = @import("../RefCount.zig");
+const tracing = @import("../tracing.zig");
 const System = @import("System.zig");
 
 const Self = @This();
 
-sys: *System,
 refcount: RefCount = .{},
 call_stack: pub_tracing.CallStack,
 local_result: AnyResult = .ok,
@@ -245,11 +245,7 @@ const State = struct {
     }
 };
 
-pub fn initFuture(
-    comptime T: type,
-    sys: *System,
-    future: *const T,
-) !pub_tasks.EnqueuedFuture(T.Result) {
+pub fn initFuture(comptime T: type, future: *const T) !pub_tasks.EnqueuedFuture(T.Result) {
     const Wrapper = struct {
         fn poll(
             data: ?*anyopaque,
@@ -282,7 +278,6 @@ pub fn initFuture(
         }
     };
     const f = try init(
-        sys,
         std.mem.asBytes(future),
         @sizeOf(T),
         @alignOf(T),
@@ -296,7 +291,6 @@ pub fn initFuture(
 }
 
 pub fn init(
-    sys: *System,
     data: ?[*]const u8,
     data_size: usize,
     data_alignment: usize,
@@ -310,7 +304,7 @@ pub fn init(
     cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
     cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
 ) !pub_tasks.OpaqueFuture {
-    const allocator = sys.allocator;
+    const allocator = System.allocator;
 
     const buffer_align: usize = @max(data_alignment, result_alignment);
     const buffer_size = std.mem.alignForward(usize, data_size, result_alignment) +
@@ -345,14 +339,13 @@ pub fn init(
     std.debug.assert(std.mem.isAligned(@intFromPtr(buffer_data), data_alignment));
     std.debug.assert(std.mem.isAligned(@intFromPtr(result_data), result_alignment));
 
-    const call_stack = sys.asContext().tracing.createCallStack();
+    const call_stack = tracing.createCallStack();
     errdefer call_stack.deinit();
 
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
     self.* = .{
-        .sys = sys,
         .call_stack = call_stack,
 
         .result_size = result_size,
@@ -395,7 +388,7 @@ fn unref(self: *Self) void {
     std.debug.assert(!state.waiter_locked);
     self.call_stack.deinit();
     self.local_result.deinit();
-    const allocator = self.sys.allocator;
+    const allocator = System.allocator;
     allocator.free(self.buffer);
     allocator.destroy(self);
 }
@@ -467,39 +460,39 @@ fn deinitPublic(self_ptr: **Self) callconv(.c) void {
 }
 
 fn enqueueAndIncreaseCount(self: *Self) void {
-    self.sys.mutex.lock();
-    defer self.sys.mutex.unlock();
-    self.sys.enqueued_tasks += 1;
-    self.sys.queue.append(&self.node);
-    self.sys.cvar.signal();
+    System.mutex.lock();
+    defer System.mutex.unlock();
+    System.enqueued_tasks += 1;
+    System.queue.append(&self.node);
+    System.cvar.signal();
 }
 
-fn decreaseCount(self: *Self) void {
-    self.sys.mutex.lock();
-    defer self.sys.mutex.unlock();
-    self.sys.enqueued_tasks -= 1;
+fn decreaseCount() void {
+    System.mutex.lock();
+    defer System.mutex.unlock();
+    System.enqueued_tasks -= 1;
     // No signal is necessary, as it is only called by the event loop.
 }
 
 fn enqueue(self: *Self) void {
-    self.sys.mutex.lock();
-    defer self.sys.mutex.unlock();
-    self.sys.queue.append(&self.node);
-    self.sys.cvar.signal();
+    System.mutex.lock();
+    defer System.mutex.unlock();
+    System.queue.append(&self.node);
+    System.cvar.signal();
 }
 
 pub fn poll(self: *Self) void {
-    ctx.global.tracing.suspendCurrentCallStack(false);
+    tracing.suspendCurrentCallStack(false);
     const main_stack = self.call_stack.replaceActive();
-    ctx.global.tracing.resumeCurrentCallStack();
+    tracing.resumeCurrentCallStack();
 
     const old_result = ctx.replaceResult(self.local_result);
     const completed = self.poll_fn(self.data, self.asWaker(), self.result);
     self.local_result = ctx.replaceResult(old_result);
 
-    ctx.global.tracing.suspendCurrentCallStack(false);
+    tracing.suspendCurrentCallStack(false);
     self.call_stack = main_stack.replaceActive();
-    ctx.global.tracing.resumeCurrentCallStack();
+    tracing.resumeCurrentCallStack();
 
     switch (self.state.dequeue(completed)) {
         .noop => {},
@@ -507,7 +500,7 @@ pub fn poll(self: *Self) void {
             if (self.cleanup_data_fn) |f| f(self.data);
             if (detached) if (self.cleanup_result_fn) |f| f(self.result);
             self.state.wake();
-            self.decreaseCount();
+            decreaseCount();
             self.unref();
         },
         .enqueue => self.enqueue(),

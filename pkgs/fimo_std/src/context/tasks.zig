@@ -1,30 +1,22 @@
 const std = @import("std");
 
-const c = @import("c");
-
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Context = @import("../context.zig");
+const context = @import("../context.zig");
 const pub_tasks = @import("../tasks.zig");
-pub const BlockingContext = @import("async/BlockingContext.zig");
-pub const EventLoop = @import("async/EventLoop.zig");
-const System = @import("async/System.zig");
-pub const Task = @import("async/Task.zig");
+pub const BlockingContext = @import("tasks/BlockingContext.zig");
+pub const EventLoop = @import("tasks/EventLoop.zig");
+const System = @import("tasks/System.zig");
+pub const Task = @import("tasks/Task.zig");
 
-const Self = @This();
+const tasks = @This();
 
-sys: System,
-
-pub fn init(ctx: *Context) !Self {
-    return Self{ .sys = try System.init(ctx) };
+pub fn init() !void {
+    try System.init();
 }
 
-pub fn deinit(self: *Self) void {
-    self.sys.deinit();
-}
-
-pub fn asContext(self: *Self) *Context {
-    return @fieldParentPtr("async", self);
+pub fn deinit() void {
+    System.deinit();
 }
 
 pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(pub_tasks.Fallible(T)) {
@@ -54,25 +46,22 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(p
 
 const VTableImpl = struct {
     fn runToCompletion() callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
-        Context.global.async.sys.startEventLoop(true) catch |err|
-            return AnyError.initError(err).intoResult();
+        std.debug.assert(context.is_init);
+        System.startEventLoop(true) catch |err| return AnyError.initError(err).intoResult();
         return AnyResult.ok;
     }
 
     fn startEventLoop(loop: *pub_tasks.EventLoop) callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
-        loop.* = EventLoop.init(&Context.global.async.sys) catch |err|
-            return AnyError.initError(err).intoResult();
+        std.debug.assert(context.is_init);
+        loop.* = EventLoop.init() catch |err| return AnyError.initError(err).intoResult();
         return AnyResult.ok;
     }
 
     fn contextNewBlocking(
-        context: *pub_tasks.BlockingContext,
+        blk_ctx: *pub_tasks.BlockingContext,
     ) callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
-        context.* = BlockingContext.init(&Context.global.async.sys) catch |err|
-            return AnyError.initError(err).intoResult();
+        std.debug.assert(context.is_init);
+        blk_ctx.* = BlockingContext.init() catch |err| return AnyError.initError(err).intoResult();
         return AnyResult.ok;
     }
 
@@ -91,9 +80,8 @@ const VTableImpl = struct {
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         future: *pub_tasks.OpaqueFuture,
     ) callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
+        std.debug.assert(context.is_init);
         future.* = Task.init(
-            &Context.global.async.sys,
             data,
             data_size,
             data_alignment,
