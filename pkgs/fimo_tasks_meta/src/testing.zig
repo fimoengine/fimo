@@ -23,7 +23,6 @@ const TaskBuilderConfig = task.BuilderConfig;
 const TaskBuilder = task.Builder;
 
 pub const TestContext = struct {
-    event_loop: tasks.EventLoop,
     instance: *const PseudoInstance,
     symbols: SymbolGroup(symbols.all_symbols),
 
@@ -32,8 +31,6 @@ pub const TestContext = struct {
 
         var err: ?fimo_std.AnyError = null;
         modules.pruneInstances(&err) catch unreachable;
-        self.event_loop.join();
-        tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
         tracing.unregisterThread();
         ctx.deinit();
     }
@@ -67,10 +64,6 @@ pub fn initTestContext() !TestContext {
         e.deinit();
     };
 
-    errdefer tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
-    const event_loop = try tasks.EventLoop.init(&err);
-    errdefer event_loop.join();
-
     const async_ctx = try tasks.BlockingContext.init(&err);
     defer async_ctx.deinit();
 
@@ -101,7 +94,6 @@ pub fn initTestContext() !TestContext {
     try instance.addNamespace(symbols.symbol_namespace, &err);
 
     const test_ctx = TestContext{
-        .event_loop = event_loop,
         .instance = instance,
         .symbols = try instance.loadSymbolGroup(symbols.all_symbols, &err),
     };

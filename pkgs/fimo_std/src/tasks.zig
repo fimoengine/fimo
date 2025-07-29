@@ -10,55 +10,6 @@ const ctx = @import("ctx.zig");
 
 const SelfTy = @This();
 
-/// A handle to an event loop, executing futures.
-pub const EventLoop = extern struct {
-    data: ?*anyopaque,
-    vtable: *const EventLoop.VTable,
-
-    /// VTable of an EventLoop.
-    ///
-    /// Changing the VTable is **not** a breaking change.
-    pub const VTable = extern struct {
-        join: *const fn (data: ?*anyopaque) callconv(.c) void,
-        detach: *const fn (data: ?*anyopaque) callconv(.c) void,
-    };
-
-    /// Initializes a new event loop.
-    ///
-    /// There can only be one event loop at a time, and it will keep/ the context alive until it
-    /// completes its execution.
-    pub fn init(err: *?AnyError) AnyError.Error!EventLoop {
-        var loop: EventLoop = undefined;
-        const handle = ctx.Handle.getHandle();
-        try handle.tasks_v0.start_event_loop(&loop).intoErrorUnion(err);
-        return loop;
-    }
-
-    /// Utilize the current thread to complete all tasks in the event loop.
-    ///
-    /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
-    /// the context can not be destroyed until the queue is empty. Upon the completion of all
-    /// tasks, the funtion will return to the caller.
-    pub fn flushWithCurrentThread(err: *?AnyError) AnyError.Error!void {
-        const handle = ctx.Handle.getHandle();
-        try handle.tasks_v0.run_to_completion().intoErrorUnion(err);
-    }
-
-    /// Signals the event loop to complete the remaining jobs and exit afterwards.
-    ///
-    /// The caller will block until the event loop has completed executing.
-    pub fn join(self: EventLoop) void {
-        self.vtable.join(self.data);
-    }
-
-    /// Signals the event loop to complete the remaining jobs and exit afterwards.
-    ///
-    /// The caller will exit imediately.
-    pub fn detach(self: EventLoop) void {
-        self.vtable.detach(self.data);
-    }
-};
-
 /// Waker of a task.
 pub const Waker = extern struct {
     data: ?*anyopaque,
@@ -719,8 +670,6 @@ pub fn Fallible(comptime T: type) type {
 ///
 /// Changing this definition is a breaking change.
 pub const VTable = extern struct {
-    run_to_completion: *const fn () callconv(.c) AnyResult,
-    start_event_loop: *const fn (loop: *EventLoop) callconv(.c) AnyResult,
     context_new_blocking: *const fn (context: *BlockingContext) callconv(.c) AnyResult,
     future_enqueue: *const fn (
         data: ?[*]const u8,

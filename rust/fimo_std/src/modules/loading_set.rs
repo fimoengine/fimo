@@ -4,17 +4,17 @@ use core::{ffi::CStr, future::Future, marker::PhantomData};
 use std::{mem::MaybeUninit, pin::Pin};
 
 use crate::{
-    r#async::{EnqueuedFuture, Fallible},
     bindings,
     context::Handle,
     error::{AnyError, AnyResult},
     handle,
-    module::{
+    modules::{
         exports::Export,
         info::InfoView,
         instance::{GenericInstance, OpaqueInstanceView},
         symbols::{AssertSharable, Share, StrRef, SymbolInfo},
     },
+    tasks::{EnqueuedFuture, Fallible},
     utils::{ConstNonNull, OpaqueHandle},
     version::Version,
 };
@@ -483,7 +483,7 @@ impl LoadingSet {
         unsafe {
             let mut out = MaybeUninit::uninit();
             let handle = Handle::get_handle();
-            let f = handle.module_v0.new_loading_set;
+            let f = handle.modules_v0.new_loading_set;
             f(&mut out).into_result()?;
             Ok(out.assume_init())
         }

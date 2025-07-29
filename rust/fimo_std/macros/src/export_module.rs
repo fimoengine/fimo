@@ -163,8 +163,8 @@ impl ToTokens for ItemExport {
             let ty = &self.ty;
             let exprs = &self.exprs;
             tokens.append_all(quote! {
-                const _: ::fimo_std::module::exports::__PrivateBuildToken = #(#exprs)*;
-                ::fimo_std::__private_sa::assert_type_eq_all!(#ty, &'static ::fimo_std::module::exports::Export<'static>);
+                const _: ::fimo_std::modules::exports::__PrivateBuildToken = #(#exprs)*;
+                ::fimo_std::__private_sa::assert_type_eq_all!(#ty, &'static ::fimo_std::modules::exports::Export<'static>);
             });
         }
 
@@ -173,7 +173,7 @@ impl ToTokens for ItemExport {
         let view_ident = &init_expr.path.view_ident;
         let owned_ident = &init_expr.path.owned_ident;
         tokens.append_all(quote! {
-            ::fimo_std::__private_sa::assert_type_eq_all!(#path, ::fimo_std::module::exports::Builder::<#view_ident<'_>, #owned_ident>);
+            ::fimo_std::__private_sa::assert_type_eq_all!(#path, ::fimo_std::modules::exports::Builder::<#view_ident<'_>, #owned_ident>);
         });
 
         let module_ident = Ident::new(&format!("__private_export_{view_ident}"), Span::call_site());
@@ -241,7 +241,7 @@ impl ToTokens for ItemExport {
                 }
             }
 
-            const #export_ident: &::fimo_std::module::exports::Export<'_> = #export;
+            const #export_ident: &::fimo_std::modules::exports::Export<'_> = #export;
 
             pub(crate) type #view_ident<'a> = #module_ident::#view_ident<'a>;
             pub(crate) type #owned_ident = #module_ident::#owned_ident;
@@ -296,10 +296,10 @@ fn generate_parameters(parameters: &[&BuilderExprParameter]) -> TokenStream {
         let ident = param.table_name();
         let ty = param.0.generic_type_argument(0).unwrap();
         fields.push(quote! {
-            #ident: ::core::pin::Pin<&'static ::fimo_std::module::parameters::Parameter<#ty>>
+            #ident: ::core::pin::Pin<&'static ::fimo_std::modules::parameters::Parameter<#ty>>
         });
         accessors.push(quote! {
-            pub const fn #ident(&self) -> ::core::pin::Pin<&'_ ::fimo_std::module::parameters::Parameter<#ty>> {
+            pub const fn #ident(&self) -> ::core::pin::Pin<&'_ ::fimo_std::modules::parameters::Parameter<#ty>> {
                 self.#ident
             }
         });
@@ -335,7 +335,7 @@ fn generate_resources(resources: &[&BuilderExprResource]) -> TokenStream {
     }
 
     quote! {
-        struct ResourceWrapper(::fimo_std::module::symbols::SliceRef<'static, u8>);
+        struct ResourceWrapper(::fimo_std::modules::symbols::SliceRef<'static, u8>);
         impl ResourceWrapper {
             const fn as_str(&self) -> &str {
                 unsafe {
@@ -421,14 +421,14 @@ fn generate_vtable(
     let mut fields: Vec<TokenStream> = Default::default();
     for (ident, ty) in symbols {
         fields.push(quote! {
-            #ident: ::fimo_std::module::symbols::SymbolRef<'static, #ty>
+            #ident: ::fimo_std::modules::symbols::SymbolRef<'static, #ty>
         });
     }
 
     let mut accessors: Vec<TokenStream> = Default::default();
     for (ident, ty) in symbols {
         accessors.push(quote! {
-            pub const fn #ident(&self) -> ::fimo_std::module::symbols::SymbolRef<'_, #ty> {
+            pub const fn #ident(&self) -> ::fimo_std::modules::symbols::SymbolRef<'_, #ty> {
                 self.#ident
             }
         });
@@ -448,8 +448,8 @@ fn generate_vtable(
     let mut provider_impls: Vec<TokenStream> = Default::default();
     for (ident, ty) in symbols {
         provider_impls.push(quote! {
-            impl ::fimo_std::module::symbols::SymbolProvider<#ty> for ::core::pin::Pin<&'_ #view_ident<'_>> {
-                fn access<'a>(self) -> ::fimo_std::module::symbols::SymbolRef<'a, #ty>
+            impl ::fimo_std::modules::symbols::SymbolProvider<#ty> for ::core::pin::Pin<&'_ #view_ident<'_>> {
+                fn access<'a>(self) -> ::fimo_std::modules::symbols::SymbolRef<'a, #ty>
                 where
                     Self: 'a
                 {
@@ -458,8 +458,8 @@ fn generate_vtable(
                 }
             }
 
-            impl ::fimo_std::module::symbols::SymbolProvider<#ty> for &'_ #owned_ident {
-                fn access<'a>(self) -> ::fimo_std::module::symbols::SymbolRef<'a, #ty>
+            impl ::fimo_std::modules::symbols::SymbolProvider<#ty> for &'_ #owned_ident {
+                fn access<'a>(self) -> ::fimo_std::modules::symbols::SymbolRef<'a, #ty>
                 where
                     Self: 'a
                 {
@@ -535,7 +535,7 @@ fn generate_export(
         let write = &param.0.args[6];
         quote! {
             const {
-                let mut p = ::fimo_std::module::exports::Parameter::new::<#ty>(#default_value, #name);
+                let mut p = ::fimo_std::modules::exports::Parameter::new::<#ty>(#default_value, #name);
                 if let Some(x) = #read_group {
                     p = p.with_read_group(x);
                 }
@@ -543,15 +543,15 @@ fn generate_export(
                     p = p.with_write_group(x);
                 }
 
-                type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
-                const READ: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>) -> Repr> = #read;
+                type Repr = <#ty as ::fimo_std::modules::parameters::ParameterCast>::Repr;
+                const READ: Option<fn(::fimo_std::modules::parameters::ParameterData<'_, Repr>) -> Repr> = #read;
                 if READ.is_some() {
-                    unsafe extern "C" fn __private_read(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
+                    unsafe extern "C" fn __private_read(parameter: ::fimo_std::modules::parameters::ParameterData<'_, ()>, value: ::core::ptr::NonNull<()>) {
                         unsafe {
-                            type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
+                            type Repr = <#ty as ::fimo_std::modules::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<
-                                ::fimo_std::module::parameters::ParameterData<'_, ()>,
-                                ::fimo_std::module::parameters::ParameterData<'_, Repr>,
+                                ::fimo_std::modules::parameters::ParameterData<'_, ()>,
+                                ::fimo_std::modules::parameters::ParameterData<'_, Repr>,
                             >(parameter);
                             let value = value.cast::<Repr>();
 
@@ -559,18 +559,18 @@ fn generate_export(
                             value.write(f(parameter));
                         }
                     }
-                    let __private_read = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_read as _) };
+                    let __private_read = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_read as _) };
                     p = p.with_read(__private_read);
                 }
 
-                const WRITE: Option<fn(::fimo_std::module::parameters::ParameterData<'_, Repr>, Repr)> = #write;
+                const WRITE: Option<fn(::fimo_std::modules::parameters::ParameterData<'_, Repr>, Repr)> = #write;
                 if WRITE.is_some() {
-                    unsafe extern "C" fn __private_write(parameter: ::fimo_std::module::parameters::ParameterData<'_, ()>, value: ::fimo_std::utils::ConstNonNull<()>) {
+                    unsafe extern "C" fn __private_write(parameter: ::fimo_std::modules::parameters::ParameterData<'_, ()>, value: ::fimo_std::utils::ConstNonNull<()>) {
                         unsafe {
-                            type Repr = <#ty as ::fimo_std::module::parameters::ParameterCast>::Repr;
+                            type Repr = <#ty as ::fimo_std::modules::parameters::ParameterCast>::Repr;
                             let parameter = ::core::mem::transmute::<
-                                ::fimo_std::module::parameters::ParameterData<'_, ()>,
-                                ::fimo_std::module::parameters::ParameterData<'_, Repr>,
+                                ::fimo_std::modules::parameters::ParameterData<'_, ()>,
+                                ::fimo_std::modules::parameters::ParameterData<'_, Repr>,
                             >(parameter);
                             let value = value.cast::<Repr>();
 
@@ -578,7 +578,7 @@ fn generate_export(
                             f(parameter, *value.as_ref());
                         }
                     }
-                    let __private_write = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_write as _) };
+                    let __private_write = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_write as _) };
                     p = p.with_write(__private_write);
                 }
                 p
@@ -592,7 +592,7 @@ fn generate_export(
             let path = &res.0.args[1];
             quote! {
                 const {
-                    ::fimo_std::module::exports::Resource::new(#path)
+                    ::fimo_std::modules::exports::Resource::new(#path)
                 }
             }
         })
@@ -604,7 +604,7 @@ fn generate_export(
         .map(|&ns| {
             let ns = &ns.0.args[0];
             quote! {
-                insert_in_ns(&mut namespaces, ::fimo_std::module::exports::Namespace::new(#ns));
+                insert_in_ns(&mut namespaces, ::fimo_std::modules::exports::Namespace::new(#ns));
             }
         })
         .chain(imports.iter().map(|imp| {
@@ -612,8 +612,8 @@ fn generate_export(
             quote! {
                 insert_in_ns(
                     &mut namespaces,
-                    ::fimo_std::module::exports::Namespace::new(
-                        <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE
+                    ::fimo_std::modules::exports::Namespace::new(
+                        <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAMESPACE
                     )
                 );
             }
@@ -626,10 +626,10 @@ fn generate_export(
             let t = imp.0.generic_type_argument(0).unwrap();
             quote! {
                 const {
-                    let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
-                    let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
-                    let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
-                    ::fimo_std::module::exports::SymbolImport::new(
+                    let name = <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAME;
+                    let namespace = <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAMESPACE;
+                    let version = <#t as ::fimo_std::modules::symbols::SymbolInfo>::VERSION;
+                    ::fimo_std::modules::exports::SymbolImport::new(
                         version,
                         name
                     ).with_namespace(namespace)
@@ -646,12 +646,12 @@ fn generate_export(
             let value = &exp.0.args[2];
             quote! {
                 const {
-                    type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
-                    let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
-                    let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
-                    let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
+                    type T = <#t as ::fimo_std::modules::symbols::SymbolInfo>::Type;
+                    let name = <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAME;
+                    let namespace = <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAMESPACE;
+                    let version = <#t as ::fimo_std::modules::symbols::SymbolInfo>::VERSION;
                     let linkage = const { #linkage };
-                    ::fimo_std::module::exports::SymbolExport::new::<T>(
+                    ::fimo_std::modules::exports::SymbolExport::new::<T>(
                         #value,
                         version,
                         name,
@@ -672,60 +672,60 @@ fn generate_export(
             quote! {
                 const {
                     unsafe extern "C" fn __private_constructor(
-                        instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
-                    ) -> ::fimo_std::r#async::EnqueuedFuture<
-                            ::fimo_std::r#async::Fallible<
+                        instance: ::core::pin::Pin<& ::fimo_std::modules::instance::OpaqueInstanceView<'_>>,
+                    ) -> ::fimo_std::tasks::EnqueuedFuture<
+                            ::fimo_std::tasks::Fallible<
                                 ::core::ptr::NonNull<()>,
-                                dyn ::fimo_std::module::symbols::Share,
+                                dyn ::fimo_std::modules::symbols::Share,
                             >
                         > {
                         let f = const { #init };
                         unsafe {
-                            type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
+                            type T = <#t as ::fimo_std::modules::symbols::SymbolInfo>::Type;
                             let instance: ::core::pin::Pin<
-                                &::fimo_std::module::instance::Stage1InstanceView<'_, #view_ident<'_>>
+                                &::fimo_std::modules::instance::Stage1InstanceView<'_, #view_ident<'_>>
                             >   = ::core::mem::transmute(instance);
                             let fut = f(instance);
                             let fut = async move {
-                                ::fimo_std::r#async::Fallible::new_result(
+                                ::fimo_std::tasks::Fallible::new_result(
                                     fut.await
                                         .map_err(<::fimo_std::error::AnyError>::new)
                                         .map(|x| {
-                                            let opaque = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::ptr_from_target(x) };
+                                            let opaque = unsafe{ <T as ::fimo_std::modules::symbols::SymbolPointer>::ptr_from_target(x) };
                                             let opaque = opaque.as_ptr().cast_mut();
                                             ::core::ptr::NonNull::new(opaque).expect("null pointers are not allowed")
                                         })
                                 )
                             };
                             unsafe {
-                                ::fimo_std::r#async::Future::new(fut)
+                                ::fimo_std::tasks::Future::new(fut)
                                     .enqueue_unchecked()
                                     .expect("could not enqueue future")
                             }
                         }
                     }
                     unsafe extern "C" fn __private_destructor(
-                        instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                        instance: ::core::pin::Pin<& ::fimo_std::modules::instance::OpaqueInstanceView<'_>>,
                         symbol: ::core::ptr::NonNull<()>,
                     ) {
                         let f = const { #deinit };
                         let instance: ::core::pin::Pin<
-                            &::fimo_std::module::instance::Stage1InstanceView<'_, #view_ident<'_>>
+                            &::fimo_std::modules::instance::Stage1InstanceView<'_, #view_ident<'_>>
                         >   = unsafe{ ::core::mem::transmute(instance) };
-                        type T = <#t as ::fimo_std::module::symbols::SymbolInfo>::Type;
+                        type T = <#t as ::fimo_std::modules::symbols::SymbolInfo>::Type;
                         let symbol = ::fimo_std::utils::ConstNonNull::new(symbol.as_ptr()).expect("should not be null");
-                        let symbol = unsafe{ <T as ::fimo_std::module::symbols::SymbolPointer>::target_from_ptr(symbol) };
+                        let symbol = unsafe{ <T as ::fimo_std::modules::symbols::SymbolPointer>::target_from_ptr(symbol) };
                         f(instance, symbol)
                     }
-                    let __private_constructor = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_constructor as _) };
-                    let __private_destructor = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_destructor as _) };
+                    let __private_constructor = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_constructor as _) };
+                    let __private_destructor = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_destructor as _) };
 
-                    let name = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAME;
-                    let namespace = <#t as ::fimo_std::module::symbols::SymbolInfo>::NAMESPACE;
-                    let version = <#t as ::fimo_std::module::symbols::SymbolInfo>::VERSION;
+                    let name = <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAME;
+                    let namespace = <#t as ::fimo_std::modules::symbols::SymbolInfo>::NAMESPACE;
+                    let version = <#t as ::fimo_std::modules::symbols::SymbolInfo>::VERSION;
                     let linkage = const { #linkage };
                     unsafe {
-                        ::fimo_std::module::exports::DynamicSymbolExport::new(
+                        ::fimo_std::modules::exports::DynamicSymbolExport::new(
                             __private_constructor,
                             __private_destructor,
                             version,
@@ -745,54 +745,54 @@ fn generate_export(
         modifiers.push(quote! {
             {
                 unsafe extern "C" fn __private_init(
-                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
-                    set: ::fimo_std::module::loading_set::LoadingSetView<'_>,
-                ) -> ::fimo_std::r#async::EnqueuedFuture<
-                        ::fimo_std::r#async::Fallible<
+                    instance: ::core::pin::Pin<& ::fimo_std::modules::instance::OpaqueInstanceView<'_>>,
+                    set: ::fimo_std::modules::loading_set::LoadingSetView<'_>,
+                ) -> ::fimo_std::tasks::EnqueuedFuture<
+                        ::fimo_std::tasks::Fallible<
                             ::core::option::Option<::core::ptr::NonNull<()>>,
-                            dyn ::fimo_std::module::symbols::Share,
+                            dyn ::fimo_std::modules::symbols::Share,
                         >
                     >
                 {
                     let f = const { #init };
                     unsafe {
                         let instance: ::core::pin::Pin<
-                            &::fimo_std::module::instance::Stage0InstanceView<'_, #view_ident<'_>>
+                            &::fimo_std::modules::instance::Stage0InstanceView<'_, #view_ident<'_>>
                         >   = ::core::mem::transmute(instance);
                         let fut = f(instance, set);
                         let fut = async move {
-                            ::fimo_std::r#async::Fallible::new_result(
+                            ::fimo_std::tasks::Fallible::new_result(
                                 fut.await
                                     .map_err(<::fimo_std::error::AnyError>::new)
                                     .map(|x| ::core::option::Option::Some(x.cast()))
                             )
                         };
                         unsafe {
-                            ::fimo_std::r#async::Future::new(fut)
+                            ::fimo_std::tasks::Future::new(fut)
                                 .enqueue_unchecked()
                                 .expect("could not enqueue future")
                         }
                     }
                 }
                 unsafe extern "C" fn __private_deinit(
-                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                    instance: ::core::pin::Pin<& ::fimo_std::modules::instance::OpaqueInstanceView<'_>>,
                     state: ::core::option::Option<::core::ptr::NonNull<()>>,
                 ) {
                     let f = const { #deinit };
                     unsafe {
                         let instance: ::core::pin::Pin<
-                            &::fimo_std::module::instance::Stage0InstanceView<'_, #view_ident<'_>>
+                            &::fimo_std::modules::instance::Stage0InstanceView<'_, #view_ident<'_>>
                         >   = ::core::mem::transmute(instance);
                         let state = state.expect("expected a non-null pointer").cast();
                         f(instance, state)
                     }
                 }
                 let modifier = &const {
-                    let __private_init = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_init as _) };
-                    let __private_deinit = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_deinit as _) };
-                    unsafe { ::fimo_std::module::exports::InstanceStateModifier::new(__private_init, __private_deinit) }
+                    let __private_init = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_init as _) };
+                    let __private_deinit = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_deinit as _) };
+                    unsafe { ::fimo_std::modules::exports::InstanceStateModifier::new(__private_init, __private_deinit) }
                 };
-                ::fimo_std::module::exports::Modifier::InstanceState(modifier)
+                ::fimo_std::modules::exports::Modifier::InstanceState(modifier)
             }
         });
     }
@@ -801,11 +801,11 @@ fn generate_export(
         modifiers.push(quote! {
             {
                 unsafe extern "C" fn __private_on_event(
-                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
-                ) -> ::fimo_std::r#async::EnqueuedFuture<
-                        ::fimo_std::r#async::Fallible<
+                    instance: ::core::pin::Pin<& ::fimo_std::modules::instance::OpaqueInstanceView<'_>>,
+                ) -> ::fimo_std::tasks::EnqueuedFuture<
+                        ::fimo_std::tasks::Fallible<
                             (),
-                            dyn ::fimo_std::module::symbols::Share,
+                            dyn ::fimo_std::modules::symbols::Share,
                         >
                     >
                 {
@@ -814,23 +814,23 @@ fn generate_export(
                         let instance: ::core::pin::Pin<&#view_ident<'_>> = ::core::mem::transmute(instance);
                         let fut = f(instance);
                         let fut = async move {
-                            ::fimo_std::r#async::Fallible::new_result(
+                            ::fimo_std::tasks::Fallible::new_result(
                                 fut.await
                                     .map_err(<::fimo_std::error::AnyError>::new)
                             )
                         };
                         unsafe {
-                            ::fimo_std::r#async::Future::new(fut)
+                            ::fimo_std::tasks::Future::new(fut)
                                 .enqueue_unchecked()
                                 .expect("could not enqueue future")
                         }
                     }
                 }
                 let modifier = &const {
-                    let __private_on_event = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_on_event as _) };
-                    unsafe { ::fimo_std::module::exports::StartEventModifier::new(__private_on_event) }
+                    let __private_on_event = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_on_event as _) };
+                    unsafe { ::fimo_std::modules::exports::StartEventModifier::new(__private_on_event) }
                 };
-                ::fimo_std::module::exports::Modifier::StartEvent(modifier)
+                ::fimo_std::modules::exports::Modifier::StartEvent(modifier)
             }
         });
     }
@@ -839,7 +839,7 @@ fn generate_export(
         modifiers.push(quote! {
             {
                 unsafe extern "C" fn __private_on_event(
-                    instance: ::core::pin::Pin<& ::fimo_std::module::instance::OpaqueInstanceView<'_>>,
+                    instance: ::core::pin::Pin<& ::fimo_std::modules::instance::OpaqueInstanceView<'_>>,
                 ) {
                     let f = const { #on_event };
                     unsafe {
@@ -848,26 +848,26 @@ fn generate_export(
                     }
                 }
                 let modifier = &const {
-                    let __private_on_event = unsafe { ::fimo_std::module::symbols::AssertSharable::new(__private_on_event as _) };
-                    unsafe { ::fimo_std::module::exports::StopEventModifier::new(__private_on_event) }
+                    let __private_on_event = unsafe { ::fimo_std::modules::symbols::AssertSharable::new(__private_on_event as _) };
+                    unsafe { ::fimo_std::modules::exports::StopEventModifier::new(__private_on_event) }
                 };
-                ::fimo_std::module::exports::Modifier::StopEvent(modifier)
+                ::fimo_std::modules::exports::Modifier::StopEvent(modifier)
             }
         });
     }
 
     quote! {
         {
-            const PARAMETERS: &[::fimo_std::module::exports::Parameter<'static>] = &[
+            const PARAMETERS: &[::fimo_std::modules::exports::Parameter<'static>] = &[
                     #(#parameters),*
             ];
-            const RESOURCES: &[::fimo_std::module::exports::Resource<'static>] = &[
+            const RESOURCES: &[::fimo_std::modules::exports::Resource<'static>] = &[
                 #(#resources),*
             ];
-            const NAMESPACES: &[::fimo_std::module::exports::Namespace<'static>] = {
+            const NAMESPACES: &[::fimo_std::modules::exports::Namespace<'static>] = {
                 const fn insert_in_ns(
-                    namespaces: &mut [::fimo_std::module::exports::Namespace<'static>; #num_namespaces],
-                    value: ::fimo_std::module::exports::Namespace<'static>,
+                    namespaces: &mut [::fimo_std::modules::exports::Namespace<'static>; #num_namespaces],
+                    value: ::fimo_std::modules::exports::Namespace<'static>,
                 ) {
                     if value.name().is_empty() { return; }
 
@@ -906,8 +906,8 @@ fn generate_export(
                     unreachable!();
                 }
 
-                const NS: [::fimo_std::module::exports::Namespace<'static>; #num_namespaces] = const {
-                    let mut namespaces = [::fimo_std::module::exports::Namespace::new(c""); #num_namespaces];
+                const NS: [::fimo_std::modules::exports::Namespace<'static>; #num_namespaces] = const {
+                    let mut namespaces = [::fimo_std::modules::exports::Namespace::new(c""); #num_namespaces];
                     #(#namespaces)*
                     namespaces
                 };
@@ -924,21 +924,21 @@ fn generate_export(
                 }
                 slice.split_at(i).0
             };
-            const IMPORTS: &[::fimo_std::module::exports::SymbolImport<'static>] = &[
+            const IMPORTS: &[::fimo_std::modules::exports::SymbolImport<'static>] = &[
                 #(#imports),*
             ];
-            const EXPORTS: &[::fimo_std::module::exports::SymbolExport<'static>] = &[
+            const EXPORTS: &[::fimo_std::modules::exports::SymbolExport<'static>] = &[
                 #(#exports),*
             ];
-            const DYN_EXPORTS: &[::fimo_std::module::exports::DynamicSymbolExport<'static>] = &[
+            const DYN_EXPORTS: &[::fimo_std::modules::exports::DynamicSymbolExport<'static>] = &[
                 #(#dyn_exports),*
             ];
-            const MODIFIERS: &[::fimo_std::module::exports::Modifier<'static>] = &[
+            const MODIFIERS: &[::fimo_std::modules::exports::Modifier<'static>] = &[
                 #(#modifiers),*
             ];
 
-            const EXPORT: ::fimo_std::module::exports::Export<'_> = unsafe {
-                ::fimo_std::module::exports::Export::__new_private(
+            const EXPORT: ::fimo_std::modules::exports::Export<'_> = unsafe {
+                ::fimo_std::modules::exports::Export::__new_private(
                     #name,
                     #description,
                     #author,
@@ -960,7 +960,7 @@ fn generate_export(
                 unsafe(link_section = "__DATA,fimo_module")
             )]
             #[cfg_attr(all(unix, not(target_vendor = "apple")), unsafe(link_section = "fimo_module"))]
-            static EXPORT_STATIC: &::fimo_std::module::exports::Export<'_> = &EXPORT;
+            static EXPORT_STATIC: &::fimo_std::modules::exports::Export<'_> = &EXPORT;
 
             EXPORT_STATIC
         }

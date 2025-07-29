@@ -19,13 +19,9 @@ pub fn main() !void {
 
     var err: ?AnyError = null;
     defer if (err) |e| e.deinit();
-    defer tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
 
     tracing.registerThread();
     defer tracing.unregisterThread();
-
-    const event_loop = try tasks.EventLoop.init(&err);
-    defer event_loop.join();
 
     const async_ctx = try tasks.BlockingContext.init(&err);
     defer async_ctx.deinit();

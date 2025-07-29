@@ -71,6 +71,6 @@ pub mod time;
 pub mod utils;
 pub mod version;
 
-pub mod r#async;
-pub mod module;
+pub mod modules;
+pub mod tasks;
 pub mod tracing;

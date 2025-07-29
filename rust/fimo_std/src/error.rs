@@ -2,7 +2,7 @@
 
 use crate::{
     bindings, handle,
-    module::symbols::{AssertSharable, Share},
+    modules::symbols::{AssertSharable, Share},
     utils::OpaqueHandle,
 };
 use std::{
@@ -865,7 +865,7 @@ impl From<AnyError<dyn Send + Sync + Share>> for AnyError<dyn Sync + Share> {
 pub(crate) mod private {
     use std::marker::Unsize;
 
-    use crate::module::symbols::Share;
+    use crate::modules::symbols::Share;
 
     pub trait Sealed: Unsize<dyn Share> + Share + 'static {}
 

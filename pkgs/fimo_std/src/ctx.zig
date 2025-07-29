@@ -154,6 +154,11 @@ pub fn takeResult() AnyResult {
     return replaceResult(.ok);
 }
 
+/// Clears the thread-local result.
+pub fn clearResult() void {
+    takeResult().deinit();
+}
+
 /// Sets the thread-local result, destroying the old one.
 pub fn setResult(new: AnyResult) void {
     replaceResult(new).deinit();
@@ -161,7 +166,8 @@ pub fn setResult(new: AnyResult) void {
 
 test "context: local error" {
     try init(&.{});
-    defer deinit();
+    var is_init = true;
+    errdefer if (is_init) deinit();
 
     try std.testing.expect(!hasErrorResult());
     try std.testing.expectEqual(
@@ -174,6 +180,8 @@ test "context: local error" {
         thread: std.Thread,
         err: ?anyerror = null,
 
+        var event = std.Thread.ResetEvent{};
+
         fn run(self: *@This()) !void {
             errdefer |err| self.err = err;
             try std.testing.expect(!hasErrorResult());
@@ -182,10 +190,18 @@ test "context: local error" {
                 AnyResult.ok,
             );
             try std.testing.expect(hasErrorResult());
+            event.set();
         }
     };
     var runner = Runner{ .thread = undefined };
     runner.thread = try std.Thread.spawn(.{}, Runner.run, .{&runner});
+
+    // Deinit the context first to test whether it blocks until the resource
+    // is cleaned up by the thread.
+    Runner.event.wait();
+    deinit();
+    is_init = false;
+
     runner.thread.join();
     if (runner.err) |err| return err;
 }

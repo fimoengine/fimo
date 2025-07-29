@@ -8,7 +8,7 @@ use std::{
     ptr::NonNull,
 };
 
-use crate::module::symbols::Share;
+use crate::modules::symbols::Share;
 
 /// A helper for an unsafe field.
 #[repr(transparent)]
@@ -469,7 +469,7 @@ macro_rules! handle {
         #[allow(trivial_bounds)]
         unsafe impl Sync for $ident where dyn $bound $(+ $bound_rest)*: Sync {}
         #[allow(trivial_bounds)]
-        unsafe impl $crate::module::symbols::Share for $ident where dyn $bound $(+ $bound_rest)*: $crate::module::symbols::Share {}
+        unsafe impl $crate::modules::symbols::Share for $ident where dyn $bound $(+ $bound_rest)*: $crate::modules::symbols::Share {}
         )?
 
         impl core::fmt::Debug for $ident {

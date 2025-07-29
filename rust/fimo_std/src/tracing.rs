@@ -2,7 +2,7 @@
 use crate::{
     context::{ConfigId, Handle},
     handle,
-    module::symbols::{AssertSharable, Share, SliceRef, StrRef},
+    modules::symbols::{AssertSharable, Share, SliceRef, StrRef},
     time::Time,
     utils::{ConstNonNull, OpaqueHandle, Unsafe},
 };

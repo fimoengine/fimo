@@ -6,11 +6,10 @@ const Condition = Thread.Condition;
 
 const pub_tasks = @import("../../tasks.zig");
 const RefCount = @import("../RefCount.zig");
-const System = @import("System.zig");
+const tasks = @import("../tasks.zig");
 
 const Self = @This();
 
-sys: *System,
 refcount: RefCount = .{},
 
 mutex: Mutex = .{},
@@ -18,10 +17,11 @@ cvar: Condition = .{},
 notified: bool = false,
 waiter: ?Thread.Id = null,
 
-pub fn init(sys: *System) Allocator.Error!pub_tasks.BlockingContext {
-    const self = try sys.allocator.create(Self);
-    errdefer sys.allocator.destroy(self);
-    self.* = .{ .sys = sys };
+pub fn init() Allocator.Error!pub_tasks.BlockingContext {
+    const self = try tasks.allocator.create(Self);
+    errdefer tasks.allocator.destroy(self);
+    self.* = .{};
+    tasks.context_count.increase();
 
     const Wrapper = struct {
         fn deinit(ptr: ?*anyopaque) callconv(.c) void {
@@ -57,9 +57,8 @@ fn ref(self: *Self) void {
 fn unref(self: *Self) void {
     if (self.refcount.unref() == .noop) return;
     std.debug.assert(self.waiter == null);
-
-    const sys = self.sys;
-    sys.allocator.destroy(self);
+    tasks.allocator.destroy(self);
+    tasks.context_count.decrease();
 }
 
 fn asWaker(self: *Self) pub_tasks.Waker {

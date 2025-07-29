@@ -734,7 +734,7 @@ macro_rules! symbol {
         #[doc = core::concat!("Marker type for the `", core::stringify!($name), "` symbol", $(" in the `", $ns, "` namespace",)? ".")]
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub enum $sym {}
-        impl $crate::module::symbols::SymbolInfo for $sym {
+        impl $crate::modules::symbols::SymbolInfo for $sym {
             type Type = $ty;
             const NAME: &'static core::ffi::CStr = {
                 let string = core::concat!(core::stringify!($name), '\0');

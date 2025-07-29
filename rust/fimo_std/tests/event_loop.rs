@@ -1,8 +1,8 @@
 use fimo_std::{
-    r#async::{BlockingContext, EventLoop},
     context::ContextBuilder,
     emit_trace,
     error::AnyError,
+    tasks::BlockingContext,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
 };
 use std::{future::Future, pin::Pin, task::Poll};
@@ -17,12 +17,9 @@ fn block_on_futures() -> Result<(), AnyError> {
         )
         .build()?;
     unsafe { context.enable_cleanup() };
-
     let _access = ThreadAccess::new();
-    let _event_loop = EventLoop::new()?;
 
     let fut = new_nested()?;
-
     let blocking = BlockingContext::new()?;
     let (a, b) = blocking.block_on(fut);
 
@@ -36,8 +33,8 @@ const LOOP_1: usize = 5;
 const LOOP_2: usize = 10;
 
 fn new_nested() -> Result<impl Future<Output = (usize, usize)>, AnyError> {
-    let a = fimo_std::r#async::Future::new(LoopFuture::<LOOP_1>::new()).enqueue()?;
-    let b = fimo_std::r#async::Future::new(LoopFuture::<LOOP_2>::new()).enqueue()?;
+    let a = fimo_std::tasks::Future::new(LoopFuture::<LOOP_1>::new()).enqueue()?;
+    let b = fimo_std::tasks::Future::new(LoopFuture::<LOOP_2>::new()).enqueue()?;
     Ok(async move {
         emit_trace!("Poll start");
         let a = a.await;

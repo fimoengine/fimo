@@ -3,7 +3,7 @@
 use crate::{
     context::Handle,
     error::AnyError,
-    module::symbols::{AssertSharable, Share, StrRef},
+    modules::symbols::{AssertSharable, Share, StrRef},
     utils::{OpaqueHandle, View, Viewable},
     version::Version,
 };
@@ -273,7 +273,7 @@ impl Info {
     pub fn find_by_name(name: &CStr) -> Result<Self, AnyError> {
         let mut out = MaybeUninit::uninit();
         let handle = unsafe { Handle::get_handle() };
-        let f = handle.module_v0.find_instance_by_name;
+        let f = handle.modules_v0.find_instance_by_name;
         unsafe {
             f(StrRef::new(name), &mut out).into_result()?;
             Ok(out.assume_init())
@@ -291,7 +291,7 @@ impl Info {
     ) -> Result<Self, AnyError> {
         let mut out = MaybeUninit::uninit();
         let handle = unsafe { Handle::get_handle() };
-        let f = handle.module_v0.find_instance_by_symbol;
+        let f = handle.modules_v0.find_instance_by_symbol;
         unsafe {
             let name = StrRef::new(name);
             let namespace = StrRef::new(namespace);

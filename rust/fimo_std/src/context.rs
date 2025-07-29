@@ -43,8 +43,8 @@ pub struct Handle {
     pub get_version: unsafe extern "C" fn() -> Version<'static>,
     pub core_v0: CoreVTableV0,
     pub tracing_v0: crate::tracing::VTableV0,
-    pub module_v0: crate::module::VTableV0,
-    pub async_v0: crate::r#async::VTableV0,
+    pub modules_v0: crate::modules::VTableV0,
+    pub tasks_v0: crate::tasks::VTableV0,
     _private: PhantomData<()>,
 }
 
@@ -67,15 +67,15 @@ impl Handle {
             get_version: extern "C" fn() -> Version<'static>,
             core_v0: CoreVTableV0,
             tracing_v0: crate::tracing::VTableV0,
-            module_v0: crate::module::VTableV0,
-            async_v0: crate::r#async::VTableV0
+            modules_v0: crate::modules::VTableV0,
+            tasks_v0: crate::tasks::VTableV0
         ) -> Self {
             Self {
                 get_version,
                 core_v0,
                 tracing_v0,
-                module_v0,
-                async_v0,
+                modules_v0,
+                tasks_v0,
                 _private: PhantomData,
             }
         }
@@ -251,7 +251,7 @@ pub enum ConfigId {
 #[derive(Debug, Default)]
 pub struct ContextBuilder<'a> {
     tracing: Option<crate::tracing::Config<'a>>,
-    module: Option<crate::module::Config<'a>>,
+    modules: Option<crate::modules::Config<'a>>,
 }
 
 impl<'a> ContextBuilder<'a> {
@@ -259,7 +259,7 @@ impl<'a> ContextBuilder<'a> {
     pub const fn new() -> Self {
         Self {
             tracing: None,
-            module: None,
+            modules: None,
         }
     }
 
@@ -270,8 +270,8 @@ impl<'a> ContextBuilder<'a> {
     }
 
     /// Adds a config for the module subsystem.
-    pub const fn with_module_config(mut self, config: crate::module::Config<'a>) -> Self {
-        self.module = Some(config);
+    pub const fn with_modules_config(mut self, config: crate::modules::Config<'a>) -> Self {
+        self.modules = Some(config);
         self
     }
 
@@ -285,7 +285,7 @@ impl<'a> ContextBuilder<'a> {
             options[counter] = (&raw const *cfg).cast();
             counter += 1;
         }
-        if let Some(cfg) = self.module.as_ref() {
+        if let Some(cfg) = self.modules.as_ref() {
             options[counter] = (&raw const *cfg).cast();
             counter += 1;
         }

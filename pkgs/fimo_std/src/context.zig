@@ -3,99 +3,160 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Mutex = std.Thread.Mutex;
 const SinglyLinkedList = std.SinglyLinkedList;
-
-const c = @import("c");
+const builtin = @import("builtin");
 
 const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Async = @import("context/async.zig");
-const Module = @import("context/module.zig");
-const RefCount = @import("context/RefCount.zig");
-const Tls = @import("context/tls.zig").Tls;
-const Tracing = @import("context/tracing.zig");
+const modules = @import("context/modules.zig");
+const ResourceCount = @import("context/ResourceCount.zig");
+const tasks = @import("context/tasks.zig");
+const tracing = @import("context/tracing.zig");
 const pub_ctx = @import("ctx.zig");
 const pub_modules = @import("modules.zig");
 const pub_tracing = @import("tracing.zig");
 const Version = @import("Version.zig");
 
-const GPA = std.heap.GeneralPurposeAllocator(.{});
 const Self = @This();
 
-gpa: GPA,
-allocator: Allocator,
-refcount: RefCount = .{},
-result_list: *ResultList,
-tracing: Tracing,
-module: Module,
-async: Async,
-
 var lock: std.Thread.Mutex = .{};
-pub var global: Self = undefined;
 pub var is_init: bool = false;
 
-const ResultList = struct {
-    refcount: RefCount = .{},
-    local_result: Tls(LocalResult),
+var result_count: ResourceCount = .{};
 
-    const LocalResult = struct {
-        result: AnyResult = .ok,
-        list: *ResultList,
-    };
+var debug_allocator = switch (builtin.mode) {
+    .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}).init,
+    else => {},
+};
+pub var allocator = switch (builtin.mode) {
+    .Debug, .ReleaseSafe => debug_allocator.allocator(),
+    else => std.heap.smp_allocator,
+};
 
-    fn init() !*ResultList {
-        const list = try std.heap.c_allocator.create(ResultList);
-        list.* = .{ .local_result = undefined };
-        errdefer std.heap.c_allocator.destroy(list);
+pub const ThreadData = struct {
+    result: AnyResult = .ok,
+    tracing: ?tracing.ThreadData = null,
+    node: std.SinglyLinkedList.Node = .{},
 
-        list.local_result = try Tls(LocalResult).init(&struct {
-            fn f(res: *LocalResult) callconv(.c) void {
-                const l = res.list;
-                res.result.deinit();
-                std.heap.c_allocator.destroy(res);
-                l.unref();
-            }
-        }.f);
-
-        return list;
+    pub fn get() ?*ThreadData {
+        return Impl.get();
     }
 
-    fn unrefDestroy(self: *ResultList) void {
-        if (self.local_result.get()) |l| {
-            l.result.deinit();
-            std.heap.c_allocator.destroy(l);
-            self.local_result.set(null) catch unreachable;
-        }
-        if (self.refcount.unref() == .noop) return;
-        self.local_result.deinit();
-        std.heap.c_allocator.destroy(self);
+    pub fn getOrInit() *ThreadData {
+        return Impl.getOrInit();
     }
 
-    fn unref(self: *ResultList) void {
-        if (self.refcount.unref() == .noop) return;
-        self.local_result.deinit();
-        std.heap.c_allocator.destroy(self);
-    }
-
-    fn replaceResult(self: *ResultList, with: AnyResult) AnyResult {
-        const local = if (self.local_result.get()) |l| l else blk: {
-            if (with.isOk()) return .ok;
-            const l = std.heap.c_allocator.create(LocalResult) catch @panic("oom");
-            l.* = .{ .list = self };
-
-            self.refcount.ref();
-            self.local_result.set(l) catch |err| @panic(@errorName(err));
-            break :blk l;
-        };
-        const old = local.result;
-        local.result = with;
+    fn replaceResult(self: *ThreadData, with: AnyResult) AnyResult {
+        const old = self.result;
+        if (old.isOk() and with.isErr())
+            result_count.increase()
+        else if (old.isErr() and with.isOk())
+            result_count.decrease();
+        self.result = with;
         return old;
     }
+
+    fn onThreadExit(self: *ThreadData) void {
+        self.replaceResult(.ok).deinit();
+        if (self.tracing) |*tr| {
+            tr.onThreadExit();
+            self.tracing = null;
+        }
+    }
+
+    const WindowsImpl = struct {
+        threadlocal var data: ?ThreadData = null;
+        export var thread_data_on_exit: std.os.windows.PIMAGE_TLS_CALLBACK linksection(".CRT$XLB") = @ptrCast(&tss_callback);
+        fn init() !void {}
+        fn tss_callback(
+            h: ?std.os.windows.PVOID,
+            dwReason: std.os.windows.DWORD,
+            pv: ?std.os.windows.PVOID,
+        ) callconv(.winapi) void {
+            _ = h;
+            _ = pv;
+
+            const DLL_PROCESS_DETACH = 0;
+            const DLL_THREAD_DETACH = 3;
+            if (dwReason == DLL_PROCESS_DETACH or dwReason == DLL_THREAD_DETACH) if (data) |*d| ThreadData.onThreadExit(d);
+        }
+        fn get() ?*ThreadData {
+            if (data) |*d| return d;
+            return null;
+        }
+        fn getOrInit() *ThreadData {
+            if (data == null) data = .{};
+            return if (data) |*d| d else unreachable;
+        }
+    };
+
+    const PosixImpl = struct {
+        var key_is_init: bool = false;
+        var key: std.c.pthread_key_t = undefined;
+        var nodes: [512]ThreadData = [_]ThreadData{.{}} ** 512;
+        var linked_list: std.SinglyLinkedList = .{};
+        var list_lock: std.Thread.Mutex = .{};
+        threadlocal var cache: ?*ThreadData = null;
+
+        fn init() !void {
+            if (key_is_init) return;
+            switch (std.c.pthread_key_create(&key, &dtor)) {
+                .SUCCESS => {},
+                .AGAIN => return error.TlsSlotsQuotaExceeded,
+                .NOMEM => return error.SystemResources,
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
+            for (nodes[0..]) |*node| linked_list.prepend(&node.node);
+            key_is_init = true;
+        }
+        fn dtor(ptr: *anyopaque) callconv(.c) void {
+            const data: *ThreadData = @ptrCast(@alignCast(ptr));
+            ThreadData.onThreadExit(data);
+            list_lock.lock();
+            defer list_lock.unlock();
+            linked_list.prepend(&data.node);
+        }
+        fn get() ?*ThreadData {
+            return cache;
+        }
+        fn getOrInit() *ThreadData {
+            if (cache) |data| return data;
+            list_lock.lock();
+            defer list_lock.unlock();
+            const node = linked_list.popFirst() orelse @panic("thread count exceeded");
+            const data: *ThreadData = @fieldParentPtr("node", node);
+            const status: std.c.E = @enumFromInt(std.c.pthread_setspecific(key, data));
+            switch (status) {
+                .SUCCESS => cache = data,
+                .INVAL => unreachable,
+                .NOMEM => @panic("oom"),
+                else => |err| @panic(@errorName(std.posix.unexpectedErrno(err))),
+            }
+            return data;
+        }
+    };
+
+    const Impl = if (builtin.os.tag == .windows)
+        WindowsImpl
+    else if (builtin.link_libc)
+        PosixImpl
+    else
+        @compileError("unsupported target");
 };
 
 pub fn init(options: [:null]const ?*const pub_ctx.ConfigHead) !void {
     lock.lock();
     defer lock.unlock();
     if (is_init) return error.AlreadyInitialized;
+
+    errdefer switch (builtin.mode) {
+        .Debug, .ReleaseSafe => _ = {
+            if (debug_allocator.deinit() == .leak) @panic("memory leak");
+            debug_allocator = .init;
+            allocator = debug_allocator.allocator();
+        },
+        else => {},
+    };
+    try ThreadData.Impl.init();
 
     var tracing_cfg: ?*const pub_tracing.Config = null;
     var modules_cfg: ?*const pub_modules.Config = null;
@@ -114,30 +175,17 @@ pub fn init(options: [:null]const ?*const pub_ctx.ConfigHead) !void {
         }
     }
 
-    global = Self{
-        .gpa = GPA.init,
-        .allocator = undefined,
-        .result_list = undefined,
-        .tracing = undefined,
-        .module = undefined,
-        .async = undefined,
-    };
-    global.allocator = global.gpa.allocator();
+    try tracing.init(tracing_cfg orelse &.{});
+    errdefer tracing.deinit();
 
-    global.result_list = try ResultList.init();
-    errdefer global.result_list.unrefDestroy();
+    tracing.registerThread();
+    defer tracing.unregisterThread();
 
-    global.tracing = try Tracing.init(global.allocator, tracing_cfg);
-    errdefer global.tracing.deinit();
+    try tasks.init();
+    errdefer tasks.deinit();
 
-    global.tracing.registerThread();
-    defer global.tracing.unregisterThread();
-
-    global.module = try Module.init(&global, modules_cfg orelse &.{});
-    errdefer global.module.deinit();
-
-    global.async = try Async.init(&global);
-    errdefer global.async.deinit();
+    try modules.init(modules_cfg orelse &.{});
+    errdefer modules.deinit();
 
     is_init = true;
 }
@@ -149,34 +197,54 @@ pub fn deinit() void {
 
     // Might not actually trace anything, since all threads may be unregistered.
     // It's for just in case, that the calling thread did not unregister itself.
-    global.tracing.emitTraceSimple("cleaning up context", .{}, @src());
+    tracing.emitTraceSimple("cleaning up context", .{}, @src());
 
-    global.async.deinit();
-    global.module.deinit();
-    global.tracing.deinit();
-    global.result_list.unrefDestroy();
-    _ = global.gpa.deinit();
-    // if (global.gpa.deinit() == .leak) @panic("memory leak");
+    modules.deinit();
+    tasks.deinit();
+    tracing.deinit();
 
+    clearResult();
+    result_count.waitUntilZero();
+
+    switch (builtin.mode) {
+        .Debug, .ReleaseSafe => _ = {
+            // if (debug_allocator.deinit() == .leak) @panic("memory leak");
+            if (debug_allocator.deinit() == .leak) {}
+            debug_allocator = .init;
+            allocator = debug_allocator.allocator();
+        },
+        else => {},
+    }
     is_init = false;
-    global = undefined;
 }
 
 pub fn hasErrorResult() bool {
-    return if (global.result_list.local_result.get()) |l| l.result.isErr() else false;
+    std.debug.assert(is_init);
+    if (ThreadData.get()) |data| return data.result.isErr();
+    return false;
 }
 
 pub fn replaceResult(with: AnyResult) AnyResult {
     std.debug.assert(is_init);
-    return global.result_list.replaceResult(with);
+    if (with.isOk()) {
+        const data = ThreadData.get() orelse return .ok;
+        return data.replaceResult(with);
+    } else {
+        const data = ThreadData.getOrInit();
+        return data.replaceResult(with);
+    }
 }
 
 pub fn takeResult() AnyResult {
     return replaceResult(.ok);
 }
 
-pub fn setResult(result: AnyResult) void {
-    replaceResult(result).deinit();
+pub fn clearResult() void {
+    takeResult().deinit();
+}
+
+pub fn setResult(res: AnyResult) void {
+    replaceResult(res).deinit();
 }
 
 // ----------------------------------------------------
@@ -205,18 +273,19 @@ pub const handle = pub_ctx.Handle{
         .has_error_result = &HandleImpl.hasErrorResult,
         .replace_result = &HandleImpl.replaceResult,
     },
-    .tracing_v0 = Tracing.vtable,
-    .modules_v0 = Module.vtable,
-    .tasks_v0 = Async.vtable,
+    .tracing_v0 = tracing.vtable,
+    .modules_v0 = modules.vtable,
+    .tasks_v0 = tasks.vtable,
 };
 
-test {
-    _ = @import("context/graph.zig");
-    _ = @import("context/module.zig");
-    _ = @import("context/RefCount.zig");
-    _ = @import("context/tls.zig");
-    _ = @import("context/tmp_path.zig");
-    _ = @import("context/tracing.zig");
+comptime {
+    if (builtin.is_test) {
+        _ = @import("context/graph.zig");
+        _ = @import("context/modules.zig");
+        _ = @import("context/RefCount.zig");
+        _ = @import("context/tmp_path.zig");
+        _ = @import("context/tracing.zig");
+    }
 }
 
 // ----------------------------------------------------

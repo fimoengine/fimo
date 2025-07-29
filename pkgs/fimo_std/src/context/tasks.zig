@@ -1,30 +1,71 @@
 const std = @import("std");
-
-const c = @import("c");
+const Allocator = std.mem.Allocator;
+const Thread = std.Thread;
+const Mutex = Thread.Mutex;
+const Condition = Thread.Condition;
+const DoublyLinkedList = std.DoublyLinkedList;
 
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Context = @import("../context.zig");
+const context = @import("../context.zig");
 const pub_tasks = @import("../tasks.zig");
-pub const BlockingContext = @import("async/BlockingContext.zig");
-pub const EventLoop = @import("async/EventLoop.zig");
-const System = @import("async/System.zig");
-pub const Task = @import("async/Task.zig");
+const ResourceCount = @import("ResourceCount.zig");
+pub const BlockingContext = @import("tasks/BlockingContext.zig");
+pub const Task = @import("tasks/Task.zig");
+const tracing = @import("tracing.zig");
 
-const Self = @This();
+const tasks = @This();
 
-sys: System,
+pub var allocator: Allocator = undefined;
+var thread: Thread = undefined;
+pub var mutex: Mutex = .{};
+pub var cvar: Condition = .{};
+pub var running_tasks: usize = 0;
+pub var task_count: ResourceCount = .{};
+pub var context_count: ResourceCount = .{};
+pub var queue: DoublyLinkedList = .{};
+pub var should_quit: bool = false;
 
-pub fn init(ctx: *Context) !Self {
-    return Self{ .sys = try System.init(ctx) };
+pub fn init() !void {
+    allocator = context.allocator;
+    thread = try Thread.spawn(.{ .allocator = allocator }, runEventLoop, .{});
+    thread.setName("fimo event loop") catch {};
 }
 
-pub fn deinit(self: *Self) void {
-    self.sys.deinit();
+pub fn deinit() void {
+    task_count.waitUntilZero();
+    context_count.waitUntilZero();
+    {
+        mutex.lock();
+        defer mutex.unlock();
+        should_quit = true;
+        cvar.signal();
+    }
+    thread.join();
+    thread = undefined;
+    should_quit = false;
+    std.debug.assert(running_tasks == 0);
+    std.debug.assert(queue.len() == 0);
+    allocator = undefined;
 }
 
-pub fn asContext(self: *Self) *Context {
-    return @fieldParentPtr("async", self);
+fn runEventLoop() void {
+    tracing.registerThread();
+    defer tracing.unregisterThread();
+
+    loop: while (true) {
+        const node = blk: {
+            mutex.lock();
+            defer mutex.unlock();
+            break :blk queue.popFirst() orelse {
+                if (running_tasks == 0 and should_quit) break :loop;
+                cvar.wait(&mutex);
+                continue;
+            };
+        };
+        const task: *Task = @fieldParentPtr("node", node);
+        task.poll();
+    }
 }
 
 pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(pub_tasks.Fallible(T)) {
@@ -53,26 +94,11 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(p
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn runToCompletion() callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
-        Context.global.async.sys.startEventLoop(true) catch |err|
-            return AnyError.initError(err).intoResult();
-        return AnyResult.ok;
-    }
-
-    fn startEventLoop(loop: *pub_tasks.EventLoop) callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
-        loop.* = EventLoop.init(&Context.global.async.sys) catch |err|
-            return AnyError.initError(err).intoResult();
-        return AnyResult.ok;
-    }
-
     fn contextNewBlocking(
-        context: *pub_tasks.BlockingContext,
+        blk_ctx: *pub_tasks.BlockingContext,
     ) callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
-        context.* = BlockingContext.init(&Context.global.async.sys) catch |err|
-            return AnyError.initError(err).intoResult();
+        std.debug.assert(context.is_init);
+        blk_ctx.* = BlockingContext.init() catch |err| return AnyError.initError(err).intoResult();
         return AnyResult.ok;
     }
 
@@ -91,9 +117,8 @@ const VTableImpl = struct {
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         future: *pub_tasks.OpaqueFuture,
     ) callconv(.c) AnyResult {
-        std.debug.assert(Context.is_init);
+        std.debug.assert(context.is_init);
         future.* = Task.init(
-            &Context.global.async.sys,
             data,
             data_size,
             data_alignment,
@@ -108,8 +133,6 @@ const VTableImpl = struct {
 };
 
 pub const vtable = pub_tasks.VTable{
-    .run_to_completion = &VTableImpl.runToCompletion,
-    .start_event_loop = &VTableImpl.startEventLoop,
     .context_new_blocking = &VTableImpl.contextNewBlocking,
     .future_enqueue = &VTableImpl.futureEnqueue,
 };

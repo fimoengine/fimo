@@ -78,7 +78,7 @@ pub struct VTableV0 {
 pub fn profile() -> Profile {
     unsafe {
         let handle = Handle::get_handle();
-        (handle.module_v0.profile)()
+        (handle.modules_v0.profile)()
     }
 }
 
@@ -88,7 +88,7 @@ pub fn features() -> Box<[FeatureStatus]> {
     unsafe {
         let mut out = MaybeUninit::uninit();
         let handle = Handle::get_handle();
-        let len = (handle.module_v0.features)(&mut out);
+        let len = (handle.modules_v0.features)(&mut out);
         let ptr = out.assume_init();
         if len == 0 {
             (&[] as &[_]).into()
@@ -107,7 +107,7 @@ pub fn namespace_exists(namespace: &CStr) -> Result<bool, AnyError> {
     unsafe {
         let mut out = MaybeUninit::uninit();
         let handle = Handle::get_handle();
-        let f = handle.module_v0.namespace_exists;
+        let f = handle.modules_v0.namespace_exists;
         f(namespace.into(), &mut out).into_result()?;
         Ok(out.assume_init())
     }
@@ -120,7 +120,7 @@ pub fn namespace_exists(namespace: &CStr) -> Result<bool, AnyError> {
 pub fn prune_instances() -> Result<(), AnyError> {
     unsafe {
         let handle = Handle::get_handle();
-        let f = handle.module_v0.prune_instances;
+        let f = handle.modules_v0.prune_instances;
         f().into_result()
     }
 }
@@ -136,7 +136,7 @@ pub fn query_parameter(module: &CStr, parameter: &CStr) -> Result<ParameterInfo,
         let mut read_group = MaybeUninit::uninit();
         let mut write_group = MaybeUninit::uninit();
         let handle = Handle::get_handle();
-        let f = handle.module_v0.query_parameter;
+        let f = handle.modules_v0.query_parameter;
         f(
             module.into(),
             parameter.into(),
@@ -166,7 +166,7 @@ pub fn read_parameter<P: ParameterCast>(module: &CStr, parameter: &CStr) -> Resu
     unsafe {
         let mut out = MaybeUninit::<P::Repr>::uninit();
         let handle = Handle::get_handle();
-        (handle.module_v0.read_parameter)(
+        (handle.modules_v0.read_parameter)(
             NonNull::new_unchecked(out.as_mut_ptr()).cast(),
             P::Repr::TYPE,
             module.into(),
@@ -191,37 +191,13 @@ pub fn write_parameter<P: ParameterCast>(
     unsafe {
         let value = ManuallyDrop::new(value.into_repr());
         let handle = Handle::get_handle();
-        (handle.module_v0.write_parameter)(
+        (handle.modules_v0.write_parameter)(
             ConstNonNull::new_unchecked(&raw const *value).cast(),
             P::Repr::TYPE,
             module.into(),
             parameter.into(),
         )
         .into_result()
-    }
-}
-
-/// Helper struct that prunes all unused instances on drop.
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct PruneInstancesOnDrop(PhantomData<()>);
-
-impl PruneInstancesOnDrop {
-    /// Constructs a new instance of the dropper.
-    pub fn new() -> Self {
-        PruneInstancesOnDrop(PhantomData)
-    }
-}
-
-impl Default for PruneInstancesOnDrop {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for PruneInstancesOnDrop {
-    fn drop(&mut self) {
-        prune_instances().expect("could not prune instances");
     }
 }
 

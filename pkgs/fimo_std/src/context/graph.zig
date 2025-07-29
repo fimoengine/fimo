@@ -97,6 +97,7 @@ fn IdMap(comptime T: type) type {
             while (iter.next()) |entry| {
                 self.dtor_fn(allocator, entry.value_ptr);
             }
+            self.map.clearAndFree(allocator);
             self.free_ids.clearAndFree(allocator);
             self.next_id = 0;
         }

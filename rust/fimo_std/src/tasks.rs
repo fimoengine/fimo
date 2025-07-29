@@ -4,7 +4,7 @@ use crate::{
     context::Handle,
     error::{AnyError, AnyResult, private},
     handle,
-    module::symbols::{AssertSharable, Share},
+    modules::symbols::{AssertSharable, Share},
     utils::{ConstNonNull, OpaqueHandle, View, Viewable},
 };
 use std::{
@@ -19,9 +19,6 @@ use std::{
 #[repr(C)]
 #[derive(Debug)]
 pub struct VTableV0 {
-    pub run_to_completion: unsafe extern "C" fn() -> AnyResult,
-    pub start_event_loop:
-        unsafe extern "C" fn(event_loop: &mut MaybeUninit<EventLoop>) -> AnyResult,
     pub new_blocking_context:
         unsafe extern "C" fn(context: &mut MaybeUninit<BlockingContext>) -> AnyResult,
     #[allow(clippy::type_complexity)]
@@ -40,103 +37,6 @@ pub struct VTableV0 {
         drop_result: Option<unsafe extern "C" fn(data: Option<NonNull<()>>)>,
         future: &mut MaybeUninit<EnqueuedFuture<()>>,
     ) -> AnyResult,
-}
-
-handle!(pub handle EventLoopHandle: Send + Sync + Share + Unpin);
-
-/// Virtual function table of an [`EventLoop`].
-#[repr(C)]
-#[derive(Debug)]
-pub struct EventLoopVTable {
-    pub join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
-    pub detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
-    _private: PhantomData<()>,
-}
-
-impl EventLoopVTable {
-    cfg_internal! {
-        /// Constructs a new `EventLoopVTable`.
-        ///
-        /// # Unstable
-        ///
-        /// **Note**: This is an [unstable API][unstable]. The public API of this type may break
-        /// with any semver compatible release. See
-        /// [the documentation on unstable features][unstable] for details.
-        ///
-        /// [unstable]: crate#unstable-features
-        pub const fn new(
-            join: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
-            detach: unsafe extern "C" fn(handle: Option<EventLoopHandle>),
-        ) -> Self {
-            Self {
-                join,
-                detach,
-                _private: PhantomData,
-            }
-        }
-    }
-}
-
-/// A handle to an event loop executing futures.
-#[repr(C)]
-#[derive(Debug)]
-pub struct EventLoop {
-    pub handle: Option<EventLoopHandle>,
-    pub vtable: &'static AssertSharable<EventLoopVTable>,
-    _private: PhantomData<()>,
-}
-
-sa::assert_impl_all!(EventLoop: Send, Sync, Share, Unpin);
-
-impl EventLoop {
-    /// Initializes a new event loop.
-    ///
-    /// There can only be one event loop at a time, and it will keep the context alive until it
-    /// completes its execution.
-    pub fn new() -> Result<Self, AnyError> {
-        let handle = unsafe { Handle::get_handle() };
-        let f = handle.async_v0.start_event_loop;
-
-        let mut out = MaybeUninit::uninit();
-        unsafe {
-            f(&mut out).into_result()?;
-            Ok(out.assume_init())
-        }
-    }
-
-    /// Utilize the current thread to complete all tasks in the event loop.
-    ///
-    /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
-    /// the context can not be destroyed until the queue is empty. Upon the completion of all tasks,
-    /// the function will return to the caller.
-    pub fn flush_with_current_thread() -> Result<(), AnyError> {
-        let handle = unsafe { Handle::get_handle() };
-        let f = handle.async_v0.run_to_completion;
-        unsafe { f().into_result() }
-    }
-
-    /// Signals the event loop to complete the remaining jobs and exit afterward.
-    ///
-    /// The caller will block until the event loop has completed executing.
-    pub fn join(self) {
-        drop(self);
-    }
-
-    /// Signals the event loop to complete the remaining jobs and exit afterward.
-    ///
-    /// The caller will exit immediately.
-    pub fn detach(self) {
-        let this = ManuallyDrop::new(self);
-        let f = this.vtable.detach;
-        unsafe { f(this.handle) }
-    }
-}
-
-impl Drop for EventLoop {
-    fn drop(&mut self) {
-        let f = self.vtable.join;
-        unsafe { f(self.handle) }
-    }
 }
 
 handle!(pub handle WakerHandle: Send + Sync + Share + Unpin);
@@ -349,7 +249,7 @@ impl<T, R> Future<T, R> {
 
         let this = ManuallyDrop::new(self);
         let handle = unsafe { Handle::get_handle() };
-        let f = handle.async_v0.enqueue_future;
+        let f = handle.tasks_v0.enqueue_future;
         let mut out = MaybeUninit::uninit();
 
         unsafe {
@@ -641,7 +541,7 @@ impl BlockingContext {
     /// Constructs a new blocking context.
     pub fn new() -> Result<Self, AnyError> {
         let handle = unsafe { Handle::get_handle() };
-        let f = handle.async_v0.new_blocking_context;
+        let f = handle.tasks_v0.new_blocking_context;
 
         let mut out = MaybeUninit::uninit();
         unsafe {

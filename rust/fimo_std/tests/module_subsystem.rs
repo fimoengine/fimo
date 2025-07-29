@@ -4,11 +4,10 @@
 use std::{pin::Pin, ptr::NonNull};
 
 use fimo_std::{
-    r#async::{BlockingContext, EventLoop},
     context::ContextBuilder,
     emit_info,
     error::AnyError,
-    module::{
+    modules::{
         exports::{Builder, SymbolLinkage},
         info::Info,
         instance::{GenericInstance, PseudoInstance, Stage0InstanceView, Stage1InstanceView},
@@ -18,6 +17,7 @@ use fimo_std::{
         *,
     },
     symbol,
+    tasks::BlockingContext,
     tracing::{Config, Level, ThreadAccess, default_subscriber},
     utils::Viewable,
 };
@@ -30,7 +30,7 @@ symbol! {
     symbol B1 @ Version("0.1.0") = "b"::b_export_1: *const i32;
 }
 
-#[fimo_std::module::exports::export_module]
+#[fimo_std::modules::exports::export_module]
 const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     .with_description(c"Test module a")
     .with_author(c"fimo")
@@ -43,7 +43,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
             extern "C" fn add(a: i32, b: i32) -> i32 {
                 a + b
             }
-            Ok(fimo_std::module::symbols::FunctionPtr::<
+            Ok(fimo_std::modules::symbols::FunctionPtr::<
                 extern "C" fn(_, _) -> _,
             >::new(add))
         },
@@ -53,7 +53,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
     )
     .build();
 
-#[fimo_std::module::exports::export_module]
+#[fimo_std::modules::exports::export_module]
 const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
     .with_description(c"Test module b")
     .with_author(c"fimo")
@@ -61,7 +61,7 @@ const _: &exports::Export<'_> = Builder::<BView<'_>, B>::new(c"b")
     .with_export::<B1>("b1", SymbolLinkage::Global, &77)
     .build();
 
-#[fimo_std::module::exports::export_module]
+#[fimo_std::modules::exports::export_module]
 const _: &exports::Export<'_> = Builder::<CView<'_>, C>::new(c"c")
     .with_description(c"Test module c")
     .with_author(c"fimo")
@@ -220,14 +220,10 @@ fn load_modules() -> Result<(), AnyError> {
         )
         .build()?;
     unsafe { context.enable_cleanup() };
-
     let _access = ThreadAccess::new();
-    let _event_loop = EventLoop::new()?;
 
     let blocking = BlockingContext::new()?;
     blocking.block_on(async move {
-        let _prune = PruneInstancesOnDrop::new();
-
         let set = LoadingSet::new()?;
         set.view().add_modules_from_local(|_| FilterRequest::Load)?;
         set.view().commit().await?;

@@ -43,7 +43,6 @@ pub const GlobalCtx = struct {
 }{};
 
 const TestContext = struct {
-    event_loop: tasks.EventLoop,
     instance: *const PseudoInstance,
     symbols: SymbolGroup(symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols),
 
@@ -66,10 +65,6 @@ const TestContext = struct {
             tracing.emitErrSimple("{f}", .{e}, @src());
             e.deinit();
         };
-
-        errdefer tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
-        const event_loop = try tasks.EventLoop.init(&err);
-        errdefer event_loop.join();
 
         const async_ctx = try tasks.BlockingContext.init(&err);
         defer async_ctx.deinit();
@@ -105,7 +100,6 @@ const TestContext = struct {
         try instance.addNamespace(fimo_tasks_meta.symbols.symbol_namespace, &err);
 
         const test_ctx = @This(){
-            .event_loop = event_loop,
             .instance = instance,
             .symbols = try instance.loadSymbolGroup(
                 symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols,
@@ -121,8 +115,6 @@ const TestContext = struct {
 
         var err: ?fimo_std.AnyError = null;
         modules.pruneInstances(&err) catch unreachable;
-        self.event_loop.join();
-        tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
         tracing.unregisterThread();
         ctx.deinit();
     }

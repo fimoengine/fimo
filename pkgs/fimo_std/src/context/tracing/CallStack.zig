@@ -1,11 +1,8 @@
 const std = @import("std");
 
-const c = @import("c");
-
 const time = @import("../../time.zig");
 const pub_tracing = @import("../../tracing.zig");
-const Tracing = @import("../tracing.zig");
-const TracingError = Tracing.TracingError;
+const tracing = @import("../tracing.zig");
 const StackFrame = @import("StackFrame.zig");
 
 const Self = @This();
@@ -22,30 +19,29 @@ max_level: pub_tracing.Level,
 call_stacks: std.ArrayListUnmanaged(*anyopaque),
 start_frame: ?*StackFrame = null,
 end_frame: ?*StackFrame = null,
-owner: *Tracing,
 
-pub fn init(owner: *Tracing) *Self {
-    const call_stack = owner.allocator.create(
+pub fn init() *Self {
+    const call_stack = tracing.allocator.create(
         Self,
     ) catch |err| @panic(@errorName(err));
     call_stack.* = Self{
         .buffer = undefined,
-        .max_level = owner.max_level,
+        .max_level = tracing.max_level,
         .call_stacks = undefined,
-        .owner = owner,
     };
 
-    call_stack.buffer = owner.allocator.alloc(
+    call_stack.buffer = tracing.allocator.alloc(
         u8,
-        owner.buffer_size,
+        tracing.buffer_size,
     ) catch |err| @panic(@errorName(err));
     call_stack.call_stacks = std.ArrayListUnmanaged(*anyopaque).initCapacity(
-        owner.allocator,
-        owner.subscribers.len,
+        tracing.allocator,
+        tracing.subscribers.len,
     ) catch |err| @panic(@errorName(err));
+    tracing.call_stack_count.increase();
 
     const now = time.Time.now();
-    for (owner.subscribers) |subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const cs = subscriber.createCallStack(now);
         call_stack.call_stacks.appendAssumeCapacity(cs);
     }
@@ -59,14 +55,14 @@ pub fn deinit(self: *Self) void {
     if (self.end_frame != null) @panic(@errorName(error.CallStackNotEmpty));
 
     const now = time.Time.now();
-    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.destroyCallStack(now, call_stack, false);
     }
 
-    const owner = self.owner;
-    self.call_stacks.deinit(self.owner.allocator);
-    owner.allocator.free(self.buffer);
-    owner.allocator.destroy(self);
+    self.call_stacks.deinit(tracing.allocator);
+    tracing.allocator.free(self.buffer);
+    tracing.allocator.destroy(self);
+    tracing.call_stack_count.decrease();
 }
 
 fn deinitUnbound(self: *Self) void {
@@ -84,14 +80,14 @@ fn deinitAbort(self: *Self) void {
     }
 
     const now = time.Time.now();
-    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.destroyCallStack(now, call_stack, true);
     }
 
-    const owner = self.owner;
-    self.call_stacks.deinit(self.owner.allocator);
-    owner.allocator.free(self.buffer);
-    owner.allocator.destroy(self);
+    self.call_stacks.deinit(tracing.allocator);
+    tracing.allocator.free(self.buffer);
+    tracing.allocator.destroy(self);
+    tracing.call_stack_count.decrease();
 }
 
 pub fn bind(self: *Self) void {
@@ -115,7 +111,7 @@ fn unblock(self: *Self) void {
     std.debug.assert(self.state.suspended);
 
     const now = time.Time.now();
-    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.unblockCallStack(now, call_stack);
     }
 
@@ -129,7 +125,7 @@ pub fn @"suspend"(self: *Self, mark_blocked: bool) void {
     if (self.state.suspended) @panic(@errorName(error.CallStackSuspended));
 
     const now = time.Time.now();
-    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.suspendCallStack(now, call_stack, mark_blocked);
     }
 
@@ -145,7 +141,7 @@ pub fn @"resume"(self: *Self) void {
     if (!self.state.suspended) @panic(@errorName(error.CallStackNotSuspended));
 
     const now = time.Time.now();
-    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.resumeCallStack(now, call_stack);
     }
 
@@ -200,7 +196,7 @@ pub fn emitEvent(
     const message = format_buffer[0..written_characters];
 
     const now = time.Time.now();
-    for (self.call_stacks.items, self.owner.subscribers) |call_stack, subscriber| {
+    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
         subscriber.emitEvent(now, call_stack, event, message);
     }
 }
@@ -259,10 +255,9 @@ const VTableImpl = struct {
     }
     fn replaceActive(handle: *anyopaque) callconv(.c) pub_tracing.CallStack {
         const self: *Self = @alignCast(@ptrCast(handle));
-        const tracing = self.owner;
         if (!tracing.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
 
-        const data = tracing.thread_data.get().?;
+        const data = tracing.ThreadData.get().?;
         if (data.call_stack == self) @panic(@errorName(error.CallStackBound));
 
         self.bind();

@@ -2,7 +2,7 @@
 
 use crate::{
     error::{AnyError, AnyResult},
-    module::symbols::SliceRef,
+    modules::symbols::SliceRef,
     utils::ConstNonNull,
 };
 use core::{fmt::Display, panic};

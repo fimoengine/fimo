@@ -1,6 +1,6 @@
 //! Panic utilities.
 
-use crate::{error::AnyError, module::symbols::Share};
+use crate::{error::AnyError, modules::symbols::Share};
 use std::panic::AssertUnwindSafe;
 
 /// Logs an error and aborts the process.

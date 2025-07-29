@@ -212,10 +212,6 @@ pub fn main() !void {
     tracing.registerThread();
     defer tracing.unregisterThread();
 
-    defer tasks.EventLoop.flushWithCurrentThread(&err) catch unreachable;
-    const event_loop = try tasks.EventLoop.init(&err);
-    defer event_loop.join();
-
     const async_ctx = try tasks.BlockingContext.init(&err);
     defer async_ctx.deinit();
 

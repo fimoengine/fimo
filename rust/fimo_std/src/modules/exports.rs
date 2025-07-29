@@ -1,8 +1,7 @@
 //! Utilities for defining and working with module exports.
 
 use crate::{
-    r#async::{EnqueuedFuture, Fallible},
-    module::{
+    modules::{
         info::Info,
         instance::{GenericInstance, OpaqueInstanceView, Stage0InstanceView, Stage1InstanceView},
         loading_set::LoadingSetView,
@@ -11,6 +10,7 @@ use crate::{
         },
         symbols::{Share, SymbolInfo, SymbolPointer},
     },
+    tasks::{EnqueuedFuture, Fallible},
     utils::{ConstNonNull, OpaqueHandle, View},
     version::Version,
 };

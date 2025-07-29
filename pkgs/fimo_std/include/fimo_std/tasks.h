@@ -12,32 +12,6 @@
 extern "C" {
 #endif // __cplusplus
 
-/// VTable of a FimoTasksEventLoop.
-///
-/// Adding fields to the VTable is not a breaking change.
-typedef struct FimoTasksEventLoopVTable {
-    /// Blocks the calling thread until the event loop queue is empty.
-    ///
-    /// Signals the event loop thread to finish processing the remaining tasks. The tasks may
-    /// continue to enqueue new tasks. The event loop may not be utilized after calling this
-    /// function.
-    void (*join)(void *data);
-    /// Signals the event loop to complete the remaining tasks and exit afterwards.
-    ///
-    /// Signals the event loop thread to finish processing the remaining tasks. The tasks may
-    /// continue to enqueue new tasks. The caller will return immediately, after which it is not
-    /// allowed to access the event loop.
-    void (*detach)(void *data);
-} FimoTasksEventLoopVTable;
-
-/// A handle to a running event loop.
-///
-/// The event loop must either be joined or detached.
-typedef struct FimoTasksEventLoop {
-    void *data;
-    const FimoTasksEventLoopVTable *vtable;
-} FimoTasksEventLoop;
-
 /// VTable of a FimoTasksWaker.
 ///
 /// Changing the VTable is a breaking change.
@@ -132,17 +106,6 @@ typedef FIMO_TASKS_ENQUEUED_FUTURE(void) FimoTasksOpaqueFuture;
 ///
 /// Changing this definition is a breaking change.
 typedef struct FimoTasksVTable {
-    /// Utilize the current thread to complete all tasks in the event loop.
-    ///
-    /// The intended purpose of this function is to complete all remaining tasks before cleanup, as
-    /// the context can not be destroyed until the queue is empty. Upon the completion of all
-    /// tasks, the funtion will return to the caller.
-    FimoResult (*run_to_completion)();
-    /// Initializes a new event loop.
-    ///
-    /// There can only be one event loop at a time, and it will keep the context alive until it
-    /// completes its execution.
-    FimoResult (*start_event_loop)(FimoTasksEventLoop *loop);
     /// Initializes a new blocking context.
     ///
     /// The context provides the utilities required to await the completion of a future, by

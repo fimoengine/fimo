@@ -16,16 +16,16 @@ const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const FSMFuture = pub_tasks.FSMFuture;
 const Fallible = pub_tasks.Fallible;
 const Version = @import("../../Version.zig");
-const Async = @import("../async.zig");
+const modules = @import("../modules.zig");
 const RefCount = @import("../RefCount.zig");
+const tasks = @import("../tasks.zig");
+const tracing = @import("../tracing.zig");
 const LoadingSet = @import("LoadingSet.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
 const SymbolRef = @import("SymbolRef.zig");
-const System = @import("System.zig");
 
 const Self = @This();
 
-sys: *System,
 inner: Inner,
 type: InstanceType,
 info: pub_modules.Info,
@@ -54,19 +54,6 @@ pub const Symbol = struct {
         }
     }
 };
-
-pub const ParameterError = error{
-    NotPermitted,
-    NotADependency,
-    InvalidParameterType,
-    NotFound,
-};
-
-pub const InstanceHandleError = error{
-    Detached,
-    NotFound,
-    InvalidParameterType,
-} || PathError || Allocator.Error;
 
 pub const Parameter = struct {
     inner: Data,
@@ -182,29 +169,26 @@ pub const Parameter = struct {
         return p;
     }
 
-    pub fn checkType(
-        self: *const Parameter,
-        ty: pub_modules.ParameterType,
-    ) ParameterError!void {
+    pub fn checkType(self: *const Parameter, ty: pub_modules.ParameterType) !void {
         if (!(self.inner.type() == ty)) return error.InvalidParameterType;
     }
 
-    pub fn checkReadPublic(self: *const Parameter) ParameterError!void {
+    pub fn checkReadPublic(self: *const Parameter) !void {
         if (!(self.read_group == .public)) return error.NotPermitted;
     }
 
-    pub fn checkWritePublic(self: *const Parameter) ParameterError!void {
+    pub fn checkWritePublic(self: *const Parameter) !void {
         if (!(self.write_group == .public)) return error.NotPermitted;
     }
 
-    fn checkReadDependency(self: *const Parameter, reader: *const Inner) ParameterError!void {
+    fn checkReadDependency(self: *const Parameter, reader: *const Inner) !void {
         const min_permission = pub_modules.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.read_group) > @intFromEnum(min_permission)) return error.NotPermitted;
         const owner_name = std.mem.span(self.owner.info.name);
         if (!reader.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
-    fn checkWriteDependency(self: *const Parameter, writer: *const Inner) ParameterError!void {
+    fn checkWriteDependency(self: *const Parameter, writer: *const Inner) !void {
         const min_permission = pub_modules.ParameterAccessGroup.dependency;
         if (@intFromEnum(self.write_group) > @intFromEnum(min_permission)) return error.NotPermitted;
         const owner_name = std.mem.span(self.owner.info.name);
@@ -264,13 +248,17 @@ pub const Inner = struct {
         return self.is_detached;
     }
 
+    pub fn isUnloading(self: *const Inner) bool {
+        return self.unload_requested;
+    }
+
     pub fn canUnload(self: *const Inner) bool {
         std.debug.assert(!self.isDetached());
         return self.strong_count == 0 and self.dependents_count == 0;
     }
 
     pub fn enqueueUnload(self: *Inner) !void {
-        if (self.unload_requested or self.isDetached()) return;
+        if (self.isUnloading() or self.isDetached()) return;
         self.unload_requested = true;
 
         const x = Self.fromInnerPtr(self);
@@ -297,7 +285,7 @@ pub const Inner = struct {
         }
     }
 
-    pub fn refStrong(self: *Inner) InstanceHandleError!void {
+    pub fn refStrong(self: *Inner) !void {
         if (self.isDetached()) return error.Detached;
         self.strong_count += 1;
     }
@@ -327,7 +315,7 @@ pub const Inner = struct {
         return sym;
     }
 
-    fn addSymbol(self: *Inner, name: []const u8, namespace: []const u8, sym: Symbol) InstanceHandleError!void {
+    fn addSymbol(self: *Inner, name: []const u8, namespace: []const u8, sym: Symbol) !void {
         if (self.isDetached()) return error.Detached;
         const key = SymbolRef.Id{
             .name = try self.cacheString(name),
@@ -341,7 +329,7 @@ pub const Inner = struct {
         return self.parameters.get(name);
     }
 
-    fn addParameter(self: *Inner, name: []const u8, param: *Parameter) InstanceHandleError!void {
+    fn addParameter(self: *Inner, name: []const u8, param: *Parameter) !void {
         if (self.isDetached()) return error.Detached;
         const n = try self.cacheString(name);
         try self.parameters.put(self.arena.allocator(), n, param);
@@ -352,13 +340,13 @@ pub const Inner = struct {
         return self.namespaces.getPtr(name);
     }
 
-    pub fn addNamespace(self: *Inner, name: []const u8, @"type": DependencyType) InstanceHandleError!void {
+    pub fn addNamespace(self: *Inner, name: []const u8, @"type": DependencyType) !void {
         if (self.isDetached()) return error.Detached;
         const n = try self.cacheString(name);
         try self.namespaces.put(self.arena.allocator(), n, @"type");
     }
 
-    pub fn removeNamespace(self: *Inner, name: []const u8) InstanceHandleError!void {
+    pub fn removeNamespace(self: *Inner, name: []const u8) !void {
         if (self.isDetached()) return error.Detached;
         if (!self.namespaces.swapRemove(name)) return error.NotFound;
     }
@@ -368,7 +356,7 @@ pub const Inner = struct {
         return self.dependencies.getPtr(name);
     }
 
-    pub fn addDependency(self: *Inner, other: *Inner, @"type": DependencyType) InstanceHandleError!void {
+    pub fn addDependency(self: *Inner, other: *Inner, @"type": DependencyType) !void {
         std.debug.assert(self != other);
         if (self.isDetached() or other.isDetached()) return error.Detached;
 
@@ -387,7 +375,7 @@ pub const Inner = struct {
         other.dependents_count += 1;
     }
 
-    pub fn removeDependency(self: *Inner, other: *Inner) InstanceHandleError!void {
+    pub fn removeDependency(self: *Inner, other: *Inner) !void {
         std.debug.assert(self != other);
         if (self.isDetached()) return error.Detached;
         std.debug.assert(!other.isDetached());
@@ -413,20 +401,20 @@ pub const Inner = struct {
         self.dependencies.clearRetainingCapacity();
     }
 
-    pub fn start(self: *Inner, sys: *System, err: *?AnyError) StartInstanceOp {
-        return StartInstanceOp.Data.init(self, sys, err);
+    pub fn start(self: *Inner, err: *?AnyError) StartInstanceOp {
+        return StartInstanceOp.Data.init(self, err);
     }
 
-    pub fn stop(self: *Inner, sys: *System) void {
+    pub fn stop(self: *Inner) void {
         std.debug.assert(!self.isDetached());
         std.debug.assert(self.state == .started);
         self.is_detached = true;
         if (self.@"export") |@"export"| {
             if (@"export".getStopEventModifier()) |event| {
                 self.unlock();
-                sys.mutex.unlock();
+                modules.mutex.unlock();
                 event.on_event(self.instance.?);
-                sys.mutex.lock();
+                modules.mutex.lock();
                 self.mutex.lock();
             }
         }
@@ -465,7 +453,6 @@ pub const Inner = struct {
 };
 
 fn init(
-    sys: *System,
     name: []const u8,
     description: ?[]const u8,
     author: ?[]const u8,
@@ -474,14 +461,13 @@ fn init(
     handle: *ModuleHandle,
     @"export": ?*const pub_modules.Export,
     @"type": InstanceType,
-) InstanceHandleError!*Self {
-    var arena = ArenaAllocator.init(sys.allocator);
+) !*Self {
+    var arena = ArenaAllocator.init(modules.allocator);
     errdefer arena.deinit();
     const allocator = arena.allocator();
 
     const self = try allocator.create(Self);
     self.* = .{
-        .sys = sys,
         .inner = .{
             .arena = undefined,
             .handle = handle,
@@ -499,26 +485,17 @@ fn init(
     };
     // Move the new state of the arena into the allocated handle.
     self.inner.arena = arena;
+    modules.instance_count.increase();
 
     return self;
 }
 
-pub fn initPseudoInstance(sys: *System, name: []const u8) !*pub_modules.PseudoInstance {
+pub fn initPseudoInstance(name: []const u8) !*pub_modules.PseudoInstance {
     const iterator = &pub_modules.exports.ExportIter.fimo_impl_module_export_iterator;
-    const handle = try ModuleHandle.initLocal(sys.allocator, iterator, iterator);
+    const handle = try ModuleHandle.initLocal(modules.allocator, iterator, iterator);
     errdefer handle.unref();
 
-    const instance_handle = try Self.init(
-        sys,
-        name,
-        null,
-        null,
-        null,
-        null,
-        handle,
-        null,
-        .pseudo,
-    );
+    const instance_handle = try Self.init(name, null, null, null, null, handle, null, .pseudo);
     errdefer instance_handle.unref();
 
     const instance = try instance_handle.inner.arena.allocator().create(pub_modules.PseudoInstance);
@@ -557,10 +534,6 @@ pub fn fromInnerPtr(inner: *Inner) *const Self {
     return @fieldParentPtr("inner", inner);
 }
 
-fn logTrace(self: *const Self, comptime fmt: []const u8, args: anytype, location: std.builtin.SourceLocation) void {
-    self.sys.logTrace(fmt, args, location);
-}
-
 fn ref(self: *const Self) void {
     const this: *Self = @constCast(self);
     this.ref_count.ref();
@@ -573,6 +546,7 @@ fn unref(self: *const Self) void {
     const inner = this.lock();
     if (!inner.isDetached()) inner.detach();
     inner.arena.deinit();
+    modules.instance_count.decrease();
 }
 
 pub fn lock(self: *const Self) *Inner {
@@ -582,38 +556,38 @@ pub fn lock(self: *const Self) *Inner {
 }
 
 fn addNamespace(self: *const Self, namespace: []const u8) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "adding namespace to instance, instance='{s}', namespace='{s}'",
         .{ self.info.name, namespace },
         @src(),
     );
 
-    if (std.mem.eql(u8, namespace, System.global_namespace)) return error.NotPermitted;
+    if (std.mem.eql(u8, namespace, modules.global_namespace)) return error.NotPermitted;
 
-    self.sys.lock();
-    defer self.sys.unlock();
+    modules.mutex.lock();
+    defer modules.mutex.unlock();
 
     const inner = self.lock();
     defer inner.unlock();
 
     if (inner.getNamespace(namespace) != null) return error.Duplicate;
 
-    try self.sys.refNamespace(namespace);
-    errdefer self.sys.unrefNamespace(namespace);
+    try modules.refNamespace(namespace);
+    errdefer modules.unrefNamespace(namespace);
     try inner.addNamespace(namespace, .dynamic);
 }
 
 fn removeNamespace(self: *const Self, namespace: []const u8) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "removing namespace from instance, instance='{s}', namespace='{s}'",
         .{ self.info.name, namespace },
         @src(),
     );
 
-    if (std.mem.eql(u8, namespace, System.global_namespace)) return error.NotPermitted;
+    if (std.mem.eql(u8, namespace, modules.global_namespace)) return error.NotPermitted;
 
-    self.sys.lock();
-    defer self.sys.unlock();
+    modules.mutex.lock();
+    defer modules.mutex.unlock();
 
     const inner = self.lock();
     defer inner.unlock();
@@ -622,11 +596,11 @@ fn removeNamespace(self: *const Self, namespace: []const u8) !void {
     if (ns_info.* == .static) return error.NotPermitted;
 
     try inner.removeNamespace(namespace);
-    self.sys.unrefNamespace(namespace);
+    modules.unrefNamespace(namespace);
 }
 
 fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "adding dependency to instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
         @src(),
@@ -635,8 +609,8 @@ fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
     const info_handle = Self.fromInfoPtr(info);
     if (self == info_handle) return error.CyclicDependency;
 
-    self.sys.lock();
-    defer self.sys.unlock();
+    modules.mutex.lock();
+    defer modules.mutex.unlock();
 
     const inner = self.lock();
     defer inner.unlock();
@@ -644,11 +618,11 @@ fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
     const info_inner = info_handle.lock();
     defer info_inner.unlock();
 
-    try self.sys.linkInstances(inner, info_inner);
+    try modules.linkInstances(inner, info_inner);
 }
 
 fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "removing dependency from instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
         @src(),
@@ -657,8 +631,8 @@ fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
     const info_handle = Self.fromInfoPtr(info);
     if (self == info_handle) return error.NotADependency;
 
-    self.sys.lock();
-    defer self.sys.unlock();
+    modules.mutex.lock();
+    defer modules.mutex.unlock();
 
     const inner = self.lock();
     defer inner.unlock();
@@ -666,18 +640,18 @@ fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
     const info_inner = info_handle.lock();
     defer info_inner.unlock();
 
-    try self.sys.unlinkInstances(inner, info_inner);
+    try modules.unlinkInstances(inner, info_inner);
 }
 
 fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
-    self.logTrace(
+    tracing.emitTraceSimple(
         "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{f}'",
         .{ self.info.name, name, namespace, version },
         @src(),
     );
-    self.sys.lock();
-    defer self.sys.unlock();
-    const symbol_ref = self.sys.getSymbolCompatible(
+    modules.mutex.lock();
+    defer modules.mutex.unlock();
+    const symbol_ref = modules.getSymbolCompatible(
         name,
         namespace,
         version,
@@ -688,12 +662,12 @@ fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, versio
 
     if (inner.getDependency(symbol_ref.owner) == null) return error.NotADependency;
     if (inner.getNamespace(namespace) == null and
-        !std.mem.eql(u8, namespace, System.global_namespace))
+        !std.mem.eql(u8, namespace, modules.global_namespace))
     {
         return error.NotADependency;
     }
 
-    const owner_instance = self.sys.getInstance(symbol_ref.owner) orelse return error.NotFound;
+    const owner_instance = modules.getInstance(symbol_ref.owner) orelse return error.NotFound;
     const owner_handle = Self.fromInstancePtr(owner_instance.instance);
     const owner_inner = owner_handle.lock();
     defer owner_inner.unlock();
@@ -712,8 +686,8 @@ fn readParameter(
     @"type": pub_modules.ParameterType,
     module: []const u8,
     parameter: []const u8,
-) ParameterError!void {
-    self.logTrace(
+) !void {
+    tracing.emitTraceSimple(
         "reading dependency parameter, reader='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
         .{ self.info.name, value, @tagName(@"type"), module, parameter },
         @src(),
@@ -736,8 +710,8 @@ fn writeParameter(
     @"type": pub_modules.ParameterType,
     module: []const u8,
     parameter: []const u8,
-) ParameterError!void {
-    self.logTrace(
+) !void {
+    tracing.emitTraceSimple(
         "writing dependency parameter, writer='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
         .{ self.info.name, value, @tagName(@"type"), module, parameter },
         @src(),
@@ -815,22 +789,17 @@ const EnqueueUnloadOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     fn init(handle: *const Self) !void {
-        handle.sys.logTrace(
+        tracing.emitTraceSimple(
             "enqueueing unload of instance, instance='{s}'",
             .{handle.info.name},
             @src(),
         );
         handle.ref();
 
-        const context = handle.sys.asContext();
         const f = EnqueueUnloadOp.init(@This(){
             .handle = handle,
         }).intoFuture();
-        var enqueued = try Async.Task.initFuture(
-            @TypeOf(f),
-            &context.async.sys,
-            &f,
-        );
+        var enqueued = try tasks.Task.initFuture(@TypeOf(f), &f);
 
         // Detaches the future.
         enqueued.deinit();
@@ -846,7 +815,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
     }
 
     pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
-        self.handle.logTrace(
+        tracing.emitTraceSimple(
             "attempting to unload instance, instance=`{s}`",
             .{self.handle.info.name},
             @src(),
@@ -856,7 +825,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
         defer inner.unlock();
         switch (inner.checkAsyncUnload(waker)) {
             .noop => {
-                self.handle.logTrace(
+                tracing.emitTraceSimple(
                     "skipping unload, already unloaded, instance=`{s}`",
                     .{self.handle.info.name},
                     @src(),
@@ -865,7 +834,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
                 return .ret;
             },
             .wait => {
-                self.handle.logTrace(
+                tracing.emitTraceSimple(
                     "unload blocked, instance=`{s}`",
                     .{self.handle.info.name},
                     @src(),
@@ -884,19 +853,18 @@ const EnqueueUnloadOp = FSMFuture(struct {
     pub fn __state1(self: *@This(), waker: pub_tasks.Waker) void {
         _ = waker;
 
-        const sys = self.handle.sys;
-        sys.lock();
-        defer sys.unlock();
+        modules.mutex.lock();
+        defer modules.mutex.unlock();
 
-        self.handle.logTrace(
+        tracing.emitTraceSimple(
             "unloading instance, instance=`{s}`",
             .{self.handle.info.name},
             @src(),
         );
 
         const inner = self.handle.lock();
-        sys.removeInstance(inner) catch |err| @panic(@errorName(err));
-        inner.stop(sys);
+        modules.removeInstance(inner) catch |err| @panic(@errorName(err));
+        inner.stop();
         inner.deinit();
         self.ret = {};
     }
@@ -977,7 +945,6 @@ pub const InitExportedOp = FSMFuture(struct {
     /// 4:
     ///     1. wait for export future
     ///     2. goto 3
-    sys: *System,
     set: pub_modules.LoadingSet,
     @"export": *const pub_modules.Export,
     handle: *ModuleHandle,
@@ -991,11 +958,11 @@ pub const InitExportedOp = FSMFuture(struct {
     dyn_export_future: EnqueuedFuture(Fallible(*anyopaque)) = undefined,
     ret: Error!*pub_modules.OpaqueInstance = undefined,
 
-    pub const Error = (InstanceHandleError || AnyError.Error);
+    pub const Error = anyerror;
     pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: Error) void {
-        if (trace) |tr| self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
@@ -1007,7 +974,6 @@ pub const InitExportedOp = FSMFuture(struct {
         _ = waker;
 
         const instance_handle = try Self.init(
-            self.sys,
             self.@"export".getName(),
             self.@"export".getDescription(),
             self.@"export".getAuthor(),
@@ -1090,7 +1056,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Init namespaces.
         for (self.@"export".getNamespaceImports()) |imp| {
             const name = std.mem.span(imp.name);
-            if (self.sys.getNamespace(name) == null) return error.NotFound;
+            if (modules.getNamespace(name) == null) return error.NotFound;
             try inner.addNamespace(name, .static);
         }
 
@@ -1102,13 +1068,13 @@ pub const InitExportedOp = FSMFuture(struct {
             const src_name = std.mem.span(src.name);
             const src_namespace = std.mem.span(src.namespace);
             const src_version = Version.initC(src.version);
-            const sym = self.sys.getSymbolCompatible(
+            const sym = modules.getSymbolCompatible(
                 src_name,
                 src_namespace,
                 src_version,
             ) orelse return error.NotFound;
 
-            const owner = self.sys.getInstance(sym.owner).?;
+            const owner = modules.getInstance(sym.owner).?;
             const owner_handle = Self.fromInstancePtr(owner.instance);
             const owner_inner = owner_handle.lock();
             defer owner_inner.unlock();
@@ -1125,7 +1091,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Init instance data.
         if (self.@"export".getInstanceStateModifier()) |state| {
             inner.unlock();
-            self.sys.mutex.unlock();
+            modules.mutex.unlock();
             self.state_future = state.init(instance, self.set);
             return .{ .transition = 1 };
         }
@@ -1143,7 +1109,7 @@ pub const InitExportedOp = FSMFuture(struct {
         errdefer self.state_future.deinit();
         switch (self.state_future.poll(waker)) {
             .ready => |result| {
-                self.sys.mutex.lock();
+                modules.mutex.lock();
                 _ = self.instance_handle.lock();
                 self.instance.state_ = @ptrCast(try result.unwrap(self.err));
                 self.state_future.deinit();
@@ -1192,7 +1158,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Initialize the future.
         const src = exp_dyn_exports[self.dyn_export_index];
         self.inner.unlock();
-        self.sys.mutex.unlock();
+        modules.mutex.unlock();
         self.dyn_export_future = src.constructor(self.instance);
         return .next;
     }
@@ -1205,7 +1171,7 @@ pub const InitExportedOp = FSMFuture(struct {
         // Wait for the future and jump back to the loop in state 3.
         switch (self.dyn_export_future.poll(waker)) {
             .ready => |result| {
-                self.sys.mutex.lock();
+                modules.mutex.lock();
                 _ = self.instance_handle.lock();
                 const sym = try result.unwrap(self.err);
 
@@ -1237,7 +1203,6 @@ pub const InitExportedOp = FSMFuture(struct {
 
 pub const StartInstanceOp = FSMFuture(struct {
     inner: *Inner,
-    sys: *System,
     err: *?AnyError,
     @"export": *const pub_modules.Export,
     instance: *const pub_modules.OpaqueInstance,
@@ -1247,7 +1212,7 @@ pub const StartInstanceOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: AnyError.Error) void {
-        if (trace) |tr| self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
@@ -1257,14 +1222,12 @@ pub const StartInstanceOp = FSMFuture(struct {
 
     pub fn init(
         inner: *Inner,
-        sys: *System,
         err: *?AnyError,
     ) StartInstanceOp {
         std.debug.assert(!inner.isDetached());
         std.debug.assert(inner.state == .init);
         return StartInstanceOp.init(.{
             .inner = inner,
-            .sys = sys,
             .err = err,
             .@"export" = inner.@"export".?,
             .instance = inner.instance.?,
@@ -1275,7 +1238,7 @@ pub const StartInstanceOp = FSMFuture(struct {
         _ = waker;
         if (self.@"export".getStartEventModifier()) |event| {
             self.inner.unlock();
-            self.sys.mutex.unlock();
+            modules.mutex.unlock();
             self.future = event.on_event(self.instance);
             return .next;
         }
@@ -1291,7 +1254,7 @@ pub const StartInstanceOp = FSMFuture(struct {
     pub fn __state1(self: *@This(), waker: pub_tasks.Waker) AnyError.Error!pub_tasks.FSMOp {
         switch (self.future.poll(waker)) {
             .ready => |result| {
-                self.sys.mutex.lock();
+                modules.mutex.lock();
                 self.inner.mutex.lock();
                 try result.unwrap(self.err);
                 self.inner.state = .started;
@@ -1327,7 +1290,7 @@ const InstanceVTableImpl = struct {
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
-        self.logTrace(
+        tracing.emitTraceSimple(
             "querying namespace info, instance='{s}', namespace='{s}'",
             .{ ctx.info.name, namespace },
             @src(),
@@ -1353,8 +1316,7 @@ const InstanceVTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
 
         self.addNamespace(namespace_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1367,8 +1329,7 @@ const InstanceVTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
 
         self.removeNamespace(namespace_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1381,7 +1342,7 @@ const InstanceVTableImpl = struct {
     ) callconv(.c) AnyResult {
         const self = Self.fromInstancePtr(ctx);
         const dependency = std.mem.span(info.name);
-        self.logTrace(
+        tracing.emitTraceSimple(
             "querying dependency info, instance='{s}', other='{s}'",
             .{ ctx.info.name, dependency },
             @src(),
@@ -1406,8 +1367,7 @@ const InstanceVTableImpl = struct {
         const self = Self.fromInstancePtr(ctx);
 
         self.addDependency(info) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1419,8 +1379,7 @@ const InstanceVTableImpl = struct {
         const self = Self.fromInstancePtr(ctx);
 
         self.removeDependency(info) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1438,8 +1397,7 @@ const InstanceVTableImpl = struct {
         const version_ = Version.initC(version);
 
         symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1456,8 +1414,7 @@ const InstanceVTableImpl = struct {
         const parameter_ = std.mem.span(parameter);
 
         self.readParameter(value, @"type", module_, parameter_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
@@ -1474,8 +1431,7 @@ const InstanceVTableImpl = struct {
         const parameter_ = std.mem.span(parameter);
 
         self.writeParameter(value, @"type", module_, parameter_) catch |e| {
-            if (@errorReturnTrace()) |tr|
-                self.sys.asContext().tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             return AnyError.initError(e).intoResult();
         };
         return AnyResult.ok;
