@@ -229,6 +229,7 @@ pub const FimoBuild = struct {
                 .root_module = root_module,
                 .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
             });
+            artifact.link_gc_sections = false;
             artifact.bundle_compiler_rt = true;
 
             self.static_lib = artifact;
@@ -248,6 +249,7 @@ pub const FimoBuild = struct {
                 .root_module = root_module,
                 .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
             });
+            artifact.link_gc_sections = false;
 
             self.dynamic_lib = artifact;
             return artifact;
@@ -309,6 +311,7 @@ pub const FimoBuild = struct {
                 }),
                 .executable => |exe| exe,
             };
+            artifact.link_gc_sections = false;
 
             self.artifact = artifact;
             return artifact;

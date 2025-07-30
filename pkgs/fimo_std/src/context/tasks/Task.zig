@@ -325,7 +325,6 @@ pub fn init(
         0;
 
     const buffer_data: ?*anyopaque = if (data) |d| blk: {
-        std.debug.assert(data_size != 0);
         const src_bytes = d[0..data_size];
         const dst_bytes = buffer[data_offset .. data_offset + data_size];
         @memcpy(dst_bytes, src_bytes);

@@ -32,63 +32,6 @@ const B1 = modules.Symbol{
     .T = i32,
 };
 
-fn initCModule(oinst: *const modules.OpaqueInstance, set: modules.LoadingSet) !void {
-    _ = set;
-    const inst: *const C = @alignCast(@ptrCast(oinst));
-    tracing.emitInfoSimple(
-        "initializing instance: name='{s}'",
-        .{inst.info.name},
-        @src(),
-    );
-
-    const parameters = inst.parameters();
-    try testing.expectEqual(0, parameters.pub_pub.read());
-    try testing.expectEqual(1, parameters.pub_dep.read());
-    try testing.expectEqual(2, parameters.pub_pri.read());
-    try testing.expectEqual(3, parameters.dep_pub.read());
-    try testing.expectEqual(4, parameters.dep_dep.read());
-    try testing.expectEqual(5, parameters.dep_pri.read());
-    try testing.expectEqual(6, parameters.pri_pub.read());
-    try testing.expectEqual(7, parameters.pri_dep.read());
-    try testing.expectEqual(8, parameters.pri_pri.read());
-
-    parameters.pub_pub.write(0);
-    parameters.pub_dep.write(1);
-    parameters.pub_pri.write(2);
-    parameters.dep_pub.write(3);
-    parameters.dep_dep.write(4);
-    parameters.dep_pri.write(5);
-    parameters.pri_pub.write(6);
-    parameters.pri_dep.write(7);
-    parameters.pri_pri.write(8);
-
-    const resources = inst.resources();
-    tracing.emitTraceSimple("empty: '{f}'", .{resources.empty}, @src());
-    tracing.emitTraceSimple("a: '{f}'", .{resources.a}, @src());
-    tracing.emitTraceSimple("b: '{f}'", .{resources.b}, @src());
-    tracing.emitTraceSimple("img: '{f}'", .{resources.img}, @src());
-
-    const imports = inst.imports();
-    try testing.expectEqual(imports.@"0".*, 5);
-    try testing.expectEqual(imports.@"1".*, 10);
-    try testing.expectEqual(imports.b0.*, -2);
-    try testing.expectEqual(imports.b1.*, 77);
-
-    try testing.expectEqual(5, inst.provideSymbol(A0).*);
-    try testing.expectEqual(10, inst.provideSymbol(A1).*);
-    try testing.expectEqual(-2, inst.provideSymbol(B0).*);
-    try testing.expectEqual(77, inst.provideSymbol(B1).*);
-
-    try testing.expectEqual(5, A0.requestFrom(inst).*);
-    try testing.expectEqual(10, A1.requestFrom(inst).*);
-    try testing.expectEqual(-2, B0.requestFrom(inst).*);
-    try testing.expectEqual(77, B1.requestFrom(inst).*);
-}
-
-fn deinitCModule(inst: *const modules.OpaqueInstance) void {
-    tracing.emitInfoSimple("deinitializing instance: name='{s}'", .{inst.info.name}, @src());
-}
-
 fn startCModule(inst: *const modules.OpaqueInstance) !void {
     tracing.emitInfoSimple("starting instance: name='{s}'", .{inst.info.name}, @src());
 }
@@ -97,96 +40,141 @@ fn stopCModule(inst: *const modules.OpaqueInstance) void {
     tracing.emitInfoSimple("stopping instance: name='{s}'", .{inst.info.name}, @src());
 }
 
-const A = modules.exports.Builder
-    .init("a")
-    .withDescription("Test module a")
-    .withAuthor("fimo")
-    .withLicense("MIT and Apache 2.0")
-    .withExport(.{ .symbol = A0 }, &5)
-    .withExport(.{ .symbol = A1 }, &10)
-    .exportModule();
+const A = struct {
+    pub const fimo_module = .{
+        .name = .a,
+        .description = "Test module a",
+        .author = "fimo",
+        .license = "MIT or Apache 2.0",
+    };
+    pub const fimo_exports = .{
+        .{ .symbol = A0, .value = &@as(i32, 5) },
+        .{ .symbol = A1, .value = &@as(i32, 10) },
+    };
 
-const B = modules.exports.Builder
-    .init("b")
-    .withDescription("Test module b")
-    .withAuthor("fimo")
-    .withLicense("MIT and Apache 2.0")
-    .withExport(.{ .symbol = B0, .name = "b0" }, &-2)
-    .withExport(.{ .symbol = B1, .name = "b1" }, &77)
-    .exportModule();
+    comptime {
+        _ = modules.Module(@This());
+    }
+};
 
-const C = modules.exports.Builder
-    .init("c")
-    .withDescription("Test module c")
-    .withAuthor("fimo")
-    .withLicense("MIT and Apache 2.0")
-    .withParameter(.{
-        .name = "pub_pub",
-        .member_name = "pub_pub",
-        .read_group = .public,
-        .write_group = .public,
-        .default_value = .{ .u32 = 0 },
-    })
-    .withParameter(.{
-        .name = "pub_dep",
-        .member_name = "pub_dep",
-        .read_group = .public,
-        .write_group = .dependency,
-        .default_value = .{ .u32 = 1 },
-    })
-    .withParameter(.{
-        .name = "pub_pri",
-        .member_name = "pub_pri",
-        .read_group = .public,
-        .default_value = .{ .u32 = 2 },
-    })
-    .withParameter(.{
-        .name = "dep_pub",
-        .member_name = "dep_pub",
-        .read_group = .dependency,
-        .write_group = .public,
-        .default_value = .{ .u32 = 3 },
-    })
-    .withParameter(.{
-        .name = "dep_dep",
-        .member_name = "dep_dep",
-        .read_group = .dependency,
-        .write_group = .dependency,
-        .default_value = .{ .u32 = 4 },
-    })
-    .withParameter(.{
-        .name = "dep_pri",
-        .member_name = "dep_pri",
-        .read_group = .dependency,
-        .default_value = .{ .u32 = 5 },
-    })
-    .withParameter(.{
-        .name = "pri_pub",
-        .member_name = "pri_pub",
-        .write_group = .public,
-        .default_value = .{ .u32 = 6 },
-    })
-    .withParameter(.{
-        .name = "pri_dep",
-        .member_name = "pri_dep",
-        .write_group = .dependency,
-        .default_value = .{ .u32 = 7 },
-    })
-    .withParameter(.{
-        .name = "pri_pri",
-        .member_name = "pri_pri",
-        .default_value = .{ .u32 = 8 },
-    })
-    .withResource(.{ .name = "empty", .path = Path.init("") catch unreachable })
-    .withResource(.{ .name = "a", .path = Path.init("a.bin") catch unreachable })
-    .withResource(.{ .name = "b", .path = Path.init("b.txt") catch unreachable })
-    .withResource(.{ .name = "img", .path = Path.init("c/d.img") catch unreachable })
-    .withMultipleImports(.{ A0, A1 })
-    .withMultipleImports(.{ .b0 = B0, .b1 = B1 })
-    .withStateSync(void, initCModule, deinitCModule)
-    .withOnStartEventSync(startCModule)
-    .withOnStopEvent(stopCModule)
-    .exportModule();
+const B = struct {
+    pub const fimo_module = .{
+        .name = .b,
+        .description = "Test module b",
+        .author = "fimo",
+        .license = "MIT or Apache 2.0",
+    };
+    pub const fimo_exports = .{
+        .{ .symbol = B0, .value = &@as(i32, -2) },
+        .{ .symbol = B1, .value = &@as(i32, 77) },
+    };
+
+    comptime {
+        _ = modules.Module(@This());
+    }
+};
+
+const C = struct {
+    const Module = modules.Module(@This());
+    pub const fimo_module = .{
+        .name = .c,
+        .description = "Test module c",
+        .author = "fimo",
+        .license = "MIT or Apache 2.0",
+    };
+    pub const fimo_parameters = .{
+        .pub_pub = .{ .read_group = .public, .write_group = .public, .default = @as(u32, 0) },
+        .pub_dep = .{ .read_group = .public, .write_group = .dependency, .default = @as(u32, 1) },
+        .pub_pri = .{ .read_group = .public, .write_group = .private, .default = @as(u32, 2) },
+        .dep_pub = .{ .read_group = .dependency, .write_group = .public, .default = @as(u32, 3) },
+        .dep_dep = .{ .read_group = .dependency, .write_group = .dependency, .default = @as(u32, 4) },
+        .dep_pri = .{ .read_group = .dependency, .write_group = .private, .default = @as(u32, 5) },
+        .pri_pub = .{ .read_group = .private, .write_group = .public, .default = @as(u32, 6) },
+        .pri_dep = .{ .read_group = .private, .write_group = .dependency, .default = @as(u32, 7) },
+        .pri_pri = .{ .read_group = .private, .write_group = .private, .default = @as(u32, 8) },
+    };
+    pub const fimo_paths = .{
+        .empty = Path.init("") catch unreachable,
+        .a = Path.init("a.bin") catch unreachable,
+        .b = Path.init("b.txt") catch unreachable,
+        .img = Path.init("c/d.img") catch unreachable,
+    };
+    pub const fimo_imports = .{ .{ A0, A1 }, B0, B1 };
+    pub const fimo_events = .{
+        .init = init,
+        .deinit = deinit,
+        .on_start = on_start,
+        .on_stop = on_stop,
+    };
+
+    fn init() !void {
+        tracing.emitInfoSimple("initializing instance: name='{s}'", .{Module.info().name}, @src());
+
+        const parameters = Module.parameters();
+        try testing.expectEqual(0, parameters.pub_pub.read());
+        try testing.expectEqual(1, parameters.pub_dep.read());
+        try testing.expectEqual(2, parameters.pub_pri.read());
+        try testing.expectEqual(3, parameters.dep_pub.read());
+        try testing.expectEqual(4, parameters.dep_dep.read());
+        try testing.expectEqual(5, parameters.dep_pri.read());
+        try testing.expectEqual(6, parameters.pri_pub.read());
+        try testing.expectEqual(7, parameters.pri_dep.read());
+        try testing.expectEqual(8, parameters.pri_pri.read());
+
+        parameters.pub_pub.write(0);
+        parameters.pub_dep.write(1);
+        parameters.pub_pri.write(2);
+        parameters.dep_pub.write(3);
+        parameters.dep_dep.write(4);
+        parameters.dep_pri.write(5);
+        parameters.pri_pub.write(6);
+        parameters.pri_dep.write(7);
+        parameters.pri_pri.write(8);
+
+        const paths = Module.paths();
+        tracing.emitTraceSimple("empty: '{f}'", .{paths.empty}, @src());
+        tracing.emitTraceSimple("a: '{f}'", .{paths.a}, @src());
+        tracing.emitTraceSimple("b: '{f}'", .{paths.b}, @src());
+        tracing.emitTraceSimple("img: '{f}'", .{paths.img}, @src());
+
+        const imports = Module.imports();
+        try testing.expectEqual(imports.@"0".*, 5);
+        try testing.expectEqual(imports.@"1".*, 10);
+        try testing.expectEqual(imports.@"2".*, -2);
+        try testing.expectEqual(imports.@"3".*, 77);
+
+        try testing.expectEqual(5, Module.provideSymbol(A0).*);
+        try testing.expectEqual(10, Module.provideSymbol(A1).*);
+        try testing.expectEqual(-2, Module.provideSymbol(B0).*);
+        try testing.expectEqual(77, Module.provideSymbol(B1).*);
+
+        try testing.expectEqual(5, A0.requestFrom(Module).*);
+        try testing.expectEqual(10, A1.requestFrom(Module).*);
+        try testing.expectEqual(-2, B0.requestFrom(Module).*);
+        try testing.expectEqual(77, B1.requestFrom(Module).*);
+
+        try testing.expectEqual(5, A0.getGlobal().get().*);
+        try testing.expectEqual(10, A1.getGlobal().get().*);
+        try testing.expectEqual(-2, B0.getGlobal().get().*);
+        try testing.expectEqual(77, B1.getGlobal().get().*);
+    }
+
+    fn deinit() void {
+        tracing.emitInfoSimple("deinitializing instance: name='{s}'", .{Module.info().name}, @src());
+    }
+
+    fn on_start() void {
+        tracing.emitInfoSimple("starting instance: name='{s}'", .{Module.info().name}, @src());
+    }
+
+    fn on_stop() void {
+        tracing.emitInfoSimple("stopping instance: name='{s}'", .{Module.info().name}, @src());
+    }
+
+    comptime {
+        _ = Module;
+    }
+};
 
 comptime {
     _ = A;
@@ -214,8 +202,6 @@ pub fn main() !void {
 
     const async_ctx = try tasks.BlockingContext.init(&err);
     defer async_ctx.deinit();
-
-    defer modules.pruneInstances(&err) catch unreachable;
 
     const set = try modules.LoadingSet.init(&err);
     defer set.unref();

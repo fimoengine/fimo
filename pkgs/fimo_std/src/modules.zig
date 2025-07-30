@@ -12,6 +12,7 @@ const ctx = @import("ctx.zig");
 pub const DebugInfo = @import("modules/DebugInfo.zig");
 pub const exports = @import("modules/exports.zig");
 pub const Export = exports.Export;
+pub const Module = exports.Module;
 const path = @import("path.zig");
 const tasks = @import("tasks.zig");
 const EnqueuedFuture = tasks.EnqueuedFuture;
@@ -211,6 +212,45 @@ pub const Symbol = struct {
     version: Version,
     T: type,
 
+    fn Global(comptime symbol: Symbol) type {
+        return struct {
+            var lock: std.Thread.Mutex = .{};
+            var count: usize = 0;
+            var ptr: ?*const symbol.T = null;
+
+            pub fn register(val: *const symbol.T) void {
+                lock.lock();
+                defer lock.unlock();
+                const old_count = @atomicRmw(usize, &count, .Add, 1, .monotonic);
+                if (old_count == 0) {
+                    const old = @atomicRmw(?*const symbol.T, &ptr, .Xchg, val, .monotonic);
+                    std.debug.assert(old == val or old == null);
+                }
+            }
+
+            pub fn registerFrom(obj: anytype) void {
+                const val = symbol.requestFrom(obj);
+                register(val);
+            }
+
+            pub fn unregister() void {
+                lock.lock();
+                defer lock.unlock();
+                const old_count = @atomicRmw(usize, &count, .Sub, 1, .monotonic);
+                if (old_count == 1) @atomicStore(?*const symbol.T, &ptr, null, .monotonic);
+            }
+
+            pub fn get() *const symbol.T {
+                std.debug.assert(@atomicLoad(usize, &count, .monotonic) != 0);
+                return @atomicLoad(?*const symbol.T, &ptr, .monotonic) orelse unreachable;
+            }
+        };
+    }
+
+    pub fn getGlobal(comptime symbol: Symbol) type {
+        return Global(symbol);
+    }
+
     /// Requests the symbol from `obj`.
     pub fn requestFrom(comptime symbol: Symbol, obj: anytype) *const symbol.T {
         return obj.provideSymbol(symbol);
@@ -229,6 +269,17 @@ pub const Symbol = struct {
 pub fn SymbolWrapper(comptime symbol: Symbol) type {
     return extern struct {
         value: *const symbol.T,
+
+        pub fn registerGlobal(self: @This()) void {
+            const Global = symbol.getGlobal();
+            Global.registerFrom(self);
+        }
+
+        pub fn unregisterGlobal(self: @This()) void {
+            _ = self;
+            const Global = symbol.getGlobal();
+            Global.unregister();
+        }
 
         /// Asserts that `sym` is compatible to the contained symbol and returns it.
         pub fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
@@ -256,7 +307,7 @@ pub fn SymbolGroup(comptime symbols: anytype) type {
     const symbols_info = @typeInfo(@TypeOf(symbols)).@"struct";
     var fields: []const std.builtin.Type.StructField = &.{};
     for (symbols_info.fields) |f| {
-        if (f.type != Symbol) continue;
+        std.debug.assert(f.type == Symbol);
         const symbol: Symbol = @field(symbols, f.name);
         fields = fields ++ [_]std.builtin.Type.StructField{.{
             .name = f.name,
@@ -277,6 +328,23 @@ pub fn SymbolGroup(comptime symbols: anytype) type {
 
     return struct {
         symbols: Inner,
+
+        pub fn registerGlobal(self: @This()) void {
+            inline for (symbols_info.fields) |f| {
+                const sym: Symbol = @field(symbols, f.name);
+                const Global = sym.getGlobal();
+                Global.registerFrom(self);
+            }
+        }
+
+        pub fn unregisterGlobal(self: @This()) void {
+            _ = self;
+            inline for (symbols_info.fields) |f| {
+                const sym: Symbol = @field(symbols, f.name);
+                const Global = sym.getGlobal();
+                Global.unregister();
+            }
+        }
 
         /// Asserts that `sym` is compatible to the contained symbol and returns it.
         pub fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
