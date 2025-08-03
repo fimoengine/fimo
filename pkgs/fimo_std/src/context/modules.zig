@@ -6,6 +6,7 @@ const Mutex = std.Thread.Mutex;
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const context = @import("../context.zig");
+const pub_context = @import("../ctx.zig");
 const pub_modules = @import("../modules.zig");
 const Path = @import("../path.zig").Path;
 const pub_tasks = @import("../tasks.zig");
@@ -216,12 +217,12 @@ pub fn addInstance(inner: *InstanceHandle.Inner) !void {
     try instances.put(arena.allocator(), key, data);
 }
 
-/// Adds a new pseudo instance.
+/// Adds a new root instance.
 ///
-/// The pseudo instance provides access to the subsystem for non-instances, and is mainly intended
+/// The root instance provides access to the subsystem for non-instances, and is mainly intended
 /// for bootstrapping.
-pub fn addPseudoInstance() !*const pub_modules.PseudoInstance {
-    tracing.emitTraceSimple("adding new pseudo instance", .{}, @src());
+pub fn addRootInstance() !*const pub_modules.RootInstance {
+    tracing.emitTraceSimple("adding new root instance", .{}, @src());
     mutex.lock();
     defer mutex.unlock();
 
@@ -232,11 +233,11 @@ pub fn addPseudoInstance() !*const pub_modules.PseudoInstance {
         std.crypto.random.bytes(&random_bytes);
         var suffix: [std.fs.base64_encoder.calcSize(8)]u8 = undefined;
         _ = std.fs.base64_encoder.encode(&suffix, &random_bytes);
-        name = std.fmt.bufPrint(&name_buf, "_pseudo_{s}", .{suffix}) catch unreachable;
+        name = std.fmt.bufPrint(&name_buf, "_root_{s}", .{suffix}) catch unreachable;
         if (getInstance(name) == null) break;
     }
 
-    const instance = try InstanceHandle.initPseudoInstance(name);
+    const instance = try InstanceHandle.initRootInstance(name);
     const handle = InstanceHandle.fromInstancePtr(&instance.instance);
     const inner = handle.lock();
     errdefer {
@@ -286,7 +287,7 @@ pub fn linkInstances(inner: *InstanceHandle.Inner, other: *InstanceHandle.Inner)
     const other_handle = InstanceHandle.fromInnerPtr(other);
     if (inner.isDetached() or other.isDetached()) return error.NotFound;
     if (inner.getDependency(std.mem.span(other_handle.info.name)) != null) return error.Duplicate;
-    if (other_handle.type == .pseudo) return error.NotPermitted;
+    if (other_handle.type == .root) return error.NotPermitted;
 
     const instance_ref = getInstance(std.mem.span(handle.info.name)).?;
     const other_instance_ref = getInstance(std.mem.span(other_handle.info.name)).?;
@@ -601,39 +602,42 @@ const VTableImpl = struct {
         out.* = &modules.features;
         return modules.features.len;
     }
-    fn addPseudoInstance(instance: **const pub_modules.PseudoInstance) callconv(.c) AnyResult {
+    fn addRootInstance(instance: **const pub_modules.RootInstance) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        instance.* = modules.addPseudoInstance() catch |e| {
+        instance.* = modules.addRootInstance() catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
-    fn addLoadingSet(set: *pub_modules.LoadingSet) callconv(.c) AnyResult {
+    fn addLoadingSet(set: *pub_modules.LoadingSet) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         set.* = LoadingSet.init() catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn findInstanceByName(
         name: [*:0]const u8,
         info: **const pub_modules.Info,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         info.* = modules.findInstanceByName(std.mem.span(name)) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn findInstanceBySymbol(
         name: [*:0]const u8,
         namespace: [*:0]const u8,
         version: Version.CVersion,
         info: **const pub_modules.Info,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         info.* = modules.findInstanceBySymbol(
             std.mem.span(name),
@@ -641,22 +645,24 @@ const VTableImpl = struct {
             Version.initC(version),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
-    fn queryNamespace(namespace: [*:0]const u8, exists: *bool) callconv(.c) AnyResult {
+    fn queryNamespace(namespace: [*:0]const u8, exists: *bool) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         exists.* = modules.queryNamespace(std.mem.span(namespace));
-        return AnyResult.ok;
+        return .ok;
     }
-    fn pruneInstances() callconv(.c) AnyResult {
+    fn pruneInstances() callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         modules.pruneInstances() catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn queryParameter(
         owner: [*:0]const u8,
@@ -664,26 +670,27 @@ const VTableImpl = struct {
         @"type": *pub_modules.ParameterType,
         read_group: *pub_modules.ParameterAccessGroup,
         write_group: *pub_modules.ParameterAccessGroup,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         const info = modules.queryParameter(
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
         @"type".* = info.type;
         read_group.* = info.read_group;
         write_group.* = info.write_group;
-        return AnyResult.ok;
+        return .ok;
     }
     fn readParameter(
         value: *anyopaque,
         @"type": pub_modules.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         modules.readParameter(
             value,
@@ -692,16 +699,17 @@ const VTableImpl = struct {
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn writeParameter(
         value: *const anyopaque,
         @"type": pub_modules.ParameterType,
         owner: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         modules.writeParameter(
             value,
@@ -710,16 +718,17 @@ const VTableImpl = struct {
             std.mem.span(parameter),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
 };
 
 pub const vtable = pub_modules.VTable{
     .profile = &VTableImpl.profile,
     .features = &VTableImpl.features,
-    .pseudo_module_new = &VTableImpl.addPseudoInstance,
+    .root_module_new = &VTableImpl.addRootInstance,
     .set_new = &VTableImpl.addLoadingSet,
     .find_by_name = &VTableImpl.findInstanceByName,
     .find_by_symbol = &VTableImpl.findInstanceBySymbol,

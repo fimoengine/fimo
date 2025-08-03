@@ -1,7 +1,7 @@
 //! Async subsystem.
 
 use crate::{
-    context::Handle,
+    context::{Error, Handle, Status},
     error::{AnyError, AnyResult, private},
     handle,
     modules::symbols::{AssertSharable, Share},
@@ -20,7 +20,7 @@ use std::{
 #[derive(Debug)]
 pub struct VTableV0 {
     pub new_blocking_context:
-        unsafe extern "C" fn(context: &mut MaybeUninit<BlockingContext>) -> AnyResult,
+        unsafe extern "C" fn(context: &mut MaybeUninit<BlockingContext>) -> Status,
     #[allow(clippy::type_complexity)]
     pub enqueue_future: unsafe extern "C" fn(
         data: Option<ConstNonNull<u8>>,
@@ -36,7 +36,7 @@ pub struct VTableV0 {
         drop_data: Option<unsafe extern "C" fn(data: Option<NonNull<()>>)>,
         drop_result: Option<unsafe extern "C" fn(data: Option<NonNull<()>>)>,
         future: &mut MaybeUninit<EnqueuedFuture<()>>,
-    ) -> AnyResult,
+    ) -> Status,
 }
 
 handle!(pub handle WakerHandle: Send + Sync + Share + Unpin);
@@ -222,7 +222,7 @@ impl<T, R> Future<T, R> {
     ///
     /// This function does not check that the future can be sent to another thread, or that it lives
     /// long enough.
-    pub unsafe fn enqueue_unchecked(self) -> Result<EnqueuedFuture<R>, AnyError> {
+    pub unsafe fn enqueue_unchecked(self) -> Result<EnqueuedFuture<R>, Error> {
         extern "C" fn poll<T, R>(
             data: Option<NonNull<()>>,
             waker: WakerView<'_>,
@@ -281,7 +281,7 @@ impl<T, R> Future<T, R> {
     }
 
     /// Enqueues the future on the subsystem.
-    pub fn enqueue(self) -> Result<EnqueuedFuture<R>, AnyError>
+    pub fn enqueue(self) -> Result<EnqueuedFuture<R>, Error>
     where
         T: Send + 'static,
         R: Send + 'static,
@@ -539,7 +539,7 @@ sa::assert_impl_all!(BlockingContext: Send, Share);
 
 impl BlockingContext {
     /// Constructs a new blocking context.
-    pub fn new() -> Result<Self, AnyError> {
+    pub fn new() -> Result<Self, Error> {
         let handle = unsafe { Handle::get_handle() };
         let f = handle.tasks_v0.new_blocking_context;
 

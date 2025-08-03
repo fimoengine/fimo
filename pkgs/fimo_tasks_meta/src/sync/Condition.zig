@@ -33,8 +33,8 @@ futex: atomic.Value(u32) = .init(0),
 /// irrespective of any notifications from `signal()` or `broadcast()`.
 ///
 /// May only be called from within a task.
-pub fn wait(self: *Condition, provider: anytype, mutex: *Mutex) void {
-    self.waitInternal(provider, mutex, null) catch unreachable;
+pub fn wait(self: *Condition, mutex: *Mutex) void {
+    self.waitInternal(mutex, null) catch unreachable;
 }
 
 /// Atomically releases the Mutex, blocks the caller task, then re-acquires the Mutex on return.
@@ -56,33 +56,31 @@ pub fn wait(self: *Condition, provider: anytype, mutex: *Mutex) void {
 /// May only be called from within a task.
 pub fn timedWait(
     self: *Condition,
-    provider: anytype,
     mutex: *Mutex,
     timeout: Duration,
 ) error{Timeout}!void {
     const timeout_time = Instant.now().addSaturating(timeout);
-    try self.waitInternal(provider, mutex, timeout_time);
+    try self.waitInternal(mutex, timeout_time);
 }
 
 /// Unblocks at least one task blocked in a call to `wait()` or `timedWait()` with a given Mutex.
 /// The blocked task must be sequenced before this call with respect to acquiring the same Mutex in order to be observable for unblocking.
 /// `signal()` can be called with or without the relevant Mutex being acquired and have no "effect" if there's no observable blocked threads.
-pub fn signal(self: *Condition, provider: anytype) void {
+pub fn signal(self: *Condition) void {
     _ = self.futex.fetchAdd(1, .monotonic);
-    _ = Futex.wake(provider, &self.futex, 1);
+    _ = Futex.wake(&self.futex, 1);
 }
 
 /// Unblocks all tasks currently blocked in a call to `wait()` or `timedWait()` with a given Mutex.
 /// The blocked tasks must be sequenced before this call with respect to acquiring the same Mutex in order to be observable for unblocking.
 /// `broadcast()` can be called with or without the relevant Mutex being acquired and have no "effect" if there's no observable blocked threads.
-pub fn broadcast(self: *Condition, provider: anytype) void {
+pub fn broadcast(self: *Condition) void {
     _ = self.futex.fetchAdd(1, .monotonic);
-    _ = Futex.wake(provider, &self.futex, std.math.maxInt(usize));
+    _ = Futex.wake(&self.futex, std.math.maxInt(usize));
 }
 
 fn waitInternal(
     self: *Condition,
-    provider: anytype,
     mutex: *Mutex,
     timeout: ?Instant,
 ) error{Timeout}!void {
@@ -90,16 +88,16 @@ fn waitInternal(
     const futex_value = self.futex.load(.monotonic);
 
     // Unlock the mutex before going to sleep.
-    mutex.unlock(provider);
-    defer mutex.lock(provider);
+    mutex.unlock();
+    defer mutex.lock();
 
     // Wait, but only if there hasn't been any
     // notification since we unlocked the mutex.
     if (timeout) |t|
-        Futex.TypedHelper(u32).timedWait(provider, &self.futex, futex_value, 0, t) catch |err| switch (err) {
+        Futex.TypedHelper(u32).timedWait(&self.futex, futex_value, 0, t) catch |err| switch (err) {
             error.Timeout => return error.Timeout,
             error.Invalid => {},
         }
     else
-        Futex.TypedHelper(u32).wait(provider, &self.futex, futex_value, 0) catch {};
+        Futex.TypedHelper(u32).wait(&self.futex, futex_value, 0) catch {};
 }

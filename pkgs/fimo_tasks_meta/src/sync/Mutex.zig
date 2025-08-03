@@ -12,7 +12,6 @@ const std = @import("std");
 const atomic = std.atomic;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
 const time = fimo_std.time;
 const Duration = time.Duration;
 const Instant = time.Instant;
@@ -42,20 +41,20 @@ pub fn tryLock(self: *Mutex) bool {
 /// Acquires the mutex, blocking the caller's task until it can.
 ///
 /// Once acquired, call `unlock()` on the Mutex to release it.
-pub fn lock(self: *Mutex, provider: anytype) void {
+pub fn lock(self: *Mutex) void {
     if (self.state.cmpxchgStrong(UNLOCKED, LOCKED, .acquire, .monotonic)) |_|
-        self.lockContended(provider, null) catch unreachable;
+        self.lockContended(null) catch unreachable;
 }
 
 /// Tries to acquire the mutex, blocking the caller's task until it can or the timeout is reached.
 ///
 /// Once acquired, call `unlock()` on the Mutex to release it.
-pub fn timedLock(self: *Mutex, provider: anytype, timeout: Duration) error{Timeout}!void {
+pub fn timedLock(self: *Mutex, timeout: Duration) error{Timeout}!void {
     if (self.state.cmpxchgStrong(UNLOCKED, LOCKED, .acquire, .monotonic)) |_|
-        try self.lockContended(provider, Instant.now().addSaturating(timeout));
+        try self.lockContended(Instant.now().addSaturating(timeout));
 }
 
-fn lockContended(self: *Mutex, provider: anytype, timeout: ?Instant) error{Timeout}!void {
+fn lockContended(self: *Mutex, timeout: ?Instant) error{Timeout}!void {
     @branchHint(.cold);
     // Spin first to speed things up if the lock is released quickly.
     var state = self.spin();
@@ -80,12 +79,12 @@ fn lockContended(self: *Mutex, provider: anytype, timeout: ?Instant) error{Timeo
 
         // Wait for the futex to change state, assuming it is still CONTENDED.
         if (timeout) |t|
-            Futex.TypedHelper(u8).timedWait(provider, &self.state, CONTENDED, 0, t) catch |err| switch (err) {
+            Futex.TypedHelper(u8).timedWait(&self.state, CONTENDED, 0, t) catch |err| switch (err) {
                 error.Timeout => return error.Timeout,
                 error.Invalid => {},
             }
         else
-            Futex.TypedHelper(u8).wait(provider, &self.state, CONTENDED, 0) catch {};
+            Futex.TypedHelper(u8).wait(&self.state, CONTENDED, 0) catch {};
 
         // Spin again after waking up.
         state = self.spin();
@@ -111,17 +110,17 @@ fn spin(self: *Mutex) u8 {
 }
 
 /// Releases the mutex which was previously acquired.
-pub fn unlock(self: *Mutex, provider: anytype) void {
+pub fn unlock(self: *Mutex) void {
     if (self.state.swap(UNLOCKED, .release) == CONTENDED)
         // We only wake up one thread. When that thread locks the mutex, it
         // will mark the mutex as CONTENDED (see lockContended above),
         // which makes sure that any other waiting threads will also be
         // woken up eventually.
-        self.wake(provider);
+        self.wake();
 }
 
-fn wake(self: *Mutex, provider: anytype) void {
-    _ = Futex.wake(provider, &self.state, 1);
+fn wake(self: *Mutex) void {
+    _ = Futex.wake(&self.state, 1);
 }
 
 test "Mutex: smoke test (threads)" {
@@ -132,27 +131,25 @@ test "Mutex: smoke test (threads)" {
 
     try std.testing.expect(mutex.tryLock());
     try std.testing.expect(!mutex.tryLock());
-    mutex.unlock(&ctx);
+    mutex.unlock();
 
-    mutex.lock(&ctx);
+    mutex.lock();
     try std.testing.expect(!mutex.tryLock());
-    mutex.unlock(&ctx);
+    mutex.unlock();
 }
 
 test "Mutex: smoke test (tasks)" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
-            _ = err;
-
+        fn f() !void {
             var mutex: Mutex = .{};
 
             try std.testing.expect(mutex.tryLock());
             try std.testing.expect(!mutex.tryLock());
-            mutex.unlock(ctx);
+            mutex.unlock();
 
-            mutex.lock(ctx);
+            mutex.lock();
             try std.testing.expect(!mutex.tryLock());
-            mutex.unlock(ctx);
+            mutex.unlock();
         }
     }.f);
 }
@@ -183,21 +180,20 @@ test "Mutex: many uncontended (threads)" {
     const Runner = struct {
         mutex: Mutex = .{},
         thread: std.Thread = undefined,
-        ctx: *const testing.TestContext,
         counter: NonAtomicCounter = .{},
 
         fn run(self: *@This()) void {
             var i: usize = num_increments;
             while (i > 0) : (i -= 1) {
-                self.mutex.lock(self.ctx);
-                defer self.mutex.unlock(self.ctx);
+                self.mutex.lock();
+                defer self.mutex.unlock();
 
                 self.counter.inc();
             }
         }
     };
 
-    var runners = [_]Runner{.{ .ctx = &ctx }} ** num_threads;
+    var runners = [_]Runner{.{}} ** num_threads;
     for (&runners) |*r| r.thread = try std.Thread.spawn(.{}, Runner.run, .{r});
     for (runners) |r| r.thread.join();
     for (runners) |r| try std.testing.expectEqual(r.counter.get(), num_increments);
@@ -205,7 +201,7 @@ test "Mutex: many uncontended (threads)" {
 
 test "Mutex: many uncontended (tasks)" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
+        fn f() !void {
             const num_threads = 4;
             const num_increments = 1000;
 
@@ -216,9 +212,8 @@ test "Mutex: many uncontended (tasks)" {
             const Runner = struct {
                 mutex: Mutex = .{},
                 counter: NonAtomicCounter = .{},
-                ctx: *const testing.TestContext,
             };
-            var runners = [_]Runner{.{ .ctx = ctx }} ** num_threads;
+            var runners = [_]Runner{.{}} ** num_threads;
 
             var tasks = blk: {
                 const config = task.BuilderConfig(*Runner){
@@ -226,8 +221,8 @@ test "Mutex: many uncontended (tasks)" {
                         fn f(t: *task.Task(*Runner)) void {
                             var i: usize = num_increments;
                             while (i > 0) : (i -= 1) {
-                                t.state.mutex.lock(t.state.ctx);
-                                defer t.state.mutex.unlock(t.state.ctx);
+                                t.state.mutex.lock();
+                                defer t.state.mutex.unlock();
                                 t.state.counter.inc();
                             }
                         }
@@ -250,10 +245,10 @@ test "Mutex: many uncontended (tasks)" {
             };
             errdefer buffer.abort();
 
-            const p = @import("../pool.zig").Pool.current(ctx).?;
+            const p = @import("../pool.zig").Pool.current().?;
             defer p.unref();
 
-            const handle = try p.enqueueCommandBuffer(&buffer, err);
+            const handle = try p.enqueueCommandBuffer(&buffer);
             defer handle.unref();
             try std.testing.expectEqual(.completed, handle.waitOn());
             for (runners) |r| try std.testing.expectEqual(r.counter.get(), num_increments);
@@ -270,7 +265,6 @@ test "Mutex: many contended (threads)" {
 
     const Runner = struct {
         mutex: Mutex = .{},
-        ctx: *const testing.TestContext,
         counter: NonAtomicCounter = .{},
 
         fn run(self: *@This()) void {
@@ -279,15 +273,15 @@ test "Mutex: many contended (threads)" {
                 // Occasionally hint to let another thread run.
                 defer if (i % 100 == 0) std.Thread.yield() catch {};
 
-                self.mutex.lock(self.ctx);
-                defer self.mutex.unlock(self.ctx);
+                self.mutex.lock();
+                defer self.mutex.unlock();
 
                 self.counter.inc();
             }
         }
     };
 
-    var runner = Runner{ .ctx = &ctx };
+    var runner = Runner{};
 
     var threads: [num_threads]std.Thread = undefined;
     for (&threads) |*t| t.* = try std.Thread.spawn(.{}, Runner.run, .{&runner});
@@ -298,7 +292,7 @@ test "Mutex: many contended (threads)" {
 
 test "Mutex: many contended (tasks)" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
+        fn f() !void {
             const num_threads = 4;
             const num_increments = 1000;
 
@@ -308,23 +302,22 @@ test "Mutex: many contended (tasks)" {
 
             const Runner = struct {
                 mutex: Mutex = .{},
-                ctx: *const testing.TestContext,
                 counter: NonAtomicCounter = .{},
 
                 fn run(self: *@This()) void {
                     var i: usize = num_increments;
                     while (i > 0) : (i -= 1) {
                         // Occasionally hint to let another thread run.
-                        defer if (i % 100 == 0) yield(self.ctx);
+                        defer if (i % 100 == 0) yield();
 
-                        self.mutex.lock(self.ctx);
-                        defer self.mutex.unlock(self.ctx);
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
 
                         self.counter.inc();
                     }
                 }
             };
-            var runner = Runner{ .ctx = ctx };
+            var runner = Runner{};
 
             var tasks = blk: {
                 const config = task.BuilderConfig(*Runner){
@@ -349,10 +342,10 @@ test "Mutex: many contended (tasks)" {
             };
             errdefer buffer.abort();
 
-            const p = @import("../pool.zig").Pool.current(ctx).?;
+            const p = @import("../pool.zig").Pool.current().?;
             defer p.unref();
 
-            const handle = try p.enqueueCommandBuffer(&buffer, err);
+            const handle = try p.enqueueCommandBuffer(&buffer);
             defer handle.unref();
             try std.testing.expectEqual(.completed, handle.waitOn());
             try std.testing.expectEqual(runner.counter.get(), num_increments * num_threads);

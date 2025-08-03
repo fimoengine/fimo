@@ -110,7 +110,7 @@ typedef struct FimoTasksVTable {
     ///
     /// The context provides the utilities required to await the completion of a future, by
     /// blocking a waiting thread and providing a waker to resume it.
-    FimoResult (*context_new_blocking)(FimoTasksBlockingContext *context);
+    FimoStatus (*context_new_blocking)(FimoTasksBlockingContext *context);
     /// Enqueues a new custom future to the event loop.
     ///
     /// Unlike normal futures, enqueues futures may be polled immediately. The future will allocate
@@ -124,7 +124,7 @@ typedef struct FimoTasksVTable {
     /// result value. The former will be called unconditionally at an appropiate time, whereas the
     /// result will only be cleaned up if the caller releases the constructed future before polling
     /// it to completion.
-    FimoResult (*future_enqueue)(const void *data, FimoUSize data_size, FimoUSize data_alignment, FimoUSize result_size,
+    FimoStatus (*future_enqueue)(const void *data, FimoUSize data_size, FimoUSize data_alignment, FimoUSize result_size,
                                  FimoUSize result_alignment,
                                  bool (*poll)(void *data, FimoTasksWaker waker, void *result),
                                  void (*release_data)(void *data), void (*release_result)(void *data),

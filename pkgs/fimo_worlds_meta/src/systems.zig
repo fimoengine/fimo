@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
+const Error = fimo_std.ctx.Error;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 
@@ -23,8 +23,8 @@ pub const System = opaque {
     ///
     /// Once unregistered, the identifier is invalidated and may be reused by another system.
     /// The system must not be used explicitly by any world when this method is called.
-    pub fn unregister(self: *System, provider: anytype) void {
-        const sym = symbols.system_unregister.requestFrom(provider);
+    pub fn unregister(self: *System) void {
+        const sym = symbols.system_unregister.getGlobal().get();
         return sym(self);
     }
 };
@@ -62,7 +62,7 @@ pub const SystemGroup = opaque {
     };
 
     /// Initializes a new empty system group.
-    pub fn init(provider: anytype, options: CreateOptions) error{InitFailed}!*SystemGroup {
+    pub fn init(options: CreateOptions) Error!*SystemGroup {
         const desc = CreateOptions.Descriptor{
             .next = null,
             .label = if (options.label) |l| l.ptr else null,
@@ -72,8 +72,8 @@ pub const SystemGroup = opaque {
         };
 
         var group: *SystemGroup = undefined;
-        const sym = symbols.system_group_create.requestFrom(provider);
-        if (sym(&desc, &group).isErr()) return error.InitFailed;
+        const sym = symbols.system_group_create.getGlobal().get();
+        try sym(&desc, &group).intoErrorUnion();
         return group;
     }
 
@@ -81,28 +81,28 @@ pub const SystemGroup = opaque {
     ///
     /// The caller is blocked until the group is destroyed. The group may not be running
     /// and must be empty.
-    pub fn deinit(self: *SystemGroup, provider: anytype) void {
-        const sym = symbols.system_group_destroy.requestFrom(provider);
+    pub fn deinit(self: *SystemGroup) void {
+        const sym = symbols.system_group_destroy.getGlobal().get();
         sym(self);
     }
 
     /// Returns the world the group is contained in.
-    pub fn getWorld(self: *SystemGroup, provider: anytype) *World {
-        const sym = symbols.system_group_get_world.requestFrom(provider);
+    pub fn getWorld(self: *SystemGroup) *World {
+        const sym = symbols.system_group_get_world.getGlobal().get();
         return sym(self);
     }
 
     /// Returns the label of the system group.
-    pub fn getLabel(self: *SystemGroup, provider: anytype) ?[]const u8 {
+    pub fn getLabel(self: *SystemGroup) ?[]const u8 {
         var len: usize = undefined;
-        const sym = symbols.system_group_get_label.requestFrom(provider);
+        const sym = symbols.system_group_get_label.getGlobal().get();
         if (sym(self, &len)) |label| return label[0..len];
         return null;
     }
 
     /// Returns a reference to the executor used by the group.
-    pub fn getPool(self: *SystemGroup, provider: anytype) Pool {
-        const sym = symbols.system_group_get_pool.requestFrom(provider);
+    pub fn getPool(self: *SystemGroup) Pool {
+        const sym = symbols.system_group_get_pool.getGlobal().get();
         return sym(self);
     }
 
@@ -110,27 +110,19 @@ pub const SystemGroup = opaque {
     ///
     /// Already scheduled operations are not affected by the added systems.
     /// The operation may add systems transitively, if the systems specify an execution order.
-    pub fn addSytems(
-        self: *SystemGroup,
-        provider: anytype,
-        systems: []const *System,
-    ) error{AddFailed}!void {
-        const sym = symbols.system_group_add_systems.requestFrom(provider);
-        if (sym(self, systems.ptr, systems.len).isErr()) return error.AddFailed;
+    pub fn addSytems(self: *SystemGroup, systems: []const *System) Error!void {
+        const sym = symbols.system_group_add_systems.getGlobal().get();
+        try sym(self, systems.ptr, systems.len).intoErrorUnion();
     }
 
     /// Removes a system from the group.
     ///
     /// Already scheduled systems will not be affected. This operation may remove systems added
     /// transitively. The caller will block until the system is removed from the group.
-    pub fn removeSystem(
-        self: *SystemGroup,
-        provider: anytype,
-        handle: *System,
-    ) void {
+    pub fn removeSystem(self: *SystemGroup, handle: *System) void {
         var fence = Fence{};
-        self.removeSystemAsync(provider, handle, &fence);
-        fence.wait(provider);
+        self.removeSystemAsync(handle, &fence);
+        fence.wait();
     }
 
     /// Removes a system from the group.
@@ -140,11 +132,10 @@ pub const SystemGroup = opaque {
     /// when the system has been removed from the group.
     pub fn removeSystemAsync(
         self: *SystemGroup,
-        provider: anytype,
         handle: *System,
         signal: *Fence,
     ) void {
-        const sym = symbols.system_group_remove_system.requestFrom(provider);
+        const sym = symbols.system_group_remove_system.getGlobal().get();
         return sym(self, handle, signal);
     }
 
@@ -161,27 +152,18 @@ pub const SystemGroup = opaque {
     /// Note that the system group must acquire the resources for the contained systems before executing
     /// them. The manner in which this is accomplished is unspecified. A valid implementation would be
     /// to lock all resources for the entire system group exclusively before starting its execution.
-    pub fn schedule(
-        self: *SystemGroup,
-        provider: anytype,
-        wait_on: []const *Fence,
-        signal: ?*Fence,
-    ) error{ScheduleFailed}!void {
-        const sym = symbols.system_group_schedule.requestFrom(provider);
-        if (sym(self, wait_on.ptr, wait_on.len, signal).isErr()) return error.ScheduleFailed;
+    pub fn schedule(self: *SystemGroup, wait_on: []const *Fence, signal: ?*Fence) Error!void {
+        const sym = symbols.system_group_schedule.getGlobal().get();
+        try sym(self, wait_on.ptr, wait_on.len, signal).intoErrorUnion();
     }
 
     /// Convenience function to schedule and wait until the completion of the group.
     ///
     /// The group will start executing after all fences in `wait_on` are signaled.
-    pub fn run(
-        self: *SystemGroup,
-        provider: anytype,
-        wait_on: []const *Fence,
-    ) error{ScheduleFailed}!void {
+    pub fn run(self: *SystemGroup, wait_on: []const *Fence) Error!void {
         var fence = Fence{};
-        try self.schedule(provider, wait_on, &fence);
-        fence.wait(provider);
+        try self.schedule(wait_on, &fence);
+        fence.wait();
     }
 };
 
@@ -190,20 +172,20 @@ test "SystemGroup: smoke test" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
-    try std.testing.expectEqual(world, group.getWorld(GlobalCtx));
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
+    try std.testing.expectEqual(world, group.getWorld());
 
-    const world_ex = world.getPool(GlobalCtx);
+    const world_ex = world.getPool();
     defer world_ex.unref();
-    const group_ex = group.getPool(GlobalCtx);
+    const group_ex = group.getPool();
     defer group_ex.unref();
     try std.testing.expectEqual(world_ex.id(), group_ex.id());
 
-    const label = group.getLabel(GlobalCtx).?;
+    const label = group.getLabel().?;
     try std.testing.expectEqualSlices(u8, "test-group", label);
 }
 
@@ -212,22 +194,19 @@ test "SystemGroup: custom pool" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    var err: ?AnyError = null;
-    defer if (err) |e| e.deinit();
-
-    const executor = try Pool.init(GlobalCtx, &.{}, &err);
+    const executor = try Pool.init(&.{});
     defer {
         executor.requestClose();
         executor.unref();
     }
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group", .pool = executor });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group", .pool = executor });
+    defer group.deinit();
 
-    const ex = group.getPool(GlobalCtx);
+    const ex = group.getPool();
     defer ex.unref();
     try std.testing.expectEqual(executor.id(), ex.id());
 }
@@ -237,17 +216,17 @@ test "SystemGroup: schedule" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const resource = try TypedResource(u32).register(GlobalCtx, .{ .label = "test-resource" });
-    defer resource.unregister(GlobalCtx);
+    const resource = try TypedResource(u32).register(.{ .label = "test-resource" });
+    defer resource.unregister();
 
-    try resource.addToWorld(GlobalCtx, world, 0);
-    defer _ = resource.removeFromWorld(GlobalCtx, world) catch unreachable;
+    try resource.addToWorld(world, 0);
+    defer _ = resource.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct {}, shared: struct { a: *u32 }) void {
@@ -256,91 +235,75 @@ test "SystemGroup: schedule" {
             shared.a.* += 1;
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .shared = .{resource} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .shared = .{resource} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
 
-    try group.schedule(GlobalCtx, &.{}, null);
-    try group.schedule(GlobalCtx, &.{}, null);
-    try group.schedule(GlobalCtx, &.{}, null);
-    try group.schedule(GlobalCtx, &.{}, null);
-    try group.run(GlobalCtx, &.{});
+    try group.schedule(&.{}, null);
+    try group.schedule(&.{}, null);
+    try group.schedule(&.{}, null);
+    try group.schedule(&.{}, null);
+    try group.run(&.{});
 
-    const ptr = resource.lockInWorldShared(GlobalCtx, world);
-    defer resource.unlockInWorldShared(GlobalCtx, world);
+    const ptr = resource.lockInWorldShared(world);
+    defer resource.unlockInWorldShared(world);
     try std.testing.expectEqual(5, ptr.*);
 }
 
 /// Context of an instantiated system in a system group.
 pub const SystemContext = opaque {
     /// Returns the group the system is contained in.
-    pub fn getGroup(self: *SystemContext, provider: anytype) *SystemGroup {
-        const sym = symbols.system_context_get_group.requestFrom(provider);
+    pub fn getGroup(self: *SystemContext) *SystemGroup {
+        const sym = symbols.system_context_get_group.getGlobal().get();
         return sym(self);
     }
 
     /// Returns the current generation of system group.
     ///
     /// The generation is increased by one each time the group finishes executing all systems.
-    pub fn getGeneration(self: *SystemContext, provider: anytype) usize {
-        const sym = symbols.system_context_get_generation.requestFrom(provider);
+    pub fn getGeneration(self: *SystemContext) usize {
+        const sym = symbols.system_context_get_generation.getGlobal().get();
         return sym(self);
     }
 
     /// Constructs an allocator using some specific (de)allocation strategy.
     ///
     /// Consult the documentation of the individual strategies for additional info.
-    pub fn getAllocator(
-        self: *SystemContext,
-        provider: anytype,
-        comptime strategy: AllocatorStrategy,
-    ) SystemAllocator(@TypeOf(provider), strategy) {
-        return .{ .context = self, .provider = provider };
+    pub fn getAllocator(self: *SystemContext, comptime strategy: AllocatorStrategy) SystemAllocator(strategy) {
+        return .{ .context = self };
     }
 
     /// An allocator that is invalidated after the system has finished executing.
     ///
     /// The memory returned by this allocator is only valid in the scope of the run function of the
     /// system for the current group generation. The allocator is not thread-safe.
-    pub fn getTransientAllocator(
-        self: *SystemContext,
-        provider: anytype,
-    ) SystemAllocator(@TypeOf(provider), .transient) {
-        return self.getAllocator(provider, .transient);
+    pub fn getTransientAllocator(self: *SystemContext) SystemAllocator(.transient) {
+        return self.getAllocator(.transient);
     }
 
     /// An allocator that is invalidated at the end of the current system group generation.
     ///
     /// The allocator may be utilized to spawn short lived tasks from the system, or to pass
     /// data to systems executing after the current one.
-    pub fn getSingleGenerationAllocator(
-        self: *SystemContext,
-        provider: anytype,
-    ) SystemAllocator(@TypeOf(provider), .single_generation) {
-        return self.getAllocator(provider, .single_generation);
+    pub fn getSingleGenerationAllocator(self: *SystemContext) SystemAllocator(.single_generation) {
+        return self.getAllocator(.single_generation);
     }
 
     /// An allocator that is invalidated after four generations.
     ///
     /// The allocator may be utilized to spawn medium-to-short lived tasks from the system, or
     /// to pass data to the systems executing in the next generations.
-    pub fn getMultiGenerationAllocator(
-        self: *SystemContext,
-        provider: anytype,
-    ) SystemAllocator(@TypeOf(provider), .multi_generation) {
-        return self.getAllocator(provider, .multi_generation);
+    pub fn getMultiGenerationAllocator(self: *SystemContext) SystemAllocator(.multi_generation) {
+        return self.getAllocator(.multi_generation);
     }
 
     /// An allocator that is invalidated with the system.
     ///
     /// May be utilized for long-lived/persistent allocations.
-    pub fn getSystemPersistentAllocator(
-        self: *SystemContext,
-        provider: anytype,
-    ) SystemAllocator(@TypeOf(provider), .system_persistent) {
-        return self.getAllocator(provider, .system_persistent);
+    pub fn getSystemPersistentAllocator(self: *SystemContext) SystemAllocator(.system_persistent) {
+        return self.getAllocator(.system_persistent);
     }
 };
 
@@ -369,10 +332,9 @@ pub const AllocatorStrategy = enum(i32) {
 };
 
 /// A strategy dependent allocator for a system.
-pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStrategy) type {
+pub fn SystemAllocator(comptime strategy: AllocatorStrategy) type {
     return struct {
         context: *SystemContext,
-        provider: Provider,
 
         const Self = @This();
         const vtable_ref = Allocator.VTable{
@@ -388,83 +350,41 @@ pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStra
             .free = &free,
         };
 
-        fn allocInner(
-            context: *SystemContext,
-            provider: Provider,
-            len: usize,
-            alignment: Alignment,
-            ret_addr: usize,
-        ) ?[*]u8 {
-            const sym = symbols.system_context_allocator_alloc.requestFrom(provider);
+        fn allocInner(context: *SystemContext, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+            const sym = symbols.system_context_allocator_alloc.getGlobal().get();
             return sym(context, strategy, len, alignment.toByteUnits(), ret_addr);
         }
         fn allocRef(this: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(this));
-            return allocInner(self.context, self.provider, len, alignment, ret_addr);
+            return allocInner(self.context, len, alignment, ret_addr);
         }
         fn alloc(context: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
             const ctx: *SystemContext = @ptrCast(@alignCast(context));
-            return allocInner(ctx, .{}, len, alignment, ret_addr);
+            return allocInner(ctx, len, alignment, ret_addr);
         }
 
-        fn resizeInner(
-            context: *SystemContext,
-            provider: Provider,
-            memory: []u8,
-            alignment: Alignment,
-            new_len: usize,
-            ret_addr: usize,
-        ) bool {
-            const sym = symbols.system_context_allocator_resize.requestFrom(provider);
-            return sym(
-                context,
-                strategy,
-                memory.ptr,
-                memory.len,
-                alignment.toByteUnits(),
-                new_len,
-                ret_addr,
-            );
+        fn resizeInner(context: *SystemContext, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+            const sym = symbols.system_context_allocator_resize.getGlobal().get();
+            return sym(context, strategy, memory.ptr, memory.len, alignment.toByteUnits(), new_len, ret_addr);
         }
-        fn resizeRef(
-            this: *anyopaque,
-            memory: []u8,
-            alignment: Alignment,
-            new_len: usize,
-            ret_addr: usize,
-        ) bool {
+        fn resizeRef(this: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
             const self: *Self = @ptrCast(@alignCast(this));
-            return resizeInner(self.context, self.provider, memory, alignment, new_len, ret_addr);
+            return resizeInner(self.context, memory, alignment, new_len, ret_addr);
         }
-        fn resize(
-            context: *anyopaque,
-            memory: []u8,
-            alignment: Alignment,
-            new_len: usize,
-            ret_addr: usize,
-        ) bool {
+        fn resize(context: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
             const ctx: *SystemContext = @ptrCast(@alignCast(context));
-            return resizeInner(ctx, .{}, memory, alignment, new_len, ret_addr);
+            return resizeInner(ctx, memory, alignment, new_len, ret_addr);
         }
 
         fn remapInner(
             context: *SystemContext,
-            provider: Provider,
             memory: []u8,
             alignment: Alignment,
             new_len: usize,
             ret_addr: usize,
         ) ?[*]u8 {
-            const sym = symbols.system_context_allocator_remap.requestFrom(provider);
-            return sym(
-                context,
-                strategy,
-                memory.ptr,
-                memory.len,
-                alignment.toByteUnits(),
-                new_len,
-                ret_addr,
-            );
+            const sym = symbols.system_context_allocator_remap.getGlobal().get();
+            return sym(context, strategy, memory.ptr, memory.len, alignment.toByteUnits(), new_len, ret_addr);
         }
         fn remapRef(
             this: *anyopaque,
@@ -474,43 +394,24 @@ pub fn SystemAllocator(comptime Provider: type, comptime strategy: AllocatorStra
             ret_addr: usize,
         ) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(this));
-            return remapInner(self.context, self.provider, memory, alignment, new_len, ret_addr);
+            return remapInner(self.context, memory, alignment, new_len, ret_addr);
         }
-        fn remap(
-            context: *anyopaque,
-            memory: []u8,
-            alignment: Alignment,
-            new_len: usize,
-            ret_addr: usize,
-        ) ?[*]u8 {
+        fn remap(context: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
             const ctx: *SystemContext = @ptrCast(@alignCast(context));
-            return remapInner(ctx, .{}, memory, alignment, new_len, ret_addr);
+            return remapInner(ctx, memory, alignment, new_len, ret_addr);
         }
 
-        fn freeInner(
-            context: *SystemContext,
-            provider: Provider,
-            memory: []u8,
-            alignment: Alignment,
-            ret_addr: usize,
-        ) void {
-            const sym = symbols.system_context_allocator_free.requestFrom(provider);
-            sym(
-                context,
-                strategy,
-                memory.ptr,
-                memory.len,
-                alignment.toByteUnits(),
-                ret_addr,
-            );
+        fn freeInner(context: *SystemContext, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+            const sym = symbols.system_context_allocator_free.getGlobal().get();
+            sym(context, strategy, memory.ptr, memory.len, alignment.toByteUnits(), ret_addr);
         }
         fn freeRef(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(this));
-            return freeInner(self.context, self.provider, memory, alignment, ret_addr);
+            return freeInner(self.context, memory, alignment, ret_addr);
         }
         fn free(context: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             const ctx: *SystemContext = @ptrCast(@alignCast(context));
-            return freeInner(ctx, .{}, memory, alignment, ret_addr);
+            return freeInner(ctx, memory, alignment, ret_addr);
         }
 
         pub fn allocatorRef(self: *Self) Allocator {
@@ -528,32 +429,32 @@ test "SystemContext: group" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const group_handle = try TypedResource(*SystemGroup).register(GlobalCtx, .{ .label = "group" });
-    defer group_handle.unregister(GlobalCtx);
-    try group_handle.addToWorld(GlobalCtx, world, undefined);
-    defer _ = group_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const group_handle = try TypedResource(*SystemGroup).register(.{ .label = "group" });
+    defer group_handle.unregister();
+    try group_handle.addToWorld(world, undefined);
+    defer _ = group_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct { group: **SystemGroup }, shared: struct {}) void {
             _ = shared;
-            exclusive.group.* = ctx.getGroup(GlobalCtx);
+            exclusive.group.* = ctx.getGroup();
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{group_handle} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .exclusive = .{group_handle} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
-    try group.run(GlobalCtx, &.{});
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
+    try group.run(&.{});
 
-    const ptr = group_handle.lockInWorldExclusive(GlobalCtx, world);
-    defer group_handle.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = group_handle.lockInWorldExclusive(world);
+    defer group_handle.unlockInWorldExclusive(world);
     try std.testing.expectEqual(group, ptr.*);
 }
 
@@ -562,16 +463,16 @@ test "SystemContext: generation" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
-    defer error_handle.unregister(GlobalCtx);
-    try error_handle.addToWorld(GlobalCtx, world, null);
-    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const error_handle = try TypedResource(?anyerror).register(.{ .label = "error" });
+    defer error_handle.unregister();
+    try error_handle.addToWorld(world, null);
+    defer _ = error_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initSimple(struct {
         ctx: *SystemContext,
@@ -587,22 +488,22 @@ test "SystemContext: generation" {
             };
         }
         fn runTest(self: *@This()) !void {
-            const generation = self.ctx.getGeneration(GlobalCtx);
+            const generation = self.ctx.getGeneration();
             if (self.generation) |gen| try std.testing.expect(gen + 1 == generation);
             self.generation = generation;
         }
     });
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
 
-    for (0..10) |_| try group.schedule(GlobalCtx, &.{}, null);
-    try group.run(GlobalCtx, &.{});
+    for (0..10) |_| try group.schedule(&.{}, null);
+    try group.run(&.{});
 
-    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
-    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = error_handle.lockInWorldExclusive(world);
+    defer error_handle.unlockInWorldExclusive(world);
     if (ptr.*) |err| return err;
 }
 
@@ -611,21 +512,21 @@ test "SystemContext: deferred" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
-    defer error_handle.unregister(GlobalCtx);
-    try error_handle.addToWorld(GlobalCtx, world, null);
-    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const error_handle = try TypedResource(?anyerror).register(.{ .label = "error" });
+    defer error_handle.unregister();
+    try error_handle.addToWorld(world, null);
+    defer _ = error_handle.removeFromWorld(world) catch unreachable;
 
-    const completed_handle = try TypedResource(bool).register(GlobalCtx, .{ .label = "completed" });
-    defer completed_handle.unregister(GlobalCtx);
-    try completed_handle.addToWorld(GlobalCtx, world, false);
-    defer _ = completed_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const completed_handle = try TypedResource(bool).register(.{ .label = "completed" });
+    defer completed_handle.unregister();
+    try completed_handle.addToWorld(world, false);
+    defer _ = completed_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(
@@ -635,10 +536,10 @@ test "SystemContext: deferred" {
             fence: *Fence,
         ) void {
             _ = shared;
-            const executor = ctx.getGroup(GlobalCtx).getPool(GlobalCtx);
+            const executor = ctx.getGroup().getPool();
             defer executor.unref();
-            const allocator = ctx.getSingleGenerationAllocator(GlobalCtx).allocator();
-            Job.go(GlobalCtx, runTest, .{exclusive.completed}, .{
+            const allocator = ctx.getSingleGenerationAllocator().allocator();
+            Job.go(runTest, .{exclusive.completed}, .{
                 .executor = executor,
                 .allocator = allocator,
                 .signal = .{ .fence = fence },
@@ -650,27 +551,27 @@ test "SystemContext: deferred" {
             completed.* = true;
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{
+    const sys = try Sys.register(.{
         .label = "test-system",
         .exclusive = .{ error_handle, completed_handle },
     });
-    defer sys.unregister(GlobalCtx);
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
 
-    for (0..10) |_| try group.schedule(GlobalCtx, &.{}, null);
-    try group.run(GlobalCtx, &.{});
+    for (0..10) |_| try group.schedule(&.{}, null);
+    try group.run(&.{});
 
     {
-        const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
-        defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+        const ptr = error_handle.lockInWorldExclusive(world);
+        defer error_handle.unlockInWorldExclusive(world);
         if (ptr.*) |err| return err;
     }
 
     {
-        const ptr = completed_handle.lockInWorldExclusive(GlobalCtx, world);
-        defer completed_handle.unlockInWorldExclusive(GlobalCtx, world);
+        const ptr = completed_handle.lockInWorldExclusive(world);
+        defer completed_handle.unlockInWorldExclusive(world);
         try std.testing.expect(ptr.*);
     }
 }
@@ -680,16 +581,16 @@ test "SystemContext: transient allocator" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
-    defer error_handle.unregister(GlobalCtx);
-    try error_handle.addToWorld(GlobalCtx, world, null);
-    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const error_handle = try TypedResource(?anyerror).register(.{ .label = "error" });
+    defer error_handle.unregister();
+    try error_handle.addToWorld(world, null);
+    defer _ = error_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
@@ -699,22 +600,22 @@ test "SystemContext: transient allocator" {
             };
         }
         fn testAlloc(ctx: *SystemContext) !void {
-            const allocator = ctx.getTransientAllocator(GlobalCtx).allocator();
+            const allocator = ctx.getTransientAllocator().allocator();
             try std.heap.testAllocator(allocator);
             try std.heap.testAllocatorAligned(allocator);
             try std.heap.testAllocatorLargeAlignment(allocator);
             try std.heap.testAllocatorAlignedShrink(allocator);
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
-    try group.run(GlobalCtx, &.{});
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
+    try group.run(&.{});
 
-    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
-    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = error_handle.lockInWorldExclusive(world);
+    defer error_handle.unlockInWorldExclusive(world);
     if (ptr.*) |err| return err;
 }
 
@@ -723,16 +624,16 @@ test "SystemContext: single generation allocator" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
-    defer error_handle.unregister(GlobalCtx);
-    try error_handle.addToWorld(GlobalCtx, world, null);
-    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const error_handle = try TypedResource(?anyerror).register(.{ .label = "error" });
+    defer error_handle.unregister();
+    try error_handle.addToWorld(world, null);
+    defer _ = error_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
@@ -742,22 +643,22 @@ test "SystemContext: single generation allocator" {
             };
         }
         fn testAlloc(ctx: *SystemContext) !void {
-            const allocator = ctx.getSingleGenerationAllocator(GlobalCtx).allocator();
+            const allocator = ctx.getSingleGenerationAllocator().allocator();
             try std.heap.testAllocator(allocator);
             try std.heap.testAllocatorAligned(allocator);
             try std.heap.testAllocatorLargeAlignment(allocator);
             try std.heap.testAllocatorAlignedShrink(allocator);
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
-    try group.run(GlobalCtx, &.{});
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
+    try group.run(&.{});
 
-    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
-    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = error_handle.lockInWorldExclusive(world);
+    defer error_handle.unlockInWorldExclusive(world);
     if (ptr.*) |err| return err;
 }
 
@@ -766,16 +667,16 @@ test "SystemContext: multi generation allocator" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
-    defer error_handle.unregister(GlobalCtx);
-    try error_handle.addToWorld(GlobalCtx, world, null);
-    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const error_handle = try TypedResource(?anyerror).register(.{ .label = "error" });
+    defer error_handle.unregister();
+    try error_handle.addToWorld(world, null);
+    defer _ = error_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
@@ -785,22 +686,22 @@ test "SystemContext: multi generation allocator" {
             };
         }
         fn testAlloc(ctx: *SystemContext) !void {
-            const allocator = ctx.getMultiGenerationAllocator(GlobalCtx).allocator();
+            const allocator = ctx.getMultiGenerationAllocator().allocator();
             try std.heap.testAllocator(allocator);
             try std.heap.testAllocatorAligned(allocator);
             try std.heap.testAllocatorLargeAlignment(allocator);
             try std.heap.testAllocatorAlignedShrink(allocator);
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
-    try group.run(GlobalCtx, &.{});
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
+    try group.run(&.{});
 
-    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
-    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = error_handle.lockInWorldExclusive(world);
+    defer error_handle.unlockInWorldExclusive(world);
     if (ptr.*) |err| return err;
 }
 
@@ -809,16 +710,16 @@ test "SystemContext: persistent allocator" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const group = try world.addSystemGroup(GlobalCtx, .{ .label = "test-group" });
-    defer group.deinit(GlobalCtx);
+    const group = try world.addSystemGroup(.{ .label = "test-group" });
+    defer group.deinit();
 
-    const error_handle = try TypedResource(?anyerror).register(GlobalCtx, .{ .label = "error" });
-    defer error_handle.unregister(GlobalCtx);
-    try error_handle.addToWorld(GlobalCtx, world, null);
-    defer _ = error_handle.removeFromWorld(GlobalCtx, world) catch unreachable;
+    const error_handle = try TypedResource(?anyerror).register(.{ .label = "error" });
+    defer error_handle.unregister();
+    try error_handle.addToWorld(world, null);
+    defer _ = error_handle.removeFromWorld(world) catch unreachable;
 
     const Sys = Declaration.initFunctor(struct {
         fn run(ctx: *SystemContext, exclusive: struct { err: *?anyerror }, shared: struct {}) void {
@@ -828,22 +729,22 @@ test "SystemContext: persistent allocator" {
             };
         }
         fn testAlloc(ctx: *SystemContext) !void {
-            const allocator = ctx.getSystemPersistentAllocator(GlobalCtx).allocator();
+            const allocator = ctx.getSystemPersistentAllocator().allocator();
             try std.heap.testAllocator(allocator);
             try std.heap.testAllocatorAligned(allocator);
             try std.heap.testAllocatorLargeAlignment(allocator);
             try std.heap.testAllocatorAlignedShrink(allocator);
         }
     }.run);
-    const sys = try Sys.register(GlobalCtx, .{ .label = "test-system", .exclusive = .{error_handle} });
-    defer sys.unregister(GlobalCtx);
+    const sys = try Sys.register(.{ .label = "test-system", .exclusive = .{error_handle} });
+    defer sys.unregister();
 
-    try group.addSytems(GlobalCtx, &.{sys});
-    defer group.removeSystem(GlobalCtx, sys);
-    try group.run(GlobalCtx, &.{});
+    try group.addSytems(&.{sys});
+    defer group.removeSystem(sys);
+    try group.run(&.{});
 
-    const ptr = error_handle.lockInWorldExclusive(GlobalCtx, world);
-    defer error_handle.unlockInWorldExclusive(GlobalCtx, world);
+    const ptr = error_handle.lockInWorldExclusive(world);
+    defer error_handle.unlockInWorldExclusive(world);
     if (ptr.*) |err| return err;
 }
 
@@ -974,11 +875,7 @@ pub const Declaration = struct {
     /// Registers a new system with the universe.
     ///
     /// Registered resources may be added to system group of any world.
-    pub fn register(
-        comptime self: Declaration,
-        provider: anytype,
-        options: self.Options,
-    ) error{RegisterFailed}!*System {
+    pub fn register(comptime self: Declaration, options: self.Options) Error!*System {
         const exclusive = if (@hasField(self.Options, "exclusive")) blk: {
             var arr: [options.exclusive.len]*Resource = undefined;
             inline for (0..arr.len) |i| arr[i] = options.exclusive[i].asUntyped();
@@ -1016,8 +913,8 @@ pub const Declaration = struct {
         };
 
         var handle: *System = undefined;
-        const sym = symbols.system_register.requestFrom(provider);
-        if (sym(&desc, &handle).isErr()) return error.RegisterFailed;
+        const sym = symbols.system_register.getGlobal().get();
+        try sym(&desc, &handle).intoErrorUnion();
         return handle;
     }
 
@@ -1359,8 +1256,8 @@ test "System: smoke test" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const sys0 = try Dummy.register(GlobalCtx, .{ .label = "system-0" });
-    defer sys0.unregister(GlobalCtx);
+    const sys0 = try Dummy.register(.{ .label = "system-0" });
+    defer sys0.unregister();
 }
 
 test "System: cyclic dependency" {
@@ -1376,17 +1273,17 @@ test "System: cyclic dependency" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const sys0 = try Dummy.register(GlobalCtx, .{ .label = "system-0" });
-    defer sys0.unregister(GlobalCtx);
+    const sys0 = try Dummy.register(.{ .label = "system-0" });
+    defer sys0.unregister();
 
-    const sys1 = try Dummy.register(GlobalCtx, .{ .label = "system-1", .after = &.{.{ .system = sys0 }} });
-    defer sys1.unregister(GlobalCtx);
+    const sys1 = try Dummy.register(.{ .label = "system-1", .after = &.{.{ .system = sys0 }} });
+    defer sys1.unregister();
 
-    const sys2 = Dummy.register(GlobalCtx, .{
+    const sys2 = Dummy.register(.{
         .label = "system-1",
         .before = &.{.{ .system = sys0 }},
         .after = &.{.{ .system = sys1 }},
     }) catch return;
-    sys2.unregister(GlobalCtx);
+    sys2.unregister();
     try std.testing.expect(false);
 }

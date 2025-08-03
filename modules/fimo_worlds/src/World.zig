@@ -4,11 +4,12 @@ const Allocator = std.mem.Allocator;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
+const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const Pool = fimo_tasks_meta.pool.Pool;
 
+const FimoWorlds = @import("FimoWorlds.zig");
 const heap = @import("heap.zig");
 const SystemGroup = @import("SystemGroup.zig");
 const Universe = @import("Universe.zig");
@@ -45,12 +46,8 @@ pub fn init(options: InitOptions) !*World {
         const executor_label = try std.fmt.allocPrint(allocator, "world `{s}` executor", .{label});
         defer allocator.free(executor_label);
 
-        var err: ?AnyError = null;
-        errdefer if (err) |e| e.deinit();
         break :blk .{ try Pool.init(
-            Universe.getInstance(),
             &.{ .label_ = executor_label.ptr, .label_len = executor_label.len },
-            &err,
         ), false };
     };
     errdefer executor.unref();
@@ -62,8 +59,8 @@ pub fn init(options: InitOptions) !*World {
         .inherited_executor = inherited_executor,
         .allocator = world_allocator,
     };
-    Universe.getUniverse().notifyWorldInit();
-    Universe.logDebug(
+    FimoWorlds.get().universe.notifyWorldInit();
+    tracing.emitDebugSimple(
         "created `{*}`, label=`{s}`, executor=`{x}`",
         .{ world, label, executor.id() },
         @src(),
@@ -72,7 +69,7 @@ pub fn init(options: InitOptions) !*World {
 }
 
 pub fn deinit(self: *World) void {
-    Universe.logDebug("destroying `{*}`", .{self}, @src());
+    tracing.emitDebugSimple("destroying `{*}`", .{self}, @src());
     if (self.system_group_count.load(.acquire) != 0) @panic("world not empty");
     if (self.resources.count() != 0) @panic("world not empty");
 
@@ -81,15 +78,14 @@ pub fn deinit(self: *World) void {
 
     var allocator = self.allocator;
     allocator.deinit();
-    Universe.getUniverse().notifyWorldDeinit();
+    FimoWorlds.get().universe.notifyWorldDeinit();
 }
 
 pub fn addResource(self: *World, handle: *Resource, value: *const anyopaque) !void {
-    const instance = Universe.getInstance();
     {
-        const universe = Universe.getUniverse();
-        universe.rwlock.lockRead(instance);
-        defer universe.rwlock.unlockRead(instance);
+        const universe = &FimoWorlds.get().universe;
+        universe.rwlock.lockRead();
+        defer universe.rwlock.unlockRead();
 
         if (!universe.resources.contains(handle)) @panic("invalid resource");
         _ = handle.references.fetchAdd(1, .monotonic);
@@ -108,19 +104,18 @@ pub fn addResource(self: *World, handle: *Resource, value: *const anyopaque) !vo
     const resource = std.mem.bytesAsValue(ResourceValue, memory);
     resource.* = ResourceValue{ .value_ptr = value_slice.ptr };
 
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
     if (self.resources.contains(handle)) return error.Duplicate;
     try self.resources.put(allocator, handle, resource);
-    Universe.logDebug("added `{}` to `{*}`", .{ handle, self }, @src());
+    tracing.emitDebugSimple("added `{}` to `{*}`", .{ handle, self }, @src());
 }
 
 pub fn removeResource(self: *World, handle: *Resource, value: *anyopaque) !void {
-    Universe.logDebug("removing `{}` from `{*}`", .{ handle, self }, @src());
+    tracing.emitDebugSimple("removing `{}` from `{*}`", .{ handle, self }, @src());
     const resource = blk: {
-        const instance = Universe.getInstance();
-        self.rwlock.lockWrite(instance);
-        defer self.rwlock.unlockWrite(instance);
+        self.rwlock.lockWrite();
+        defer self.rwlock.unlockWrite();
 
         const res = self.resources.get(handle) orelse @panic("invalid resource");
         if (res.references.load(.acquire) != 0) return error.InUse;
@@ -142,9 +137,8 @@ pub fn removeResource(self: *World, handle: *Resource, value: *anyopaque) !void 
 }
 
 pub fn hasResource(self: *World, handle: *Resource) bool {
-    const instance = Universe.getInstance();
-    self.rwlock.lockRead(instance);
-    defer self.rwlock.unlockRead(instance);
+    self.rwlock.lockRead();
+    defer self.rwlock.unlockRead();
     return self.resources.contains(handle);
 }
 
@@ -167,16 +161,15 @@ pub fn lockResources(
         }
     };
 
-    var stack_fallback = std.heap.stackFallback(32 * @sizeOf(Info), Universe.getUniverse().allocator);
+    var stack_fallback = std.heap.stackFallback(32 * @sizeOf(Info), FimoWorlds.get().allocator);
     const allocator = stack_fallback.get();
 
     const infos = allocator.alloc(Info, out.len) catch @panic("oom");
     defer allocator.free(infos);
 
-    const instance = Universe.getInstance();
     {
-        self.rwlock.lockRead(instance);
-        defer self.rwlock.unlockRead(instance);
+        self.rwlock.lockRead();
+        defer self.rwlock.unlockRead();
 
         for (exclusive, 0..) |handle, i| {
             if (std.mem.indexOfScalar(*Resource, exclusive[i + 1 ..], handle) != null) @panic("deadlock");
@@ -197,29 +190,27 @@ pub fn lockResources(
     std.mem.sort(Info, infos, {}, Info.lessThan);
     for (infos) |info| {
         switch (info.lock_type) {
-            .exclusive => info.resource.rwlock.lockWrite(instance),
-            .shared => info.resource.rwlock.lockRead(instance),
+            .exclusive => info.resource.rwlock.lockWrite(),
+            .shared => info.resource.rwlock.lockRead(),
         }
         out[info.index] = info.resource.value_ptr;
     }
 }
 
 pub fn unlockResourceExclusive(self: *World, handle: *Resource) void {
-    const instance = Universe.getInstance();
-    self.rwlock.lockRead(instance);
-    defer self.rwlock.unlockRead(instance);
+    self.rwlock.lockRead();
+    defer self.rwlock.unlockRead();
 
     const resource = self.resources.get(handle) orelse @panic("invalid resource");
     _ = resource.references.fetchSub(1, .monotonic);
-    resource.rwlock.unlockWrite(instance);
+    resource.rwlock.unlockWrite();
 }
 
 pub fn unlockResourceShared(self: *World, handle: *Resource) void {
-    const instance = Universe.getInstance();
-    self.rwlock.lockRead(instance);
-    defer self.rwlock.unlockRead(instance);
+    self.rwlock.lockRead();
+    defer self.rwlock.unlockRead();
 
     const resource = self.resources.get(handle) orelse @panic("invalid resource");
     _ = resource.references.fetchSub(1, .monotonic);
-    resource.rwlock.unlockRead(instance);
+    resource.rwlock.unlockRead();
 }

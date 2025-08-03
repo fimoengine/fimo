@@ -130,7 +130,6 @@ pub const RequeueResult = extern struct {
 /// If `timeout` is reached before a wake operation wakes the task, the task will be resumed, and
 /// the function returns `error.Timeout`.
 pub fn timedWait(
-    provider: anytype,
     key: *const anyopaque,
     key_size: usize,
     expect: u64,
@@ -138,7 +137,7 @@ pub fn timedWait(
     timeout: Instant,
 ) error{ Invalid, Timeout }!void {
     const t = timeout.intoC();
-    const sym = symbols.futex_wait.requestFrom(provider);
+    const sym = symbols.futex_wait.getGlobal().get();
     return switch (sym(key, key_size, expect, token, &t)) {
         .Ok => {},
         .Invalid => error.Invalid,
@@ -154,14 +153,8 @@ pub fn timedWait(
 /// `4` or `8`, in which case `key` is treated as pointer to `u8`, `u16`, `u32`, or
 /// `u64` respectively, and `expect` is truncated. The `token` is a user definable integer to store
 /// additional metadata about the waiter, which can be utilized to controll some wake operations.
-pub fn wait(
-    provider: anytype,
-    key: *const anyopaque,
-    key_size: usize,
-    expect: u64,
-    token: usize,
-) error{Invalid}!void {
-    const sym = symbols.futex_wait.requestFrom(provider);
+pub fn wait(key: *const anyopaque, key_size: usize, expect: u64, token: usize) error{Invalid}!void {
+    const sym = symbols.futex_wait.getGlobal().get();
     return switch (sym(key, key_size, expect, token, null)) {
         .Ok => {},
         .Invalid => error.Invalid,
@@ -173,14 +166,10 @@ pub fn wait(
 ///
 /// Is a generalization of `wait` for multiple keys. At least `1` key must, and at most
 /// `max_waitv_key_count` may be passed to this function. Otherwise it returns `error.KeyError`.
-pub fn timedWaitv(
-    provider: anytype,
-    keys: []const KeyExpect,
-    timeout: Instant,
-) error{ KeyError, Invalid, Timeout }!usize {
+pub fn timedWaitv(keys: []const KeyExpect, timeout: Instant) error{ KeyError, Invalid, Timeout }!usize {
     const t = timeout.intoC();
     var wake_index: usize = undefined;
-    const sym = symbols.futex_waitv.requestFrom(provider);
+    const sym = symbols.futex_waitv.getGlobal().get();
     return switch (sym(keys.ptr, keys.len, &t, &wake_index)) {
         .Ok => wake_index,
         .Invalid => error.Invalid,
@@ -194,9 +183,9 @@ pub fn timedWaitv(
 ///
 /// Is a generalization of `wait` for multiple keys. At least `1` key must, and at most
 /// `max_waitv_key_count` may be passed to this function. Otherwise it returns `error.KeyError`.
-pub fn waitv(provider: anytype, keys: []const KeyExpect) error{ KeyError, Invalid }!usize {
+pub fn waitv(keys: []const KeyExpect) error{ KeyError, Invalid }!usize {
     var wake_index: usize = undefined;
-    const sym = symbols.futex_waitv.requestFrom(provider);
+    const sym = symbols.futex_waitv.getGlobal().get();
     return switch (sym(keys.ptr, keys.len, null, &wake_index)) {
         .Ok => wake_index,
         .Invalid => error.Invalid,
@@ -209,21 +198,16 @@ pub fn waitv(provider: anytype, keys: []const KeyExpect) error{ KeyError, Invali
 ///
 /// Uses the token provided by the waiter and the `filter` to determine whether to ignore it from
 /// being woken up. Returns the number of woken waiters.
-pub fn wakeFilter(
-    provider: anytype,
-    key: *const anyopaque,
-    max_waiters: usize,
-    filter: Filter,
-) usize {
-    const sym = symbols.futex_wake.requestFrom(provider);
+pub fn wakeFilter(key: *const anyopaque, max_waiters: usize, filter: Filter) usize {
+    const sym = symbols.futex_wake.getGlobal().get();
     return sym(key, max_waiters, filter);
 }
 
 /// Wakes at most `max_waiters` waiting on `key`.
 ///
 /// Returns the number of woken waiters.
-pub fn wake(provider: anytype, key: *const anyopaque, max_waiters: usize) usize {
-    return wakeFilter(provider, key, max_waiters, .all);
+pub fn wake(key: *const anyopaque, max_waiters: usize) usize {
+    return wakeFilter(key, max_waiters, .all);
 }
 
 /// Requeues waiters from `key_from` to `key_to`.
@@ -234,7 +218,6 @@ pub fn wake(provider: anytype, key: *const anyopaque, max_waiters: usize) usize 
 /// the function returns `error.Invalid`. Uses the token provided by the waiter and the `filter`
 /// to determine whether to ignore it from being woken up.
 pub fn requeueFilter(
-    provider: anytype,
     key_from: *const anyopaque,
     key_to: *const anyopaque,
     key_size: usize,
@@ -244,7 +227,7 @@ pub fn requeueFilter(
     filter: Filter,
 ) error{Invalid}!RequeueResult {
     var result: RequeueResult = undefined;
-    const sym = symbols.futex_requeue.requestFrom(provider);
+    const sym = symbols.futex_requeue.getGlobal().get();
     return switch (sym(
         key_from,
         key_to,
@@ -268,7 +251,6 @@ pub fn requeueFilter(
 /// are requeued from the `key_from` queue to the `key_to` queue. If the value does not match
 /// the function returns `error.Invalid`.
 pub fn requeue(
-    provider: anytype,
     key_from: *const anyopaque,
     key_to: *const anyopaque,
     key_size: usize,
@@ -276,7 +258,7 @@ pub fn requeue(
     max_wakes: usize,
     max_requeues: usize,
 ) error{Invalid}!RequeueResult {
-    return requeueFilter(provider, key_from, key_to, key_size, expect, max_wakes, max_requeues, .all);
+    return requeueFilter(key_from, key_to, key_size, expect, max_wakes, max_requeues, .all);
 }
 
 pub fn TypedHelper(comptime T: type) type {
@@ -294,24 +276,21 @@ pub fn TypedHelper(comptime T: type) type {
 
     return struct {
         pub fn timedWait(
-            provider: anytype,
             key: *const atomic.Value(T),
             expect: T,
             token: usize,
             timeout: Instant,
         ) error{ Invalid, Timeout }!void {
-            return Futex.timedWait(provider, key, @sizeOf(T), @as(Int, @bitCast(expect)), token, timeout);
+            return Futex.timedWait(key, @sizeOf(T), @as(Int, @bitCast(expect)), token, timeout);
         }
         pub fn wait(
-            provider: anytype,
             key: *const atomic.Value(T),
             expect: T,
             token: usize,
         ) error{Invalid}!void {
-            return Futex.wait(provider, key, @sizeOf(T), @as(Int, @bitCast(expect)), token);
+            return Futex.wait(key, @sizeOf(T), @as(Int, @bitCast(expect)), token);
         }
         pub fn requeueFilter(
-            provider: anytype,
             key_from: *const atomic.Value(T),
             key_to: *const anyopaque,
             expect: T,
@@ -320,7 +299,6 @@ pub fn TypedHelper(comptime T: type) type {
             filter: Filter,
         ) error{Invalid}!RequeueResult {
             return Futex.requeueFilter(
-                provider,
                 key_from,
                 key_to,
                 @sizeOf(T),
@@ -331,7 +309,6 @@ pub fn TypedHelper(comptime T: type) type {
             );
         }
         pub fn requeue(
-            provider: anytype,
             key_from: *const atomic.Value(T),
             key_to: *const anyopaque,
             expect: T,
@@ -339,7 +316,6 @@ pub fn TypedHelper(comptime T: type) type {
             max_requeues: usize,
         ) error{Invalid}!RequeueResult {
             return Futex.requeue(
-                provider,
                 key_from,
                 key_to,
                 @sizeOf(T),

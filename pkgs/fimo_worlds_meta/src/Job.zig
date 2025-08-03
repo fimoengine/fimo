@@ -5,7 +5,6 @@ const atomic = std.atomic;
 const Allocator = std.mem.Allocator;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
 const Duration = fimo_std.time.Duration;
 const Instant = fimo_std.time.Instant;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
@@ -31,7 +30,7 @@ pub const Fence = extern struct {
     }
 
     /// Blocks the caller until the fence is signaled.
-    pub fn wait(self: *Fence, provider: anytype) void {
+    pub fn wait(self: *Fence) void {
         while (true) {
             const state = self.state.load(.monotonic);
             if (state & signaled != 0)
@@ -46,14 +45,14 @@ pub const Fence = extern struct {
                 )) |_| continue;
             }
 
-            Futex.TypedHelper(u8).wait(provider, &self.state, contended, 0) catch {};
+            Futex.TypedHelper(u8).wait(&self.state, contended, 0) catch {};
         }
     }
 
     /// Wakes all waiters of the fence.
-    pub fn signal(self: *Fence, provider: anytype) void {
+    pub fn signal(self: *Fence) void {
         const state = self.state.swap(signaled, .release);
-        if (state & contended != 0) _ = Futex.wake(provider, &self.state, std.math.maxInt(usize));
+        if (state & contended != 0) _ = Futex.wake(&self.state, std.math.maxInt(usize));
     }
 
     /// Resets the state of the fence to be unsignaled.
@@ -83,24 +82,23 @@ pub const TimelineSemaphore = extern struct {
     }
 
     /// Blocks the caller until the semaphore reaches a count greater or equal to `value`.
-    pub fn wait(self: *TimelineSemaphore, provider: anytype, value: u64) void {
-        if (!self.isSignaled(value)) _ = self.waitSlow(provider, value, null);
+    pub fn wait(self: *TimelineSemaphore, value: u64) void {
+        if (!self.isSignaled(value)) _ = self.waitSlow(value, null);
     }
 
     /// Blocks the caller until the semaphore reaches a count greater or equal to `value`, or the timeout expires.
     pub fn timedWait(
         self: *TimelineSemaphore,
-        provider: anytype,
         value: u64,
         timeout: Duration,
     ) error{Timeout}!void {
         if (!self.isSignaled(value)) {
             const timeout_time = Instant.now().add(timeout) catch null;
-            if (!self.waitSlow(provider, value, timeout_time)) return error.Timeout;
+            if (!self.waitSlow(value, timeout_time)) return error.Timeout;
         }
     }
 
-    fn waitSlow(self: *TimelineSemaphore, provider: anytype, value: u64, timeout: ?Instant) bool {
+    fn waitSlow(self: *TimelineSemaphore, value: u64, timeout: ?Instant) bool {
         @branchHint(.cold);
         var state = self.state.load(.monotonic);
         while (true) {
@@ -111,7 +109,6 @@ pub const TimelineSemaphore = extern struct {
 
             if (timeout) |t| {
                 Futex.TypedHelper(u64).timedWait(
-                    provider,
                     &self.state,
                     state,
                     if (comptime @sizeOf(u64) <= @sizeOf(usize)) value else @intFromPtr(&value),
@@ -125,7 +122,6 @@ pub const TimelineSemaphore = extern struct {
                 };
             } else {
                 Futex.TypedHelper(u64).wait(
-                    provider,
                     &self.state,
                     state,
                     if (comptime @sizeOf(u64) <= @sizeOf(usize)) value else @intFromPtr(&value),
@@ -144,7 +140,7 @@ pub const TimelineSemaphore = extern struct {
     /// Sets the internal value of the semaphore, possibly waking waiting tasks.
     ///
     /// `value` must be greater than the current value of the semaphore.
-    pub fn signal(self: *TimelineSemaphore, provider: anytype, value: u64) void {
+    pub fn signal(self: *TimelineSemaphore, value: u64) void {
         std.debug.assert(self.state.load(.monotonic) < value);
         self.state.store(value, .release);
 
@@ -172,7 +168,7 @@ pub const TimelineSemaphore = extern struct {
                 .token_mask = ~@as(usize, 0),
                 .cmp_arg = @intFromPtr(&value),
             };
-        _ = Futex.wakeFilter(provider, &self.state, std.math.maxInt(usize), filter);
+        _ = Futex.wakeFilter(&self.state, std.math.maxInt(usize), filter);
     }
 };
 
@@ -218,59 +214,45 @@ pub const SpawnOptions = struct {
 
 /// Spawns a new job.
 pub fn go(
-    provider: anytype,
     function: anytype,
     args: std.meta.ArgsTuple(@TypeOf(function)),
     options: SpawnOptions,
-) error{SpawnFailed}!void {
-    const fences = options.allocator.dupe(
-        *Fence,
-        options.fences,
-    ) catch return error.SpawnFailed;
-    const semaphores = options.allocator.dupe(
-        SpawnOptions.TimelineSemaphoreInfo,
-        options.semaphores,
-    ) catch return error.SpawnFailed;
+) future.SpawnError!void {
+    const fences = try options.allocator.dupe(*Fence, options.fences);
+    const semaphores = try options.allocator.dupe(SpawnOptions.TimelineSemaphoreInfo, options.semaphores);
     const Wrapper = struct {
         fn start(
-            prov: if (@TypeOf(provider) == type) void else @TypeOf(provider),
             wait: []*Fence,
             wait_sem: []SpawnOptions.TimelineSemaphoreInfo,
             args_: std.meta.ArgsTuple(@TypeOf(function)),
         ) void {
-            const p = if (@TypeOf(provider) == type) provider else prov;
-            for (wait) |f| f.wait(p);
-            for (wait_sem) |i| i.semaphore.wait(p, i.counter);
+            for (wait) |f| f.wait();
+            for (wait_sem) |i| i.semaphore.wait(i.counter);
             @call(.auto, function, args_);
         }
 
         fn cleanup(
-            prov: if (@TypeOf(provider) == type) void else @TypeOf(provider),
             allocator: Allocator,
             f: []*Fence,
             sem: []SpawnOptions.TimelineSemaphoreInfo,
             signal: ?SpawnOptions.SignalObject,
         ) void {
-            const p = if (@TypeOf(provider) == type) provider else prov;
             allocator.free(f);
             allocator.free(sem);
             if (signal) |s| switch (s) {
-                .fence => |x| x.signal(p),
-                .timeline_semaphore => |x| x.semaphore.signal(p, x.counter),
+                .fence => |x| x.signal(),
+                .timeline_semaphore => |x| x.semaphore.signal(x.counter),
                 else => unreachable,
             };
         }
     };
 
-    var err: ?AnyError = null;
-    errdefer if (err) |e| e.deinit();
-
-    future.goWithCleanup(
+    try future.goWithCleanup(
         options.executor,
         Wrapper.start,
-        .{ if (@TypeOf(provider) == type) {} else provider, fences, semaphores, args },
+        .{ fences, semaphores, args },
         Wrapper.cleanup,
-        .{ if (@TypeOf(provider) == type) {} else provider, options.allocator, fences, semaphores, options.signal },
+        .{ options.allocator, fences, semaphores, options.signal },
         .{
             .allocator = options.allocator,
             .label = options.label,
@@ -278,6 +260,5 @@ pub fn go(
             .worker = options.worker,
             .dependencies = options.dependencies,
         },
-        &err,
-    ) catch return error.SpawnFailed;
+    );
 }

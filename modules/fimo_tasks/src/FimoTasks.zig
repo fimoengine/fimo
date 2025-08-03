@@ -1,11 +1,12 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const atomic = std.atomic;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const builtin = @import("builtin");
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
-const AnyResult = AnyError.AnyResult;
+const ctx = fimo_std.ctx;
+const Status = ctx.Status;
 const modules = fimo_std.modules;
 const tracing = fimo_std.tracing;
 const time = fimo_std.time;
@@ -15,116 +16,124 @@ const fimo_tasks_meta = @import("fimo_tasks_meta");
 const symbols = fimo_tasks_meta.symbols;
 
 const context = @import("context.zig");
+const Futex = @import("Futex.zig");
 const Pool = @import("Pool.zig");
-const Runtime = @import("Runtime.zig");
+const PoolMap = @import("PoolMap.zig");
 const Worker = @import("Worker.zig");
+
+debug_allocator: switch (builtin.mode) {
+    .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}),
+    else => void,
+},
+allocator: Allocator,
+futex: Futex,
+pool_map: PoolMap = .{},
 
 pub const default_stack_size: usize = 8 * 1024 * 1024;
 pub const default_worker_count: usize = 0; // One worker per cpu core.
+pub const Module = modules.Module(@This());
 
-pub const Instance = blk: {
-    @setEvalBranchQuota(100000);
-    break :blk modules.exports.Builder.init("fimo_tasks")
-        .withDescription("Multi-threaded tasks runtime")
-        .withLicense("MIT OR APACHE 2.0")
-        .withParameter(.{
-            .name = "default_stack_size",
-            .member_name = "default_stack_size",
-            .default_value = .{ .u32 = @intCast(default_stack_size) },
-            .read_group = .dependency,
-            .write_group = .dependency,
-        })
-        .withParameter(.{
-            .name = "default_worker_count",
-            .member_name = "default_worker_count",
-            .default_value = .{ .u8 = @intCast(default_worker_count) },
-            .read_group = .dependency,
-            .write_group = .dependency,
-        })
-        .withExport(.{ .symbol = symbols.task_id }, &taskId)
-        .withExport(.{ .symbol = symbols.worker_id }, &workerId)
-        .withExport(.{ .symbol = symbols.worker_pool }, &workerPool)
-        .withExport(.{ .symbol = symbols.worker_pool_by_id }, &workerPoolById)
-        .withExport(.{ .symbol = symbols.query_worker_pools }, &queryWorkerPool)
-        .withExport(.{ .symbol = symbols.create_worker_pool }, &createWorkerPool)
-        .withExport(.{ .symbol = symbols.yield }, &yield)
-        .withExport(.{ .symbol = symbols.abort }, &abort)
-        .withExport(.{ .symbol = symbols.sleep }, &sleep)
-        .withExport(.{ .symbol = symbols.task_local_set }, &taskLocalSet)
-        .withExport(.{ .symbol = symbols.task_local_get }, &taskLocalGet)
-        .withExport(.{ .symbol = symbols.task_local_clear }, &taskLocalClear)
-        .withExport(.{ .symbol = symbols.futex_wait }, &futexWait)
-        .withExport(.{ .symbol = symbols.futex_waitv }, &futexWaitv)
-        .withExport(.{ .symbol = symbols.futex_wake }, &futexWake)
-        .withExport(.{ .symbol = symbols.futex_requeue }, &futexRequeue)
-        .withStateSync(State, State.init, State.deinit)
-        .exportModule();
+comptime {
+    _ = Module;
+}
+
+pub const fimo_module = .{
+    .name = .fimo_tasks,
+    .author = "fimo",
+    .description = "Multi-threaded tasks runtime",
+    .license = "MIT OR APACHE 2.0",
 };
 
-// Ensure that the module is exported.
-comptime {
-    _ = Instance;
-}
+pub const fimo_parameters = .{
+    .default_stack_size = .{
+        .default = @as(u32, @intCast(default_stack_size)),
+        .read_group = .dependency,
+        .write_group = .dependency,
+    },
+    .default_worker_count = .{
+        .default = @as(u8, @intCast(default_worker_count)),
+        .read_group = .dependency,
+        .write_group = .dependency,
+    },
+};
+
+pub const fimo_exports = .{
+    .{ .symbol = symbols.task_id, .value = &taskId },
+    .{ .symbol = symbols.worker_id, .value = &workerId },
+    .{ .symbol = symbols.worker_pool, .value = &workerPool },
+    .{ .symbol = symbols.worker_pool_by_id, .value = &workerPoolById },
+    .{ .symbol = symbols.query_worker_pools, .value = &queryWorkerPool },
+    .{ .symbol = symbols.create_worker_pool, .value = &createWorkerPool },
+    .{ .symbol = symbols.yield, .value = &yield },
+    .{ .symbol = symbols.abort, .value = &abort },
+    .{ .symbol = symbols.sleep, .value = &sleep },
+    .{ .symbol = symbols.task_local_set, .value = &taskLocalSet },
+    .{ .symbol = symbols.task_local_get, .value = &taskLocalGet },
+    .{ .symbol = symbols.task_local_clear, .value = &taskLocalClear },
+    .{ .symbol = symbols.futex_wait, .value = &futexWait },
+    .{ .symbol = symbols.futex_waitv, .value = &futexWaitv },
+    .{ .symbol = symbols.futex_wake, .value = &futexWake },
+    .{ .symbol = symbols.futex_requeue, .value = &futexRequeue },
+};
+
+pub const fimo_events = .{
+    .init = init,
+    .deinit = deinit,
+};
 
 extern "winmm" fn timeBeginPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
 extern "winmm" fn timeEndPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
 
-const State = struct {
-    debug_allocator: switch (builtin.mode) {
-        .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}),
-        else => void,
-    },
-    runtime: Runtime,
-
-    var global_state: State = undefined;
-    var global_instance: atomic.Value(?*const Instance) = .init(null);
-
-    fn init(octx: *const modules.OpaqueInstance, set: modules.LoadingSet) !*State {
-        _ = set;
-        const ctx: *const Instance = @ptrCast(@alignCast(octx));
-        if (global_instance.cmpxchgStrong(null, ctx, .monotonic, .monotonic)) |_| {
-            tracing.emitErrSimple("`fimo_tasks` is already initialized", .{}, @src());
-            return error.AlreadyInitialized;
+fn init(self: *@This()) void {
+    if (comptime builtin.target.os.tag == .windows) {
+        if (timeBeginPeriod(1) != 0) {
+            tracing.emitWarnSimple(
+                "`timeBeginPeriod` failed, defaulting to default timer resolution",
+                .{},
+                @src(),
+            );
         }
-        if (comptime builtin.target.os.tag == .windows) {
-            if (timeBeginPeriod(1) != 0) {
-                tracing.emitWarnSimple(
-                    "`timeBeginPeriod` failed, defaulting to default timer resolution",
-                    .{},
-                    @src(),
-                );
-            }
-        }
-
-        const allocator = switch (builtin.mode) {
-            .Debug, .ReleaseSafe => blk: {
-                global_state.debug_allocator = .init;
-                break :blk global_state.debug_allocator.allocator();
-            },
-            else => std.heap.smp_allocator,
-        };
-        global_state.runtime = .initInInstance(allocator, ctx);
-
-        return &global_state;
     }
 
-    fn deinit(octx: *const modules.OpaqueInstance, state: *State) void {
-        const ctx: *const Instance = @ptrCast(@alignCast(octx));
-        if (global_instance.cmpxchgStrong(ctx, null, .monotonic, .monotonic)) |_|
-            @panic("already deinit");
-        std.debug.assert(state == &global_state);
+    const allocator = if (@TypeOf(self.debug_allocator) != void) blk: {
+        self.debug_allocator = .init;
+        break :blk self.debug_allocator.allocator();
+    } else std.heap.smp_allocator;
+    self.allocator = allocator;
+    self.futex = .init(allocator);
+}
 
-        global_state.runtime.deinit();
-        switch (builtin.mode) {
-            .Debug, .ReleaseSafe => {
-                if (global_state.debug_allocator.deinit() == .leak) @panic("memory leak");
-            },
-            else => {},
-        }
-        global_state = undefined;
-        if (comptime builtin.target.os.tag == .windows) _ = timeEndPeriod(1);
-    }
-};
+fn deinit(self: *@This()) void {
+    self.pool_map.deinit(self.allocator);
+    self.futex.deinit();
+
+    if (@TypeOf(self.debug_allocator) != void)
+        if (self.debug_allocator.deinit() == .leak) @panic("memory leak");
+    self.* = undefined;
+    if (comptime builtin.target.os.tag == .windows) _ = timeEndPeriod(1);
+}
+
+pub fn get() *@This() {
+    return Module.state();
+}
+
+pub fn getDefaultStackSize() usize {
+    const min = context.StackAllocator.minStackSize();
+    const max = context.StackAllocator.maxStackSize();
+
+    const param = Module.parameters().default_stack_size;
+    const size: usize = @intCast(param.read());
+    if (size < min) return min;
+    if (size > max) return max;
+    return size;
+}
+
+pub fn getDefaultWorkerCount() usize {
+    const param = Module.parameters().default_worker_count;
+    const count: usize = @intCast(param.read());
+    if (count == 0) return std.Thread.getCpuCount() catch 1;
+    return count;
+}
 
 fn taskId(id: *fimo_tasks_meta.task.Id) callconv(.c) bool {
     if (Worker.currentTask()) |curr| {
@@ -154,16 +163,17 @@ fn workerPoolById(
     id: fimo_tasks_meta.pool.Id,
     pool: *fimo_tasks_meta.pool.Pool,
 ) callconv(.c) bool {
-    const runtime = &State.global_state.runtime;
-    const p = runtime.pool_map.queryPoolById(id) orelse return false;
+    const self = get();
+    const p = self.pool_map.queryPoolById(id) orelse return false;
     pool.* = p.asMetaPool();
     return true;
 }
 
-fn queryWorkerPool(query: *fimo_tasks_meta.pool.Query) callconv(.c) AnyResult {
-    const runtime = &State.global_state.runtime;
-    const q = runtime.pool_map.queryAllPools(runtime.allocator) catch |err| {
-        return AnyError.initError(err).intoResult();
+fn queryWorkerPool(query: *fimo_tasks_meta.pool.Query) callconv(.c) Status {
+    const self = get();
+    const q = self.pool_map.queryAllPools(self.allocator) catch |err| {
+        ctx.setResult(.initErr(.initError(err)));
+        return .err;
     };
 
     const deinitFn = struct {
@@ -178,82 +188,89 @@ fn queryWorkerPool(query: *fimo_tasks_meta.pool.Query) callconv(.c) AnyResult {
             }
 
             const nodes = @as([*]fimo_tasks_meta.pool.Query.Node, @ptrCast(root))[0..len];
-            const allocator = State.global_state.runtime.allocator;
+            const allocator = get().allocator;
             allocator.free(nodes);
         }
     }.f;
 
     if (q.len == 0) {
-        runtime.allocator.free(q);
+        get().allocator.free(q);
         query.* = .{ .root = null, .deinit_fn = &deinitFn };
     } else {
         query.* = .{ .root = &q[0], .deinit_fn = &deinitFn };
     }
-    return AnyResult.ok;
+    return .ok;
 }
 
 fn createWorkerPool(
     config: *const fimo_tasks_meta.pool.Config,
     pool: *fimo_tasks_meta.pool.Pool,
-) callconv(.c) AnyResult {
-    const runtime = &State.global_state.runtime;
-    const allocator = runtime.allocator;
+) callconv(.c) Status {
+    const self = get();
+    const allocator = self.allocator;
 
     if (config.next != null) {
-        runtime.logErr(
+        tracing.emitErrSimple(
             "the next key is reserved for future use, pool=`{s}`",
             .{config.label()},
             @src(),
         );
-        return AnyError.initError(error.InvalidConfig).intoResult();
+        ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+        return .err;
     }
     if (config.stacks_len == 0) {
-        runtime.logErr("expected at least one stack, pool=`{s}`", .{config.label()}, @src());
-        return AnyError.initError(error.InvalidConfig).intoResult();
+        tracing.emitErrSimple("expected at least one stack, pool=`{s}`", .{config.label()}, @src());
+        ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+        return .err;
     }
     if (config.default_stack_index >= config.stacks_len) {
-        runtime.logErr(
+        tracing.emitErrSimple(
             "default stack index out of bounds, pool=`{s}`, stacks=`{}`, default=`{}`",
             .{ config.label(), config.stacks_len, config.default_stack_index },
             @src(),
         );
-        return AnyError.initError(error.InvalidConfig).intoResult();
+        ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+        return .err;
     }
     for (config.stacks(), 0..) |stack, i| {
         if (stack.next != null) {
-            runtime.logErr(
+            tracing.emitErrSimple(
                 "the next key is reserved for future use, pool=`{s}`, stack_index=`{}`",
                 .{ config.label(), i },
                 @src(),
             );
-            return AnyError.initError(error.InvalidConfig).intoResult();
+            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+            return .err;
         }
         if (stack.preallocated_count > stack.max_allocated) {
-            runtime.logErr(
+            tracing.emitErrSimple(
                 "number of preallocated stacks exceeds the specified maximum number of stacks," ++
                     " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, max_allocated=`{}`",
                 .{ config.label(), i, stack.preallocated_count, stack.max_allocated },
                 @src(),
             );
-            return AnyError.initError(error.InvalidConfig).intoResult();
+            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+            return .err;
         }
         if (stack.cold_count + stack.hot_count < stack.preallocated_count) {
-            runtime.logErr(
+            tracing.emitErrSimple(
                 "number of preallocated stacks stacks exceeds the combined cold and hot stacks count," ++
                     " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, cold=`{}`, hot=`{}`",
                 .{ config.label(), i, stack.preallocated_count, stack.cold_count, stack.hot_count },
                 @src(),
             );
-            return AnyError.initError(error.InvalidConfig).intoResult();
+            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+            return .err;
         }
         if (stack.cold_count + stack.hot_count > stack.max_allocated) {
-            runtime.logErr(
+            tracing.emitErrSimple(
                 "number of cold and hot stacks exceeds the specified maximum number of stacks," ++
                     " pool=`{s}`, stack_index=`{}`, cold=`{}`, hot=`{}`, max_allocated=`{}`",
                 .{ config.label(), i, stack.cold_count, stack.hot_count, stack.max_allocated },
                 @src(),
             );
-            return AnyError.initError(error.InvalidConfig).intoResult();
+            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
+            return .err;
         }
     }
 
@@ -266,14 +283,14 @@ fn createWorkerPool(
         is_default: bool,
         skip: bool = false,
 
-        fn cmp(ctx: void, a: @This(), b: @This()) bool {
-            _ = ctx;
+        fn cmp(c: void, a: @This(), b: @This()) bool {
+            _ = c;
             return a.size < b.size;
         }
     };
-    var stacks = ArrayListUnmanaged(Pair)
-        .initCapacity(allocator, config.stacks_len) catch |err| {
-        return AnyError.initError(err).intoResult();
+    var stacks = ArrayListUnmanaged(Pair).initCapacity(allocator, config.stacks_len) catch |err| {
+        ctx.setResult(.initErr(.initError(err)));
+        return .err;
     };
     defer stacks.deinit(allocator);
 
@@ -281,7 +298,7 @@ fn createWorkerPool(
         const size = if (stack.size != .default)
             @max(@min(@intFromEnum(stack.size), max_stack_size), min_stack_size)
         else
-            runtime.getDefaultStackSize();
+            getDefaultStackSize();
         stacks.appendAssumeCapacity(.{
             .size = size,
             .idx = i,
@@ -304,7 +321,8 @@ fn createWorkerPool(
     var default_stack_idx: usize = undefined;
     var stack_cfg = ArrayListUnmanaged(Pool.InitOptions.StackOptions)
         .initCapacity(allocator, num_stacks) catch |err| {
-        return AnyError.initError(err).intoResult();
+        ctx.setResult(.initErr(.initError(err)));
+        return .err;
     };
     defer stack_cfg.deinit(allocator);
     for (stacks.items) |stack| {
@@ -324,23 +342,23 @@ fn createWorkerPool(
     }
 
     const options = Pool.InitOptions{
-        .runtime = runtime,
         .allocator = allocator,
         .label = config.label(),
         .stacks = stack_cfg.items,
         .default_stack = default_stack_idx,
         .worker_count = if (config.worker_count == 0)
-            runtime.getDefaultWorkerCount()
+            getDefaultWorkerCount()
         else
             config.worker_count,
         .is_public = config.is_queryable,
     };
 
-    const p = runtime.pool_map.spawnPool(runtime.allocator, options) catch |err| {
-        return AnyError.initError(err).intoResult();
+    const p = self.pool_map.spawnPool(self.allocator, options) catch |err| {
+        ctx.setResult(.initErr(.initError(err)));
+        return .err;
     };
     pool.* = p.asMetaPool();
-    return AnyResult.ok;
+    return .ok;
 }
 
 fn yield() callconv(.c) void {
@@ -381,7 +399,8 @@ fn futexWait(
     token: usize,
     timeout: ?*const fimo_std.time.compat.Instant,
 ) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
-    State.global_state.runtime.futex.wait(
+    const self = get();
+    self.futex.wait(
         key,
         key_size,
         expect,
@@ -400,7 +419,8 @@ fn futexWaitv(
     timeout: ?*const fimo_std.time.compat.Instant,
     wake_index: *usize,
 ) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
-    wake_index.* = State.global_state.runtime.futex.waitv(
+    const self = get();
+    wake_index.* = self.futex.waitv(
         keys[0..key_count],
         if (timeout) |t| Instant.initC(t.*) else null,
     ) catch |err| switch (err) {
@@ -416,7 +436,8 @@ fn futexWake(
     max_waiters: usize,
     filter: fimo_tasks_meta.sync.Futex.Filter,
 ) callconv(.c) usize {
-    return State.global_state.runtime.futex.wakeFilter(key, max_waiters, filter);
+    const self = get();
+    return self.futex.wakeFilter(key, max_waiters, filter);
 }
 
 fn futexRequeue(
@@ -429,7 +450,8 @@ fn futexRequeue(
     filter: fimo_tasks_meta.sync.Futex.Filter,
     result: *fimo_tasks_meta.sync.Futex.RequeueResult,
 ) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
-    result.* = State.global_state.runtime.futex.requeueFilter(
+    const self = get();
+    result.* = self.futex.requeueFilter(
         key_from,
         key_to,
         key_size,

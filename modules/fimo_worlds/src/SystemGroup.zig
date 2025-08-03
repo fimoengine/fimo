@@ -7,7 +7,7 @@ const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
+const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 const Entry = fimo_tasks_meta.command_buffer.Entry;
@@ -19,6 +19,7 @@ const Job = fimo_worlds_meta.Job;
 const Fence = Job.Fence;
 const TimelineSemaphore = Job.TimelineSemaphore;
 
+const FimoWorlds = @import("FimoWorlds.zig");
 const heap = @import("heap.zig");
 const SystemContext = @import("SystemContext.zig");
 const Universe = @import("Universe.zig");
@@ -63,9 +64,8 @@ const Graph = struct {
             return ctx;
         }
 
-        const instance = Universe.getInstance();
-        sys.rwlock.lockRead(instance);
-        defer sys.rwlock.unlockRead(instance);
+        sys.rwlock.lockRead();
+        defer sys.rwlock.unlockRead();
 
         var before_count: usize = 0;
         var after_count: usize = 0;
@@ -106,11 +106,10 @@ const Graph = struct {
             after_count += 1;
         }
 
-        const universe = Universe.getUniverse();
         const group: *SystemGroup = @fieldParentPtr("system_graph", self);
         const ctx = try SystemContext.init(group, sys, weak);
         errdefer ctx.deinit();
-        try self.systems.put(universe.allocator, sys, ctx);
+        try self.systems.put(FimoWorlds.get().allocator, sys, ctx);
         self.dirty = true;
         return ctx;
     }
@@ -121,15 +120,14 @@ const Graph = struct {
             return;
         };
 
-        const instance = Universe.getInstance();
         var queue = DoublyLinkedList{};
         var deinit_stack = DoublyLinkedList{};
 
         queue.append(&entry.value.node);
         while (queue.popFirst()) |node| {
             const ctx: *SystemContext = @fieldParentPtr("node", node);
-            ctx.sys.rwlock.lockRead(instance);
-            defer ctx.sys.rwlock.unlockRead(instance);
+            ctx.sys.rwlock.lockRead();
+            defer ctx.sys.rwlock.unlockRead();
             for (ctx.sys.before.keys(), ctx.sys.before.values()) |dep, link| {
                 if (link.implicit or link.weak) continue;
                 const dep_ctx = self.systems.get(dep) orelse unreachable;
@@ -153,7 +151,7 @@ const Graph = struct {
             } else {
                 self.clearDeinitList();
                 ctx.deinit();
-                if (ctx.sys == sys) if (fence) |f| f.signal(instance);
+                if (ctx.sys == sys) if (fence) |f| f.signal();
             }
         }
         self.dirty = true;
@@ -166,16 +164,15 @@ const Graph = struct {
         self.resources = .empty;
         _ = self.arena.reset(.retain_capacity);
         const group: *SystemGroup = @fieldParentPtr("system_graph", self);
-        Universe.logDebug("repopulating buffers of {*}", .{group}, @src());
+        tracing.emitDebugSimple("repopulating buffers of {*}", .{group}, @src());
 
-        const instance = Universe.getInstance();
         const allocator = self.arena.allocator();
         for (self.systems.values()) |ctx| {
             for (ctx.sys.exclusive_resources) |res| try self.resources.put(allocator, res, undefined);
             for (ctx.sys.shared_resources) |res| try self.resources.put(allocator, res, undefined);
 
-            ctx.sys.rwlock.lockRead(instance);
-            defer ctx.sys.rwlock.unlockRead(instance);
+            ctx.sys.rwlock.lockRead();
+            defer ctx.sys.rwlock.unlockRead();
 
             // The deferred pass can be merged if no other system depends on the deferred pass.
             ctx.merge_deferred = blk: {
@@ -223,8 +220,8 @@ const Graph = struct {
             ) usize {
                 if (markers.get(handle)) |idx| return idx;
                 var generation: usize = 0;
-                ctx.sys.rwlock.lockRead(Universe.getInstance());
-                defer ctx.sys.rwlock.unlockRead(Universe.getInstance());
+                ctx.sys.rwlock.lockRead();
+                defer ctx.sys.rwlock.unlockRead();
                 for (ctx.sys.before.keys(), ctx.sys.before.values()) |dep, link| {
                     const dep_ctx = graph.systems.get(dep) orelse {
                         std.debug.assert(link.implicit or link.weak);
@@ -275,8 +272,8 @@ const Graph = struct {
         var running_systems = AutoArrayHashMapUnmanaged(*System, usize).empty;
         var entries = try ArrayListUnmanaged(Entry).initCapacity(allocator, self.systems.count());
         for (tasks.items) |*task| {
-            task.ctx.sys.rwlock.lockRead(instance);
-            defer task.ctx.sys.rwlock.unlockRead(instance);
+            task.ctx.sys.rwlock.lockRead();
+            defer task.ctx.sys.rwlock.unlockRead();
 
             // Insert synchronization points if the system depends on other systems.
             for (task.ctx.sys.before.keys()) |dep| {
@@ -361,9 +358,7 @@ pub const InitOptions = struct {
 };
 
 pub fn init(options: InitOptions) !*SystemGroup {
-    const universe = Universe.getUniverse();
-    const allocator = universe.allocator;
-
+    const allocator = FimoWorlds.get().allocator;
     const label = try allocator.dupe(u8, options.label orelse "<unlabelled>");
     errdefer allocator.free(label);
     const executor = if (options.executor) |ex| ex.ref() else options.world.executor.ref();
@@ -372,7 +367,7 @@ pub fn init(options: InitOptions) !*SystemGroup {
     const group = try allocator.create(SystemGroup);
     group.* = .{ .label = label, .world = options.world, .executor = executor };
     _ = options.world.system_group_count.fetchAdd(1, .monotonic);
-    Universe.logDebug(
+    tracing.emitDebugSimple(
         "created `{*}`, label=`{s}`, world=`{*}`, executor=`{}`",
         .{ group, label, options.world, executor.id() },
         @src(),
@@ -381,18 +376,15 @@ pub fn init(options: InitOptions) !*SystemGroup {
 }
 
 pub fn deinit(self: *SystemGroup) void {
-    Universe.logDebug("destroying `{*}`", .{self}, @src());
-    const instance = Universe.getInstance();
-    self.system_graph.mutex.lock(instance);
+    tracing.emitDebugSimple("destroying `{*}`", .{self}, @src());
+    self.system_graph.mutex.lock();
 
     if (!self.system_graph.schedule_semaphore.isSignaled(@truncate(
         self.system_graph.next_generation,
     ))) @panic("system group still running");
     if (self.system_graph.systems.count() != 0) @panic("system group not empty");
 
-    const universe = Universe.getUniverse();
-    const allocator = universe.allocator;
-
+    const allocator = FimoWorlds.get().allocator;
     allocator.free(self.label);
     _ = self.world.system_group_count.fetchSub(1, .monotonic);
     self.executor.unref();
@@ -404,14 +396,13 @@ pub fn deinit(self: *SystemGroup) void {
 }
 
 pub fn addSystems(self: *SystemGroup, handles: []const *System) !void {
-    Universe.logDebug("adding `{any}` to `{*}`", .{ handles, self }, @src());
-    const instance = Universe.getInstance();
-    self.system_graph.mutex.lock(instance);
-    defer self.system_graph.mutex.unlock(instance);
+    tracing.emitDebugSimple("adding `{any}` to `{*}`", .{ handles, self }, @src());
+    self.system_graph.mutex.lock();
+    defer self.system_graph.mutex.unlock();
 
-    const universe = Universe.getUniverse();
-    universe.rwlock.lockRead(instance);
-    defer universe.rwlock.unlockRead(instance);
+    const universe = &FimoWorlds.get().universe;
+    universe.rwlock.lockRead();
+    defer universe.rwlock.unlockRead();
 
     for (handles) |handle| {
         if (!universe.systems.contains(handle)) @panic("invalid system");
@@ -426,10 +417,9 @@ pub fn addSystems(self: *SystemGroup, handles: []const *System) !void {
 }
 
 pub fn removeSystem(self: *SystemGroup, handle: *System, fence: *Fence) void {
-    Universe.logDebug("removing `{}` from `{*}`", .{ handle, self }, @src());
-    const instance = Universe.getInstance();
-    self.system_graph.mutex.lock(instance);
-    defer self.system_graph.mutex.unlock(instance);
+    tracing.emitDebugSimple("removing `{}` from `{*}`", .{ handle, self }, @src());
+    self.system_graph.mutex.lock();
+    defer self.system_graph.mutex.unlock();
 
     const sys = self.system_graph.systems.get(handle) orelse @panic("invalid system");
     if (sys.weak) @panic("invalid system");
@@ -437,24 +427,21 @@ pub fn removeSystem(self: *SystemGroup, handle: *System, fence: *Fence) void {
 }
 
 pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !void {
-    const instance = Universe.getInstance();
-    self.system_graph.mutex.lock(instance);
-    defer self.system_graph.mutex.unlock(instance);
+    self.system_graph.mutex.lock();
+    defer self.system_graph.mutex.unlock();
     const generation = self.system_graph.next_generation;
-    Universe.logDebug(
+    tracing.emitDebugSimple(
         "scheduling generation {} of `{*}`",
         .{ generation, self },
         @src(),
     );
 
-    const universe = Universe.getUniverse();
     try Job.go(
-        instance,
         run,
         .{ self, generation },
         .{
             .executor = self.executor,
-            .allocator = universe.allocator,
+            .allocator = FimoWorlds.get().allocator,
             .label = self.label,
             .fences = fences,
             .semaphores = &.{.{
@@ -469,16 +456,14 @@ pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !voi
 
 fn run(self: *SystemGroup, generation: usize) void {
     std.debug.assert(self.generation == generation);
-    Universe.logDebug("running generation `{}` of `{*}`", .{ generation, self }, @src());
-    const instance = Universe.getInstance();
+    tracing.emitDebugSimple("running generation `{}` of `{*}`", .{ generation, self }, @src());
     {
-        self.system_graph.mutex.lock(instance);
-        defer self.system_graph.mutex.unlock(instance);
+        self.system_graph.mutex.lock();
+        defer self.system_graph.mutex.unlock();
         self.system_graph.populateBuffers() catch |err| @panic(@errorName(err));
         self.system_graph.acquireResources();
     }
 
-    var e: ?AnyError = null;
     const allocator = self.single_allocator.allocator();
     const label = std.fmt.allocPrint(allocator, "{*} systems", .{self}) catch @panic("oom");
     var buffer = OpaqueCommandBuffer{
@@ -488,7 +473,7 @@ fn run(self: *SystemGroup, generation: usize) void {
         .entries_len = self.system_graph.entries.len,
         .state = {},
     };
-    const handle = self.executor.enqueueCommandBuffer(&buffer, &e) catch |err| @panic(@errorName(err));
+    const handle = self.executor.enqueueCommandBuffer(&buffer) catch |err| @panic(@errorName(err));
     _ = handle.waitOn();
     handle.unref();
 
@@ -501,5 +486,5 @@ fn run(self: *SystemGroup, generation: usize) void {
     self.generation +%= 1;
     self.single_allocator.endGeneration();
     self.multi_allocator.endGeneration();
-    self.system_graph.schedule_semaphore.signal(instance, @truncate(self.generation));
+    self.system_graph.schedule_semaphore.signal(@truncate(self.generation));
 }

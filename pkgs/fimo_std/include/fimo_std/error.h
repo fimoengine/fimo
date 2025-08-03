@@ -179,6 +179,10 @@ typedef enum FimoStatus : FimoI32 {
     ///
     /// The specific error may be accessible through the context.
     FIMO_STATUS_FAILURE = -1,
+    /// Operation failed with an unspecified error.
+    ///
+    /// No error was provided to the context.
+    FIMO_STATUS_FAILURE_NO_REPORT = -2,
 } FimoStatus;
 
 /// Posix error codes.

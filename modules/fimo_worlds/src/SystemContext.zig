@@ -9,6 +9,7 @@ const fimo_worlds_meta = @import("fimo_worlds_meta");
 const AllocatorStrategy = fimo_worlds_meta.systems.AllocatorStrategy;
 const Fence = fimo_worlds_meta.Job.Fence;
 
+const FimoWorlds = @import("FimoWorlds.zig");
 const heap = @import("heap.zig");
 const TracingAllocator = heap.TracingAllocator;
 const SystemGroup = @import("SystemGroup.zig");
@@ -79,10 +80,9 @@ pub fn deinit(self: *SystemContext) void {
     if (sys.system_deinit) |f| f(self.value_ptr);
     _ = sys.references.fetchSub(1, .monotonic);
 
-    const instance = Universe.getInstance();
     while (waiters.popFirst()) |n| {
         const waiter: *DeinitWaiter = @fieldParentPtr("node", n);
-        waiter.fence.signal(instance);
+        waiter.fence.signal();
     }
     self.arena_allocator.deinit();
     tracing_allocator.deinit();
@@ -90,13 +90,13 @@ pub fn deinit(self: *SystemContext) void {
 
 pub fn run(self: *SystemContext) void {
     self.deferred_fence.reset();
-    for (self.deferred_dep.values()) |dep| dep.deferred_fence.wait(Universe.getInstance());
+    for (self.deferred_dep.values()) |dep| dep.deferred_fence.wait();
     const exclusive = self.resources[0..self.sys.exclusive_resources.len];
     const shared = self.resources[exclusive.len..];
     self.sys.system_run(self.value_ptr, exclusive.ptr, shared.ptr, &self.deferred_fence);
     _ = self.arena_allocator.reset(.free_all);
 
-    if (self.merge_deferred) self.deferred_fence.wait(Universe.getInstance());
+    if (self.merge_deferred) self.deferred_fence.wait();
 }
 
 pub fn allocator(self: *SystemContext, strategy: AllocatorStrategy) Allocator {

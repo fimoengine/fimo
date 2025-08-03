@@ -4,13 +4,13 @@
 use std::{pin::Pin, ptr::NonNull};
 
 use fimo_std::{
-    context::ContextBuilder,
+    context::{ContextBuilder, Error},
     emit_info,
     error::AnyError,
     modules::{
         exports::{Builder, SymbolLinkage},
         info::Info,
-        instance::{GenericInstance, PseudoInstance, Stage0InstanceView, Stage1InstanceView},
+        instance::{GenericInstance, RootInstance, Stage0InstanceView, Stage1InstanceView},
         loading_set::{FilterRequest, LoadingSet, LoadingSetView},
         parameters::ParameterAccessGroup,
         symbols::SymbolInfo,
@@ -211,7 +211,7 @@ impl CState {
 }
 
 #[test]
-fn load_modules() -> Result<(), AnyError> {
+fn load_modules() -> Result<(), Error> {
     let mut context = ContextBuilder::new()
         .with_tracing_config(
             Config::default()
@@ -228,7 +228,7 @@ fn load_modules() -> Result<(), AnyError> {
         set.view().add_modules_from_local(|_| FilterRequest::Load)?;
         set.view().commit().await?;
 
-        let instance = PseudoInstance::new()?;
+        let instance = RootInstance::new()?;
         let a = Info::find_by_name(c"a")?;
         let b = Info::find_by_name(c"b")?;
         let c = Info::find_by_name(c"c")?;
@@ -253,7 +253,7 @@ fn load_modules() -> Result<(), AnyError> {
 
         let info = instance.info().to_info();
         if !info.view().try_ref_instance_strong() {
-            return Err(AnyError::new("failed to acquire module"));
+            return Err(AnyError::new("failed to acquire module").into());
         }
 
         drop(instance);

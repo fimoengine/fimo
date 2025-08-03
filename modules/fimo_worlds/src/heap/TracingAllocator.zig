@@ -6,6 +6,7 @@ const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Mutex = fimo_tasks_meta.sync.Mutex;
 
+const FimoWorlds = @import("../FimoWorlds.zig");
 const Universe = @import("../Universe.zig");
 
 const Self = @This();
@@ -23,9 +24,7 @@ pub fn init() Self {
 }
 
 pub fn deinit(self: *Self) void {
-    const universe = Universe.getUniverse();
-    const all = universe.allocator;
-
+    const all = FimoWorlds.get().allocator;
     var it = self.allocations.iterator();
     while (it.next()) |info| {
         const memory = @as([*]u8, @ptrFromInt(info.key_ptr.*))[0..info.value_ptr.len];
@@ -49,12 +48,10 @@ pub fn allocator(self: *Self) Allocator {
 
 fn alloc(ctx: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
 
-    const universe = Universe.getUniverse();
-    const all = universe.allocator;
+    const all = FimoWorlds.get().allocator;
     self.allocations.ensureUnusedCapacity(all, 1) catch return null;
 
     const memory = all.rawAlloc(len, alignment, ret_addr) orelse return null;
@@ -64,12 +61,10 @@ fn alloc(ctx: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*
 
 fn resize(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
 
-    const universe = Universe.getUniverse();
-    const all = universe.allocator;
+    const all = FimoWorlds.get().allocator;
     if (!all.rawResize(memory, alignment, new_len, ret_addr)) return false;
 
     const info = self.allocations.getPtr(@intFromPtr(memory.ptr)).?;
@@ -79,12 +74,10 @@ fn resize(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, r
 
 fn remap(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
 
-    const universe = Universe.getUniverse();
-    const all = universe.allocator;
+    const all = FimoWorlds.get().allocator;
     const new_memory = all.rawRemap(memory, alignment, new_len, ret_addr) orelse return null;
 
     _ = self.allocations.swapRemove(@intFromPtr(memory.ptr));
@@ -97,12 +90,10 @@ fn remap(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, re
 
 fn free(ctx: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
 
-    const universe = Universe.getUniverse();
-    const all = universe.allocator;
+    const all = FimoWorlds.get().allocator;
     all.rawFree(memory, alignment, ret_addr);
 
     _ = self.allocations.swapRemove(@intFromPtr(memory.ptr));

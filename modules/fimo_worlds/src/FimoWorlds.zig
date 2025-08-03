@@ -1,5 +1,6 @@
 const std = @import("std");
 const atomic = std.atomic;
+const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
 const fimo_std = @import("fimo_std");
@@ -22,108 +23,94 @@ const SystemGroup = @import("SystemGroup.zig");
 const Universe = @import("Universe.zig");
 const World = @import("World.zig");
 
-pub const Instance = blk: {
-    @setEvalBranchQuota(100000);
-    break :blk modules.exports.Builder.init("fimo_worlds")
-        .withDescription("Multi-threaded state processing")
-        .withLicense("MIT OR APACHE 2.0")
-        .withMultipleImports(fimo_tasks_meta.symbols.all_symbols)
-        .withExport(.{ .symbol = symbols.resource_register }, &resourceRegister)
-        .withExport(.{ .symbol = symbols.resource_unregister }, &resourceUnregister)
-        .withExport(.{ .symbol = symbols.system_register }, &systemRegister)
-        .withExport(.{ .symbol = symbols.system_unregister }, &systemUnregister)
-        .withExport(.{ .symbol = symbols.system_group_create }, &systemGroupCreate)
-        .withExport(.{ .symbol = symbols.system_group_destroy }, &systemGroupDestroy)
-        .withExport(.{ .symbol = symbols.system_group_get_world }, &systemGroupGetWorld)
-        .withExport(.{ .symbol = symbols.system_group_get_label }, &systemGroupGetLabel)
-        .withExport(.{ .symbol = symbols.system_group_get_pool }, &systemGroupGetPool)
-        .withExport(.{ .symbol = symbols.system_group_add_systems }, &systemGroupAddSystems)
-        .withExport(.{ .symbol = symbols.system_group_remove_system }, &systemGroupRemoveSystem)
-        .withExport(.{ .symbol = symbols.system_group_schedule }, &systemGroupSchedule)
-        .withExport(.{ .symbol = symbols.system_context_get_group }, &systemContextGetGroup)
-        .withExport(.{ .symbol = symbols.system_context_get_generation }, &systemContextGetGeneration)
-        .withExport(.{ .symbol = symbols.system_context_allocator_alloc }, &systemContextAllocatorAlloc)
-        .withExport(.{ .symbol = symbols.system_context_allocator_resize }, &systemContextAllocatorResize)
-        .withExport(.{ .symbol = symbols.system_context_allocator_remap }, &systemContextAllocatorRemap)
-        .withExport(.{ .symbol = symbols.system_context_allocator_free }, &systemContextAllocatorFree)
-        .withExport(.{ .symbol = symbols.world_create }, &worldCreate)
-        .withExport(.{ .symbol = symbols.world_destroy }, &worldDestroy)
-        .withExport(.{ .symbol = symbols.world_get_label }, &worldGetLabel)
-        .withExport(.{ .symbol = symbols.world_get_pool }, &worldGetPool)
-        .withExport(.{ .symbol = symbols.world_has_resource }, &worldHasResource)
-        .withExport(.{ .symbol = symbols.world_add_resource }, &worldAddResource)
-        .withExport(.{ .symbol = symbols.world_remove_resource }, &worldRemoveResource)
-        .withExport(.{ .symbol = symbols.world_lock_resources }, &worldLockResources)
-        .withExport(.{ .symbol = symbols.world_unlock_resource_exclusive }, &worldUnlockResourceExclusive)
-        .withExport(.{ .symbol = symbols.world_unlock_resource_shared }, &worldUnlockResourceShared)
-        .withExport(.{ .symbol = symbols.world_allocator_alloc }, &worldAllocatorAlloc)
-        .withExport(.{ .symbol = symbols.world_allocator_resize }, &worldAllocatorResize)
-        .withExport(.{ .symbol = symbols.world_allocator_remap }, &worldAllocatorRemap)
-        .withExport(.{ .symbol = symbols.world_allocator_free }, &worldAllocatorFree)
-        .withStateSync(State, State.init, State.deinit)
-        .exportModule();
-};
+debug_allocator: switch (builtin.mode) {
+    .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}),
+    else => void,
+},
+allocator: Allocator,
+universe: Universe,
 
-pub fn getInstance() *const Instance {
-    return State.global_instance.load(.monotonic) orelse unreachable;
-}
+pub const Module = modules.Module(@This());
 
 comptime {
-    _ = Instance;
+    _ = Module;
 }
 
-const State = struct {
-    debug_allocator: switch (builtin.mode) {
-        .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}),
-        else => void,
-    },
-    universe: Universe = undefined,
-
-    var global_state: State = undefined;
-    var global_instance: atomic.Value(?*const Instance) = .init(null);
-
-    fn init(oinst: *const modules.OpaqueInstance, set: modules.LoadingSet) !*State {
-        _ = set;
-        const inst: *const Instance = @ptrCast(@alignCast(oinst));
-        if (global_instance.cmpxchgStrong(null, inst, .monotonic, .monotonic)) |_| {
-            tracing.emitErrSimple("`fimo_worlds` is already initialized", .{}, @src());
-            return error.AlreadyInitialized;
-        }
-
-        const allocator = switch (builtin.mode) {
-            .Debug, .ReleaseSafe => blk: {
-                global_state.debug_allocator = .init;
-                break :blk global_state.debug_allocator.allocator();
-            },
-            else => std.heap.smp_allocator,
-        };
-        global_state.universe = .{ .allocator = allocator };
-
-        return &global_state;
-    }
-
-    fn deinit(oinst: *const modules.OpaqueInstance, state: *State) void {
-        const inst: *const Instance = @ptrCast(@alignCast(oinst));
-        if (global_instance.cmpxchgStrong(inst, null, .monotonic, .monotonic)) |_|
-            @panic("already deinit");
-        std.debug.assert(state == &global_state);
-
-        global_state.universe.deinit();
-        switch (builtin.mode) {
-            .Debug, .ReleaseSafe => {
-                if (global_state.debug_allocator.deinit() == .leak) @panic("memory leak");
-            },
-            else => {},
-        }
-        global_state = undefined;
-    }
+pub const fimo_module = .{
+    .name = .fimo_worlds,
+    .author = "fimo",
+    .description = "Multi-threaded state processing",
+    .license = "MIT OR APACHE 2.0",
 };
+
+pub const fimo_imports = .{fimo_tasks_meta.symbols.all_symbols};
+
+pub const fimo_exports = .{
+    .{ .symbol = symbols.resource_register, .value = &resourceRegister },
+    .{ .symbol = symbols.resource_unregister, .value = &resourceUnregister },
+    .{ .symbol = symbols.system_register, .value = &systemRegister },
+    .{ .symbol = symbols.system_unregister, .value = &systemUnregister },
+    .{ .symbol = symbols.system_group_create, .value = &systemGroupCreate },
+    .{ .symbol = symbols.system_group_destroy, .value = &systemGroupDestroy },
+    .{ .symbol = symbols.system_group_get_world, .value = &systemGroupGetWorld },
+    .{ .symbol = symbols.system_group_get_label, .value = &systemGroupGetLabel },
+    .{ .symbol = symbols.system_group_get_pool, .value = &systemGroupGetPool },
+    .{ .symbol = symbols.system_group_add_systems, .value = &systemGroupAddSystems },
+    .{ .symbol = symbols.system_group_remove_system, .value = &systemGroupRemoveSystem },
+    .{ .symbol = symbols.system_group_schedule, .value = &systemGroupSchedule },
+    .{ .symbol = symbols.system_context_get_group, .value = &systemContextGetGroup },
+    .{ .symbol = symbols.system_context_get_generation, .value = &systemContextGetGeneration },
+    .{ .symbol = symbols.system_context_allocator_alloc, .value = &systemContextAllocatorAlloc },
+    .{ .symbol = symbols.system_context_allocator_resize, .value = &systemContextAllocatorResize },
+    .{ .symbol = symbols.system_context_allocator_remap, .value = &systemContextAllocatorRemap },
+    .{ .symbol = symbols.system_context_allocator_free, .value = &systemContextAllocatorFree },
+    .{ .symbol = symbols.world_create, .value = &worldCreate },
+    .{ .symbol = symbols.world_destroy, .value = &worldDestroy },
+    .{ .symbol = symbols.world_get_label, .value = &worldGetLabel },
+    .{ .symbol = symbols.world_get_pool, .value = &worldGetPool },
+    .{ .symbol = symbols.world_has_resource, .value = &worldHasResource },
+    .{ .symbol = symbols.world_add_resource, .value = &worldAddResource },
+    .{ .symbol = symbols.world_remove_resource, .value = &worldRemoveResource },
+    .{ .symbol = symbols.world_lock_resources, .value = &worldLockResources },
+    .{ .symbol = symbols.world_unlock_resource_exclusive, .value = &worldUnlockResourceExclusive },
+    .{ .symbol = symbols.world_unlock_resource_shared, .value = &worldUnlockResourceShared },
+    .{ .symbol = symbols.world_allocator_alloc, .value = &worldAllocatorAlloc },
+    .{ .symbol = symbols.world_allocator_resize, .value = &worldAllocatorResize },
+    .{ .symbol = symbols.world_allocator_remap, .value = &worldAllocatorRemap },
+    .{ .symbol = symbols.world_allocator_free, .value = &worldAllocatorFree },
+};
+
+pub const fimo_events = .{
+    .init = init,
+    .deinit = deinit,
+};
+
+fn init(self: *@This()) void {
+    const allocator = if (@TypeOf(self.debug_allocator) != void) blk: {
+        self.debug_allocator = .init;
+        break :blk self.debug_allocator.allocator();
+    } else std.heap.smp_allocator;
+    self.allocator = allocator;
+    self.universe = .{ .allocator = allocator };
+}
+
+fn deinit(self: *@This()) void {
+    self.universe.deinit();
+    if (@TypeOf(self.debug_allocator) != void)
+        if (self.debug_allocator.deinit() == .leak) @panic("memory leak");
+    self.* = undefined;
+}
+
+pub fn get() *@This() {
+    return Module.state();
+}
 
 fn resourceRegister(
     resource: *const resources.RegisterOptions.Descriptor,
     handle: **resources.Resource,
 ) callconv(.c) Status {
-    handle.* = @ptrCast(State.global_state.universe.registerResource(.{
+    const self = get();
+    handle.* = @ptrCast(self.universe.registerResource(.{
         .label = if (resource.label_len != 0) resource.label.?[0..resource.label_len] else null,
         .size = resource.size,
         .alignment = .fromByteUnits(resource.alignment),
@@ -135,14 +122,16 @@ fn resourceRegister(
 }
 
 fn resourceUnregister(handle: *resources.Resource) callconv(.c) void {
-    State.global_state.universe.unregisterResource(@ptrCast(@alignCast(handle)));
+    const self = get();
+    self.universe.unregisterResource(@ptrCast(@alignCast(handle)));
 }
 
 fn systemRegister(
     system: *const systems.Declaration.Descriptor,
     handle: **systems.System,
 ) callconv(.c) Status {
-    handle.* = @ptrCast(State.global_state.universe.registerSystem(.{
+    const self = get();
+    handle.* = @ptrCast(self.universe.registerSystem(.{
         .label = if (system.label_len != 0) system.label.?[0..system.label_len] else null,
         .exclusive_resources = if (system.exclusive_handles_len != 0)
             @ptrCast(@alignCast(system.exclusive_handles.?[0..system.exclusive_handles_len]))
@@ -179,7 +168,8 @@ fn systemRegister(
 }
 
 fn systemUnregister(handle: *systems.System) callconv(.c) void {
-    State.global_state.universe.unregisterSystem(@ptrCast(@alignCast(handle)));
+    const self = get();
+    self.universe.unregisterSystem(@ptrCast(@alignCast(handle)));
 }
 
 fn systemGroupCreate(

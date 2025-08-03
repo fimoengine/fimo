@@ -7,8 +7,6 @@ const Waker = fimo_std.tasks.Waker;
 const Poll = fimo_std.tasks.Poll;
 const BlockingContext = fimo_std.tasks.BlockingContext;
 const EnqueuedFuture = fimo_std.tasks.EnqueuedFuture;
-const AnyError = fimo_std.AnyError;
-const AnyResult = AnyError.AnyResult;
 
 const command_buffer = @import("command_buffer.zig");
 const Entry = command_buffer.Entry;
@@ -23,7 +21,7 @@ const task = @import("task.zig");
 const Task = task.Task;
 const testing = @import("testing.zig");
 
-pub const SpawnError = Allocator.Error || AnyError.Error;
+pub const SpawnError = Allocator.Error || fimo_std.ctx.Error;
 
 /// Options for spawning new futures.
 pub const SpawnFutureOptions = struct {
@@ -80,12 +78,11 @@ pub fn go(
     function: anytype,
     args: std.meta.ArgsTuple(@TypeOf(function)),
     options: SpawnFutureOptions,
-    err: *?AnyError,
 ) SpawnError!void {
     const cleanup = struct {
         fn f() void {}
     }.f;
-    return goWithCleanup(executor, function, args, cleanup, .{}, options, err);
+    return goWithCleanup(executor, function, args, cleanup, .{}, options);
 }
 
 /// Spawns a new detached future in the provided pool.
@@ -98,7 +95,6 @@ pub fn goWithCleanup(
     cleanup: anytype,
     cleanup_args: std.meta.ArgsTuple(@TypeOf(cleanup)),
     options: SpawnFutureOptions,
-    err: *?AnyError,
 ) SpawnError!void {
     if (@typeInfo(@TypeOf(function)).@"fn".return_type.? != void) {
         @compileError("expected function with a `void` return type");
@@ -188,7 +184,7 @@ pub fn goWithCleanup(
         .payload = .{ .enqueue_task = @ptrCast(&future.task) },
     });
 
-    try executor.enqueueCommandBufferDetached(&future.command_buffer, err);
+    try executor.enqueueCommandBufferDetached(&future.command_buffer);
 }
 
 /// Spawns a new future in the provided pool.
@@ -197,12 +193,11 @@ pub fn init(
     function: anytype,
     args: std.meta.ArgsTuple(@TypeOf(function)),
     options: SpawnFutureOptions,
-    err: *?AnyError,
 ) SpawnError!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
     const cleanup = struct {
         fn f() void {}
     }.f;
-    return initWithCleanup(executor, function, args, cleanup, .{}, options, err);
+    return initWithCleanup(executor, function, args, cleanup, .{}, options);
 }
 
 /// Spawns a new future in the provided pool.
@@ -215,7 +210,6 @@ pub fn initWithCleanup(
     cleanup: anytype,
     cleanup_args: std.meta.ArgsTuple(@TypeOf(cleanup)),
     options: SpawnFutureOptions,
-    err: *?AnyError,
 ) SpawnError!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
     const Result = @typeInfo(@TypeOf(function)).@"fn".return_type.?;
     const FutureState = struct {
@@ -304,7 +298,7 @@ pub fn initWithCleanup(
         .payload = .{ .enqueue_task = @ptrCast(&future.task) },
     });
 
-    const handle = try executor.enqueueCommandBuffer(&future.command_buffer, err);
+    const handle = try executor.enqueueCommandBuffer(&future.command_buffer);
     return .{ .handle = handle, .result = &future.result };
 }
 
@@ -314,12 +308,11 @@ pub fn initPollable(
     function: anytype,
     args: std.meta.ArgsTuple(@TypeOf(function)),
     options: SpawnFutureOptions,
-    err: *?AnyError,
 ) SpawnError!EnqueuedFuture(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
     const cleanup = struct {
         fn f() void {}
     }.f;
-    return initPollableWithCleanup(executor, function, args, cleanup, .{}, options, err);
+    return initPollableWithCleanup(executor, function, args, cleanup, .{}, options);
 }
 
 pub fn initPollableWithCleanup(
@@ -329,7 +322,6 @@ pub fn initPollableWithCleanup(
     cleanup: anytype,
     cleanup_args: std.meta.ArgsTuple(@TypeOf(cleanup)),
     options: SpawnFutureOptions,
-    err: *?AnyError,
 ) SpawnError!EnqueuedFuture(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
     const Result = @typeInfo(@TypeOf(function)).@"fn".return_type.?;
     const FutureState = struct {
@@ -444,7 +436,7 @@ pub fn initPollableWithCleanup(
         .payload = .{ .enqueue_task = &future.task },
     });
 
-    future.handle = try executor.enqueueCommandBuffer(&future.command_buffer, err);
+    future.handle = try executor.enqueueCommandBuffer(&future.command_buffer);
     return EnqueuedFuture(Result).init(future, FutureState.poll, FutureState.onCleanup);
 }
 
@@ -452,32 +444,28 @@ test "pollable future" {
     var ctx = try testing.initTestContext();
     defer ctx.deinit();
 
-    var err: ?AnyError = null;
-    defer if (err) |e| e.deinit();
-
-    const p = try Pool.init(ctx, &.{ .worker_count = 4, .label_ = "test", .label_len = 4 }, &err);
+    const p = try Pool.init(&.{ .worker_count = 4, .label_ = "test", .label_len = 4 });
     defer {
         p.requestClose();
         p.unref();
     }
 
     const start = struct {
-        fn f(ctx_: *const testing.TestContext, a: usize, b: usize) usize {
-            task.sleep(ctx_, .initMillis(200));
+        fn f(a: usize, b: usize) usize {
+            task.sleep(.initMillis(200));
             return a + b;
         }
     }.f;
     var future = try initPollable(
         p,
         start,
-        .{ &ctx, 5, 10 },
+        .{ 5, 10 },
         .{ .label = "pollable future", .allocator = std.testing.allocator },
-        &err,
     );
     defer future.deinit();
     var fut = future.intoFuture();
 
-    const awaiter = try fimo_std.tasks.BlockingContext.init(&err);
+    const awaiter = try fimo_std.tasks.BlockingContext.init();
     defer awaiter.deinit();
     try std.testing.expectEqual(15, fut.awaitBlockingBorrow(awaiter));
 }

@@ -1,11 +1,7 @@
 //! Reader-writer lock.
 // Taken from https://github.com/rust-lang/rust/blob/master/library/std/src/sys/sync/rwlock/futex.rs
-
 const std = @import("std");
 const atomic = std.atomic;
-
-const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
 
 const Futex = @import("Futex.zig");
 
@@ -95,18 +91,18 @@ pub fn tryLockRead(self: *Self) bool {
 
 /// Obtains shared lock ownership. Blocks if another thread has exclusive ownership.
 /// May block if another thread is attempting to get exclusive ownership.
-pub fn lockRead(self: *Self, provider: anytype) void {
+pub fn lockRead(self: *Self) void {
     const state = self.state.load(.monotonic);
     if (!isReadLockable(state) or self.state.cmpxchgWeak(
         state,
         state + READ_LOCKED,
         .acquire,
         .monotonic,
-    ) != null) self.lockReadContended(provider);
+    ) != null) self.lockReadContended();
 }
 
 /// Releases a held shared lock.
-pub fn unlockRead(self: *Self, provider: anytype) void {
+pub fn unlockRead(self: *Self) void {
     const state = self.state.fetchSub(READ_LOCKED, .release) - READ_LOCKED;
 
     // It's impossible for a reader to be waiting on a read-locked RwLock,
@@ -114,10 +110,10 @@ pub fn unlockRead(self: *Self, provider: anytype) void {
     std.debug.assert(!hasReadersWaiting(state) or hasWritersWaiting(state));
 
     // Wake up a writer if we were the last reader and there's a writer waiting.
-    if (isUnlocked(state) and hasWritersWaiting(state)) self.wakeWriterOrReaders(provider, state);
+    if (isUnlocked(state) and hasWritersWaiting(state)) self.wakeWriterOrReaders(state);
 }
 
-fn lockReadContended(self: *Self, provider: anytype) void {
+fn lockReadContended(self: *Self) void {
     @branchHint(.cold);
     var has_slept = false;
     var state = self.spinRead();
@@ -147,7 +143,7 @@ fn lockReadContended(self: *Self, provider: anytype) void {
         }
 
         // Wait for the state to change.
-        Futex.TypedHelper(u32).wait(provider, &self.state, state | READERS_WAITING, 0) catch {};
+        Futex.TypedHelper(u32).wait(&self.state, state | READERS_WAITING, 0) catch {};
         has_slept = true;
 
         // Spin again after waking up.
@@ -171,23 +167,23 @@ pub fn tryLockWrite(self: *Self) bool {
 }
 
 /// Blocks until exclusive lock ownership is acquired.
-pub fn lockWrite(self: *Self, provider: anytype) void {
+pub fn lockWrite(self: *Self) void {
     if (self.state.cmpxchgWeak(0, WRITE_LOCKED, .acquire, .monotonic)) |_|
-        self.lockWriteContended(provider);
+        self.lockWriteContended();
 }
 
 /// Releases a held exclusive lock. Asserts the lock is held exclusively.
-pub fn unlockWrite(self: *Self, provider: anytype) void {
+pub fn unlockWrite(self: *Self) void {
     const state = self.state.fetchSub(WRITE_LOCKED, .release) - WRITE_LOCKED;
 
     std.debug.assert(isUnlocked(state));
 
     if (hasWritersWaiting(state) or hasReadersWaiting(state))
-        self.wakeWriterOrReaders(provider, state);
+        self.wakeWriterOrReaders(state);
 }
 
 /// Downgrades a held exclusive lock to a shared lock.
-pub fn downgrade(self: *Self, provider: anytype) void {
+pub fn downgrade(self: *Self) void {
     // Removes all write bits and adds a single read bit.
     const state = self.state.fetchAdd(DOWNGRADE, .release);
     std.debug.assert(isWriteLocked(state));
@@ -195,11 +191,11 @@ pub fn downgrade(self: *Self, provider: anytype) void {
     if (hasReadersWaiting(state)) {
         // Since we had the exclusive lock, nobody else can unset this bit.
         _ = self.state.fetchSub(READERS_WAITING, .monotonic);
-        _ = Futex.wake(provider, &self.state, std.math.maxInt(usize));
+        _ = Futex.wake(&self.state, std.math.maxInt(usize));
     }
 }
 
-fn lockWriteContended(self: *Self, provider: anytype) void {
+fn lockWriteContended(self: *Self) void {
     @branchHint(.cold);
     var state = self.spinWrite();
     var other_writers_waiting: u32 = 0;
@@ -238,7 +234,7 @@ fn lockWriteContended(self: *Self, provider: anytype) void {
         if (isUnlocked(state) or !hasWritersWaiting(state)) continue;
 
         // Wait for the state to change.
-        Futex.TypedHelper(u32).wait(provider, &self.writer_notify, seq, 0) catch {};
+        Futex.TypedHelper(u32).wait(&self.writer_notify, seq, 0) catch {};
 
         // Spin again after waking up.
         state = self.spinWrite();
@@ -249,7 +245,7 @@ fn lockWriteContended(self: *Self, provider: anytype) void {
 ///
 /// If both are waiting, this will wake up only one writer, but will fall
 /// back to waking up readers if there was no writer to wake up.
-fn wakeWriterOrReaders(self: *Self, provider: anytype, s: u32) void {
+fn wakeWriterOrReaders(self: *Self, s: u32) void {
     @branchHint(.cold);
     var state = s;
     if (!isUnlocked(state)) @panic("expected an unlocked RwLock");
@@ -266,7 +262,7 @@ fn wakeWriterOrReaders(self: *Self, provider: anytype, s: u32) void {
     // If only writers are waiting, wake one of them up.
     if (state == WRITERS_WAITING) {
         state = self.state.cmpxchgWeak(state, 0, .monotonic, .monotonic) orelse {
-            _ = self.wakeWriter(provider);
+            _ = self.wakeWriter();
             return;
         };
     }
@@ -275,7 +271,7 @@ fn wakeWriterOrReaders(self: *Self, provider: anytype, s: u32) void {
     // and only wake up one writer.
     if (state == READERS_WAITING + WRITERS_WAITING) {
         if (self.state.cmpxchgWeak(state, READERS_WAITING, .monotonic, .monotonic)) |_| return;
-        if (self.wakeWriter(provider)) return;
+        if (self.wakeWriter()) return;
         // No writers were actually blocked on futex_wait, so we continue
         // to wake up readers instead, since we can't be sure if we notified a writer.
         state = READERS_WAITING;
@@ -284,7 +280,7 @@ fn wakeWriterOrReaders(self: *Self, provider: anytype, s: u32) void {
     // If readers are waiting, wake them all up.
     if (state == READERS_WAITING) {
         if (self.state.cmpxchgWeak(state, 0, .monotonic, .monotonic) == null)
-            _ = Futex.wake(provider, &self.state, std.math.maxInt(usize));
+            _ = Futex.wake(&self.state, std.math.maxInt(usize));
     }
 }
 
@@ -293,9 +289,9 @@ fn wakeWriterOrReaders(self: *Self, provider: anytype, s: u32) void {
 ///
 /// If this returns false, it might still be the case that we notified a
 /// writer that was about to go to sleep.
-fn wakeWriter(self: *Self, provider: anytype) bool {
+fn wakeWriter(self: *Self) bool {
     _ = self.writer_notify.fetchAdd(1, .release);
-    return Futex.wake(provider, &self.writer_notify, 1) != 0;
+    return Futex.wake(&self.writer_notify, 1) != 0;
 }
 
 /// Spin for a while, but stop directly at the given condition.
@@ -331,34 +327,32 @@ test "RwLock: smoke test (tasks)" {
     const testing = @import("../testing.zig");
 
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
-            _ = err;
-
+        fn f() !void {
             var rwl = Self{};
 
-            rwl.lockWrite(ctx);
+            rwl.lockWrite();
             try std.testing.expect(!rwl.tryLockWrite());
             try std.testing.expect(!rwl.tryLockRead());
-            rwl.unlockWrite(ctx);
+            rwl.unlockWrite();
 
             try std.testing.expect(rwl.tryLockWrite());
             try std.testing.expect(!rwl.tryLockRead());
-            rwl.unlockWrite(ctx);
+            rwl.unlockWrite();
 
-            rwl.lockRead(ctx);
+            rwl.lockRead();
             try std.testing.expect(!rwl.tryLockWrite());
             try std.testing.expect(rwl.tryLockRead());
-            rwl.unlockRead(ctx);
-            rwl.unlockRead(ctx);
+            rwl.unlockRead();
+            rwl.unlockRead();
 
             try std.testing.expect(rwl.tryLockRead());
             try std.testing.expect(!rwl.tryLockWrite());
             try std.testing.expect(rwl.tryLockRead());
-            rwl.unlockRead(ctx);
-            rwl.unlockRead(ctx);
+            rwl.unlockRead();
+            rwl.unlockRead();
 
-            rwl.lockWrite(ctx);
-            rwl.unlockWrite(ctx);
+            rwl.lockWrite();
+            rwl.unlockWrite();
         }
     }.f);
 }
@@ -375,7 +369,6 @@ test "RwLock: concurrent access (threads)" {
     const num_reads: usize = num_writes * 2;
 
     const Runner = struct {
-        ctx: *const testing.TestContext,
         rwl: Self = .{},
         writes: usize = 0,
         reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
@@ -386,8 +379,8 @@ test "RwLock: concurrent access (threads)" {
 
         fn reader(self: *@This()) !void {
             while (true) {
-                self.rwl.lockRead(self.ctx);
-                defer self.rwl.unlockRead(self.ctx);
+                self.rwl.lockRead();
+                defer self.rwl.unlockRead();
 
                 if (self.writes >= num_writes or self.reads.load(.unordered) >= num_reads)
                     break;
@@ -403,8 +396,8 @@ test "RwLock: concurrent access (threads)" {
             var rnd = prng.random();
 
             while (true) {
-                self.rwl.lockWrite(self.ctx);
-                defer self.rwl.unlockWrite(self.ctx);
+                self.rwl.lockWrite();
+                defer self.rwl.unlockWrite();
 
                 if (self.writes >= num_writes)
                     break;
@@ -436,7 +429,7 @@ test "RwLock: concurrent access (threads)" {
         }
     };
 
-    var runner = Runner{ .ctx = &ctx };
+    var runner = Runner{};
     var threads: [num_writers + num_readers]std.Thread = undefined;
 
     for (threads[0..num_writers], 0..) |*t, i| t.* = try std.Thread.spawn(.{}, Runner.writer, .{ &runner, i });
@@ -455,8 +448,8 @@ test "RwLock: concurrent access (tasks)" {
     const testing = @import("../testing.zig");
 
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) !void {
-            const executor = pool.Pool.current(ctx).?;
+        fn f() !void {
+            const executor = pool.Pool.current().?;
             defer executor.unref();
 
             const num_writers: usize = 2;
@@ -465,7 +458,6 @@ test "RwLock: concurrent access (tasks)" {
             const num_reads: usize = num_writes * 2;
 
             const Runner = struct {
-                ctx: *const testing.TestContext,
                 rwl: Self = .{},
                 writes: usize = 0,
                 reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
@@ -476,8 +468,8 @@ test "RwLock: concurrent access (tasks)" {
 
                 fn reader(self: *@This()) void {
                     while (true) {
-                        self.rwl.lockRead(self.ctx);
-                        defer self.rwl.unlockRead(self.ctx);
+                        self.rwl.lockRead();
+                        defer self.rwl.unlockRead();
 
                         if (self.writes >= num_writes or self.reads.load(.unordered) >= num_reads)
                             break;
@@ -493,8 +485,8 @@ test "RwLock: concurrent access (tasks)" {
                     var rnd = prng.random();
 
                     while (true) {
-                        self.rwl.lockWrite(self.ctx);
-                        defer self.rwl.unlockWrite(self.ctx);
+                        self.rwl.lockWrite();
+                        defer self.rwl.unlockWrite();
 
                         if (self.writes >= num_writes)
                             break;
@@ -503,11 +495,11 @@ test "RwLock: concurrent access (tasks)" {
 
                         const term1 = rnd.int(usize);
                         self.term1 = term1;
-                        yield(self.ctx);
+                        yield();
 
                         const term2 = rnd.int(usize);
                         self.term2 = term2;
-                        yield(self.ctx);
+                        yield();
 
                         self.term_sum = term1 +% term2;
                         self.writes += 1;
@@ -516,17 +508,17 @@ test "RwLock: concurrent access (tasks)" {
 
                 fn check(self: *const @This()) void {
                     const term_sum = self.term_sum;
-                    yield(self.ctx);
+                    yield();
 
                     const term2 = self.term2;
-                    yield(self.ctx);
+                    yield();
 
                     const term1 = self.term1;
                     std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;
                 }
             };
 
-            var runner = Runner{ .ctx = ctx };
+            var runner = Runner{};
             var futures: [num_readers + num_writers]future.Future(void) = undefined;
 
             for (futures[0..num_writers], 0..) |*fu, i| fu.* = try future.init(
@@ -534,18 +526,16 @@ test "RwLock: concurrent access (tasks)" {
                 Runner.writer,
                 .{ &runner, i },
                 .{ .allocator = std.testing.allocator },
-                err,
             );
             for (futures[num_writers..]) |*fu| fu.* = try future.init(
                 executor,
                 Runner.reader,
                 .{&runner},
                 .{ .allocator = std.testing.allocator },
-                err,
             );
 
             for (futures) |fu| {
-                _ = fu.@"await"() catch {};
+                _ = fu.await() catch {};
                 fu.deinit();
             }
 

@@ -146,19 +146,19 @@ typedef struct FimoModulesInstanceVTable {
     /// `has_dependency`. Additionally, this function also queries whether the include is static,
     /// i.e., the include was specified by the module at load time. The include type is stored in
     /// `is_static`.
-    FimoResult (*query_namespace)(const FimoModulesInstance *ctx, const char *ns, bool *has_dependency,
+    FimoStatus (*query_namespace)(const FimoModulesInstance *ctx, const char *ns, bool *has_dependency,
                                   bool *is_static);
     /// Includes a namespace by the module.
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are exposed
     /// in said namespace. A namespace can not be included multiple times.
-    FimoResult (*add_namespace)(const FimoModulesInstance *ctx, const char *ns);
+    FimoStatus (*add_namespace)(const FimoModulesInstance *ctx, const char *ns);
     /// Removes a namespace include from the module.
     ///
     /// Once excluded, the caller guarantees to relinquish access to the symbols contained in said
     /// namespace. It is only possible to exclude namespaces that were manually added, whereas
     /// static namespace includes remain valid until the module is unloaded.
-    FimoResult (*remove_namespace)(const FimoModulesInstance *ctx, const char *ns);
+    FimoStatus (*remove_namespace)(const FimoModulesInstance *ctx, const char *ns);
     /// Checks if a module depends on another module.
     ///
     /// Checks if `info` is a dependency of `module`. In that case `ctx` is allowed to access the
@@ -166,7 +166,7 @@ typedef struct FimoModulesInstanceVTable {
     /// Additionally, this function also queries whether the dependency is static, i.e., the
     /// dependency was set by the module subsystem at load time. The dependency type is stored in
     /// `is_static`.
-    FimoResult (*query_dependency)(const FimoModulesInstance *ctx, const FimoModulesInfo *info, bool *has_dependency,
+    FimoStatus (*query_dependency)(const FimoModulesInstance *ctx, const FimoModulesInfo *info, bool *has_dependency,
                                    bool *is_static);
     /// Acquires another module as a dependency.
     ///
@@ -174,14 +174,14 @@ typedef struct FimoModulesInstanceVTable {
     /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
     /// already a dependency, or to a module that would result in a circular dependency will result
     /// in an error.
-    FimoResult (*add_dependency)(const FimoModulesInstance *ctx, const FimoModulesInfo *info);
+    FimoStatus (*add_dependency)(const FimoModulesInstance *ctx, const FimoModulesInfo *info);
     /// Removes a module as a dependency.
     ///
     /// By removing a module as a dependency, the caller ensures that it does not own any
     /// references to resources originating from the former dependency, and allows for the
     /// unloading of the module. A module can only relinquish dependencies to modules that were
     /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
-    FimoResult (*remove_dependency)(const FimoModulesInstance *ctx, const FimoModulesInfo *info);
+    FimoStatus (*remove_dependency)(const FimoModulesInstance *ctx, const FimoModulesInfo *info);
     /// Loads a symbol from the module subsystem.
     ///
     /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
@@ -189,21 +189,21 @@ typedef struct FimoModulesInstanceVTable {
     /// symbol, if it exists, can be used until the module relinquishes the dependency to the
     /// module that exported the symbol. This function fails, if the module containing the symbol
     /// is not a dependency of the module.
-    FimoResult (*load_symbol)(const FimoModulesInstance *ctx, const char *name, const char *ns, FimoVersion version,
+    FimoStatus (*load_symbol)(const FimoModulesInstance *ctx, const char *name, const char *ns, FimoVersion version,
                               const void **symbol);
     /// Reads a module parameter with dependency read access.
     ///
     /// Reads the value of a module parameter with dependency read access. The operation fails, if
     /// the parameter does not exist, or if the parameter does not allow reading with a dependency
     /// access.
-    FimoResult (*read_parameter)(void *ctx, void *value, FimoModulesParamType type, const char *module,
+    FimoStatus (*read_parameter)(void *ctx, void *value, FimoModulesParamType type, const char *module,
                                  const char *param);
     /// Sets a module parameter with dependency write access.
     ///
     /// Sets the value of a module parameter with dependency write access. The operation fails, if
     /// the parameter does not exist, or if the parameter does not allow writing with a dependency
     /// access.
-    FimoResult (*write_parameter)(void *ctx, const void *value, FimoModulesParamType type, const char *module,
+    FimoStatus (*write_parameter)(void *ctx, const void *value, FimoModulesParamType type, const char *module,
                                   const char *param);
 } FimoModulesInstanceVTable;
 
@@ -292,7 +292,7 @@ typedef struct FimoModulesLoadingSetVTable {
     /// which they are in charge of cleaning up. If an error occurs during the execution of the
     /// function, it will invoke the optional `on_abort` callback. If the requested module does not
     /// exist, the function will return an error.
-    FimoResult (*add_callback)(void *ctx, const char *name, void (*on_success)(const FimoModulesInfo *info, void *data),
+    FimoStatus (*add_callback)(void *ctx, const char *name, void (*on_success)(const FimoModulesInfo *info, void *data),
                                void (*on_error)(const FimoModulesExport *exp, void *data), void (*on_abort)(void *data),
                                void *data);
     /// Adds a module to the module set.
@@ -306,7 +306,7 @@ typedef struct FimoModulesLoadingSetVTable {
     ///
     /// Note that the new module is not set up to automatically depend on the owner, but may
     /// prevent it from being unloaded while the set exists.
-    FimoResult (*add_module)(void *ctx, const FimoModulesInstance *owner, const FimoModulesExport *exp);
+    FimoStatus (*add_module)(void *ctx, const FimoModulesInstance *owner, const FimoModulesExport *exp);
     /// Adds modules to the set.
     ///
     /// Opens up a module binary to select which modules to load. If the path points to a file, the
@@ -319,7 +319,7 @@ typedef struct FimoModulesLoadingSetVTable {
     /// the exported modules, but does not return an error, if it does not export any modules. The
     /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
     /// In case of an error, no modules are appended to the set.
-    FimoResult (*add_modules_from_path)(void *ctx, FimoUTF8Path path,
+    FimoStatus (*add_modules_from_path)(void *ctx, FimoUTF8Path path,
                                         FimoModulesLoadingSetFilterRequest (*filter_fn)(const FimoModulesExport *exp,
                                                                                         void *data),
                                         void (*filter_deinit)(void *data), void *filter_data);
@@ -333,7 +333,7 @@ typedef struct FimoModulesLoadingSetVTable {
     /// but does not return an error, if it does not export any modules. The necessary symbols are
     /// set up automatically, if the binary was linked with the fimo library. In case of an error,
     /// no modules are appended to the set.
-    FimoResult (*add_modules_from_local)(
+    FimoStatus (*add_modules_from_local)(
             void *ctx, FimoModulesLoadingSetFilterRequest (*filter_fn)(const FimoModulesExport *exp, void *data),
             void (*filter_deinit)(void *data), void *filter_data,
             void (*iterator_fn)(bool (*filter_fn)(const FimoModulesExport *exp, void *data), void *data),
@@ -896,7 +896,7 @@ typedef struct FimoModulesExportModifierDebugInfo {
     /// Type-erased data to pass to the constructor.
     void *data;
     /// Constructor function for the debug info.
-    FimoResult (*construct)(void *data, FimoModulesDebugInfo *info);
+    FimoStatus (*construct)(void *data, FimoModulesDebugInfo *info);
 } FimoModulesExportModifierDebugInfo;
 
 typedef FIMO_TASKS_FALLIBLE(void *) FimoModulesExportModifierInstanceStateFutureResult;
@@ -1085,43 +1085,43 @@ typedef struct FimoModulesVTable {
     /// The start of the array or `NULL` is written into `features`. The return value is the array
     /// length.
     FimoUSize (*features)(const FimoModulesFeatureRequest **features);
-    /// Constructs a new pseudo module.
+    /// Constructs a new root module.
     ///
     /// The functions of the module subsystem require that the caller owns a reference to their own
     /// module. This is a problem, as the constructor of the context won't be assigned a module
-    /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
-    /// modules, i.e., module handles without an associated module.
-    FimoResult (*pseudo_module_new)(const FimoModulesInstance **module);
+    /// instance during bootstrapping. As a workaround, we allow for the creation of root modules,
+    /// i.e., module handles without an associated module.
+    FimoStatus (*root_module_new)(const FimoModulesInstance **module);
     /// Constructs a new empty set.
     ///
     /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
     /// to determine a suitable load order. A loading set is a utility to facilitate this process,
     /// by automatically computing a suitable load order for a batch of modules.
-    FimoResult (*set_new)(FimoModulesLoadingSet *set);
+    FimoStatus (*set_new)(FimoModulesLoadingSet *set);
     /// Searches for a module by it's name.
     ///
     /// Queries a module by its unique name. The returned `FimoModulesInfo` will have its reference
     /// count increased.
-    FimoResult (*find_by_name)(const char *name, const FimoModulesInfo **info);
+    FimoStatus (*find_by_name)(const char *name, const FimoModulesInfo **info);
     /// Searches for a module by a symbol it exports.
     ///
     /// Queries the module that exported the specified symbol. The returned `FimoModulesInfo` will
     /// have its reference count increased.
-    FimoResult (*find_by_symbol)(const char *name, const char *ns, FimoVersion version, const FimoModulesInfo **info);
+    FimoStatus (*find_by_symbol)(const char *name, const char *ns, FimoVersion version, const FimoModulesInfo **info);
     /// Checks for the presence of a namespace in the module subsystem.
     ///
     /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-    FimoResult (*namespace_exists)(const char *ns, bool *exists);
+    FimoStatus (*namespace_exists)(const char *ns, bool *exists);
     /// Marks all instances as unloadable.
     ///
     /// Tries to unload all instances that are not referenced by any other modules. If the instance is
     /// still referenced, this will mark the instance as unloadable and enqueue it for unloading.
-    FimoResult (*prune_instances)();
+    FimoStatus (*prune_instances)();
     /// Queries the info of a module parameter.
     ///
     /// This function can be used to query the datatype, the read access, and the write access of a
     /// module parameter. This function fails, if the parameter can not be found.
-    FimoResult (*query_parameter)(const char *module, const char *param, FimoModulesParamType *type,
+    FimoStatus (*query_parameter)(const char *module, const char *param, FimoModulesParamType *type,
                                   FimoModulesParamAccessGroup *read_group, FimoModulesParamAccessGroup *write_group);
     /// Reads a module parameter with public read access.
     ///
@@ -1129,14 +1129,14 @@ typedef struct FimoModulesVTable {
     /// parameter does not exist, or if the parameter does not allow reading with a public access.
     /// The caller must ensure that `value` points to an instance of the same datatype as the
     /// parameter in question.
-    FimoResult (*read_parameter)(void *value, FimoModulesParamType type, const char *module, const char *param);
+    FimoStatus (*read_parameter)(void *value, FimoModulesParamType type, const char *module, const char *param);
     /// Sets a module parameter with public write access.
     ///
     /// Sets the value of a module parameter with public write access. The operation fails, if the
     /// parameter does not exist, or if the parameter does not allow writing with a public access.
     /// The caller must ensure that `value` points to an instance of the same datatype as the
     /// parameter in question.
-    FimoResult (*write_parameter)(const void *value, FimoModulesParamType type, const char *module, const char *param);
+    FimoStatus (*write_parameter)(const void *value, FimoModulesParamType type, const char *module, const char *param);
 } FimoModulesVTable;
 
 #ifdef __cplusplus

@@ -17,16 +17,13 @@ pub fn main() !void {
     try ctx.init(init_options);
     defer ctx.deinit();
 
-    var err: ?AnyError = null;
-    defer if (err) |e| e.deinit();
-
     tracing.registerThread();
     defer tracing.unregisterThread();
 
-    const async_ctx = try tasks.BlockingContext.init(&err);
+    const async_ctx = try tasks.BlockingContext.init();
     defer async_ctx.deinit();
 
-    const ab: NestedFuture.Result = (try NestedFuture.init(&err)).awaitBlocking(async_ctx);
+    const ab: NestedFuture.Result = (try NestedFuture.init()).awaitBlocking(async_ctx);
     const a = ab.a;
     const b = ab.b;
 
@@ -55,11 +52,11 @@ const NestedFuture = union(enum) {
     const a_iter = 5;
     const b_iter = 10;
 
-    fn init(err: *?AnyError) !Future {
-        var a_fut = try LoopFuture(a_iter).init().enqueue(null, err);
+    fn init() !Future {
+        var a_fut = try LoopFuture(a_iter).init().enqueue(null);
         errdefer a_fut.deinit();
 
-        var b_fut = try LoopFuture(b_iter).init().enqueue(null, err);
+        var b_fut = try LoopFuture(b_iter).init().enqueue(null);
         errdefer b_fut.deinit();
 
         return Future.init(.{

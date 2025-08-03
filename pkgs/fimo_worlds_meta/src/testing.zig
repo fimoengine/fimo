@@ -9,14 +9,11 @@ const tasks = fimo_std.tasks;
 const Symbol = modules.Symbol;
 const SymbolWrapper = modules.SymbolWrapper;
 const SymbolGroup = modules.SymbolGroup;
-const PseudoInstance = modules.PseudoInstance;
+const RootInstance = modules.RootInstance;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
+const TestModule = @import("test_module");
 
 const symbols = @import("symbols.zig");
-
-comptime {
-    @import("test_module").forceExportModules();
-}
 
 pub const GlobalCtx = struct {
     var t_ctx: ?TestContext = null;
@@ -43,7 +40,7 @@ pub const GlobalCtx = struct {
 }{};
 
 const TestContext = struct {
-    instance: *const PseudoInstance,
+    instance: *const RootInstance,
     symbols: SymbolGroup(symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols),
 
     fn init() !@This() {
@@ -59,62 +56,49 @@ const TestContext = struct {
 
         tracing.registerThread();
         errdefer tracing.unregisterThread();
-
-        var err: ?fimo_std.AnyError = null;
-        errdefer if (err) |e| {
+        errdefer if (ctx.hasErrorResult()) {
+            const e = ctx.takeResult().unwrapErr();
+            defer e.deinit();
             tracing.emitErrSimple("{f}", .{e}, @src());
             e.deinit();
         };
 
-        const async_ctx = try tasks.BlockingContext.init(&err);
+        const async_ctx = try tasks.BlockingContext.init();
         defer async_ctx.deinit();
 
-        const set = try modules.LoadingSet.init(&err);
+        const set = try modules.LoadingSet.init();
         defer set.unref();
 
-        try set.addModulesFromLocal(
-            &{},
-            struct {
-                fn f(@"export": *const modules.Export, data: *const void) modules.LoadingSet.FilterRequest {
-                    _ = @"export";
-                    _ = data;
-                    return .load;
-                }
-            }.f,
-            null,
-            &err,
-        );
-        try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap(&err);
+        try set.addModulesFromLocal({}, TestModule.fimo_module_bundle.loadingSetFilter, null);
+        try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
 
-        const instance = try modules.PseudoInstance.init(&err);
+        const instance = try modules.RootInstance.init();
         errdefer instance.deinit();
 
-        const tasks_info = try modules.Info.findByName("fimo_tasks", &err);
+        const tasks_info = try modules.Info.findByName("fimo_tasks");
         defer tasks_info.unref();
-        const worlds_info = try modules.Info.findByName("fimo_worlds", &err);
+        const worlds_info = try modules.Info.findByName("fimo_worlds");
         defer worlds_info.unref();
 
-        try instance.addDependency(tasks_info, &err);
-        try instance.addDependency(worlds_info, &err);
-        try instance.addNamespace(symbols.symbol_namespace, &err);
-        try instance.addNamespace(fimo_tasks_meta.symbols.symbol_namespace, &err);
+        try instance.addDependency(tasks_info);
+        try instance.addDependency(worlds_info);
+        try instance.addNamespace(symbols.symbol_namespace);
+        try instance.addNamespace(fimo_tasks_meta.symbols.symbol_namespace);
 
         const test_ctx = @This(){
             .instance = instance,
-            .symbols = try instance.loadSymbolGroup(
-                symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols,
-                &err,
-            ),
+            .symbols = try instance.loadSymbolGroup(symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols),
         };
+        test_ctx.symbols.registerGlobal();
 
         return test_ctx;
     }
 
     pub fn deinit(self: *@This()) void {
+        self.symbols.unregisterGlobal();
         self.instance.deinit();
 
-        var err: ?fimo_std.AnyError = null;
-        modules.pruneInstances(&err) catch unreachable;
+        modules.pruneInstances() catch unreachable;
         tracing.unregisterThread();
         ctx.deinit();
     }

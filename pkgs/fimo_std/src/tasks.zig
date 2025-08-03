@@ -63,10 +63,10 @@ pub const BlockingContext = extern struct {
     };
 
     /// Initializes a new blocking context.
-    pub fn init(err: *?AnyError) AnyError.Error!BlockingContext {
+    pub fn init() ctx.Error!BlockingContext {
         var context: BlockingContext = undefined;
         const handle = ctx.Handle.getHandle();
-        try handle.tasks_v0.context_new_blocking(&context).intoErrorUnion(err);
+        try handle.tasks_v0.context_new_blocking(&context).intoErrorUnion();
         return context;
     }
 
@@ -189,11 +189,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
         /// Moves the future on the async executor.
         ///
         /// Polling the new future will block the current task.
-        pub fn enqueue(
-            self: @This(),
-            comptime deinit_result_fn: ?fn (*U) void,
-            err: *?AnyError,
-        ) AnyError.Error!EnqueuedFuture(U) {
+        pub fn enqueue(self: @This(), comptime deinit_result_fn: ?fn (*U) void) ctx.Error!EnqueuedFuture(U) {
             const This = @This();
             const Wrapper = struct {
                 fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
@@ -229,7 +225,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
                 &Wrapper.deinit_data,
                 &Wrapper.deinit_result,
                 &enqueued,
-            ).intoErrorUnion(err);
+            ).intoErrorUnion();
             return @bitCast(enqueued);
         }
     };
@@ -645,8 +641,11 @@ pub fn Fallible(comptime T: type) type {
         }
 
         /// Extracts the contained result.
-        pub fn unwrap(self: Self, err: *?AnyError) AnyError.Error!T {
-            try self.result.intoErrorUnion(err);
+        pub fn unwrap(self: Self) ctx.Error!T {
+            if (self.result.isErr()) {
+                ctx.setResult(self.result);
+                return error.OperationFailed;
+            }
             return self.value;
         }
 
@@ -670,7 +669,7 @@ pub fn Fallible(comptime T: type) type {
 ///
 /// Changing this definition is a breaking change.
 pub const VTable = extern struct {
-    context_new_blocking: *const fn (context: *BlockingContext) callconv(.c) AnyResult,
+    context_new_blocking: *const fn (context: *BlockingContext) callconv(.c) ctx.Status,
     future_enqueue: *const fn (
         data: ?[*]const u8,
         data_size: usize,
@@ -681,5 +680,5 @@ pub const VTable = extern struct {
         cleanup_data: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         future: *OpaqueFuture,
-    ) callconv(.c) AnyResult,
+    ) callconv(.c) ctx.Status,
 };

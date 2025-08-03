@@ -1,8 +1,7 @@
 //! Definition of module infos.
 
 use crate::{
-    context::Handle,
-    error::AnyError,
+    context::{Error, Handle},
     modules::symbols::{AssertSharable, Share, StrRef},
     utils::{OpaqueHandle, View, Viewable},
     version::Version,
@@ -270,7 +269,7 @@ impl Info {
     ///
     /// Queries a module by its unique name. The returned `Info` instance will have its reference
     /// count increased.
-    pub fn find_by_name(name: &CStr) -> Result<Self, AnyError> {
+    pub fn find_by_name(name: &CStr) -> Result<Self, Error> {
         let mut out = MaybeUninit::uninit();
         let handle = unsafe { Handle::get_handle() };
         let f = handle.modules_v0.find_instance_by_name;
@@ -288,7 +287,7 @@ impl Info {
         name: &CStr,
         namespace: &CStr,
         version: Version<'_>,
-    ) -> Result<Self, AnyError> {
+    ) -> Result<Self, Error> {
         let mut out = MaybeUninit::uninit();
         let handle = unsafe { Handle::get_handle() };
         let f = handle.modules_v0.find_instance_by_symbol;

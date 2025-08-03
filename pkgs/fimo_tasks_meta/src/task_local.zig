@@ -12,7 +12,6 @@ pub fn Key(comptime T: type) type {
         /// be invoked upon task exit. May only be called by a task.
         pub fn set(
             self: *const @This(),
-            provider: anytype,
             value: ?*T,
             comptime dtor: ?fn (value: ?*T) void,
         ) void {
@@ -21,7 +20,7 @@ pub fn Key(comptime T: type) type {
                     if (comptime dtor) |f| f(@ptrCast(@alignCast(v)));
                 }
             };
-            const sym = symbols.task_local_set.requestFrom(provider);
+            const sym = symbols.task_local_set.getGlobal().get();
             sym(
                 @ptrCast(self),
                 @ptrCast(value),
@@ -32,8 +31,8 @@ pub fn Key(comptime T: type) type {
         /// Returns the value associated to the key for the current task.
         ///
         /// May only be called by a task.
-        pub fn get(self: *const @This(), provider: anytype) ?*T {
-            const sym = symbols.task_local_get.requestFrom(provider);
+        pub fn get(self: *const @This()) ?*T {
+            const sym = symbols.task_local_get.getGlobal().get();
             return @ptrCast(@alignCast(sym(@ptrCast(self))));
         }
 
@@ -41,8 +40,8 @@ pub fn Key(comptime T: type) type {
         ///
         /// This operation invokes the associated destructor function and sets the value to `null`.
         /// May only be called by a task.
-        pub fn clear(self: *const @This(), provider: anytype) void {
-            const sym = symbols.task_local_clear.requestFrom(provider);
+        pub fn clear(self: *const @This()) void {
+            const sym = symbols.task_local_clear.getGlobal().get();
             sym(@ptrCast(self));
         }
     };

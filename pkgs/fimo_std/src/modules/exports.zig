@@ -4,8 +4,6 @@ const builtin = @import("builtin");
 
 const c = @import("c");
 
-const AnyError = @import("../AnyError.zig");
-const AnyResult = AnyError.AnyResult;
 const ctx = @import("../ctx.zig");
 const modules = @import("../modules.zig");
 const path = @import("../path.zig");
@@ -131,7 +129,7 @@ pub const Modifier = extern struct {
     /// tracing. May only be specified once.
     pub const DebugInfo = extern struct {
         data: ?*anyopaque,
-        construct: *const fn (ptr: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) AnyResult,
+        construct: *const fn (ptr: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) ctx.Status,
     };
 
     /// A constructor and destructor for the state of a module.
@@ -304,6 +302,715 @@ pub const Export = extern struct {
         return null;
     }
 };
+
+pub fn ModuleBundle(bundle: anytype) type {
+    if (@typeInfo(@TypeOf(bundle)) != .@"struct") @compileError("fimo: invalid module bundle, expected a tuple, found " ++ @typeName(@TypeOf(bundle)));
+    if (!@typeInfo(@TypeOf(bundle)).@"struct".is_tuple) @compileError("fimo: invalid module bundle, expected a tuple, found " ++ @typeName(@TypeOf(bundle)));
+    for (@typeInfo(@TypeOf(bundle)).@"struct".fields) |f| {
+        if (!@hasDecl(@field(bundle, f.name), "fimo_modules_bundle_marker") and !@hasDecl(@field(bundle, f.name), "fimo_modules_marker"))
+            @compileError("fimo: invalid module bundle entry, expected a module or a module bundle, found " ++ @typeName(@field(bundle, f.name)));
+    }
+
+    return struct {
+        pub const bundled = bundle;
+        pub const fimo_modules_bundle_marker = {};
+
+        pub fn loadingSetFilter(@"export": *const Export, context: void) modules.LoadingSet.FilterRequest {
+            _ = context;
+            inline for (@typeInfo(@TypeOf(bundled)).@"struct".fields) |f| {
+                if (comptime @hasDecl(@field(bundle, f.name), "fimo_modules_marker")) {
+                    if (@"export" == @field(bundled, f.name).@"export") return .load;
+                } else if (comptime @hasDecl(@field(bundle, f.name), "fimo_modules_bundle_marker")) {
+                    if (@field(bundled, f.name).loadingSetFilter(@"export", {}) == .load) return .load;
+                } else unreachable;
+            }
+            return .skip;
+        }
+    };
+}
+
+pub fn Module(T: type) type {
+    @setEvalBranchQuota(100000);
+    if (!@hasDecl(T, "fimo_module")) @compileError("fimo: invalid module, missing `pub const fimo_module = .foo_name;` declaration: " ++ @typeName(T));
+
+    const Global = struct {
+        var is_init: bool = false;
+        var state: T = undefined;
+        var instance: *const modules.OpaqueInstance = undefined;
+    };
+    comptime var builder = switch (@typeInfo(@TypeOf(T.fimo_module))) {
+        .enum_literal => Builder.init(@tagName(T.fimo_module)),
+        .@"struct" => blk: {
+            const module = T.fimo_module;
+            const M = @TypeOf(module);
+            if (!@hasField(M, "name")) @compileError("fimo: invalid module, missing `pub const fimo_module = .{ .name = .foo_name };` declaration: " ++ @typeName(T));
+            if (@typeInfo(@TypeOf(module.name)) != .enum_literal) @compileError("fimo: invalid module, expected `pub const fimo_module = .{ .name = .foo_name };` declaration, found: " ++ @typeName(@TypeOf(module.name)));
+
+            var b = Builder.init(@tagName(module.name));
+            if (@hasField(M, "description")) b = b.withDescription(module.description);
+            if (@hasField(M, "author")) b = b.withAuthor(module.author);
+            if (@hasField(M, "license")) b = b.withLicense(module.license);
+            if (@hasField(M, "debug_info")) {
+                if (@TypeOf(module.debug_info) != bool) @compileError("fimo: invalid debug option, expected `pub const fimo_module = .{ ..., .debug_info = true };` declaration, found: " ++ @typeName(@TypeOf(module.debug_info)));
+                if (M.debug_info) b = b.withDebugInfo() else b.debug_info = null;
+            }
+
+            break :blk b;
+        },
+        else => @compileError("fimo: invalid module, expected `pub const fimo_module = .foo_name;` declaration, found: " ++ @typeName(@TypeOf(T.mach_module))),
+    };
+
+    if (@hasDecl(T, "fimo_parameters")) {
+        if (@typeInfo(@TypeOf(T.fimo_parameters)) != .@"struct") @compileError("fimo: invalid parameters, expected `pub const fimo_parameters = .{ .param = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_parameters)));
+        inline for (std.meta.fieldNames(@TypeOf(T.fimo_parameters))) |name| {
+            const param = @field(T.fimo_parameters, name);
+            if (!@hasField(@TypeOf(param), "default")) @compileError("fimo: invalid parameter default value, expected `pub const fimo_parameters = .{ .param = .{ .default = @as(..., ...) }, ... };` declaration, found: " ++ @typeName(@TypeOf(param)));
+            const default = param.default;
+            switch (@TypeOf(default)) {
+                u8, u16, u32, u64, i8, i16, i32, i64 => {},
+                else => @compileError("fimo: invalid parameter default value type, expected `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32` or `i64` found: " ++ @typeName(@TypeOf(default))),
+            }
+            const read_group = if (@hasField(@TypeOf(param), "read_group")) blk2: {
+                const group = param.read_group;
+                if (@typeInfo(@TypeOf(group)) != .enum_literal) @compileError("fimo: invalid parameter read group, expected `private`, `dependency` or `public` found: " ++ @typeName(@TypeOf(default)));
+                break :blk2 group;
+            } else .private;
+            const write_group = if (@hasField(@TypeOf(param), "write_group")) blk2: {
+                const group = param.write_group;
+                if (@typeInfo(@TypeOf(group)) != .enum_literal) @compileError("fimo: invalid parameter write group, expected `private`, `dependency` or `public` found: " ++ @typeName(@TypeOf(default)));
+                break :blk2 group;
+            } else .private;
+            const read = if (@hasField(@TypeOf(param), "read")) &struct {
+                fn f(p: modules.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
+                    const func: fn (modules.ParameterData(@TypeOf(default))) @TypeOf(default) = param.read;
+                    const d = modules.ParameterData(@TypeOf(default)).castFromOpaque(p);
+                    const v: *@TypeOf(default) = @ptrCast(@alignCast(value));
+                    v.* = func(d);
+                }
+            }.f else null;
+            const write = if (@hasField(@TypeOf(param), "write")) &struct {
+                fn f(p: modules.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
+                    const func: fn (modules.ParameterData(@TypeOf(default)), @TypeOf(default)) void = param.write;
+                    const d = modules.ParameterData(@TypeOf(default)).castFromOpaque(p);
+                    const v: *const @TypeOf(default) = @ptrCast(@alignCast(value));
+                    func(d, v.*);
+                }
+            }.f else null;
+
+            builder = builder.withParameter(.{
+                .name = name,
+                .member_name = name,
+                .default_value = switch (@TypeOf(default)) {
+                    u8 => .{ .u8 = default },
+                    u16 => .{ .u16 = default },
+                    u32 => .{ .u32 = default },
+                    u64 => .{ .u64 = default },
+                    i8 => .{ .i8 = default },
+                    i16 => .{ .i16 = default },
+                    i32 => .{ .i32 = default },
+                    i64 => .{ .i64 = default },
+                    else => unreachable,
+                },
+                .read_group = read_group,
+                .write_group = write_group,
+                .read = read,
+                .write = write,
+            });
+        }
+    }
+
+    if (@hasDecl(T, "fimo_paths")) {
+        if (@typeInfo(@TypeOf(T.fimo_paths)) != .@"struct") @compileError("fimo: invalid paths, expected `pub const fimo_paths = .{ .path = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_paths)));
+        inline for (std.meta.fieldNames(@TypeOf(T.fimo_paths))) |name| {
+            const p = @field(T.fimo_paths, name);
+            if (@TypeOf(p) != path.Path) @compileError("fimo: invalid parameters, expected a path, found: " ++ @typeName(@TypeOf(p)));
+            builder = builder.withResource(.{ .name = name, .path = p });
+        }
+    }
+
+    if (@hasDecl(T, "fimo_imports")) {
+        if (@typeInfo(@TypeOf(T.fimo_imports)) != .@"struct") @compileError("fimo: invalid imports, expected `pub const fimo_imports = .{ imp, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_imports)));
+        var imps: []const modules.Symbol = &.{};
+        inline for (T.fimo_imports) |imp| {
+            if (@TypeOf(imp) == modules.Symbol)
+                imps = imps ++ [_]modules.Symbol{imp}
+            else inline for (imp) |imp2| imps = imps ++ [_]modules.Symbol{imp2};
+        }
+        const Tup = std.meta.Tuple(&([_]type{modules.Symbol} ** imps.len));
+        var tup: Tup = undefined;
+        inline for (imps, 0..) |imp, i| {
+            tup[i] = imp;
+        }
+        builder = builder.withMultipleImports(tup);
+    }
+
+    if (@hasDecl(T, "fimo_exports")) {
+        if (@typeInfo(@TypeOf(T.fimo_exports)) != .@"struct") @compileError("fimo: invalid exports, expected `pub const fimo_exports = .{ .exp = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_exports)));
+        inline for (std.meta.fieldNames(@TypeOf(T.fimo_exports))) |name| {
+            const exp = @field(T.fimo_exports, name);
+            if (!@hasField(@TypeOf(exp), "symbol")) @compileError("fimo: invalid export, expected `pub const fimo_exports = .{ .exp = .{ .symbol = foo, ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(exp)));
+            const symbol: modules.Symbol = exp.symbol;
+            const linkage = if (@hasField(@TypeOf(exp), "linkage")) blk2: {
+                break :blk2 exp.linkage;
+            } else .global;
+            if (!@hasField(@TypeOf(exp), "value")) @compileError("fimo: invalid export value, expected `pub const fimo_exports = .{ .exp = .{ .value = ..., ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(exp)));
+            const value = exp.value;
+            if (@typeInfo(@TypeOf(value)) == .pointer) {
+                if (@TypeOf(value) != *const symbol.T) @compileError("fimo: invalid export value, expected `" ++ @typeName(*const symbol.T) ++ "`, found " ++ @typeName(@TypeOf(value)));
+                const wrapper = struct {
+                    const Sync = struct {
+                        const Result = *symbol.T;
+                        const Future = tasks.Future(@This(), Result, poll, null);
+
+                        fn init(inst: *const modules.OpaqueInstance) Future {
+                            _ = inst;
+                            return Future.init(.{});
+                        }
+                        fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                            _ = this;
+                            _ = waker;
+                            symbol.getGlobal().register(value);
+                            return .{ .ready = @constCast(value) };
+                        }
+                    };
+                    fn deinit(inst: *const modules.OpaqueInstance, sym: *symbol.T) void {
+                        _ = inst;
+                        _ = sym;
+                        symbol.getGlobal().unregister();
+                    }
+                };
+                builder = builder.withDynamicExport(
+                    .{ .symbol = symbol, .name = name, .linkage = linkage },
+                    wrapper.Sync.Future,
+                    wrapper.Sync.init,
+                    wrapper.deinit,
+                );
+            } else {
+                const wrapper = struct {
+                    const Sync = struct {
+                        const Result = @typeInfo(value.init).@"fn".return_type.?;
+                        const Future = tasks.Future(@This(), Result, poll, null);
+
+                        fn init(inst: *const modules.OpaqueInstance) Future {
+                            _ = inst;
+                            return Future.init(.{});
+                        }
+                        fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                            _ = this;
+                            _ = waker;
+                            const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
+                                value.init() catch |err| return .{ .ready = err }
+                            else
+                                value.init();
+                            symbol.getGlobal().register(sym);
+                            return .{ .ready = sym };
+                        }
+                    };
+                    const Async = struct {
+                        inner: Inner,
+
+                        const Inner = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
+                        const Result = Inner.Result;
+                        const Future = tasks.Future(@This(), Result, poll, Async.deinit);
+                        comptime {
+                            if (Inner.Result != *symbol.T) switch (@typeInfo(Inner.Result)) {
+                                .error_union => |v| {
+                                    if (Inner.Result != v.error_set!*symbol.T) @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result));
+                                },
+                                else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result)),
+                            };
+                        }
+
+                        fn init(inst: *const modules.OpaqueInstance) Future {
+                            _ = inst;
+                            return Future.init(.{ .inner = value.init() });
+                        }
+                        fn deinit(this: *@This()) void {
+                            if (@hasDecl(Inner, "deinit")) this.inner.deinit();
+                        }
+                        fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                            switch (this.inner.poll(waker)) {
+                                .ready => |v| {
+                                    const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
+                                        v catch |err| return .{ .ready = err }
+                                    else
+                                        v;
+                                    symbol.getGlobal().register(sym);
+                                    return .{ .ready = sym };
+                                },
+                                .pending => return .pending,
+                            }
+                        }
+                    };
+                    fn deinit(inst: *const modules.OpaqueInstance, sym: *symbol.T) void {
+                        _ = inst;
+                        symbol.getGlobal().unregister();
+                        const f: fn (*symbol.T) void = value.deinit;
+                        f(sym);
+                    }
+                };
+                if (@typeInfo(@TypeOf(value.init)) == .@"fn") {
+                    builder = builder.withDynamicExport(
+                        .{ .symbol = symbol, .name = name, .linkage = linkage },
+                        wrapper.Sync.Future,
+                        wrapper.Sync.init,
+                        wrapper.deinit,
+                    );
+                } else {
+                    builder = builder.withDynamicExport(
+                        .{ .symbol = symbol, .name = name, .linkage = linkage },
+                        wrapper.Async.Future,
+                        wrapper.Async.init,
+                        wrapper.deinit,
+                    );
+                }
+
+                const return_type = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
+                if (return_type == *symbol.T)
+                    builder = builder.withOnStartEvent(wrapper.Sync.Future, wrapper.Sync.init)
+                else if (@typeInfo(return_type) == .error_union) {
+                    const payload = @typeInfo(return_type).error_union.payload;
+                    if (payload == *symbol.T)
+                        builder = builder.withOnStartEvent(wrapper.Sync.Future, wrapper.Sync.init)
+                    else
+                        builder.withOnStartEvent(wrapper.Async.Future, wrapper.Async.init);
+                } else builder.withOnStartEvent(wrapper.Async.Future, wrapper.Async.init);
+            }
+        }
+    }
+
+    if (@hasDecl(T, "fimo_events")) {
+        if (@typeInfo(@TypeOf(T.fimo_events)) != .@"struct") @compileError("fimo: invalid events, expected `pub const fimo_events = .{ .init = ..., ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_events)));
+        if (@hasField(@TypeOf(T.fimo_events), "init")) {
+            const ev_init = T.fimo_events.init;
+            const wrapper = struct {
+                const Sync = struct {
+                    successfull: bool = false,
+                    set: modules.LoadingSet,
+
+                    const EvReturn = @typeInfo(@TypeOf(ev_init)).@"fn".return_type.?;
+                    const Result = switch (@typeInfo(EvReturn)) {
+                        .error_union => |v| v.error_set!*T,
+                        .void => *T,
+                        else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(EvReturn)),
+                    };
+                    const Future = tasks.Future(@This(), Result, poll, Sync.deinit);
+
+                    fn init(inst: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
+                        if (Global.is_init) @panic("already init");
+                        ctx.Handle.registerHandle(inst.handle);
+                        Global.instance = @ptrCast(@alignCast(inst));
+                        Global.is_init = true;
+                        return Future.init(.{ .set = set });
+                    }
+                    fn deinit(this: *@This()) void {
+                        if (!this.successfull) {
+                            ctx.Handle.unregisterHandle();
+                            Global.instance = undefined;
+                            Global.is_init = false;
+                        }
+                    }
+                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                        _ = waker;
+                        if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
+                            if (f.default_value_ptr) |default| {
+                                @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
+                            }
+                        };
+                        const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
+                        if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
+                        var args: Args = undefined;
+                        inline for (std.meta.fields(Args), 0..) |f, i| {
+                            switch (f.type) {
+                                *T => args[i] = &Global.state,
+                                modules.LoadingSet => args[i] = this.set,
+                                else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
+                            }
+                        }
+                        const result = @call(.auto, ev_init, args);
+                        if (@typeInfo(Result) == .error_union) result catch |err| return .{ .ready = err };
+                        this.successfull = true;
+                        return .{ .ready = &Global.state };
+                    }
+                };
+                const Async = struct {
+                    inner: Inner,
+                    successfull: bool = false,
+
+                    const Inner = @typeInfo(@TypeOf(ev_init)).@"fn".return_type.?;
+                    const Result = switch (@typeInfo(Inner.Result)) {
+                        .error_union => |v| v.error_set!*T,
+                        .void => *T,
+                        else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result)),
+                    };
+                    const Future = tasks.Future(@This(), Result, poll, Async.deinit);
+
+                    fn init(inst: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
+                        if (Global.is_init) @panic("already init");
+                        ctx.Handle.registerHandle(inst.handle);
+                        Global.instance = @ptrCast(@alignCast(inst));
+                        Global.is_init = true;
+                        if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
+                            if (f.default_value_ptr) |default| {
+                                @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
+                            }
+                        };
+                        const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
+                        if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
+                        var args: Args = undefined;
+                        inline for (std.meta.fields(Args), 0..) |f, i| {
+                            switch (f.type) {
+                                *T => args[i] = &Global.state,
+                                modules.LoadingSet => args[i] = set,
+                                else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
+                            }
+                        }
+                        const result = @call(.auto, ev_init, args);
+                        return Future.init(.{ .inner = result });
+                    }
+                    fn deinit(this: *@This()) void {
+                        if (!this.successfull) {
+                            ctx.Handle.unregisterHandle();
+                            Global.instance = undefined;
+                            Global.state = undefined;
+                            Global.is_init = false;
+                        }
+                    }
+                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                        switch (this.inner.poll(waker)) {
+                            .ready => |v| {
+                                if (@typeInfo(Result) == .error_union) v catch |err| return .{ .ready = err };
+                                this.successfull = true;
+                                return .{ .ready = &Global.state };
+                            },
+                            .pending => return .pending,
+                        }
+                    }
+                };
+                fn deinit(inst: *const modules.OpaqueInstance, state: *T) void {
+                    _ = inst;
+                    if (@hasField(@TypeOf(T.fimo_events), "deinit")) {
+                        const f = T.fimo_events.deinit;
+                        if (@typeInfo(@TypeOf(f)).@"fn".params.len == 1) f(state) else f();
+                    }
+                    ctx.Handle.unregisterHandle();
+                    Global.instance = undefined;
+                    Global.state = undefined;
+                    Global.is_init = false;
+                }
+            };
+
+            switch (@typeInfo(@typeInfo(@TypeOf(ev_init)).@"fn".return_type.?)) {
+                .void, .error_union => builder = builder.withState(wrapper.Sync.Future, wrapper.Sync.init, wrapper.deinit),
+                else => builder.withState(wrapper.Async.Future, wrapper.Async.init, wrapper.deinit),
+            }
+        } else {
+            const wrapper = struct {
+                const Sync = struct {
+                    successfull: bool = false,
+                    set: modules.LoadingSet,
+
+                    const Result = *T;
+                    const Future = tasks.Future(@This(), Result, poll, Sync.deinit);
+
+                    fn init(inst: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
+                        if (Global.is_init) @panic("already init");
+                        ctx.Handle.registerHandle(inst.handle);
+                        Global.instance = @ptrCast(@alignCast(inst));
+                        Global.is_init = true;
+                        if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
+                            if (f.default_value_ptr) |default| {
+                                @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
+                            }
+                        };
+                        return Future.init(.{ .set = set });
+                    }
+                    fn deinit(this: *@This()) void {
+                        if (!this.successfull) {
+                            ctx.Handle.unregisterHandle();
+                            Global.instance = undefined;
+                            Global.is_init = false;
+                        }
+                    }
+                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                        _ = waker;
+                        this.successfull = true;
+                        return .{ .ready = &Global.state };
+                    }
+                };
+                fn deinit(inst: *const modules.OpaqueInstance, state: *T) void {
+                    _ = inst;
+                    if (@hasField(@TypeOf(T.fimo_events), "deinit")) {
+                        const f = T.fimo_events.deinit;
+                        if (@typeInfo(@TypeOf(f)).@"fn".params.len == 1) f(state) else f();
+                    }
+                    ctx.Handle.unregisterHandle();
+                    Global.instance = undefined;
+                    Global.state = undefined;
+                    Global.is_init = false;
+                }
+            };
+            builder = builder.withState(wrapper.Sync.Future, wrapper.Sync.init, wrapper.deinit);
+        }
+        if (@hasField(@TypeOf(T.fimo_events), "on_start")) {
+            const on_start = T.fimo_events.on_start;
+            const wrapper = struct {
+                const Sync = struct {
+                    const EvReturn = @typeInfo(@TypeOf(on_start)).@"fn".return_type.?;
+                    const Result = switch (@typeInfo(EvReturn)) {
+                        .error_union => |v| v.error_set!void,
+                        .void => void,
+                        else => @compileError("fimo: invalid on_start return type, expected `void` or `err!void`, found " ++ @typeName(EvReturn)),
+                    };
+                    const Future = tasks.Future(@This(), Result, poll, null);
+
+                    fn init(inst: *const modules.OpaqueInstance) Future {
+                        _ = inst;
+                        return Future.init(.{});
+                    }
+                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                        _ = this;
+                        _ = waker;
+                        const result = on_start();
+                        if (@typeInfo(Result) == .error_union) result catch |err| return .{ .ready = err };
+                        return .{ .ready = {} };
+                    }
+                };
+                const Async = struct {
+                    inner: Inner,
+
+                    const Inner = @typeInfo(@TypeOf(on_start)).@"fn".return_type.?;
+                    const Result = switch (@typeInfo(Inner.Result)) {
+                        .error_union => |v| v.error_set!void,
+                        .void => void,
+                        else => @compileError("fimo: invalid init return type, expected `void` or `err!void`, found " ++ @typeName(Inner.Result)),
+                    };
+                    const Future = tasks.Future(@This(), Result, poll, Async.deinit);
+
+                    fn init(inst: *const modules.OpaqueInstance) Future {
+                        _ = inst;
+                        return Future.init(.{ .inner = on_start() });
+                    }
+                    fn deinit(this: *@This()) void {
+                        if (@hasDecl(Inner, "deinit")) this.inner.deinit();
+                    }
+                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                        switch (this.inner.poll(waker)) {
+                            .ready => |v| return v,
+                            .pending => return .pending,
+                        }
+                    }
+                };
+            };
+            switch (@typeInfo(@typeInfo(@TypeOf(on_start)).@"fn".return_type.?)) {
+                .void, .error_union => builder = builder.withOnStartEvent(wrapper.Sync.Future, wrapper.Sync.init),
+                else => builder.withOnStartEvent(wrapper.Async.Future, wrapper.Async.init),
+            }
+        }
+        if (@hasField(@TypeOf(T.fimo_events), "on_stop")) {
+            const on_stop = T.fimo_events.on_stop;
+            const wrapper = struct {
+                fn f(inst: *const modules.OpaqueInstance) void {
+                    _ = inst;
+                    on_stop();
+                }
+            };
+            builder = builder.withOnStopEvent(wrapper.f);
+        }
+    }
+
+    const InstanceT = builder.exportModule();
+    return struct {
+        pub const is_init: *bool = &Global.is_init;
+        pub const @"export" = Instance.@"export";
+        pub const Instance = InstanceT;
+        pub const fimo_modules_marker = {};
+
+        pub fn instance() *const Instance {
+            std.debug.assert(is_init.*);
+            return @ptrCast(Global.instance);
+        }
+
+        /// Returns the parameter table.
+        pub fn parameters() *const Instance.Parameters {
+            return instance().parameters();
+        }
+
+        /// Returns the paths table.
+        pub fn paths() *const Instance.Resources {
+            return instance().resources();
+        }
+
+        /// Returns the import table.
+        pub fn imports() *const Instance.Imports {
+            return instance().imports();
+        }
+
+        /// Returns the export table.
+        pub fn exports() *const Instance.Exports {
+            return instance().exports();
+        }
+
+        /// Returns the module info.
+        pub fn info() *const modules.Info {
+            return instance().info;
+        }
+
+        /// Returns the context handle.
+        pub fn handle() *const ctx.Handle {
+            return instance().handle;
+        }
+
+        /// Returns the instance state.
+        pub fn state() *T {
+            return if (comptime @sizeOf(T) == 0) &T{} else &Global.state;
+        }
+
+        /// Provides a pointer to the requested symbol.
+        pub fn provideSymbol(comptime symbol: modules.Symbol) *const symbol.T {
+            return instance().provideSymbol(symbol);
+        }
+
+        /// Increases the strong reference count of the module instance.
+        ///
+        /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
+        /// between modules, without registering the dependency with the subsystem.
+        pub fn ref() void {
+            instance().ref();
+        }
+
+        /// Decreases the strong reference count of the module instance.
+        ///
+        /// Should only be called after `ref`, when the dependency is no longer required.
+        pub fn unref() void {
+            instance().unref();
+        }
+
+        /// Checks the status of a namespace from the view of the module.
+        ///
+        /// Checks if the module includes the namespace. In that case, the module is allowed access
+        /// to the symbols in the namespace. Additionally, this function also queries whether the
+        /// include is static, i.e., it was specified by the module at load time.
+        pub fn queryNamespace(namespace: [:0]const u8) ctx.Error!enum { removed, added, static } {
+            return switch (try instance().queryNamespace(namespace)) {
+                .removed => .removed,
+                .added => .added,
+                .static => .static,
+            };
+        }
+
+        /// Includes a namespace by the module.
+        ///
+        /// Once included, the module gains access to the symbols of its dependencies that are
+        /// exposed in said namespace. A namespace can not be included multiple times.
+        pub fn addNamespace(namespace: [:0]const u8) ctx.Error!void {
+            try instance().addNamespace(namespace);
+        }
+
+        /// Removes a namespace include from the module.
+        ///
+        /// Once excluded, the caller guarantees to relinquish access to the symbols contained in
+        /// said namespace. It is only possible to exclude namespaces that were manually added,
+        /// whereas static namespace includes remain valid until the module is unloaded.
+        pub fn removeNamespace(namespace: [:0]const u8) ctx.Error!void {
+            try instance().removeNamespace(namespace);
+        }
+
+        /// Checks if a module depends on another module.
+        ///
+        /// Checks if the specified module is a dependency of the current instance. In that case
+        /// the instance is allowed to access the symbols exported by the module. Additionally,
+        /// this function also queries whether the dependency is static, i.e., the dependency was
+        /// specified by the module at load time.
+        pub fn queryDependency(dep: *const modules.Info) ctx.Error!enum { removed, added, static } {
+            return switch (try instance().queryDependency(dep)) {
+                .removed => .removed,
+                .added => .added,
+                .static => .static,
+            };
+        }
+
+        /// Acquires another module as a dependency.
+        ///
+        /// After acquiring a module as a dependency, the module is allowed access to the symbols
+        /// and protected parameters of said dependency. Trying to acquire a dependency to a module
+        /// that is already a dependency, or to a module that would result in a circular dependency
+        /// will result in an error.
+        pub fn addDependency(dep: *const modules.Info) ctx.Error!void {
+            try instance().addDependency(dep);
+        }
+
+        /// Removes a module as a dependency.
+        ///
+        /// By removing a module as a dependency, the caller ensures that it does not own any
+        /// references to resources originating from the former dependency, and allows for the
+        /// unloading of the module. A module can only relinquish dependencies to modules that were
+        /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
+        pub fn removeDependency(dep: *const modules.Info) ctx.Error!void {
+            try instance().removeDependency(dep);
+        }
+
+        /// Loads a group of symbols from the module subsystem.
+        ///
+        /// Is equivalent to calling `loadSymbol` for each symbol of the group independently.
+        pub fn loadSymbolGroup(comptime symbols: anytype) ctx.Error!modules.SymbolGroup(symbols) {
+            return try instance().loadSymbolGroup(symbols);
+        }
+
+        /// Loads a symbol from the module subsystem.
+        ///
+        /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+        /// loading optional symbols, or for loading symbols after the creation of a module. The
+        /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+        /// dependency to the module that exported the symbol. This function fails, if the module
+        /// containing the symbol is not a dependency of the module.
+        pub fn loadSymbol(comptime symbol: modules.Symbol) ctx.Error!modules.SymbolWrapper(symbol) {
+            return try instance().loadSymbol(symbol);
+        }
+
+        /// Loads a symbol from the module subsystem.
+        ///
+        /// The caller can query the subsystem for a symbol of a loaded module. This is useful for
+        /// loading optional symbols, or for loading symbols after the creation of a module. The
+        /// symbol, if it exists, is returned, and can be used until the module relinquishes the
+        /// dependency to the module that exported the symbol. This function fails, if the module
+        /// containing the symbol is not a dependency of the module.
+        pub fn loadSymbolRaw(
+            name: [:0]const u8,
+            namespace: [:0]const u8,
+            version: Version,
+        ) ctx.Error!*const anyopaque {
+            return try instance().loadSymbolRaw(name, namespace, version);
+        }
+
+        /// Reads a module parameter with dependency read access.
+        ///
+        /// Reads the value of a module parameter with dependency read access. The operation fails,
+        /// if the parameter does not exist, or if the parameter does not allow reading with a
+        /// dependency access.
+        pub fn readParameter(
+            comptime ParamT: type,
+            module: [:0]const u8,
+            parameter: [:0]const u8,
+        ) ctx.Error!ParamT {
+            return try instance().readParameter(ParamT, module, parameter);
+        }
+
+        /// Sets a module parameter with dependency write access.
+        ///
+        /// Sets the value of a module parameter with dependency write access. The operation fails,
+        /// if the parameter does not exist, or if the parameter does not allow writing with a
+        /// dependency access.
+        pub fn writeParameter(
+            comptime ParamT: type,
+            value: ParamT,
+            module: [:0]const u8,
+            parameter: [:0]const u8,
+        ) ctx.Error!void {
+            try instance().writeParameter(ParamT, value, module, parameter);
+        }
+    };
+}
 
 /// Builder for a module export.
 pub const Builder = struct {
@@ -599,7 +1306,7 @@ pub const Builder = struct {
         return self.withExportInner(exp);
     }
 
-    /// Adds a static export to the module.
+    /// Adds a dynamic export to the module.
     pub fn withDynamicExport(
         comptime self: Builder,
         comptime options: SymbolExportOptions,
@@ -621,15 +1328,16 @@ pub const Builder = struct {
                     Fallible(*anyopaque),
                     struct {
                         fn map(v: Result) Fallible(*anyopaque) {
-                            const x = v catch |err| return Fallible(*anyopaque).wrap(err);
+                            const x = if (@typeInfo(Result) == .error_union)
+                                v catch |err| return Fallible(?*anyopaque).wrap(err)
+                            else
+                                v;
                             return Fallible(*anyopaque).wrap(@ptrCast(x));
                         }
                     }.map,
                 ).intoFuture();
-                var err: ?AnyError = null;
-                return mapped_fut.enqueue(null, &err) catch {
+                return mapped_fut.enqueue(null) catch {
                     mapped_fut.deinit();
-                    err.?.deinit();
                     return EnqueueError(*anyopaque);
                 };
             }
@@ -653,36 +1361,6 @@ pub const Builder = struct {
             },
         };
         return self.withExportInner(exp);
-    }
-
-    /// Adds a static export to the module.
-    pub fn withDynamicExportSync(
-        comptime self: Builder,
-        comptime options: SymbolExportOptions,
-        comptime initFn: fn (ctx: *const modules.OpaqueInstance) anyerror!*options.symbol.T,
-        comptime deinitFn: fn (ctx: *const modules.OpaqueInstance, symbol: *options.symbol.T) void,
-    ) Builder {
-        const Wrapper = struct {
-            instance: *const modules.OpaqueInstance,
-
-            const Result = anyerror!*options.symbol.T;
-            const Future = tasks.Future(@This(), Result, poll, null);
-
-            fn init(instance: *const modules.OpaqueInstance) Future {
-                return Future.init(.{ .instance = instance });
-            }
-
-            fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(anyerror!*options.symbol.T) {
-                _ = waker;
-                return .{ .ready = initFn(this.instance) };
-            }
-        };
-        return self.withDynamicExport(
-            options,
-            Wrapper.Future,
-            Wrapper.init,
-            deinitFn,
-        );
     }
 
     fn withModifierInner(
@@ -730,12 +1408,15 @@ pub const Builder = struct {
         const T: type = switch (@typeInfo(Result)) {
             .error_union => |x| blk: {
                 const payload = x.payload;
-                if (@sizeOf(payload) == 0) break :blk payload;
                 const info = @typeInfo(payload);
                 std.debug.assert(payload == *info.pointer.child);
                 break :blk info.pointer.child;
             },
-            else => Result,
+            .pointer => |x| blk: {
+                std.debug.assert(Result == *x.child);
+                break :blk x.child;
+            },
+            else => @compileError("fimo: invalid return type, expected `*T` or `err!*T`, found " ++ @typeName(Result)),
         };
         const Wrapper = struct {
             fn wrapInit(
@@ -747,19 +1428,16 @@ pub const Builder = struct {
                     Fallible(?*anyopaque),
                     struct {
                         fn f(v: Result) Fallible(?*anyopaque) {
-                            if (comptime @sizeOf(T) == 0) {
-                                return Fallible(?*anyopaque).wrap(@constCast(&T{}));
-                            } else {
-                                const x = v catch |err| return Fallible(?*anyopaque).wrap(err);
-                                return Fallible(?*anyopaque).wrap(@ptrCast(x));
-                            }
+                            const x = if (@typeInfo(Result) == .error_union)
+                                v catch |err| return Fallible(?*anyopaque).wrap(err)
+                            else
+                                v;
+                            return Fallible(?*anyopaque).wrap(@ptrCast(x));
                         }
                     }.f,
                 ).intoFuture();
-                var err: ?AnyError = null;
-                return mapped_fut.enqueue(null, &err) catch {
+                return mapped_fut.enqueue(null) catch {
                     mapped_fut.deinit();
-                    err.?.deinit();
                     return EnqueueError(?*anyopaque);
                 };
             }
@@ -768,14 +1446,9 @@ pub const Builder = struct {
                 context: *const modules.OpaqueInstance,
                 data: ?*anyopaque,
             ) callconv(.c) void {
-                if (comptime @sizeOf(T) == 0) {
-                    const f: fn (*const modules.OpaqueInstance) void = deinitFn;
-                    f(context);
-                } else {
-                    const f: fn (*const modules.OpaqueInstance, *T) void = deinitFn;
-                    const state: *T = @alignCast(@ptrCast(data));
-                    f(context, state);
-                }
+                const f: fn (*const modules.OpaqueInstance, *T) void = deinitFn;
+                const state: *T = @alignCast(@ptrCast(data));
+                f(context, state);
             }
         };
 
@@ -788,39 +1461,6 @@ pub const Builder = struct {
         };
         if (x.debug_info) |*info| _ = info.addType(T);
         return x.withModifierInner(.{ .instance_state = {} });
-    }
-
-    /// Adds a state to the module.
-    pub fn withStateSync(
-        comptime self: Builder,
-        comptime T: type,
-        comptime initFn: anytype,
-        comptime deinitFn: anytype,
-    ) Builder {
-        const Ret = if (comptime @sizeOf(T) == 0) void else *T;
-        const Wrapper = struct {
-            instance: *const modules.OpaqueInstance,
-            set: modules.LoadingSet,
-
-            const Result = anyerror!Ret;
-            const Future = tasks.Future(@This(), Result, poll, null);
-
-            fn init(instance: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
-                return Future.init(.{ .instance = instance, .set = set });
-            }
-
-            fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(anyerror!Ret) {
-                _ = waker;
-                if (comptime @sizeOf(T) == 0) {
-                    const f: fn (*const modules.OpaqueInstance, modules.LoadingSet) anyerror!void = initFn;
-                    return .{ .ready = f(this.instance, this.set) };
-                } else {
-                    const f: fn (*const modules.OpaqueInstance, modules.LoadingSet) anyerror!*T = initFn;
-                    return .{ .ready = f(this.instance, this.set) };
-                }
-            }
-        };
-        return self.withState(Wrapper.Future, Wrapper.init, deinitFn);
     }
 
     pub fn withOnStartEvent(
@@ -843,10 +1483,8 @@ pub const Builder = struct {
                     Fallible(void),
                     Fallible(void).wrap,
                 ).intoFuture();
-                var err: ?AnyError = null;
-                return mapped_fut.enqueue(null, &err) catch {
+                return mapped_fut.enqueue(null) catch {
                     mapped_fut.deinit();
-                    err.?.deinit();
                     return EnqueueError(void);
                 };
             }
@@ -858,29 +1496,6 @@ pub const Builder = struct {
         var x = self;
         x.start_event = .{ .on_event = &Wrapper.wrapF };
         return x.withModifierInner(.{ .start_event = {} });
-    }
-
-    /// Adds an `on_start` event to the module.
-    pub fn withOnStartEventSync(
-        comptime self: Builder,
-        comptime f: fn (ctx: *const modules.OpaqueInstance) anyerror!void,
-    ) Builder {
-        const Wrapper = struct {
-            instance: *const modules.OpaqueInstance,
-
-            const Result = anyerror!void;
-            const Future = tasks.Future(@This(), Result, poll, null);
-
-            fn init(instance: *const modules.OpaqueInstance) Future {
-                return Future.init(.{ .instance = instance });
-            }
-
-            fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(anyerror!void) {
-                _ = waker;
-                return .{ .ready = f(this.instance) };
-            }
-        };
-        return self.withOnStartEvent(Wrapper.Future, Wrapper.init);
     }
 
     /// Adds an `on_stop` event to the module.
@@ -1223,10 +1838,10 @@ pub const Builder = struct {
                 .debug_info => {
                     const debug_info = self.debug_info.?.build();
                     const construct = struct {
-                        fn f(data: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) AnyResult {
+                        fn f(data: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) ctx.Status {
                             _ = data;
                             info.* = debug_info.asFfi();
-                            return AnyResult.ok;
+                            return .ok;
                         }
                     }.f;
 
@@ -1329,6 +1944,8 @@ const exports_section = switch (builtin.target.os.tag) {
             .{ .name = "_stop_fimo_module" },
         );
         const export_visibility = .hidden;
+        const section_name = "__DATA,fimo_module";
+
         // Make shure that the section is created.
         comptime {
             asm (
@@ -1355,6 +1972,7 @@ const exports_section = switch (builtin.target.os.tag) {
         const start_exports: [*]const ?*const Export = @ptrCast(&a);
         const stop_exports: [*]const ?*const Export = @ptrCast(&z);
         const export_visibility = .default;
+        const section_name = "fi_mod$u";
 
         // Create the section.
         comptime {
@@ -1383,6 +2001,7 @@ const exports_section = switch (builtin.target.os.tag) {
             &__stop_fimo_module,
         );
         const export_visibility = .hidden;
+        const section_name = "fimo_module";
 
         // Make shure that the section is created.
         comptime {
@@ -1436,7 +2055,7 @@ fn embedStaticModuleExport(comptime module: ?*const Export) void {
         comptime {
             @export(&data, .{
                 .name = "module_export_" ++ name ++ "_" ++ @typeName(@This()),
-                .section = c.FIMO_IMPL_MODULE_SECTION,
+                .section = exports_section.section_name,
                 .linkage = .strong,
                 .visibility = exports_section.export_visibility,
             });

@@ -7,9 +7,8 @@ const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
 const ctx = fimo_std.ctx;
+const Status = ctx.Status;
 const tracing = fimo_std.tracing;
-const AnyError = fimo_std.AnyError;
-const AnyResult = AnyError.AnyResult;
 const time = fimo_std.time;
 const Instant = time.Instant;
 const Duration = time.Duration;
@@ -33,7 +32,7 @@ const UnorderedSpmcChannel = channel.UnorderedSpmcChannel;
 const CommandBuffer = @import("CommandBuffer.zig");
 const context = @import("context.zig");
 const Stack = context.Stack;
-const Runtime = @import("Runtime.zig");
+const FimoTasks = @import("FimoTasks.zig");
 const Task = @import("Task.zig");
 const Worker = @import("Worker.zig");
 const GlobalChannel = Worker.GlobalChannel;
@@ -57,7 +56,6 @@ signal_channel: SignalMpscChannel = .empty,
 label: []u8,
 thread: Thread,
 is_public: bool,
-runtime: *Runtime,
 allocator: Allocator,
 should_join: atomic.Value(bool) = .init(false),
 worker_count: atomic.Value(usize),
@@ -172,7 +170,6 @@ pub const StackAllocator = struct {
 };
 
 pub const InitOptions = struct {
-    runtime: *Runtime,
     allocator: Allocator,
     label: []const u8 = "<unlabelled>",
     stacks: []const StackOptions,
@@ -203,9 +200,8 @@ pub fn init(options: InitOptions) !*Self {
         std.debug.assert(stack.size > next.size);
     std.debug.assert(options.worker_count != 0);
 
-    const runtime = options.runtime;
-    if (runtime.getInstance()) |instance| instance.ref();
-    errdefer if (runtime.getInstance()) |instance| instance.unref();
+    FimoTasks.Module.ref();
+    errdefer FimoTasks.Module.unref();
 
     const allocator = options.allocator;
     const self = try allocator.create(Self);
@@ -220,7 +216,6 @@ pub fn init(options: InitOptions) !*Self {
         .label = undefined,
         .thread = undefined,
         .is_public = options.is_public,
-        .runtime = runtime,
         .allocator = allocator,
     };
 
@@ -270,9 +265,9 @@ pub fn init(options: InitOptions) !*Self {
     var running_workers: usize = 0;
     self.workers = try allocator.alloc(Worker, options.worker_count);
     errdefer {
-        self.global_channel.close(&options.runtime.futex);
+        self.global_channel.close(&FimoTasks.get().futex);
         for (self.workers[0..running_workers]) |*worker| {
-            worker.private_queue.close(&options.runtime.futex);
+            worker.private_queue.close(&FimoTasks.get().futex);
             worker.thread.join();
         }
         allocator.free(self.workers);
@@ -298,7 +293,7 @@ pub fn init(options: InitOptions) !*Self {
     self.thread = try Thread.spawn(.{}, runEventLoop, .{self_ref});
     self.thread.setName("event loop") catch {};
 
-    self.runtime.logDebug(
+    tracing.emitDebugSimple(
         "created `{*}`, label=`{s}`, public=`{}`",
         .{ self, self.label, self.is_public },
         @src(),
@@ -321,7 +316,7 @@ pub fn unref(self: *Self) void {
 
     _ = self.ref_count.load(.acquire);
 
-    if (self.runtime.getInstance()) |instance| instance.unref();
+    FimoTasks.Module.unref();
     self.unrefWeak();
 }
 
@@ -356,7 +351,7 @@ pub fn unrefWeak(self: *Self) void {
 /// Releases a weak reference and waits for the thread to join.
 pub fn unrefWeakAndJoin(self: *Self) void {
     // Wait until the thread is joined.
-    self.runtime.logDebug("joining `{*}`", .{self}, @src());
+    tracing.emitDebugSimple("joining `{*}`", .{self}, @src());
     std.debug.assert(self.enqueue_requests.isClosed());
     self.thread.join();
     self.unrefWeak();
@@ -391,14 +386,14 @@ pub fn refStrongFromWeakOrJoinAndUnref(self: *Self) bool {
 pub fn enqueueCommandBuffer(self: *Self, buffer: *CommandBuffer) SendError!void {
     const buffer_ref = buffer.ref();
     errdefer buffer_ref.unref();
-    return self.enqueue_requests.sender().send(&self.runtime.futex, buffer_ref);
+    return self.enqueue_requests.sender().send(&FimoTasks.get().futex, buffer_ref);
 }
 
 pub fn wakeByAddress(self: *Self, value: *const atomic.Value(u32), max_waiters: usize) void {
     const allocator = self.allocator;
     const msg = allocator.create(PrivateMessage) catch @panic("oom");
     msg.* = .{ .msg = .{ .wake = .{ .value = value, .max_waiters = max_waiters } } };
-    self.private_message_queue.sender().send(&self.runtime.futex, msg) catch |err| switch (err) {
+    self.private_message_queue.sender().send(&FimoTasks.get().futex, msg) catch |err| switch (err) {
         // If the private message queue is closed, we don't need to wake up anyone.
         error.Closed => allocator.destroy(msg),
         else => unreachable,
@@ -406,9 +401,9 @@ pub fn wakeByAddress(self: *Self, value: *const atomic.Value(u32), max_waiters: 
 }
 
 pub fn requestClose(self: *Self) void {
-    self.runtime.logDebug("`{*}` close requested", .{self}, @src());
-    self.enqueue_requests.close(&self.runtime.futex);
-    self.signal_channel.sender().trySend(&self.runtime.futex, {}) catch {};
+    tracing.emitDebugSimple("`{*}` close requested", .{self}, @src());
+    self.enqueue_requests.close(&FimoTasks.get().futex);
+    self.signal_channel.sender().trySend(&FimoTasks.get().futex, {}) catch {};
 }
 
 pub fn getStackAllocator(self: *Self, size: StackSize) ?*StackAllocator {
@@ -422,14 +417,14 @@ pub fn getStackAllocator(self: *Self, size: StackSize) ?*StackAllocator {
 pub fn enqueueTask(self: *Self, task: *Task, worker: ?MetaWorker) void {
     std.debug.assert(task.msg == null);
     std.debug.assert(task.next == null);
-    const futex = &self.runtime.futex;
+    const futex = &FimoTasks.get().futex;
     if (worker) |w| {
-        self.runtime.logDebug("`{*}` enqueueing `{*}` to `{}`", .{ self, task, w }, @src());
+        tracing.emitDebugSimple("`{*}` enqueueing `{*}` to `{}`", .{ self, task, w }, @src());
         std.debug.assert(task.worker == null or task.worker == worker);
         const ptr = &self.workers[@intFromEnum(w)];
         ptr.private_queue.sender().send(futex, task) catch unreachable;
     } else {
-        self.runtime.logDebug("`{*}` enqueueing `{*}` to global queue", .{ self, task }, @src());
+        tracing.emitDebugSimple("`{*}` enqueueing `{*}` to global queue", .{ self, task }, @src());
         self.global_channel.sender(self.allocator).send(futex, task) catch |e| @panic(@errorName(e));
     }
 }
@@ -454,7 +449,7 @@ fn handleComplete(self: *Self, msg: *PrivateMessage) void {
 fn handleSleep(self: *Self, msg: *PrivateMessage) void {
     const timeout = &msg.msg.sleep.timeout;
     std.debug.assert(timeout.next == null);
-    self.runtime.logDebug("`{*}` enqueueing sleep timeout `{*}`", .{ self, timeout }, @src());
+    tracing.emitDebugSimple("`{*}` enqueueing sleep timeout `{*}`", .{ self, timeout }, @src());
 
     // Insert the timeout into the timeout queue.
     if (self.timeouts_head == null) {
@@ -480,11 +475,11 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
     const wait = &msg.msg.wait;
     const task: *Task = wait.task;
     std.debug.assert(task.next == null);
-    self.runtime.logDebug("`{*}` processing wait for `{*}`", .{ self, task }, @src());
+    tracing.emitDebugSimple("`{*}` processing wait for `{*}`", .{ self, task }, @src());
 
     // Wake the task if the value does not match the expected value.
     if (wait.value.load(.acquire) != wait.expect) {
-        self.runtime.logDebug("`{*}` waking `{*}`", .{ self, task }, @src());
+        tracing.emitDebugSimple("`{*}` waking `{*}`", .{ self, task }, @src());
         wait.timed_out.* = false;
         task.msg = null;
         if (task.call_stack) |cs| cs.unblock();
@@ -493,7 +488,7 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
     }
 
     // Enqueue the waiter.
-    self.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` enqueuing waiter `{x}` for `{*}`, key=`{*}`",
         .{ self, @intFromPtr(wait), task, wait.value },
         @src(),
@@ -509,7 +504,7 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
 
     // Enqueue the task timeout, if it has one.
     if (wait.timeout) |*timeout| blk: {
-        self.runtime.logDebug(
+        tracing.emitDebugSimple(
             "`{*}` enqueueing wait timeout `{x}`, waiter=`{x}`",
             .{ self, @intFromPtr(timeout), @intFromPtr(wait) },
             @src(),
@@ -538,7 +533,7 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
 fn handleWake(self: *Self, msg: *PrivateMessage) void {
     const wake = msg.msg.wake;
     self.allocator.destroy(msg);
-    self.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` waking {} waiters, key=`{*}`",
         .{ self, wake.max_waiters, wake.value },
         @src(),
@@ -559,7 +554,7 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 
         link.* = curr.next;
         if (bucket.tail == curr) bucket.tail = previous;
-        self.runtime.logDebug(
+        tracing.emitDebugSimple(
             "`{*}` waking waiter `{x}`",
             .{ self, @intFromPtr(curr_wait) },
             @src(),
@@ -567,7 +562,7 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 
         // If the task registered a timeout we also dequeue it.
         if (curr_wait.timeout) |*timeout| {
-            self.runtime.logDebug(
+            tracing.emitDebugSimple(
                 "`{*}` removing timeout `{x}`, waiter=`{x}`",
                 .{ self, @intFromPtr(timeout), @intFromPtr(curr_wait) },
                 @src(),
@@ -608,13 +603,13 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 }
 
 fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
-    self.runtime.logDebug("`{*}` timeout `{x}` reached", .{ self, @intFromPtr(timeout) }, @src());
+    tracing.emitDebugSimple("`{*}` timeout `{x}` reached", .{ self, @intFromPtr(timeout) }, @src());
 
     const task = timeout.task;
     const wait = switch (task.msg.?.msg) {
         .complete, .wake => unreachable,
         .sleep => {
-            self.runtime.logDebug("`{*}` waking `{*}` from sleep", .{ self, task }, @src());
+            tracing.emitDebugSimple("`{*}` waking `{*}` from sleep", .{ self, task }, @src());
             task.msg = null;
             std.debug.assert(task.next == null);
             if (task.call_stack) |cs| cs.unblock();
@@ -622,7 +617,7 @@ fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
             return;
         },
         .wait => |*v| blk: {
-            self.runtime.logDebug(
+            tracing.emitDebugSimple(
                 "`{*}` timing out waiter `{x}`",
                 .{ self, @intFromPtr(v) },
                 @src(),
@@ -664,7 +659,7 @@ fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
 fn processEnqueueRequest(self: *Self, buffer: *CommandBuffer) void {
     std.debug.assert(buffer.owner == self);
     std.debug.assert(buffer.enqueue_status == .dequeued);
-    self.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` spawning `{*}`",
         .{ self, buffer },
         @src(),
@@ -691,7 +686,7 @@ fn runEventLoop(self: *Self) void {
         self.enqueue_requests.receiver(),
         self.signal_channel.receiver(),
     });
-    const futex = &self.runtime.futex;
+    const futex = &FimoTasks.get().futex;
 
     const max_timeout = Instant.now().addSaturating(Duration.Max);
     var next_timeout = max_timeout;
@@ -699,7 +694,7 @@ fn runEventLoop(self: *Self) void {
         // Wait until the next message arrives or timeout occurs.
         var curr_msg = rx.recvUntil(futex, next_timeout) catch |err| switch (err) {
             error.Timeout => blk: {
-                self.runtime.logDebug("`{*}` recv timed out", .{self}, @src());
+                tracing.emitDebugSimple("`{*}` recv timed out", .{self}, @src());
                 break :blk null;
             },
             else => break,
@@ -744,12 +739,12 @@ fn runEventLoop(self: *Self) void {
         // If there are no more command buffers and the public message queue is closed we can stop
         // the event loop.
         if (self.command_buffer_count == 0 and self.enqueue_requests.isClosed()) {
-            self.runtime.logDebug("`{*}` closing", .{self}, @src());
+            tracing.emitDebugSimple("`{*}` closing", .{self}, @src());
             self.signal_channel.close(futex);
             self.private_message_queue.close(futex);
         }
     }
-    self.runtime.logDebug("`{*}` terminating", .{self}, @src());
+    tracing.emitDebugSimple("`{*}` terminating", .{self}, @src());
 
     // Join all worker threads.
     self.should_join.store(true, .release);
@@ -843,22 +838,24 @@ const VTableImpl = struct {
         handle: *anyopaque,
         buffer: *MetaCommandBuffer,
         buff_handle: ?*MetaCommandBufferHandle,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) Status {
         const this: *Self = @ptrCast(@alignCast(handle));
         const b = CommandBuffer.init(this, buffer) catch |err| {
             for (buffer.entries()) |entry| entry.abort();
             buffer.abort();
             buffer.deinit();
-            return AnyError.initError(err).intoResult();
+            ctx.setResult(.initErr(.initError(err)));
+            return .err;
         };
         this.enqueueCommandBuffer(b) catch |err| {
             b.abortDeinit();
-            return AnyError.initError(err).intoResult();
+            ctx.setResult(.initErr(.initError(err)));
+            return .err;
         };
         if (buff_handle) |h| {
             h.* = b.asHandle();
         } else b.unref();
-        return AnyResult.ok;
+        return .ok;
     }
 };
 const vtable = MetaPoolVTable{

@@ -3,8 +3,8 @@ const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
-const AnyResult = AnyError.AnyResult;
+const Error = fimo_std.ctx.Error;
+const Status = fimo_std.ctx.Status;
 
 const command_buffer = @import("command_buffer.zig");
 const OpaqueCommandBuffer = command_buffer.OpaqueCommandBuffer;
@@ -22,19 +22,18 @@ pub const Id = enum(usize) {
     _,
 
     /// Acquires a reference to the worker pool with the provided id.
-    pub fn query(self: Id, provider: anytype) ?Pool {
-        return Pool.queryById(provider, self);
+    pub fn query(self: Id) ?Pool {
+        return Pool.queryById(self);
     }
 
     test "query own pool" {
         try testing.initTestContextInTask(struct {
-            fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-                _ = err;
-                const pool = Pool.current(ctx).?;
+            fn f() anyerror!void {
+                const pool = Pool.current().?;
                 defer pool.unref();
 
                 const id = pool.id();
-                const queried = id.query(ctx).?;
+                const queried = id.query().?;
                 defer queried.unref();
                 try std.testing.expectEqual(id, queried.id());
             }
@@ -47,8 +46,8 @@ pub const Worker = enum(usize) {
     _,
 
     /// Returns the id of the current worker.
-    pub fn current(provider: anytype) ?Worker {
-        const sym = symbols.worker_id.requestFrom(provider);
+    pub fn current() ?Worker {
+        const sym = symbols.worker_id.getGlobal().get();
         var id: Worker = undefined;
         if (sym(&id) == false) return null;
         return id;
@@ -57,14 +56,13 @@ pub const Worker = enum(usize) {
     test "no task" {
         var ctx = try testing.initTestContext();
         defer ctx.deinit();
-        try std.testing.expectEqual(null, Worker.current(ctx));
+        try std.testing.expectEqual(null, Worker.current());
     }
 
     test "in task" {
         try testing.initTestContextInTask(struct {
-            fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-                _ = err;
-                try std.testing.expect(Worker.current(ctx) != null);
+            fn f() anyerror!void {
+                try std.testing.expect(Worker.current() != null);
             }
         }.f);
     }
@@ -102,7 +100,7 @@ pub const VTable = extern struct {
         pool: *anyopaque,
         buffer: *OpaqueCommandBuffer,
         handle: ?*Handle,
-    ) callconv(.c) AnyResult,
+    ) callconv(.c) Status,
 };
 
 /// A worker pool.
@@ -111,16 +109,16 @@ pub const Pool = extern struct {
     vtable: *const VTable,
 
     /// Creates a new worker pool with the specified configuration.
-    pub fn init(provider: anytype, config: *const Config, err: *?AnyError) AnyError.Error!Pool {
-        const sym = symbols.create_worker_pool.requestFrom(provider);
+    pub fn init(config: *const Config) Error!Pool {
+        const sym = symbols.create_worker_pool.getGlobal().get();
         var p: Pool = undefined;
-        try sym(config, &p).intoErrorUnion(err);
+        try sym(config, &p).intoErrorUnion();
         return p;
     }
 
     /// Returns the pool managing the current thread.
-    pub fn current(provider: anytype) ?Pool {
-        const sym = symbols.worker_pool.requestFrom(provider);
+    pub fn current() ?Pool {
+        const sym = symbols.worker_pool.getGlobal().get();
         var p: Pool = undefined;
         if (sym(&p) == false) return null;
         return p;
@@ -129,14 +127,13 @@ pub const Pool = extern struct {
     test "current, no task" {
         var ctx = try testing.initTestContext();
         defer ctx.deinit();
-        try std.testing.expectEqual(null, Pool.current(ctx));
+        try std.testing.expectEqual(null, Pool.current());
     }
 
     test "current, in task" {
         try testing.initTestContextInTask(struct {
-            fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-                _ = err;
-                const pool = Pool.current(ctx);
+            fn f() anyerror!void {
+                const pool = Pool.current();
                 defer if (pool) |p| p.unref();
                 try std.testing.expect(pool != null);
             }
@@ -144,18 +141,18 @@ pub const Pool = extern struct {
     }
 
     /// Acquires a reference to the worker pool with the provided id.
-    pub fn queryById(provider: anytype, pool_id: Id) ?Pool {
-        const sym = symbols.worker_pool_by_id.requestFrom(provider);
+    pub fn queryById(pool_id: Id) ?Pool {
+        const sym = symbols.worker_pool_by_id.getGlobal().get();
         var p: Pool = undefined;
         if (sym(pool_id, &p) == false) return null;
         return p;
     }
 
     /// Queries all public and active worker pools managed by the runtime.
-    pub fn queryAll(provider: anytype, err: *?AnyError) AnyError.Error!Query {
-        const sym = symbols.query_worker_pools.requestFrom(provider);
+    pub fn queryAll() Error!Query {
+        const sym = symbols.query_worker_pools.getGlobal().get();
         var query: Query = undefined;
-        try sym(&query).intoErrorUnion(err);
+        try sym(&query).intoErrorUnion();
         return query;
     }
 
@@ -163,18 +160,15 @@ pub const Pool = extern struct {
         var ctx = try testing.initTestContext();
         defer ctx.deinit();
 
-        var err: ?AnyError = null;
-        defer if (err) |e| e.deinit();
-
         const cfg = Config{ .is_queryable = true, .worker_count = 4 };
-        const pool = try Pool.init(&ctx, &cfg, &err);
+        const pool = try Pool.init(&cfg);
         defer {
             pool.requestClose();
             pool.unref();
         }
         const pool_id = pool.id();
 
-        const query = try Pool.queryAll(&ctx, &err);
+        const query = try Pool.queryAll();
         defer query.deinit();
 
         var found = false;
@@ -258,27 +252,17 @@ pub const Pool = extern struct {
     /// Enqueues the command buffer in the pool.
     ///
     /// The buffer must remain valid until it is deinitialized by the pool.
-    pub fn enqueueCommandBuffer(
-        self: Pool,
-        buffer: *OpaqueCommandBuffer,
-        err: *?AnyError,
-    ) AnyError.Error!Handle {
+    pub fn enqueueCommandBuffer(self: Pool, buffer: *OpaqueCommandBuffer) Error!Handle {
         var handle: Handle = undefined;
-        try self.vtable.enqueue_buffer(self.data, buffer, &handle)
-            .intoErrorUnion(err);
+        try self.vtable.enqueue_buffer(self.data, buffer, &handle).intoErrorUnion();
         return handle;
     }
 
     /// Enqueues the command buffer in the pool and detaches it.
     ///
     /// The buffer must remain valid until it is deinitialized by the pool.
-    pub fn enqueueCommandBufferDetached(
-        self: Pool,
-        buffer: *OpaqueCommandBuffer,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        try self.vtable.enqueue_buffer(self.data, buffer, null)
-            .intoErrorUnion(err);
+    pub fn enqueueCommandBufferDetached(self: Pool, buffer: *OpaqueCommandBuffer) Error!void {
+        try self.vtable.enqueue_buffer(self.data, buffer, null).intoErrorUnion();
     }
 };
 

@@ -3,7 +3,7 @@ const atomic = std.atomic;
 const Allocator = std.mem.Allocator;
 
 const fimo_std = @import("fimo_std");
-const Tracing = fimo_std.Context.Tracing;
+const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const meta_command_buffer = fimo_tasks_meta.command_buffer;
 const Entry = meta_command_buffer.Entry;
@@ -16,6 +16,7 @@ const StackSize = meta_pool.StackSize;
 const MetaWorker = meta_pool.Worker;
 const MetaPool = meta_pool.Pool;
 
+const FimoTasks = @import("FimoTasks.zig");
 const Futex = @import("Futex.zig");
 const Pool = @import("Pool.zig");
 const Task = @import("Task.zig");
@@ -74,7 +75,7 @@ pub fn init(owner: *Pool, buffer: *MetaCommandBuffer) Allocator.Error!*Self {
         .entry_status = entry_status,
     };
 
-    owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "created `{*}`, label=`{s}`",
         .{ self, self.buffer.label() },
         @src(),
@@ -91,7 +92,7 @@ pub fn abortDeinit(self: *Self) void {
     std.debug.assert(self.enqueue_status == .dequeued);
     std.debug.assert(self.state.load(.acquire) == running);
     std.debug.assert(self.ref_count.load(.acquire) == 1);
-    self.owner.runtime.logDebug("destroying {*}", .{self}, @src());
+    tracing.emitDebugSimple("destroying {*}", .{self}, @src());
 
     for (self.buffer.entries()) |entry| entry.abort();
     self.buffer.abort();
@@ -112,7 +113,7 @@ pub fn ref(self: *Self) *Self {
 pub fn unref(self: *Self) void {
     if (self.ref_count.fetchSub(1, .release) != 1) return;
     _ = self.ref_count.load(.acquire);
-    self.owner.runtime.logDebug("destroying {*}", .{self}, @src());
+    tracing.emitDebugSimple("destroying {*}", .{self}, @src());
 
     for (self.entry_status) |entry| std.debug.assert(entry == .processed);
     const state = self.state.load(.acquire);
@@ -137,7 +138,7 @@ pub fn completeTask(self: *Self, task: *Task, is_error: bool) void {
         // task will notify us when it is done
         .running_task => |*t| {
             std.debug.assert(task == t);
-            self.owner.runtime.logDebug(
+            tracing.emitDebugSimple(
                 "completed `{*}` of `{*}`",
                 .{ task, self },
                 @src(),
@@ -155,7 +156,7 @@ pub fn completeTask(self: *Self, task: *Task, is_error: bool) void {
 }
 
 pub fn processEntry(self: *Self) void {
-    self.owner.runtime.logDebug("processing `{*}`", .{self}, @src());
+    tracing.emitDebugSimple("processing `{*}`", .{self}, @src());
     std.debug.assert(self.enqueue_status == .will_process);
     self.enqueue_status = .dequeued;
 
@@ -212,7 +213,7 @@ const ProcessError = error{Block};
 fn processAbortOnError(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .abort_on_error);
     self.abort_on_error = entry.payload.abort_on_error;
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` setting `abort on error` to `{}`, index=`{}`",
         .{ self, self.abort_on_error, self.entry_index },
         @src(),
@@ -223,13 +224,13 @@ fn processAbortOnError(self: *Self, entry: Entry) ProcessError!void {
 fn processMinStackSize(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .set_min_stack_size);
     const min_stack_size = entry.payload.set_min_stack_size;
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` setting `min stack size` to `{}`, index=`{}`",
         .{ self, min_stack_size, self.entry_index },
         @src(),
     );
     if (self.owner.getStackAllocator(min_stack_size) == null) {
-        self.owner.runtime.logErr(
+        tracing.emitErrSimple(
             "`{*}` validation failed:" ++
                 " invalid stack size, entry=`{s}`, index=`{}`, stack_size=`{}`",
             .{
@@ -250,13 +251,13 @@ fn processMinStackSize(self: *Self, entry: Entry) ProcessError!void {
 fn processSelectWorker(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .select_worker);
     const worker = entry.payload.select_worker;
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` setting `worker` to `{}`, index=`{}`",
         .{ self, worker, self.entry_index },
         @src(),
     );
     if (self.owner.workers.len <= @intFromEnum(worker)) {
-        self.owner.runtime.logErr(
+        tracing.emitErrSimple(
             "`{*}` validation failed:" ++
                 " invalid worker, entry=`{s}`, index=`{}`, worker=`{}`",
             .{
@@ -277,7 +278,7 @@ fn processSelectWorker(self: *Self, entry: Entry) ProcessError!void {
 fn processSelectAnyWorker(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .select_any_worker);
     self.worker = null;
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` setting `worker` to `any`, index=`{}`",
         .{ self, self.entry_index },
         @src(),
@@ -294,7 +295,7 @@ fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
             return ProcessError.Block;
         },
         Allocator.Error.OutOfMemory => {
-            self.owner.runtime.logErr(
+            tracing.emitErrSimple(
                 "`{*}` validation failed:" ++
                     " stack allocation failed, entry=`{s}`, index=`{}`, stack=`{}`",
                 .{
@@ -323,7 +324,7 @@ fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
     self.markStatus(.{ .running_task = task });
     const task_ptr = &task_status.running_task;
 
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` spawning `{*}`, index=`{}`",
         .{ self, task_ptr, task_ptr.entry_index },
         @src(),
@@ -335,7 +336,7 @@ fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
 fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .enqueue_command_buffer);
     const buffer = Self.init(self.owner, entry.payload.enqueue_command_buffer) catch {
-        self.owner.runtime.logErr(
+        tracing.emitErrSimple(
             "`{*}` validation failed:" ++
                 " enqueue of command buffer failed, entry=`{s}`, index=`{}`, enqueue-buffer=`{s}`",
             .{
@@ -349,7 +350,7 @@ fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
         self.abortCurrentAndForward();
         return;
     };
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` spawning `{*}` to `{*}`, index=`{}`",
         .{ self, buffer, self.owner, self.entry_index },
         @src(),
@@ -361,7 +362,7 @@ fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
 
 fn processWaitOnBarrier(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_barrier);
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` waiting on barrier, index=`{}`",
         .{ self, self.entry_index },
         @src(),
@@ -376,7 +377,7 @@ fn processWaitOnBarrier(self: *Self, entry: Entry) ProcessError!void {
 
 fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_command_buffer);
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` waiting on child command buffer, index=`{}`",
         .{ self, self.entry_index },
         @src(),
@@ -384,7 +385,7 @@ fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
 
     const handle = entry.payload.wait_on_command_buffer;
     if (handle.vtable != &vtable) {
-        self.owner.runtime.logErr(
+        tracing.emitErrSimple(
             "`{*}` validation failed:" ++
                 " invalid handle, entry=`{s}`, index=`{}`",
             .{
@@ -399,7 +400,7 @@ fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
     }
     const buffer: *Self = @ptrCast(@alignCast(handle.data));
     if (buffer.owner != self.owner) {
-        self.owner.runtime.logErr(
+        tracing.emitErrSimple(
             "`{*}` validation failed:" ++
                 " handle owner mismatch, entry=`{s}`, index=`{}`," ++
                 " expected=`{s}`, got=`{s}`",
@@ -425,7 +426,7 @@ fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
 
 fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_command_indirect);
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` waiting on command, index=`{}`",
         .{ self, self.entry_index },
         @src(),
@@ -434,7 +435,7 @@ fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
     const offset = entry.payload.wait_on_command_indirect;
     if (offset == 0) return self.markStatus(.processed);
     if (offset > self.entry_index) {
-        self.owner.runtime.logErr(
+        tracing.emitErrSimple(
             "`{*}` validation failed:" ++
                 " offset out of bounds, entry=`{s}`, index=`{}`, offset=`{}`",
             .{
@@ -455,7 +456,7 @@ fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
 }
 
 fn processUnknown(self: *Self, entry: Entry) void {
-    self.owner.runtime.logErr(
+    tracing.emitErrSimple(
         "`{*}` validation failed:" ++
             " unknown entry type, entry=`{}`, index=`{}`",
         .{
@@ -471,7 +472,7 @@ fn processUnknown(self: *Self, entry: Entry) void {
 pub fn enqueueToPool(self: *Self) void {
     if (self.enqueue_status != .dequeued) return;
 
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` enqueueing to `{*}`",
         .{ self, self.owner },
         @src(),
@@ -567,7 +568,7 @@ fn abortForward(self: *Self) void {
 fn broadcast(self: *Self) void {
     std.debug.assert(self.completed_index == self.entry_index);
     std.debug.assert(self.entry_index == self.entry_status.len);
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "`{*}` waking waiters",
         .{self},
         @src(),
@@ -580,7 +581,7 @@ fn broadcast(self: *Self) void {
 
     // If there are waiting tasks, we wake them.
     if (state & waiting_bit != 0) {
-        const futex = &self.owner.runtime.futex;
+        const futex = &FimoTasks.get().futex;
         _ = futex.wake(&self.state, std.math.maxInt(usize));
     }
 
@@ -589,7 +590,7 @@ fn broadcast(self: *Self) void {
         var current: ?*Self = head;
         while (current) |waiter| {
             std.debug.assert(self.enqueue_status == .blocked);
-            self.owner.runtime.logDebug("waking `{*}`", .{waiter}, @src());
+            tracing.emitDebugSimple("waking `{*}`", .{waiter}, @src());
             waiter.enqueue_status = .will_process;
             current = waiter.next;
         }
@@ -618,7 +619,7 @@ fn waitOnEntry(self: *Self, entry_index: usize) ProcessError!void {
         // If the command is a running task, we need to do nothing, as the
         // task will notify us when it is done
         .running_task => |*task| {
-            self.owner.runtime.logDebug("`{*}` blocking on `{*}`", .{ self, task }, @src());
+            tracing.emitDebugSimple("`{*}` blocking on `{*}`", .{ self, task }, @src());
             return error.Block;
         },
         // If we are waiting on another command buffer, we have to register
@@ -644,7 +645,7 @@ fn waitOnBuffer(self: *Self, buffer: *Self) ProcessError!Handle.CompletionStatus
     if (state & status_mask != running)
         return if (state & status_mask == completed) .completed else .aborted;
 
-    self.owner.runtime.logDebug("`{*}` blocking on `{*}`", .{ self, buffer }, @src());
+    tracing.emitDebugSimple("`{*}` blocking on `{*}`", .{ self, buffer }, @src());
     if (buffer.waiters_tail) |tail| {
         tail.next = self;
     } else {
@@ -657,13 +658,13 @@ fn waitOnBuffer(self: *Self, buffer: *Self) ProcessError!Handle.CompletionStatus
 }
 
 fn waitOn(self: *Self) Handle.CompletionStatus {
-    self.owner.runtime.logDebug(
+    tracing.emitDebugSimple(
         "waiting on `{*}`",
         .{self},
         @src(),
     );
 
-    const futex = &self.owner.runtime.futex;
+    const futex = &FimoTasks.get().futex;
     var state = self.state.load(.monotonic);
     while (state & status_mask == running) {
         // Flag that we are waiting on this command buffer.

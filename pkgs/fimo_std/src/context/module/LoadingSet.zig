@@ -7,8 +7,8 @@ const c = @import("c");
 
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const priv_context = @import("../../context.zig");
-const pub_ctx = @import("../../ctx.zig");
+const context = @import("../../context.zig");
+const pub_context = @import("../../ctx.zig");
 const pub_modules = @import("../../modules.zig");
 const Path = @import("../../path.zig").Path;
 const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
@@ -548,7 +548,7 @@ fn addModuleInner(
     }
 
     var module_info = try ModuleInfo.init(
-        priv_context.allocator,
+        context.allocator,
         @"export",
         module_handle,
         owner,
@@ -564,10 +564,10 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
         tracing.emitWarnSimple("the next field is reserved for future use", .{}, @src());
         return error.InvalidExport;
     }
-    if (!pub_ctx.context_version.isCompatibleWith(@"export".getVersion())) {
+    if (!pub_context.context_version.isCompatibleWith(@"export".getVersion())) {
         tracing.emitWarnSimple(
             "incompatible context version, got='{f}', required='{f}'",
-            .{ pub_ctx.context_version, @"export".getVersion() },
+            .{ pub_context.context_version, @"export".getVersion() },
             @src(),
         );
         return error.InvalidExport;
@@ -888,7 +888,6 @@ const LoadOp = FSMFuture(struct {
     node_id: graph.NodeId,
     load_graph: *LoadGraph,
     name: [:0]const u8 = undefined,
-    err: ?AnyError = null,
     instance_future: InstanceHandle.InitExportedOp = undefined,
     instance: *pub_modules.OpaqueInstance = undefined,
     start_instance_future: InstanceHandle.StartInstanceOp = undefined,
@@ -1040,7 +1039,6 @@ const LoadOp = FSMFuture(struct {
             .set = set.asProxySet(),
             .@"export" = info.status.unloaded.@"export",
             .handle = info.handle,
-            .err = &self.err,
         });
     }
 
@@ -1058,22 +1056,21 @@ const LoadOp = FSMFuture(struct {
         switch (self.instance_future.poll(waker)) {
             .ready => |result| {
                 self.instance = result catch |err| {
-                    if (self.err) |*e| {
+                    if (context.hasErrorResult()) {
+                        const e = context.takeResult().unwrapErr();
+                        defer e.deinit();
                         tracing.emitWarnSimple(
                             "instance construction error...skipping," ++
                                 " instance='{s}', error='{f}:{f}'",
-                            .{ self.name, std.fmt.alt(e.*, .formatName), e.* },
+                            .{ self.name, std.fmt.alt(e, .formatName), e },
                             @src(),
                         );
-                        e.deinit();
-                    } else {
-                        tracing.emitWarnSimple(
-                            "instance construction error...skipping," ++
-                                " instance='{s}', error='{s}'",
-                            .{ self.name, @errorName(err) },
-                            @src(),
-                        );
-                    }
+                    } else tracing.emitWarnSimple(
+                        "instance construction error...skipping," ++
+                            " instance='{s}', error='{s}'",
+                        .{ self.name, @errorName(err) },
+                        @src(),
+                    );
                     set.lock();
                     set.getModuleInfo(self.name).?.signalError();
                     return .ret;
@@ -1094,7 +1091,7 @@ const LoadOp = FSMFuture(struct {
         const inner = instance_handle.lock();
 
         set.unlock();
-        self.start_instance_future = inner.start(&self.err);
+        self.start_instance_future = inner.start();
     }
 
     pub fn __unwind4(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
@@ -1112,22 +1109,21 @@ const LoadOp = FSMFuture(struct {
             .ready => |result| {
                 result catch |e_| {
                     if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-                    if (self.err) |*e| {
+                    if (context.hasErrorResult()) {
+                        const e = context.takeResult().unwrapErr();
+                        defer e.deinit();
                         tracing.emitWarnSimple(
                             "instance `on_start` error...skipping," ++
                                 " instance='{s}', error='{f}:{f}'",
-                            .{ self.name, std.fmt.alt(e.*, .formatName), e.* },
+                            .{ self.name, std.fmt.alt(e, .formatName), e },
                             @src(),
                         );
-                        e.deinit();
-                    } else {
-                        tracing.emitWarnSimple(
-                            "instance `on_start` error...skipping," ++
-                                " instance='{s}', error='{s}'",
-                            .{ self.name, @errorName(e_) },
-                            @src(),
-                        );
-                    }
+                    } else tracing.emitWarnSimple(
+                        "instance `on_start` error...skipping," ++
+                            " instance='{s}', error='{s}'",
+                        .{ self.name, @errorName(e_) },
+                        @src(),
+                    );
                     inner.unrefStrong();
                     inner.deinit();
                     set.lock();
@@ -1350,7 +1346,7 @@ const VTableImpl = struct {
         on_error: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) void,
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         data: ?*anyopaque,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self: *Self = @alignCast(@ptrCast(this));
         const module_ = std.mem.span(module);
         const callback = Callback{
@@ -1374,15 +1370,16 @@ const VTableImpl = struct {
         } catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
             if (on_abort) |f| f(data);
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn addModule(
         this: *anyopaque,
         owner: *const pub_modules.OpaqueInstance,
         @"export": *const pub_modules.Export,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self: *Self = @alignCast(@ptrCast(this));
 
         tracing.emitTraceSimple(
@@ -1401,9 +1398,10 @@ const VTableImpl = struct {
             self.addModule(owner_inner, @"export") catch |err| break :blk err;
         } catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn addModulesFromPath(
         this: *anyopaque,
@@ -1414,7 +1412,7 @@ const VTableImpl = struct {
         ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self: *Self = @alignCast(@ptrCast(this));
         const path_ = Path.initC(path);
 
@@ -1430,9 +1428,10 @@ const VTableImpl = struct {
 
         self.addModulesFromPath(path_, filter_fn, filter_data) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn addModulesFromLocal(
         this: *anyopaque,
@@ -1447,7 +1446,7 @@ const VTableImpl = struct {
             data: ?*anyopaque,
         ) callconv(.c) void,
         bin_ptr: *const anyopaque,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self: *Self = @alignCast(@ptrCast(this));
 
         tracing.emitTraceSimple(
@@ -1467,9 +1466,10 @@ const VTableImpl = struct {
             bin_ptr,
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn commit(this: *anyopaque) callconv(.c) EnqueuedFuture(Fallible(void)) {
         const self: *Self = @alignCast(@ptrCast(this));

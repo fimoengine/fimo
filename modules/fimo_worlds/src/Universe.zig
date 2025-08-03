@@ -11,8 +11,7 @@ const fimo_tasks_meta = @import("fimo_tasks_meta");
 const RwLock = fimo_tasks_meta.sync.RwLock;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
 
-const fimo_export = @import("fimo_export.zig");
-const Instance = fimo_export.Instance;
+const FimoWorlds = @import("FimoWorlds.zig");
 
 const Self = @This();
 
@@ -114,27 +113,24 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn notifyWorldInit(self: *Self) void {
-    const instance = getInstance();
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
 
-    if (self.isEmpty()) instance.ref();
+    if (self.isEmpty()) FimoWorlds.Module.ref();
     self.num_worlds += 1;
 }
 
 pub fn notifyWorldDeinit(self: *Self) void {
-    const instance = getInstance();
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
 
     self.num_worlds -= 1;
-    if (self.isEmpty()) instance.unref();
+    if (self.isEmpty()) FimoWorlds.Module.unref();
 }
 
 pub fn registerResource(self: *Self, options: RegisterResourceOptions) !*Resource {
-    const instance = getInstance();
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
 
     const was_empty = self.isEmpty();
     const handle = try self.allocator.create(Resource);
@@ -149,14 +145,13 @@ pub fn registerResource(self: *Self, options: RegisterResourceOptions) !*Resourc
     errdefer self.allocator.free(handle.label);
     try self.resources.put(self.allocator, handle, {});
 
-    if (was_empty) instance.ref();
+    if (was_empty) FimoWorlds.Module.ref();
     return @ptrCast(handle);
 }
 
 pub fn unregisterResource(self: *Self, handle: *Resource) void {
-    const instance = getInstance();
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
 
     if (!self.resources.swapRemove(handle)) @panic("invalid resource");
     if (handle.references.load(.acquire) != 0) @panic("resource in use");
@@ -164,7 +159,7 @@ pub fn unregisterResource(self: *Self, handle: *Resource) void {
     self.allocator.free(handle.label);
     self.allocator.destroy(handle);
 
-    if (self.isEmpty()) instance.unref();
+    if (self.isEmpty()) FimoWorlds.Module.unref();
 }
 
 pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
@@ -173,9 +168,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         f(factory.ptr);
     };
 
-    const instance = getInstance();
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
 
     for (options.exclusive_resources, 0..) |handle, i| {
         if (!self.resources.contains(handle)) return error.NotFound;
@@ -235,8 +229,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         for (after.keys()) |sys| try visited.put(self.allocator, sys, {});
         while (stack.pop()) |sys| {
             if (before.contains(sys)) return error.Deadlock;
-            sys.rwlock.lockRead(instance);
-            defer sys.rwlock.unlockRead(instance);
+            sys.rwlock.lockRead();
+            defer sys.rwlock.unlockRead();
             for (sys.after.keys(), sys.after.values()) |s, l| {
                 if (l.implicit or visited.contains(s)) continue;
                 try visited.put(self.allocator, s, {});
@@ -275,21 +269,21 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
 
     errdefer {
         for (before.keys()) |sys2| {
-            sys2.rwlock.lockWrite(instance);
-            defer sys2.rwlock.unlockWrite(instance);
+            sys2.rwlock.lockWrite();
+            defer sys2.rwlock.unlockWrite();
             _ = sys2.after.swapRemove(sys);
         }
         for (after.keys()) |sys2| {
-            sys2.rwlock.lockWrite(instance);
-            defer sys2.rwlock.unlockWrite(instance);
+            sys2.rwlock.lockWrite();
+            defer sys2.rwlock.unlockWrite();
             _ = sys2.before.swapRemove(sys);
         }
     }
-    sys.rwlock.lockWrite(instance);
-    defer sys.rwlock.unlockWrite(instance);
+    sys.rwlock.lockWrite();
+    defer sys.rwlock.unlockWrite();
     for (before.keys(), before.values()) |sys2, link| {
-        sys2.rwlock.lockWrite(instance);
-        defer sys2.rwlock.unlockWrite(instance);
+        sys2.rwlock.lockWrite();
+        defer sys2.rwlock.unlockWrite();
         try sys2.after.put(
             self.allocator,
             sys,
@@ -301,8 +295,8 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         );
     }
     for (after.keys(), after.values()) |sys2, link| {
-        sys2.rwlock.lockWrite(instance);
-        defer sys2.rwlock.unlockWrite(instance);
+        sys2.rwlock.lockWrite();
+        defer sys2.rwlock.unlockWrite();
         try sys2.before.put(
             self.allocator,
             sys,
@@ -335,16 +329,15 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
         _ = res.references.fetchAdd(1, .monotonic);
     }
 
-    if (was_empty) instance.ref();
+    if (was_empty) FimoWorlds.Module.ref();
     return sys;
 }
 
 pub fn unregisterSystem(self: *Self, sys: *System) void {
-    const instance = getInstance();
-    self.rwlock.lockWrite(instance);
-    defer self.rwlock.unlockWrite(instance);
+    self.rwlock.lockWrite();
+    defer self.rwlock.unlockWrite();
 
-    sys.rwlock.lockWrite(instance);
+    sys.rwlock.lockWrite();
 
     if (!self.systems.swapRemove(sys)) @panic("invalid system");
     if (sys.before.count() != sys.static_before_count) @panic("system referenced");
@@ -363,15 +356,15 @@ pub fn unregisterSystem(self: *Self, sys: *System) void {
 
     for (sys.before.keys(), sys.before.values()) |sys2, link| {
         if (link.implicit) @panic("system referenced");
-        sys2.rwlock.lockWrite(instance);
-        defer sys2.rwlock.unlockWrite(instance);
+        sys2.rwlock.lockWrite();
+        defer sys2.rwlock.unlockWrite();
         const entry = sys2.after.fetchSwapRemove(sys) orelse unreachable;
         std.debug.assert(entry.value.implicit);
     }
     for (sys.after.keys(), sys.after.values()) |sys2, link| {
         if (link.implicit) @panic("system referenced");
-        sys2.rwlock.lockWrite(instance);
-        defer sys2.rwlock.unlockWrite(instance);
+        sys2.rwlock.lockWrite();
+        defer sys2.rwlock.unlockWrite();
         const entry = sys2.before.fetchSwapRemove(sys) orelse unreachable;
         std.debug.assert(entry.value.implicit);
     }
@@ -384,36 +377,9 @@ pub fn unregisterSystem(self: *Self, sys: *System) void {
     if (sys.factory) |factory| self.allocator.rawFree(factory, sys.factory_alignment, @returnAddress());
     self.allocator.destroy(sys);
 
-    if (self.isEmpty()) instance.unref();
+    if (self.isEmpty()) FimoWorlds.Module.unref();
 }
 
 fn isEmpty(self: *Self) bool {
     return self.num_worlds == 0 and self.resources.count() == 0 and self.systems.count() == 0;
-}
-
-pub fn getUniverse() *Self {
-    const instance = getInstance();
-    return &instance.state().universe;
-}
-
-pub fn getInstance() *const Instance {
-    return fimo_export.getInstance();
-}
-
-/// Logs an error message.
-pub fn logErr(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    tracing.emitErrSimple(fmt, args, location);
-}
-
-/// Logs a debug message.
-pub fn logDebug(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    tracing.emitDebugSimple(fmt, args, location);
 }

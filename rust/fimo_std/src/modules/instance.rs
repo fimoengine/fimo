@@ -1,8 +1,7 @@
 //! Definition of module instances.
 
 use crate::{
-    context::Handle,
-    error::{AnyError, AnyResult},
+    context::{Error, Handle, Status},
     modules::{
         info::InfoView,
         parameters::{ParameterCast, ParameterRepr, ParameterType},
@@ -66,7 +65,7 @@ pub trait GenericInstance: Sized {
     /// Checks if the module includes the namespace. In that case, the module is allowed access
     /// to the symbols in the namespace. Additionally, this function also queries whether the
     /// include is static, i.e., it was specified by the module at load time.
-    fn query_namespace(self, namespace: &CStr) -> Result<DependencyInfo, AnyError> {
+    fn query_namespace(self, namespace: &CStr) -> Result<DependencyInfo, Error> {
         let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -98,7 +97,7 @@ pub trait GenericInstance: Sized {
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are
     /// exposed in said namespace. A namespace can not be included multiple times.
-    fn add_namespace(self, namespace: &CStr) -> Result<(), AnyError> {
+    fn add_namespace(self, namespace: &CStr) -> Result<(), Error> {
         let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -112,7 +111,7 @@ pub trait GenericInstance: Sized {
     /// Once excluded, the caller guarantees to relinquish access to the symbols contained in
     /// said namespace. It is only possible to exclude namespaces that were manually added,
     /// whereas static namespace includes remain valid until the module is unloaded.
-    fn remove_namespace(self, namespace: &CStr) -> Result<(), AnyError> {
+    fn remove_namespace(self, namespace: &CStr) -> Result<(), Error> {
         let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -130,7 +129,7 @@ pub trait GenericInstance: Sized {
     fn query_dependency<'i>(
         self,
         info: impl Viewable<Pin<&'i InfoView<'i>>>,
-    ) -> Result<DependencyInfo, AnyError> {
+    ) -> Result<DependencyInfo, Error> {
         let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -158,10 +157,7 @@ pub trait GenericInstance: Sized {
     /// and protected parameters of said dependency. Trying to acquire a dependency to a module
     /// that is already a dependency, or to a module that would result in a circular dependency
     /// will result in an error.
-    fn add_dependency<'i>(
-        self,
-        info: impl Viewable<Pin<&'i InfoView<'i>>>,
-    ) -> Result<(), AnyError> {
+    fn add_dependency<'i>(self, info: impl Viewable<Pin<&'i InfoView<'i>>>) -> Result<(), Error> {
         let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -179,7 +175,7 @@ pub trait GenericInstance: Sized {
     fn remove_dependency<'i>(
         self,
         info: impl Viewable<Pin<&'i InfoView<'i>>>,
-    ) -> Result<(), AnyError> {
+    ) -> Result<(), Error> {
         let this = self.to_opaque_instance_view();
         unsafe {
             let inner = Pin::into_inner_unchecked(this);
@@ -200,7 +196,7 @@ pub trait GenericInstance: Sized {
         name: &CStr,
         namespace: &CStr,
         version: Version<'_>,
-    ) -> Result<ConstNonNull<()>, AnyError> {
+    ) -> Result<ConstNonNull<()>, Error> {
         let this = self.to_opaque_instance_view();
         let name = StrRef::new(name);
         let namespace = StrRef::new(namespace);
@@ -220,7 +216,7 @@ pub trait GenericInstance: Sized {
     /// symbol, if it exists, is returned, and can be used until the module relinquishes the
     /// dependency to the module that exported the symbol. This function fails, if the module
     /// containing the symbol is not a dependency of the module.
-    fn load_symbol<'a, T>(self) -> Result<SymbolRef<'a, T>, AnyError>
+    fn load_symbol<'a, T>(self) -> Result<SymbolRef<'a, T>, Error>
     where
         Self: 'a,
         T: SymbolInfo,
@@ -235,11 +231,7 @@ pub trait GenericInstance: Sized {
     /// Reads the value of a module parameter with dependency read access. The operation fails,
     /// if the parameter does not exist, or if the parameter does not allow reading with a
     /// dependency access.
-    fn read_parameter<U: ParameterCast>(
-        self,
-        module: &CStr,
-        parameter: &CStr,
-    ) -> Result<U, AnyError> {
+    fn read_parameter<U: ParameterCast>(self, module: &CStr, parameter: &CStr) -> Result<U, Error> {
         let this = self.to_opaque_instance_view();
         let module = StrRef::new(module);
         let parameter = StrRef::new(parameter);
@@ -272,7 +264,7 @@ pub trait GenericInstance: Sized {
         value: U,
         module: &CStr,
         parameter: &CStr,
-    ) -> Result<(), AnyError> {
+    ) -> Result<(), Error> {
         let this = self.to_opaque_instance_view();
         let module = StrRef::new(module);
         let parameter = StrRef::new(parameter);
@@ -304,50 +296,46 @@ pub struct InstanceVTable {
         namespace: StrRef<'_>,
         has_dependency: &mut MaybeUninit<bool>,
         is_static: &mut MaybeUninit<bool>,
-    ) -> AnyResult,
-    pub add_namespace: unsafe extern "C" fn(
-        handle: Pin<&OpaqueInstanceView<'_>>,
-        namespace: StrRef<'_>,
-    ) -> AnyResult,
-    pub remove_namespace: unsafe extern "C" fn(
-        handle: Pin<&OpaqueInstanceView<'_>>,
-        namespace: StrRef<'_>,
-    ) -> AnyResult,
+    ) -> Status,
+    pub add_namespace:
+        unsafe extern "C" fn(handle: Pin<&OpaqueInstanceView<'_>>, namespace: StrRef<'_>) -> Status,
+    pub remove_namespace:
+        unsafe extern "C" fn(handle: Pin<&OpaqueInstanceView<'_>>, namespace: StrRef<'_>) -> Status,
     pub query_dependency: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         info: Pin<&InfoView<'_>>,
         has_dependency: &mut MaybeUninit<bool>,
         is_static: &mut MaybeUninit<bool>,
-    ) -> AnyResult,
+    ) -> Status,
     pub add_dependency: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         info: Pin<&InfoView<'_>>,
-    ) -> AnyResult,
+    ) -> Status,
     pub remove_dependency: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         info: Pin<&InfoView<'_>>,
-    ) -> AnyResult,
+    ) -> Status,
     pub load_symbol: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         name: StrRef<'_>,
         namespace: StrRef<'_>,
         version: Version<'_>,
         out: &mut MaybeUninit<ConstNonNull<()>>,
-    ) -> AnyResult,
+    ) -> Status,
     pub read_parameter: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         value: NonNull<()>,
         r#type: ParameterType,
         module: StrRef<'_>,
         parameter: StrRef<'_>,
-    ) -> AnyResult,
+    ) -> Status,
     pub write_parameter: unsafe extern "C" fn(
         handle: Pin<&OpaqueInstanceView<'_>>,
         value: ConstNonNull<()>,
         r#type: ParameterType,
         module: StrRef<'_>,
         parameter: StrRef<'_>,
-    ) -> AnyResult,
+    ) -> Status,
     _private: PhantomData<()>,
 }
 
@@ -842,20 +830,20 @@ where
 /// A module instance that can be created to gain access to the module subsystem.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct PseudoInstance(Pin<&'static OpaqueInstanceView<'static>>);
+pub struct RootInstance(Pin<&'static OpaqueInstanceView<'static>>);
 
-impl PseudoInstance {
-    /// Constructs a new `PseudoInstance`.
+impl RootInstance {
+    /// Constructs a new `RootInstance`.
     ///
     /// The functions of the module subsystem require that the caller owns a reference to their own
     /// module. This is a problem, as the constructor of the context won't be assigned a module
-    /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
-    /// instances, i.e., module handles without an associated module.
-    pub fn new() -> Result<Self, AnyError> {
+    /// instance during bootstrapping. As a workaround, we allow for the creation of root instances,
+    /// i.e., module handles without an associated module.
+    pub fn new() -> Result<Self, Error> {
         unsafe {
             let mut out = MaybeUninit::uninit();
             let handle = Handle::get_handle();
-            let f = handle.modules_v0.new_pseudo_instance;
+            let f = handle.modules_v0.new_root_instance;
             f(&mut out).into_result()?;
             Ok(out.assume_init())
         }
@@ -904,7 +892,7 @@ impl PseudoInstance {
     }
 }
 
-impl GenericInstance for &'_ PseudoInstance {
+impl GenericInstance for &'_ RootInstance {
     type Parameters = ();
 
     type Resources = ();
@@ -931,14 +919,14 @@ impl GenericInstance for &'_ PseudoInstance {
     }
 }
 
-impl<'a> Viewable<Pin<&'a OpaqueInstanceView<'a>>> for &'a PseudoInstance {
+impl<'a> Viewable<Pin<&'a OpaqueInstanceView<'a>>> for &'a RootInstance {
     #[inline(always)]
     fn view(self) -> Pin<&'a OpaqueInstanceView<'a>> {
         self.0
     }
 }
 
-impl Drop for PseudoInstance {
+impl Drop for RootInstance {
     fn drop(&mut self) {
         let info = self.info();
         info.mark_unloadable();

@@ -5,8 +5,8 @@ use std::{mem::MaybeUninit, pin::Pin};
 
 use crate::{
     bindings,
-    context::Handle,
-    error::{AnyError, AnyResult},
+    context::{Error, Handle, Status},
+    error::AnyError,
     handle,
     modules::{
         exports::Export,
@@ -63,12 +63,12 @@ pub struct LoadingSetVTable {
         ),
         on_abort: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
         callback_handle: Option<OpaqueHandle<dyn Send>>,
-    ) -> AnyResult,
+    ) -> Status,
     pub add_module: unsafe extern "C" fn(
         handle: LoadingSetHandle,
         owner: Pin<&OpaqueInstanceView<'_>>,
         export: ConstNonNull<Export<'static>>,
-    ) -> AnyResult,
+    ) -> Status,
     pub add_modules_from_path: unsafe extern "C" fn(
         handle: LoadingSetHandle,
         path: bindings::FimoUTF8Path,
@@ -78,7 +78,7 @@ pub struct LoadingSetVTable {
         ) -> FilterRequest,
         filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
         filter_handle: Option<OpaqueHandle<dyn Send>>,
-    ) -> AnyResult,
+    ) -> Status,
     pub add_modules_from_local: unsafe extern "C" fn(
         handle: LoadingSetHandle,
         filter: unsafe extern "C" fn(
@@ -92,7 +92,7 @@ pub struct LoadingSetVTable {
             handle: Option<OpaqueHandle>,
         ),
         bin_ptr: OpaqueHandle,
-    ) -> AnyResult,
+    ) -> Status,
     pub commit: unsafe extern "C" fn(handle: LoadingSetHandle) -> EnqueuedFuture<Fallible<()>>,
     _private: PhantomData<()>,
 }
@@ -132,12 +132,12 @@ impl LoadingSetVTable {
                 ),
                 on_abort: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
                 callback_handle: Option<OpaqueHandle<dyn Send>>,
-            ) -> AnyResult,
+            ) -> Status,
             add_module: unsafe extern "C" fn(
                 handle: LoadingSetHandle,
                 owner: Pin<&OpaqueInstanceView<'_>>,
                 export: ConstNonNull<Export<'static>>,
-            ) -> AnyResult,
+            ) -> Status,
             add_modules_from_path: unsafe extern "C" fn(
                 handle: LoadingSetHandle,
                 path: bindings::FimoUTF8Path,
@@ -147,7 +147,7 @@ impl LoadingSetVTable {
                 ) -> FilterRequest,
                 filter_drop: Option<unsafe extern "C" fn(handle: Option<OpaqueHandle<dyn Send>>)>,
                 filter_handle: Option<OpaqueHandle<dyn Send>>,
-            ) -> AnyResult,
+            ) -> Status,
             add_modules_from_local: unsafe extern "C" fn(
                 handle: LoadingSetHandle,
                 filter: unsafe extern "C" fn(
@@ -161,7 +161,7 @@ impl LoadingSetVTable {
                     handle: Option<OpaqueHandle>,
                 ),
                 bin_ptr: OpaqueHandle,
-            ) -> AnyResult,
+            ) -> Status,
             commit: unsafe extern "C" fn(handle: LoadingSetHandle) -> EnqueuedFuture<Fallible<()>>,
         ) -> Self {
             Self {
@@ -240,7 +240,7 @@ impl LoadingSetView<'_> {
     /// can be in a partially loaded state at the time of calling this function, the error path
     /// may be invoked immediately. If the requested module does not exist, the function will return
     /// an error.
-    pub fn add_callback<F>(&self, module: &CStr, callback: F) -> Result<(), AnyError>
+    pub fn add_callback<F>(&self, module: &CStr, callback: F) -> Result<(), Error>
     where
         F: FnOnce(LoadingStatus<'_>) + Send + 'static,
     {
@@ -319,7 +319,7 @@ impl LoadingSetView<'_> {
         &self,
         owner: impl GenericInstance,
         export: &Export<'_>,
-    ) -> Result<(), AnyError> {
+    ) -> Result<(), Error> {
         unsafe {
             let f = self.vtable.add_module;
             f(
@@ -347,7 +347,7 @@ impl LoadingSetView<'_> {
     /// # Safety
     ///
     /// Loading a library may execute arbitrary code.
-    pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), AnyError>
+    pub unsafe fn add_modules_from_path<F>(&self, path: &str, filter: F) -> Result<(), Error>
     where
         F: FnMut(&Export<'_>) -> FilterRequest + Send,
     {
@@ -402,7 +402,7 @@ impl LoadingSetView<'_> {
     /// not return an error, if it does not export any modules. The necessary symbols are set up
     /// automatically, if the binary was linked with the fimo library. In case of an error, no
     /// modules are appended to the set.
-    pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), AnyError>
+    pub fn add_modules_from_local<F>(&self, filter: F) -> Result<(), Error>
     where
         F: FnMut(&Export<'_>) -> FilterRequest + Send,
     {
@@ -479,7 +479,7 @@ sa::assert_impl_all!(LoadingSet: Send, Sync, Share);
 
 impl LoadingSet {
     /// Constructs a new loading set.
-    pub fn new() -> Result<Self, AnyError> {
+    pub fn new() -> Result<Self, Error> {
         unsafe {
             let mut out = MaybeUninit::uninit();
             let handle = Handle::get_handle();

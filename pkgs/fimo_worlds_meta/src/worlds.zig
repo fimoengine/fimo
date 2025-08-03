@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
+const Error = fimo_std.ctx.Error;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Pool = fimo_tasks_meta.pool.Pool;
 
@@ -53,7 +53,7 @@ pub const AddSystemGroupOptions = struct {
 /// A container for resources and scheduable systems.
 pub const World = opaque {
     /// Initializes a new empty world.
-    pub fn init(provider: anytype, options: CreateOptions) error{InitFailed}!*World {
+    pub fn init(options: CreateOptions) Error!*World {
         const desc = CreateOptions.Descriptor{
             .next = null,
             .label = if (options.label) |l| l.ptr else null,
@@ -62,59 +62,49 @@ pub const World = opaque {
         };
 
         var world: *World = undefined;
-        const sym = symbols.world_create.requestFrom(provider);
-        if (sym(&desc, &world).isErr()) return error.InitFailed;
+        const sym = symbols.world_create.getGlobal().get();
+        try sym(&desc, &world).intoErrorUnion();
         return world;
     }
 
     /// Destroys the world.
     ///
     /// The world must be empty.
-    pub fn deinit(self: *World, provider: anytype) void {
-        const sym = symbols.world_destroy.requestFrom(provider);
+    pub fn deinit(self: *World) void {
+        const sym = symbols.world_destroy.getGlobal().get();
         return sym(self);
     }
 
     /// Returns the label of the world.
-    pub fn getLabel(self: *World, provider: anytype) ?[]const u8 {
+    pub fn getLabel(self: *World) ?[]const u8 {
         var len: usize = undefined;
-        const sym = symbols.world_get_label.requestFrom(provider);
+        const sym = symbols.world_get_label.getGlobal().get();
         if (sym(self, &len)) |label| return label[0..len];
         return null;
     }
 
     /// Returns a reference to the executor used by the world.
-    pub fn getPool(self: *World, provider: anytype) Pool {
-        const sym = symbols.world_get_pool.requestFrom(provider);
+    pub fn getPool(self: *World) Pool {
+        const sym = symbols.world_get_pool.getGlobal().get();
         return sym(self);
     }
 
     /// Checks if the resource is instantiated in the world.
-    pub fn hasResource(self: *World, provider: anytype, handle: *Resource) bool {
-        const sym = symbols.world_has_resource.requestFrom(provider);
+    pub fn hasResource(self: *World, handle: *Resource) bool {
+        const sym = symbols.world_has_resource.getGlobal().get();
         return sym(self, handle);
     }
 
     /// Adds the resource to the world.
-    pub fn addResource(
-        self: *World,
-        provider: anytype,
-        handle: *Resource,
-        value: *const anyopaque,
-    ) error{AddFailed}!void {
-        const sym = symbols.world_add_resource.requestFrom(provider);
-        if (sym(self, handle, value).isErr()) return error.AddFailed;
+    pub fn addResource(self: *World, handle: *Resource, value: *const anyopaque) Error!void {
+        const sym = symbols.world_add_resource.getGlobal().get();
+        try sym(self, handle, value).intoErrorUnion();
     }
 
     /// Removes the resource from the world.
-    pub fn removeResource(
-        self: *World,
-        provider: anytype,
-        handle: *Resource,
-        value: *anyopaque,
-    ) error{RemoveFailed}!void {
-        const sym = symbols.world_remove_resource.requestFrom(provider);
-        if (sym(self, handle, value).isErr()) return error.RemoveFailed;
+    pub fn removeResource(self: *World, handle: *Resource, value: *anyopaque) Error!void {
+        const sym = symbols.world_remove_resource.getGlobal().get();
+        try sym(self, handle, value).intoErrorUnion();
     }
 
     /// Acquires a set of exclusive and shared resource references.
@@ -128,13 +118,12 @@ pub const World = opaque {
     /// The caller will block until all resources are locked.
     pub fn lockResourcesRaw(
         self: *World,
-        provider: anytype,
         exclusive_handles: []const *Resource,
         shared_handles: []const *Resource,
         out_resources: []*anyopaque,
     ) void {
         std.debug.assert(exclusive_handles.len + shared_handles.len <= out_resources.len);
-        const sym = symbols.world_lock_resources.requestFrom(provider);
+        const sym = symbols.world_lock_resources.getGlobal().get();
         sym(
             self,
             exclusive_handles.ptr,
@@ -146,121 +135,78 @@ pub const World = opaque {
     }
 
     /// Unlocks an exclusive resource lock.
-    pub fn unlockResourceExclusive(self: *World, provider: anytype, handle: *Resource) void {
-        const sym = symbols.world_unlock_resource_exclusive.requestFrom(provider);
+    pub fn unlockResourceExclusive(self: *World, handle: *Resource) void {
+        const sym = symbols.world_unlock_resource_exclusive.getGlobal().get();
         return sym(self, handle);
     }
 
     /// Unlocks a shared resource lock.
-    pub fn unlockResourceShared(self: *World, provider: anytype, handle: *Resource) void {
-        const sym = symbols.world_unlock_resource_shared.requestFrom(provider);
+    pub fn unlockResourceShared(self: *World, handle: *Resource) void {
+        const sym = symbols.world_unlock_resource_shared.getGlobal().get();
         return sym(self, handle);
     }
 
     /// Adds a new empty system group to the world.
-    pub fn addSystemGroup(
-        self: *World,
-        provider: anytype,
-        options: AddSystemGroupOptions,
-    ) error{AddFailed}!*SystemGroup {
-        return SystemGroup.init(provider, .{
-            .label = options.label,
-            .pool = options.pool,
-            .world = self,
-        }) catch error.AddFailed;
+    pub fn addSystemGroup(self: *World, options: AddSystemGroupOptions) Error!*SystemGroup {
+        return SystemGroup.init(.{ .label = options.label, .pool = options.pool, .world = self });
     }
 
     /// Returns the allocator for the world.
-    pub fn getAllocator(self: *World, provider: anytype) WorldAllocator(@TypeOf(provider)) {
-        return .{ .world = self, .provider = provider };
+    pub fn getAllocator(self: *World) WorldAllocator {
+        return .{ .world = self };
     }
 };
 
 /// An allocator that clears its memory upon destruction of the owning world.
-pub fn WorldAllocator(Provider: type) type {
-    return struct {
-        world: *World,
-        provider: Provider,
+pub const WorldAllocator = struct {
+    world: *World,
 
-        const Self = @This();
-        const vtable = Allocator.VTable{
-            .alloc = &alloc,
-            .resize = &resize,
-            .remap = &remap,
-            .free = &free,
-        };
-
-        fn alloc(this: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
-            const self: *Self = @ptrCast(@alignCast(this));
-            const sym = symbols.world_allocator_alloc.requestFrom(self.provider);
-            return sym(self.world, len, alignment.toByteUnits(), ret_addr);
-        }
-
-        fn resize(
-            this: *anyopaque,
-            memory: []u8,
-            alignment: Alignment,
-            new_len: usize,
-            ret_addr: usize,
-        ) bool {
-            const self: *Self = @ptrCast(@alignCast(this));
-            const sym = symbols.world_allocator_resize.requestFrom(self.provider);
-            return sym(
-                self.world,
-                memory.ptr,
-                memory.len,
-                alignment.toByteUnits(),
-                new_len,
-                ret_addr,
-            );
-        }
-
-        fn remap(
-            this: *anyopaque,
-            memory: []u8,
-            alignment: Alignment,
-            new_len: usize,
-            ret_addr: usize,
-        ) ?[*]u8 {
-            const self: *Self = @ptrCast(@alignCast(this));
-            const sym = symbols.world_allocator_remap.requestFrom(self.provider);
-            return sym(
-                self.world,
-                memory.ptr,
-                memory.len,
-                alignment.toByteUnits(),
-                new_len,
-                ret_addr,
-            );
-        }
-
-        fn free(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
-            const self: *Self = @ptrCast(@alignCast(this));
-            const sym = symbols.world_allocator_free.requestFrom(self.provider);
-            sym(
-                self.world,
-                memory.ptr,
-                memory.len,
-                alignment.toByteUnits(),
-                ret_addr,
-            );
-        }
-
-        pub fn allocator(self: *Self) Allocator {
-            return .{ .ptr = self, .vtable = &vtable };
-        }
+    const Self = @This();
+    const vtable = Allocator.VTable{
+        .alloc = &alloc,
+        .resize = &resize,
+        .remap = &remap,
+        .free = &free,
     };
-}
+
+    fn alloc(this: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+        const self: *Self = @ptrCast(@alignCast(this));
+        const sym = symbols.world_allocator_alloc.getGlobal().get();
+        return sym(self.world, len, alignment.toByteUnits(), ret_addr);
+    }
+
+    fn resize(this: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+        const self: *Self = @ptrCast(@alignCast(this));
+        const sym = symbols.world_allocator_resize.getGlobal().get();
+        return sym(self.world, memory.ptr, memory.len, alignment.toByteUnits(), new_len, ret_addr);
+    }
+
+    fn remap(this: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+        const self: *Self = @ptrCast(@alignCast(this));
+        const sym = symbols.world_allocator_remap.getGlobal().get();
+        return sym(self.world, memory.ptr, memory.len, alignment.toByteUnits(), new_len, ret_addr);
+    }
+
+    fn free(this: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+        const self: *Self = @ptrCast(@alignCast(this));
+        const sym = symbols.world_allocator_free.getGlobal().get();
+        sym(self.world, memory.ptr, memory.len, alignment.toByteUnits(), ret_addr);
+    }
+
+    pub fn allocator(self: *Self) Allocator {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+};
 
 test "World: smoke test" {
     const GlobalCtx = testing.GlobalCtx;
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    const label = world.getLabel(GlobalCtx).?;
+    const label = world.getLabel().?;
     try std.testing.expectEqualSlices(u8, "test-world", label);
 }
 
@@ -269,19 +215,16 @@ test "World: custom pool" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    var err: ?AnyError = null;
-    defer if (err) |e| e.deinit();
-
-    const executor = try Pool.init(GlobalCtx, &.{}, &err);
+    const executor = try Pool.init(&.{});
     defer {
         executor.requestClose();
         executor.unref();
     }
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world", .pool = executor });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world", .pool = executor });
+    defer world.deinit();
 
-    const ex = world.getPool(GlobalCtx);
+    const ex = world.getPool();
     defer ex.unref();
     try std.testing.expectEqual(executor.id(), ex.id());
 }
@@ -291,10 +234,10 @@ test "WorldAllocator: base" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    var world_allocator = world.getAllocator(GlobalCtx);
+    var world_allocator = world.getAllocator();
     const allocator = world_allocator.allocator();
 
     try std.heap.testAllocator(allocator);
@@ -308,10 +251,10 @@ test "WorldAllocator: auto free memory" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const world = try World.init(GlobalCtx, .{ .label = "test-world" });
-    defer world.deinit(GlobalCtx);
+    const world = try World.init(.{ .label = "test-world" });
+    defer world.deinit();
 
-    var world_allocator = world.getAllocator(GlobalCtx);
+    var world_allocator = world.getAllocator();
     const allocator = world_allocator.allocator();
 
     _ = try allocator.alloc(u8, 100);

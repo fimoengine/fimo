@@ -2,7 +2,6 @@ const std = @import("std");
 
 const fimo_std = @import("fimo_std");
 const tracing = fimo_std.tracing;
-const AnyError = fimo_std.AnyError;
 const time = fimo_std.time;
 const Instant = time.Instant;
 const Duration = time.Duration;
@@ -15,8 +14,8 @@ pub const Id = enum(usize) {
     _,
 
     /// Returns the id of the current task.
-    pub fn current(provider: anytype) ?Id {
-        const sym = symbols.task_id.requestFrom(provider);
+    pub fn current() ?Id {
+        const sym = symbols.task_id.getGlobal().get();
         var id: Id = undefined;
         if (sym(&id) == false) return null;
         return id;
@@ -25,14 +24,13 @@ pub const Id = enum(usize) {
     test "no task" {
         var ctx = try testing.initTestContext();
         defer ctx.deinit();
-        try std.testing.expectEqual(null, Id.current(ctx));
+        try std.testing.expectEqual(null, Id.current());
     }
 
     test "in task" {
         try testing.initTestContextInTask(struct {
-            fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-                _ = err;
-                try std.testing.expect(Id.current(ctx) != null);
+            fn f() anyerror!void {
+                try std.testing.expect(Id.current() != null);
             }
         }.f);
     }
@@ -90,45 +88,43 @@ pub fn Task(comptime T: type) type {
 }
 
 /// Yields the current task or thread back to the scheduler.
-pub fn yield(provider: anytype) void {
-    const sym = symbols.yield.requestFrom(provider);
+pub fn yield() void {
+    const sym = symbols.yield.getGlobal().get();
     sym();
 }
 
 test "yield" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-            _ = err;
-            for (0..100000) |_| yield(ctx);
+        fn f() anyerror!void {
+            for (0..100000) |_| yield();
         }
     }.f);
 }
 
 /// Aborts the current task.
-pub fn abort(provider: anytype) noreturn {
-    const sym = symbols.abort.requestFrom(provider);
+pub fn abort() noreturn {
+    const sym = symbols.abort.getGlobal().get();
     sym();
     unreachable;
 }
 
 test "abort" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
+        fn f() anyerror!void {
             const Pool = @import("pool.zig").Pool;
-            const pool = Pool.current(ctx).?;
+            const pool = Pool.current().?;
             defer pool.unref();
 
             const Runner = struct {
-                fn start(c: *const testing.TestContext) void {
-                    abort(c);
+                fn start() void {
+                    abort();
                 }
             };
             const future = try @import("future.zig").init(
                 pool,
                 Runner.start,
-                .{ctx},
+                .{},
                 .{ .allocator = std.testing.allocator, .label = "abortTask" },
-                err,
             );
             defer future.deinit();
             try std.testing.expectError(error.Aborted, future.await());
@@ -137,18 +133,17 @@ test "abort" {
 }
 
 /// Puts the current task or thread to sleep for the specified amount of time.
-pub fn sleep(provider: anytype, duration: Duration) void {
-    const sym = symbols.sleep.requestFrom(provider);
+pub fn sleep(duration: Duration) void {
+    const sym = symbols.sleep.getGlobal().get();
     sym(duration.intoC());
 }
 
 test "sleep" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-            _ = err;
+        fn f() anyerror!void {
             const before_sleep = Instant.now();
             const duration = Duration.initSeconds(2);
-            sleep(ctx, duration);
+            sleep(duration);
             const elapsed = try Instant.elapsed(before_sleep);
             try std.testing.expect(elapsed.order(duration) != .lt);
         }
@@ -157,12 +152,11 @@ test "sleep" {
 
 test "short sleep" {
     try testing.initTestContextInTask(struct {
-        fn f(ctx: *const testing.TestContext, err: *?AnyError) anyerror!void {
-            _ = err;
+        fn f() anyerror!void {
             const duration = Duration.initMillis(1);
             for (0..10) |_| {
                 const before_sleep = Instant.now();
-                sleep(ctx, duration);
+                sleep(duration);
                 const elapsed = try Instant.elapsed(before_sleep);
                 try std.testing.expect(elapsed.order(duration) != .lt);
                 tracing.emitDebugSimple("slept for {}ms", .{elapsed.millis()}, @src());

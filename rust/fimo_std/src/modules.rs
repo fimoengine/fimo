@@ -1,8 +1,7 @@
 //! Module subsystem.
 
 use crate::{
-    context::{ConfigId, Handle},
-    error::{AnyError, AnyResult},
+    context::{ConfigId, Error, Handle, Status},
     utils::{ConstNonNull, OpaqueHandle, Unsafe},
     version::Version,
 };
@@ -22,7 +21,7 @@ pub mod symbols;
 
 use exports::Export;
 use info::Info;
-use instance::PseudoInstance;
+use instance::RootInstance;
 use loading_set::LoadingSet;
 use parameters::{
     ParameterAccessGroup, ParameterCast, ParameterInfo, ParameterRepr, ParameterType,
@@ -38,39 +37,38 @@ pub struct VTableV0 {
     pub profile: unsafe extern "C" fn() -> Profile,
     pub features:
         unsafe extern "C" fn(&mut MaybeUninit<Option<ConstNonNull<FeatureStatus>>>) -> usize,
-    pub new_pseudo_instance:
-        unsafe extern "C" fn(out: &mut MaybeUninit<PseudoInstance>) -> AnyResult,
-    pub new_loading_set: unsafe extern "C" fn(out: &mut MaybeUninit<LoadingSet>) -> AnyResult,
+    pub new_root_instance: unsafe extern "C" fn(out: &mut MaybeUninit<RootInstance>) -> Status,
+    pub new_loading_set: unsafe extern "C" fn(out: &mut MaybeUninit<LoadingSet>) -> Status,
     pub find_instance_by_name:
-        unsafe extern "C" fn(name: StrRef<'_>, out: &mut MaybeUninit<Info>) -> AnyResult,
+        unsafe extern "C" fn(name: StrRef<'_>, out: &mut MaybeUninit<Info>) -> Status,
     pub find_instance_by_symbol: unsafe extern "C" fn(
         name: StrRef<'_>,
         namespace: StrRef<'_>,
         version: Version<'_>,
         out: &mut MaybeUninit<Info>,
-    ) -> AnyResult,
+    ) -> Status,
     pub namespace_exists:
-        unsafe extern "C" fn(namespace: StrRef<'_>, out: &mut MaybeUninit<bool>) -> AnyResult,
-    pub prune_instances: unsafe extern "C" fn() -> AnyResult,
+        unsafe extern "C" fn(namespace: StrRef<'_>, out: &mut MaybeUninit<bool>) -> Status,
+    pub prune_instances: unsafe extern "C" fn() -> Status,
     pub query_parameter: unsafe extern "C" fn(
         module: StrRef<'_>,
         parameter: StrRef<'_>,
         r#type: &mut MaybeUninit<ParameterType>,
         read_group: &mut MaybeUninit<ParameterAccessGroup>,
         write_group: &mut MaybeUninit<ParameterAccessGroup>,
-    ) -> AnyResult,
+    ) -> Status,
     pub read_parameter: unsafe extern "C" fn(
         value: NonNull<()>,
         r#type: ParameterType,
         module: StrRef<'_>,
         parameter: StrRef<'_>,
-    ) -> AnyResult,
+    ) -> Status,
     pub write_parameter: unsafe extern "C" fn(
         value: ConstNonNull<()>,
         r#type: ParameterType,
         module: StrRef<'_>,
         parameter: StrRef<'_>,
-    ) -> AnyResult,
+    ) -> Status,
 }
 
 /// Returns the active profile of the module subsystem.
@@ -103,7 +101,7 @@ pub fn features() -> Box<[FeatureStatus]> {
 ///
 /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
 #[inline(always)]
-pub fn namespace_exists(namespace: &CStr) -> Result<bool, AnyError> {
+pub fn namespace_exists(namespace: &CStr) -> Result<bool, Error> {
     unsafe {
         let mut out = MaybeUninit::uninit();
         let handle = Handle::get_handle();
@@ -117,7 +115,7 @@ pub fn namespace_exists(namespace: &CStr) -> Result<bool, AnyError> {
 ///
 /// After calling this function, all unreferenced instances are unloaded.
 #[inline(always)]
-pub fn prune_instances() -> Result<(), AnyError> {
+pub fn prune_instances() -> Result<(), Error> {
     unsafe {
         let handle = Handle::get_handle();
         let f = handle.modules_v0.prune_instances;
@@ -130,7 +128,7 @@ pub fn prune_instances() -> Result<(), AnyError> {
 /// This function can be used to query the datatype, the read access, and the write access of a
 /// module parameter. This function fails, if the parameter can not be found.
 #[inline(always)]
-pub fn query_parameter(module: &CStr, parameter: &CStr) -> Result<ParameterInfo, AnyError> {
+pub fn query_parameter(module: &CStr, parameter: &CStr) -> Result<ParameterInfo, Error> {
     unsafe {
         let mut r#type = MaybeUninit::uninit();
         let mut read_group = MaybeUninit::uninit();
@@ -162,7 +160,7 @@ pub fn query_parameter(module: &CStr, parameter: &CStr) -> Result<ParameterInfo,
 /// Reads the value of a module parameter with public read access. The operation fails, if the
 /// parameter does not exist, or if the parameter does not allow reading with a public access.
 #[inline(always)]
-pub fn read_parameter<P: ParameterCast>(module: &CStr, parameter: &CStr) -> Result<P, AnyError> {
+pub fn read_parameter<P: ParameterCast>(module: &CStr, parameter: &CStr) -> Result<P, Error> {
     unsafe {
         let mut out = MaybeUninit::<P::Repr>::uninit();
         let handle = Handle::get_handle();
@@ -187,7 +185,7 @@ pub fn write_parameter<P: ParameterCast>(
     value: P,
     module: &CStr,
     parameter: &CStr,
-) -> Result<(), AnyError> {
+) -> Result<(), Error> {
     unsafe {
         let value = ManuallyDrop::new(value.into_repr());
         let handle = Handle::get_handle();

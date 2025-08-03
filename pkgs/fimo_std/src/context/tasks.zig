@@ -8,6 +8,7 @@ const DoublyLinkedList = std.DoublyLinkedList;
 const AnyError = @import("../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const context = @import("../context.zig");
+const pub_context = @import("../ctx.zig");
 const pub_tasks = @import("../tasks.zig");
 const ResourceCount = @import("ResourceCount.zig");
 pub const BlockingContext = @import("tasks/BlockingContext.zig");
@@ -96,10 +97,13 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(p
 const VTableImpl = struct {
     fn contextNewBlocking(
         blk_ctx: *pub_tasks.BlockingContext,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        blk_ctx.* = BlockingContext.init() catch |err| return AnyError.initError(err).intoResult();
-        return AnyResult.ok;
+        blk_ctx.* = BlockingContext.init() catch |err| {
+            context.setResult(.initErr(.initError(err)));
+            return .err;
+        };
+        return .ok;
     }
 
     fn futureEnqueue(
@@ -116,7 +120,7 @@ const VTableImpl = struct {
         cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
         future: *pub_tasks.OpaqueFuture,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         future.* = Task.init(
             data,
@@ -127,8 +131,11 @@ const VTableImpl = struct {
             poll_fn,
             cleanup_data_fn,
             cleanup_result_fn,
-        ) catch |e| return AnyError.initError(e).intoResult();
-        return AnyResult.ok;
+        ) catch |err| {
+            context.setResult(.initErr(.initError(err)));
+            return .err;
+        };
+        return .ok;
     }
 };
 

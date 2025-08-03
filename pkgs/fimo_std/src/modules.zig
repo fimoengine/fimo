@@ -6,12 +6,12 @@ const builtin = @import("builtin");
 
 const c = @import("c");
 
-const AnyError = @import("AnyError.zig");
-const AnyResult = AnyError.AnyResult;
 const ctx = @import("ctx.zig");
 pub const DebugInfo = @import("modules/DebugInfo.zig");
 pub const exports = @import("modules/exports.zig");
 pub const Export = exports.Export;
+pub const Module = exports.Module;
+pub const ModuleBundle = exports.ModuleBundle;
 const path = @import("path.zig");
 const tasks = @import("tasks.zig");
 const EnqueuedFuture = tasks.EnqueuedFuture;
@@ -211,6 +211,45 @@ pub const Symbol = struct {
     version: Version,
     T: type,
 
+    fn Global(comptime symbol: Symbol) type {
+        return struct {
+            var lock: std.Thread.Mutex = .{};
+            var count: usize = 0;
+            var ptr: ?*const symbol.T = null;
+
+            pub fn register(val: *const symbol.T) void {
+                lock.lock();
+                defer lock.unlock();
+                const old_count = @atomicRmw(usize, &count, .Add, 1, .monotonic);
+                if (old_count == 0) {
+                    const old = @atomicRmw(?*const symbol.T, &ptr, .Xchg, val, .monotonic);
+                    std.debug.assert(old == val or old == null);
+                }
+            }
+
+            pub fn registerFrom(obj: anytype) void {
+                const val = symbol.requestFrom(obj);
+                register(val);
+            }
+
+            pub fn unregister() void {
+                lock.lock();
+                defer lock.unlock();
+                const old_count = @atomicRmw(usize, &count, .Sub, 1, .monotonic);
+                if (old_count == 1) @atomicStore(?*const symbol.T, &ptr, null, .monotonic);
+            }
+
+            pub fn get() *const symbol.T {
+                std.debug.assert(@atomicLoad(usize, &count, .monotonic) != 0);
+                return @atomicLoad(?*const symbol.T, &ptr, .monotonic) orelse unreachable;
+            }
+        };
+    }
+
+    pub fn getGlobal(comptime symbol: Symbol) type {
+        return Global(symbol);
+    }
+
     /// Requests the symbol from `obj`.
     pub fn requestFrom(comptime symbol: Symbol, obj: anytype) *const symbol.T {
         return obj.provideSymbol(symbol);
@@ -229,6 +268,17 @@ pub const Symbol = struct {
 pub fn SymbolWrapper(comptime symbol: Symbol) type {
     return extern struct {
         value: *const symbol.T,
+
+        pub fn registerGlobal(self: @This()) void {
+            const Global = symbol.getGlobal();
+            Global.registerFrom(self);
+        }
+
+        pub fn unregisterGlobal(self: @This()) void {
+            _ = self;
+            const Global = symbol.getGlobal();
+            Global.unregister();
+        }
 
         /// Asserts that `sym` is compatible to the contained symbol and returns it.
         pub fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
@@ -256,7 +306,7 @@ pub fn SymbolGroup(comptime symbols: anytype) type {
     const symbols_info = @typeInfo(@TypeOf(symbols)).@"struct";
     var fields: []const std.builtin.Type.StructField = &.{};
     for (symbols_info.fields) |f| {
-        if (f.type != Symbol) continue;
+        std.debug.assert(f.type == Symbol);
         const symbol: Symbol = @field(symbols, f.name);
         fields = fields ++ [_]std.builtin.Type.StructField{.{
             .name = f.name,
@@ -277,6 +327,23 @@ pub fn SymbolGroup(comptime symbols: anytype) type {
 
     return struct {
         symbols: Inner,
+
+        pub fn registerGlobal(self: @This()) void {
+            inline for (symbols_info.fields) |f| {
+                const sym: Symbol = @field(symbols, f.name);
+                const Global = sym.getGlobal();
+                Global.registerFrom(self);
+            }
+        }
+
+        pub fn unregisterGlobal(self: @This()) void {
+            _ = self;
+            inline for (symbols_info.fields) |f| {
+                const sym: Symbol = @field(symbols, f.name);
+                const Global = sym.getGlobal();
+                Global.unregister();
+            }
+        }
 
         /// Asserts that `sym` is compatible to the contained symbol and returns it.
         pub fn provideSymbol(self: @This(), comptime sym: Symbol) *const sym.T {
@@ -377,10 +444,10 @@ pub const Info = extern struct {
     ///
     /// Queries a module by its unique name. The returned `Info` instance will have its reference
     /// count increased.
-    pub fn findByName(module: [:0]const u8, err: *?AnyError) AnyError.Error!*const Info {
+    pub fn findByName(module: [:0]const u8) ctx.Error!*const Info {
         var info: *const Info = undefined;
         const handle = ctx.Handle.getHandle();
-        try handle.modules_v0.find_by_name(module.ptr, &info).intoErrorUnion(err);
+        try handle.modules_v0.find_by_name(module.ptr, &info).intoErrorUnion();
         return info;
     }
 
@@ -392,8 +459,7 @@ pub const Info = extern struct {
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
-        err: *?AnyError,
-    ) AnyError.Error!*const Info {
+    ) ctx.Error!*const Info {
         var info: *const Info = undefined;
         const handle = ctx.Handle.getHandle();
         try handle.modules_v0.find_by_symbol(
@@ -401,7 +467,7 @@ pub const Info = extern struct {
             namespace.ptr,
             version.intoC(),
             &info,
-        ).intoErrorUnion(err);
+        ).intoErrorUnion();
         return info;
     }
 };
@@ -471,50 +537,50 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 namespace: [*:0]const u8,
                 has_dependency: *bool,
                 is_static: *bool,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             add_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             remove_namespace: *const fn (
                 ctx: *const OpaqueInstance,
                 namespace: [*:0]const u8,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             query_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
                 has_dependency: *bool,
                 is_static: *bool,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             add_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             remove_dependency: *const fn (
                 ctx: *const OpaqueInstance,
                 info: *const Info,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             load_symbol: *const fn (
                 ctx: *const OpaqueInstance,
                 name: [*:0]const u8,
                 namespace: [*:0]const u8,
                 version: Version.CVersion,
                 symbol: **const anyopaque,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             read_parameter: *const fn (
                 ctx: *const OpaqueInstance,
                 value: *anyopaque,
                 type: ParameterType,
                 module: [*:0]const u8,
                 parameter: [*:0]const u8,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
             write_parameter: *const fn (
                 ctx: *const OpaqueInstance,
                 value: *const anyopaque,
                 type: ParameterType,
                 module: [*:0]const u8,
                 parameter: [*:0]const u8,
-            ) callconv(.c) AnyResult,
+            ) callconv(.c) ctx.Status,
         };
 
         /// Returns the parameter table.
@@ -589,8 +655,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
         pub fn queryNamespace(
             self: *const @This(),
             namespace: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!enum { removed, added, static } {
+        ) ctx.Error!enum { removed, added, static } {
             var has_dependency: bool = undefined;
             var is_static: bool = undefined;
             try self.vtable.query_namespace(
@@ -598,7 +663,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 namespace.ptr,
                 &has_dependency,
                 &is_static,
-            ).intoErrorUnion(err);
+            ).intoErrorUnion();
             if (!has_dependency) return .removed;
             if (!is_static) return .added;
             return .static;
@@ -608,12 +673,8 @@ pub fn Instance(comptime config: InstanceConfig) type {
         ///
         /// Once included, the module gains access to the symbols of its dependencies that are
         /// exposed in said namespace. A namespace can not be included multiple times.
-        pub fn addNamespace(
-            self: *const @This(),
-            namespace: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            try self.vtable.add_namespace(self.castOpaque(), namespace.ptr).intoErrorUnion(err);
+        pub fn addNamespace(self: *const @This(), namespace: [:0]const u8) ctx.Error!void {
+            try self.vtable.add_namespace(self.castOpaque(), namespace.ptr).intoErrorUnion();
         }
 
         /// Removes a namespace include from the module.
@@ -621,12 +682,8 @@ pub fn Instance(comptime config: InstanceConfig) type {
         /// Once excluded, the caller guarantees to relinquish access to the symbols contained in
         /// said namespace. It is only possible to exclude namespaces that were manually added,
         /// whereas static namespace includes remain valid until the module is unloaded.
-        pub fn removeNamespace(
-            self: *const @This(),
-            namespace: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            try self.vtable.remove_namespace(self.castOpaque(), namespace.ptr).intoErrorUnion(err);
+        pub fn removeNamespace(self: *const @This(), namespace: [:0]const u8) ctx.Error!void {
+            try self.vtable.remove_namespace(self.castOpaque(), namespace.ptr).intoErrorUnion();
         }
 
         /// Checks if a module depends on another module.
@@ -638,12 +695,11 @@ pub fn Instance(comptime config: InstanceConfig) type {
         pub fn queryDependency(
             self: *const @This(),
             info: *const Info,
-            err: *?AnyError,
-        ) AnyError.Error!enum { removed, added, static } {
+        ) ctx.Error!enum { removed, added, static } {
             var has_dependency: bool = undefined;
             var is_static: bool = undefined;
             try self.vtable.query_dependency(self.castOpaque(), info, &has_dependency, &is_static)
-                .intoErrorUnion(err);
+                .intoErrorUnion();
             if (!has_dependency) return .removed;
             if (!is_static) return .added;
             return .static;
@@ -655,12 +711,8 @@ pub fn Instance(comptime config: InstanceConfig) type {
         /// and protected parameters of said dependency. Trying to acquire a dependency to a module
         /// that is already a dependency, or to a module that would result in a circular dependency
         /// will result in an error.
-        pub fn addDependency(
-            self: *const @This(),
-            info: *const Info,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            try self.vtable.add_dependency(self.castOpaque(), info).intoErrorUnion(err);
+        pub fn addDependency(self: *const @This(), info: *const Info) ctx.Error!void {
+            try self.vtable.add_dependency(self.castOpaque(), info).intoErrorUnion();
         }
 
         /// Removes a module as a dependency.
@@ -669,12 +721,8 @@ pub fn Instance(comptime config: InstanceConfig) type {
         /// references to resources originating from the former dependency, and allows for the
         /// unloading of the module. A module can only relinquish dependencies to modules that were
         /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
-        pub fn removeDependency(
-            self: *const @This(),
-            info: *const Info,
-            err: *?AnyError,
-        ) AnyError.Error!void {
-            try self.vtable.remove_dependency(self.castOpaque(), info).intoErrorUnion(err);
+        pub fn removeDependency(self: *const @This(), info: *const Info) ctx.Error!void {
+            try self.vtable.remove_dependency(self.castOpaque(), info).intoErrorUnion();
         }
 
         /// Loads a group of symbols from the module subsystem.
@@ -683,11 +731,10 @@ pub fn Instance(comptime config: InstanceConfig) type {
         pub fn loadSymbolGroup(
             self: *const @This(),
             comptime symbols: anytype,
-            err: *?AnyError,
-        ) AnyError.Error!SymbolGroup(symbols) {
+        ) ctx.Error!SymbolGroup(symbols) {
             var group: SymbolGroup(symbols) = undefined;
             inline for (std.meta.fields(@TypeOf(symbols))) |f| {
-                const symbol = try self.loadSymbol(@field(symbols, f.name), err);
+                const symbol = try self.loadSymbol(@field(symbols, f.name));
                 @field(group.symbols, f.name) = symbol.value;
             }
             return group;
@@ -703,13 +750,11 @@ pub fn Instance(comptime config: InstanceConfig) type {
         pub fn loadSymbol(
             self: *const @This(),
             comptime symbol: Symbol,
-            err: *?AnyError,
-        ) AnyError.Error!SymbolWrapper(symbol) {
+        ) ctx.Error!SymbolWrapper(symbol) {
             const s = try self.loadSymbolRaw(
                 symbol.name,
                 symbol.namespace,
                 symbol.version,
-                err,
             );
             return .{ .value = @alignCast(@ptrCast(s)) };
         }
@@ -726,11 +771,10 @@ pub fn Instance(comptime config: InstanceConfig) type {
             name: [:0]const u8,
             namespace: [:0]const u8,
             version: Version,
-            err: *?AnyError,
-        ) AnyError.Error!*const anyopaque {
+        ) ctx.Error!*const anyopaque {
             var sym: *const anyopaque = undefined;
             try self.vtable.load_symbol(self.castOpaque(), name, namespace, version.intoC(), &sym)
-                .intoErrorUnion(err);
+                .intoErrorUnion();
             return sym;
         }
 
@@ -744,8 +788,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
             comptime T: type,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!T {
+        ) ctx.Error!T {
             std.debug.assert(std.mem.indexOfScalar(
                 u16,
                 &.{ 8, 16, 32, 64 },
@@ -764,7 +807,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 value_type,
                 module.ptr,
                 parameter.ptr,
-            ).intoErrorUnion(err);
+            ).intoErrorUnion();
             return value;
         }
 
@@ -779,8 +822,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
             value: T,
             module: [:0]const u8,
             parameter: [:0]const u8,
-            err: *?AnyError,
-        ) AnyError.Error!void {
+        ) ctx.Error!void {
             const value_type: ParameterType = switch (comptime @typeInfo(T).int.bits) {
                 8 => if (@typeInfo(T).int.signedness == .signed) .i8 else .u8,
                 16 => if (@typeInfo(T).int.signedness == .signed) .i16 else .u16,
@@ -793,7 +835,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 value_type,
                 module.ptr,
                 parameter.ptr,
-            ).intoErrorUnion(err);
+            ).intoErrorUnion();
         }
 
         /// Casts the instance pointer to an opaque instance pointer.
@@ -806,8 +848,8 @@ pub fn Instance(comptime config: InstanceConfig) type {
 /// Type of an opaque module instance.
 pub const OpaqueInstance = Instance(.{});
 
-/// Type of a pseudo module instance.
-pub const PseudoInstance = extern struct {
+/// Type of a root module instance.
+pub const RootInstance = extern struct {
     instance: OpaqueInstance,
 
     pub const Parameters = OpaqueInstance.Parameters;
@@ -816,24 +858,24 @@ pub const PseudoInstance = extern struct {
     pub const Exports = OpaqueInstance.Exports;
     pub const State = OpaqueInstance.State;
 
-    /// Constructs a new pseudo instance.
+    /// Constructs a new root instance.
     ///
     /// The functions of the module subsystem require that the caller owns a reference to their own
     /// module. This is a problem, as the constructor of the context won't be assigned a module
-    /// instance during bootstrapping. As a workaround, we allow for the creation of pseudo
+    /// instance during bootstrapping. As a workaround, we allow for the creation of root
     /// instances, i.e., module handles without an associated module.
-    pub fn init(err: *?AnyError) AnyError.Error!*const PseudoInstance {
-        var instance: *const PseudoInstance = undefined;
+    pub fn init() ctx.Error!*const RootInstance {
+        var instance: *const RootInstance = undefined;
         const handle = ctx.Handle.getHandle();
-        try handle.modules_v0.pseudo_module_new(&instance).intoErrorUnion(err);
+        try handle.modules_v0.root_module_new(&instance).intoErrorUnion();
         return instance;
     }
 
-    /// Destroys the pseudo module.
+    /// Destroys the root module.
     ///
-    /// By destroying the pseudo module, the caller ensures that they relinquished all access to
+    /// By destroying the root module, the caller ensures that they relinquished all access to
     /// handles derived by the module subsystem.
-    pub fn deinit(self: *const PseudoInstance) void {
+    pub fn deinit(self: *const RootInstance) void {
         self.castOpaque().info.markUnloadable();
     }
 
@@ -845,21 +887,16 @@ pub const PseudoInstance = extern struct {
     pub fn queryNamespace(
         self: *const @This(),
         namespace: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!enum { removed, added, static } {
-        return self.castOpaque().queryNamespace(namespace, err);
+    ) ctx.Error!enum { removed, added, static } {
+        return self.castOpaque().queryNamespace(namespace);
     }
 
     /// Includes a namespace by the module.
     ///
     /// Once included, the module gains access to the symbols of its dependencies that are exposed
     /// in said namespace. A namespace can not be included multiple times.
-    pub fn addNamespace(
-        self: *const @This(),
-        namespace: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        return self.castOpaque().addNamespace(namespace, err);
+    pub fn addNamespace(self: *const @This(), namespace: [:0]const u8) ctx.Error!void {
+        return self.castOpaque().addNamespace(namespace);
     }
 
     /// Removes a namespace include from the module.
@@ -867,12 +904,8 @@ pub const PseudoInstance = extern struct {
     /// Once excluded, the caller guarantees to relinquish access to the symbols contained in said
     /// namespace. It is only possible to exclude namespaces that were manually added, whereas
     /// static namespace includes remain valid until the module is unloaded.
-    pub fn removeNamespace(
-        self: *const @This(),
-        namespace: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        return self.castOpaque().removeNamespace(namespace, err);
+    pub fn removeNamespace(self: *const @This(), namespace: [:0]const u8) ctx.Error!void {
+        return self.castOpaque().removeNamespace(namespace);
     }
 
     /// Checks if a module depends on another module.
@@ -884,9 +917,8 @@ pub const PseudoInstance = extern struct {
     pub fn queryDependency(
         self: *const @This(),
         info: *const Info,
-        err: *?AnyError,
-    ) AnyError.Error!enum { removed, added, static } {
-        return self.castOpaque().queryDependency(info, err);
+    ) ctx.Error!enum { removed, added, static } {
+        return self.castOpaque().queryDependency(info);
     }
 
     /// Acquires another module as a dependency.
@@ -895,12 +927,8 @@ pub const PseudoInstance = extern struct {
     /// protected parameters of said dependency. Trying to acquire a dependency to a module that is
     /// already a dependency, or to a module that would result in a circular dependency will result
     /// in an error.
-    pub fn addDependency(
-        self: *const @This(),
-        info: *const Info,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        return self.castOpaque().addDependency(info, err);
+    pub fn addDependency(self: *const @This(), info: *const Info) ctx.Error!void {
+        return self.castOpaque().addDependency(info);
     }
 
     /// Removes a module as a dependency.
@@ -909,12 +937,8 @@ pub const PseudoInstance = extern struct {
     /// references to resources originating from the former dependency, and allows for the
     /// unloading of the module. A module can only relinquish dependencies to modules that were
     /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
-    pub fn removeDependency(
-        self: *const @This(),
-        info: *const Info,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        return self.castOpaque().removeDependency(info, err);
+    pub fn removeDependency(self: *const @This(), info: *const Info) ctx.Error!void {
+        return self.castOpaque().removeDependency(info);
     }
 
     /// Loads a group of symbols from the module subsystem.
@@ -923,9 +947,8 @@ pub const PseudoInstance = extern struct {
     pub fn loadSymbolGroup(
         self: *const @This(),
         comptime symbols: anytype,
-        err: *?AnyError,
-    ) AnyError.Error!SymbolGroup(symbols) {
-        return self.castOpaque().loadSymbolGroup(symbols, err);
+    ) ctx.Error!SymbolGroup(symbols) {
+        return self.castOpaque().loadSymbolGroup(symbols);
     }
 
     /// Loads a symbol from the module subsystem.
@@ -938,9 +961,8 @@ pub const PseudoInstance = extern struct {
     pub fn loadSymbol(
         self: *const @This(),
         comptime symbol: Symbol,
-        err: *?AnyError,
-    ) AnyError.Error!SymbolWrapper(symbol) {
-        return self.castOpaque().loadSymbol(symbol, err);
+    ) ctx.Error!SymbolWrapper(symbol) {
+        return self.castOpaque().loadSymbol(symbol);
     }
 
     /// Loads a symbol from the module subsystem.
@@ -955,9 +977,8 @@ pub const PseudoInstance = extern struct {
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
-        err: *?AnyError,
-    ) AnyError.Error!*const anyopaque {
-        return self.castOpaque().loadSymbolRaw(name, namespace, version, err);
+    ) ctx.Error!*const anyopaque {
+        return self.castOpaque().loadSymbolRaw(name, namespace, version);
     }
 
     /// Reads a module parameter with dependency read access.
@@ -970,9 +991,8 @@ pub const PseudoInstance = extern struct {
         comptime T: type,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!T {
-        return self.castOpaque().readParameter(T, module, parameter, err);
+    ) ctx.Error!T {
+        return self.castOpaque().readParameter(T, module, parameter);
     }
 
     /// Sets a module parameter with dependency write access.
@@ -986,9 +1006,8 @@ pub const PseudoInstance = extern struct {
         value: T,
         module: [:0]const u8,
         parameter: [:0]const u8,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        return self.castOpaque().writeParameter(T, value, module, parameter, err);
+    ) ctx.Error!void {
+        return self.castOpaque().writeParameter(T, value, module, parameter);
     }
 
     /// Casts the instance pointer to an opaque instance pointer.
@@ -1031,19 +1050,19 @@ pub const LoadingSet = extern struct {
             on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
             on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             data: ?*anyopaque,
-        ) callconv(.c) AnyResult,
+        ) callconv(.c) ctx.Status,
         add_module: *const fn (
             ctx: *anyopaque,
             owner: *const OpaqueInstance,
             module: *const Export,
-        ) callconv(.c) AnyResult,
+        ) callconv(.c) ctx.Status,
         add_modules_from_path: *const fn (
             ctx: *anyopaque,
             path: c.FimoUTF8Path,
             filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
             filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             filter_data: ?*anyopaque,
-        ) callconv(.c) AnyResult,
+        ) callconv(.c) ctx.Status,
         add_modules_from_local: *const fn (
             ctx: *anyopaque,
             filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
@@ -1054,7 +1073,7 @@ pub const LoadingSet = extern struct {
                 data: ?*anyopaque,
             ) callconv(.c) void,
             bin_ptr: *const anyopaque,
-        ) callconv(.c) AnyResult,
+        ) callconv(.c) ctx.Status,
         commit: *const fn (
             ctx: *anyopaque,
         ) callconv(.c) EnqueuedFuture(Fallible(void)),
@@ -1065,10 +1084,10 @@ pub const LoadingSet = extern struct {
     /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
     /// to determine a suitable load order. A loading set is a utility to facilitate this process,
     /// by automatically computing a suitable load order for a batch of modules.
-    pub fn init(err: *?AnyError) AnyError.Error!LoadingSet {
+    pub fn init() ctx.Error!LoadingSet {
         var set: LoadingSet = undefined;
         const handle = ctx.Handle.getHandle();
-        try handle.modules_v0.set_new(&set).intoErrorUnion(err);
+        try handle.modules_v0.set_new(&set).intoErrorUnion();
         return set;
     }
 
@@ -1124,8 +1143,7 @@ pub const LoadingSet = extern struct {
             data: @TypeOf(obj),
         ) void,
         comptime on_abort: ?fn (data: @TypeOf(obj)) void,
-        err: *?AnyError,
-    ) AnyError.Error!void {
+    ) ctx.Error!void {
         const Ptr = @TypeOf(obj);
         std.debug.assert(@typeInfo(Ptr) == .pointer);
         std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
@@ -1151,7 +1169,6 @@ pub const LoadingSet = extern struct {
             Callbacks.onOk,
             Callbacks.onErr,
             if (on_abort) Callbacks.onAbort else null,
-            err,
         );
     }
 
@@ -1172,8 +1189,7 @@ pub const LoadingSet = extern struct {
         on_success: *const fn (info: *const Info, data: ?*anyopaque) callconv(.c) void,
         on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-        err: *?AnyError,
-    ) AnyError.Error!void {
+    ) ctx.Error!void {
         try self.vtable.add_callback(
             self.data,
             module,
@@ -1181,7 +1197,7 @@ pub const LoadingSet = extern struct {
             on_error,
             on_abort,
             data,
-        ).intoErrorUnion(err);
+        ).intoErrorUnion();
     }
 
     /// Adds a module to the set.
@@ -1199,9 +1215,8 @@ pub const LoadingSet = extern struct {
         self: LoadingSet,
         owner: *const OpaqueInstance,
         module: *const Export,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        try self.vtable.add_module(self.data, owner, module).intoErrorUnion(err);
+    ) ctx.Error!void {
+        try self.vtable.add_module(self.data, owner, module).intoErrorUnion();
     }
 
     /// Adds modules to the set.
@@ -1219,32 +1234,34 @@ pub const LoadingSet = extern struct {
     pub fn addModulesFromPath(
         self: LoadingSet,
         p: path.Path,
-        obj: anytype,
-        comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterRequest,
-        comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        const Ptr = @TypeOf(obj);
-        std.debug.assert(@typeInfo(Ptr) == .pointer);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
+        context: anytype,
+        comptime filter: fn (module: *const Export, data: @TypeOf(context)) LoadingSet.FilterRequest,
+        comptime filter_deinit: ?fn (data: @TypeOf(context)) void,
+    ) ctx.Error!void {
+        const Context = @TypeOf(context);
         const Callbacks = struct {
             fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
-                const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
-                return filter(module, o);
+                const context_: Context = if (comptime @typeInfo(Context) == .pointer)
+                    @alignCast(@ptrCast(@constCast(data)))
+                else
+                    @as(*const Context, @alignCast(@ptrCast(data))).*;
+                return filter(module, context_);
             }
             fn deinit(data: ?*anyopaque) callconv(.c) void {
                 if (filter_deinit) {
-                    const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
-                    filter_deinit(o);
+                    const context_: Context = if (comptime @typeInfo(Context) == .pointer)
+                        @alignCast(@ptrCast(@constCast(data)))
+                    else
+                        @as(*const Context, @alignCast(@ptrCast(data))).*;
+                    filter_deinit(context_);
                 }
             }
         };
         return self.addModulesFromPathCustom(
             p,
-            @constCast(obj),
+            if (comptime @typeInfo(Context) == .pointer) @constCast(context) else @constCast(&context),
             Callbacks.f,
             if (filter_deinit != null) &Callbacks.deinit else null,
-            err,
         );
     }
 
@@ -1266,15 +1283,14 @@ pub const LoadingSet = extern struct {
         filter_data: ?*anyopaque,
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-        err: *?AnyError,
-    ) AnyError.Error!void {
+    ) ctx.Error!void {
         try self.vtable.add_modules_from_path(
             self.data,
             p.intoC(),
             filter,
             filter_deinit,
             filter_data,
-        ).intoErrorUnion(err);
+        ).intoErrorUnion();
     }
 
     /// Adds modules to the set.
@@ -1289,31 +1305,33 @@ pub const LoadingSet = extern struct {
     /// no modules are appended to the set.
     pub fn addModulesFromLocal(
         self: LoadingSet,
-        obj: anytype,
-        comptime filter: fn (module: *const Export, data: @TypeOf(obj)) LoadingSet.FilterRequest,
-        comptime filter_deinit: ?fn (data: @TypeOf(obj)) void,
-        err: *?AnyError,
-    ) AnyError.Error!void {
-        const Ptr = @TypeOf(obj);
-        std.debug.assert(@typeInfo(Ptr) == .pointer);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
+        context: anytype,
+        comptime filter: fn (module: *const Export, data: @TypeOf(context)) LoadingSet.FilterRequest,
+        comptime filter_deinit: ?fn (data: @TypeOf(context)) void,
+    ) ctx.Error!void {
+        const Context = @TypeOf(context);
         const Callbacks = struct {
             fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
-                const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
-                return filter(module, o);
+                const context_: Context = if (comptime @typeInfo(Context) == .pointer)
+                    @alignCast(@ptrCast(@constCast(data)))
+                else
+                    @as(*const Context, @alignCast(@ptrCast(data))).*;
+                return filter(module, context_);
             }
             fn deinit(data: ?*anyopaque) callconv(.c) void {
                 if (filter_deinit) {
-                    const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
-                    filter_deinit(o);
+                    const context_: Context = if (comptime @typeInfo(Context) == .pointer)
+                        @alignCast(@ptrCast(@constCast(data)))
+                    else
+                        @as(*const Context, @alignCast(@ptrCast(data))).*;
+                    filter_deinit(context_);
                 }
             }
         };
         return self.addModulesFromLocalCustom(
-            @constCast(obj),
+            if (comptime @typeInfo(Context) == .pointer) @constCast(context) else @constCast(&context),
             Callbacks.f,
             if (filter_deinit != null) &Callbacks.deinit else null,
-            err,
         );
     }
 
@@ -1332,8 +1350,7 @@ pub const LoadingSet = extern struct {
         filter_data: ?*anyopaque,
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-        err: *?AnyError,
-    ) AnyError.Error!void {
+    ) ctx.Error!void {
         try self.vtable.add_modules_from_local(
             self.data,
             filter,
@@ -1341,7 +1358,7 @@ pub const LoadingSet = extern struct {
             filter_data,
             exports.ExportIter.fimo_impl_module_export_iterator,
             @ptrCast(&exports.ExportIter.fimo_impl_module_export_iterator),
-        ).intoErrorUnion(err);
+        ).intoErrorUnion();
     }
 
     /// Loads the modules contained in the set.
@@ -1406,36 +1423,36 @@ pub const Config = extern struct {
 pub const VTable = extern struct {
     profile: *const fn () callconv(.c) Profile,
     features: *const fn (features: *?[*]const FeatureStatus) callconv(.c) usize,
-    pseudo_module_new: *const fn (instance: **const PseudoInstance) callconv(.c) AnyResult,
-    set_new: *const fn (fut: *LoadingSet) callconv(.c) AnyResult,
-    find_by_name: *const fn (name: [*:0]const u8, info: **const Info) callconv(.c) AnyResult,
+    root_module_new: *const fn (instance: **const RootInstance) callconv(.c) ctx.Status,
+    set_new: *const fn (fut: *LoadingSet) callconv(.c) ctx.Status,
+    find_by_name: *const fn (name: [*:0]const u8, info: **const Info) callconv(.c) ctx.Status,
     find_by_symbol: *const fn (
         name: [*:0]const u8,
         namespace: [*:0]const u8,
         version: Version.CVersion,
         info: **const Info,
-    ) callconv(.c) AnyResult,
-    namespace_exists: *const fn (namespace: [*:0]const u8, exists: *bool) callconv(.c) AnyResult,
-    prune_instances: *const fn () callconv(.c) AnyResult,
+    ) callconv(.c) ctx.Status,
+    namespace_exists: *const fn (namespace: [*:0]const u8, exists: *bool) callconv(.c) ctx.Status,
+    prune_instances: *const fn () callconv(.c) ctx.Status,
     query_parameter: *const fn (
         module: [*:0]const u8,
         parameter: [*:0]const u8,
         type: *ParameterType,
         read_group: *ParameterAccessGroup,
         write_group: *ParameterAccessGroup,
-    ) callconv(.c) AnyResult,
+    ) callconv(.c) ctx.Status,
     read_parameter: *const fn (
         value: *anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) AnyResult,
+    ) callconv(.c) ctx.Status,
     write_parameter: *const fn (
         value: *const anyopaque,
         type: ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) AnyResult,
+    ) callconv(.c) ctx.Status,
 };
 
 /// Returns the active profile of the module subsystem.
@@ -1456,10 +1473,10 @@ pub fn features() []const FeatureStatus {
 /// Checks for the presence of a namespace in the module subsystem.
 ///
 /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-pub fn namespaceExists(namespace: [:0]const u8, err: *?AnyError) AnyError.Error!bool {
+pub fn namespaceExists(namespace: [:0]const u8) ctx.Error!bool {
     var exists: bool = undefined;
     const handle = ctx.Handle.getHandle();
-    try handle.modules_v0.namespace_exists(namespace.ptr, &exists).intoErrorUnion(err);
+    try handle.modules_v0.namespace_exists(namespace.ptr, &exists).intoErrorUnion();
     return exists;
 }
 
@@ -1467,20 +1484,16 @@ pub fn namespaceExists(namespace: [:0]const u8, err: *?AnyError) AnyError.Error!
 ///
 /// Tries to unload all instances that are not referenced by any other modules. If the instance is
 /// still referenced, this will mark the instance as unloadable and enqueue it for unloading.
-pub fn pruneInstances(err: *?AnyError) AnyError.Error!void {
+pub fn pruneInstances() ctx.Error!void {
     const handle = ctx.Handle.getHandle();
-    try handle.modules_v0.prune_instances().intoErrorUnion(err);
+    try handle.modules_v0.prune_instances().intoErrorUnion();
 }
 
 /// Queries the info of a module parameter.
 ///
 /// This function can be used to query the datatype, the read access, and the write access of a
 /// module parameter. This function fails, if the parameter can not be found.
-pub fn queryParameter(
-    module: [:0]const u8,
-    parameter: [:0]const u8,
-    err: *?AnyError,
-) AnyError.Error!OpaqueParameter.Info {
+pub fn queryParameter(module: [:0]const u8, parameter: [:0]const u8) ctx!OpaqueParameter.Info {
     var tag: ParameterType = undefined;
     var read_group: ParameterAccessGroup = undefined;
     var write_group: ParameterAccessGroup = undefined;
@@ -1491,7 +1504,7 @@ pub fn queryParameter(
         &tag,
         &read_group,
         &write_group,
-    ).intoErrorUnion(err);
+    ).intoErrorUnion();
     return .{
         .tag = tag,
         .read_group = read_group,
@@ -1503,12 +1516,7 @@ pub fn queryParameter(
 ///
 /// Reads the value of a module parameter with public read access. The operation fails, if the
 /// parameter does not exist, or if the parameter does not allow reading with a public access.
-pub fn readParameter(
-    comptime T: type,
-    module: [:0]const u8,
-    parameter: [:0]const u8,
-    err: *?AnyError,
-) AnyError.Error!T {
+pub fn readParameter(comptime T: type, module: [:0]const u8, parameter: [:0]const u8) ctx.Error!T {
     std.debug.assert(std.mem.indexOfScalar(
         u16,
         &.{ 8, 16, 32, 64 },
@@ -1527,7 +1535,7 @@ pub fn readParameter(
         value_type,
         module.ptr,
         parameter.ptr,
-    ).intoErrorUnion(err);
+    ).intoErrorUnion();
     return value;
 }
 
@@ -1540,8 +1548,7 @@ pub fn writeParameter(
     value: T,
     module: [:0]const u8,
     parameter: [:0]const u8,
-    err: *?AnyError,
-) AnyError.Error!void {
+) ctx.Error!void {
     std.debug.assert(std.mem.indexOfScalar(
         u16,
         &.{ 8, 16, 32, 64 },
@@ -1559,5 +1566,5 @@ pub fn writeParameter(
         value_type,
         module.ptr,
         parameter.ptr,
-    ).intoErrorUnion(err);
+    ).intoErrorUnion();
 }

@@ -8,9 +8,38 @@ use crate::{
 use core::panic;
 use std::{marker::PhantomData, mem::MaybeUninit};
 
+#[derive(Debug)]
+pub enum Error {
+    OperationFailed(AnyError),
+    OperationFailedWithoutReport,
+    Unknown(Status),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OperationFailed(any_error) => write!(f, "{any_error}"),
+            Self::OperationFailedWithoutReport => write!(f, "operation failed"),
+            Self::Unknown(status) => write!(f, "unknown error ({})", status.0),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl<T: error::private::Sealed + ?Sized> From<AnyError<T>> for Error
+where
+    AnyError: From<AnyError<T>>,
+{
+    fn from(value: AnyError<T>) -> Self {
+        Self::OperationFailed(value.into())
+    }
+}
+
 /// Status code.
 ///
 /// All positive values are interpreted as successfull operations.
+#[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Status(pub i32);
 
@@ -21,6 +50,10 @@ impl Status {
     ///
     /// The specific error may be accessible through the context.
     pub const FAILURE: Self = Self(-1);
+    /// Operation failed with an unspecified error.
+    ///
+    /// No error was provided to the context.
+    pub const FAILURE_NO_REPORT: Self = Self(-2);
 
     /// Checks if the status indicates a success.
     pub const fn is_ok(self) -> bool {
@@ -30,6 +63,18 @@ impl Status {
     /// Checks if the status indicates an error.
     pub const fn is_error(self) -> bool {
         self.0 < 0
+    }
+
+    pub(crate) fn into_result(self) -> Result<(), Error> {
+        if self.is_ok() {
+            Ok(())
+        } else {
+            match self.0 {
+                -1 => Err(Error::OperationFailed(take_result().unwrap_err())),
+                -2 => Err(Error::OperationFailedWithoutReport),
+                _ => Err(Error::Unknown(self)),
+            }
+        }
     }
 }
 

@@ -6,6 +6,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const Mutex = fimo_tasks_meta.sync.Mutex;
 
+const FimoWorlds = @import("../FimoWorlds.zig");
 const Universe = @import("../Universe.zig");
 
 const Self = @This();
@@ -39,32 +40,28 @@ pub fn endGeneration(self: *Self) void {
 
 fn alloc(ctx: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
     return self.arena.allocator().rawAlloc(len, alignment, ret_addr);
 }
 
 fn resize(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
     return self.arena.allocator().rawResize(memory, alignment, new_len, ret_addr);
 }
 
 fn remap(ctx: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
     return self.arena.allocator().rawRemap(memory, alignment, new_len, ret_addr);
 }
 
 fn free(ctx: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
     const self: *Self = @ptrCast(@alignCast(ctx));
-    const instance = Universe.getInstance();
-    self.mutex.lock(instance);
-    defer self.mutex.unlock(instance);
+    self.mutex.lock();
+    defer self.mutex.unlock();
     self.arena.allocator().rawFree(memory, alignment, ret_addr);
 }

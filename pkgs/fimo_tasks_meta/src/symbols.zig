@@ -1,9 +1,8 @@
 const std = @import("std");
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
-const AnyResult = AnyError.AnyResult;
 const ctx = fimo_std.ctx;
+const Status = ctx.Status;
 const Symbol = fimo_std.modules.Symbol;
 const Duration = fimo_std.time.compat.Duration;
 const Instant = fimo_std.time.compat.Instant;
@@ -80,13 +79,13 @@ pub const query_worker_pools = Symbol{
     .name = "query_worker_pools",
     .namespace = symbol_namespace,
     .version = ctx.context_version,
-    .T = fn (query: *Query) callconv(.c) AnyResult,
+    .T = fn (query: *Query) callconv(.c) Status,
 };
 pub const create_worker_pool = Symbol{
     .name = "create_worker_pool",
     .namespace = symbol_namespace,
     .version = ctx.context_version,
-    .T = fn (config: *const PoolConfig, pool: *Pool) callconv(.c) AnyResult,
+    .T = fn (config: *const PoolConfig, pool: *Pool) callconv(.c) Status,
 };
 pub const yield = Symbol{
     .name = "yield",

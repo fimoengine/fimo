@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const fimo_std = @import("fimo_std");
-const AnyError = fimo_std.AnyError;
 const ctx = fimo_std.ctx;
 const tasks = fimo_std.tasks;
 const tracing = fimo_std.tracing;
@@ -9,7 +8,8 @@ const modules = fimo_std.modules;
 const Symbol = modules.Symbol;
 const SymbolWrapper = modules.SymbolWrapper;
 const SymbolGroup = modules.SymbolGroup;
-const PseudoInstance = modules.PseudoInstance;
+const RootInstance = modules.RootInstance;
+const TestModule = @import("test_module");
 
 const command_buffer = @import("command_buffer.zig");
 const CommandBufferBuilderConfig = command_buffer.BuilderConfig;
@@ -23,14 +23,14 @@ const TaskBuilderConfig = task.BuilderConfig;
 const TaskBuilder = task.Builder;
 
 pub const TestContext = struct {
-    instance: *const PseudoInstance,
+    instance: *const RootInstance,
     symbols: SymbolGroup(symbols.all_symbols),
 
     pub fn deinit(self: *TestContext) void {
+        self.symbols.unregisterGlobal();
         self.instance.deinit();
 
-        var err: ?fimo_std.AnyError = null;
-        modules.pruneInstances(&err) catch unreachable;
+        modules.pruneInstances() catch unreachable;
         tracing.unregisterThread();
         ctx.deinit();
     }
@@ -39,10 +39,6 @@ pub const TestContext = struct {
         return symbol.requestFrom(self.symbols);
     }
 };
-
-comptime {
-    @import("test_module").forceExportModules();
-}
 
 pub fn initTestContext() !TestContext {
     const tracing_cfg = tracing.Config{
@@ -57,58 +53,45 @@ pub fn initTestContext() !TestContext {
 
     tracing.registerThread();
     errdefer tracing.unregisterThread();
-
-    var err: ?fimo_std.AnyError = null;
-    errdefer if (err) |e| {
+    errdefer if (ctx.hasErrorResult()) {
+        const e = ctx.takeResult().unwrapErr();
+        defer e.deinit();
         tracing.emitErrSimple("{f}", .{e}, @src());
         e.deinit();
     };
 
-    const async_ctx = try tasks.BlockingContext.init(&err);
+    const async_ctx = try tasks.BlockingContext.init();
     defer async_ctx.deinit();
 
-    const set = try modules.LoadingSet.init(&err);
+    const set = try modules.LoadingSet.init();
     defer set.unref();
 
-    try set.addModulesFromLocal(
-        &{},
-        struct {
-            fn f(@"export": *const modules.Export, data: *const void) modules.LoadingSet.FilterRequest {
-                _ = @"export";
-                _ = data;
-                return .load;
-            }
-        }.f,
-        null,
-        &err,
-    );
-    try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap(&err);
+    try set.addModulesFromLocal({}, TestModule.fimo_module_bundle.loadingSetFilter, null);
+    try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
 
-    const instance = try modules.PseudoInstance.init(&err);
+    const instance = try modules.RootInstance.init();
     errdefer instance.deinit();
 
-    const info = try modules.Info.findByName("fimo_tasks", &err);
+    const info = try modules.Info.findByName("fimo_tasks");
     defer info.unref();
 
-    try instance.addDependency(info, &err);
-    try instance.addNamespace(symbols.symbol_namespace, &err);
+    try instance.addDependency(info);
+    try instance.addNamespace(symbols.symbol_namespace);
 
     const test_ctx = TestContext{
         .instance = instance,
-        .symbols = try instance.loadSymbolGroup(symbols.all_symbols, &err),
+        .symbols = try instance.loadSymbolGroup(symbols.all_symbols),
     };
+    test_ctx.symbols.registerGlobal();
 
     return test_ctx;
 }
 
-pub fn initTestContextInTask(func: fn (*const TestContext, *?AnyError) anyerror!void) !void {
+pub fn initTestContextInTask(func: fn () anyerror!void) !void {
     var t_ctx = try initTestContext();
     defer t_ctx.deinit();
 
-    var err: ?AnyError = null;
-    defer if (err) |e| e.deinit();
-
-    const p = try Pool.init(t_ctx, &.{ .worker_count = 4, .label_ = "test", .label_len = 4 }, &err);
+    const p = try Pool.init(&.{ .worker_count = 4, .label_ = "test", .label_len = 4 });
     defer {
         p.requestClose();
         p.unref();
@@ -117,9 +100,8 @@ pub fn initTestContextInTask(func: fn (*const TestContext, *?AnyError) anyerror!
     const future = try @import("future.zig").init(
         p,
         func,
-        .{ &t_ctx, &err },
+        .{},
         .{ .allocator = std.testing.allocator, .label = "test" },
-        &err,
     );
     defer future.deinit();
     try future.await();

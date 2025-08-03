@@ -7,7 +7,8 @@ const c = @import("c");
 
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-const Context = @import("../../context.zig");
+const context = @import("../../context.zig");
+const pub_context = @import("../../ctx.zig");
 const pub_modules = @import("../../modules.zig");
 const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
 const PathError = @import("../../path.zig").PathError;
@@ -31,7 +32,7 @@ type: InstanceType,
 info: pub_modules.Info,
 ref_count: RefCount = .{},
 
-pub const InstanceType = enum { regular, pseudo };
+pub const InstanceType = enum { regular, root };
 
 pub const DependencyType = enum { static, dynamic };
 
@@ -401,8 +402,8 @@ pub const Inner = struct {
         self.dependencies.clearRetainingCapacity();
     }
 
-    pub fn start(self: *Inner, err: *?AnyError) StartInstanceOp {
-        return StartInstanceOp.Data.init(self, err);
+    pub fn start(self: *Inner) StartInstanceOp {
+        return StartInstanceOp.Data.init(self);
     }
 
     pub fn stop(self: *Inner) void {
@@ -490,19 +491,19 @@ fn init(
     return self;
 }
 
-pub fn initPseudoInstance(name: []const u8) !*pub_modules.PseudoInstance {
+pub fn initRootInstance(name: []const u8) !*pub_modules.RootInstance {
     const iterator = &pub_modules.exports.ExportIter.fimo_impl_module_export_iterator;
     const handle = try ModuleHandle.initLocal(modules.allocator, iterator, iterator);
     errdefer handle.unref();
 
-    const instance_handle = try Self.init(name, null, null, null, null, handle, null, .pseudo);
+    const instance_handle = try Self.init(name, null, null, null, null, handle, null, .root);
     errdefer instance_handle.unref();
 
-    const instance = try instance_handle.inner.arena.allocator().create(pub_modules.PseudoInstance);
+    const instance = try instance_handle.inner.arena.allocator().create(pub_modules.RootInstance);
     comptime {
-        std.debug.assert(@sizeOf(pub_modules.PseudoInstance) == @sizeOf(pub_modules.OpaqueInstance));
-        std.debug.assert(@alignOf(pub_modules.PseudoInstance) == @alignOf(pub_modules.OpaqueInstance));
-        std.debug.assert(@offsetOf(pub_modules.PseudoInstance, "instance") == 0);
+        std.debug.assert(@sizeOf(pub_modules.RootInstance) == @sizeOf(pub_modules.OpaqueInstance));
+        std.debug.assert(@alignOf(pub_modules.RootInstance) == @alignOf(pub_modules.OpaqueInstance));
+        std.debug.assert(@offsetOf(pub_modules.RootInstance, "instance") == 0);
     }
     instance.* = .{
         .instance = .{
@@ -512,7 +513,7 @@ pub fn initPseudoInstance(name: []const u8) !*pub_modules.PseudoInstance {
             .imports_ = null,
             .exports_ = null,
             .info = &instance_handle.info,
-            .handle = &Context.handle,
+            .handle = &context.handle,
             .state_ = null,
         },
     };
@@ -948,7 +949,6 @@ pub const InitExportedOp = FSMFuture(struct {
     set: pub_modules.LoadingSet,
     @"export": *const pub_modules.Export,
     handle: *ModuleHandle,
-    err: *?AnyError,
     instance_handle: *Self = undefined,
     inner: *Inner = undefined,
     instance: *pub_modules.OpaqueInstance = undefined,
@@ -1002,7 +1002,7 @@ pub const InitExportedOp = FSMFuture(struct {
             .imports_ = null,
             .exports_ = null,
             .info = &instance_handle.info,
-            .handle = &Context.handle,
+            .handle = &context.handle,
             .state_ = null,
         };
         inner.instance = instance;
@@ -1111,7 +1111,7 @@ pub const InitExportedOp = FSMFuture(struct {
             .ready => |result| {
                 modules.mutex.lock();
                 _ = self.instance_handle.lock();
-                self.instance.state_ = @ptrCast(try result.unwrap(self.err));
+                self.instance.state_ = @ptrCast(try result.unwrap());
                 self.state_future.deinit();
                 self.inner.state = .init;
                 return .next;
@@ -1173,7 +1173,7 @@ pub const InitExportedOp = FSMFuture(struct {
             .ready => |result| {
                 modules.mutex.lock();
                 _ = self.instance_handle.lock();
-                const sym = try result.unwrap(self.err);
+                const sym = try result.unwrap();
 
                 const i = self.dyn_export_index;
                 const src = self.@"export".getDynamicSymbolExports()[i];
@@ -1203,32 +1203,29 @@ pub const InitExportedOp = FSMFuture(struct {
 
 pub const StartInstanceOp = FSMFuture(struct {
     inner: *Inner,
-    err: *?AnyError,
     @"export": *const pub_modules.Export,
     instance: *const pub_modules.OpaqueInstance,
     future: pub_tasks.EnqueuedFuture(pub_tasks.Fallible(void)) = undefined,
-    ret: AnyError.Error!void = undefined,
+    ret: pub_context.Error!void = undefined,
 
     pub const __no_abort = true;
 
-    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: AnyError.Error) void {
+    pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: pub_context.Error) void {
         if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
         self.ret = err;
     }
 
-    pub fn __ret(self: *@This()) AnyError.Error!void {
+    pub fn __ret(self: *@This()) pub_context.Error!void {
         return self.ret;
     }
 
     pub fn init(
         inner: *Inner,
-        err: *?AnyError,
     ) StartInstanceOp {
         std.debug.assert(!inner.isDetached());
         std.debug.assert(inner.state == .init);
         return StartInstanceOp.init(.{
             .inner = inner,
-            .err = err,
             .@"export" = inner.@"export".?,
             .instance = inner.instance.?,
         });
@@ -1251,12 +1248,12 @@ pub const StartInstanceOp = FSMFuture(struct {
         self.future.deinit();
     }
 
-    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) AnyError.Error!pub_tasks.FSMOp {
+    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) pub_context.Error!pub_tasks.FSMOp {
         switch (self.future.poll(waker)) {
             .ready => |result| {
                 modules.mutex.lock();
                 self.inner.mutex.lock();
-                try result.unwrap(self.err);
+                try result.unwrap();
                 self.inner.state = .started;
                 return .ret;
             },
@@ -1287,7 +1284,7 @@ const InstanceVTableImpl = struct {
         namespace: [*:0]const u8,
         has_dependency: *bool,
         is_static: *bool,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
         tracing.emitTraceSimple(
@@ -1306,40 +1303,42 @@ const InstanceVTableImpl = struct {
             has_dependency.* = false;
             is_static.* = false;
         }
-        return AnyResult.ok;
+        return .ok;
     }
     fn addNamespace(
         ctx: *const pub_modules.OpaqueInstance,
         namespace: [*:0]const u8,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
 
         self.addNamespace(namespace_) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn removeNamespace(
         ctx: *const pub_modules.OpaqueInstance,
         namespace: [*:0]const u8,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
 
         self.removeNamespace(namespace_) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn queryDependency(
         ctx: *const pub_modules.OpaqueInstance,
         info: *const pub_modules.Info,
         has_dependency: *bool,
         is_static: *bool,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const dependency = std.mem.span(info.name);
         tracing.emitTraceSimple(
@@ -1358,31 +1357,33 @@ const InstanceVTableImpl = struct {
             has_dependency.* = false;
             is_static.* = false;
         }
-        return AnyResult.ok;
+        return .ok;
     }
     fn addDependency(
         ctx: *const pub_modules.OpaqueInstance,
         info: *const pub_modules.Info,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
 
         self.addDependency(info) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn removeDependency(
         ctx: *const pub_modules.OpaqueInstance,
         info: *const pub_modules.Info,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
 
         self.removeDependency(info) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn loadSymbol(
         ctx: *const pub_modules.OpaqueInstance,
@@ -1390,7 +1391,7 @@ const InstanceVTableImpl = struct {
         namespace: [*:0]const u8,
         version: Version.CVersion,
         symbol: **const anyopaque,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const name_ = std.mem.span(name);
         const namespace_ = std.mem.span(namespace);
@@ -1398,9 +1399,10 @@ const InstanceVTableImpl = struct {
 
         symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn readParameter(
         ctx: *const pub_modules.OpaqueInstance,
@@ -1408,16 +1410,17 @@ const InstanceVTableImpl = struct {
         @"type": pub_modules.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const module_ = std.mem.span(module);
         const parameter_ = std.mem.span(parameter);
 
         self.readParameter(value, @"type", module_, parameter_) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
     fn writeParameter(
         ctx: *const pub_modules.OpaqueInstance,
@@ -1425,16 +1428,17 @@ const InstanceVTableImpl = struct {
         @"type": pub_modules.ParameterType,
         module: [*:0]const u8,
         parameter: [*:0]const u8,
-    ) callconv(.c) AnyResult {
+    ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const module_ = std.mem.span(module);
         const parameter_ = std.mem.span(parameter);
 
         self.writeParameter(value, @"type", module_, parameter_) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
-            return AnyError.initError(e).intoResult();
+            context.setResult(.initErr(.initError(e)));
+            return .err;
         };
-        return AnyResult.ok;
+        return .ok;
     }
 };
 
