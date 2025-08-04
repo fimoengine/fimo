@@ -15,51 +15,6 @@
 extern "C" {
 #endif // __cplusplus
 
-struct FimoTracingCallStackVTable;
-
-/// A call stack.
-///
-/// Each call stack represents a unit of computation, like a thread. A call stack is active on only
-/// one thread at any given time. The active call stack of a thread can be swapped, which is useful
-/// for tracing where a `M:N` threading model is used. In that case, one would create one stack for
-/// each task, and activate it when the task is resumed.
-typedef struct FimoTracingCallStack {
-    void *handle;
-    const struct FimoTracingCallStackVTable *vtable;
-} FimoTracingCallStack;
-
-/// VTable of a call stack.
-///
-/// Adding fields to the vtable is not a breaking change.
-typedef struct FimoTracingCallStackVTable {
-    /// Destroys an empty call stack.
-    ///
-    /// Marks the completion of a task. Before calling this function, the call stack must be empty,
-    /// i.e., there must be no active spans on the stack, and must not be active. If successful,
-    /// the call stack may not be used afterwards. The active call stack of the thread is destroyed
-    /// automatically, on thread exit or during destruction of the context. The caller must own the
-    /// call stack uniquely.
-    void (*drop)(void *handle);
-    /// Unwinds and destroys a call stack.
-    ///
-    /// Marks that the task was aborted. Before calling this function, the call stack  must not be
-    /// active. If successful, the call stack may not be used afterwards. The caller must own the
-    /// call stack uniquely.
-    void (*drop_unwind)(void *handle);
-    /// Switches the call stack of the current thread.
-    ///
-    /// If successful, this call stack will be used as the active call stack of the calling thread.
-    /// The old call stack is returned, enabling the caller to switch back to it afterwards. This
-    /// call stack must be in a suspended, but unblocked, state and not be active. The active call
-    /// stack must also be in a suspended state, but may also be blocked.
-    FimoTracingCallStack (*replace_active)(void *handle);
-    /// Unblocks a blocked call stack.
-    ///
-    /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
-    /// marked as blocked.
-    void (*unblock)(void *handle);
-} FimoTracingCallStackVTable;
-
 /// Tracing levels.
 ///
 /// The levels are ordered such that given two levels `lvl1` and `lvl2`, where `lvl1 >= lvl2`, then
@@ -74,12 +29,10 @@ typedef enum FimoTracingLevel : FimoI32 {
     FIMO_TRACING_LEVEL_TRACE = 5,
 } FimoTracingLevel;
 
-/// Metadata for a span and event.
-typedef struct FimoTracingMetadata {
-    /// Pointer to a possible extension.
-    ///
-    /// Reserved for future use. Must be `NULL`.
-    const void *next;
+/// Basic information regarding a tracing event.
+///
+/// The subsystem expects instances of this struct to have a static lifetime.
+typedef struct FimoTracingEventInfo {
     /// Name of the event.
     ///
     /// Must not be `NULL`.
@@ -88,116 +41,113 @@ typedef struct FimoTracingMetadata {
     ///
     /// Must not be `NULL`.
     const char *target;
-    /// Level at which to trace the event.
-    FimoTracingLevel level;
+    /// Scope of the event.
+    ///
+    /// Must not be `NULL`.
+    const char *scope;
     /// Optional file name where the event took place.
     const char *file_name;
     /// Optional line number where the event took place.
     ///
     /// Use a negative number to indicate no line number.
     FimoI32 line_number;
-} FimoTracingMetadata;
+    /// Level at which to trace the event.
+    FimoTracingLevel level;
+} FimoTracingEventInfo;
 
-/// Descriptor of a new span.
-typedef struct FimoTracingSpanDesc {
-    /// Pointer to a possible extension.
-    ///
-    /// Reserved for future use. Must be `NULL`.
-    const void *next;
-    /// Metadata of the span.
-    ///
-    /// Must not be `NULL`.
-    const FimoTracingMetadata *metadata;
-} FimoTracingSpanDesc;
-
-/// VTable of a span.
+/// A call stack.
 ///
-/// Adding fields to the vtable is not a breaking change.
-typedef struct FimoTracingSpanVTable {
-    /// Exits and destroys a span.
-    ///
-    /// The events won't occur inside the context of the exited span anymore. The span must be the
-    /// span at the top of the current call stack. The span may not be in use prior to a call to
-    /// this function, and may not be used afterwards.
-    ///
-    /// This function must be called while the owning call stack is bound by the current thread.
-    void (*drop)(void *handle);
-    /// Unwinds and destroys a span.
-    ///
-    /// The events won't occur inside the context of the exited span anymore. The span must be the
-    /// span at the top of the current call stack. The span may not be in use prior to a call to
-    /// this function, and may not be used afterwards.
-    ///
-    /// This function must be called while the owning call stack is bound by the current thread.
-    void (*drop_unwind)(void *handle);
-} FimoTracingSpanVTable;
-
-/// A period of time, during which events can occur.
-typedef struct FimoTracingSpan {
-    void *handle;
-    const FimoTracingSpanVTable *vtable;
-} FimoTracingSpan;
-
-/// An event to be traced.
-typedef struct FimoTracingEvent {
-    /// Pointer to a possible extension.
-    ///
-    /// Reserved for future use. Must be `NULL`.
-    const void *next;
-    /// Metadata of the event.
-    ///
-    /// Must not be `NULL`.
-    const FimoTracingMetadata *metadata;
-} FimoTracingEvent;
+/// Each call stack represents a unit of computation, like a thread. A call stack is active on only
+/// one thread at any given time. The active call stack of a thread can be swapped, which is useful
+/// for tracing where a `M:N` threading model is used. In that case, one would create one stack for
+/// each task, and activate it when the task is resumed.
+typedef struct FimoTracingCallStack FimoTracingCallStack;
 
 /// Type of a formatter function.
 ///
 /// The formatter function is allowed to format only part of the message, if it would not fit into
 /// the buffer.
-typedef void (*FimoTracingFormat)(char *buffer, FimoUSize buffer_len, const void *data, FimoUSize *written);
+typedef FimoUSize (*FimoTracingFormat)(char *buffer, FimoUSize buffer_len, const void *data);
 
-/// VTable of a tracing subscriber.
-///
-/// Adding/removing functionality to a subscriber through this table is a breaking change, as a
-/// subscriber may be implemented from outside the library.
-typedef struct FimoTracingSubscriberVTable {
-    /// Pointer to a possible extension.
-    ///
-    /// Reserved for future use. Must be `NULL`.
-    const void *next;
-    /// Increases the reference count of the subscriber.
-    void (*acquire)(void *ctx);
-    /// Decreases the reference count of the subscriber.
-    void (*release)(void *ctx);
-    /// Creates a new stack.
-    void *(*call_stack_create)(void *ctx, const FimoTime *time);
-    /// Drops an empty call stack.
-    ///
-    /// Calling this function reverts the creation of the call stack.
-    void (*call_stack_drop)(void *ctx, void *call_stack);
-    /// Destroys a stack.
-    void (*call_stack_destroy)(void *ctx, const FimoTime *time, void *call_stack, bool is_unwind);
-    /// Marks the stack as unblocked.
-    void (*call_stack_unblock)(void *ctx, const FimoTime *time, void *call_stack);
-    /// Marks the stack as suspended/blocked.
-    void (*call_stack_suspend)(void *ctx, const FimoTime *time, void *call_stack, bool mark_blocked);
-    /// Marks the stack as resumed.
-    void (*call_stack_resume)(void *ctx, const FimoTime *time, void *call_stack);
-    /// Creates a new span.
-    void (*span_push)(void *ctx, const FimoTime *time, const FimoTracingSpanDesc *span_desc, const char *msg,
-                      FimoUSize msg_len, void *call_stack);
-    /// Drops a newly created span.
-    ///
-    /// Calling this function reverts the creation of the span.
-    void (*span_drop)(void *ctx, void *call_stack);
-    /// Exits and destroys a span.
-    void (*span_pop)(void *ctx, const FimoTime *time, void *call_stack, bool is_unwind);
-    /// Emits an event.
-    void (*event_emit)(void *ctx, const FimoTime *time, void *call_stack, const FimoTracingEvent *event,
-                       const char *msg, FimoUSize msg_len);
-    /// Flushes the messages of the subscriber.
-    void (*flush)(void *ctx);
-} FimoTracingSubscriberVTable;
+/// Common header of all events.
+typedef enum FimoTracingEvent : FimoU32 {
+    FIMO_TRACING_EVENT_REGISTER_THREAD,
+    FIMO_TRACING_EVENT_UNREGISTER_THREAD,
+    FIMO_TRACING_EVENT_CREATE_CALL_STACK,
+    FIMO_TRACING_EVENT_DESTROY_CALL_STACK,
+    FIMO_TRACING_EVENT_UNBLOCK_CALL_STACK,
+    FIMO_TRACING_EVENT_SUSPEND_CALL_STACK,
+    FIMO_TRACING_EVENT_RESUME_CALL_STACK,
+    FIMO_TRACING_EVENT_ENTER_SPAN,
+    FIMO_TRACING_EVENT_EXIT_SPAN,
+    FIMO_TRACING_EVENT_LOG_MESSAGE,
+} FimoTracingEvent;
+
+typedef struct FimoTracingEventRegisterThread {
+    FimoTracingEvent event;
+    FimoInstant time;
+} FimoTracingEventRegisterThread;
+
+typedef struct FimoTracingEventUnregisterThread {
+    FimoTracingEvent event;
+    FimoInstant time;
+} FimoTracingEventUnregisterThread;
+
+typedef struct FimoTracingEventCreateCallStack {
+    FimoTracingEvent event;
+    FimoInstant time;
+} FimoTracingEventCreateCallStack;
+
+typedef struct FimoTracingEventDestroyCallStack {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+} FimoTracingEventDestroyCallStack;
+
+typedef struct FimoTracingEventUnblockCallStack {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+} FimoTracingEventUnblockCallStack;
+
+typedef struct FimoTracingEventSuspendCallStack {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+    bool mark_blocked;
+} FimoTracingEventSuspendCallStack;
+
+typedef struct FimoTracingEventResumeCallStack {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+} FimoTracingEventResumeCallStack;
+
+typedef struct FimoTracingEventEnterSpan {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+    const FimoTracingEventInfo *span;
+    const char *message;
+    FimoUSize message_length;
+} FimoTracingEventEnterSpan;
+
+typedef struct FimoTracingEventExitSpan {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+    const FimoTracingEventInfo *span;
+    bool is_unwinding;
+} FimoTracingEventExitSpan;
+
+typedef struct FimoTracingEventLogMessage {
+    FimoTracingEvent event;
+    void *stack;
+    FimoInstant time;
+    const FimoTracingEventInfo *info;
+    const char *message;
+    FimoUSize message_length;
+} FimoTracingEventLogMessage;
 
 /// A subscriber for tracing events.
 ///
@@ -205,10 +155,10 @@ typedef struct FimoTracingSubscriberVTable {
 /// subscribers. Therefore it does not consume any events on its own, which is the task of the
 /// subscribers. Subscribers may utilize the events in any way they deem fit.
 typedef struct FimoTracingSubscriber {
-    /// Pointer to the subscriber.
+    /// Pointer to the subscriber (not `Null`).
     void *ptr;
-    /// Pointer to the vtable of the subscriber (not `Null`).
-    const FimoTracingSubscriberVTable *vtable;
+    /// Event handler of the subscriber (not `Null`).
+    void *(*on_event)(void *data, const FimoTracingEvent *event);
 } FimoTracingSubscriber;
 
 /// Default subscriber.
@@ -235,58 +185,76 @@ typedef struct FimoTracingConfig {
 ///
 /// Changing this definition is a breaking change.
 typedef struct FimoTracingVTable {
-    /// Creates a new empty call stack.
-    ///
-    /// If successful, the new call stack is marked as suspended. The new call stack is not set to
-    /// be the active call stack.
-    FimoTracingCallStack (*create_call_stack)(void *ctx);
-    /// Marks the current call stack as being suspended.
-    ///
-    /// While suspended, the call stack can not be utilized for tracing messages. The call stack
-    /// optionally also be marked as being blocked. In that case, the call stack must be unblocked
-    /// prior to resumption.
-    void (*suspend_current_call_stack)(void *ctx, bool block);
-    /// Marks the current call stack as being resumed.
-    ///
-    /// Once resumed, the context can be used to trace messages. To be successful, the current call
-    /// stack must be suspended and unblocked.
-    void (*resume_current_call_stack)(void *ctx);
-    /// Creates a new span with a custom formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
-    /// the message after reaching that specified size. The `desc` must remain valid until the span
-    /// is destroyed.
-    FimoTracingSpan (*span_create)(void *ctx, const FimoTracingSpanDesc *span_desc, FimoTracingFormat format,
-                                   const void *data);
-    /// Emits a new event with a custom formatter.
-    ///
-    /// The subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
-    /// the message after reaching that specified size.
-    void (*event_emit)(void *ctx, const FimoTracingEvent *event, FimoTracingFormat format, const void *data);
     /// Checks whether the tracing subsystem is enabled.
     ///
     /// This function can be used to check whether to call into the subsystem at all. Calling this
     /// function is not necessary, as the remaining functions of the subsystem are guaranteed to return
     /// default values, in case the subsystem is disabled.
-    bool (*is_enabled)(void *ctx);
+    bool (*is_enabled)();
     /// Registers the calling thread with the tracing subsystem.
     ///
-    /// The tracing of the subsystem is opt-in on a per thread basis, where unregistered threads will
+    /// The instrumentation is opt-in on a per thread basis, where unregistered threads will
     /// behave as if the subsystem was disabled. Once registered, the calling thread gains access to
     /// the tracing subsystem and is assigned a new empty call stack. A registered thread must be
     /// unregistered from the tracing subsystem before the context is destroyed, by terminating the
-    /// tread, or by manually calling `unregister_thread()`.
-    void (*register_thread)(void *ctx);
+    /// tread, or by manually unregistering it. A registered thread may not try to register itself.
+    void (*register_thread)();
     /// Unregisters the calling thread from the tracing subsystem.
     ///
     /// Once unregistered, the calling thread looses access to the tracing subsystem until it is
     /// registered again. The thread can not be unregistered until the call stack is empty.
-    void (*unregister_thread)(void *ctx);
-    /// Flushes the streams used for tracing.
+    void (*unregister_thread)();
+    /// Creates a new empty call stack.
     ///
-    /// If successful, any unwritten data is written out by the individual subscribers.
-    void (*flush)(void *ctx);
+    /// The call stack is marked as suspended.
+    FimoTracingCallStack *(*create_call_stack)();
+    /// Destroys a call stack.
+    ///
+    /// If `do_abort` is `false`, it marks the completion of a task. Before calling this function,
+    /// the call stack must be empty, i.e., there must be no active spans on the stack.
+    ///
+    /// If `do_abort` is `true`, it marks that the task was aborted.
+    ///
+    /// Before calling this function,the call stack must not be active, and it may not be used
+    /// afterwards. The active call stack of the thread is destroyed automatically, on thread exit
+    /// or during destruction of the context.
+    void (*destroy_call_stack)(FimoTracingCallStack *stack, bool do_abort);
+    /// Switches the call stack of the current thread.
+    ///
+    /// This call stack will be used as the active call stack of the calling thread. The old call
+    /// stack is returned, enabling the caller to switch back to it afterwards. This call stack
+    /// must be in a suspended, but unblocked, state and not be active. The active call stack must
+    /// also be in a suspended state, but may also be blocked.
+    FimoTracingCallStack *(*swap_call_stack)(FimoTracingCallStack *stack);
+    /// Unblocks the blocked call stack.
+    ///
+    /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
+    /// marked as blocked.
+    void (*unblock_call_stack)(FimoTracingCallStack *stack);
+    /// Marks the current call stack as being suspended.
+    ///
+    /// While suspended, the call stack can not be utilized for tracing messages. The call stack
+    /// optionally also be marked as being blocked. In that case, the call stack must be unblocked
+    /// prior to resumption.
+    void (*suspend_current_call_stack)(bool mark_blocked);
+    /// Marks the current call stack as being resumed.
+    ///
+    /// Once resumed, the context can be used to trace messages. To be successful, the current call
+    /// stack must be suspended and unblocked.
+    void (*resume_current_call_stack)();
+    /// Enters the span.
+    ///
+    /// Once entered, the span is used as the context for succeeding events. Each `enter` operation
+    /// must be accompanied with a `exit` operation in reverse entering order. A span may be entered
+    /// multiple times. The formatting function may be used to assign a name to the entered span.
+    void (*enter_span)(const FimoTracingEventInfo *id, FimoTracingFormat fmt, const void *fmt_data);
+    /// Exits an entered span.
+    ///
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack.
+    void (*exit_span)(const FimoTracingEventInfo *id);
+    /// Logs a message with a custom format function.
+    void (*log_message)(const FimoTracingEventInfo *info, FimoTracingFormat fmt, const void *fmt_data);
 } FimoTracingVTable;
 
 #ifdef __cplusplus

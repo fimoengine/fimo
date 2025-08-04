@@ -557,10 +557,10 @@ pub fn lock(self: *const Self) *Inner {
 }
 
 fn addNamespace(self: *const Self, namespace: []const u8) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "adding namespace to instance, instance='{s}', namespace='{s}'",
         .{ self.info.name, namespace },
-        @src(),
     );
 
     if (std.mem.eql(u8, namespace, modules.global_namespace)) return error.NotPermitted;
@@ -579,10 +579,10 @@ fn addNamespace(self: *const Self, namespace: []const u8) !void {
 }
 
 fn removeNamespace(self: *const Self, namespace: []const u8) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "removing namespace from instance, instance='{s}', namespace='{s}'",
         .{ self.info.name, namespace },
-        @src(),
     );
 
     if (std.mem.eql(u8, namespace, modules.global_namespace)) return error.NotPermitted;
@@ -601,10 +601,10 @@ fn removeNamespace(self: *const Self, namespace: []const u8) !void {
 }
 
 fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "adding dependency to instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
-        @src(),
     );
 
     const info_handle = Self.fromInfoPtr(info);
@@ -623,10 +623,10 @@ fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
 }
 
 fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "removing dependency from instance, instance='{s}', other='{s}'",
         .{ self.info.name, info.name },
-        @src(),
     );
 
     const info_handle = Self.fromInfoPtr(info);
@@ -645,10 +645,10 @@ fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
 }
 
 fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{f}'",
         .{ self.info.name, name, namespace, version },
-        @src(),
     );
     modules.mutex.lock();
     defer modules.mutex.unlock();
@@ -688,10 +688,10 @@ fn readParameter(
     module: []const u8,
     parameter: []const u8,
 ) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "reading dependency parameter, reader='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
         .{ self.info.name, value, @tagName(@"type"), module, parameter },
-        @src(),
     );
     const inner = self.lock();
     defer inner.unlock();
@@ -712,10 +712,10 @@ fn writeParameter(
     module: []const u8,
     parameter: []const u8,
 ) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "writing dependency parameter, writer='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
         .{ self.info.name, value, @tagName(@"type"), module, parameter },
-        @src(),
     );
     const inner = self.lock();
     defer inner.unlock();
@@ -790,11 +790,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     fn init(handle: *const Self) !void {
-        tracing.emitTraceSimple(
-            "enqueueing unload of instance, instance='{s}'",
-            .{handle.info.name},
-            @src(),
-        );
+        tracing.logTrace(@src(), "enqueueing unload of instance, instance='{s}'", .{handle.info.name});
         handle.ref();
 
         const f = EnqueueUnloadOp.init(@This(){
@@ -816,30 +812,26 @@ const EnqueueUnloadOp = FSMFuture(struct {
     }
 
     pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
-        tracing.emitTraceSimple(
+        tracing.logTrace(
+            @src(),
             "attempting to unload instance, instance=`{s}`",
             .{self.handle.info.name},
-            @src(),
         );
 
         const inner = self.handle.lock();
         defer inner.unlock();
         switch (inner.checkAsyncUnload(waker)) {
             .noop => {
-                tracing.emitTraceSimple(
+                tracing.logTrace(
+                    @src(),
                     "skipping unload, already unloaded, instance=`{s}`",
                     .{self.handle.info.name},
-                    @src(),
                 );
                 self.ret = {};
                 return .ret;
             },
             .wait => {
-                tracing.emitTraceSimple(
-                    "unload blocked, instance=`{s}`",
-                    .{self.handle.info.name},
-                    @src(),
-                );
+                tracing.logTrace(@src(), "unload blocked, instance=`{s}`", .{self.handle.info.name});
                 return .yield;
             },
             .unload => return .next,
@@ -857,12 +849,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
         modules.mutex.lock();
         defer modules.mutex.unlock();
 
-        tracing.emitTraceSimple(
-            "unloading instance, instance=`{s}`",
-            .{self.handle.info.name},
-            @src(),
-        );
-
+        tracing.logTrace(@src(), "unloading instance, instance=`{s}`", .{self.handle.info.name});
         const inner = self.handle.lock();
         modules.removeInstance(inner) catch |err| @panic(@errorName(err));
         inner.stop();
@@ -962,7 +949,7 @@ pub const InitExportedOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: Error) void {
-        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.logStackTrace(@src(), tr.*);
         self.ret = err;
     }
 
@@ -1211,7 +1198,7 @@ pub const StartInstanceOp = FSMFuture(struct {
     pub const __no_abort = true;
 
     pub fn __set_err(self: *@This(), trace: ?*std.builtin.StackTrace, err: pub_context.Error) void {
-        if (trace) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+        if (trace) |tr| tracing.logStackTrace(@src(), tr.*);
         self.ret = err;
     }
 
@@ -1287,10 +1274,10 @@ const InstanceVTableImpl = struct {
     ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const namespace_ = std.mem.span(namespace);
-        tracing.emitTraceSimple(
+        tracing.logTrace(
+            @src(),
             "querying namespace info, instance='{s}', namespace='{s}'",
             .{ ctx.info.name, namespace },
-            @src(),
         );
 
         const inner = self.lock();
@@ -1313,7 +1300,7 @@ const InstanceVTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
 
         self.addNamespace(namespace_) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -1327,7 +1314,7 @@ const InstanceVTableImpl = struct {
         const namespace_ = std.mem.span(namespace);
 
         self.removeNamespace(namespace_) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -1341,10 +1328,10 @@ const InstanceVTableImpl = struct {
     ) callconv(.c) pub_context.Status {
         const self = Self.fromInstancePtr(ctx);
         const dependency = std.mem.span(info.name);
-        tracing.emitTraceSimple(
+        tracing.logTrace(
+            @src(),
             "querying dependency info, instance='{s}', other='{s}'",
             .{ ctx.info.name, dependency },
-            @src(),
         );
 
         const inner = self.lock();
@@ -1366,7 +1353,7 @@ const InstanceVTableImpl = struct {
         const self = Self.fromInstancePtr(ctx);
 
         self.addDependency(info) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -1379,7 +1366,7 @@ const InstanceVTableImpl = struct {
         const self = Self.fromInstancePtr(ctx);
 
         self.removeDependency(info) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -1398,7 +1385,7 @@ const InstanceVTableImpl = struct {
         const version_ = Version.initC(version);
 
         symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -1416,7 +1403,7 @@ const InstanceVTableImpl = struct {
         const parameter_ = std.mem.span(parameter);
 
         self.readParameter(value, @"type", module_, parameter_) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -1434,7 +1421,7 @@ const InstanceVTableImpl = struct {
         const parameter_ = std.mem.span(parameter);
 
         self.writeParameter(value, @"type", module_, parameter_) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };

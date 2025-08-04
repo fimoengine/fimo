@@ -6,7 +6,6 @@ const DoublyLinkedList = std.DoublyLinkedList;
 const AnyResult = @import("../../AnyError.zig").AnyResult;
 const ctx = @import("../../context.zig");
 const pub_tasks = @import("../../tasks.zig");
-const pub_tracing = @import("../../tracing.zig");
 const RefCount = @import("../RefCount.zig");
 const tasks = @import("../tasks.zig");
 const tracing = @import("../tracing.zig");
@@ -14,7 +13,7 @@ const tracing = @import("../tracing.zig");
 const Self = @This();
 
 refcount: RefCount = .{},
-call_stack: pub_tracing.CallStack,
+call_stack: *tracing.CallStack,
 local_result: AnyResult = .ok,
 
 mutex: Mutex = .{},
@@ -337,8 +336,8 @@ pub fn init(
     std.debug.assert(std.mem.isAligned(@intFromPtr(buffer_data), data_alignment));
     std.debug.assert(std.mem.isAligned(@intFromPtr(result_data), result_alignment));
 
-    const call_stack = tracing.createCallStack();
-    errdefer call_stack.deinit();
+    const call_stack = tracing.CallStack.init();
+    errdefer call_stack.abort();
 
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
@@ -480,17 +479,17 @@ fn enqueue(self: *Self) void {
 }
 
 pub fn poll(self: *Self) void {
-    tracing.suspendCurrentCallStack(false);
-    const main_stack = self.call_stack.replaceActive();
-    tracing.resumeCurrentCallStack();
+    tracing.CallStack.suspendCurrent(false);
+    const main_stack = self.call_stack.swapCurrent();
+    tracing.CallStack.resumeCurrent();
 
     const old_result = ctx.replaceResult(self.local_result);
     const completed = self.poll_fn(self.data, self.asWaker(), self.result);
     self.local_result = ctx.replaceResult(old_result);
 
-    tracing.suspendCurrentCallStack(false);
-    self.call_stack = main_stack.replaceActive();
-    tracing.resumeCurrentCallStack();
+    tracing.CallStack.suspendCurrent(false);
+    self.call_stack = main_stack.swapCurrent();
+    tracing.CallStack.resumeCurrent();
 
     switch (self.state.dequeue(completed)) {
         .noop => {},
@@ -498,7 +497,7 @@ pub fn poll(self: *Self) void {
             if (self.cleanup_data_fn) |f| f(self.data);
             if (detached) if (self.cleanup_result_fn) |f| f(self.result);
             self.state.wake();
-            self.call_stack.deinit();
+            self.call_stack.finish();
             self.local_result.deinit();
             decreaseCount();
             self.unref();

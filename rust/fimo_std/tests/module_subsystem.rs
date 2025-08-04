@@ -5,8 +5,8 @@ use std::{pin::Pin, ptr::NonNull};
 
 use fimo_std::{
     context::{ContextBuilder, Error},
-    emit_info,
     error::AnyError,
+    log_info,
     modules::{
         exports::{Builder, SymbolLinkage},
         info::Info,
@@ -48,7 +48,7 @@ const _: &exports::Export<'_> = Builder::<AView<'_>, A>::new(c"a")
             >::new(add))
         },
         |_instance: Pin<&Stage1InstanceView<'_, AView<'_>>>, _f| {
-            emit_info!("dropping \"a2\"");
+            log_info!("dropping \"a2\"");
         },
     )
     .build();
@@ -181,10 +181,10 @@ impl CState {
         parameters.pri_pri().write(8);
 
         let resources = instance.resources();
-        emit_info!("empty: {}", resources.empty());
-        emit_info!("a: {}", resources.a());
-        emit_info!("b: {}", resources.b());
-        emit_info!("img: {}", resources.img());
+        log_info!("empty: {}", resources.empty());
+        log_info!("a: {}", resources.a());
+        log_info!("b: {}", resources.b());
+        log_info!("img: {}", resources.img());
 
         let imports = instance.imports();
         assert_eq!(**imports.a0(), 5);
@@ -193,7 +193,7 @@ impl CState {
         assert_eq!(**imports.b1(), 77);
 
         let info = instance.info();
-        emit_info!("{info:?}");
+        log_info!("{info:?}");
 
         Ok(NonNull::from(&CState))
     }
@@ -201,70 +201,71 @@ impl CState {
     fn deinit(_instance: Pin<&Stage0InstanceView<'_, CView<'_>>>, _value: NonNull<Self>) {}
 
     async fn on_start(instance: Pin<&CView<'_>>) -> Result<(), std::convert::Infallible> {
-        emit_info!("starting instance: {:?}", instance.info());
+        log_info!("starting instance: {:?}", instance.info());
         Ok(())
     }
 
     fn on_stop(instance: Pin<&CView<'_>>) {
-        emit_info!("stopping instance: {:?}", instance.info());
+        log_info!("stopping instance: {:?}", instance.info());
     }
 }
 
 #[test]
 fn load_modules() -> Result<(), Error> {
-    let mut context = ContextBuilder::new()
+    ContextBuilder::new()
         .with_tracing_config(
             Config::default()
                 .with_max_level(Level::Trace)
                 .with_subscribers(&[default_subscriber()]),
         )
-        .build()?;
-    unsafe { context.enable_cleanup() };
-    let _access = ThreadAccess::new();
+        .enter(|context| {
+            unsafe { context.enable_cleanup() };
+            let _access = ThreadAccess::new();
 
-    let blocking = BlockingContext::new()?;
-    blocking.block_on(async move {
-        let set = LoadingSet::new()?;
-        set.view().add_modules_from_local(|_| FilterRequest::Load)?;
-        set.view().commit().await?;
+            let blocking = BlockingContext::new()?;
+            blocking.block_on(async move {
+                let set = LoadingSet::new()?;
+                set.view().add_modules_from_local(|_| FilterRequest::Load)?;
+                set.view().commit().await?;
 
-        let instance = RootInstance::new()?;
-        let a = Info::find_by_name(c"a")?;
-        let b = Info::find_by_name(c"b")?;
-        let c = Info::find_by_name(c"c")?;
-        assert!(instance.info().is_loaded());
-        assert!(a.view().is_loaded());
-        assert!(b.view().is_loaded());
-        assert!(c.view().is_loaded());
+                let instance = RootInstance::new()?;
+                let a = Info::find_by_name(c"a")?;
+                let b = Info::find_by_name(c"b")?;
+                let c = Info::find_by_name(c"c")?;
+                assert!(instance.info().is_loaded());
+                assert!(a.view().is_loaded());
+                assert!(b.view().is_loaded());
+                assert!(c.view().is_loaded());
 
-        instance.add_dependency(&a)?;
-        instance.add_dependency(&b)?;
-        instance.add_dependency(&c)?;
+                instance.add_dependency(&a)?;
+                instance.add_dependency(&b)?;
+                instance.add_dependency(&c)?;
 
-        let a_0 = instance.load_symbol::<A0>()?;
-        assert_eq!(**a_0, 5);
+                let a_0 = instance.load_symbol::<A0>()?;
+                assert_eq!(**a_0, 5);
 
-        let a_2 = instance.load_symbol::<A2>()?;
-        assert_eq!(a_2.call(2, 3), 5);
+                let a_2 = instance.load_symbol::<A2>()?;
+                assert_eq!(a_2.call(2, 3), 5);
 
-        assert!(instance.load_symbol::<B0>().is_err());
-        instance.add_namespace(B0::NAMESPACE)?;
-        assert!(instance.load_symbol::<B0>().is_ok());
+                assert!(instance.load_symbol::<B0>().is_err());
+                instance.add_namespace(B0::NAMESPACE)?;
+                assert!(instance.load_symbol::<B0>().is_ok());
 
-        let info = instance.info().to_info();
-        if !info.view().try_ref_instance_strong() {
-            return Err(AnyError::new("failed to acquire module").into());
-        }
+                let info = instance.info().to_info();
+                if !info.view().try_ref_instance_strong() {
+                    return Err(AnyError::new("failed to acquire module").into());
+                }
 
-        drop(instance);
-        assert!(a.view().is_loaded());
-        assert!(b.view().is_loaded());
-        assert!(c.view().is_loaded());
+                drop(instance);
+                assert!(a.view().is_loaded());
+                assert!(b.view().is_loaded());
+                assert!(c.view().is_loaded());
 
-        unsafe {
-            info.view().unref_instance_strong();
-        }
+                unsafe {
+                    info.view().unref_instance_strong();
+                }
 
-        Ok(())
-    })
+                Ok(())
+            })
+        })?
 }

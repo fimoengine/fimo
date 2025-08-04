@@ -17,183 +17,75 @@ pub const Level = enum(i32) {
     trace,
 };
 
-/// Metadata for a span and event.
-pub const Metadata = extern struct {
-    next: ?*const anyopaque = null,
+/// Basic information regarding a tracing event.
+///
+/// The subsystem expects instances of this struct to have a static lifetime.
+pub const EventInfo = extern struct {
     name: [*:0]const u8,
     target: [*:0]const u8,
-    level: Level,
+    scope: [*:0]const u8,
     file_name: ?[*:0]const u8 = null,
     line_number: i32 = -1,
+    level: Level,
+
+    /// Constructs a new info instance.
+    pub fn at(
+        comptime loc: std.builtin.SourceLocation,
+        comptime scope: @Type(.enum_literal),
+        comptime lvl: Level,
+    ) EventInfo {
+        return .{
+            .name = loc.fn_name,
+            .target = loc.module,
+            .scope = if (scope == .default) "" else @tagName(scope),
+            .file_name = loc.file,
+            .line_number = @intCast(loc.line),
+            .level = lvl,
+        };
+    }
 };
 
 /// A period of time, during which events can occur.
-pub const Span = extern struct {
-    handle: *anyopaque,
-    vtable: *const Span.VTable,
+pub const Span = struct {
+    id: *const EventInfo,
 
-    /// VTable of a span.
+    /// Constructs a new span.
     ///
-    /// Adding fields to the vtable is not a breaking change.
-    pub const VTable = extern struct {
-        deinit: *const fn (ptr: *anyopaque) callconv(.c) void,
-        deinit_abort: *const fn (ptr: *anyopaque) callconv(.c) void,
-    };
-
-    /// Creates a new span with the default formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// message is formatted with the default formatter of the zig standard library. The message
-    /// may be cut of, if the length exceeds the internal formatting buffer size.
-    pub inline fn init(
-        name: ?[:0]const u8,
-        target: ?[:0]const u8,
-        level: Level,
-        location: std.builtin.SourceLocation,
-        comptime fmt: []const u8,
-        args: anytype,
+    /// The event associated with the span is embedded into the callers binary, and is not emitted
+    /// to the subsystem.
+    pub inline fn at(
+        comptime loc: std.builtin.SourceLocation,
+        comptime scope: @Type(.enum_literal),
+        comptime lvl: Level,
     ) Span {
-        const desc = &struct {
-            var desc = SpanDesc{
-                .metadata = &.{
-                    .name = name orelse location.fn_name,
-                    .target = target orelse location.module,
-                    .level = level,
-                    .file_name = location.file,
-                    .line_number = @intCast(location.line),
-                },
-            };
-        }.desc;
-        return Span.initCustom(
-            desc,
-            stdFormatter(fmt, @TypeOf(args)),
-            &args,
-        );
+        const Global = struct {
+            const embedded: EventInfo = .at(loc, scope, lvl);
+        };
+        return .{ .id = &Global.embedded };
     }
 
-    /// Creates a new span with a custom formatter and enters it.
+    /// Enters the span.
     ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
-    /// the message after reaching that specified size. The `desc` must remain valid until the span
-    /// is destroyed.
-    pub fn initCustom(
-        desc: *const SpanDesc,
+    /// Once entered, the span is used as the context for succeeding events. Each `enter` operation
+    /// must be accompanied with a `exit` operation in reverse entering order. A span may be entered
+    /// multiple times. The formatting function may be used to assign a name to the entered span.
+    pub fn enter(
+        self: Span,
         formatter: *const Formatter,
-        data: ?*const anyopaque,
-    ) Span {
+        formatter_data: *const anyopaque,
+    ) void {
         const handle = ctx.Handle.getHandle();
-        return handle.tracing_v0.span_create(desc, formatter, data);
+        handle.tracing_v0.enter_span(self.id, formatter, formatter_data);
     }
 
-    /// Creates a new error span with the default formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// message is formatted with the default formatter of the zig standard library. The message
-    /// may be cut of, if the length exceeds the internal formatting buffer size.
-    pub inline fn initErr(
-        name: ?[:0]const u8,
-        target: ?[:0]const u8,
-        location: std.builtin.SourceLocation,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) Span {
-        return Span.init(name, target, .err, location, fmt, args);
-    }
-
-    /// Creates a new warn span with the default formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// message is formatted with the default formatter of the zig standard library. The message
-    /// may be cut of, if the length exceeds the internal formatting buffer size.
-    pub inline fn initWarn(
-        name: ?[:0]const u8,
-        target: ?[:0]const u8,
-        location: std.builtin.SourceLocation,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) Span {
-        return Span.init(name, target, .warn, location, fmt, args);
-    }
-
-    /// Creates a new info span with the default formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// message is formatted with the default formatter of the zig standard library. The message
-    /// may be cut of, if the length exceeds the internal formatting buffer size.
-    pub inline fn initInfo(
-        name: ?[:0]const u8,
-        target: ?[:0]const u8,
-        location: std.builtin.SourceLocation,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) Span {
-        return Span.init(name, target, .info, location, fmt, args);
-    }
-
-    /// Creates a new debug span with the default formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// message is formatted with the default formatter of the zig standard library. The message
-    /// may be cut of, if the length exceeds the internal formatting buffer size.
-    pub inline fn initDebug(
-        name: ?[:0]const u8,
-        target: ?[:0]const u8,
-        location: std.builtin.SourceLocation,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) Span {
-        return Span.init(name, target, .debug, location, fmt, args);
-    }
-
-    /// Creates a new trace span with the default formatter and enters it.
-    ///
-    /// If successful, the newly created span is used as the context for succeeding events. The
-    /// message is formatted with the default formatter of the zig standard library. The message
-    /// may be cut of, if the length exceeds the internal formatting buffer size.
-    pub inline fn initTrace(
-        name: ?[:0]const u8,
-        target: ?[:0]const u8,
-        location: std.builtin.SourceLocation,
-        comptime fmt: []const u8,
-        args: anytype,
-    ) Span {
-        return Span.init(name, target, .trace, location, fmt, args);
-    }
-
-    /// Exits and destroys a span.
+    /// Exits an entered span.
     ///
     /// The events won't occur inside the context of the exited span anymore. The span must be the
-    /// span at the top of the current call stack. The span may not be in use prior to a call to
-    /// this function, and may not be used afterwards.
-    ///
-    /// This function must be called while the owning call stack is bound by the current thread.
-    pub fn deinit(self: Span) void {
-        self.vtable.deinit(self.handle);
+    /// span at the top of the current call stack.
+    pub fn exit(self: Span) void {
+        const handle = ctx.Handle.getHandle();
+        handle.tracing_v0.exit_span(self.id);
     }
-
-    /// Unwinds and destroys a span.
-    ///
-    /// The events won't occur inside the context of the exited span anymore. The span must be the
-    /// span at the top of the current call stack. The span may not be in use prior to a call to
-    /// this function, and may not be used afterwards.
-    ///
-    /// This function must be called while the owning call stack is bound by the current thread.
-    pub fn deinitAbort(self: Span) void {
-        self.vtable.deinit_abort(self.handle);
-    }
-};
-
-/// Descriptor of a new span.
-pub const SpanDesc = extern struct {
-    next: ?*const anyopaque = null,
-    metadata: *const Metadata,
-};
-
-/// An event to be traced.
-pub const Event = extern struct {
-    next: ?*const anyopaque = null,
-    metadata: *const Metadata,
 };
 
 /// A call stack.
@@ -202,25 +94,11 @@ pub const Event = extern struct {
 /// one thread at any given time. The active call stack of a thread can be swapped, which is useful
 /// for tracing where a `M:N` threading model is used. In that case, one would create one stack for
 /// each task, and activate it when the task is resumed.
-pub const CallStack = extern struct {
-    handle: *anyopaque,
-    vtable: *const CallStack.VTable,
-
-    /// VTable of a call stack.
-    ///
-    /// Adding fields to the vtable is not a breaking change.
-    pub const VTable = extern struct {
-        deinit: *const fn (handle: *anyopaque) callconv(.c) void,
-        deinit_abort: *const fn (handle: *anyopaque) callconv(.c) void,
-        replace_active: *const fn (handle: *anyopaque) callconv(.c) CallStack,
-        unblock: *const fn (handle: *anyopaque) callconv(.c) void,
-    };
-
+pub const CallStack = opaque {
     /// Creates a new empty call stack.
     ///
-    /// If successful, the new call stack is marked as suspended. The new call stack is not set to
-    /// be the active call stack.
-    pub fn init() CallStack {
+    /// The call stack is marked as suspended.
+    pub fn init() *CallStack {
         const handle = ctx.Handle.getHandle();
         return handle.tracing_v0.create_call_stack();
     }
@@ -228,39 +106,41 @@ pub const CallStack = extern struct {
     /// Destroys an empty call stack.
     ///
     /// Marks the completion of a task. Before calling this function, the call stack must be empty,
-    /// i.e., there must be no active spans on the stack, and must not be active. If successful,
-    /// the call stack may not be used afterwards. The active call stack of the thread is destroyed
-    /// automatically, on thread exit or during destruction of the context. The caller must own the
-    /// call stack uniquely.
-    pub fn deinit(self: CallStack) void {
-        self.vtable.deinit(self.handle);
+    /// i.e., there must be no active spans on the stack, and must not be active. The call stack may
+    /// not be used afterwards. The active call stack of the thread is destroyed automatically, on
+    /// thread exit or during destruction of the context.
+    pub fn finish(self: *CallStack) void {
+        const handle = ctx.Handle.getHandle();
+        handle.tracing_v0.destroy_call_stack(self, false);
     }
 
-    /// Unwinds and destroys a call stack.
+    /// Unwinds and destroys the call stack.
     ///
-    /// Marks that the task was aborted. Before calling this function, the call stack  must not be
-    /// active. If successful, the call stack may not be used afterwards. The caller must own the
-    /// call stack uniquely.
-    pub fn deinitAbort(self: CallStack) void {
-        self.vtable.deinit_abort(self.handle);
+    /// Marks that the task was aborted. Before calling this function, the call stack must not be
+    /// active. The call stack may not be used afterwards.
+    pub fn abort(self: *CallStack) void {
+        const handle = ctx.Handle.getHandle();
+        handle.tracing_v0.destroy_call_stack(self, true);
     }
 
     /// Switches the call stack of the current thread.
     ///
-    /// If successful, this call stack will be used as the active call stack of the calling thread.
-    /// The old call stack is returned, enabling the caller to switch back to it afterwards. This
-    /// call stack must be in a suspended, but unblocked, state and not be active. The active call
-    /// stack must also be in a suspended state, but may also be blocked.
-    pub fn replaceActive(self: CallStack) CallStack {
-        return self.vtable.replace_active(self.handle);
+    /// This call stack will be used as the active call stack of the calling thread. The old call
+    /// stack is returned, enabling the caller to switch back to it afterwards. This call stack
+    /// must be in a suspended, but unblocked, state and not be active. The active call stack must
+    /// also be in a suspended state, but may also be blocked.
+    pub fn swapCurrent(self: *CallStack) *CallStack {
+        const handle = ctx.Handle.getHandle();
+        return handle.tracing_v0.swap_call_stack(self);
     }
 
-    /// Unblocks a blocked call stack.
+    /// Unblocks the blocked call stack.
     ///
     /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
     /// marked as blocked.
-    pub fn unblock(self: CallStack) void {
-        self.vtable.unblock(self.handle);
+    pub fn unblock(self: *CallStack) void {
+        const handle = ctx.Handle.getHandle();
+        return handle.tracing_v0.unblock_call_stack(self);
     }
 
     /// Marks the current call stack as being suspended.
@@ -283,6 +163,420 @@ pub const CallStack = extern struct {
     }
 };
 
+/// Returns a scoped tracing namespace that emits all events using the scope provided here.
+pub fn scoped(scope: @Type(.enum_literal)) type {
+    return struct {
+        /// Logs a error message.
+        pub inline fn logErr(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .err, fmt, args);
+        }
+
+        /// Logs a warning message.
+        pub inline fn logWarn(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .warn, fmt, args);
+        }
+
+        /// Logs an info message.
+        pub inline fn logInfo(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .info, fmt, args);
+        }
+
+        /// Logs a debug message.
+        pub inline fn logDebug(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .debug, fmt, args);
+        }
+
+        /// Logs a trace message.
+        pub inline fn logTrace(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .trace, fmt, args);
+        }
+
+        /// Logs the current stack trace as an error.
+        pub inline fn logStackTrace(
+            comptime loc: std.builtin.SourceLocation,
+            stack_trace: std.builtin.StackTrace,
+        ) void {
+            @This().logWithFormatter(loc, .err, stackTraceFormatter, &stack_trace);
+        }
+
+        /// Logs a message using to the zig formatting logic.
+        pub inline fn log(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().logWithFormatter(loc, lvl, stdFormatter(fmt, @TypeOf(args)), &args);
+        }
+
+        /// Logs a message with a custom format function.
+        pub inline fn logWithFormatter(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            formatter: *const Formatter,
+            formatter_data: *const anyopaque,
+        ) void {
+            const Global = struct {
+                const embedded: EventInfo = .at(loc, scope, lvl);
+            };
+            const handle = ctx.Handle.getHandle();
+            handle.tracing_v0.log_message(&Global.embedded, formatter, formatter_data);
+        }
+
+        /// Creates and enters an error span.
+        pub inline fn spanErr(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .err);
+        }
+
+        /// Creates and enters an error span.
+        pub inline fn spanErrNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .err, fmt, args);
+        }
+
+        /// Creates and enters a warning span.
+        pub inline fn spanWarn(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .warn);
+        }
+
+        /// Creates and enters a warning span.
+        pub inline fn spanWarnNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .warn, fmt, args);
+        }
+
+        /// Creates and enters an info span.
+        pub inline fn spanInfo(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .info);
+        }
+
+        /// Creates and enters an info span.
+        pub inline fn spanInfoNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .info, fmt, args);
+        }
+
+        /// Creates and enters a debug span.
+        pub inline fn spanDebug(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .debug);
+        }
+
+        /// Creates and enters a debug span.
+        pub inline fn spanDebugNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .debug, fmt, args);
+        }
+
+        /// Creates and enters a trace span.
+        pub inline fn spanTrace(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .trace);
+        }
+
+        /// Creates and enters a trace span.
+        pub inline fn spanTraceNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .trace, fmt, args);
+        }
+
+        /// Creates and enters a span.
+        pub inline fn span(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+        ) Span {
+            return @This().spanNamed(loc, lvl, "", .{});
+        }
+
+        /// Creates and enters a span using to the zig formatting logic.
+        pub inline fn spanNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamedWithFormatter(loc, lvl, stdFormatter(fmt, @TypeOf(args)), &args);
+        }
+
+        /// Creates and enters a span with a custom format function.
+        pub inline fn spanNamedWithFormatter(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            formatter: *const Formatter,
+            formatter_data: *const anyopaque,
+        ) Span {
+            const sp: Span = .at(loc, scope, lvl);
+            sp.enter(formatter, formatter_data);
+            return sp;
+        }
+    };
+}
+
+/// The default scoped tracing namespace.
+pub const default = scoped(default_trace_scope);
+pub const default_trace_scope = .default;
+
+pub const logErr = default.logErr;
+pub const logWarn = default.logWarn;
+pub const logInfo = default.logInfo;
+pub const logDebug = default.logDebug;
+pub const logTrace = default.logTrace;
+pub const logStackTrace = default.logStackTrace;
+pub const log = default.log;
+pub const logWithFormatter = default.logWithFormatter;
+pub const spanErr = default.spanErr;
+pub const spanErrNamed = default.spanErrNamed;
+pub const spanWarn = default.spanWarn;
+pub const spanWarnNamed = default.spanWarnNamed;
+pub const spanInfo = default.spanInfo;
+pub const spanInfoNamed = default.spanInfoNamed;
+pub const spanDebug = default.spanDebug;
+pub const spanDebugNamed = default.spanDebugNamed;
+pub const spanTrace = default.spanTrace;
+pub const spanTraceNamed = default.spanTraceNamed;
+pub const span = default.span;
+pub const spanNamed = default.spanNamed;
+pub const spanNamedWithFormatter = default.spanNamedWithFormatter;
+
+/// Subscriber events.
+pub const events = struct {
+    /// Common header of all events.
+    pub const Event = enum(u32) {
+        register_thread,
+        unregister_thread,
+        create_call_stack,
+        destroy_call_stack,
+        unblock_call_stack,
+        suspend_call_stack,
+        resume_call_stack,
+        enter_span,
+        exit_span,
+        log_message,
+        _,
+    };
+
+    pub const RegisterThread = extern struct {
+        event: Event = .register_thread,
+        time: time.compat.Instant,
+    };
+    pub const UnregisterThread = extern struct {
+        event: Event = .unregister_thread,
+        time: time.compat.Instant,
+    };
+    pub const CreateCallStack = extern struct {
+        event: Event = .create_call_stack,
+        time: time.compat.Instant,
+    };
+    pub const DestroyCallStack = extern struct {
+        event: Event = .destroy_call_stack,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+    };
+    pub const UnblockCallStack = extern struct {
+        event: Event = .unblock_call_stack,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+    };
+    pub const SuspendCallStack = extern struct {
+        event: Event = .suspend_call_stack,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+        mark_blocked: bool,
+    };
+    pub const ResumeCallStack = extern struct {
+        event: Event = .resume_call_stack,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+    };
+    pub const EnterSpan = extern struct {
+        event: Event = .enter_span,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+        span: *const EventInfo,
+        message: [*]const u8,
+        message_length: usize,
+    };
+    pub const ExitSpan = extern struct {
+        event: Event = .exit_span,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+        span: *const EventInfo,
+        is_unwinding: bool,
+    };
+    pub const LogMessage = extern struct {
+        event: Event = .log_message,
+        stack: *anyopaque,
+        time: time.compat.Instant,
+        info: *const EventInfo,
+        message: [*]const u8,
+        message_length: usize,
+    };
+};
+
+/// A subscriber for tracing events.
+///
+/// The main function of the tracing subsystem is managing and routing tracing events to
+/// subscribers. Therefore, it does not consume any events on its own, which is the task of the
+/// subscribers. Subscribers may utilize the events in any way they deem fit.
+pub const Subscriber = extern struct {
+    data: *anyopaque,
+    on_event: *const fn (data: *anyopaque, event: *const events.Event) callconv(.c) *anyopaque,
+
+    pub fn of(T: type, value: *T) Subscriber {
+        if (!@hasDecl(T, "fimo_subscriber")) @compileError("fimo: invalid module, missing `pub const fimo_subscriber = .{...};` declaration: " ++ @typeName(T));
+        const info = T.fimo_subscriber;
+        const Info = @TypeOf(info);
+
+        const wrapper = struct {
+            fn on_event(data: *anyopaque, event: *const events.Event) callconv(.c) *anyopaque {
+                const self: *T = @ptrCast(@alignCast(data));
+                switch (event.*) {
+                    .register_thread => if (comptime @hasField(Info, "register_thread")) {
+                        const ev: *const events.RegisterThread = @alignCast(@fieldParentPtr("event", event));
+                        info.register_thread(self, ev);
+                        return @constCast(&{});
+                    },
+                    .unregister_thread => if (comptime @hasField(Info, "unregister_thread")) {
+                        const ev: *const events.UnregisterThread = @alignCast(@fieldParentPtr("event", event));
+                        info.unregister_thread(self, ev);
+                        return @constCast(&{});
+                    },
+                    .create_call_stack => if (comptime @hasField(Info, "create_call_stack")) {
+                        const ev: *const events.CreateCallStack = @alignCast(@fieldParentPtr("event", event));
+                        return info.create_call_stack(self, ev);
+                    },
+                    .destroy_call_stack => if (comptime @hasField(Info, "destroy_call_stack")) {
+                        const ev: *const events.DestroyCallStack = @alignCast(@fieldParentPtr("event", event));
+                        info.destroy_call_stack(self, ev);
+                        return @constCast(&{});
+                    },
+                    .unblock_call_stack => if (comptime @hasField(Info, "unblock_call_stack")) {
+                        const ev: *const events.UnblockCallStack = @alignCast(@fieldParentPtr("event", event));
+                        info.unblock_call_stack(self, ev);
+                        return @constCast(&{});
+                    },
+                    .suspend_call_stack => if (comptime @hasField(Info, "suspend_call_stack")) {
+                        const ev: *const events.SuspendCallStack = @alignCast(@fieldParentPtr("event", event));
+                        info.suspend_call_stack(self, ev);
+                        return @constCast(&{});
+                    },
+                    .resume_call_stack => if (comptime @hasField(Info, "resume_call_stack")) {
+                        const ev: *const events.ResumeCallStack = @alignCast(@fieldParentPtr("event", event));
+                        info.resume_call_stack(self, ev);
+                        return @constCast(&{});
+                    },
+                    .enter_span => if (comptime @hasField(Info, "enter_span")) {
+                        const ev: *const events.EnterSpan = @alignCast(@fieldParentPtr("event", event));
+                        info.enter_span(self, ev);
+                        return @constCast(&{});
+                    },
+                    .exit_span => if (comptime @hasField(Info, "exit_span")) {
+                        const ev: *const events.ExitSpan = @alignCast(@fieldParentPtr("event", event));
+                        info.exit_span(self, ev);
+                        return @constCast(&{});
+                    },
+                    .log_message => if (comptime @hasField(Info, "log_message")) {
+                        const ev: *const events.LogMessage = @alignCast(@fieldParentPtr("event", event));
+                        info.log_message(self, ev);
+                        return @constCast(&{});
+                    },
+                    else => return @constCast(&{}),
+                }
+                return @constCast(&{});
+            }
+        };
+        return .{ .data = value, .on_event = &wrapper.on_event };
+    }
+
+    pub fn registerThread(self: Subscriber, event: events.RegisterThread) void {
+        std.debug.assert(event.event == .register_thread);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn unregisterThread(self: Subscriber, event: events.UnregisterThread) void {
+        std.debug.assert(event.event == .unregister_thread);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn createCallStack(self: Subscriber, event: events.CreateCallStack) *anyopaque {
+        std.debug.assert(event.event == .create_call_stack);
+        return self.on_event(self.data, &event.event);
+    }
+
+    pub fn dropCallStack(self: Subscriber, event: events.DropCallStack) void {
+        std.debug.assert(event.event == .drop_call_stack);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn destroyCallStack(self: Subscriber, event: events.DestroyCallStack) void {
+        std.debug.assert(event.event == .destroy_call_stack);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn unblockCallStack(self: Subscriber, event: events.UnblockCallStack) void {
+        std.debug.assert(event.event == .unblock_call_stack);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn suspendCallStack(self: Subscriber, event: events.SuspendCallStack) void {
+        std.debug.assert(event.event == .suspend_call_stack);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn resumeCallStack(self: Subscriber, event: events.ResumeCallStack) void {
+        std.debug.assert(event.event == .resume_call_stack);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn enterSpan(self: Subscriber, event: events.EnterSpan) void {
+        std.debug.assert(event.event == .enter_span);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn exitSpan(self: Subscriber, event: events.ExitSpan) void {
+        std.debug.assert(event.event == .exit_span);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn logMessage(self: Subscriber, event: events.LogMessage) void {
+        std.debug.assert(event.event == .log_message);
+        _ = self.on_event(self.data, &event.event);
+    }
+};
+
 /// Type of a formatter function.
 ///
 /// The formatter function is allowed to format only part of the message, if it would not fit into
@@ -290,9 +584,8 @@ pub const CallStack = extern struct {
 pub const Formatter = fn (
     buffer: [*]u8,
     buffer_len: usize,
-    data: ?*const anyopaque,
-    written: *usize,
-) callconv(.c) void;
+    data: *const anyopaque,
+) callconv(.c) usize;
 
 /// Formatter of the zig standard library.
 pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
@@ -300,14 +593,14 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
         fn format(
             buffer: [*]u8,
             buffer_len: usize,
-            data: ?*const anyopaque,
-            written: *usize,
-        ) callconv(.c) void {
+            data: *const anyopaque,
+        ) callconv(.c) usize {
             const b = buffer[0..buffer_len];
             const args: *const ARGS = @alignCast(@ptrCast(data));
-            if (std.fmt.bufPrint(b, fmt, args.*)) |out| {
-                written.* = out.len;
-            } else |_| written.* = buffer_len;
+            return if (std.fmt.bufPrint(b, fmt, args.*)) |out|
+                out.len
+            else |_|
+                buffer_len;
         }
     }.format;
 }
@@ -316,459 +609,33 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
 pub fn stackTraceFormatter(
     buffer: [*]u8,
     buffer_len: usize,
-    data: ?*const anyopaque,
-    written: *usize,
-) callconv(.c) void {
+    data: *const anyopaque,
+) callconv(.c) usize {
     const buf = buffer[0..buffer_len];
     const stack_trace: *const std.builtin.StackTrace = @alignCast(@ptrCast(data));
-    if (builtin.strip_debug_info) {
-        if (std.fmt.bufPrint(buf, "Unable to dump stack trace: debug info stripped", .{})) |out| {
-            written.* = out.len;
-        } else |_| written.* = buffer_len;
-    }
+    if (builtin.strip_debug_info) return if (std.fmt.bufPrint(buf, "Unable to dump stack trace: debug info stripped", .{})) |out|
+        out.len
+    else |_|
+        buffer_len;
 
-    const debug_info = std.debug.getSelfDebugInfo() catch |err| {
-        if (std.fmt.bufPrint(
-            buf,
-            "Unable to dump stack trace: Unable to open debug info: {s}",
-            .{@errorName(err)},
-        )) |out| {
-            written.* = out.len;
-        } else |_| written.* = buffer_len;
-        return;
-    };
-    var writer: std.io.Writer = .fixed(buf);
-    std.debug.writeStackTrace(
-        stack_trace.*,
-        &writer,
-        debug_info,
-        .no_color,
-    ) catch |err| switch (err) {
+    const debug_info = std.debug.getSelfDebugInfo() catch |err| return if (std.fmt.bufPrint(
+        buf,
+        "Unable to dump stack trace: Unable to open debug info: {s}",
+        .{@errorName(err)},
+    )) |out|
+        out.len
+    else |_|
+        buffer_len;
+    var writer: std.Io.Writer = .fixed(buf);
+    std.debug.writeStackTrace(stack_trace.*, &writer, debug_info, .no_color) catch |err| switch (err) {
         error.WriteFailed => {},
-        else => {
-            if (std.fmt.bufPrint(
-                buf,
-                "Unable to dump stack trace: {s}",
-                .{@errorName(err)},
-            )) |out| {
-                written.* = out.len;
-            } else |_| written.* = buffer_len;
-        },
+        else => return if (std.fmt.bufPrint(buf, "Unable to dump stack trace: {s}", .{@errorName(err)})) |out|
+            out.len
+        else |_|
+            buffer_len,
     };
-    written.* = @intCast(writer.buffered().len);
+    return writer.buffered().len;
 }
-
-/// A subscriber for tracing events.
-///
-/// The main function of the tracing subsystem is managing and routing tracing events to
-/// subscribers. Therefore, it does not consume any events on its own, which is the task of the
-/// subscribers. Subscribers may utilize the events in any way they deem fit.
-pub const Subscriber = extern struct {
-    data: ?*anyopaque,
-    vtable: *const Subscriber.VTable,
-
-    /// VTable of a tracing subscriber.
-    ///
-    /// Adding/removing functionality to a subscriber through this table is a breaking change, as a
-    /// subscriber may be implemented from outside the library.
-    pub const VTable = extern struct {
-        /// Reserved for future extensions.
-        next: ?*const anyopaque = null,
-        /// Increases the reference count of the subscriber.
-        ref: *const fn (ctx: ?*anyopaque) callconv(.c) void,
-        /// Decreases the reference count of the subsriber.
-        unref: *const fn (ctx: ?*anyopaque) callconv(.c) void,
-        /// Creates a new stack.
-        call_stack_create: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-        ) callconv(.c) *anyopaque,
-        /// Drops an empty call stack.
-        ///
-        /// Calling this function reverts the creation of the call stack.
-        call_stack_drop: *const fn (
-            ctx: ?*anyopaque,
-            call_stack: *anyopaque,
-        ) callconv(.c) void,
-        /// Destroys a stack.
-        call_stack_destroy: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            call_stack: *anyopaque,
-            is_unwind: bool,
-        ) callconv(.c) void,
-        /// Marks the stack as unblocked.
-        call_stack_unblock: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            call_stack: *anyopaque,
-        ) callconv(.c) void,
-        /// Marks the stack as suspended/blocked.
-        call_stack_suspend: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            call_stack: *anyopaque,
-            mark_blocked: bool,
-        ) callconv(.c) void,
-        /// Marks the stack as resumed.
-        call_stack_resume: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            call_stack: *anyopaque,
-        ) callconv(.c) void,
-        /// Creates a new span.
-        span_push: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            span_desc: *const SpanDesc,
-            msg: [*]const u8,
-            msg_len: usize,
-            call_stack: *anyopaque,
-        ) callconv(.c) void,
-        /// Drops a newly created span.
-        ///
-        /// Calling this function reverts the creation of the span.
-        span_drop: *const fn (ctx: ?*anyopaque, call_stack: *anyopaque) callconv(.c) void,
-        /// Exits and destroys a span.
-        span_pop: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            call_stack: *anyopaque,
-            is_unwind: bool,
-        ) callconv(.c) void,
-        /// Emits an event.
-        event_emit: *const fn (
-            ctx: ?*anyopaque,
-            time: *const time.compat.Time,
-            call_stack: *anyopaque,
-            event: *const Event,
-            msg: [*]const u8,
-            msg_len: usize,
-        ) callconv(.c) void,
-        /// Flushes the messages of the subscriber.
-        flush: *const fn (ctx: ?*anyopaque) callconv(.c) void,
-    };
-
-    /// Initializes the subscriber interface from an existing object.
-    ///
-    /// The object must be kept alive for as long as the subscriber is still in use.
-    pub fn init(
-        comptime CallStackT: type,
-        obj: anytype,
-        comptime ref_fn: fn (ctx: @TypeOf(obj)) void,
-        comptime unref_fn: fn (ctx: @TypeOf(obj)) void,
-        comptime call_stack_create_fn: fn (ctx: @TypeOf(obj), time: time.Time) *CallStackT,
-        comptime call_stack_drop_fn: fn (ctx: @TypeOf(obj), call_stack: *CallStackT) void,
-        comptime call_stack_destroy_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            call_stack: *CallStackT,
-            is_unwind: bool,
-        ) void,
-        comptime call_stack_unblock_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            call_stack: *CallStackT,
-        ) void,
-        comptime call_stack_suspend_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            call_stack: *CallStackT,
-            mark_blocked: bool,
-        ) void,
-        comptime call_stack_resume_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            call_stack: *CallStackT,
-        ) void,
-        comptime span_push_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            span_desc: *const SpanDesc,
-            msg: []const u8,
-            call_stack: *CallStackT,
-        ) void,
-        comptime span_drop_fn: fn (ctx: @TypeOf(obj), call_stack: *CallStackT) void,
-        comptime span_pop_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            call_stack: *CallStackT,
-            is_unwind: bool,
-        ) void,
-        comptime event_emit_fn: fn (
-            ctx: @TypeOf(obj),
-            time: time.Time,
-            call_stack: *CallStackT,
-            event: *const Event,
-            msg: []const u8,
-        ) void,
-        comptime flush_fn: fn (ctx: @TypeOf(obj)) void,
-    ) Subscriber {
-        const Ptr = @TypeOf(obj);
-        std.debug.assert(@typeInfo(Ptr) == .pointer);
-        // std.debug.assert(@typeInfo(Ptr).pointer.is_const == false);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
-        std.debug.assert(@typeInfo(@typeInfo(Ptr).pointer.child) == .@"struct");
-
-        const impl = struct {
-            fn ref(ptr: ?*anyopaque) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                ref_fn(self);
-            }
-            fn unref(ptr: ?*anyopaque) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                unref_fn(self);
-            }
-            fn callStackCreate(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-            ) callconv(.c) *anyopaque {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                return call_stack_create_fn(self, t);
-            }
-            fn callStackDrop(
-                ptr: ?*anyopaque,
-                call_stack: *anyopaque,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                call_stack_drop_fn(self, cs);
-            }
-            fn callStackDestroy(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                call_stack: *anyopaque,
-                is_unwind: bool,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                call_stack_destroy_fn(self, t, cs, is_unwind);
-            }
-            fn callStackUnblock(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                call_stack: *anyopaque,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                call_stack_unblock_fn(self, t, cs);
-            }
-            fn callStackSuspend(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                call_stack: *anyopaque,
-                mark_blocked: bool,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                call_stack_suspend_fn(self, t, cs, mark_blocked);
-            }
-            fn callStackResume(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                call_stack: *anyopaque,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                call_stack_resume_fn(self, t, cs);
-            }
-            fn spanPush(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                span_desc: *const SpanDesc,
-                msg: [*]const u8,
-                msg_len: usize,
-                call_stack: *anyopaque,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                const m = msg[0..msg_len];
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                span_push_fn(
-                    self,
-                    t,
-                    span_desc,
-                    m,
-                    cs,
-                );
-            }
-            fn spanDrop(
-                ptr: ?*anyopaque,
-                call_stack: *anyopaque,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                span_drop_fn(self, cs);
-            }
-            fn spanPop(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                call_stack: *anyopaque,
-                is_unwind: bool,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                const t = time.Time.initC(time_c.*);
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                span_pop_fn(self, t, cs, is_unwind);
-            }
-            fn eventEmit(
-                ptr: ?*anyopaque,
-                time_c: *const time.compat.Time,
-                call_stack: *anyopaque,
-                event: *const Event,
-                msg: [*]const u8,
-                msg_len: usize,
-            ) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(ptr.?));
-                const t = time.Time.initC(time_c.*);
-                const cs: *CallStackT = @alignCast(@ptrCast(call_stack));
-                const m = msg[0..msg_len];
-                event_emit_fn(self, t, cs, event, m);
-            }
-            fn flush(ptr: ?*anyopaque) callconv(.c) void {
-                const self: Ptr = @alignCast(@ptrCast(@constCast(ptr.?)));
-                flush_fn(self);
-            }
-        };
-
-        return Subscriber{
-            .data = @constCast(obj),
-            .vtable = &.{
-                .ref = impl.ref,
-                .unref = impl.unref,
-                .call_stack_create = impl.callStackCreate,
-                .call_stack_drop = impl.callStackDrop,
-                .call_stack_destroy = impl.callStackDestroy,
-                .call_stack_unblock = impl.callStackUnblock,
-                .call_stack_suspend = impl.callStackSuspend,
-                .call_stack_resume = impl.callStackResume,
-                .span_push = impl.spanPush,
-                .span_drop = impl.spanDrop,
-                .span_pop = impl.spanPop,
-                .event_emit = impl.eventEmit,
-                .flush = impl.flush,
-            },
-        };
-    }
-
-    pub fn ref(self: Subscriber) void {
-        self.vtable.ref(self.data);
-    }
-
-    pub fn unref(self: Subscriber) void {
-        self.vtable.unref(self.data);
-    }
-
-    pub fn createCallStack(
-        self: Subscriber,
-        timepoint: time.Time,
-    ) *anyopaque {
-        return self.vtable.call_stack_create(self.data, &timepoint.intoC());
-    }
-
-    pub fn dropCallStack(self: Subscriber, call_stack: *anyopaque) void {
-        self.vtable.call_stack_drop(
-            self.data,
-            call_stack,
-        );
-    }
-
-    pub fn destroyCallStack(
-        self: Subscriber,
-        timepoint: time.Time,
-        call_stack: *anyopaque,
-        is_unwind: bool,
-    ) void {
-        self.vtable.call_stack_destroy(
-            self.data,
-            &timepoint.intoC(),
-            call_stack,
-            is_unwind,
-        );
-    }
-
-    pub fn unblockCallStack(self: Subscriber, timepoint: time.Time, call_stack: *anyopaque) void {
-        self.vtable.call_stack_unblock(
-            self.data,
-            &timepoint.intoC(),
-            call_stack,
-        );
-    }
-
-    pub fn suspendCallStack(
-        self: Subscriber,
-        timepoint: time.Time,
-        call_stack: *anyopaque,
-        mark_blocked: bool,
-    ) void {
-        self.vtable.call_stack_suspend(
-            self.data,
-            &timepoint.intoC(),
-            call_stack,
-            mark_blocked,
-        );
-    }
-
-    pub fn resumeCallStack(self: Subscriber, timepoint: time.Time, call_stack: *anyopaque) void {
-        self.vtable.call_stack_resume(self.data, &timepoint.intoC(), call_stack);
-    }
-
-    pub fn createSpan(
-        self: Subscriber,
-        timepoint: time.Time,
-        span_desc: *const SpanDesc,
-        message: []const u8,
-        call_stack: *anyopaque,
-    ) void {
-        self.vtable.span_push(
-            self.data,
-            &timepoint.intoC(),
-            @ptrCast(span_desc),
-            message.ptr,
-            message.len,
-            call_stack,
-        );
-    }
-
-    pub fn dropSpan(self: Subscriber, call_stack: *anyopaque) void {
-        self.vtable.span_drop(self.data, call_stack);
-    }
-
-    pub fn destroySpan(
-        self: Subscriber,
-        timepoint: time.Time,
-        call_stack: *anyopaque,
-        is_unwind: bool,
-    ) void {
-        self.vtable.span_pop(self.data, &timepoint.intoC(), call_stack, is_unwind);
-    }
-
-    pub fn emitEvent(
-        self: Subscriber,
-        timepoint: time.Time,
-        call_stack: *anyopaque,
-        event: *const Event,
-        message: []const u8,
-    ) void {
-        self.vtable.event_emit(
-            self.data,
-            &timepoint.intoC(),
-            call_stack,
-            @ptrCast(event),
-            message.ptr,
-            message.len,
-        );
-    }
-
-    pub fn flush(self: Subscriber) void {
-        self.vtable.flush(self.data);
-    }
-};
 
 /// Configuration for the tracing subsystem.
 pub const Config = extern struct {
@@ -785,234 +652,33 @@ pub const Config = extern struct {
     subscribers: ?[*]const Subscriber = null,
     /// Number of subscribers to register with the tracing subsystem.
     subscriber_count: usize = 0,
-
-    pub fn deinit(self: *const Config) void {
-        if (self.subscribers) |subscribers| {
-            for (subscribers[0..self.subscriber_count]) |s| s.unref();
-        }
-    }
 };
 
 /// Base VTable of the tracing subsystem.
 ///
 /// Changing this definition is a breaking change.
 pub const VTable = extern struct {
-    create_call_stack: *const fn () callconv(.c) CallStack,
-    suspend_current_call_stack: *const fn (mark_blocked: bool) callconv(.c) void,
-    resume_current_call_stack: *const fn () callconv(.c) void,
-    span_create: *const fn (
-        span_desc: *const SpanDesc,
-        formatter: *const Formatter,
-        data: ?*const anyopaque,
-    ) callconv(.c) Span,
-    event_emit: *const fn (
-        event: *const Event,
-        formatter: *const Formatter,
-        data: ?*const anyopaque,
-    ) callconv(.c) void,
     is_enabled: *const fn () callconv(.c) bool,
     register_thread: *const fn () callconv(.c) void,
     unregister_thread: *const fn () callconv(.c) void,
-    flush: *const fn () callconv(.c) void,
+    create_call_stack: *const fn () callconv(.c) *CallStack,
+    destroy_call_stack: *const fn (stack: *CallStack, abort: bool) callconv(.c) void,
+    swap_call_stack: *const fn (stack: *CallStack) callconv(.c) *CallStack,
+    unblock_call_stack: *const fn (stack: *CallStack) callconv(.c) void,
+    suspend_current_call_stack: *const fn (mark_blocked: bool) callconv(.c) void,
+    resume_current_call_stack: *const fn () callconv(.c) void,
+    enter_span: *const fn (
+        id: *const EventInfo,
+        formatter: *const Formatter,
+        formatter_data: *const anyopaque,
+    ) callconv(.c) void,
+    exit_span: *const fn (id: *const EventInfo) callconv(.c) void,
+    log_message: *const fn (
+        info: *const EventInfo,
+        formatter: *const Formatter,
+        formatter_data: *const anyopaque,
+    ) callconv(.c) void,
 };
-
-/// Emits a new event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitEvent(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    level: Level,
-    location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
-) void {
-    const event = Event{
-        .metadata = &.{
-            .name = name orelse location.fn_name,
-            .target = target orelse location.module,
-            .level = level,
-            .file_name = location.file,
-            .line_number = @intCast(location.line),
-        },
-    };
-    return emitEventCustom(&event, stdFormatter(fmt, @TypeOf(args)), &args);
-}
-
-/// Emits a new error event dumping the stack trace.
-///
-/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitStackTrace(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    stack_trace: std.builtin.StackTrace,
-    location: std.builtin.SourceLocation,
-) void {
-    const event = Event{
-        .metadata = &.{
-            .name = name orelse location.fn_name,
-            .target = target orelse location.module,
-            .level = .err,
-            .file_name = location.file,
-            .line_number = @intCast(location.line),
-        },
-    };
-    emitEventCustom(&event, stackTraceFormatter, &stack_trace);
-}
-
-/// Emits a new error event dumping the stack trace.
-///
-/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitStackTraceSimple(
-    stack_trace: std.builtin.StackTrace,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitStackTrace(null, null, stack_trace, location);
-}
-
-/// Emits a new event with a custom formatter.
-///
-/// The subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
-/// the message after reaching that specified size.
-pub fn emitEventCustom(
-    event: *const Event,
-    formatter: *const Formatter,
-    data: ?*const anyopaque,
-) void {
-    const handle = ctx.Handle.getHandle();
-    return handle.tracing_v0.event_emit(event, formatter, data);
-}
-
-/// Emits a new error event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitErr(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
-) void {
-    return emitEvent(name, target, .err, location, fmt, args);
-}
-
-/// Emits a new warn event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitWarn(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
-) void {
-    return emitEvent(name, target, .warn, location, fmt, args);
-}
-
-/// Emits a new info event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitInfo(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
-) void {
-    return emitEvent(name, target, .info, location, fmt, args);
-}
-
-/// Emits a new debug event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitDebug(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
-) void {
-    return emitEvent(name, target, .debug, location, fmt, args);
-}
-
-/// Emits a new trace event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitTrace(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-    comptime fmt: []const u8,
-    args: anytype,
-) void {
-    return emitEvent(name, target, .trace, location, fmt, args);
-}
-
-/// Emits a new error event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitErrSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitErr(null, null, location, fmt, args);
-}
-
-/// Emits a new warn event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitWarnSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitWarn(null, null, location, fmt, args);
-}
-
-/// Emits a new info event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitInfoSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitInfo(null, null, location, fmt, args);
-}
-
-/// Emits a new debug event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitDebugSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitDebug(null, null, location, fmt, args);
-}
-
-/// Emits a new trace event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitTraceSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitTrace(null, null, location, fmt, args);
-}
 
 /// Checks whether the tracing subsystem is enabled.
 ///
@@ -1026,11 +692,11 @@ pub fn isEnabled() bool {
 
 /// Registers the calling thread with the tracing subsystem.
 ///
-/// The tracing of the subsystem is opt-in on a per thread basis, where unregistered threads will
+/// The instrumentation is opt-in on a per thread basis, where unregistered threads will
 /// behave as if the subsystem was disabled. Once registered, the calling thread gains access to
 /// the tracing subsystem and is assigned a new empty call stack. A registered thread must be
 /// unregistered from the tracing subsystem before the context is destroyed, by terminating the
-/// tread, or by manually calling `unregisterThread()`.
+/// tread, or by manually unregistering it. A registered thread may not try to register itself.
 pub fn registerThread() void {
     const handle = ctx.Handle.getHandle();
     handle.tracing_v0.register_thread();
@@ -1045,28 +711,34 @@ pub fn unregisterThread() void {
     handle.tracing_v0.unregister_thread();
 }
 
-/// Flushes the streams used for tracing.
-///
-/// If successful, any unwritten data is written out by the individual subscribers.
-pub fn flush() void {
-    const handle = ctx.Handle.getHandle();
-    handle.tracing_v0.flush();
-}
-
-const DefaultSubscriber = struct {
-    const Self = @This();
+const LoggingSubscriber = struct {
     const Span = struct {
-        previous: ?*Self.Span = null,
-        next: ?*Self.Span = null,
-        desc: *const SpanDesc,
+        id: *const EventInfo,
         message: []const u8,
     };
-    const CallStack = struct {
-        tail: ?*Self.Span = null,
+    const Stack = struct {
+        arena: std.heap.ArenaAllocator,
+        spans: std.ArrayListUnmanaged(LoggingSubscriber.Span) = .empty,
     };
+
+    pub const fimo_subscriber = .{
+        .create_call_stack = createCallStack,
+        .destroy_call_stack = destroyCallStack,
+        .enter_span = enterSpan,
+        .exit_span = exitSpan,
+        .log_message = logMessage,
+    };
+
     const allocator = std.heap.c_allocator;
-    threadlocal var print_buffer = std.mem.zeroes([Self.print_buffer_len + overlength_correction.len:0]u8);
+    threadlocal var print_buffer = std.mem.zeroes([print_buffer_len + overlength_correction.len:0]u8);
     const print_buffer_len = 1024;
+
+    var config: std.Io.tty.Config = undefined;
+    var init_config = std.once(detectConfig);
+
+    fn detectConfig() void {
+        config = .detect(std.fs.File.stderr());
+    }
 
     const ansi_color_red: []const u8 = "\x1b[31m";
     const ansi_color_green: []const u8 = "\x1b[32m";
@@ -1089,120 +761,51 @@ const DefaultSubscriber = struct {
     const backtrace_fmt: []const u8 = "\t" ++ ansi_sgr_italic ++ "in" ++ ansi_sgr_reset ++ " {s}" ++ ansi_sgr_italic ++ " with" ++ ansi_sgr_reset ++ " {s}\n";
     const overlength_correction: []const u8 = "\t..." ++ ansi_color_reset ++ "\n";
 
-    fn ref(self: *const Self) void {
+    fn createCallStack(self: *LoggingSubscriber, event: *const events.CreateCallStack) *Stack {
         _ = self;
+        _ = event;
+        const stack = allocator.create(Stack) catch |err| @panic(@errorName(err));
+        stack.* = .{ .arena = .init(allocator) };
+        return stack;
     }
 
-    fn unref(self: *const Self) void {
+    fn destroyCallStack(self: *LoggingSubscriber, event: *const events.DestroyCallStack) void {
         _ = self;
+        const stack: *Stack = @ptrCast(@alignCast(event.stack));
+        std.debug.assert(stack.spans.items.len == 0);
+        stack.arena.deinit();
+        allocator.destroy(stack);
     }
 
-    fn createCallStack(self: *const Self, t: time.Time) *Self.CallStack {
+    fn enterSpan(self: *LoggingSubscriber, event: *const events.EnterSpan) void {
         _ = self;
-        _ = t;
-        const cs = Self.allocator.create(
-            Self.CallStack,
+        const stack: *Stack = @ptrCast(@alignCast(event.stack));
+        const message = stack.arena.allocator().dupe(
+            u8,
+            event.message[0..event.message_length],
         ) catch |err| @panic(@errorName(err));
-        cs.tail = null;
-        return cs;
-    }
-
-    fn dropCallStack(self: *const Self, call_stack: *Self.CallStack) void {
-        _ = self;
-        std.debug.assert(call_stack.tail == null);
-        Self.allocator.destroy(call_stack);
-    }
-
-    fn destroyCallStack(
-        self: *const Self,
-        t: time.Time,
-        call_stack: *Self.CallStack,
-        is_unwind: bool,
-    ) void {
-        _ = self;
-        _ = t;
-        _ = is_unwind;
-        std.debug.assert(call_stack.tail == null);
-        Self.allocator.destroy(call_stack);
-    }
-
-    fn unblockCallStack(self: *const Self, t: time.Time, call_stack: *Self.CallStack) void {
-        _ = self;
-        _ = t;
-        _ = call_stack;
-    }
-
-    fn suspendCallStack(
-        self: *const Self,
-        t: time.Time,
-        call_stack: *Self.CallStack,
-        mark_blocked: bool,
-    ) void {
-        _ = self;
-        _ = t;
-        _ = call_stack;
-        _ = mark_blocked;
-    }
-
-    fn resumeCallStack(self: *const Self, t: time.Time, call_stack: *Self.CallStack) void {
-        _ = self;
-        _ = t;
-        _ = call_stack;
-    }
-
-    fn createSpan(
-        self: *const Self,
-        t: time.Time,
-        desc: *const SpanDesc,
-        message: []const u8,
-        call_stack: *Self.CallStack,
-    ) void {
-        _ = self;
-        _ = t;
-        const span = Self.allocator.create(
-            Self.Span,
+        errdefer stack.arena.allocator().free(message);
+        stack.spans.append(
+            allocator,
+            .{ .id = event.span, .message = message },
         ) catch |err| @panic(@errorName(err));
-        span.* = Self.Span{
-            .previous = call_stack.tail,
-            .desc = desc,
-            .message = message,
-        };
-        call_stack.tail = span;
     }
 
-    fn dropSpan(self: *const Self, call_stack: *Self.CallStack) void {
+    fn exitSpan(self: *LoggingSubscriber, event: *const events.ExitSpan) void {
         _ = self;
-        const tail = call_stack.tail.?;
-        const previous = tail.previous;
-        Self.allocator.destroy(tail);
-        call_stack.tail = previous;
+        const stack: *Stack = @ptrCast(@alignCast(event.stack));
+        std.debug.assert(stack.spans.getLast().id == event.span);
+        const sp = stack.spans.pop() orelse unreachable;
+        const message = sp.message;
+        stack.arena.allocator().free(message);
     }
 
-    fn destroySpan(
-        self: *const Self,
-        t: time.Time,
-        call_stack: *Self.CallStack,
-        is_unwind: bool,
-    ) void {
+    fn logMessage(self: *LoggingSubscriber, event: *const events.LogMessage) void {
         _ = self;
-        _ = t;
-        _ = is_unwind;
-        const tail = call_stack.tail.?;
-        const previous = tail.previous;
-        Self.allocator.destroy(tail);
-        call_stack.tail = previous;
-    }
+        init_config.call();
 
-    fn emitEvent(
-        self: *const Self,
-        t: time.Time,
-        call_stack: *Self.CallStack,
-        event: *const Event,
-        message: []const u8,
-    ) void {
-        _ = self;
-        _ = t;
-
+        const stack: *Stack = @ptrCast(@alignCast(event.stack));
+        const message = event.message[0..event.message_length];
         const format = struct {
             fn f(cursor: usize, comptime fmt: []const u8, args: anytype) usize {
                 const buffer = std.fmt.bufPrint(
@@ -1216,30 +819,33 @@ const DefaultSubscriber = struct {
 
         // Write the event message.
         var cursor: usize = 0;
-        cursor += switch (event.metadata.level) {
+        cursor += switch (event.info.level) {
             .off => 0,
-            .err => format(cursor, error_fmt, .{ event.metadata.name, message }),
-            .warn => format(cursor, warn_fmt, .{ event.metadata.name, message }),
-            .info => format(cursor, info_fmt, .{ event.metadata.name, message }),
-            .debug => format(cursor, debug_fmt, .{ event.metadata.name, message }),
-            .trace => format(cursor, trace_fmt, .{ event.metadata.name, message }),
+            .err => format(cursor, error_fmt, .{ event.info.name, message }),
+            .warn => format(cursor, warn_fmt, .{ event.info.name, message }),
+            .info => format(cursor, info_fmt, .{ event.info.name, message }),
+            .debug => format(cursor, debug_fmt, .{ event.info.name, message }),
+            .trace => format(cursor, trace_fmt, .{ event.info.name, message }),
         };
 
         // Write out the file location.
-        if (event.metadata.file_name) |file_name| {
+        if (event.info.file_name) |file_name| {
             cursor += format(cursor, file_path_fmt, .{
                 file_name,
-                event.metadata.line_number,
+                event.info.line_number,
             });
         } else {
             cursor += format(cursor, unknown_file_path_fmt, .{});
         }
 
         // Write out the call stack.
-        var span = call_stack.tail;
-        while (span) |s| {
-            cursor += format(cursor, backtrace_fmt, .{ s.desc.metadata.name, s.message });
-            span = s.previous;
+        {
+            var i: usize = stack.spans.items.len;
+            while (i > 0) {
+                i -= 1;
+                const sp = stack.spans.items[i];
+                cursor += format(cursor, backtrace_fmt, .{ sp.id.name, sp.message });
+            }
         }
 
         // Correct overlong messages.
@@ -1262,33 +868,11 @@ const DefaultSubscriber = struct {
         var buffer: [64]u8 = undefined;
         const stderr = std.debug.lockStderrWriter(&buffer);
         defer std.debug.unlockStderrWriter();
-        stderr.writeAll(Self.print_buffer[0..cursor]) catch {};
-    }
-
-    fn flush(self: *const Self) void {
-        _ = self;
-        // zig Files are not buffered.
+        stderr.writeAll(print_buffer[0..cursor]) catch {};
     }
 };
 
-pub const default_subscriber = Subscriber.init(
-    DefaultSubscriber.CallStack,
-    &DefaultSubscriber{},
-    DefaultSubscriber.ref,
-    DefaultSubscriber.unref,
-    DefaultSubscriber.createCallStack,
-    DefaultSubscriber.dropCallStack,
-    DefaultSubscriber.destroyCallStack,
-    DefaultSubscriber.unblockCallStack,
-    DefaultSubscriber.suspendCallStack,
-    DefaultSubscriber.resumeCallStack,
-    DefaultSubscriber.createSpan,
-    DefaultSubscriber.dropSpan,
-    DefaultSubscriber.destroySpan,
-    DefaultSubscriber.emitEvent,
-    DefaultSubscriber.flush,
-);
-
+pub const default_subscriber = Subscriber.of(LoggingSubscriber, @constCast(&LoggingSubscriber{}));
 comptime {
     @export(&default_subscriber, .{ .name = "FIMO_TRACING_DEFAULT_SUBSCRIBER" });
 }

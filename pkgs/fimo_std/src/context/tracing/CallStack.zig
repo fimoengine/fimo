@@ -1,9 +1,9 @@
 const std = @import("std");
 
 const time = @import("../../time.zig");
+const Instant = time.Instant;
 const pub_tracing = @import("../../tracing.zig");
 const tracing = @import("../tracing.zig");
-const StackFrame = @import("StackFrame.zig");
 
 const Self = @This();
 
@@ -13,269 +13,306 @@ state: packed struct(u8) {
     blocked: bool = false,
     _padding: u6 = 0,
 } = .{},
-buffer: []u8,
-cursor: usize = 0,
-max_level: pub_tracing.Level,
+fmt_buffer: []u8,
+max_level: tracing.Level,
 call_stacks: std.ArrayListUnmanaged(*anyopaque),
-start_frame: ?*StackFrame = null,
-end_frame: ?*StackFrame = null,
+frames: std.MultiArrayList(Frame) = .empty,
 
+var dummy: Self = undefined;
+
+pub const Frame = struct {
+    id: *const tracing.EventInfo,
+    previous_max_level: tracing.Level,
+};
+
+/// Creates a new empty call stack.
+///
+/// The call stack is marked as suspended.
 pub fn init() *Self {
-    const call_stack = tracing.allocator.create(
-        Self,
-    ) catch |err| @panic(@errorName(err));
+    if (!tracing.isEnabled()) return &dummy;
+
+    const call_stack = tracing.allocator.create(Self) catch |err| @panic(@errorName(err));
     call_stack.* = Self{
-        .buffer = undefined,
+        .fmt_buffer = undefined,
         .max_level = tracing.max_level,
         .call_stacks = undefined,
     };
 
-    call_stack.buffer = tracing.allocator.alloc(
-        u8,
-        tracing.buffer_size,
-    ) catch |err| @panic(@errorName(err));
-    call_stack.call_stacks = std.ArrayListUnmanaged(*anyopaque).initCapacity(
+    call_stack.call_stacks = @TypeOf(call_stack.call_stacks).initCapacity(
         tracing.allocator,
         tracing.subscribers.len,
     ) catch |err| @panic(@errorName(err));
     tracing.call_stack_count.increase();
 
-    const now = time.Time.now();
+    const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
-        const cs = subscriber.createCallStack(now);
-        call_stack.call_stacks.appendAssumeCapacity(cs);
+        const event = tracing.events.CreateCallStack{ .time = now };
+        const stack = subscriber.createCallStack(event);
+        call_stack.call_stacks.appendAssumeCapacity(stack);
     }
 
     return call_stack;
 }
 
-pub fn deinit(self: *Self) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
-    if (self.end_frame != null) @panic(@errorName(error.CallStackNotEmpty));
+/// Creates a new empty call stack.
+pub fn initBound(fmt_buffer: []u8) *Self {
+    const self = init();
+    self.mutex.lock();
+    self.state.suspended = false;
+    self.fmt_buffer = fmt_buffer;
+    return self;
+}
 
-    const now = time.Time.now();
-    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
-        subscriber.destroyCallStack(now, call_stack, false);
+pub fn finishBound(self: *Self) void {
+    if (!self.mutex.tryLock()) @panic("call stack in use");
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (self.frames.len != 0) @panic("call stack is not empty");
+
+    const now = Instant.now().intoC();
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.DestroyCallStack{
+            .stack = stack,
+            .time = now,
+        };
+        subscriber.destroyCallStack(event);
     }
 
+    self.frames.deinit(tracing.allocator);
     self.call_stacks.deinit(tracing.allocator);
-    tracing.allocator.free(self.buffer);
     tracing.allocator.destroy(self);
     tracing.call_stack_count.decrease();
 }
 
-fn deinitUnbound(self: *Self) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    if (self.mutex.lock_count != 1) @panic(@errorName(error.CallStackBound));
-    self.deinit();
-}
+/// Destroys an empty call stack.
+pub fn finish(self: *Self) void {
+    if (!tracing.isEnabled()) return;
+    if (!self.mutex.tryLock()) @panic("call stack in use");
+    if (self.mutex.lock_count != 1) @panic("call stack is bound");
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (self.frames.len != 0) @panic("call stack is not empty");
 
-fn deinitAbort(self: *Self) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    if (self.mutex.lock_count != 1) @panic(@errorName(error.CallStackBound));
-
-    while (self.end_frame) |frame| {
-        frame.deinitAbortUnchecked();
+    const now = Instant.now().intoC();
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.DestroyCallStack{
+            .stack = stack,
+            .time = now,
+        };
+        subscriber.destroyCallStack(event);
     }
 
-    const now = time.Time.now();
-    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
-        subscriber.destroyCallStack(now, call_stack, true);
-    }
-
+    self.frames.deinit(tracing.allocator);
     self.call_stacks.deinit(tracing.allocator);
-    tracing.allocator.free(self.buffer);
     tracing.allocator.destroy(self);
     tracing.call_stack_count.decrease();
 }
 
-pub fn bind(self: *Self) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    errdefer self.mutex.unlock();
-    if (self.mutex.lock_count != 1) @panic(@errorName(error.CallStackBound));
-    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
-    if (!self.state.suspended) @panic(@errorName(error.CallStackNotSuspended));
+/// Unwinds and destroys the call stack.
+pub fn abort(self: *Self) void {
+    if (!tracing.isEnabled()) return;
+    if (!self.mutex.tryLock()) @panic("call stack in use");
+    if (self.mutex.lock_count != 1) @panic("call stack is bound");
+
+    const now = Instant.now().intoC();
+    if (self.state.blocked) {
+        for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+            const event = tracing.events.UnblockCallStack{
+                .stack = stack,
+                .time = now,
+            };
+            subscriber.unblockCallStack(event);
+        }
+    }
+    while (self.frames.pop()) |frame| {
+        for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+            const event = tracing.events.ExitSpan{
+                .stack = stack,
+                .time = now,
+                .span = frame.id,
+                .is_unwinding = true,
+            };
+            subscriber.exitSpan(event);
+        }
+    }
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.DestroyCallStack{
+            .stack = stack,
+            .time = now,
+        };
+        subscriber.destroyCallStack(event);
+    }
+
+    self.frames.deinit(tracing.allocator);
+    self.call_stacks.deinit(tracing.allocator);
+    tracing.allocator.destroy(self);
+    tracing.call_stack_count.decrease();
 }
 
-fn unbind(self: *Self) void {
-    std.debug.assert(self.mutex.lock_count == 1);
-    self.mutex.unlock();
+/// Switches the call stack of the current thread.
+pub fn swapCurrent(self: *Self) *Self {
+    if (!tracing.isEnabled()) return self;
+    if (!self.mutex.tryLock()) @panic("call stack in use");
+    if (self.mutex.lock_count != 1) @panic("call stack is bound");
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (!self.state.suspended) @panic("call stack is not suspended");
+
+    if (!tracing.isEnabledForCurrentThread()) @panic("thread not registered");
+    const data = tracing.ThreadData.get().?;
+    const old = data.call_stack;
+    data.call_stack = self;
+    self.fmt_buffer = data.fmt_buffer;
+
+    old.fmt_buffer = undefined;
+    old.mutex.unlock();
+    return old;
 }
 
-fn unblock(self: *Self) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
+/// Unblocks the blocked call stack.
+pub fn unblock(self: *Self) void {
+    if (!tracing.isEnabled()) return;
+    if (!self.mutex.tryLock()) @panic("call stack in use");
     defer self.mutex.unlock();
-    if (self.mutex.lock_count != 1) @panic(@errorName(error.CallStackBound));
-    if (!self.state.blocked) @panic(@errorName(error.CallStackNotBlocked));
+    if (self.mutex.lock_count != 1) @panic("call stack is bound");
+    if (!self.state.blocked) @panic("call stack is not blocked");
     std.debug.assert(self.state.suspended);
 
-    const now = time.Time.now();
-    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
-        subscriber.unblockCallStack(now, call_stack);
+    const now = Instant.now().intoC();
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.UnblockCallStack{
+            .stack = stack,
+            .time = now,
+        };
+        subscriber.unblockCallStack(event);
     }
 
     self.state.blocked = false;
 }
 
-pub fn @"suspend"(self: *Self, mark_blocked: bool) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    defer self.mutex.unlock();
-    if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
-    if (self.state.suspended) @panic(@errorName(error.CallStackSuspended));
+/// Marks the current call stack as being suspended.
+pub fn suspendCurrent(mark_blocked: bool) void {
+    if (!tracing.isEnabled()) return;
+    if (!tracing.isEnabledForCurrentThread()) @panic("thread not registered");
+    const data = tracing.ThreadData.get().?;
+    const self = data.call_stack;
+    if (self.state.suspended) @panic("call stack is suspended");
 
-    const now = time.Time.now();
-    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
-        subscriber.suspendCallStack(now, call_stack, mark_blocked);
+    const now = Instant.now().intoC();
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.SuspendCallStack{
+            .stack = stack,
+            .time = now,
+            .mark_blocked = mark_blocked,
+        };
+        subscriber.suspendCallStack(event);
     }
-
     self.state.suspended = true;
     self.state.blocked = mark_blocked;
 }
 
-pub fn @"resume"(self: *Self) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    defer self.mutex.unlock();
-    if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
-    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
-    if (!self.state.suspended) @panic(@errorName(error.CallStackNotSuspended));
+/// Marks the current call stack as being resumed.
+pub fn resumeCurrent() void {
+    if (!tracing.isEnabled()) return;
+    if (!tracing.isEnabledForCurrentThread()) @panic("thread not registered");
+    const data = tracing.ThreadData.get().?;
+    const self = data.call_stack;
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (!self.state.suspended) @panic("call stack is not suspended");
 
-    const now = time.Time.now();
-    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
-        subscriber.resumeCallStack(now, call_stack);
+    const now = Instant.now().intoC();
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.ResumeCallStack{
+            .stack = stack,
+            .time = now,
+        };
+        subscriber.resumeCallStack(event);
     }
-
     self.state.suspended = false;
 }
 
-pub fn pushSpan(
+pub fn enterFrame(
     self: *Self,
-    desc: *const pub_tracing.SpanDesc,
-    formatter: *const pub_tracing.Formatter,
-    data: ?*const anyopaque,
-) pub_tracing.Span {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
-    defer self.mutex.unlock();
-    if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
-    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
-    if (self.state.suspended) @panic(@errorName(error.CallStackSuspended));
-
-    const frame = StackFrame.init(
-        self,
-        desc,
-        formatter,
-        data,
-    );
-    return frame.asProxySpan();
-}
-
-pub fn emitEvent(
-    self: *Self,
-    event: *const pub_tracing.Event,
-    formatter: *const pub_tracing.Formatter,
-    data: ?*const anyopaque,
+    id: *const tracing.EventInfo,
+    formatter: *const tracing.Formatter,
+    formatter_data: *const anyopaque,
 ) void {
-    if (!self.mutex.tryLock()) @panic(@errorName(error.CallStackInUse));
+    if (!self.mutex.tryLock()) @panic("call stack in use");
     defer self.mutex.unlock();
-    if (self.mutex.lock_count == 1) @panic(@errorName(error.CallStackNotBound));
-    if (self.state.blocked) @panic(@errorName(error.CallStackBlocked));
-    if (self.state.suspended) @panic(@errorName(error.CallStackSuspended));
+    if (self.mutex.lock_count == 1) @panic("call stack is not bound");
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (self.state.suspended) @panic("call stack is suspended");
 
-    if (@intFromEnum(event.metadata.level) > @intFromEnum(self.max_level)) {
-        return;
+    const now = Instant.now().intoC();
+    const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
+    const message = self.fmt_buffer[0..message_len];
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.EnterSpan{
+            .stack = stack,
+            .time = now,
+            .span = id,
+            .message = message.ptr,
+            .message_length = message.len,
+        };
+        subscriber.enterSpan(event);
     }
 
-    var written_characters: usize = undefined;
-    const format_buffer = self.buffer[self.cursor..];
-    formatter(
-        format_buffer.ptr,
-        format_buffer.len,
-        data,
-        &written_characters,
-    );
-    const message = format_buffer[0..written_characters];
+    self.frames.append(
+        tracing.allocator,
+        .{ .id = id, .previous_max_level = self.max_level },
+    ) catch |e| @panic(@errorName(e));
+    const max_lvl_int = @intFromEnum(self.max_level);
+    const event_lvl_int = @intFromEnum(id.level);
+    self.max_level = @enumFromInt(@min(max_lvl_int, event_lvl_int));
+}
 
-    const now = time.Time.now();
-    for (self.call_stacks.items, tracing.subscribers) |call_stack, subscriber| {
-        subscriber.emitEvent(now, call_stack, event, message);
+pub fn exitFrame(self: *Self, id: *const tracing.EventInfo) void {
+    if (!self.mutex.tryLock()) @panic("call stack in use");
+    defer self.mutex.unlock();
+    if (self.mutex.lock_count == 1) @panic("call stack is not bound");
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (self.state.suspended) @panic("call stack is suspended");
+
+    const frame = self.frames.pop() orelse @panic("span is not on top");
+    if (frame.id != id) @panic("span is not on top");
+    self.max_level = frame.previous_max_level;
+
+    const now = Instant.now().intoC();
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.ExitSpan{
+            .stack = stack,
+            .time = now,
+            .span = id,
+            .is_unwinding = false,
+        };
+        subscriber.exitSpan(event);
     }
 }
 
-pub fn asProxy(self: *Self) pub_tracing.CallStack {
-    return .{
-        .handle = self,
-        .vtable = &vtable,
-    };
+pub fn logMessage(
+    self: *Self,
+    info: *const tracing.EventInfo,
+    formatter: *const tracing.Formatter,
+    formatter_data: *const anyopaque,
+) void {
+    if (!self.mutex.tryLock()) @panic("call stack in use");
+    defer self.mutex.unlock();
+    if (self.mutex.lock_count == 1) @panic("call stack is not bound");
+    if (self.state.blocked) @panic("call stack is blocked");
+    if (self.state.suspended) @panic("call stack is suspended");
+
+    const max_lvl_int = @intFromEnum(self.max_level);
+    const event_lvl_int = @intFromEnum(info.level);
+    if (event_lvl_int > max_lvl_int) return;
+
+    const now = Instant.now().intoC();
+    const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
+    const message = self.fmt_buffer[0..message_len];
+    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        const event = tracing.events.LogMessage{
+            .stack = stack,
+            .time = now,
+            .info = info,
+            .message = message.ptr,
+            .message_length = message.len,
+        };
+        subscriber.logMessage(event);
+    }
 }
-
-// ----------------------------------------------------
-// Dummy Call Stack
-// ----------------------------------------------------
-
-const DummyVTableImpl = struct {
-    fn deinit(handle: *anyopaque) callconv(.c) void {
-        std.debug.assert(handle == dummy_call_stack.handle);
-    }
-    fn deinitAbort(handle: *anyopaque) callconv(.c) void {
-        std.debug.assert(handle == dummy_call_stack.handle);
-    }
-    fn replaceActive(handle: *anyopaque) callconv(.c) pub_tracing.CallStack {
-        std.debug.assert(handle == dummy_call_stack.handle);
-        return dummy_call_stack;
-    }
-    fn unblock(handle: *anyopaque) callconv(.c) void {
-        std.debug.assert(handle == dummy_call_stack.handle);
-    }
-};
-
-pub const dummy_call_stack = pub_tracing.CallStack{
-    .handle = @ptrFromInt(1),
-    .vtable = &dummy_vtable,
-};
-
-const dummy_vtable = pub_tracing.CallStack.VTable{
-    .deinit = &DummyVTableImpl.deinit,
-    .deinit_abort = &DummyVTableImpl.deinitAbort,
-    .replace_active = &DummyVTableImpl.replaceActive,
-    .unblock = &DummyVTableImpl.unblock,
-};
-
-// ----------------------------------------------------
-// VTable
-// ----------------------------------------------------
-
-const VTableImpl = struct {
-    fn deinit(handle: *anyopaque) callconv(.c) void {
-        const self: *Self = @alignCast(@ptrCast(handle));
-        self.deinitUnbound();
-    }
-    fn deinitAbort(handle: *anyopaque) callconv(.c) void {
-        const self: *Self = @alignCast(@ptrCast(handle));
-        self.deinitAbort();
-    }
-    fn replaceActive(handle: *anyopaque) callconv(.c) pub_tracing.CallStack {
-        const self: *Self = @alignCast(@ptrCast(handle));
-        if (!tracing.isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
-
-        const data = tracing.ThreadData.get().?;
-        if (data.call_stack == self) @panic(@errorName(error.CallStackBound));
-
-        self.bind();
-        data.call_stack.unbind();
-
-        const old = data.call_stack;
-        data.call_stack = self;
-        return old.asProxy();
-    }
-    fn unblock(handle: *anyopaque) callconv(.c) void {
-        const self: *Self = @alignCast(@ptrCast(handle));
-        self.unblock();
-    }
-};
-
-const vtable = pub_tracing.CallStack.VTable{
-    .deinit = &VTableImpl.deinit,
-    .deinit_abort = &VTableImpl.deinitAbort,
-    .replace_active = &VTableImpl.replaceActive,
-    .unblock = &VTableImpl.unblock,
-};

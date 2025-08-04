@@ -12,7 +12,6 @@ pub fn main() !void {
         .subscribers = &.{tracing.default_subscriber},
         .subscriber_count = 1,
     };
-    defer tracing_cfg.deinit();
     const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
     try ctx.init(init_options);
     defer ctx.deinit();
@@ -84,7 +83,7 @@ const NestedFuture = union(enum) {
     fn poll(self: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
         switch (self.*) {
             .start => |*x| {
-                tracing.emitTraceSimple("Polled state=`{any}`", .{self}, @src());
+                tracing.logTrace(@src(), "Polled state=`{any}`", .{self});
 
                 const a = switch (x.a.poll(waker)) {
                     .pending => return .pending,
@@ -98,7 +97,7 @@ const NestedFuture = union(enum) {
                 return .pending;
             },
             .stage_0 => |*x| {
-                tracing.emitTraceSimple("Polled state=`{any}`", .{self}, @src());
+                tracing.logTrace(@src(), "Polled state=`{any}`", .{self});
 
                 const b = switch (x.b.poll(waker)) {
                     .pending => return .pending,
@@ -112,7 +111,7 @@ const NestedFuture = union(enum) {
                 return .pending;
             },
             .stage_1 => |*x| {
-                tracing.emitTraceSimple("Polled state=`{any}`", .{self}, @src());
+                tracing.logTrace(@src(), "Polled state=`{any}`", .{self});
 
                 const a = x.a;
                 const b = x.b;
@@ -137,11 +136,7 @@ fn LoopFuture(comptime iterations: usize) type {
         }
 
         fn poll(self: *@This(), waker: tasks.Waker) tasks.Poll(usize) {
-            tracing.emitTraceSimple(
-                "Iteration i='{}', data=`{*}`",
-                .{ self.i, self },
-                @src(),
-            );
+            tracing.logTrace(@src(), "Iteration i='{}', data=`{*}`", .{ self.i, self });
 
             self.i += 1;
             if (self.i < iterations) {

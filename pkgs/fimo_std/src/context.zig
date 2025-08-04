@@ -197,7 +197,7 @@ pub fn deinit() void {
 
     // Might not actually trace anything, since all threads may be unregistered.
     // It's for just in case, that the calling thread did not unregister itself.
-    tracing.emitTraceSimple("cleaning up context", .{}, @src());
+    tracing.logTrace(@src(), "cleaning up context", .{});
 
     modules.deinit();
     tasks.deinit();

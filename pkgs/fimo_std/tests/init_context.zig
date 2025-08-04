@@ -8,7 +8,6 @@ pub fn main() !void {
         .subscribers = &.{tracing.default_subscriber},
         .subscriber_count = 1,
     };
-    defer tracing_cfg.deinit();
     const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
 
     try ctx.init(init_options);

@@ -64,7 +64,7 @@ pub fn init(config: *const pub_modules.Config) !void {
     profile = switch (config.profile) {
         .release, .dev => |x| x,
         else => |x| {
-            tracing.emitErrSimple("unknown profile, profile='{}'", .{@intFromEnum(x)}, @src());
+            tracing.logErr(@src(), "unknown profile, profile='{}'", .{@intFromEnum(x)});
             return error.InvalidConfig;
         },
     };
@@ -77,28 +77,16 @@ pub fn init(config: *const pub_modules.Config) !void {
         switch (request.tag) {
             else => |tag| {
                 if (request.flag == .required) {
-                    tracing.emitErrSimple(
-                        "unknown feature was marked as required, feature='{}'",
-                        .{tag},
-                        @src(),
-                    );
+                    tracing.logErr(@src(), "unknown feature was marked as required, feature='{}'", .{tag});
                     return error.InvaldConfig;
                 } else {
-                    tracing.emitWarnSimple(
-                        "unknown feature...ignoring, feature='{}'",
-                        .{tag},
-                        @src(),
-                    );
+                    tracing.logWarn(@src(), "unknown feature...ignoring, feature='{}'", .{tag});
                 }
             },
         }
     };
     for (&features) |feature| {
-        tracing.emitDebugSimple(
-            "module subsystem feature=`{t}`, status=`{t}`",
-            .{ feature.tag, feature.flag },
-            @src(),
-        );
+        tracing.logDebug(@src(), "module subsystem feature=`{t}`, status=`{t}`", .{ feature.tag, feature.flag });
     }
     dep_graph = .init(null, null);
 }
@@ -222,7 +210,7 @@ pub fn addInstance(inner: *InstanceHandle.Inner) !void {
 /// The root instance provides access to the subsystem for non-instances, and is mainly intended
 /// for bootstrapping.
 pub fn addRootInstance() !*const pub_modules.RootInstance {
-    tracing.emitTraceSimple("adding new root instance", .{}, @src());
+    tracing.logTrace(@src(), "adding new root instance", .{});
     mutex.lock();
     defer mutex.unlock();
 
@@ -337,7 +325,7 @@ pub fn unlinkInstances(inner: *InstanceHandle.Inner, other: *InstanceHandle.Inne
 
 /// Marks all instances as unloadable.
 pub fn pruneInstances() !void {
-    tracing.emitTraceSimple("pruning instances", .{}, @src());
+    tracing.logTrace(@src(), "pruning instances", .{});
     mutex.lock();
     defer mutex.unlock();
 
@@ -361,11 +349,7 @@ pub fn pruneInstances() !void {
             inner.enqueueUnload() catch return error.EnqueueError;
             continue;
         }
-        tracing.emitTraceSimple(
-            "unloading unused instance, instance='{s}'",
-            .{instance.info.name},
-            @src(),
-        );
+        tracing.logTrace(@src(), "unloading unused instance, instance='{s}'", .{instance.info.name});
         try removeInstance(inner);
         inner.stop();
         inner.deinit();
@@ -375,7 +359,7 @@ pub fn pruneInstances() !void {
 
 /// Searches for an instance by its name.
 pub fn findInstanceByName(name: []const u8) !*const pub_modules.Info {
-    tracing.emitTraceSimple("searching for instance, name='{s}'", .{name}, @src());
+    tracing.logTrace(@src(), "searching for instance, name='{s}'", .{name});
     mutex.lock();
     defer mutex.unlock();
 
@@ -386,11 +370,7 @@ pub fn findInstanceByName(name: []const u8) !*const pub_modules.Info {
 
 /// Searches for the instance that exports a specific symbol.
 pub fn findInstanceBySymbol(name: []const u8, namespace: []const u8, version: Version) !*const pub_modules.Info {
-    tracing.emitTraceSimple(
-        "searching for symbol owner, name='{s}', namespace='{s}', version='{f}'",
-        .{ name, namespace, version },
-        @src(),
-    );
+    tracing.logTrace(@src(), "searching for symbol owner, name='{s}', namespace='{s}', version='{f}'", .{ name, namespace, version });
     mutex.lock();
     defer mutex.unlock();
 
@@ -409,7 +389,7 @@ pub fn findInstanceBySymbol(name: []const u8, namespace: []const u8, version: Ve
 /// To exist, the namespace must contain at least one symbol.
 /// The global namespace always exist.
 pub fn queryNamespace(namespace: []const u8) bool {
-    tracing.emitTraceSimple("querying namespace, namespace='{s}'", .{namespace}, @src());
+    tracing.logTrace(@src(), "querying namespace, namespace='{s}'", .{namespace});
     mutex.lock();
     defer mutex.unlock();
 
@@ -495,7 +475,7 @@ fn removeSymbol(name: []const u8, namespace: []const u8) void {
 
 /// Initializes a new empty loading set.
 pub fn addLoadingSet(err: *?AnyError) !EnqueuedFuture(Fallible(*LoadingSet)) {
-    tracing.emitTraceSimple("creating new loading set", .{}, @src());
+    tracing.logTrace(@src(), "creating new loading set", .{});
     var fut = LoadingSet.init(&context.global).intoFuture().map(
         Fallible(*LoadingSet),
         Fallible(*LoadingSet).Wrapper(anyerror),
@@ -515,11 +495,7 @@ pub fn queryParameter(owner: []const u8, parameter: []const u8) error{NotFound}!
     read_group: pub_modules.ParameterAccessGroup,
     write_group: pub_modules.ParameterAccessGroup,
 } {
-    tracing.emitTraceSimple(
-        "querying parameter, owner='{s}', parameter='{s}'",
-        .{ owner, parameter },
-        @src(),
-    );
+    tracing.logTrace(@src(), "querying parameter, owner='{s}', parameter='{s}'", .{ owner, parameter });
     mutex.lock();
     defer mutex.unlock();
 
@@ -543,10 +519,10 @@ pub fn readParameter(
     owner: []const u8,
     parameter: []const u8,
 ) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "reading public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
         .{ value, @tagName(@"type"), owner, parameter },
-        @src(),
     );
     mutex.lock();
     defer mutex.unlock();
@@ -569,10 +545,10 @@ pub fn writeParameter(
     owner: []const u8,
     parameter: []const u8,
 ) !void {
-    tracing.emitTraceSimple(
+    tracing.logTrace(
+        @src(),
         "write public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
         .{ value, @tagName(@"type"), owner, parameter },
-        @src(),
     );
     mutex.lock();
     defer mutex.unlock();
@@ -605,7 +581,7 @@ const VTableImpl = struct {
     fn addRootInstance(instance: **const pub_modules.RootInstance) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         instance.* = modules.addRootInstance() catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -614,7 +590,7 @@ const VTableImpl = struct {
     fn addLoadingSet(set: *pub_modules.LoadingSet) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         set.* = LoadingSet.init() catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -626,7 +602,7 @@ const VTableImpl = struct {
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         info.* = modules.findInstanceByName(std.mem.span(name)) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -644,7 +620,7 @@ const VTableImpl = struct {
             std.mem.span(namespace),
             Version.initC(version),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -658,7 +634,7 @@ const VTableImpl = struct {
     fn pruneInstances() callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         modules.pruneInstances() catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -676,7 +652,7 @@ const VTableImpl = struct {
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -698,7 +674,7 @@ const VTableImpl = struct {
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
@@ -717,7 +693,7 @@ const VTableImpl = struct {
             std.mem.span(owner),
             std.mem.span(parameter),
         ) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.emitStackTraceSimple(tr.*, @src());
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
