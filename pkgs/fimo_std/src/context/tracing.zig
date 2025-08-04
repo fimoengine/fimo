@@ -4,9 +4,14 @@ const Allocator = std.mem.Allocator;
 const context = @import("../context.zig");
 const time = @import("../time.zig");
 const pub_tracing = @import("../tracing.zig");
+pub const Level = pub_tracing.Level;
+pub const EventInfo = pub_tracing.EventInfo;
+pub const Formatter = pub_tracing.Formatter;
+pub const stdFormatter = pub_tracing.stdFormatter;
+pub const stackTraceFormatter = pub_tracing.stackTraceFormatter;
+pub const events = pub_tracing.events;
 const ResourceCount = @import("ResourceCount.zig");
-const CallStack = @import("tracing/CallStack.zig");
-const StackFrame = @import("tracing/StackFrame.zig");
+pub const CallStack = @import("tracing/CallStack.zig");
 
 const tracing = @This();
 
@@ -17,6 +22,260 @@ pub var max_level: pub_tracing.Level = undefined;
 pub var thread_count: ResourceCount = .{};
 pub var call_stack_count: ResourceCount = .{};
 
+/// A period of time, during which events can occur.
+pub const Span = struct {
+    id: *const EventInfo,
+
+    /// Constructs a new span.
+    ///
+    /// The event associated with the span is embedded into the callers binary, and is not emitted
+    /// to the subsystem.
+    pub inline fn at(
+        comptime loc: std.builtin.SourceLocation,
+        comptime scope: @Type(.enum_literal),
+        comptime lvl: Level,
+    ) Span {
+        const Global = struct {
+            const embedded: EventInfo = .at(loc, scope, lvl);
+        };
+        return .{ .id = &Global.embedded };
+    }
+
+    /// Enters the span.
+    ///
+    /// Once entered, the span is used as the context for succeeding events. Each `enter` operation
+    /// must be accompanied with a `exit` operation in reverse entering order. A span may be entered
+    /// multiple times. The formatting function may be used to assign a name to the entered span.
+    pub fn enter(
+        self: Span,
+        formatter: *const Formatter,
+        formatter_data: *const anyopaque,
+    ) void {
+        if (!isEnabled()) return;
+        if (!isEnabledForCurrentThread()) @panic("thread not registered");
+        const d = ThreadData.get().?;
+        d.call_stack.enterFrame(self.id, formatter, formatter_data);
+    }
+
+    /// Exits an entered span.
+    ///
+    /// The events won't occur inside the context of the exited span anymore. The span must be the
+    /// span at the top of the current call stack.
+    pub fn exit(self: Span) void {
+        if (!isEnabled()) return;
+        if (!isEnabledForCurrentThread()) @panic("thread not registered");
+        const d = ThreadData.get().?;
+        d.call_stack.exitFrame(self.id);
+    }
+};
+
+/// Returns a scoped tracing namespace that emits all events using the scope provided here.
+pub fn scoped(scope: @Type(.enum_literal)) type {
+    return struct {
+        /// Logs a error message.
+        pub inline fn logErr(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .err, fmt, args);
+        }
+
+        /// Logs a warning message.
+        pub inline fn logWarn(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .warn, fmt, args);
+        }
+
+        /// Logs an info message.
+        pub inline fn logInfo(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .info, fmt, args);
+        }
+
+        /// Logs a debug message.
+        pub inline fn logDebug(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .debug, fmt, args);
+        }
+
+        /// Logs a trace message.
+        pub inline fn logTrace(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().log(loc, .trace, fmt, args);
+        }
+
+        /// Logs the current stack trace as an error.
+        pub inline fn logStackTrace(
+            comptime loc: std.builtin.SourceLocation,
+            stack_trace: std.builtin.StackTrace,
+        ) void {
+            @This().logWithFormatter(loc, .err, stackTraceFormatter, &stack_trace);
+        }
+
+        /// Logs a message using to the zig formatting logic.
+        pub inline fn log(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) void {
+            @This().logWithFormatter(loc, lvl, stdFormatter(fmt, @TypeOf(args)), &args);
+        }
+
+        /// Logs a message with a custom format function.
+        pub inline fn logWithFormatter(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            formatter: *const Formatter,
+            formatter_data: *const anyopaque,
+        ) void {
+            const Global = struct {
+                const embedded: EventInfo = .at(loc, scope, lvl);
+            };
+            logMessage(&Global.embedded, formatter, formatter_data);
+        }
+
+        /// Creates and enters an error span.
+        pub inline fn spanErr(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .err);
+        }
+
+        /// Creates and enters an error span.
+        pub inline fn spanErrNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .err, fmt, args);
+        }
+
+        /// Creates and enters a warning span.
+        pub inline fn spanWarn(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .warn);
+        }
+
+        /// Creates and enters a warning span.
+        pub inline fn spanWarnNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .warn, fmt, args);
+        }
+
+        /// Creates and enters an info span.
+        pub inline fn spanInfo(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .info);
+        }
+
+        /// Creates and enters an info span.
+        pub inline fn spanInfoNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .info, fmt, args);
+        }
+
+        /// Creates and enters a debug span.
+        pub inline fn spanDebug(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .debug);
+        }
+
+        /// Creates and enters a debug span.
+        pub inline fn spanDebugNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .debug, fmt, args);
+        }
+
+        /// Creates and enters a trace span.
+        pub inline fn spanTrace(comptime loc: std.builtin.SourceLocation) Span {
+            return @This().span(loc, .trace);
+        }
+
+        /// Creates and enters a trace span.
+        pub inline fn spanTraceNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamed(loc, .trace, fmt, args);
+        }
+
+        /// Creates and enters a span.
+        pub inline fn span(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+        ) Span {
+            return @This().spanNamed(loc, lvl, "", .{});
+        }
+
+        /// Creates and enters a span using to the zig formatting logic.
+        pub inline fn spanNamed(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            comptime fmt: []const u8,
+            args: anytype,
+        ) Span {
+            return @This().spanNamedWithFormatter(loc, lvl, stdFormatter(fmt, @TypeOf(args)), &args);
+        }
+
+        /// Creates and enters a span with a custom format function.
+        pub inline fn spanNamedWithFormatter(
+            comptime loc: std.builtin.SourceLocation,
+            comptime lvl: Level,
+            formatter: *const Formatter,
+            formatter_data: *const anyopaque,
+        ) Span {
+            const sp: Span = .at(loc, scope, lvl);
+            sp.enter(formatter, formatter_data);
+            return sp;
+        }
+    };
+}
+
+/// The default scoped tracing namespace.
+pub const default = scoped(default_trace_scope);
+pub const default_trace_scope = .default;
+
+pub const logErr = default.logErr;
+pub const logWarn = default.logWarn;
+pub const logInfo = default.logInfo;
+pub const logDebug = default.logDebug;
+pub const logTrace = default.logTrace;
+pub const logStackTrace = default.logStackTrace;
+pub const log = default.log;
+pub const logWithFormatter = default.logWithFormatter;
+pub const spanErr = default.spanErr;
+pub const spanErrNamed = default.spanErrNamed;
+pub const spanWarn = default.spanWarn;
+pub const spanWarnNamed = default.spanWarnNamed;
+pub const spanInfo = default.spanInfo;
+pub const spanInfoNamed = default.spanInfoNamed;
+pub const spanDebug = default.spanDebug;
+pub const spanDebugNamed = default.spanDebugNamed;
+pub const spanTrace = default.spanTrace;
+pub const spanTraceNamed = default.spanTraceNamed;
+pub const span = default.span;
+pub const spanNamed = default.spanNamed;
+pub const spanNamedWithFormatter = default.spanNamedWithFormatter;
+
 /// Initializes the tracing subsystem.
 pub fn init(config: *const pub_tracing.Config) !void {
     allocator = context.allocator;
@@ -25,13 +284,9 @@ pub fn init(config: *const pub_tracing.Config) !void {
         &.{},
     );
     subscribers = try allocator.dupe(pub_tracing.Subscriber, subs);
-    for (subscribers) |sub| sub.ref();
     buffer_size = if (config.format_buffer_len != 0) config.format_buffer_len else 1024;
     max_level = config.max_level;
-    errdefer {
-        for (subscribers) |sub| sub.unref();
-        allocator.free(subscribers);
-    }
+    errdefer allocator.free(subscribers);
 }
 
 /// Deinitializes the tracing subsystem.
@@ -42,453 +297,7 @@ pub fn deinit() void {
     if (ThreadData.get() != null) ThreadData.cleanup();
     thread_count.waitUntilZero();
     call_stack_count.waitUntilZero();
-
-    for (subscribers) |subs| subs.unref();
     allocator.free(subscribers);
-}
-
-/// Creates a new empty call stack.
-///
-/// If successful, the new call stack is marked as suspended. The new call stack is not set to be
-/// the active call stack.
-pub fn createCallStack() pub_tracing.CallStack {
-    if (!isEnabled()) return CallStack.dummy_call_stack;
-    const call_stack = CallStack.init();
-    return call_stack.asProxy();
-}
-
-/// Marks the current call stack as being suspended.
-///
-/// While suspended, the call stack can not be utilized for tracing messages. The call stack
-/// optionally also be marked as being blocked. In that case, the call stack must be unblocked
-/// prior to resumption.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub fn suspendCurrentCallStack(mark_blocked: bool) void {
-    if (!isEnabled()) return;
-    if (!isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
-    const data = ThreadData.get().?;
-    return data.call_stack.@"suspend"(mark_blocked);
-}
-
-/// Marks the current call stack as being resumed.
-///
-/// Once resumed, the context can be used to trace messages. To be successful, the current call
-/// stack must be suspended and unblocked.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub fn resumeCurrentCallStack() void {
-    if (!isEnabled()) return;
-    if (!isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
-    const data = ThreadData.get().?;
-    return data.call_stack.@"resume"();
-}
-
-/// Creates a new span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpan(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    level: pub_tracing.Level,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    const desc = &struct {
-        var desc = pub_tracing.SpanDesc{
-            .metadata = &.{
-                .name = name orelse location.fn_name,
-                .target = target orelse location.module,
-                .level = level,
-                .file_name = location.file,
-                .line_number = @intCast(location.line),
-            },
-        };
-    }.desc;
-    return pushSpanCustom(desc, pub_tracing.stdFormatter(fmt, @TypeOf(args)), &args);
-}
-
-/// Creates a new error span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanErr(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpan(fmt, args, name, target, .err, location);
-}
-
-/// Creates a new warn span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanWarn(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpan(fmt, args, name, target, .warn, location);
-}
-
-/// Creates a new info span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanInfo(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpan(fmt, args, name, target, .info, location);
-}
-
-/// Creates a new debug span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanDebug(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpan(fmt, args, name, target, .debug, location);
-}
-
-/// Creates a new trace span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanTrace(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpan(fmt, args, name, target, .trace, location);
-}
-
-/// Creates a new error span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanErrSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpanErr(fmt, args, null, null, location);
-}
-
-/// Creates a new warn span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanWarnSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpanWarn(fmt, args, null, null, location);
-}
-
-/// Creates a new info span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanInfoSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpanInfo(fmt, args, null, null, location);
-}
-
-/// Creates a new debug span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanDebugSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpanDebug(fmt, args, null, null, location);
-}
-
-/// Creates a new trace span with the default formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The message
-/// is formatted with the default formatter of the zig standard library. The message may be cut of,
-/// if the length exceeds the internal formatting buffer size.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub inline fn pushSpanTraceSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) pub_tracing.Span {
-    return pushSpanTrace(fmt, args, null, null, location);
-}
-
-/// Creates a new span with a custom formatter and enters it.
-///
-/// If successful, the newly created span is used as the context for succeeding events. The
-/// subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of the
-/// message after reaching that specified size. The `desc` must remain valid until the span is
-/// destroyed.
-///
-/// This function may panic, if the current thread is not registered with the subsystem.
-pub fn pushSpanCustom(
-    desc: *const pub_tracing.SpanDesc,
-    formatter: *const pub_tracing.Formatter,
-    data: ?*const anyopaque,
-) pub_tracing.Span {
-    if (!isEnabled()) return StackFrame.dummy_span;
-    if (!isEnabledForCurrentThread()) @panic(@errorName(error.ThreadNotRegistered));
-    const d = ThreadData.get().?;
-    return d.call_stack.pushSpan(desc, formatter, data);
-}
-
-/// Emits a new event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitEvent(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    level: pub_tracing.Level,
-    location: std.builtin.SourceLocation,
-) void {
-    const event = pub_tracing.Event{
-        .metadata = &.{
-            .name = name orelse location.fn_name,
-            .target = target orelse location.module,
-            .level = level,
-            .file_name = location.file,
-            .line_number = @intCast(location.line),
-        },
-    };
-    emitEventCustom(&event, pub_tracing.stdFormatter(fmt, @TypeOf(args)), &args);
-}
-
-/// Emits a new error event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitErr(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitEvent(fmt, args, name, target, .err, location);
-}
-
-/// Emits a new warn event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitWarn(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitEvent(fmt, args, name, target, .warn, location);
-}
-
-/// Emits a new info event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitInfo(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitEvent(fmt, args, name, target, .info, location);
-}
-
-/// Emits a new debug event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitDebug(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitEvent(fmt, args, name, target, .debug, location);
-}
-
-/// Emits a new trace event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitTrace(
-    comptime fmt: []const u8,
-    args: anytype,
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitEvent(fmt, args, name, target, .trace, location);
-}
-
-/// Emits a new error event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitErrSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitErr(fmt, args, null, null, location);
-}
-
-/// Emits a new warn event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitWarnSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitWarn(fmt, args, null, null, location);
-}
-
-/// Emits a new info event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitInfoSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitInfo(fmt, args, null, null, location);
-}
-
-/// Emits a new debug event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitDebugSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitDebug(fmt, args, null, null, location);
-}
-
-/// Emits a new trace event with the standard formatter.
-///
-/// The message is formatted using the default formatter of the zig standard library. The message
-/// may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitTraceSimple(
-    comptime fmt: []const u8,
-    args: anytype,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitTrace(fmt, args, null, null, location);
-}
-
-/// Emits a new error event dumping the stack trace.
-///
-/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitStackTrace(
-    name: ?[:0]const u8,
-    target: ?[:0]const u8,
-    stack_trace: std.builtin.StackTrace,
-    location: std.builtin.SourceLocation,
-) void {
-    const event = pub_tracing.Event{
-        .metadata = &.{
-            .name = name orelse location.fn_name,
-            .target = target orelse location.module,
-            .level = .err,
-            .file_name = location.file,
-            .line_number = @intCast(location.line),
-        },
-    };
-    emitEventCustom(&event, pub_tracing.stackTraceFormatter, &stack_trace);
-}
-
-/// Emits a new error event dumping the stack trace.
-///
-/// The stack trace may be cut of, if the length exceeds the internal formatting buffer size.
-pub fn emitStackTraceSimple(
-    stack_trace: std.builtin.StackTrace,
-    location: std.builtin.SourceLocation,
-) void {
-    return emitStackTrace(null, null, stack_trace, location);
-}
-
-/// Emits a new event with a custom formatter.
-///
-/// The subsystem may use a formatting buffer of a fixed size. The formatter is expected to cut-of
-/// the message after reaching that specified size.
-pub fn emitEventCustom(
-    event: *const pub_tracing.Event,
-    formatter: *const pub_tracing.Formatter,
-    data: ?*const anyopaque,
-) void {
-    if (!wouldTrace(event.metadata)) return;
-    const d = ThreadData.get().?;
-    d.call_stack.emitEvent(event, formatter, data);
 }
 
 /// Returns whether the subsystem was configured to enable tracing.
@@ -500,16 +309,16 @@ pub fn isEnabled() bool {
 
 /// Returns whether the subsystem is configured to trace the current thread.
 ///
-/// In addition to requiring the correctt configuration of the subsystem, this also requires that
+/// In addition to requiring the correct configuration of the subsystem, this also requires that
 /// the current thread be registered.
 pub fn isEnabledForCurrentThread() bool {
     return isEnabled() and ThreadData.get() != null;
 }
 
-/// Checks whether an event or span with the provided metadata would lead to a tracing operation.
-pub fn wouldTrace(metadata: *const pub_tracing.Metadata) bool {
+/// Checks whether an event with the provided info would lead to a tracing operation.
+pub fn wouldTrace(info: *const EventInfo) bool {
     if (!isEnabledForCurrentThread()) return false;
-    return @intFromEnum(max_level) >= @intFromEnum(metadata.level);
+    return @intFromEnum(max_level) >= @intFromEnum(info.level);
 }
 
 /// Tries to register the current thread with the subsystem.
@@ -528,30 +337,32 @@ pub fn unregisterThread() void {
     ThreadData.cleanup();
 }
 
-/// Flushes all tracing messages from the subscribers.
-pub fn flush() void {
-    if (!isEnabled()) return;
-    for (subscribers) |sub| {
-        sub.flush();
-    }
+fn logMessage(
+    info: *const EventInfo,
+    formatter: *const Formatter,
+    formatter_data: *const anyopaque,
+) void {
+    if (!wouldTrace(info)) return;
+    const d = ThreadData.get().?;
+    d.call_stack.logMessage(info, formatter, formatter_data);
 }
 
 pub const ThreadData = struct {
     call_stack: *CallStack,
-    ref_count: usize = 1,
+    fmt_buffer: []u8,
 
     fn init() void {
         const thread_data = context.ThreadData.getOrInit();
-        if (thread_data.tracing) |*this| {
-            this.ref_count += 1;
-            return;
-        }
+        if (thread_data.tracing != null) @panic("thread already registered");
 
+        const fmt_buffer = tracing.allocator.alloc(
+            u8,
+            tracing.buffer_size,
+        ) catch |err| @panic(@errorName(err));
         const this = ThreadData{
-            .call_stack = CallStack.init(),
+            .call_stack = CallStack.initBound(fmt_buffer),
+            .fmt_buffer = fmt_buffer,
         };
-        this.call_stack.bind();
-        this.call_stack.@"resume"();
         thread_data.tracing = this;
         thread_count.increase();
     }
@@ -559,10 +370,9 @@ pub const ThreadData = struct {
     fn cleanup() void {
         const thread_data = context.ThreadData.get() orelse @panic("thread not registered");
         const this = &(thread_data.tracing orelse @panic(@panic("thread not registered")));
-        this.ref_count -= 1;
-        if (this.ref_count > 0) return;
 
-        this.call_stack.deinit();
+        this.call_stack.finishBound();
+        tracing.allocator.free(this.fmt_buffer);
         thread_data.tracing = null;
         thread_count.decrease();
     }
@@ -574,9 +384,7 @@ pub const ThreadData = struct {
     }
 
     pub fn onThreadExit(self: *ThreadData) void {
-        self.ref_count -= 1;
-        std.debug.assert(self.ref_count == 0);
-        self.call_stack.deinit();
+        self.call_stack.finishBound();
         thread_count.decrease();
     }
 };
@@ -586,34 +394,6 @@ pub const ThreadData = struct {
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn createCallStack() callconv(.c) pub_tracing.CallStack {
-        std.debug.assert(context.is_init);
-        return tracing.createCallStack();
-    }
-    fn suspendCurrentCallStack(mark_blocked: bool) callconv(.c) void {
-        std.debug.assert(context.is_init);
-        tracing.suspendCurrentCallStack(mark_blocked);
-    }
-    fn resumeCurrentCallStack() callconv(.c) void {
-        std.debug.assert(context.is_init);
-        tracing.resumeCurrentCallStack();
-    }
-    fn pushSpan(
-        desc: *const pub_tracing.SpanDesc,
-        formatter: *const pub_tracing.Formatter,
-        data: ?*const anyopaque,
-    ) callconv(.c) pub_tracing.Span {
-        std.debug.assert(context.is_init);
-        return tracing.pushSpanCustom(desc, formatter, data);
-    }
-    fn emitEvent(
-        event: *const pub_tracing.Event,
-        formatter: *const pub_tracing.Formatter,
-        data: ?*const anyopaque,
-    ) callconv(.c) void {
-        std.debug.assert(context.is_init);
-        tracing.emitEventCustom(event, formatter, data);
-    }
     fn isEnabled() callconv(.c) bool {
         std.debug.assert(context.is_init);
         return tracing.isEnabled();
@@ -626,20 +406,68 @@ const VTableImpl = struct {
         std.debug.assert(context.is_init);
         tracing.unregisterThread();
     }
-    fn flush() callconv(.c) void {
+    fn createCallStack() callconv(.c) *pub_tracing.CallStack {
         std.debug.assert(context.is_init);
-        tracing.flush();
+        const stack = CallStack.init();
+        return @ptrCast(stack);
+    }
+    fn destroyCallStack(stack: *pub_tracing.CallStack, abort: bool) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        const stack_: *CallStack = @ptrCast(@alignCast(stack));
+        if (abort) stack_.abort() else stack_.finish();
+    }
+    fn swapCallStack(stack: *pub_tracing.CallStack) callconv(.c) *pub_tracing.CallStack {
+        std.debug.assert(context.is_init);
+        const stack_: *CallStack = @ptrCast(@alignCast(stack));
+        const old = stack_.swapCurrent();
+        return @ptrCast(old);
+    }
+    fn unblockCallStack(stack: *pub_tracing.CallStack) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        const stack_: *CallStack = @ptrCast(@alignCast(stack));
+        stack_.unblock();
+    }
+    fn suspendCurrentCallStack(mark_blocked: bool) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        CallStack.suspendCurrent(mark_blocked);
+    }
+    fn resumeCurrentCallStack() callconv(.c) void {
+        std.debug.assert(context.is_init);
+        CallStack.resumeCurrent();
+    }
+    fn enterSpan(
+        id: *const EventInfo,
+        formatter: *const Formatter,
+        formatter_data: *const anyopaque,
+    ) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        (Span{ .id = id }).enter(formatter, formatter_data);
+    }
+    fn exitSpan(id: *const EventInfo) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        (Span{ .id = id }).exit();
+    }
+    fn logMessage(
+        info: *const EventInfo,
+        formatter: *const Formatter,
+        formatter_data: *const anyopaque,
+    ) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        tracing.logMessage(info, formatter, formatter_data);
     }
 };
 
 pub const vtable = pub_tracing.VTable{
-    .create_call_stack = &VTableImpl.createCallStack,
-    .suspend_current_call_stack = &VTableImpl.suspendCurrentCallStack,
-    .resume_current_call_stack = &VTableImpl.resumeCurrentCallStack,
-    .span_create = &VTableImpl.pushSpan,
-    .event_emit = &VTableImpl.emitEvent,
     .is_enabled = &VTableImpl.isEnabled,
     .register_thread = &VTableImpl.registerThread,
     .unregister_thread = &VTableImpl.unregisterThread,
-    .flush = &VTableImpl.flush,
+    .create_call_stack = &VTableImpl.createCallStack,
+    .destroy_call_stack = &VTableImpl.destroyCallStack,
+    .swap_call_stack = &VTableImpl.swapCallStack,
+    .unblock_call_stack = &VTableImpl.unblockCallStack,
+    .suspend_current_call_stack = &VTableImpl.suspendCurrentCallStack,
+    .resume_current_call_stack = &VTableImpl.resumeCurrentCallStack,
+    .enter_span = &VTableImpl.enterSpan,
+    .exit_span = &VTableImpl.exitSpan,
+    .log_message = &VTableImpl.logMessage,
 };

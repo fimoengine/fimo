@@ -164,7 +164,7 @@ const Graph = struct {
         self.resources = .empty;
         _ = self.arena.reset(.retain_capacity);
         const group: *SystemGroup = @fieldParentPtr("system_graph", self);
-        tracing.emitDebugSimple("repopulating buffers of {*}", .{group}, @src());
+        tracing.logDebug(@src(), "repopulating buffers of {*}", .{group});
 
         const allocator = self.arena.allocator();
         for (self.systems.values()) |ctx| {
@@ -367,16 +367,17 @@ pub fn init(options: InitOptions) !*SystemGroup {
     const group = try allocator.create(SystemGroup);
     group.* = .{ .label = label, .world = options.world, .executor = executor };
     _ = options.world.system_group_count.fetchAdd(1, .monotonic);
-    tracing.emitDebugSimple(
-        "created `{*}`, label=`{s}`, world=`{*}`, executor=`{}`",
-        .{ group, label, options.world, executor.id() },
-        @src(),
-    );
+    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, world=`{*}`, executor=`{}`", .{
+        group,
+        label,
+        options.world,
+        executor.id(),
+    });
     return group;
 }
 
 pub fn deinit(self: *SystemGroup) void {
-    tracing.emitDebugSimple("destroying `{*}`", .{self}, @src());
+    tracing.logDebug(@src(), "destroying `{*}`", .{self});
     self.system_graph.mutex.lock();
 
     if (!self.system_graph.schedule_semaphore.isSignaled(@truncate(
@@ -396,7 +397,7 @@ pub fn deinit(self: *SystemGroup) void {
 }
 
 pub fn addSystems(self: *SystemGroup, handles: []const *System) !void {
-    tracing.emitDebugSimple("adding `{any}` to `{*}`", .{ handles, self }, @src());
+    tracing.logDebug(@src(), "adding `{any}` to `{*}`", .{ handles, self });
     self.system_graph.mutex.lock();
     defer self.system_graph.mutex.unlock();
 
@@ -417,7 +418,7 @@ pub fn addSystems(self: *SystemGroup, handles: []const *System) !void {
 }
 
 pub fn removeSystem(self: *SystemGroup, handle: *System, fence: *Fence) void {
-    tracing.emitDebugSimple("removing `{}` from `{*}`", .{ handle, self }, @src());
+    tracing.logDebug(@src(), "removing `{}` from `{*}`", .{ handle, self });
     self.system_graph.mutex.lock();
     defer self.system_graph.mutex.unlock();
 
@@ -430,11 +431,7 @@ pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !voi
     self.system_graph.mutex.lock();
     defer self.system_graph.mutex.unlock();
     const generation = self.system_graph.next_generation;
-    tracing.emitDebugSimple(
-        "scheduling generation {} of `{*}`",
-        .{ generation, self },
-        @src(),
-    );
+    tracing.logDebug(@src(), "scheduling generation {} of `{*}`", .{ generation, self });
 
     try Job.go(
         run,
@@ -456,7 +453,7 @@ pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !voi
 
 fn run(self: *SystemGroup, generation: usize) void {
     std.debug.assert(self.generation == generation);
-    tracing.emitDebugSimple("running generation `{}` of `{*}`", .{ generation, self }, @src());
+    tracing.logDebug(@src(), "running generation `{}` of `{*}`", .{ generation, self });
     {
         self.system_graph.mutex.lock();
         defer self.system_graph.mutex.unlock();

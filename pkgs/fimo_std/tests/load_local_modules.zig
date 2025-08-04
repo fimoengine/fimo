@@ -33,11 +33,11 @@ const B1 = modules.Symbol{
 };
 
 fn startCModule(inst: *const modules.OpaqueInstance) !void {
-    tracing.emitInfoSimple("starting instance: name='{s}'", .{inst.info.name}, @src());
+    tracing.logInfo(@src(), "starting instance: name='{s}'", .{inst.info.name});
 }
 
 fn stopCModule(inst: *const modules.OpaqueInstance) void {
-    tracing.emitInfoSimple("stopping instance: name='{s}'", .{inst.info.name}, @src());
+    tracing.logInfo(@src(), "stopping instance: name='{s}'", .{inst.info.name});
 }
 
 const Modules = modules.ModuleBundle(.{
@@ -106,7 +106,7 @@ const C = struct {
     };
 
     fn init() !void {
-        tracing.emitInfoSimple("initializing instance: name='{s}'", .{Module.info().name}, @src());
+        tracing.logInfo(@src(), "initializing instance: name='{s}'", .{Module.info().name});
 
         const parameters = Module.parameters();
         try testing.expectEqual(0, parameters.pub_pub.read());
@@ -130,10 +130,10 @@ const C = struct {
         parameters.pri_pri.write(8);
 
         const paths = Module.paths();
-        tracing.emitTraceSimple("empty: '{f}'", .{paths.empty}, @src());
-        tracing.emitTraceSimple("a: '{f}'", .{paths.a}, @src());
-        tracing.emitTraceSimple("b: '{f}'", .{paths.b}, @src());
-        tracing.emitTraceSimple("img: '{f}'", .{paths.img}, @src());
+        tracing.logTrace(@src(), "empty: '{f}'", .{paths.empty});
+        tracing.logTrace(@src(), "a: '{f}'", .{paths.a});
+        tracing.logTrace(@src(), "b: '{f}'", .{paths.b});
+        tracing.logTrace(@src(), "img: '{f}'", .{paths.img});
 
         const imports = Module.imports();
         try testing.expectEqual(imports.@"0".*, 5);
@@ -158,15 +158,15 @@ const C = struct {
     }
 
     fn deinit() void {
-        tracing.emitInfoSimple("deinitializing instance: name='{s}'", .{Module.info().name}, @src());
+        tracing.logInfo(@src(), "deinitializing instance: name='{s}'", .{Module.info().name});
     }
 
     fn on_start() void {
-        tracing.emitInfoSimple("starting instance: name='{s}'", .{Module.info().name}, @src());
+        tracing.logInfo(@src(), "starting instance: name='{s}'", .{Module.info().name});
     }
 
     fn on_stop() void {
-        tracing.emitInfoSimple("stopping instance: name='{s}'", .{Module.info().name}, @src());
+        tracing.logInfo(@src(), "stopping instance: name='{s}'", .{Module.info().name});
     }
 };
 
@@ -176,7 +176,6 @@ pub fn main() !void {
         .subscribers = &.{tracing.default_subscriber},
         .subscriber_count = 1,
     };
-    defer tracing_cfg.deinit();
     const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
 
     try ctx.init(init_options);
@@ -187,7 +186,7 @@ pub fn main() !void {
     errdefer if (ctx.hasErrorResult()) {
         const e = ctx.takeResult().unwrapErr();
         defer e.deinit();
-        tracing.emitErrSimple("{f}", .{e}, @src());
+        tracing.logErr(@src(), "{f}", .{e});
         e.deinit();
     };
 

@@ -42,11 +42,10 @@ pub const TestContext = struct {
 
 pub fn initTestContext() !TestContext {
     const tracing_cfg = tracing.Config{
-        .max_level = .warn,
+        .max_level = .info,
         .subscribers = &.{tracing.default_subscriber},
         .subscriber_count = 1,
     };
-    defer tracing_cfg.deinit();
     const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
     try ctx.init(init_options);
     errdefer ctx.deinit();
@@ -56,7 +55,7 @@ pub fn initTestContext() !TestContext {
     errdefer if (ctx.hasErrorResult()) {
         const e = ctx.takeResult().unwrapErr();
         defer e.deinit();
-        tracing.emitErrSimple("{f}", .{e}, @src());
+        tracing.logErr(@src(), "{f}", .{e});
         e.deinit();
     };
 

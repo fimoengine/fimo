@@ -87,11 +87,7 @@ extern "winmm" fn timeEndPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
 fn init(self: *@This()) void {
     if (comptime builtin.target.os.tag == .windows) {
         if (timeBeginPeriod(1) != 0) {
-            tracing.emitWarnSimple(
-                "`timeBeginPeriod` failed, defaulting to default timer resolution",
-                .{},
-                @src(),
-            );
+            tracing.logWarn(@src(), "`timeBeginPeriod` failed, defaulting to default timer resolution", .{});
         }
     }
 
@@ -210,65 +206,65 @@ fn createWorkerPool(
     const allocator = self.allocator;
 
     if (config.next != null) {
-        tracing.emitErrSimple(
-            "the next key is reserved for future use, pool=`{s}`",
-            .{config.label()},
-            @src(),
-        );
+        tracing.logErr(@src(), "the next key is reserved for future use, pool=`{s}`", .{config.label()});
         ctx.setResult(.initErr(.initError(error.InvalidConfig)));
         return .err;
     }
     if (config.stacks_len == 0) {
-        tracing.emitErrSimple("expected at least one stack, pool=`{s}`", .{config.label()}, @src());
+        tracing.logErr(@src(), "expected at least one stack, pool=`{s}`", .{config.label()});
         ctx.setResult(.initErr(.initError(error.InvalidConfig)));
         return .err;
     }
     if (config.default_stack_index >= config.stacks_len) {
-        tracing.emitErrSimple(
-            "default stack index out of bounds, pool=`{s}`, stacks=`{}`, default=`{}`",
-            .{ config.label(), config.stacks_len, config.default_stack_index },
-            @src(),
-        );
+        tracing.logErr(@src(), "default stack index out of bounds, pool=`{s}`, stacks=`{}`, default=`{}`", .{
+            config.label(),
+            config.stacks_len,
+            config.default_stack_index,
+        });
         ctx.setResult(.initErr(.initError(error.InvalidConfig)));
         return .err;
     }
     for (config.stacks(), 0..) |stack, i| {
         if (stack.next != null) {
-            tracing.emitErrSimple(
-                "the next key is reserved for future use, pool=`{s}`, stack_index=`{}`",
-                .{ config.label(), i },
-                @src(),
-            );
+            tracing.logErr(@src(), "the next key is reserved for future use, pool=`{s}`, stack_index=`{}`", .{
+                config.label(),
+                i,
+            });
             ctx.setResult(.initErr(.initError(error.InvalidConfig)));
             return .err;
         }
         if (stack.preallocated_count > stack.max_allocated) {
-            tracing.emitErrSimple(
-                "number of preallocated stacks exceeds the specified maximum number of stacks," ++
-                    " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, max_allocated=`{}`",
-                .{ config.label(), i, stack.preallocated_count, stack.max_allocated },
-                @src(),
-            );
+            tracing.logErr(@src(), "number of preallocated stacks exceeds the specified maximum number of stacks," ++
+                " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, max_allocated=`{}`", .{
+                config.label(),
+                i,
+                stack.preallocated_count,
+                stack.max_allocated,
+            });
             ctx.setResult(.initErr(.initError(error.InvalidConfig)));
             return .err;
         }
         if (stack.cold_count + stack.hot_count < stack.preallocated_count) {
-            tracing.emitErrSimple(
-                "number of preallocated stacks stacks exceeds the combined cold and hot stacks count," ++
-                    " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, cold=`{}`, hot=`{}`",
-                .{ config.label(), i, stack.preallocated_count, stack.cold_count, stack.hot_count },
-                @src(),
-            );
+            tracing.logErr(@src(), "number of preallocated stacks stacks exceeds the combined cold and hot stacks count," ++
+                " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, cold=`{}`, hot=`{}`", .{
+                config.label(),
+                i,
+                stack.preallocated_count,
+                stack.cold_count,
+                stack.hot_count,
+            });
             ctx.setResult(.initErr(.initError(error.InvalidConfig)));
             return .err;
         }
         if (stack.cold_count + stack.hot_count > stack.max_allocated) {
-            tracing.emitErrSimple(
-                "number of cold and hot stacks exceeds the specified maximum number of stacks," ++
-                    " pool=`{s}`, stack_index=`{}`, cold=`{}`, hot=`{}`, max_allocated=`{}`",
-                .{ config.label(), i, stack.cold_count, stack.hot_count, stack.max_allocated },
-                @src(),
-            );
+            tracing.logErr(@src(), "number of cold and hot stacks exceeds the specified maximum number of stacks," ++
+                " pool=`{s}`, stack_index=`{}`, cold=`{}`, hot=`{}`, max_allocated=`{}`", .{
+                config.label(),
+                i,
+                stack.cold_count,
+                stack.hot_count,
+                stack.max_allocated,
+            });
             ctx.setResult(.initErr(.initError(error.InvalidConfig)));
             return .err;
         }

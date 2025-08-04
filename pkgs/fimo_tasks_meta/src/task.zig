@@ -159,7 +159,7 @@ test "short sleep" {
                 sleep(duration);
                 const elapsed = try Instant.elapsed(before_sleep);
                 try std.testing.expect(elapsed.order(duration) != .lt);
-                tracing.emitDebugSimple("slept for {}ms", .{elapsed.millis()}, @src());
+                tracing.logInfo(@src(), "slept for {}ms", .{elapsed.millis()});
             }
         }
     }.f);

@@ -60,16 +60,16 @@ pub fn init(options: InitOptions) !*World {
         .allocator = world_allocator,
     };
     FimoWorlds.get().universe.notifyWorldInit();
-    tracing.emitDebugSimple(
-        "created `{*}`, label=`{s}`, executor=`{x}`",
-        .{ world, label, executor.id() },
-        @src(),
-    );
+    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, executor=`{x}`", .{
+        world,
+        label,
+        executor.id(),
+    });
     return world;
 }
 
 pub fn deinit(self: *World) void {
-    tracing.emitDebugSimple("destroying `{*}`", .{self}, @src());
+    tracing.logDebug(@src(), "destroying `{*}`", .{self});
     if (self.system_group_count.load(.acquire) != 0) @panic("world not empty");
     if (self.resources.count() != 0) @panic("world not empty");
 
@@ -108,11 +108,11 @@ pub fn addResource(self: *World, handle: *Resource, value: *const anyopaque) !vo
     defer self.rwlock.unlockWrite();
     if (self.resources.contains(handle)) return error.Duplicate;
     try self.resources.put(allocator, handle, resource);
-    tracing.emitDebugSimple("added `{}` to `{*}`", .{ handle, self }, @src());
+    tracing.logDebug(@src(), "added `{}` to `{*}`", .{ handle, self });
 }
 
 pub fn removeResource(self: *World, handle: *Resource, value: *anyopaque) !void {
-    tracing.emitDebugSimple("removing `{}` from `{*}`", .{ handle, self }, @src());
+    tracing.logDebug(@src(), "removing `{}` from `{*}`", .{ handle, self });
     const resource = blk: {
         self.rwlock.lockWrite();
         defer self.rwlock.unlockWrite();

@@ -293,11 +293,11 @@ pub fn init(options: InitOptions) !*Self {
     self.thread = try Thread.spawn(.{}, runEventLoop, .{self_ref});
     self.thread.setName("event loop") catch {};
 
-    tracing.emitDebugSimple(
-        "created `{*}`, label=`{s}`, public=`{}`",
-        .{ self, self.label, self.is_public },
-        @src(),
-    );
+    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, public=`{}`", .{
+        self,
+        self.label,
+        self.is_public,
+    });
     return self;
 }
 
@@ -351,7 +351,7 @@ pub fn unrefWeak(self: *Self) void {
 /// Releases a weak reference and waits for the thread to join.
 pub fn unrefWeakAndJoin(self: *Self) void {
     // Wait until the thread is joined.
-    tracing.emitDebugSimple("joining `{*}`", .{self}, @src());
+    tracing.logDebug(@src(), "joining `{*}`", .{self});
     std.debug.assert(self.enqueue_requests.isClosed());
     self.thread.join();
     self.unrefWeak();
@@ -401,7 +401,7 @@ pub fn wakeByAddress(self: *Self, value: *const atomic.Value(u32), max_waiters: 
 }
 
 pub fn requestClose(self: *Self) void {
-    tracing.emitDebugSimple("`{*}` close requested", .{self}, @src());
+    tracing.logDebug(@src(), "`{*}` close requested", .{self});
     self.enqueue_requests.close(&FimoTasks.get().futex);
     self.signal_channel.sender().trySend(&FimoTasks.get().futex, {}) catch {};
 }
@@ -419,12 +419,12 @@ pub fn enqueueTask(self: *Self, task: *Task, worker: ?MetaWorker) void {
     std.debug.assert(task.next == null);
     const futex = &FimoTasks.get().futex;
     if (worker) |w| {
-        tracing.emitDebugSimple("`{*}` enqueueing `{*}` to `{}`", .{ self, task, w }, @src());
+        tracing.logDebug(@src(), "`{*}` enqueueing `{*}` to `{}`", .{ self, task, w });
         std.debug.assert(task.worker == null or task.worker == worker);
         const ptr = &self.workers[@intFromEnum(w)];
         ptr.private_queue.sender().send(futex, task) catch unreachable;
     } else {
-        tracing.emitDebugSimple("`{*}` enqueueing `{*}` to global queue", .{ self, task }, @src());
+        tracing.logDebug(@src(), "`{*}` enqueueing `{*}` to global queue", .{ self, task });
         self.global_channel.sender(self.allocator).send(futex, task) catch |e| @panic(@errorName(e));
     }
 }
@@ -449,7 +449,7 @@ fn handleComplete(self: *Self, msg: *PrivateMessage) void {
 fn handleSleep(self: *Self, msg: *PrivateMessage) void {
     const timeout = &msg.msg.sleep.timeout;
     std.debug.assert(timeout.next == null);
-    tracing.emitDebugSimple("`{*}` enqueueing sleep timeout `{*}`", .{ self, timeout }, @src());
+    tracing.logDebug(@src(), "`{*}` enqueueing sleep timeout `{*}`", .{ self, timeout });
 
     // Insert the timeout into the timeout queue.
     if (self.timeouts_head == null) {
@@ -475,11 +475,11 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
     const wait = &msg.msg.wait;
     const task: *Task = wait.task;
     std.debug.assert(task.next == null);
-    tracing.emitDebugSimple("`{*}` processing wait for `{*}`", .{ self, task }, @src());
+    tracing.logDebug(@src(), "`{*}` processing wait for `{*}`", .{ self, task });
 
     // Wake the task if the value does not match the expected value.
     if (wait.value.load(.acquire) != wait.expect) {
-        tracing.emitDebugSimple("`{*}` waking `{*}`", .{ self, task }, @src());
+        tracing.logDebug(@src(), "`{*}` waking `{*}`", .{ self, task });
         wait.timed_out.* = false;
         task.msg = null;
         if (task.call_stack) |cs| cs.unblock();
@@ -488,11 +488,12 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
     }
 
     // Enqueue the waiter.
-    tracing.emitDebugSimple(
-        "`{*}` enqueuing waiter `{x}` for `{*}`, key=`{*}`",
-        .{ self, @intFromPtr(wait), task, wait.value },
-        @src(),
-    );
+    tracing.logDebug(@src(), "`{*}` enqueuing waiter `{x}` for `{*}`, key=`{*}`", .{
+        self,
+        @intFromPtr(wait),
+        task,
+        wait.value,
+    });
     const entry = self.waiters.getOrPutValue(self.allocator, wait.value, .{}) catch @panic("oom");
     const bucket = entry.value_ptr;
     if (bucket.tail) |tail| {
@@ -504,11 +505,11 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
 
     // Enqueue the task timeout, if it has one.
     if (wait.timeout) |*timeout| blk: {
-        tracing.emitDebugSimple(
-            "`{*}` enqueueing wait timeout `{x}`, waiter=`{x}`",
-            .{ self, @intFromPtr(timeout), @intFromPtr(wait) },
-            @src(),
-        );
+        tracing.logDebug(@src(), "`{*}` enqueueing wait timeout `{x}`, waiter=`{x}`", .{
+            self,
+            @intFromPtr(timeout),
+            @intFromPtr(wait),
+        });
 
         if (self.timeouts_head == null) {
             self.timeouts_head = timeout;
@@ -533,11 +534,11 @@ fn handleWait(self: *Self, msg: *PrivateMessage) void {
 fn handleWake(self: *Self, msg: *PrivateMessage) void {
     const wake = msg.msg.wake;
     self.allocator.destroy(msg);
-    tracing.emitDebugSimple(
-        "`{*}` waking {} waiters, key=`{*}`",
-        .{ self, wake.max_waiters, wake.value },
-        @src(),
-    );
+    tracing.logDebug(@src(), "`{*}` waking {} waiters, key=`{*}`", .{
+        self,
+        wake.max_waiters,
+        wake.value,
+    });
     std.debug.assert(wake.max_waiters == 0 or wake.max_waiters == 1);
     if (wake.max_waiters == 0) return;
 
@@ -554,19 +555,15 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 
         link.* = curr.next;
         if (bucket.tail == curr) bucket.tail = previous;
-        tracing.emitDebugSimple(
-            "`{*}` waking waiter `{x}`",
-            .{ self, @intFromPtr(curr_wait) },
-            @src(),
-        );
+        tracing.logDebug(@src(), "`{*}` waking waiter `{x}`", .{ self, @intFromPtr(curr_wait) });
 
         // If the task registered a timeout we also dequeue it.
         if (curr_wait.timeout) |*timeout| {
-            tracing.emitDebugSimple(
-                "`{*}` removing timeout `{x}`, waiter=`{x}`",
-                .{ self, @intFromPtr(timeout), @intFromPtr(curr_wait) },
-                @src(),
-            );
+            tracing.logDebug(@src(), "`{*}` removing timeout `{x}`, waiter=`{x}`", .{
+                self,
+                @intFromPtr(timeout),
+                @intFromPtr(curr_wait),
+            });
             var timeout_current = self.timeouts_head;
             var timeout_previous: ?*PrivateMessage.Timeout = null;
             while (timeout_current) |timeout_curr| {
@@ -603,13 +600,13 @@ fn handleWake(self: *Self, msg: *PrivateMessage) void {
 }
 
 fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
-    tracing.emitDebugSimple("`{*}` timeout `{x}` reached", .{ self, @intFromPtr(timeout) }, @src());
+    tracing.logDebug(@src(), "`{*}` timeout `{x}` reached", .{ self, @intFromPtr(timeout) });
 
     const task = timeout.task;
     const wait = switch (task.msg.?.msg) {
         .complete, .wake => unreachable,
         .sleep => {
-            tracing.emitDebugSimple("`{*}` waking `{*}` from sleep", .{ self, task }, @src());
+            tracing.logDebug(@src(), "`{*}` waking `{*}` from sleep", .{ self, task });
             task.msg = null;
             std.debug.assert(task.next == null);
             if (task.call_stack) |cs| cs.unblock();
@@ -617,11 +614,7 @@ fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
             return;
         },
         .wait => |*v| blk: {
-            tracing.emitDebugSimple(
-                "`{*}` timing out waiter `{x}`",
-                .{ self, @intFromPtr(v) },
-                @src(),
-            );
+            tracing.logDebug(@src(), "`{*}` timing out waiter `{x}`", .{ self, @intFromPtr(v) });
             break :blk v;
         },
     };
@@ -659,27 +652,17 @@ fn handleTimeout(self: *Self, timeout: *PrivateMessage.Timeout) void {
 fn processEnqueueRequest(self: *Self, buffer: *CommandBuffer) void {
     std.debug.assert(buffer.owner == self);
     std.debug.assert(buffer.enqueue_status == .dequeued);
-    tracing.emitDebugSimple(
-        "`{*}` spawning `{*}`",
-        .{ self, buffer },
-        @src(),
-    );
+    tracing.logDebug(@src(), "`{*}` spawning `{*}`", .{ self, buffer });
     self.command_buffer_count += 1;
     buffer.enqueueToPool();
 }
 
 fn runEventLoop(self: *Self) void {
-    if (ctx.isInit()) tracing.registerThread();
-    defer if (ctx.isInit()) tracing.unregisterThread();
+    tracing.registerThread();
+    defer tracing.unregisterThread();
 
-    const span = if (ctx.isInit()) tracing.Span.initTrace(
-        null,
-        null,
-        @src(),
-        "event loop, pool=`{*}`",
-        .{self},
-    ) else null;
-    defer if (span) |sp| sp.deinit();
+    const span = tracing.spanTraceNamed(@src(), "event loop, pool=`{*}`", .{self});
+    defer span.exit();
 
     const rx = multi_receiver(&.{ *PrivateMessage, *CommandBuffer, void }, .{
         self.private_message_queue.receiver(),
@@ -694,7 +677,7 @@ fn runEventLoop(self: *Self) void {
         // Wait until the next message arrives or timeout occurs.
         var curr_msg = rx.recvUntil(futex, next_timeout) catch |err| switch (err) {
             error.Timeout => blk: {
-                tracing.emitDebugSimple("`{*}` recv timed out", .{self}, @src());
+                tracing.logDebug(@src(), "`{*}` recv timed out", .{self});
                 break :blk null;
             },
             else => break,
@@ -739,12 +722,12 @@ fn runEventLoop(self: *Self) void {
         // If there are no more command buffers and the public message queue is closed we can stop
         // the event loop.
         if (self.command_buffer_count == 0 and self.enqueue_requests.isClosed()) {
-            tracing.emitDebugSimple("`{*}` closing", .{self}, @src());
+            tracing.logDebug(@src(), "`{*}` closing", .{self});
             self.signal_channel.close(futex);
             self.private_message_queue.close(futex);
         }
     }
-    tracing.emitDebugSimple("`{*}` terminating", .{self}, @src());
+    tracing.logDebug(@src(), "`{*}` terminating", .{self});
 
     // Join all worker threads.
     self.should_join.store(true, .release);

@@ -34,7 +34,7 @@ entry_index: usize,
 stack: Stack,
 stack_size: StackSize,
 context: ?Context = null,
-call_stack: ?CallStack = null,
+call_stack: ?*CallStack = null,
 local_result: AnyResult = .ok,
 local_keys: AutoArrayHashMapUnmanaged(*const anyopaque, LocalData) = .empty,
 msg: ?Pool.PrivateMessage = null,
@@ -76,7 +76,7 @@ pub fn exit(self: *Self, is_abort: bool) void {
 /// Runs the cleanup operations that must occur while the task is not running.
 pub fn afterExit(self: *Self, is_abort: bool) void {
     std.debug.assert(self.state == .stopped);
-    if (self.call_stack) |cs| if (is_abort) cs.deinitAbort() else cs.deinit();
+    if (self.call_stack) |cs| if (is_abort) cs.abort() else cs.finish();
     self.local_result.deinit();
     std.debug.assert(self.context != null);
     self.stack.updateCommitedSizeFromContext(self.context.?);

@@ -49,7 +49,6 @@ const TestContext = struct {
             .subscribers = &.{tracing.default_subscriber},
             .subscriber_count = 1,
         };
-        defer tracing_cfg.deinit();
         const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
         try ctx.init(init_options);
         errdefer ctx.deinit();
@@ -59,7 +58,7 @@ const TestContext = struct {
         errdefer if (ctx.hasErrorResult()) {
             const e = ctx.takeResult().unwrapErr();
             defer e.deinit();
-            tracing.emitErrSimple("{f}", .{e}, @src());
+            tracing.logErr(@src(), "{f}", .{e});
             e.deinit();
         };
 

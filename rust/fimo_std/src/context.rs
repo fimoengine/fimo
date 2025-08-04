@@ -323,7 +323,7 @@ impl<'a> ContextBuilder<'a> {
     /// Initializes the context.
     ///
     /// Only one context may exist at a time.
-    pub fn build(self) -> Result<Context, AnyError> {
+    pub fn enter<R>(self, f: impl FnOnce(&mut Context) -> R) -> Result<R, AnyError> {
         let mut counter = 0;
         let mut options: [*const bindings::FimoConfigHead; 3] = [core::ptr::null(); 3];
         if let Some(cfg) = self.tracing.as_ref() {
@@ -335,15 +335,17 @@ impl<'a> ContextBuilder<'a> {
             counter += 1;
         }
 
-        if counter == 0 {
-            Context::new()
+        let mut ctx = if counter == 0 {
+            Context::new()?
         } else {
             let mut ctx = MaybeUninit::uninit();
             unsafe {
                 fimo_context_init(options.as_mut_ptr(), &mut ctx).into_result()?;
                 Handle::register(ctx.assume_init());
-                Ok(Context { cleanup: false })
+                Context { cleanup: false }
             }
-        }
+        };
+
+        Ok(f(&mut ctx))
     }
 }
