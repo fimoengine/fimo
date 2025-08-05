@@ -18,7 +18,7 @@ use fimo_std::{
     },
     symbol,
     tasks::BlockingContext,
-    tracing::{Config, Level, ThreadAccess, default_subscriber},
+    tracing::{Config, Level, StdErrLogger, ThreadAccess},
     utils::Viewable,
 };
 
@@ -212,11 +212,12 @@ impl CState {
 
 #[test]
 fn load_modules() -> Result<(), Error> {
+    let logger = StdErrLogger::new();
     ContextBuilder::new()
         .with_tracing_config(
             Config::default()
                 .with_max_level(Level::Trace)
-                .with_subscribers(&[default_subscriber()]),
+                .with_subscribers(&[logger.as_subscriber()]),
         )
         .enter(|context| {
             unsafe { context.enable_cleanup() };

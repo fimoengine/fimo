@@ -171,9 +171,16 @@ const C = struct {
 };
 
 pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}).init;
+    defer _ = gpa.deinit();
+
+    var logger: tracing.StdErrLogger = undefined;
+    try logger.init(.{ .gpa = gpa.allocator() });
+    defer logger.deinit();
+
     const tracing_cfg = tracing.Config{
         .max_level = .trace,
-        .subscribers = &.{tracing.default_subscriber},
+        .subscribers = &.{logger.subscriber()},
         .subscriber_count = 1,
     };
     const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};

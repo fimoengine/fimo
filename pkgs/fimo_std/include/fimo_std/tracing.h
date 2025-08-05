@@ -161,9 +161,11 @@ typedef struct FimoTracingSubscriber {
     void *(*on_event)(void *data, const FimoTracingEvent *event);
 } FimoTracingSubscriber;
 
-/// Default subscriber.
-FIMO_EXPORT
-extern const FimoTracingSubscriber FIMO_TRACING_DEFAULT_SUBSCRIBER;
+/// Creates a new subscriber, which logs the messages to the stderr file.
+FimoTracingSubscriber fimo_tracing_stderr_logger_new(void);
+
+/// Destroys the priorly created subscriber.
+void fimo_tracing_stderr_logger_destroy(FimoTracingSubscriber subscriber);
 
 /// Configuration for the tracing subsystem.
 typedef struct FimoTracingConfig {
