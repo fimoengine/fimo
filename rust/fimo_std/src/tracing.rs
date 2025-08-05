@@ -539,7 +539,10 @@ pub mod events {
 
     use super::SubscriberCallStackHandle;
     use crate::{
-        modules::symbols::SliceRef, time::Instant, tracing::EventInfo, utils::ConstNonNull,
+        modules::symbols::SliceRef,
+        time::{Duration, Instant, Time},
+        tracing::EventInfo,
+        utils::ConstNonNull,
     };
 
     /// Common header of all events.
@@ -548,20 +551,32 @@ pub mod events {
     pub struct Event(u32);
 
     impl Event {
-        pub const REGISTER_EVENT: Self = Self(0);
-        pub const UNREGISTER_THREAD: Self = Self(1);
-        pub const CREATE_CALL_STACK: Self = Self(2);
-        pub const DESTROY_CALL_STACK: Self = Self(3);
-        pub const UNBLOCK_CALL_STACK: Self = Self(4);
-        pub const SUSPEND_CALL_STACK: Self = Self(5);
-        pub const RESUME_CALL_STACK: Self = Self(6);
-        pub const ENTER_SPAN: Self = Self(7);
-        pub const EXIT_SPAN: Self = Self(8);
-        pub const LOG_MESSAGE: Self = Self(9);
+        pub const START_EVENT: Self = Self(0);
+        pub const FINISH_EVENT: Self = Self(1);
+        pub const REGISTER_EVENT: Self = Self(2);
+        pub const UNREGISTER_THREAD: Self = Self(3);
+        pub const CREATE_CALL_STACK: Self = Self(4);
+        pub const DESTROY_CALL_STACK: Self = Self(5);
+        pub const UNBLOCK_CALL_STACK: Self = Self(6);
+        pub const SUSPEND_CALL_STACK: Self = Self(7);
+        pub const RESUME_CALL_STACK: Self = Self(8);
+        pub const ENTER_SPAN: Self = Self(9);
+        pub const EXIT_SPAN: Self = Self(10);
+        pub const LOG_MESSAGE: Self = Self(11);
 
         pub(crate) unsafe fn as_enum<'a>(event: ConstNonNull<Self>) -> EventEnum<'a> {
             unsafe {
                 match event.as_ptr().read() {
+                    Self::START_EVENT => {
+                        let ptr: *const Start<'_> =
+                            event.as_ptr().byte_sub(offset_of!(Start<'_>, event)).cast();
+                        EventEnum::Start(&*ptr)
+                    }
+                    Self::FINISH_EVENT => {
+                        let ptr: *const Finish =
+                            event.as_ptr().byte_sub(offset_of!(Finish, event)).cast();
+                        EventEnum::Finish(&*ptr)
+                    }
                     Self::REGISTER_EVENT => {
                         let ptr: *const RegisterThread = event
                             .as_ptr()
@@ -640,6 +655,8 @@ pub mod events {
     #[non_exhaustive]
     #[derive(Debug, Copy, Clone)]
     pub enum EventEnum<'a> {
+        Start(&'a Start<'a>),
+        Finish(&'a Finish),
         RegisterThread(&'a RegisterThread),
         UnregisterThread(&'a UnregisterThread),
         CreateCallStack(&'a CreateCallStack),
@@ -653,88 +670,121 @@ pub mod events {
         Unknown,
     }
 
+    #[repr(u8)]
+    #[non_exhaustive]
+    #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    pub enum CpuArch {
+        Unknown,
+        X86_64,
+        AArch64,
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct Start<'a> {
+        pub event: Event,
+        pub time: Instant,
+        pub epoch: Time,
+        pub resolution: Duration,
+        pub available_memory: usize,
+        pub process_id: usize,
+        pub num_cores: usize,
+        pub cpu_arch: CpuArch,
+        pub cpu_id: u32,
+        pub cpu_vendor: SliceRef<'a, u8>,
+        pub app_name: SliceRef<'a, u8>,
+        pub host_info: SliceRef<'a, u8>,
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct Finish {
+        pub event: Event,
+        pub time: Instant,
+    }
+
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct RegisterThread {
-        event: Event,
-        time: Instant,
+        pub event: Event,
+        pub time: Instant,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct UnregisterThread {
-        event: Event,
-        time: Instant,
+        pub event: Event,
+        pub time: Instant,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct CreateCallStack {
-        event: Event,
-        time: Instant,
+        pub event: Event,
+        pub time: Instant,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct DestroyCallStack {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct UnblockCallStack {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct SuspendCallStack {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
-        mark_blocked: bool,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
+        pub mark_blocked: bool,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct ResumeCallStack {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct EnterSpan<'a> {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
-        span: &'static EventInfo,
-        message: SliceRef<'a, u8>,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
+        pub span: &'static EventInfo,
+        pub message: SliceRef<'a, u8>,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct ExitSpan {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
-        span: &'static EventInfo,
-        is_unwinding: bool,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
+        pub span: &'static EventInfo,
+        pub is_unwinding: bool,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct LogMessage<'a> {
-        event: Event,
-        stack: SubscriberCallStackHandle,
-        time: Instant,
-        info: &'static EventInfo,
-        message: SliceRef<'a, u8>,
+        pub event: Event,
+        pub stack: SubscriberCallStackHandle,
+        pub time: Instant,
+        pub info: &'static EventInfo,
+        pub message: SliceRef<'a, u8>,
     }
 }
 
@@ -951,6 +1001,12 @@ impl Drop for ThreadAccess {
 /// subscribers. Therefore, it does not consume any events on its own, which is the task of the
 /// subscribers. Subscribers may utilize the events in any way they deem fit.
 pub trait Subscriber: Send + Sync + Share {
+    /// Signals the start of the application.
+    fn start(&self, _event: &events::Start<'_>) {}
+
+    /// Signals the completion of the application.
+    fn finish(&self, _event: &events::Finish) {}
+
     /// Registers the current thread.
     fn register_thread(&self, _event: &events::RegisterThread) {}
 
@@ -1012,6 +1068,14 @@ impl<'a> OpaqueSubscriber<'a> {
             unsafe {
                 let this = &*handle.as_ptr::<T>().cast_const();
                 match events::Event::as_enum(event) {
+                    events::EventEnum::Start(start) => {
+                        this.start(start);
+                        NonNull::from(&mut ())
+                    }
+                    events::EventEnum::Finish(finish) => {
+                        this.finish(finish);
+                        NonNull::from(&mut ())
+                    }
                     events::EventEnum::RegisterThread(register_thread) => {
                         this.register_thread(register_thread);
                         NonNull::from(&mut ())
@@ -1120,6 +1184,8 @@ pub struct Config<'a> {
     pub format_buffer_length: Option<NonZeroUsize>,
     pub max_level: Level,
     pub subscribers: SliceRef<'a, OpaqueSubscriber<'a>>,
+    pub register_thread: bool,
+    pub app_name: SliceRef<'a, u8>,
     _private: PhantomData<()>,
 }
 
@@ -1138,6 +1204,8 @@ impl<'a> Config<'a> {
                     Level::Error
                 },
                 subscribers: SliceRef::new(&[]),
+                register_thread: true,
+                app_name: SliceRef::new(b""),
                 _private: PhantomData,
             }
         }
@@ -1158,6 +1226,18 @@ impl<'a> Config<'a> {
     /// Sets a custom list of subscribers.
     pub const fn with_subscribers(mut self, subscribers: &'a [OpaqueSubscriber<'a>]) -> Self {
         self.subscribers = SliceRef::new(subscribers);
+        self
+    }
+
+    /// Sets whether to register the calling thread.
+    pub const fn with_register_thread(mut self, register_thread: bool) -> Self {
+        self.register_thread = register_thread;
+        self
+    }
+
+    /// Sets the name of the application.
+    pub const fn with_app_name(mut self, app_name: &'a str) -> Self {
+        self.app_name = SliceRef::new(app_name.as_bytes());
         self
     }
 

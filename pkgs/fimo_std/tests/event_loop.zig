@@ -23,9 +23,6 @@ pub fn main() !void {
     try ctx.init(init_options);
     defer ctx.deinit();
 
-    tracing.registerThread();
-    defer tracing.unregisterThread();
-
     const async_ctx = try tasks.BlockingContext.init();
     defer async_ctx.deinit();
 

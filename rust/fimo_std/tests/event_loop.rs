@@ -2,7 +2,7 @@ use fimo_std::{
     context::{ContextBuilder, Error},
     log_trace,
     tasks::BlockingContext,
-    tracing::{Config, Level, StdErrLogger, ThreadAccess},
+    tracing::{Config, Level, StdErrLogger},
 };
 use std::{future::Future, pin::Pin, task::Poll};
 
@@ -17,7 +17,6 @@ fn block_on_futures() -> Result<(), Error> {
         )
         .enter(|context| {
             unsafe { context.enable_cleanup() };
-            let _access = ThreadAccess::new();
 
             let fut = new_nested()?;
             let blocking = BlockingContext::new()?;

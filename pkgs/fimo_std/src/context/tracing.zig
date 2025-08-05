@@ -1,8 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
 
 const context = @import("../context.zig");
 const time = @import("../time.zig");
+const Duration = time.Duration;
+const Instant = time.Instant;
+const Time = time.Time;
 const pub_tracing = @import("../tracing.zig");
 pub const Level = pub_tracing.Level;
 pub const EventInfo = pub_tracing.EventInfo;
@@ -276,6 +280,19 @@ pub const span = default.span;
 pub const spanNamed = default.spanNamed;
 pub const spanNamedWithFormatter = default.spanNamedWithFormatter;
 
+const MEMORYSTATUSEX = extern struct {
+    dwLength: u32,
+    dwMemoryLoad: u32,
+    ullTotalPhys: u64,
+    ullAvailPhys: u64,
+    ullTotalPageFile: u64,
+    ullAvailPageFile: u64,
+    ullTotalVirtual: u64,
+    ullAvailVirtual: u64,
+    ullAvailExtendedVirtual: u64,
+};
+extern "kernel32" fn GlobalMemoryStatusEx(*MEMORYSTATUSEX) callconv(.winapi) std.os.windows.BOOL;
+
 /// Initializes the tracing subsystem.
 pub fn init(config: *const pub_tracing.Config) !void {
     allocator = context.allocator;
@@ -287,6 +304,116 @@ pub fn init(config: *const pub_tracing.Config) !void {
     buffer_size = if (config.format_buffer_len != 0) config.format_buffer_len else 1024;
     max_level = config.max_level;
     errdefer allocator.free(subscribers);
+
+    const resolution = blk: {
+        var nanos: usize = std.math.maxInt(usize);
+        for (0..500000) |_| {
+            const t1 = Instant.now();
+            const elapsed = t1.elapsed() catch unreachable;
+            const elapsed_ns = elapsed.nanos();
+            if (elapsed_ns > 0) nanos = @min(nanos, @as(usize, @intCast(elapsed_ns)));
+        }
+        break :blk Duration.initNanos(nanos).intoC();
+    };
+    const available_memory: usize = if (comptime builtin.target.os.tag == .windows) blk: {
+        var status: MEMORYSTATUSEX = undefined;
+        status.dwLength = @intCast(@sizeOf(MEMORYSTATUSEX));
+        if (GlobalMemoryStatusEx(&status) == 0) break :blk 0;
+        break :blk status.ullTotalPhys;
+    } else blk: {
+        const pages: usize = @bitCast(std.c.sysconf(std.c._SC.PHYS_PAGES));
+        const page_size = std.heap.pageSize();
+        break :blk pages * page_size;
+    };
+    const process_id: usize = if (comptime builtin.target.os.tag == .windows)
+        std.os.windows.GetCurrentProcessId()
+    else
+        @as(u32, @bitCast(std.c.getpid()));
+    const num_cores = std.Thread.getCpuCount() catch 0;
+    const cpu_arch: events.CpuArch = switch (comptime builtin.target.cpu.arch) {
+        .x86_64 => .x86_64,
+        .aarch64 => .aarch64,
+        else => .unknown,
+    };
+    const cpu_id: u32, const cpu_vendor: [12]u8 = if (comptime builtin.target.cpu.arch == .x86_64) blk: {
+        var eax: u32, var ebx: u32, var ecx: u32, var edx: u32 = .{ 0, 0, 0, 0 };
+        asm volatile ("cpuid"
+            : [ret1] "={eax}" (eax),
+              [ret2] "={ebx}" (ebx),
+              [ret3] "={ecx}" (ecx),
+              [ret4] "={edx}" (edx),
+            : [id] "{eax}" (0),
+            : .{});
+        const vendor: [12]u8 = @bitCast([_]u32{ ebx, edx, ecx });
+
+        asm volatile ("cpuid"
+            : [ret1] "={eax}" (eax),
+            : [id] "{eax}" (1),
+            : .{});
+        const id = (eax & 0xFFF) | ((eax & 0xFFF0000) >> 4);
+        break :blk .{ id, vendor };
+    } else .{ 0, [_]u8{0} ** 12 };
+    _ = .{ cpu_id, cpu_vendor };
+
+    const buffer = struct {
+        var buffer = [_]u8{0} ** 1024;
+    }.buffer[0..];
+    var writer = std.Io.Writer.fixed(buffer);
+
+    // OS
+    switch (comptime builtin.target.os.tag) {
+        .windows => {
+            var version: std.os.windows.OSVERSIONINFOW = undefined;
+            version.dwOSVersionInfoSize = @sizeOf(std.os.windows.OSVERSIONINFOW);
+            if (std.os.windows.ntdll.RtlGetVersion(&version) != .SUCCESS) {
+                writer.writeAll("OS: Windows;") catch unreachable;
+            } else {
+                writer.print("OS: Windows {}.{}.{};", .{
+                    version.dwMajorVersion,
+                    version.dwMinorVersion,
+                    version.dwBuildNumber,
+                }) catch unreachable;
+            }
+        },
+        .linux => {
+            var utsname: std.os.linux.utsname = undefined;
+            if (std.os.linux.uname(&utsname) != 0) unreachable;
+            writer.print("OS: Linux {s};", .{utsname.release}) catch unreachable;
+        },
+        .ios => writer.writeAll("OS: Darwin (iOS);") catch unreachable,
+        .macos => writer.writeAll("OS: Darwin (macOS);") catch unreachable,
+        .tvos => writer.writeAll("OS: Darwin (tvOS);") catch unreachable,
+        .visionos => writer.writeAll("OS: Darwin (visionOS);") catch unreachable,
+        .watchos => writer.writeAll("OS: Darwin (watchOS);") catch unreachable,
+        else => writer.writeAll("OS: unknown;") catch unreachable,
+    }
+
+    writer.print("Compiler: Zig {s};", .{builtin.zig_version_string}) catch unreachable;
+    writer.print("Backend: {t};", .{builtin.zig_backend}) catch unreachable;
+    writer.print("ABI: {t};", .{builtin.target.abi}) catch unreachable;
+    writer.print("Arch: {t};", .{builtin.cpu.arch}) catch unreachable;
+    writer.print("CPU cores: {};", .{num_cores}) catch unreachable;
+    writer.print("RAM: {} MB", .{available_memory / 1024 / 1024}) catch unreachable;
+
+    const now = Instant.now().intoC();
+    const epoch = Time.now().intoC();
+    for (subscribers) |subscriber| subscriber.start(.{
+        .time = now,
+        .epoch = epoch,
+        .resolution = resolution,
+        .available_memory = available_memory,
+        .process_id = process_id,
+        .num_cores = num_cores,
+        .cpu_arch = cpu_arch,
+        .cpu_id = cpu_id,
+        .cpu_vendor = &cpu_vendor,
+        .cpu_vendor_length = cpu_vendor.len,
+        .app_name = config.app_name,
+        .app_name_length = config.app_name_length,
+        .host_info = writer.buffer.ptr,
+        .host_info_length = writer.end,
+    });
+    if (config.register_thread) registerThread();
 }
 
 /// Deinitializes the tracing subsystem.
@@ -297,6 +424,9 @@ pub fn deinit() void {
     if (ThreadData.get() != null) ThreadData.cleanup();
     thread_count.waitUntilZero();
     call_stack_count.waitUntilZero();
+
+    const now = Instant.now().intoC();
+    for (subscribers) |subscriber| subscriber.finish(.{ .time = now });
     allocator.free(subscribers);
 }
 
