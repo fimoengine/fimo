@@ -18,7 +18,7 @@ use fimo_std::{
     },
     symbol,
     tasks::BlockingContext,
-    tracing::{Config, Level, StdErrLogger, ThreadAccess},
+    tracing::{Config, Level, StdErrLogger},
     utils::Viewable,
 };
 
@@ -221,7 +221,6 @@ fn load_modules() -> Result<(), Error> {
         )
         .enter(|context| {
             unsafe { context.enable_cleanup() };
-            let _access = ThreadAccess::new();
 
             let blocking = BlockingContext::new()?;
             blocking.block_on(async move {

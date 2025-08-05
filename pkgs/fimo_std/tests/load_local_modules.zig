@@ -187,9 +187,6 @@ pub fn main() !void {
 
     try ctx.init(init_options);
     defer ctx.deinit();
-
-    tracing.registerThread();
-    defer tracing.unregisterThread();
     errdefer if (ctx.hasErrorResult()) {
         const e = ctx.takeResult().unwrapErr();
         defer e.deinit();

@@ -71,6 +71,8 @@ typedef FimoUSize (*FimoTracingFormat)(char *buffer, FimoUSize buffer_len, const
 
 /// Common header of all events.
 typedef enum FimoTracingEvent : FimoU32 {
+    FIMO_TRACING_EVENT_START,
+    FIMO_TRACING_EVENT_FINISH,
     FIMO_TRACING_EVENT_REGISTER_THREAD,
     FIMO_TRACING_EVENT_UNREGISTER_THREAD,
     FIMO_TRACING_EVENT_CREATE_CALL_STACK,
@@ -82,6 +84,35 @@ typedef enum FimoTracingEvent : FimoU32 {
     FIMO_TRACING_EVENT_EXIT_SPAN,
     FIMO_TRACING_EVENT_LOG_MESSAGE,
 } FimoTracingEvent;
+
+typedef enum FimoTracingCpuArch : FimoU8 {
+    FIMO_TRACING_CPU_ARCH_UNKNOWN,
+    FIMO_TRACING_CPU_ARCH_X86_64,
+    FIMO_TRACING_CPU_ARCH_AARCH64,
+} FimoTracingCpuArch;
+
+typedef struct FimoTracingEventStart {
+    FimoTracingEvent event;
+    FimoInstant time;
+    FimoTime epoch;
+    FimoDuration resolution;
+    FimoUSize available_memory;
+    FimoUSize process_id;
+    FimoUSize num_cores;
+    FimoTracingCpuArch cpu_arch;
+    FimoU8 cpu_id;
+    const char *cpu_vendor;
+    FimoUSize cpu_vendor_length;
+    const char *app_name;
+    FimoUSize app_name_length;
+    const char *host_info;
+    FimoUSize host_info_length;
+} FimoTracingEventStart;
+
+typedef struct FimoTracingEventFinish {
+    FimoTracingEvent event;
+    FimoInstant time;
+} FimoTracingEventFinish;
 
 typedef struct FimoTracingEventRegisterThread {
     FimoTracingEvent event;
@@ -173,7 +204,7 @@ typedef struct FimoTracingConfig {
     ///
     /// Must be `FIMO_CONFIG_ID_TRACING`.
     FimoConfigId id;
-    /// Length in characters of the per-call-stack buffer used when formatting mesasges.
+    /// Length in bytes of the per-call-stack buffer used when formatting mesasges.
     FimoUSize format_buffer_size;
     /// Maximum level for which to consume tracing events.
     FimoTracingLevel maximum_level;
@@ -181,6 +212,12 @@ typedef struct FimoTracingConfig {
     FimoTracingSubscriber *subscribers;
     /// Number of subscribers to register with the tracing subsystem.
     FimoUSize subscriber_count;
+    /// Register the calling thread.
+    bool register_thread;
+    /// Name of the application (Not null).
+    const char *app_name;
+    /// Length in bytes of the application name.
+    FimoUSize app_name_length;
 } FimoTracingCreationConfig;
 
 /// VTable of the tracing subsystem.

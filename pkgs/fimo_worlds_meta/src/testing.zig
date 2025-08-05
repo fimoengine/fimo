@@ -56,9 +56,6 @@ const TestContext = struct {
         const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
         try ctx.init(init_options);
         errdefer ctx.deinit();
-
-        tracing.registerThread();
-        errdefer tracing.unregisterThread();
         errdefer if (ctx.hasErrorResult()) {
             const e = ctx.takeResult().unwrapErr();
             defer e.deinit();
@@ -102,7 +99,6 @@ const TestContext = struct {
         self.instance.deinit();
 
         modules.pruneInstances() catch unreachable;
-        tracing.unregisterThread();
         ctx.deinit();
     }
 

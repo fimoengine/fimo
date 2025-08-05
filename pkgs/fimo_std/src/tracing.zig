@@ -380,6 +380,8 @@ pub const spanNamedWithFormatter = default.spanNamedWithFormatter;
 pub const events = struct {
     /// Common header of all events.
     pub const Event = enum(u32) {
+        start,
+        finish,
         register_thread,
         unregister_thread,
         create_call_stack,
@@ -393,6 +395,34 @@ pub const events = struct {
         _,
     };
 
+    pub const CpuArch = enum(u8) {
+        unknown,
+        x86_64,
+        aarch64,
+        _,
+    };
+
+    pub const Start = extern struct {
+        event: Event = .start,
+        time: time.compat.Instant,
+        epoch: time.compat.Time,
+        resolution: time.compat.Duration,
+        available_memory: usize,
+        process_id: usize,
+        num_cores: usize,
+        cpu_arch: CpuArch,
+        cpu_id: u32,
+        cpu_vendor: [*]const u8,
+        cpu_vendor_length: usize,
+        app_name: [*]const u8,
+        app_name_length: usize,
+        host_info: [*]const u8,
+        host_info_length: usize,
+    };
+    pub const Finish = extern struct {
+        event: Event = .finish,
+        time: time.compat.Instant,
+    };
     pub const RegisterThread = extern struct {
         event: Event = .register_thread,
         time: time.compat.Instant,
@@ -469,6 +499,16 @@ pub const Subscriber = extern struct {
             fn on_event(data: *anyopaque, event: *const events.Event) callconv(.c) *anyopaque {
                 const self: *T = @ptrCast(@alignCast(data));
                 switch (event.*) {
+                    .start => if (comptime @hasField(Info, "start")) {
+                        const ev: *const events.Start = @alignCast(@fieldParentPtr("event", event));
+                        info.start(self, ev);
+                        return @constCast(&{});
+                    },
+                    .finish => if (comptime @hasField(Info, "finish")) {
+                        const ev: *const events.Finish = @alignCast(@fieldParentPtr("event", event));
+                        info.finish(self, ev);
+                        return @constCast(&{});
+                    },
                     .register_thread => if (comptime @hasField(Info, "register_thread")) {
                         const ev: *const events.RegisterThread = @alignCast(@fieldParentPtr("event", event));
                         info.register_thread(self, ev);
@@ -524,6 +564,16 @@ pub const Subscriber = extern struct {
             }
         };
         return .{ .data = value, .on_event = &wrapper.on_event };
+    }
+
+    pub fn start(self: Subscriber, event: events.Start) void {
+        std.debug.assert(event.event == .start);
+        _ = self.on_event(self.data, &event.event);
+    }
+
+    pub fn finish(self: Subscriber, event: events.Finish) void {
+        std.debug.assert(event.event == .finish);
+        _ = self.on_event(self.data, &event.event);
     }
 
     pub fn registerThread(self: Subscriber, event: events.RegisterThread) void {
@@ -645,7 +695,7 @@ pub fn stackTraceFormatter(
 /// Configuration for the tracing subsystem.
 pub const Config = extern struct {
     id: ctx.ConfigId = .tracing,
-    /// Length in characters of the per-call-stack buffer used when formatting mesasges.
+    /// Length in bytes of the per-call-stack buffer used when formatting mesasges.
     format_buffer_len: usize = 0,
     /// Maximum level for which to consume tracing events.
     max_level: Level = switch (builtin.mode) {
@@ -657,6 +707,12 @@ pub const Config = extern struct {
     subscribers: ?[*]const Subscriber = null,
     /// Number of subscribers to register with the tracing subsystem.
     subscriber_count: usize = 0,
+    /// Register the calling thread.
+    register_thread: bool = true,
+    /// Name of the application.
+    app_name: [*]const u8 = "",
+    /// Length in bytes of the application name.
+    app_name_length: usize = 0,
 };
 
 /// Base VTable of the tracing subsystem.

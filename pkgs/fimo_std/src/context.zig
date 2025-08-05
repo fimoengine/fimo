@@ -178,9 +178,6 @@ pub fn init(options: [:null]const ?*const pub_ctx.ConfigHead) !void {
     try tracing.init(tracing_cfg orelse &.{});
     errdefer tracing.deinit();
 
-    tracing.registerThread();
-    defer tracing.unregisterThread();
-
     try tasks.init();
     errdefer tasks.deinit();
 
