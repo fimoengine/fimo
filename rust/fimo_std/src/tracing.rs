@@ -1070,12 +1070,43 @@ impl<'a> OpaqueSubscriber<'a> {
 }
 
 unsafe extern "C" {
-    static FIMO_TRACING_DEFAULT_SUBSCRIBER: OpaqueSubscriber<'static>;
+    fn fimo_tracing_stderr_logger_new() -> OpaqueSubscriber<'static>;
+    fn fimo_tracing_stderr_logger_destroy(logger: OpaqueSubscriber<'static>);
 }
 
-/// Returns the default subscriber.
-pub fn default_subscriber() -> OpaqueSubscriber<'static> {
-    unsafe { std::ptr::read(&FIMO_TRACING_DEFAULT_SUBSCRIBER) }
+/// Subscriber, which logs the messages to the stderr file.
+#[derive(Debug)]
+pub struct StdErrLogger {
+    logger: OpaqueSubscriber<'static>,
+}
+
+impl StdErrLogger {
+    /// Initializes a new instance of the subscriber.
+    pub fn new() -> Self {
+        unsafe {
+            Self {
+                logger: fimo_tracing_stderr_logger_new(),
+            }
+        }
+    }
+
+    pub fn as_subscriber(&self) -> OpaqueSubscriber<'_> {
+        unsafe { (&raw const self.logger).read() }
+    }
+}
+
+impl Default for StdErrLogger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for StdErrLogger {
+    fn drop(&mut self) {
+        unsafe {
+            fimo_tracing_stderr_logger_destroy((&raw const self.logger).read());
+        }
+    }
 }
 
 /// Configuration of the tracing subsystem.

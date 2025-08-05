@@ -2,17 +2,18 @@ use fimo_std::{
     context::{ContextBuilder, Error},
     log_trace,
     tasks::BlockingContext,
-    tracing::{Config, Level, ThreadAccess, default_subscriber},
+    tracing::{Config, Level, StdErrLogger, ThreadAccess},
 };
 use std::{future::Future, pin::Pin, task::Poll};
 
 #[test]
 fn block_on_futures() -> Result<(), Error> {
+    let logger = StdErrLogger::new();
     ContextBuilder::new()
         .with_tracing_config(
             Config::default()
                 .with_max_level(Level::Trace)
-                .with_subscribers(&[default_subscriber()]),
+                .with_subscribers(&[logger.as_subscriber()]),
         )
         .enter(|context| {
             unsafe { context.enable_cleanup() };

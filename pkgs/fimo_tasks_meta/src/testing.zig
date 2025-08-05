@@ -33,6 +33,8 @@ pub const TestContext = struct {
         modules.pruneInstances() catch unreachable;
         tracing.unregisterThread();
         ctx.deinit();
+        logger.deinit();
+        if (gpa.deinit() == .leak) @panic("leak");
     }
 
     pub fn provideSymbol(self: *const TestContext, comptime symbol: Symbol) *const symbol.T {
@@ -40,10 +42,18 @@ pub const TestContext = struct {
     }
 };
 
+var gpa = std.heap.DebugAllocator(.{}).init;
+var logger: tracing.StdErrLogger = undefined;
+
 pub fn initTestContext() !TestContext {
+    gpa = .init;
+    errdefer if (gpa.deinit() == .leak) @panic("leak");
+    try logger.init(.{ .gpa = gpa.allocator() });
+    errdefer logger.deinit();
+
     const tracing_cfg = tracing.Config{
         .max_level = .info,
-        .subscribers = &.{tracing.default_subscriber},
+        .subscribers = &.{logger.subscriber()},
         .subscriber_count = 1,
     };
     const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
