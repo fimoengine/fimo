@@ -49,7 +49,7 @@ pub fn MultiReceiver(comptime Receivers: type, comptime Ts: []const type) type {
         union_fields[i] = .{
             .name = std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable,
             .type = T,
-            .alignment = 0,
+            .alignment = @alignOf(T),
         };
     }
     const T = @Type(.{
