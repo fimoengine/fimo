@@ -502,22 +502,18 @@ pub const Subscriber = extern struct {
                     .start => if (comptime @hasField(Info, "start")) {
                         const ev: *const events.Start = @alignCast(@fieldParentPtr("event", event));
                         info.start(self, ev);
-                        return @constCast(&{});
                     },
                     .finish => if (comptime @hasField(Info, "finish")) {
                         const ev: *const events.Finish = @alignCast(@fieldParentPtr("event", event));
                         info.finish(self, ev);
-                        return @constCast(&{});
                     },
                     .register_thread => if (comptime @hasField(Info, "register_thread")) {
                         const ev: *const events.RegisterThread = @alignCast(@fieldParentPtr("event", event));
                         info.register_thread(self, ev);
-                        return @constCast(&{});
                     },
                     .unregister_thread => if (comptime @hasField(Info, "unregister_thread")) {
                         const ev: *const events.UnregisterThread = @alignCast(@fieldParentPtr("event", event));
                         info.unregister_thread(self, ev);
-                        return @constCast(&{});
                     },
                     .create_call_stack => if (comptime @hasField(Info, "create_call_stack")) {
                         const ev: *const events.CreateCallStack = @alignCast(@fieldParentPtr("event", event));
@@ -526,39 +522,32 @@ pub const Subscriber = extern struct {
                     .destroy_call_stack => if (comptime @hasField(Info, "destroy_call_stack")) {
                         const ev: *const events.DestroyCallStack = @alignCast(@fieldParentPtr("event", event));
                         info.destroy_call_stack(self, ev);
-                        return @constCast(&{});
                     },
                     .unblock_call_stack => if (comptime @hasField(Info, "unblock_call_stack")) {
                         const ev: *const events.UnblockCallStack = @alignCast(@fieldParentPtr("event", event));
                         info.unblock_call_stack(self, ev);
-                        return @constCast(&{});
                     },
                     .suspend_call_stack => if (comptime @hasField(Info, "suspend_call_stack")) {
                         const ev: *const events.SuspendCallStack = @alignCast(@fieldParentPtr("event", event));
                         info.suspend_call_stack(self, ev);
-                        return @constCast(&{});
                     },
                     .resume_call_stack => if (comptime @hasField(Info, "resume_call_stack")) {
                         const ev: *const events.ResumeCallStack = @alignCast(@fieldParentPtr("event", event));
                         info.resume_call_stack(self, ev);
-                        return @constCast(&{});
                     },
                     .enter_span => if (comptime @hasField(Info, "enter_span")) {
                         const ev: *const events.EnterSpan = @alignCast(@fieldParentPtr("event", event));
                         info.enter_span(self, ev);
-                        return @constCast(&{});
                     },
                     .exit_span => if (comptime @hasField(Info, "exit_span")) {
                         const ev: *const events.ExitSpan = @alignCast(@fieldParentPtr("event", event));
                         info.exit_span(self, ev);
-                        return @constCast(&{});
                     },
                     .log_message => if (comptime @hasField(Info, "log_message")) {
                         const ev: *const events.LogMessage = @alignCast(@fieldParentPtr("event", event));
                         info.log_message(self, ev);
-                        return @constCast(&{});
                     },
-                    else => return @constCast(&{}),
+                    else => {},
                 }
                 return @constCast(&{});
             }
