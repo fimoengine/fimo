@@ -152,8 +152,9 @@ pub fn init(self: *Self, options: Options) !void {
         .gpa = options.gpa,
         .max_level = options.max_level,
         .print_buffer_length = options.print_buffer_length,
-        .worker = try .spawn(.{}, runWorker, .{self}),
+        .worker = undefined,
     };
+    self.worker = try .spawn(.{}, runWorker, .{self});
 }
 
 pub fn deinit(self: *Self) void {
