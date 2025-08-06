@@ -315,15 +315,25 @@ pub fn init(config: *const pub_tracing.Config) !void {
         }
         break :blk Duration.initNanos(nanos).intoC();
     };
-    const available_memory: usize = if (comptime builtin.target.os.tag == .windows) blk: {
-        var status: MEMORYSTATUSEX = undefined;
-        status.dwLength = @intCast(@sizeOf(MEMORYSTATUSEX));
-        if (GlobalMemoryStatusEx(&status) == 0) break :blk 0;
-        break :blk status.ullTotalPhys;
-    } else blk: {
-        const pages: usize = @bitCast(std.c.sysconf(std.c._SC.PHYS_PAGES));
-        const page_size = std.heap.pageSize();
-        break :blk pages * page_size;
+    const available_memory: usize = switch (comptime builtin.target.os.tag) {
+        .windows => blk: {
+            var status: MEMORYSTATUSEX = undefined;
+            status.dwLength = @intCast(@sizeOf(MEMORYSTATUSEX));
+            if (GlobalMemoryStatusEx(&status) == 0) break :blk 0;
+            break :blk status.ullTotalPhys;
+        },
+        .ios, .macos, .tvos, .visionos, .watchos => blk: {
+            var memsize: usize = undefined;
+            var size: usize = @sizeOf(usize);
+            if (std.c.sysctlbyname("hw.memsize", &memsize, &size, null, 0) != 0) break :blk 0;
+            break :blk memsize;
+        },
+        .linux => blk: {
+            const pages: usize = @bitCast(std.c.sysconf(std.c._SC.PHYS_PAGES));
+            const page_size = std.heap.pageSize();
+            break :blk pages * page_size;
+        },
+        else => 0,
     };
     const process_id: usize = if (comptime builtin.target.os.tag == .windows)
         std.os.windows.GetCurrentProcessId()
