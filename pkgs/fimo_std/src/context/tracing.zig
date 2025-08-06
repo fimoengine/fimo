@@ -329,9 +329,9 @@ pub fn init(config: *const pub_tracing.Config) !void {
             break :blk memsize;
         },
         .linux => blk: {
-            const pages: usize = @bitCast(std.c.sysconf(std.c._SC.PHYS_PAGES));
-            const page_size = std.heap.pageSize();
-            break :blk pages * page_size;
+            var info: std.os.linux.Sysinfo = undefined;
+            if (std.os.linux.sysinfo(&info) == -1) break :blk 0;
+            break :blk info.totalram * info.mem_unit;
         },
         else => 0,
     };
