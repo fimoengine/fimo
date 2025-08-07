@@ -15,7 +15,6 @@ state: packed struct(u8) {
 } = .{},
 fmt_buffer: []u8,
 max_level: tracing.Level,
-call_stacks: std.ArrayListUnmanaged(*anyopaque),
 frames: std.MultiArrayList(Frame) = .empty,
 
 var dummy: Self = undefined;
@@ -35,20 +34,16 @@ pub fn init() *Self {
     call_stack.* = Self{
         .fmt_buffer = undefined,
         .max_level = tracing.max_level,
-        .call_stacks = undefined,
     };
-
-    call_stack.call_stacks = @TypeOf(call_stack.call_stacks).initCapacity(
-        tracing.allocator,
-        tracing.subscribers.len,
-    ) catch |err| @panic(@errorName(err));
     tracing.call_stack_count.increase();
 
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
-        const event = tracing.events.CreateCallStack{ .time = now };
-        const stack = subscriber.createCallStack(event);
-        call_stack.call_stacks.appendAssumeCapacity(stack);
+        const event = tracing.events.CreateCallStack{
+            .stack = call_stack,
+            .time = now,
+        };
+        subscriber.createCallStack(event);
     }
 
     return call_stack;
@@ -69,16 +64,15 @@ pub fn finishBound(self: *Self) void {
     if (self.frames.len != 0) @panic("call stack is not empty");
 
     const now = Instant.now().intoC();
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.DestroyCallStack{
-            .stack = stack,
+            .stack = self,
             .time = now,
         };
         subscriber.destroyCallStack(event);
     }
 
     self.frames.deinit(tracing.allocator);
-    self.call_stacks.deinit(tracing.allocator);
     tracing.allocator.destroy(self);
     tracing.call_stack_count.decrease();
 }
@@ -92,16 +86,15 @@ pub fn finish(self: *Self) void {
     if (self.frames.len != 0) @panic("call stack is not empty");
 
     const now = Instant.now().intoC();
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.DestroyCallStack{
-            .stack = stack,
+            .stack = self,
             .time = now,
         };
         subscriber.destroyCallStack(event);
     }
 
     self.frames.deinit(tracing.allocator);
-    self.call_stacks.deinit(tracing.allocator);
     tracing.allocator.destroy(self);
     tracing.call_stack_count.decrease();
 }
@@ -114,18 +107,18 @@ pub fn abort(self: *Self) void {
 
     const now = Instant.now().intoC();
     if (self.state.blocked) {
-        for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        for (tracing.subscribers) |subscriber| {
             const event = tracing.events.UnblockCallStack{
-                .stack = stack,
+                .stack = self,
                 .time = now,
             };
             subscriber.unblockCallStack(event);
         }
     }
     while (self.frames.pop()) |frame| {
-        for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+        for (tracing.subscribers) |subscriber| {
             const event = tracing.events.ExitSpan{
-                .stack = stack,
+                .stack = self,
                 .time = now,
                 .span = frame.id,
                 .is_unwinding = true,
@@ -133,16 +126,15 @@ pub fn abort(self: *Self) void {
             subscriber.exitSpan(event);
         }
     }
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.DestroyCallStack{
-            .stack = stack,
+            .stack = self,
             .time = now,
         };
         subscriber.destroyCallStack(event);
     }
 
     self.frames.deinit(tracing.allocator);
-    self.call_stacks.deinit(tracing.allocator);
     tracing.allocator.destroy(self);
     tracing.call_stack_count.decrease();
 }
@@ -176,9 +168,9 @@ pub fn unblock(self: *Self) void {
     std.debug.assert(self.state.suspended);
 
     const now = Instant.now().intoC();
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.UnblockCallStack{
-            .stack = stack,
+            .stack = self,
             .time = now,
         };
         subscriber.unblockCallStack(event);
@@ -196,9 +188,9 @@ pub fn suspendCurrent(mark_blocked: bool) void {
     if (self.state.suspended) @panic("call stack is suspended");
 
     const now = Instant.now().intoC();
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.SuspendCallStack{
-            .stack = stack,
+            .stack = self,
             .time = now,
             .mark_blocked = mark_blocked,
         };
@@ -218,9 +210,9 @@ pub fn resumeCurrent() void {
     if (!self.state.suspended) @panic("call stack is not suspended");
 
     const now = Instant.now().intoC();
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.ResumeCallStack{
-            .stack = stack,
+            .stack = self,
             .time = now,
         };
         subscriber.resumeCallStack(event);
@@ -243,9 +235,9 @@ pub fn enterFrame(
     const now = Instant.now().intoC();
     const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
     const message = self.fmt_buffer[0..message_len];
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.EnterSpan{
-            .stack = stack,
+            .stack = self,
             .time = now,
             .span = id,
             .message = message.ptr,
@@ -275,9 +267,9 @@ pub fn exitFrame(self: *Self, id: *const tracing.EventInfo) void {
     self.max_level = frame.previous_max_level;
 
     const now = Instant.now().intoC();
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.ExitSpan{
-            .stack = stack,
+            .stack = self,
             .time = now,
             .span = id,
             .is_unwinding = false,
@@ -305,9 +297,9 @@ pub fn logMessage(
     const now = Instant.now().intoC();
     const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
     const message = self.fmt_buffer[0..message_len];
-    for (self.call_stacks.items, tracing.subscribers) |stack, subscriber| {
+    for (tracing.subscribers) |subscriber| {
         const event = tracing.events.LogMessage{
-            .stack = stack,
+            .stack = self,
             .time = now,
             .info = info,
             .message = message.ptr,

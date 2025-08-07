@@ -537,11 +537,10 @@ impl EventInfo {
 pub mod events {
     use std::mem::offset_of;
 
-    use super::SubscriberCallStackHandle;
     use crate::{
         modules::symbols::SliceRef,
         time::{Duration, Instant, Time},
-        tracing::EventInfo,
+        tracing::{CallStackHandle, EventInfo},
         utils::ConstNonNull,
     };
 
@@ -721,6 +720,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct CreateCallStack {
         pub event: Event,
+        pub stack: CallStackHandle,
         pub time: Instant,
     }
 
@@ -728,7 +728,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct DestroyCallStack {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
     }
 
@@ -736,7 +736,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct UnblockCallStack {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
     }
 
@@ -744,7 +744,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct SuspendCallStack {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
         pub mark_blocked: bool,
     }
@@ -753,7 +753,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct ResumeCallStack {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
     }
 
@@ -761,7 +761,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct EnterSpan<'a> {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
         pub span: &'static EventInfo,
         pub message: SliceRef<'a, u8>,
@@ -771,7 +771,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct ExitSpan {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
         pub span: &'static EventInfo,
         pub is_unwinding: bool,
@@ -781,7 +781,7 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct LogMessage<'a> {
         pub event: Event,
-        pub stack: SubscriberCallStackHandle,
+        pub stack: CallStackHandle,
         pub time: Instant,
         pub info: &'static EventInfo,
         pub message: SliceRef<'a, u8>,
@@ -1014,9 +1014,7 @@ pub trait Subscriber: Send + Sync + Share {
     fn unregister_thread(&self, _event: &events::UnregisterThread) {}
 
     /// Creates a new call stack.
-    fn create_call_stack(&self, _event: &events::CreateCallStack) -> CallStackHandle {
-        CallStackHandle::new(&mut ()).unwrap()
-    }
+    fn create_call_stack(&self, _event: &events::CreateCallStack) {}
 
     /// Destroys the call stack.
     fn destroy_call_stack(&self, _event: &events::DestroyCallStack) {}
@@ -1040,8 +1038,6 @@ pub trait Subscriber: Send + Sync + Share {
     fn log_message(&self, _event: &events::LogMessage<'_>) {}
 }
 
-handle!(pub handle SubscriberCallStackHandle: Send + Sync + Share);
-
 /// A type-erased [`Subscriber`].
 #[repr(C)]
 #[derive(Debug)]
@@ -1051,7 +1047,7 @@ pub struct OpaqueSubscriber<'a> {
         unsafe extern "C" fn(
             handle: OpaqueHandle<dyn Subscriber>,
             event: ConstNonNull<events::Event>,
-        ) -> NonNull<()>,
+        ),
     >,
     _private: PhantomData<&'a ()>,
 }
@@ -1064,59 +1060,47 @@ impl<'a> OpaqueSubscriber<'a> {
         unsafe extern "C" fn on_event<'a, T: Subscriber + 'a>(
             handle: OpaqueHandle<dyn Subscriber>,
             event: ConstNonNull<events::Event>,
-        ) -> NonNull<()> {
+        ) {
             unsafe {
                 let this = &*handle.as_ptr::<T>().cast_const();
                 match events::Event::as_enum(event) {
                     events::EventEnum::Start(start) => {
                         this.start(start);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::Finish(finish) => {
                         this.finish(finish);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::RegisterThread(register_thread) => {
                         this.register_thread(register_thread);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::UnregisterThread(unregister_thread) => {
                         this.unregister_thread(unregister_thread);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::CreateCallStack(create_call_stack) => {
-                        let stack = this.create_call_stack(create_call_stack);
-                        NonNull::new_unchecked(stack.as_ptr::<()>())
+                        this.create_call_stack(create_call_stack);
                     }
                     events::EventEnum::DestroyCallStack(destroy_call_stack) => {
                         this.destroy_call_stack(destroy_call_stack);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::UnblockCallStack(unblock_call_stack) => {
                         this.unblock_call_stack(unblock_call_stack);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::SuspendCallStack(suspend_call_stack) => {
                         this.suspend_call_stack(suspend_call_stack);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::ResumeCallStack(resume_call_stack) => {
                         this.resume_call_stack(resume_call_stack);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::EnterSpan(enter_span) => {
                         this.enter_span(enter_span);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::ExitSpan(exit_span) => {
                         this.exit_span(exit_span);
-                        NonNull::from(&mut ())
                     }
                     events::EventEnum::LogMessage(log_message) => {
                         this.log_message(log_message);
-                        NonNull::from(&mut ())
                     }
-                    events::EventEnum::Unknown => NonNull::from(&mut ()),
+                    events::EventEnum::Unknown => {}
                 }
             }
         }

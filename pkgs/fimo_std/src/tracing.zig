@@ -433,6 +433,7 @@ pub const events = struct {
     };
     pub const CreateCallStack = extern struct {
         event: Event = .create_call_stack,
+        stack: *anyopaque,
         time: time.compat.Instant,
     };
     pub const DestroyCallStack = extern struct {
@@ -488,7 +489,7 @@ pub const events = struct {
 /// subscribers. Subscribers may utilize the events in any way they deem fit.
 pub const Subscriber = extern struct {
     data: *anyopaque,
-    on_event: *const fn (data: *anyopaque, event: *const events.Event) callconv(.c) *anyopaque,
+    on_event: *const fn (data: *anyopaque, event: *const events.Event) callconv(.c) void,
 
     pub fn of(T: type, value: *T) Subscriber {
         if (!@hasDecl(T, "fimo_subscriber")) @compileError("fimo: invalid module, missing `pub const fimo_subscriber = .{...};` declaration: " ++ @typeName(T));
@@ -496,7 +497,7 @@ pub const Subscriber = extern struct {
         const Info = @TypeOf(info);
 
         const wrapper = struct {
-            fn on_event(data: *anyopaque, event: *const events.Event) callconv(.c) *anyopaque {
+            fn on_event(data: *anyopaque, event: *const events.Event) callconv(.c) void {
                 const self: *T = @ptrCast(@alignCast(data));
                 switch (event.*) {
                     .start => if (comptime @hasField(Info, "start")) {
@@ -517,7 +518,7 @@ pub const Subscriber = extern struct {
                     },
                     .create_call_stack => if (comptime @hasField(Info, "create_call_stack")) {
                         const ev: *const events.CreateCallStack = @alignCast(@fieldParentPtr("event", event));
-                        return info.create_call_stack(self, ev);
+                        info.create_call_stack(self, ev);
                     },
                     .destroy_call_stack => if (comptime @hasField(Info, "destroy_call_stack")) {
                         const ev: *const events.DestroyCallStack = @alignCast(@fieldParentPtr("event", event));
@@ -549,7 +550,6 @@ pub const Subscriber = extern struct {
                     },
                     else => {},
                 }
-                return @constCast(&{});
             }
         };
         return .{ .data = value, .on_event = &wrapper.on_event };
@@ -557,67 +557,67 @@ pub const Subscriber = extern struct {
 
     pub fn start(self: Subscriber, event: events.Start) void {
         std.debug.assert(event.event == .start);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn finish(self: Subscriber, event: events.Finish) void {
         std.debug.assert(event.event == .finish);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn registerThread(self: Subscriber, event: events.RegisterThread) void {
         std.debug.assert(event.event == .register_thread);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn unregisterThread(self: Subscriber, event: events.UnregisterThread) void {
         std.debug.assert(event.event == .unregister_thread);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
-    pub fn createCallStack(self: Subscriber, event: events.CreateCallStack) *anyopaque {
+    pub fn createCallStack(self: Subscriber, event: events.CreateCallStack) void {
         std.debug.assert(event.event == .create_call_stack);
-        return self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn dropCallStack(self: Subscriber, event: events.DropCallStack) void {
         std.debug.assert(event.event == .drop_call_stack);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn destroyCallStack(self: Subscriber, event: events.DestroyCallStack) void {
         std.debug.assert(event.event == .destroy_call_stack);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn unblockCallStack(self: Subscriber, event: events.UnblockCallStack) void {
         std.debug.assert(event.event == .unblock_call_stack);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn suspendCallStack(self: Subscriber, event: events.SuspendCallStack) void {
         std.debug.assert(event.event == .suspend_call_stack);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn resumeCallStack(self: Subscriber, event: events.ResumeCallStack) void {
         std.debug.assert(event.event == .resume_call_stack);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn enterSpan(self: Subscriber, event: events.EnterSpan) void {
         std.debug.assert(event.event == .enter_span);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn exitSpan(self: Subscriber, event: events.ExitSpan) void {
         std.debug.assert(event.event == .exit_span);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 
     pub fn logMessage(self: Subscriber, event: events.LogMessage) void {
         std.debug.assert(event.event == .log_message);
-        _ = self.on_event(self.data, &event.event);
+        self.on_event(self.data, &event.event);
     }
 };
 
