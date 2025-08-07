@@ -126,6 +126,7 @@ typedef struct FimoTracingEventUnregisterThread {
 
 typedef struct FimoTracingEventCreateCallStack {
     FimoTracingEvent event;
+    void *stack;
     FimoInstant time;
 } FimoTracingEventCreateCallStack;
 
@@ -189,7 +190,7 @@ typedef struct FimoTracingSubscriber {
     /// Pointer to the subscriber (not `Null`).
     void *ptr;
     /// Event handler of the subscriber (not `Null`).
-    void *(*on_event)(void *data, const FimoTracingEvent *event);
+    void (*on_event)(void *data, const FimoTracingEvent *event);
 } FimoTracingSubscriber;
 
 /// Creates a new subscriber, which logs the messages to the stderr file.

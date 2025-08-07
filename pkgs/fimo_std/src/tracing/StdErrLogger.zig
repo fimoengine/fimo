@@ -10,6 +10,8 @@ mutex: std.Thread.Mutex = .{},
 condition: std.Thread.Condition = .{},
 queue: std.DoublyLinkedList = .{},
 free_list: std.DoublyLinkedList = .{},
+stack_lock: std.Thread.RwLock = .{},
+stacks: std.AutoArrayHashMapUnmanaged(*anyopaque, *Stack) = .empty,
 print_buffer_length: usize,
 gpa: std.mem.Allocator,
 max_level: Level,
@@ -70,8 +72,8 @@ const Frame = struct {
 };
 
 const Stack = struct {
+    lock: std.Thread.Mutex = .{},
     arena: std.heap.ArenaAllocator,
-    safe_allocator: std.heap.ThreadSafeAllocator,
     spans: std.DoublyLinkedList = .{},
 };
 
@@ -124,13 +126,13 @@ const Block = struct {
 };
 
 const Message = union(enum) {
-    destroy_stack: *Stack,
+    destroy_stack: *anyopaque,
     append_frame: struct {
         stack: *Stack,
         frame: *Frame,
     },
     destroy_frame: struct {
-        stack: *Stack,
+        stack: *anyopaque,
         id: *const EventInfo,
     },
     log: struct {
@@ -168,6 +170,8 @@ pub fn deinit(self: *Self) void {
         const block: *Block = @fieldParentPtr("node", node);
         block.deinit(self.gpa);
     }
+    std.debug.assert(self.stacks.count() == 0);
+    self.stacks.deinit(self.gpa);
     self.* = undefined;
 }
 
@@ -175,38 +179,51 @@ pub fn subscriber(self: *Self) Subscriber {
     return .of(Self, self);
 }
 
-fn onCreateCallStack(self: *Self, event: *const events.CreateCallStack) *Stack {
-    _ = event;
+fn onCreateCallStack(self: *Self, event: *const events.CreateCallStack) void {
     const stack = self.gpa.create(Stack) catch @panic("oom");
-    stack.* = .{ .arena = .init(self.gpa), .safe_allocator = undefined };
-    stack.safe_allocator = .{ .child_allocator = stack.arena.allocator() };
-    return stack;
+    stack.* = .{ .arena = .init(self.gpa) };
+
+    self.stack_lock.lock();
+    defer self.stack_lock.unlock();
+    self.stacks.put(self.gpa, event.stack, stack) catch @panic("oom");
 }
 
 fn onDestroyCallStack(self: *Self, event: *const events.DestroyCallStack) void {
-    const stack: *Stack = @ptrCast(@alignCast(event.stack));
-    self.pushMessage(.{ .destroy_stack = stack });
+    self.pushMessage(.{ .destroy_stack = event.stack });
 }
 
 fn onEnterSpan(self: *Self, event: *const events.EnterSpan) void {
-    const message = event.message[0..event.message_length];
-    const stack: *Stack = @ptrCast(@alignCast(event.stack));
-    const frame = Frame.init(event.span, message, stack.safe_allocator.allocator());
+    const stack = blk: {
+        self.stack_lock.lockShared();
+        defer self.stack_lock.unlockShared();
+        break :blk self.stacks.get(event.stack).?;
+    };
+    const frame = blk: {
+        stack.lock.lock();
+        defer stack.lock.unlock();
+        const message = event.message[0..event.message_length];
+        break :blk Frame.init(event.span, message, stack.arena.allocator());
+    };
     self.pushMessage(.{ .append_frame = .{ .stack = stack, .frame = frame } });
 }
 
 fn onExitSpan(self: *Self, event: *const events.ExitSpan) void {
-    const stack: *Stack = @ptrCast(@alignCast(event.stack));
-    const id = event.span;
-    self.pushMessage(.{ .destroy_frame = .{ .stack = stack, .id = id } });
+    self.pushMessage(.{ .destroy_frame = .{ .stack = event.stack, .id = event.span } });
 }
 
 fn onLogMessage(self: *Self, event: *const events.LogMessage) void {
-    const stack: *Stack = @ptrCast(@alignCast(event.stack));
-    const info = event.info;
-    const message = event.message[0..event.message_length];
-    const dupe = stack.safe_allocator.allocator().dupe(u8, message) catch @panic("oom");
-    self.pushMessage(.{ .log = .{ .stack = stack, .info = info, .message = dupe } });
+    const stack = blk: {
+        self.stack_lock.lockShared();
+        defer self.stack_lock.unlockShared();
+        break :blk self.stacks.get(event.stack).?;
+    };
+    const dupe = blk: {
+        stack.lock.lock();
+        defer stack.lock.unlock();
+        const message = event.message[0..event.message_length];
+        break :blk stack.arena.allocator().dupe(u8, message) catch @panic("oom");
+    };
+    self.pushMessage(.{ .log = .{ .stack = stack, .info = event.info, .message = dupe } });
 }
 
 fn takeOrAllocEmptyBlock(self: *Self, msg: Message) *Block {
@@ -268,7 +285,12 @@ fn runWorker(self: *Self) void {
     const use_escape_codes = config == .escape_codes;
     _ = use_escape_codes;
     while (self.waitOnMessage()) |msg| switch (msg) {
-        .destroy_stack => |stack| {
+        .destroy_stack => |s| {
+            const stack = blk: {
+                self.stack_lock.lock();
+                defer self.stack_lock.unlock();
+                break :blk self.stacks.fetchSwapRemove(s).?.value;
+            };
             std.debug.assert(stack.spans.first == null);
             stack.arena.deinit();
             self.gpa.destroy(stack);
@@ -278,16 +300,26 @@ fn runWorker(self: *Self) void {
             stack.spans.append(&frame.node);
         },
         .destroy_frame => |m| {
-            const stack, const id = .{ m.stack, m.id };
+            const s, const id = .{ m.stack, m.id };
+            const stack = blk: {
+                self.stack_lock.lockShared();
+                defer self.stack_lock.unlockShared();
+                break :blk self.stacks.get(s).?;
+            };
+
             const node = stack.spans.pop() orelse unreachable;
             const frame: *Frame = @fieldParentPtr("node", node);
             std.debug.assert(frame.id == id);
-            frame.deinit(stack.safe_allocator.allocator());
+            stack.lock.lock();
+            defer stack.lock.unlock();
+            frame.deinit(stack.arena.allocator());
         },
         .log => |m| {
             const stack, const info, const message = .{ m.stack, m.info, m.message };
             self.emitLogEC(print_buffer, stack, info, message);
-            stack.safe_allocator.allocator().free(message);
+            stack.lock.lock();
+            defer stack.lock.unlock();
+            stack.arena.allocator().free(message);
         },
     };
 }
