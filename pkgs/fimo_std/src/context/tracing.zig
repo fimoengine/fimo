@@ -495,6 +495,15 @@ pub const ThreadData = struct {
         const thread_data = context.ThreadData.getOrInit();
         if (thread_data.tracing != null) @panic("thread already registered");
 
+        const now = Instant.now().intoC();
+        const thread_id = std.Thread.getCurrentId();
+        for (subscribers) |subscriber| {
+            subscriber.registerThread(.{
+                .time = now,
+                .thread_id = thread_id,
+            });
+        }
+
         const fmt_buffer = tracing.allocator.alloc(
             u8,
             tracing.buffer_size,
@@ -512,6 +521,16 @@ pub const ThreadData = struct {
         const this = &(thread_data.tracing orelse @panic(@panic("thread not registered")));
 
         this.call_stack.finishBound();
+
+        const now = Instant.now().intoC();
+        const thread_id = std.Thread.getCurrentId();
+        for (subscribers) |subscriber| {
+            subscriber.unregisterThread(.{
+                .time = now,
+                .thread_id = thread_id,
+            });
+        }
+
         tracing.allocator.free(this.fmt_buffer);
         thread_data.tracing = null;
         thread_count.decrease();

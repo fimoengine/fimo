@@ -131,10 +131,7 @@ const Message = union(enum) {
         stack: *Stack,
         frame: *Frame,
     },
-    destroy_frame: struct {
-        stack: *anyopaque,
-        id: *const EventInfo,
-    },
+    destroy_frame: *anyopaque,
     log: struct {
         stack: *Stack,
         info: *const EventInfo,
@@ -208,7 +205,7 @@ fn onEnterSpan(self: *Self, event: *const events.EnterSpan) void {
 }
 
 fn onExitSpan(self: *Self, event: *const events.ExitSpan) void {
-    self.pushMessage(.{ .destroy_frame = .{ .stack = event.stack, .id = event.span } });
+    self.pushMessage(.{ .destroy_frame = event.stack });
 }
 
 fn onLogMessage(self: *Self, event: *const events.LogMessage) void {
@@ -299,8 +296,7 @@ fn runWorker(self: *Self) void {
             const stack, const frame = .{ m.stack, m.frame };
             stack.spans.append(&frame.node);
         },
-        .destroy_frame => |m| {
-            const s, const id = .{ m.stack, m.id };
+        .destroy_frame => |s| {
             const stack = blk: {
                 self.stack_lock.lockShared();
                 defer self.stack_lock.unlockShared();
@@ -309,7 +305,6 @@ fn runWorker(self: *Self) void {
 
             const node = stack.spans.pop() orelse unreachable;
             const frame: *Frame = @fieldParentPtr("node", node);
-            std.debug.assert(frame.id == id);
             stack.lock.lock();
             defer stack.lock.unlock();
             frame.deinit(stack.arena.allocator());

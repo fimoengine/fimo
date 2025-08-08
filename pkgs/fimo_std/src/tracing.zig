@@ -7,9 +7,11 @@ const builtin = @import("builtin");
 const ctx = @import("ctx.zig");
 const time = @import("time.zig");
 pub const StdErrLogger = @import("tracing/StdErrLogger.zig");
+pub const stream = @import("tracing/stream.zig");
 
 comptime {
     _ = StdErrLogger;
+    _ = stream;
 }
 
 /// Tracing levels.
@@ -426,56 +428,58 @@ pub const events = struct {
     pub const RegisterThread = extern struct {
         event: Event = .register_thread,
         time: time.compat.Instant,
+        thread_id: usize,
     };
     pub const UnregisterThread = extern struct {
         event: Event = .unregister_thread,
         time: time.compat.Instant,
+        thread_id: usize,
     };
     pub const CreateCallStack = extern struct {
         event: Event = .create_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
     };
     pub const DestroyCallStack = extern struct {
         event: Event = .destroy_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
     };
     pub const UnblockCallStack = extern struct {
         event: Event = .unblock_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
     };
     pub const SuspendCallStack = extern struct {
         event: Event = .suspend_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
         mark_blocked: bool,
     };
     pub const ResumeCallStack = extern struct {
         event: Event = .resume_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
+        thread_id: usize,
     };
     pub const EnterSpan = extern struct {
         event: Event = .enter_span,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
         span: *const EventInfo,
         message: [*]const u8,
         message_length: usize,
     };
     pub const ExitSpan = extern struct {
         event: Event = .exit_span,
-        stack: *anyopaque,
         time: time.compat.Instant,
-        span: *const EventInfo,
+        stack: *anyopaque,
         is_unwinding: bool,
     };
     pub const LogMessage = extern struct {
         event: Event = .log_message,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
         info: *const EventInfo,
         message: [*]const u8,
         message_length: usize,
