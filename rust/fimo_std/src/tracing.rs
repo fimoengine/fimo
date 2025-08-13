@@ -707,6 +707,7 @@ pub mod events {
     pub struct RegisterThread {
         pub event: Event,
         pub time: Instant,
+        pub thread_id: usize,
     }
 
     #[repr(C)]
@@ -714,38 +715,39 @@ pub mod events {
     pub struct UnregisterThread {
         pub event: Event,
         pub time: Instant,
+        pub thread_id: usize,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct CreateCallStack {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct DestroyCallStack {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct UnblockCallStack {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct SuspendCallStack {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
         pub mark_blocked: bool,
     }
 
@@ -753,16 +755,17 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct ResumeCallStack {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
+        pub thread_id: usize,
     }
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
     pub struct EnterSpan<'a> {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
         pub span: &'static EventInfo,
         pub message: SliceRef<'a, u8>,
     }
@@ -771,9 +774,8 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct ExitSpan {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
-        pub span: &'static EventInfo,
+        pub stack: CallStackHandle,
         pub is_unwinding: bool,
     }
 
@@ -781,8 +783,8 @@ pub mod events {
     #[derive(Debug, Clone, Copy)]
     pub struct LogMessage<'a> {
         pub event: Event,
-        pub stack: CallStackHandle,
         pub time: Instant,
+        pub stack: CallStackHandle,
         pub info: &'static EventInfo,
         pub message: SliceRef<'a, u8>,
     }

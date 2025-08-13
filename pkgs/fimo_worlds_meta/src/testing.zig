@@ -16,23 +16,16 @@ const TestModule = @import("test_module");
 const symbols = @import("symbols.zig");
 
 pub const GlobalCtx = struct {
-    var gpa = std.heap.DebugAllocator(.{}).init;
-    var logger: tracing.StdErrLogger = undefined;
     var t_ctx: ?TestContext = null;
 
     pub fn init() !void {
         if (t_ctx != null) @panic("context already initialized");
-        errdefer if (gpa.deinit() == .leak) @panic("leak");
-        try logger.init(.{ .gpa = gpa.allocator() });
         t_ctx = try .init();
     }
 
     pub fn deinit() void {
         if (t_ctx) |*c| {
             c.deinit();
-            logger.deinit();
-            if (gpa.deinit() == .leak) @panic("leak");
-            gpa = .init;
             t_ctx = null;
         } else @panic("not initialized");
     }
@@ -48,11 +41,7 @@ const TestContext = struct {
     symbols: SymbolGroup(symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols),
 
     fn init() !@This() {
-        const tracing_cfg = tracing.Config{
-            .max_level = .warn,
-            .subscribers = &.{GlobalCtx.logger.subscriber()},
-            .subscriber_count = 1,
-        };
+        const tracing_cfg = @import("root").tracing_cfg;
         const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
         try ctx.init(init_options);
         errdefer ctx.deinit();

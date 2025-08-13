@@ -6,6 +6,10 @@
         .@"tools/build-internals" = .{
             .path = "../../tools/build-internals",
         },
+        // .lz4 = .{
+        //     .url = "git+https://github.com/allyourcodebase/lz4.git?ref=1.10.0-5",
+        //     .hash = "lz4-1.10.0-5-ewyzw7YNAADOUkQ7M9fjW005oGzxt9b6m0uPd_kQC48z",
+        // },
     },
     .fingerprint = 0x6d5533552999aa5,
     .paths = .{
