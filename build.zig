@@ -43,6 +43,8 @@ pub fn build(b: *std.Build) void {
 
     const test_filter = b.option([]const u8, "test-filter", "Filter the test execution to one specific package or module (default: none)");
 
+    const tool_capture = b.option(bool, "tool-capture", "Enable the capture tool (default: yes)") orelse true;
+
     const pkg_std = b.option(bool, "pkg-std", "Enable the fimo_std package (default: yes)") orelse true;
     const pkg_tasks = b.option(bool, "pkg-tasks", "Enable the fimo_tasks_meta package (default: yes)") orelse true;
     const pkg_worlds = b.option(bool, "pkg-worlds", "Enable the fimo_worlds_meta package (default: yes)") orelse true;
@@ -64,6 +66,21 @@ pub fn build(b: *std.Build) void {
             .fimo_worlds = mod_worlds,
         },
     );
+
+    if (tool_capture) {
+        const fimo_std = builder.builder.getPackage("fimo_std");
+        const capture = b.addExecutable(.{
+            .name = "capture",
+            .root_module = b.createModule(.{
+                .target = target,
+                .optimize = optimize,
+                .root_source_file = b.path("tools/capture.zig"),
+            }),
+        });
+        capture.root_module.addImport("fimo_std", fimo_std.root_module);
+        check_step.dependOn(&capture.step);
+        b.installArtifact(capture);
+    }
 
     const test_pkg_names = if (test_filter) |filter| blk: {
         for (meta_list) |pkg| if (std.mem.eql(u8, filter, pkg.pub_name)) break :blk pkg.name;
