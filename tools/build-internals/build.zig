@@ -280,15 +280,17 @@ pub const FimoBuild = struct {
             const owner = self.owner;
             const b = owner.build;
             const artifact = switch (self.step) {
-                .module => |root_module| b.addTest(.{
-                    .name = self.name,
-                    .root_module = root_module,
-                    .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
-                    .test_runner = .{
-                        .path = owner.build_dep.path("test_runner.zig"),
-                        .mode = .simple,
-                    },
-                }),
+                .module => |root_module| blk: {
+                    break :blk b.addTest(.{
+                        .name = self.name,
+                        .root_module = root_module,
+                        .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
+                        .test_runner = .{
+                            .path = owner.build_dep.path("test_runner.zig"),
+                            .mode = .simple,
+                        },
+                    });
+                },
                 .executable => |exe| exe,
             };
 

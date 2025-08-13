@@ -117,48 +117,51 @@ typedef struct FimoTracingEventFinish {
 typedef struct FimoTracingEventRegisterThread {
     FimoTracingEvent event;
     FimoInstant time;
+    FimoUSize thread_id;
 } FimoTracingEventRegisterThread;
 
 typedef struct FimoTracingEventUnregisterThread {
     FimoTracingEvent event;
     FimoInstant time;
+    FimoUSize thread_id;
 } FimoTracingEventUnregisterThread;
 
 typedef struct FimoTracingEventCreateCallStack {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
 } FimoTracingEventCreateCallStack;
 
 typedef struct FimoTracingEventDestroyCallStack {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
 } FimoTracingEventDestroyCallStack;
 
 typedef struct FimoTracingEventUnblockCallStack {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
 } FimoTracingEventUnblockCallStack;
 
 typedef struct FimoTracingEventSuspendCallStack {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
     bool mark_blocked;
 } FimoTracingEventSuspendCallStack;
 
 typedef struct FimoTracingEventResumeCallStack {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
+    FimoUSize thread_id;
 } FimoTracingEventResumeCallStack;
 
 typedef struct FimoTracingEventEnterSpan {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
     const FimoTracingEventInfo *span;
     const char *message;
     FimoUSize message_length;
@@ -166,16 +169,15 @@ typedef struct FimoTracingEventEnterSpan {
 
 typedef struct FimoTracingEventExitSpan {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
-    const FimoTracingEventInfo *span;
+    void *stack;
     bool is_unwinding;
 } FimoTracingEventExitSpan;
 
 typedef struct FimoTracingEventLogMessage {
     FimoTracingEvent event;
-    void *stack;
     FimoInstant time;
+    void *stack;
     const FimoTracingEventInfo *info;
     const char *message;
     FimoUSize message_length;

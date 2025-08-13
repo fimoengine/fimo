@@ -23,6 +23,7 @@ pub var allocator: Allocator = undefined;
 pub var subscribers: []pub_tracing.Subscriber = undefined;
 pub var buffer_size: usize = undefined;
 pub var max_level: pub_tracing.Level = undefined;
+pub var event_info_cache: EventInfoCache = undefined;
 pub var thread_count: ResourceCount = .{};
 pub var call_stack_count: ResourceCount = .{};
 
@@ -303,6 +304,7 @@ pub fn init(config: *const pub_tracing.Config) !void {
     subscribers = try allocator.dupe(pub_tracing.Subscriber, subs);
     buffer_size = if (config.format_buffer_len != 0) config.format_buffer_len else 1024;
     max_level = config.max_level;
+    event_info_cache = .{};
     errdefer allocator.free(subscribers);
 
     const resolution = blk: {
@@ -487,6 +489,21 @@ fn logMessage(
     d.call_stack.logMessage(info, formatter, formatter_data);
 }
 
+pub const EventInfoCache = struct {
+    cache: [cache_len]std.atomic.Value(?*const EventInfo) = @splat(.init(null)),
+    const cache_len = 4096;
+
+    /// Caches the element and returns whether it was inserted into the cache;
+    pub fn cacheInfo(self: *EventInfoCache, info: *const EventInfo) bool {
+        var hasher: std.hash.Wyhash = .init(0);
+        std.hash.autoHash(&hasher, info);
+        const hash = hasher.final();
+        const idx = hash & (cache_len - 1);
+        const old = self.cache[idx].swap(info, .monotonic);
+        return old != info;
+    }
+};
+
 pub const ThreadData = struct {
     call_stack: *CallStack,
     fmt_buffer: []u8,
@@ -494,6 +511,15 @@ pub const ThreadData = struct {
     fn init() void {
         const thread_data = context.ThreadData.getOrInit();
         if (thread_data.tracing != null) @panic("thread already registered");
+
+        const now = Instant.now().intoC();
+        const thread_id = std.Thread.getCurrentId();
+        for (subscribers) |subscriber| {
+            subscriber.registerThread(.{
+                .time = now,
+                .thread_id = thread_id,
+            });
+        }
 
         const fmt_buffer = tracing.allocator.alloc(
             u8,
@@ -512,6 +538,16 @@ pub const ThreadData = struct {
         const this = &(thread_data.tracing orelse @panic(@panic("thread not registered")));
 
         this.call_stack.finishBound();
+
+        const now = Instant.now().intoC();
+        const thread_id = std.Thread.getCurrentId();
+        for (subscribers) |subscriber| {
+            subscriber.unregisterThread(.{
+                .time = now,
+                .thread_id = thread_id,
+            });
+        }
+
         tracing.allocator.free(this.fmt_buffer);
         thread_data.tracing = null;
         thread_count.decrease();

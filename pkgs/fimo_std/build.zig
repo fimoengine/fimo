@@ -4,6 +4,13 @@ const builtin = @import("builtin");
 const build_internals = @import("tools/build-internals");
 
 pub fn configure(b: *build_internals.FimoBuild) void {
+    // const lz4_dependency = b.dependency("lz4", .{
+    //     .target = b.graph.target,
+    //     .optimize = b.graph.optimize,
+    // });
+    // const lz4 = lz4_dependency.artifact("lz4");
+    // _ = lz4; // autofix
+
     // Generate additional build files.
     const wf = b.build.addWriteFiles();
     const context_version = generateVersion(b.build, wf);
@@ -38,23 +45,26 @@ pub fn configure(b: *build_internals.FimoBuild) void {
         .headers = headers.getDirectory(),
     });
 
-    _ = pkg.addTest(.{ .step = .{
-        .module = blk: {
-            const t = b.build.addModule("fimo_std", .{
-                .root_source_file = b.build.path("src/root.zig"),
-                .target = b.graph.target,
-                .optimize = b.graph.optimize,
-                .valgrind = b.graph.target.result.os.tag == .linux,
-                .link_libc = true,
-                .pic = true,
-            });
-            t.addImport("c", translate_c.createModule());
-            t.addImport("context_version", context_version);
-            t.addIncludePath(headers.getDirectory());
+    _ = pkg.addTest(.{
+        .step = .{
+            .module = blk: {
+                const t = b.build.addModule("fimo_std", .{
+                    .root_source_file = b.build.path("src/root.zig"),
+                    .target = b.graph.target,
+                    .optimize = b.graph.optimize,
+                    .valgrind = b.graph.target.result.os.tag == .linux,
+                    .link_libc = true,
+                    .pic = true,
+                });
+                t.addImport("c", translate_c.createModule());
+                t.addImport("context_version", context_version);
+                t.addIncludePath(headers.getDirectory());
+                t.addImport("fimo_std", t);
 
-            break :blk t;
+                break :blk t;
+            },
         },
-    } });
+    });
 
     const event_loop_test = b.build.addExecutable(.{
         .name = "event_loop_test",

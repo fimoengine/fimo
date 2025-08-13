@@ -2,10 +2,21 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
+const fimo_std = @import("fimo_std");
+const tracing = fimo_std.tracing;
+
+comptime {
+    _ = fimo_std;
+}
+
 const BORDER = "=" ** 80;
 
 // use in custom panic handler
 var current_test: ?[]const u8 = null;
+
+// use for initializing the test context
+var logger: tracing.net.NetLogger = undefined;
+pub var tracing_cfg: tracing.Config = undefined;
 
 pub fn main() !void {
     var mem: [8192]u8 = undefined;
@@ -27,6 +38,22 @@ pub fn main() !void {
     var printer = Printer.init();
     printer.fmt("\r\x1b[0K", .{}); // beginning of line and clear to end of line
 
+    try logger.init(.{
+        .gpa = std.heap.smp_allocator,
+        .server = .{
+            .host_name = env.host_name orelse tracing.net.protocol.default_host,
+            .port = env.port,
+        },
+    });
+    defer logger.deinit();
+    tracing_cfg = .{
+        .max_level = .trace,
+        .subscribers = &.{logger.subscriber()},
+        .subscriber_count = 1,
+        .app_name = undefined,
+        .app_name_length = undefined,
+    };
+
     for (builtin.test_functions) |t| {
         var status = Status.pass;
         slowest.startTiming();
@@ -38,29 +65,22 @@ pub fn main() !void {
             }
         }
 
-        const friendly_name = blk: {
-            const name = t.name;
-            var it = std.mem.splitScalar(u8, name, '.');
-            while (it.next()) |value| {
-                if (std.mem.eql(u8, value, "test")) {
-                    const rest = it.rest();
-                    break :blk if (rest.len > 0) rest else name;
-                }
-            }
-            break :blk name;
-        };
-        printer.status(.text, "{s}\n", .{friendly_name});
+        printer.status(.text, "{s}\n", .{t.name});
 
-        current_test = friendly_name;
+        current_test = t.name;
+        tracing_cfg.app_name = t.name.ptr;
+        tracing_cfg.app_name_length = t.name.len;
         std.testing.allocator_instance = .{};
         const result = t.func();
+        tracing_cfg.app_name = undefined;
+        tracing_cfg.app_name_length = undefined;
         current_test = null;
 
-        const ns_taken = slowest.endTiming(friendly_name);
+        const ns_taken = slowest.endTiming(t.name);
 
         if (std.testing.allocator_instance.deinit() == .leak) {
             leak += 1;
-            printer.status(.fail, "\n{s}\n\"{s}\" - Memory Leak\n{s}\n", .{ BORDER, friendly_name, BORDER });
+            printer.status(.fail, "\n{s}\n\"{s}\" - Memory Leak\n{s}\n", .{ BORDER, t.name, BORDER });
         }
 
         if (result) |_| {
@@ -73,7 +93,7 @@ pub fn main() !void {
             else => {
                 status = .fail;
                 fail += 1;
-                printer.status(.fail, "\n{s}\n\"{s}\" - {s}\n{s}\n", .{ BORDER, friendly_name, @errorName(err), BORDER });
+                printer.status(.fail, "\n{s}\n\"{s}\" - {s}\n{s}\n", .{ BORDER, t.name, @errorName(err), BORDER });
                 if (@errorReturnTrace()) |trace| {
                     std.debug.dumpStackTrace(trace.*);
                 }
@@ -85,7 +105,7 @@ pub fn main() !void {
 
         if (env.verbose) {
             const ms = @as(f64, @floatFromInt(ns_taken)) / 1_000_000.0;
-            printer.status(status, "{s} ({d:.2}ms)\n", .{ friendly_name, ms });
+            printer.status(status, "{s} ({d:.2}ms)\n", .{ t.name, ms });
         } else {
             printer.status(status, ".", .{});
         }
@@ -217,20 +237,25 @@ const SlowTracker = struct {
 const Env = struct {
     verbose: bool,
     fail_first: bool,
+    host_name: ?[]const u8,
+    port: u16,
+    wait_on_connection: bool,
     filter: ?[]const u8,
 
     fn init(allocator: Allocator) Env {
         return .{
             .verbose = readEnvBool(allocator, "TEST_VERBOSE", true),
             .fail_first = readEnvBool(allocator, "TEST_FAIL_FIRST", false),
+            .host_name = readEnv(allocator, "TEST_HOST_NAME"),
+            .port = readEnvU16(allocator, "TEST_PORT", tracing.net.protocol.default_port),
+            .wait_on_connection = readEnvBool(allocator, "TEST_WAIT_ON_CONNECTION", false),
             .filter = readEnv(allocator, "TEST_FILTER"),
         };
     }
 
     fn deinit(self: Env, allocator: Allocator) void {
-        if (self.filter) |f| {
-            allocator.free(f);
-        }
+        if (self.host_name) |h| allocator.free(h);
+        if (self.filter) |f| allocator.free(f);
     }
 
     fn readEnv(allocator: Allocator, key: []const u8) ?[]const u8 {
@@ -248,6 +273,12 @@ const Env = struct {
         const value = readEnv(allocator, key) orelse return deflt;
         defer allocator.free(value);
         return std.ascii.eqlIgnoreCase(value, "true");
+    }
+
+    fn readEnvU16(allocator: Allocator, key: []const u8, deflt: u16) u16 {
+        const value = readEnv(allocator, key) orelse return deflt;
+        defer allocator.free(value);
+        return std.fmt.parseInt(u16, value, 10) catch @panic("invalid port");
     }
 };
 

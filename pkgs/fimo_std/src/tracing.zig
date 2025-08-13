@@ -6,10 +6,16 @@ const builtin = @import("builtin");
 
 const ctx = @import("ctx.zig");
 const time = @import("time.zig");
+pub const db = @import("tracing/db.zig");
+pub const net = @import("tracing/net.zig");
 pub const StdErrLogger = @import("tracing/StdErrLogger.zig");
 
 comptime {
+    _ = net;
     _ = StdErrLogger;
+    if (builtin.is_test) {
+        _ = db;
+    }
 }
 
 /// Tracing levels.
@@ -380,6 +386,7 @@ pub const spanNamedWithFormatter = default.spanNamedWithFormatter;
 pub const events = struct {
     /// Common header of all events.
     pub const Event = enum(u32) {
+        // Instrumentation
         start,
         finish,
         register_thread,
@@ -392,6 +399,9 @@ pub const events = struct {
         enter_span,
         exit_span,
         log_message,
+
+        // Hints
+        declare_event_info = 1024,
         _,
     };
 
@@ -426,59 +436,66 @@ pub const events = struct {
     pub const RegisterThread = extern struct {
         event: Event = .register_thread,
         time: time.compat.Instant,
+        thread_id: usize,
     };
     pub const UnregisterThread = extern struct {
         event: Event = .unregister_thread,
         time: time.compat.Instant,
+        thread_id: usize,
     };
     pub const CreateCallStack = extern struct {
         event: Event = .create_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
     };
     pub const DestroyCallStack = extern struct {
         event: Event = .destroy_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
     };
     pub const UnblockCallStack = extern struct {
         event: Event = .unblock_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
     };
     pub const SuspendCallStack = extern struct {
         event: Event = .suspend_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
         mark_blocked: bool,
     };
     pub const ResumeCallStack = extern struct {
         event: Event = .resume_call_stack,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
+        thread_id: usize,
     };
     pub const EnterSpan = extern struct {
         event: Event = .enter_span,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
         span: *const EventInfo,
         message: [*]const u8,
         message_length: usize,
     };
     pub const ExitSpan = extern struct {
         event: Event = .exit_span,
-        stack: *anyopaque,
         time: time.compat.Instant,
-        span: *const EventInfo,
+        stack: *anyopaque,
         is_unwinding: bool,
     };
     pub const LogMessage = extern struct {
         event: Event = .log_message,
-        stack: *anyopaque,
         time: time.compat.Instant,
+        stack: *anyopaque,
         info: *const EventInfo,
         message: [*]const u8,
         message_length: usize,
+    };
+
+    pub const DeclareEventInfo = extern struct {
+        event: Event = .declare_event_info,
+        info: *const EventInfo,
     };
 };
 
@@ -548,6 +565,12 @@ pub const Subscriber = extern struct {
                         const ev: *const events.LogMessage = @alignCast(@fieldParentPtr("event", event));
                         info.log_message(self, ev);
                     },
+
+                    .declare_event_info => if (comptime @hasField(Info, "declare_event_info")) {
+                        const ev: *const events.DeclareEventInfo = @alignCast(@fieldParentPtr("event", event));
+                        info.declare_event_info(self, ev);
+                    },
+
                     else => {},
                 }
             }
@@ -619,6 +642,11 @@ pub const Subscriber = extern struct {
         std.debug.assert(event.event == .log_message);
         self.on_event(self.data, &event.event);
     }
+
+    pub fn declareEventInfo(self: Subscriber, event: events.DeclareEventInfo) void {
+        std.debug.assert(event.event == .declare_event_info);
+        self.on_event(self.data, &event.event);
+    }
 };
 
 /// Type of a formatter function.
@@ -640,7 +668,7 @@ pub fn stdFormatter(comptime fmt: []const u8, ARGS: type) Formatter {
             data: *const anyopaque,
         ) callconv(.c) usize {
             const b = buffer[0..buffer_len];
-            const args: *const ARGS = @alignCast(@ptrCast(data));
+            const args: *const ARGS = @ptrCast(@alignCast(data));
             return if (std.fmt.bufPrint(b, fmt, args.*)) |out|
                 out.len
             else |_|
@@ -656,7 +684,7 @@ pub fn stackTraceFormatter(
     data: *const anyopaque,
 ) callconv(.c) usize {
     const buf = buffer[0..buffer_len];
-    const stack_trace: *const std.builtin.StackTrace = @alignCast(@ptrCast(data));
+    const stack_trace: *const std.builtin.StackTrace = @ptrCast(@alignCast(data));
     if (builtin.strip_debug_info) return if (std.fmt.bufPrint(buf, "Unable to dump stack trace: debug info stripped", .{})) |out|
         out.len
     else |_|

@@ -40,8 +40,8 @@ pub fn init() *Self {
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.CreateCallStack{
-            .stack = call_stack,
             .time = now,
+            .stack = call_stack,
         };
         subscriber.createCallStack(event);
     }
@@ -55,6 +55,18 @@ pub fn initBound(fmt_buffer: []u8) *Self {
     self.mutex.lock();
     self.state.suspended = false;
     self.fmt_buffer = fmt_buffer;
+
+    const thread_id = std.Thread.getCurrentId();
+    const now = Instant.now().intoC();
+    for (tracing.subscribers) |subscriber| {
+        const event = tracing.events.ResumeCallStack{
+            .time = now,
+            .stack = self,
+            .thread_id = thread_id,
+        };
+        subscriber.resumeCallStack(event);
+    }
+
     return self;
 }
 
@@ -66,8 +78,8 @@ pub fn finishBound(self: *Self) void {
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.DestroyCallStack{
-            .stack = self,
             .time = now,
+            .stack = self,
         };
         subscriber.destroyCallStack(event);
     }
@@ -88,8 +100,8 @@ pub fn finish(self: *Self) void {
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.DestroyCallStack{
-            .stack = self,
             .time = now,
+            .stack = self,
         };
         subscriber.destroyCallStack(event);
     }
@@ -109,18 +121,17 @@ pub fn abort(self: *Self) void {
     if (self.state.blocked) {
         for (tracing.subscribers) |subscriber| {
             const event = tracing.events.UnblockCallStack{
-                .stack = self,
                 .time = now,
+                .stack = self,
             };
             subscriber.unblockCallStack(event);
         }
     }
-    while (self.frames.pop()) |frame| {
+    while (self.frames.pop()) |_| {
         for (tracing.subscribers) |subscriber| {
             const event = tracing.events.ExitSpan{
-                .stack = self,
                 .time = now,
-                .span = frame.id,
+                .stack = self,
                 .is_unwinding = true,
             };
             subscriber.exitSpan(event);
@@ -128,8 +139,8 @@ pub fn abort(self: *Self) void {
     }
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.DestroyCallStack{
-            .stack = self,
             .time = now,
+            .stack = self,
         };
         subscriber.destroyCallStack(event);
     }
@@ -170,8 +181,8 @@ pub fn unblock(self: *Self) void {
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.UnblockCallStack{
-            .stack = self,
             .time = now,
+            .stack = self,
         };
         subscriber.unblockCallStack(event);
     }
@@ -190,8 +201,8 @@ pub fn suspendCurrent(mark_blocked: bool) void {
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.SuspendCallStack{
-            .stack = self,
             .time = now,
+            .stack = self,
             .mark_blocked = mark_blocked,
         };
         subscriber.suspendCallStack(event);
@@ -210,10 +221,12 @@ pub fn resumeCurrent() void {
     if (!self.state.suspended) @panic("call stack is not suspended");
 
     const now = Instant.now().intoC();
+    const thread_id = std.Thread.getCurrentId();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.ResumeCallStack{
-            .stack = self,
             .time = now,
+            .stack = self,
+            .thread_id = thread_id,
         };
         subscriber.resumeCallStack(event);
     }
@@ -232,13 +245,18 @@ pub fn enterFrame(
     if (self.state.blocked) @panic("call stack is blocked");
     if (self.state.suspended) @panic("call stack is suspended");
 
+    if (tracing.event_info_cache.cacheInfo(id)) for (tracing.subscribers) |subscriber| {
+        const event = tracing.events.DeclareEventInfo{ .info = id };
+        subscriber.declareEventInfo(event);
+    };
+
     const now = Instant.now().intoC();
     const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
     const message = self.fmt_buffer[0..message_len];
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.EnterSpan{
-            .stack = self,
             .time = now,
+            .stack = self,
             .span = id,
             .message = message.ptr,
             .message_length = message.len,
@@ -269,9 +287,8 @@ pub fn exitFrame(self: *Self, id: *const tracing.EventInfo) void {
     const now = Instant.now().intoC();
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.ExitSpan{
-            .stack = self,
             .time = now,
-            .span = id,
+            .stack = self,
             .is_unwinding = false,
         };
         subscriber.exitSpan(event);
@@ -294,13 +311,18 @@ pub fn logMessage(
     const event_lvl_int = @intFromEnum(info.level);
     if (event_lvl_int > max_lvl_int) return;
 
+    if (tracing.event_info_cache.cacheInfo(info)) for (tracing.subscribers) |subscriber| {
+        const event = tracing.events.DeclareEventInfo{ .info = info };
+        subscriber.declareEventInfo(event);
+    };
+
     const now = Instant.now().intoC();
     const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
     const message = self.fmt_buffer[0..message_len];
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.LogMessage{
-            .stack = self,
             .time = now,
+            .stack = self,
             .info = info,
             .message = message.ptr,
             .message_length = message.len,
