@@ -585,7 +585,7 @@ pub const DBWriter = struct {
                 null,
                 file_len,
                 posix.PROT.READ | posix.PROT.WRITE,
-                posix.MAP.TYPE.PRIVATE,
+                .{ .TYPE = .SHARED },
                 file.handle,
                 0,
             );
@@ -652,7 +652,7 @@ pub const DBWriter = struct {
             _ = UnmapViewOfFile(self.block);
             windows.CloseHandle(self.handle);
         } else {
-            const ptr: [*]const u8 = @ptrCast(self.block);
+            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.file_len]);
         }
 
@@ -665,7 +665,7 @@ pub const DBWriter = struct {
             if (FlushViewOfFile(self.block, 0) == 0) return error.FlushFailed;
             if (windows.kernel32.FlushFileBuffers(self.file.handle) == 0) return error.FlushFailed;
         } else {
-            const ptr: [*]const u8 = @ptrCast(self.block);
+            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
             try posix.msync(ptr[0..self.file_len], posix.MSF.SYNC);
         }
     }
@@ -691,11 +691,11 @@ pub const DBWriter = struct {
                 null,
                 self.file_len,
                 posix.PROT.READ | posix.PROT.WRITE,
-                posix.MAP.TYPE.PRIVATE,
+                .{ .TYPE = .SHARED },
                 self.file.handle,
                 0,
             );
-            const ptr: [*]const u8 = @ptrCast(self.block);
+            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0 .. self.file_len - rounded]);
             self.block = @ptrCast(@alignCast(mapping));
         }
@@ -1155,7 +1155,7 @@ pub const DBReader = struct {
                 null,
                 file_len,
                 posix.PROT.READ,
-                posix.MAP.TYPE.PRIVATE,
+                .{ .TYPE = .SHARED },
                 file.handle,
                 0,
             );
@@ -1171,7 +1171,7 @@ pub const DBReader = struct {
             _ = UnmapViewOfFile(self.block);
             windows.CloseHandle(self.handle);
         } else {
-            const ptr: [*]const u8 = @ptrCast(self.block);
+            const ptr: [*]align(heap.page_size_min) const u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.handle]);
         }
         self.* = undefined;
