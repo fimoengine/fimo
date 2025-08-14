@@ -1039,7 +1039,11 @@ test "Client-Server" {
     try server.init(.{ .gpa = std.testing.allocator, .server = .{ .port = 5883 } });
     defer server.deinit();
 
-    var client: Client = try .init(.{ .gpa = std.testing.allocator, .port = 5883 });
+    var client: Client = blk: while (true)
+        break :blk Client.init(.{ .gpa = std.testing.allocator, .port = 5883 }) catch |err| switch (err) {
+            error.ConnectionRefused => continue,
+            else => return err,
+        };
     defer client.close();
 
     const epoch: Time = .now();
