@@ -6,16 +6,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  ci:
-    name: "Build and test"
-    timeout-minutes: 20
-    runs-on: ${{ matrix.os }}
+  build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-24.04]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         build-type: [Debug, Release]
         rust:
           - nightly
+    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,20 +26,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          components: clippy
+          components: clippy, rustfmt
 
-      - name: Test Zig
+      - name: Run zig fmt
+        if: matrix.os == 'ubuntu-latest'
+        run: zig fmt --check .
+
+      - name: Run rust fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Test zig
         shell: bash
         run: |
           if ${{ matrix.build-type == 'Release' }}; then
-            zig build check --release=safe
-            zig build test --release=safe
+            zig build check test -Doptimize=ReleaseSafe
           else
-            zig build check
-            zig build test
+            zig build check test
           fi
 
-      - name: Test Rust
+      - name: Test rust
         shell: bash
         run: |
           if ${{ matrix.build-type == 'Release' }}; then
@@ -49,26 +57,3 @@ jobs:
             cargo clippy
             cargo test
           fi
-
-  formatting:
-    name: "Cargo fmt"
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-        rust:
-          - nightly
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
-          components: rustfmt
-
-      - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
