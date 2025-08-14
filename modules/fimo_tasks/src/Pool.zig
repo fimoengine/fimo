@@ -2,7 +2,7 @@ const std = @import("std");
 const atomic = std.atomic;
 const Thread = std.Thread;
 const Allocator = std.mem.Allocator;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
@@ -103,9 +103,9 @@ pub const StackAllocator = struct {
     max_allocated: usize = std.math.maxInt(usize),
     waiters_head: ?*CommandBuffer = null,
     waiters_tail: ?*CommandBuffer = null,
-    cold_freelist: ArrayListUnmanaged(Stack) = .empty,
-    hot_freelist: ArrayListUnmanaged(Stack) = .empty,
-    deallocation_cache: ArrayListUnmanaged(Stack) = .empty,
+    cold_freelist: ArrayList(Stack) = .empty,
+    hot_freelist: ArrayList(Stack) = .empty,
+    deallocation_cache: ArrayList(Stack) = .empty,
 
     pub const Error = error{Block} || Allocator.Error;
 
@@ -243,9 +243,9 @@ pub fn init(options: InitOptions) !*Self {
             .allocated = stack.preallocated,
             .max_allocated = stack.max_allocated,
         };
-        al.cold_freelist = try ArrayListUnmanaged(Stack).initCapacity(allocator, stack.cold);
-        al.hot_freelist = try ArrayListUnmanaged(Stack).initCapacity(allocator, stack.hot);
-        al.deallocation_cache = try ArrayListUnmanaged(Stack).initCapacity(allocator, options.worker_count * 2);
+        al.cold_freelist = try ArrayList(Stack).initCapacity(allocator, stack.cold);
+        al.hot_freelist = try ArrayList(Stack).initCapacity(allocator, stack.hot);
+        al.deallocation_cache = try ArrayList(Stack).initCapacity(allocator, options.worker_count * 2);
 
         const preallocated_hot = @min(stack.hot, stack.preallocated);
         const preallocated_cold = @min(stack.cold, stack.preallocated - preallocated_hot);

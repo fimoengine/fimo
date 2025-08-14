@@ -876,7 +876,7 @@ pub const Type = extern struct {
         self.ref();
         return VoidType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -886,7 +886,7 @@ pub const Type = extern struct {
         self.ref();
         return BoolType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -896,7 +896,7 @@ pub const Type = extern struct {
         self.ref();
         return IntType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -906,7 +906,7 @@ pub const Type = extern struct {
         self.ref();
         return FloatType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -916,7 +916,7 @@ pub const Type = extern struct {
         self.ref();
         return PointerType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -926,7 +926,7 @@ pub const Type = extern struct {
         self.ref();
         return ArrayType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -936,7 +936,7 @@ pub const Type = extern struct {
         self.ref();
         return StructType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -946,7 +946,7 @@ pub const Type = extern struct {
         self.ref();
         return EnumType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -956,7 +956,7 @@ pub const Type = extern struct {
         self.ref();
         return UnionType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 
@@ -966,7 +966,7 @@ pub const Type = extern struct {
         self.ref();
         return FnType{
             .data = self.data,
-            .vtable = @alignCast(@ptrCast(self.vtable)),
+            .vtable = @ptrCast(@alignCast(self.vtable)),
         };
     }
 };
@@ -1561,43 +1561,43 @@ pub const Impl = struct {
         }
 
         fn getSymbolId(self: ?*anyopaque) callconv(.c) usize {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.id;
         }
 
         fn getTypeId(self: ?*anyopaque, id: *usize) callconv(.c) bool {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             id.* = sel.type_id;
             return true;
         }
 
         fn getTableIndex(self: ?*anyopaque) callconv(.c) usize {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.table_index;
         }
 
         fn getDeclarationIndex(self: ?*anyopaque) callconv(.c) usize {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.decl_index;
         }
 
         fn isImport(self: ?*anyopaque) callconv(.c) bool {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.type == .import;
         }
 
         fn isExport(self: ?*anyopaque) callconv(.c) bool {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.type == .static_export or sel.type == .dynamic_export;
         }
 
         fn isStaticExport(self: ?*anyopaque) callconv(.c) bool {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.type == .static_export;
         }
 
         fn isDynamicExport(self: ?*anyopaque) callconv(.c) bool {
-            const sel: *const Impl.Symbol = @constCast(@alignCast(@ptrCast(self)));
+            const sel: *const Impl.Symbol = @ptrCast(@alignCast(@constCast(self)));
             return sel.type == .dynamic_export;
         }
 
@@ -1691,32 +1691,32 @@ pub const Impl = struct {
             signedness: std.builtin.Signedness,
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.int.size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.int.bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.int.alignment;
             }
 
             fn isUnsigned(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.int.signedness == .unsigned;
             }
 
             fn isSigned(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.int.signedness == .signed;
             }
 
             fn getBitwidth(self: ?*anyopaque) callconv(.c) u16 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.int.bits;
             }
 
@@ -1750,22 +1750,22 @@ pub const Impl = struct {
             const getName = OpaqueData.getName;
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.float.size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.float.bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.float.alignment;
             }
 
             fn getBitwidth(self: ?*anyopaque) callconv(.c) u16 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.float.bits;
             }
 
@@ -1796,42 +1796,42 @@ pub const Impl = struct {
             child_id: usize,
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.pointer.size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.pointer.bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.pointer.alignment;
             }
 
             fn getPointeeAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.pointer.alignment;
             }
 
             fn isConst(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.pointer.is_const;
             }
 
             fn isVolatile(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.pointer.is_volatile;
             }
 
             fn isNonzero(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return !sel.data.pointer.is_allowzero;
             }
 
             fn getChildId(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.pointer.child_id;
             }
 
@@ -1863,27 +1863,27 @@ pub const Impl = struct {
             child_id: usize,
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.array.size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.array.bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.array.alignment;
             }
 
             fn getLength(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.array.length;
             }
 
             fn getChildId(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.array.child_id;
             }
 
@@ -1912,27 +1912,27 @@ pub const Impl = struct {
             fields: []const StructField,
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"struct".size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.@"struct".bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"struct".alignment;
             }
 
             fn isPackedLayout(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"struct".layout == .@"packed";
             }
 
             fn getFieldCount(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"struct".fields.len;
             }
 
@@ -1941,7 +1941,7 @@ pub const Impl = struct {
                 index: usize,
                 name: *[*:0]const u8,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"struct".fields;
                 if (index >= fields.len) return false;
                 name.* = fields[index].name.ptr;
@@ -1953,7 +1953,7 @@ pub const Impl = struct {
                 index: usize,
                 id: *usize,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"struct".fields;
                 if (index >= fields.len) return false;
                 id.* = fields[index].type_id;
@@ -1965,7 +1965,7 @@ pub const Impl = struct {
                 index: usize,
                 offset: *usize,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"struct".fields;
                 if (index >= fields.len) return false;
                 offset.* = fields[index].offset;
@@ -1977,7 +1977,7 @@ pub const Impl = struct {
                 index: usize,
                 offset: *u8,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"struct".fields;
                 if (index >= fields.len) return false;
                 offset.* = @intCast(fields[index].bit_offset);
@@ -1989,7 +1989,7 @@ pub const Impl = struct {
                 index: usize,
                 alignment: *u8,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"struct".fields;
                 if (index >= fields.len) return false;
                 alignment.* = fields[index].alignment;
@@ -2033,22 +2033,22 @@ pub const Impl = struct {
             tag_id: usize,
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"enum".size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.@"enum".bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"enum".alignment;
             }
 
             fn getTagId(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"enum".tag_id;
             }
 
@@ -2076,27 +2076,27 @@ pub const Impl = struct {
             fields: []const UnionField,
 
             fn getSize(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"union".size;
             }
 
             fn getBitSize(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intCast(sel.data.@"union".bitsize);
             }
 
             fn getAlignment(self: ?*anyopaque) callconv(.c) u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"union".alignment;
             }
 
             fn isPackedLayout(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"union".layout == .@"packed";
             }
 
             fn getFieldCount(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"union".fields.len;
             }
 
@@ -2105,7 +2105,7 @@ pub const Impl = struct {
                 index: usize,
                 name: *[*:0]const u8,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"union".fields;
                 if (index >= fields.len) return false;
                 name.* = fields[index].name.ptr;
@@ -2117,7 +2117,7 @@ pub const Impl = struct {
                 index: usize,
                 id: *usize,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"union".fields;
                 if (index >= fields.len) return false;
                 id.* = fields[index].type_id;
@@ -2129,7 +2129,7 @@ pub const Impl = struct {
                 index: usize,
                 alignment: *u8,
             ) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const fields = sel.data.@"union".fields;
                 if (index >= fields.len) return false;
                 alignment.* = fields[index].alignment;
@@ -2169,12 +2169,12 @@ pub const Impl = struct {
             parameters: []const FnParameter,
 
             fn isDefaultCallingConvention(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return @intFromEnum(sel.data.@"fn".calling_convention) == @intFromEnum(std.builtin.CallingConvention.c);
             }
 
             fn getCallingConvention(self: ?*anyopaque, cc: *FnType.CallingConvention) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 cc.* = switch (sel.data.@"fn".calling_convention) {
                     .x86_64_sysv => .x86_64_sysv,
                     .x86_64_win => .x86_64_win,
@@ -2187,7 +2187,7 @@ pub const Impl = struct {
             }
 
             fn getStackAlignment(self: ?*anyopaque, al: *u8) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const cfg = switch (sel.data.@"fn".calling_convention) {
                     .x86_64_sysv => |v| v,
                     .x86_64_win => |v| v,
@@ -2204,22 +2204,22 @@ pub const Impl = struct {
             }
 
             fn isVarArgs(self: ?*anyopaque) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"fn".is_var_args;
             }
 
             fn getReturnTypeId(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"fn".return_type_id;
             }
 
             fn getParameterCount(self: ?*anyopaque) callconv(.c) usize {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.data.@"fn".parameters.len;
             }
 
             fn getParameterTypeId(self: ?*anyopaque, index: usize, id: *usize) callconv(.c) bool {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 const parameters = sel.data.@"fn".parameters;
                 if (index >= parameters.len) return false;
                 id.* = if (parameters[index].type_id) |x| x else return false;
@@ -2259,7 +2259,7 @@ pub const Impl = struct {
             }
 
             fn getTypeTag(self: ?*anyopaque) callconv(.c) Self.TypeTag {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return switch (sel.data) {
                     .void => Self.TypeTag.void,
                     .bool => Self.TypeTag.bool,
@@ -2276,7 +2276,7 @@ pub const Impl = struct {
             }
 
             fn getName(self: ?*anyopaque) callconv(.c) [*:0]const u8 {
-                const sel: *const Impl.Type = @constCast(@alignCast(@ptrCast(self)));
+                const sel: *const Impl.Type = @ptrCast(@alignCast(@constCast(self)));
                 return sel.name.ptr;
             }
 
@@ -2324,32 +2324,32 @@ pub const Impl = struct {
             }
 
             fn getSymbolCount(data: ?*anyopaque) callconv(.c) usize {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 return this.symbols.len;
             }
 
             fn getImportSymbolCount(data: ?*anyopaque) callconv(.c) usize {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 return this.import_count;
             }
 
             fn getExportSymbolCount(data: ?*anyopaque) callconv(.c) usize {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 return this.static_export_count + this.dynamic_export_count;
             }
 
             fn getStaticExportSymbolCount(data: ?*anyopaque) callconv(.c) usize {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 return this.static_export_count;
             }
 
             fn getDynamicExportSymbolCount(data: ?*anyopaque) callconv(.c) usize {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 return this.dynamic_export_count;
             }
 
             fn getSymbolIdByImportIndex(data: ?*anyopaque, index: usize, id: *usize) callconv(.c) bool {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 if (index >= this.import_count) return false;
                 for (this.symbols) |sym| {
                     if (sym.type == .import and sym.table_index == index) {
@@ -2361,7 +2361,7 @@ pub const Impl = struct {
             }
 
             fn getSymbolIdByExportIndex(data: ?*anyopaque, index: usize, id: *usize) callconv(.c) bool {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 if (index >= this.static_export_count + this.dynamic_export_count) return false;
                 for (this.symbols) |sym| {
                     if ((sym.type == .static_export or sym.type == .dynamic_export) and sym.table_index == index) {
@@ -2373,7 +2373,7 @@ pub const Impl = struct {
             }
 
             fn getSymbolIdByStaticExportIndex(data: ?*anyopaque, index: usize, id: *usize) callconv(.c) bool {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 if (index >= this.static_export_count) return false;
                 for (this.symbols) |sym| {
                     if (sym.type == .static_export and sym.decl_index == index) {
@@ -2385,7 +2385,7 @@ pub const Impl = struct {
             }
 
             fn getSymbolIdByDynamicExportIndex(data: ?*anyopaque, index: usize, id: *usize) callconv(.c) bool {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 if (index >= this.dynamic_export_count) return false;
                 for (this.symbols) |sym| {
                     if (sym.type == .dynamic_export and sym.decl_index == index) {
@@ -2397,19 +2397,19 @@ pub const Impl = struct {
             }
 
             fn getSymbolById(data: ?*anyopaque, id: usize, symbol: *Self.Symbol) callconv(.c) bool {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 if (id >= this.symbols.len) return false;
                 symbol.* = this.symbols[id].asFfi();
                 return true;
             }
 
             fn getTypeCount(data: ?*anyopaque) callconv(.c) usize {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 return this.types.len;
             }
 
             fn getTypeById(data: ?*anyopaque, id: usize, @"type": *Self.Type) callconv(.c) bool {
-                const this: *const Impl = @alignCast(@ptrCast(@constCast(data)));
+                const this: *const Impl = @ptrCast(@alignCast(@constCast(data)));
                 if (id < this.types.len) @"type".* = this.types[id].asFfi() else return false;
                 return false;
             }

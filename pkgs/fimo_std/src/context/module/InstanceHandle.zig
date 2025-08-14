@@ -98,27 +98,27 @@ pub const Parameter = struct {
 
         fn readTo(self: *const @This(), ptr: *anyopaque) void {
             switch (self.value) {
-                .u8 => |*v| @as(*u8, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .u16 => |*v| @as(*u16, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .u32 => |*v| @as(*u32, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .u64 => |*v| @as(*u64, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .i8 => |*v| @as(*i8, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .i16 => |*v| @as(*i16, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .i32 => |*v| @as(*i32, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
-                .i64 => |*v| @as(*i64, @alignCast(@ptrCast(ptr))).* = v.load(.seq_cst),
+                .u8 => |*v| @as(*u8, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .u16 => |*v| @as(*u16, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .u32 => |*v| @as(*u32, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .u64 => |*v| @as(*u64, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .i8 => |*v| @as(*i8, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .i16 => |*v| @as(*i16, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .i32 => |*v| @as(*i32, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
+                .i64 => |*v| @as(*i64, @ptrCast(@alignCast(ptr))).* = v.load(.seq_cst),
             }
         }
 
         fn writeFrom(self: *@This(), ptr: *const anyopaque) void {
             switch (self.value) {
-                .u8 => |*v| v.store(@as(*const u8, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .u16 => |*v| v.store(@as(*const u16, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .u32 => |*v| v.store(@as(*const u32, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .u64 => |*v| v.store(@as(*const u64, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .i8 => |*v| v.store(@as(*const i8, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .i16 => |*v| v.store(@as(*const i16, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .i32 => |*v| v.store(@as(*const i32, @alignCast(@ptrCast(ptr))).*, .seq_cst),
-                .i64 => |*v| v.store(@as(*const i64, @alignCast(@ptrCast(ptr))).*, .seq_cst),
+                .u8 => |*v| v.store(@as(*const u8, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .u16 => |*v| v.store(@as(*const u16, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .u32 => |*v| v.store(@as(*const u32, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .u64 => |*v| v.store(@as(*const u64, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .i8 => |*v| v.store(@as(*const i8, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .i16 => |*v| v.store(@as(*const i16, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .i32 => |*v| v.store(@as(*const i32, @ptrCast(@alignCast(ptr))).*, .seq_cst),
+                .i64 => |*v| v.store(@as(*const i64, @ptrCast(@alignCast(ptr))).*, .seq_cst),
             }
         }
 
@@ -146,11 +146,11 @@ pub const Parameter = struct {
     ) Allocator.Error!*Parameter {
         const Wrapper = struct {
             fn read(this: pub_modules.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
-                const self: *Data = @alignCast(@ptrCast(this.data));
+                const self: *Data = @ptrCast(@alignCast(this.data));
                 self.readTo(value);
             }
             fn write(this: pub_modules.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
-                const self: *Data = @alignCast(@ptrCast(this.data));
+                const self: *Data = @ptrCast(@alignCast(this.data));
                 self.writeFrom(value);
             }
         };
@@ -760,15 +760,15 @@ const param_vtable = pub_modules.OpaqueParameter.VTable{
 
 const ParamDataVTableImpl = struct {
     fn @"type"(data: *anyopaque) callconv(.c) pub_modules.ParameterType {
-        const self: *Parameter.Data = @alignCast(@ptrCast(data));
+        const self: *Parameter.Data = @ptrCast(@alignCast(data));
         return self.type();
     }
     fn read(data: *anyopaque, value: *anyopaque) callconv(.c) void {
-        const self: *Parameter.Data = @alignCast(@ptrCast(data));
+        const self: *Parameter.Data = @ptrCast(@alignCast(data));
         return self.readTo(value);
     }
     fn write(data: *anyopaque, value: *const anyopaque) callconv(.c) void {
-        const self: *Parameter.Data = @alignCast(@ptrCast(data));
+        const self: *Parameter.Data = @ptrCast(@alignCast(data));
         return self.writeFrom(value);
     }
 };

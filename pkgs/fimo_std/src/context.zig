@@ -165,11 +165,11 @@ pub fn init(options: [:null]const ?*const pub_ctx.ConfigHead) !void {
         switch (o.id) {
             .tracing => {
                 if (tracing_cfg != null) return error.InvalidInput;
-                tracing_cfg = @alignCast(@ptrCast(o));
+                tracing_cfg = @ptrCast(@alignCast(o));
             },
             .modules => {
                 if (modules_cfg != null) return error.InvalidInput;
-                modules_cfg = @alignCast(@ptrCast(o));
+                modules_cfg = @ptrCast(@alignCast(o));
             },
             else => return error.InvalidInput,
         }

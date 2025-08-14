@@ -57,7 +57,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         var handle: windows.HMODULE = undefined;
         const found_handle = Inner.GetModuleHandleExW(
             Inner.GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            @alignCast(@ptrCast(bin_ptr)),
+            @ptrCast(@alignCast(bin_ptr)),
             &handle,
         );
         if (found_handle == 0) return error.InvalidModule;
@@ -216,7 +216,7 @@ pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
             raw_handle,
             "fimo_impl_module_export_iterator",
         ) orelse return error.InvalidModule;
-    handle.iterator = @alignCast(@ptrCast(iterator));
+    handle.iterator = @ptrCast(@alignCast(iterator));
 
     return handle;
 }

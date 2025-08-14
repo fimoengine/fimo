@@ -155,7 +155,7 @@ pub const PathBuffer = struct {
 
 /// A growable filesystem path encoded as UTF-8.
 pub const PathBufferUnmanaged = struct {
-    buffer: std.ArrayListUnmanaged(u8) = .{},
+    buffer: std.ArrayList(u8) = .{},
 
     const Self = @This();
 
@@ -163,7 +163,7 @@ pub const PathBufferUnmanaged = struct {
     pub fn initC(obj: c.FimoUTF8PathBuf) Self {
         return if (obj.buffer) |buffer|
             Self{
-                .buffer = std.ArrayListUnmanaged(u8){
+                .buffer = std.ArrayList(u8){
                     .items = buffer[0..obj.length],
                     .capacity = obj.capacity,
                 },
@@ -190,7 +190,7 @@ pub const PathBufferUnmanaged = struct {
     /// Initialize the capacity to hold `capacity` bytes.
     pub fn initCapacity(allocator: Allocator, capacity: usize) Allocator.Error!Self {
         return Self{
-            .buffer = try std.ArrayListUnmanaged(u8).initCapacity(
+            .buffer = try std.ArrayList(u8).initCapacity(
                 allocator,
                 capacity,
             ),
@@ -245,7 +245,7 @@ pub const PathBufferUnmanaged = struct {
         if (path.isAbsolute() or path.iterator().prefix != null)
             self.buffer.clearRetainingCapacity()
         else if (it.prefixIsVerbatim() and path.raw.len != 0) {
-            var buffer = std.ArrayListUnmanaged(Path.Component){};
+            var buffer = std.ArrayList(Path.Component){};
             defer buffer.deinit(allocator);
             while (it.next()) |comp| {
                 try buffer.append(allocator, comp);
@@ -268,7 +268,7 @@ pub const PathBufferUnmanaged = struct {
                 }
             }
 
-            var res = std.ArrayListUnmanaged(u8){};
+            var res = std.ArrayList(u8){};
             errdefer res.deinit(allocator);
             var need_sep2 = false;
             for (buffer.items) |comp| {
@@ -489,7 +489,7 @@ pub const OwnedPathUnmanaged = struct {
 
     /// Coerces the owned path to a path buffer.
     pub fn toPathBuffer(self: Self) PathBufferUnmanaged {
-        const buffer = std.ArrayListUnmanaged(u8).fromOwnedSlice(self.raw);
+        const buffer = std.ArrayList(u8).fromOwnedSlice(self.raw);
         return PathBufferUnmanaged{ .buffer = buffer };
     }
 

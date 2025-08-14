@@ -57,11 +57,11 @@ pub const TmpDirUnmanaged = struct {
 
             std.posix.mkdir(buf.asPath().raw, std.fs.Dir.default_mode) catch |err|
                 switch (err) {
-                error.PathAlreadyExists => {
-                    _ = buf.pop();
-                },
-                else => return err,
-            };
+                    error.PathAlreadyExists => {
+                        _ = buf.pop();
+                    },
+                    else => return err,
+                };
             break;
         }
 

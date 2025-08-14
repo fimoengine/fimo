@@ -48,7 +48,7 @@ const ModuleInfo = struct {
     status: Status,
     allocator: Allocator,
     handle: *ModuleHandle,
-    callbacks: std.ArrayListUnmanaged(Callback) = .{},
+    callbacks: std.ArrayList(Callback) = .{},
 
     const Status = union(enum) {
         unloaded: struct {
@@ -790,11 +790,11 @@ const AppendModulesData = struct {
         @"export": *const pub_modules.Export,
         data: ?*anyopaque,
     ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
-    exports: std.ArrayListUnmanaged(*const pub_modules.Export) = .{},
+    exports: std.ArrayList(*const pub_modules.Export) = .{},
 };
 
 fn appendModules(@"export": *const pub_modules.Export, o_data: ?*anyopaque) callconv(.c) bool {
-    const data: *AppendModulesData = @alignCast(@ptrCast(o_data));
+    const data: *AppendModulesData = @ptrCast(@alignCast(o_data));
     validate_export(@"export") catch {
         tracing.logWarn(@src(), "skipping export", .{});
         return true;
@@ -1287,18 +1287,18 @@ const CommitOp = FSMFuture(struct {
 
 const VTableImpl = struct {
     fn ref(this: *anyopaque) callconv(.c) void {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         self.ref();
     }
     fn unref(this: *anyopaque) callconv(.c) void {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         self.unref();
     }
     fn queryModule(
         this: *anyopaque,
         module: [*:0]const u8,
     ) callconv(.c) bool {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         const module_ = std.mem.span(module);
 
         tracing.logTrace(
@@ -1317,7 +1317,7 @@ const VTableImpl = struct {
         namespace: [*:0]const u8,
         version: Version.CVersion,
     ) callconv(.c) bool {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         const name_ = std.mem.span(name);
         const namespace_ = std.mem.span(namespace);
         const version_ = Version.initC(version);
@@ -1340,7 +1340,7 @@ const VTableImpl = struct {
         on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         data: ?*anyopaque,
     ) callconv(.c) pub_context.Status {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         const module_ = std.mem.span(module);
         const callback = Callback{
             .data = data,
@@ -1373,7 +1373,7 @@ const VTableImpl = struct {
         owner: *const pub_modules.OpaqueInstance,
         @"export": *const pub_modules.Export,
     ) callconv(.c) pub_context.Status {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
 
         tracing.logTrace(
             @src(),
@@ -1406,7 +1406,7 @@ const VTableImpl = struct {
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         filter_data: ?*anyopaque,
     ) callconv(.c) pub_context.Status {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         const path_ = Path.initC(path);
 
         tracing.logTrace(
@@ -1440,7 +1440,7 @@ const VTableImpl = struct {
         ) callconv(.c) void,
         bin_ptr: *const anyopaque,
     ) callconv(.c) pub_context.Status {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
 
         tracing.logTrace(
             @src(),
@@ -1465,7 +1465,7 @@ const VTableImpl = struct {
         return .ok;
     }
     fn commit(this: *anyopaque) callconv(.c) EnqueuedFuture(Fallible(void)) {
-        const self: *Self = @alignCast(@ptrCast(this));
+        const self: *Self = @ptrCast(@alignCast(this));
         return CommitOp.Data.init(self);
     }
 };

@@ -193,8 +193,8 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
             const This = @This();
             const Wrapper = struct {
                 fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
-                    const this: *This = @alignCast(@ptrCast(data));
-                    const res: *U = if (@sizeOf(U) != 0) @alignCast(@ptrCast(result)) else &.{};
+                    const this: *This = @ptrCast(@alignCast(data));
+                    const res: *U = if (@sizeOf(U) != 0) @ptrCast(@alignCast(result)) else &.{};
                     switch (this.poll(waker)) {
                         .ready => |v| {
                             res.* = v;
@@ -204,11 +204,11 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
                     }
                 }
                 fn deinit_data(data: ?*anyopaque) callconv(.c) void {
-                    const this: *This = @alignCast(@ptrCast(data));
+                    const this: *This = @ptrCast(@alignCast(data));
                     this.deinit();
                 }
                 fn deinit_result(result: ?*anyopaque) callconv(.c) void {
-                    const res: *U = if (@sizeOf(U) != 0) @alignCast(@ptrCast(result)) else &.{};
+                    const res: *U = if (@sizeOf(U) != 0) @ptrCast(@alignCast(result)) else &.{};
                     if (deinit_result_fn) |f| f(res);
                 }
             };

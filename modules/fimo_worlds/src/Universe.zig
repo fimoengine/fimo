@@ -2,7 +2,7 @@ const std = @import("std");
 const atomic = std.atomic;
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
@@ -220,7 +220,7 @@ pub fn registerSystem(self: *Self, options: RegisterSystemOptions) !*System {
 
     // Check if it introduces a new cycle.
     {
-        var stack: ArrayListUnmanaged(*System) = .empty;
+        var stack: ArrayList(*System) = .empty;
         defer stack.deinit(self.allocator);
         var visited: AutoArrayHashMapUnmanaged(*System, void) = .empty;
         defer visited.deinit(self.allocator);

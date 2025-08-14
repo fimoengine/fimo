@@ -70,7 +70,7 @@ pub fn queryAllPools(self: *Self, allocator: Allocator) Allocator.Error![]MetaQu
         for (nodes.items) |node| {
             node.pool.unref();
         }
-        nodes.deinit();
+        nodes.deinit(allocator);
     }
 
     var it = self.pools.iterator();
@@ -88,7 +88,7 @@ pub fn queryAllPools(self: *Self, allocator: Allocator) Allocator.Error![]MetaQu
         nodes.appendAssumeCapacity(MetaQuery.Node{ .pool = pool.asMetaPool(), .next = null });
     }
 
-    const items = try nodes.toOwnedSlice();
+    const items = try nodes.toOwnedSlice(allocator);
     for (items[0 .. items.len - 1], items[1..items.len]) |*node, *next| {
         node.next = next;
     }
