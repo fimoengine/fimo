@@ -1102,7 +1102,7 @@ pub const Builder = struct {
 
     fn EnqueueError(comptime T: type) tasks.EnqueuedFuture(Fallible(T)) {
         return .{
-            .data = @constCast(@ptrCast(&{})),
+            .data = @ptrCast(@constCast(&{})),
             .poll_fn = &struct {
                 fn f(
                     data: **anyopaque,
@@ -1345,7 +1345,7 @@ pub const Builder = struct {
                 context: *const modules.OpaqueInstance,
                 symbol_ptr: *anyopaque,
             ) callconv(.c) void {
-                return deinitFn(context, @alignCast(@ptrCast(symbol_ptr)));
+                return deinitFn(context, @ptrCast(@alignCast(symbol_ptr)));
             }
         };
 
@@ -1447,7 +1447,7 @@ pub const Builder = struct {
                 data: ?*anyopaque,
             ) callconv(.c) void {
                 const f: fn (*const modules.OpaqueInstance, *T) void = deinitFn;
-                const state: *T = @alignCast(@ptrCast(data));
+                const state: *T = @ptrCast(@alignCast(data));
                 f(context, state);
             }
         };

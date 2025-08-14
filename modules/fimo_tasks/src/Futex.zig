@@ -419,19 +419,19 @@ fn growHashTable(self: *Self, num_waiters: usize) void {
 fn checkKeyEquality(key: *const anyopaque, key_size: usize, expect: u64) bool {
     switch (key_size) {
         1 => {
-            const value: *const atomic.Value(u8) = @alignCast(@ptrCast(key));
+            const value: *const atomic.Value(u8) = @ptrCast(@alignCast(key));
             return value.load(.monotonic) == @as(u8, @truncate(expect));
         },
         2 => {
-            const value: *const atomic.Value(u16) = @alignCast(@ptrCast(key));
+            const value: *const atomic.Value(u16) = @ptrCast(@alignCast(key));
             return value.load(.monotonic) == @as(u16, @truncate(expect));
         },
         4 => {
-            const value: *const atomic.Value(u32) = @alignCast(@ptrCast(key));
+            const value: *const atomic.Value(u32) = @ptrCast(@alignCast(key));
             return value.load(.monotonic) == @as(u32, @truncate(expect));
         },
         8 => {
-            const value: *const atomic.Value(u64) = @alignCast(@ptrCast(key));
+            const value: *const atomic.Value(u64) = @ptrCast(@alignCast(key));
             return value.load(.monotonic) == @as(u64, expect);
         },
         else => @panic("invalid key size"),

@@ -756,7 +756,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
                 symbol.namespace,
                 symbol.version,
             );
-            return .{ .value = @alignCast(@ptrCast(s)) };
+            return .{ .value = @ptrCast(@alignCast(s)) };
         }
 
         /// Loads a symbol from the module subsystem.
@@ -1149,16 +1149,16 @@ pub const LoadingSet = extern struct {
         std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
         const Callbacks = struct {
             fn onOk(info: *const Info, data: ?*anyopaque) callconv(.c) void {
-                const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
+                const o: Ptr = @ptrCast(@alignCast(@constCast(data)));
                 callback(.{ .ok = info }, o);
             }
             fn onErr(mod: *const Export, data: ?*anyopaque) callconv(.c) void {
-                const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
+                const o: Ptr = @ptrCast(@alignCast(@constCast(data)));
                 callback(.{ .err = mod }, o);
             }
             fn onAbort(data: ?*anyopaque) callconv(.c) void {
                 if (on_abort) |f| {
-                    const o: Ptr = @alignCast(@ptrCast(@constCast(data)));
+                    const o: Ptr = @ptrCast(@alignCast(@constCast(data)));
                     f(o);
                 }
             }
@@ -1242,17 +1242,17 @@ pub const LoadingSet = extern struct {
         const Callbacks = struct {
             fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
                 const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                    @alignCast(@ptrCast(@constCast(data)))
+                    @ptrCast(@alignCast(@constCast(data)))
                 else
-                    @as(*const Context, @alignCast(@ptrCast(data))).*;
+                    @as(*const Context, @ptrCast(@alignCast(data))).*;
                 return filter(module, context_);
             }
             fn deinit(data: ?*anyopaque) callconv(.c) void {
                 if (filter_deinit) {
                     const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                        @alignCast(@ptrCast(@constCast(data)))
+                        @ptrCast(@alignCast(@constCast(data)))
                     else
-                        @as(*const Context, @alignCast(@ptrCast(data))).*;
+                        @as(*const Context, @ptrCast(@alignCast(data))).*;
                     filter_deinit(context_);
                 }
             }
@@ -1313,17 +1313,17 @@ pub const LoadingSet = extern struct {
         const Callbacks = struct {
             fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
                 const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                    @alignCast(@ptrCast(@constCast(data)))
+                    @ptrCast(@alignCast(@constCast(data)))
                 else
-                    @as(*const Context, @alignCast(@ptrCast(data))).*;
+                    @as(*const Context, @ptrCast(@alignCast(data))).*;
                 return filter(module, context_);
             }
             fn deinit(data: ?*anyopaque) callconv(.c) void {
                 if (filter_deinit) {
                     const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                        @alignCast(@ptrCast(@constCast(data)))
+                        @ptrCast(@alignCast(@constCast(data)))
                     else
-                        @as(*const Context, @alignCast(@ptrCast(data))).*;
+                        @as(*const Context, @ptrCast(@alignCast(data))).*;
                     filter_deinit(context_);
                 }
             }

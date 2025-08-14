@@ -251,11 +251,11 @@ pub fn initFuture(comptime T: type, future: *const T) !pub_tasks.EnqueuedFuture(
             waker: pub_tasks.Waker,
             result: ?*anyopaque,
         ) callconv(.c) bool {
-            const this: *T = @alignCast(@ptrCast(data));
+            const this: *T = @ptrCast(@alignCast(data));
             return switch (this.poll(waker)) {
                 .ready => |v| {
                     if (@sizeOf(T.Result) != 0) {
-                        @as(*T.Result, @alignCast(@ptrCast(result))).* = v;
+                        @as(*T.Result, @ptrCast(@alignCast(result))).* = v;
                     }
                     return true;
                 },
@@ -263,13 +263,13 @@ pub fn initFuture(comptime T: type, future: *const T) !pub_tasks.EnqueuedFuture(
             };
         }
         fn deinit_data(data: ?*anyopaque) callconv(.c) void {
-            const this: *T = @alignCast(@ptrCast(data));
+            const this: *T = @ptrCast(@alignCast(data));
             this.deinit();
         }
         fn deinit_result(result: ?*anyopaque) callconv(.c) void {
             switch (@typeInfo(T.Result)) {
                 .@"struct", .@"union", .@"enum" => if (@hasField(T.Result, "deinit")) {
-                    const res: *T.Result = if (@sizeOf(T.Result) != 0) @alignCast(@ptrCast(result)) else &.{};
+                    const res: *T.Result = if (@sizeOf(T.Result) != 0) @ptrCast(@alignCast(result)) else &.{};
                     res.deinit();
                 },
                 else => {},
@@ -393,20 +393,20 @@ fn unref(self: *Self) void {
 fn asWaker(self: *Self) pub_tasks.Waker {
     const Wrapper = struct {
         fn ref(data: ?*anyopaque) callconv(.c) pub_tasks.Waker {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.ref();
             return this.asWaker();
         }
         fn unref(data: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.unref();
         }
         fn wake(data: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.notify();
         }
         fn wakeUnref(data: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.notify();
             this.unref();
         }

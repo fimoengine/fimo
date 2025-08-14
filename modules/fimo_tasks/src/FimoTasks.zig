@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const atomic = std.atomic;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const builtin = @import("builtin");
 
 const fimo_std = @import("fimo_std");
@@ -284,7 +284,7 @@ fn createWorkerPool(
             return a.size < b.size;
         }
     };
-    var stacks = ArrayListUnmanaged(Pair).initCapacity(allocator, config.stacks_len) catch |err| {
+    var stacks = ArrayList(Pair).initCapacity(allocator, config.stacks_len) catch |err| {
         ctx.setResult(.initErr(.initError(err)));
         return .err;
     };
@@ -315,7 +315,7 @@ fn createWorkerPool(
 
     const num_stacks = config.stacks_len - num_filtered_stacks;
     var default_stack_idx: usize = undefined;
-    var stack_cfg = ArrayListUnmanaged(Pool.InitOptions.StackOptions)
+    var stack_cfg = ArrayList(Pool.InitOptions.StackOptions)
         .initCapacity(allocator, num_stacks) catch |err| {
         ctx.setResult(.initErr(.initError(err)));
         return .err;

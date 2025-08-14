@@ -35,7 +35,7 @@ fn IdMap(comptime T: type) type {
         next_id: usize = 0,
         dtor_fn: *const fn (allocator: Allocator, ptr: *T) void,
         map: std.AutoArrayHashMapUnmanaged(usize, T) = .{},
-        free_ids: std.ArrayListUnmanaged(usize) = .{},
+        free_ids: std.ArrayList(usize) = .{},
 
         const Iterator = std.AutoArrayHashMapUnmanaged(usize, T).Iterator;
 
@@ -533,7 +533,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
             // Fast path without allocating.
             if (start.outgoing.contains(to)) return true;
 
-            var stack: std.ArrayListUnmanaged(NodeId) = .{};
+            var stack: std.ArrayList(NodeId) = .{};
             defer stack.deinit(allocator);
             var visited: std.AutoArrayHashMapUnmanaged(NodeId, void) = .{};
             defer visited.deinit(allocator);
@@ -628,7 +628,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
                     self_: *const Self,
                     allocator_: Allocator,
                     markers: *std.AutoArrayHashMapUnmanaged(NodeId, Marker),
-                    nodes: *std.ArrayListUnmanaged(NodeId),
+                    nodes: *std.ArrayList(NodeId),
                     direction_: EdgeDirection,
                     id: NodeId,
                     node: *const Node(N),
@@ -664,7 +664,7 @@ pub fn GraphUnmanaged(comptime N: type, comptime E: type) type {
             var markers = std.AutoArrayHashMapUnmanaged(NodeId, Marker){};
             defer markers.deinit(allocator);
 
-            var nodes = try std.ArrayListUnmanaged(NodeId).initCapacity(
+            var nodes = try std.ArrayList(NodeId).initCapacity(
                 allocator,
                 self.nodeCount(),
             );

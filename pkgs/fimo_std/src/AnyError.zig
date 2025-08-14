@@ -40,7 +40,7 @@ export const FIMO_IMPL_RESULT_STATIC_STRING_VTABLE = VTable{
     .description = static_string_string,
 };
 fn static_string_string(ptr: ?*anyopaque) callconv(.c) ErrorString {
-    const str: [*:0]const u8 = @constCast(@alignCast(@ptrCast(ptr.?)));
+    const str: [*:0]const u8 = @ptrCast(@alignCast(@constCast(ptr.?)));
     return ErrorString.init(str);
 }
 

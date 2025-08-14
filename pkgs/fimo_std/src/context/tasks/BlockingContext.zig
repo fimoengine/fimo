@@ -25,15 +25,15 @@ pub fn init() Allocator.Error!pub_tasks.BlockingContext {
 
     const Wrapper = struct {
         fn deinit(ptr: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(ptr));
+            const this: *Self = @ptrCast(@alignCast(ptr));
             this.unref();
         }
         fn waker_ref(ptr: ?*anyopaque) callconv(.c) pub_tasks.Waker {
-            const this: *Self = @alignCast(@ptrCast(ptr));
+            const this: *Self = @ptrCast(@alignCast(ptr));
             return this.asWaker();
         }
         fn block_until_notified(ptr: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(ptr));
+            const this: *Self = @ptrCast(@alignCast(ptr));
             this.block_until_notified();
         }
     };
@@ -64,20 +64,20 @@ fn unref(self: *Self) void {
 fn asWaker(self: *Self) pub_tasks.Waker {
     const Wrapper = struct {
         fn ref(data: ?*anyopaque) callconv(.c) pub_tasks.Waker {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.ref();
             return this.asWaker();
         }
         fn unref(data: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.unref();
         }
         fn wake(data: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.notify();
         }
         fn wakeUnref(data: ?*anyopaque) callconv(.c) void {
-            const this: *Self = @alignCast(@ptrCast(data));
+            const this: *Self = @ptrCast(@alignCast(data));
             this.notify();
             this.unref();
         }

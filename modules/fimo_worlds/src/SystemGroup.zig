@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const MemoryPool = std.heap.MemoryPool;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const DoublyLinkedList = std.DoublyLinkedList;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 
 const fimo_std = @import("fimo_std");
@@ -213,7 +213,7 @@ const Graph = struct {
 
             fn toposort(
                 graph: *Graph,
-                tasks: *ArrayListUnmanaged(@This()),
+                tasks: *ArrayList(@This()),
                 markers: *AutoArrayHashMapUnmanaged(*System, usize),
                 handle: *System,
                 ctx: *SystemContext,
@@ -250,7 +250,7 @@ const Graph = struct {
         var systems_it = self.systems.iterator();
         var markers = AutoArrayHashMapUnmanaged(*System, usize).empty;
         try markers.ensureTotalCapacity(allocator, self.systems.count());
-        var tasks = try ArrayListUnmanaged(TaskInfo).initCapacity(allocator, self.systems.count());
+        var tasks = try ArrayList(TaskInfo).initCapacity(allocator, self.systems.count());
         while (systems_it.next()) |entry| {
             const id = entry.key_ptr.*;
             const sys = entry.value_ptr.*;
@@ -264,13 +264,13 @@ const Graph = struct {
         // Insert synchronization entries between the tasks.
         const ResourceInfo = struct {
             exclusive: bool = false,
-            referenced_by: ArrayListUnmanaged(*System) = .empty,
+            referenced_by: ArrayList(*System) = .empty,
         };
         const resource_infos = try allocator.alloc(ResourceInfo, self.resources.count());
         for (resource_infos) |*info| info.* = .{};
 
         var running_systems = AutoArrayHashMapUnmanaged(*System, usize).empty;
-        var entries = try ArrayListUnmanaged(Entry).initCapacity(allocator, self.systems.count());
+        var entries = try ArrayList(Entry).initCapacity(allocator, self.systems.count());
         for (tasks.items) |*task| {
             task.ctx.sys.rwlock.lockRead();
             defer task.ctx.sys.rwlock.unlockRead();
