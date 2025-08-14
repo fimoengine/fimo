@@ -76,6 +76,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .root_source_file = b.path("tools/capture.zig"),
             }),
+            .use_llvm = if (target.result.os.tag == .linux) true else null,
         });
         capture.root_module.addImport("fimo_std", fimo_std.root_module);
         check_step.dependOn(&capture.step);
