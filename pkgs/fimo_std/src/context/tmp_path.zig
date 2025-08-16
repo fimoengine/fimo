@@ -2,16 +2,16 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const testing = std.testing;
 
-const path = @import("../path.zig");
+const paths = @import("../paths.zig");
 
 pub const TmpDirError = error{
     TmpDirNotFound,
-} || Allocator.Error || std.posix.MakeDirError || path.PathError;
+} || Allocator.Error || std.posix.MakeDirError || paths.PathError;
 
-pub const TmpDirUnmanaged = struct {
-    path: path.OwnedPathUnmanaged,
+pub const TmpDir = struct {
+    path: paths.OwnedPath,
 
-    pub fn init(allocator: Allocator, prefix: []const u8) TmpDirError!TmpDirUnmanaged {
+    pub fn init(allocator: Allocator, prefix: []const u8) TmpDirError!TmpDir {
         const keys = [_][]const u8{
             "TMPDIR",
             "TEMPDIR",
@@ -38,7 +38,7 @@ pub const TmpDirUnmanaged = struct {
             tmp_dir = try allocator.dupe(u8, "/tmp");
         }
 
-        var buf = path.PathBufferUnmanaged{};
+        var buf: paths.PathBuffer = .{};
         errdefer buf.deinit(allocator);
         try buf.pushString(allocator, tmp_dir.?);
 
@@ -66,17 +66,17 @@ pub const TmpDirUnmanaged = struct {
         }
 
         const p = try buf.toOwnedPath(allocator);
-        return TmpDirUnmanaged{ .path = p };
+        return TmpDir{ .path = p };
     }
 
-    pub fn deinit(self: *TmpDirUnmanaged, allocator: Allocator) void {
+    pub fn deinit(self: *TmpDir, allocator: Allocator) void {
         std.fs.deleteTreeAbsolute(self.path.raw) catch |err| @panic(@errorName(err));
         self.path.deinit(allocator);
     }
 };
 
 test "create tmp dir" {
-    var dir: ?TmpDirUnmanaged = try TmpDirUnmanaged.init(testing.allocator, "test_");
+    var dir: ?TmpDir = try TmpDir.init(testing.allocator, "test_");
     errdefer if (dir != null) dir.?.deinit(testing.allocator);
     var d = dir.?;
     const p = try testing.allocator.dupe(u8, d.path.raw);

@@ -4,19 +4,20 @@ const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
 const pub_modules = @import("../../modules.zig");
-const Path = @import("../../path.zig").Path;
-const PathError = @import("../../path.zig").PathError;
-const OsPath = @import("../../path.zig").OsPath;
-const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
-const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
-const OwnedOsPathUnmanaged = @import("../../path.zig").OwnedOsPathUnmanaged;
+const paths = @import("../../paths.zig");
+const Path = paths.Path;
+const PathError = paths.PathError;
+const OsPath = paths.OsPath;
+const OwnedPath = paths.OwnedPath;
+const PathBuffer = paths.PathBuffer;
+const OwnedOsPath = paths.OwnedOsPath;
 const RefCount = @import("../RefCount.zig");
 
 const Self = @This();
 allocator: Allocator,
 iterator: IteratorFn,
 ref_count: RefCount = .{},
-path: OwnedPathUnmanaged,
+path: OwnedPath,
 
 pub const ModuleHandleError = error{
     InvalidModule,
@@ -63,7 +64,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         if (found_handle == 0) return error.InvalidModule;
 
         var path_len: usize = windows.MAX_PATH;
-        var os_path = OwnedOsPathUnmanaged{
+        var os_path = OwnedOsPath{
             .raw = undefined,
         };
         while (true) {
@@ -86,13 +87,13 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         }
         defer os_path.deinit(allocator);
 
-        const p = try OwnedPathUnmanaged.initOsPath(
+        const p = try OwnedPath.initOsPath(
             allocator,
             os_path.asOsPath(),
         );
         defer p.deinit(allocator);
         const module_dir = p.asPath().parent() orelse return error.InvalidPath;
-        const owned_module_dir = try OwnedPathUnmanaged.initPath(
+        const owned_module_dir = try OwnedPath.initPath(
             allocator,
             module_dir,
         );
@@ -110,10 +111,10 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         if (Inner.dladdr(bin_ptr, &info) == 0) return error.InvalidModule;
 
         const os_path = OsPath{ .raw = std.mem.span(info.dli_fname) };
-        const p = try OwnedPathUnmanaged.initOsPath(allocator, os_path);
+        const p = try OwnedPath.initOsPath(allocator, os_path);
         defer p.deinit(allocator);
         const module_dir = p.asPath().parent() orelse return error.InvalidPath;
-        const owned_module_dir = try OwnedPathUnmanaged.initPath(
+        const owned_module_dir = try OwnedPath.initPath(
             allocator,
             module_dir,
         );
@@ -146,7 +147,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
 }
 
 pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
-    var module_path = PathBufferUnmanaged{};
+    var module_path = PathBuffer{};
     defer module_path.deinit(allocator);
 
     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return error.InvalidPath;
@@ -174,7 +175,7 @@ pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
     }
     const module_dir = module_path.asPath().parent() orelse return error.InvalidPath;
 
-    const native_path = try OwnedOsPathUnmanaged.initPath(allocator, module_path.asPath());
+    const native_path = try OwnedOsPath.initPath(allocator, module_path.asPath());
     defer native_path.deinit(allocator);
 
     var handle = try allocator.create(Self);
@@ -185,7 +186,7 @@ pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
         .iterator = undefined,
     };
 
-    handle.path = try OwnedPathUnmanaged.initPath(allocator, module_dir);
+    handle.path = try OwnedPath.initPath(allocator, module_dir);
     errdefer handle.path.deinit(allocator);
 
     const raw_handle = if (comptime builtin.os.tag == .windows)

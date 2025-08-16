@@ -7,7 +7,7 @@ pub const AnyError = @import("AnyError.zig");
 const context = @import("context.zig");
 pub const ctx = @import("ctx.zig");
 pub const modules = @import("modules.zig");
-pub const path = @import("path.zig");
+pub const paths = @import("paths.zig");
 pub const tasks = @import("tasks.zig");
 pub const time = @import("time.zig");
 pub const tracing = @import("tracing.zig");
@@ -24,7 +24,7 @@ comptime {
 
     _ = context;
     _ = AnyError;
-    _ = path;
+    _ = paths;
     _ = time;
     _ = Version;
 }

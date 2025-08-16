@@ -2,11 +2,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const c = @import("c");
-
 const ctx = @import("../ctx.zig");
 const modules = @import("../modules.zig");
-const path = @import("../path.zig");
+const paths = @import("../paths.zig");
 const tasks = @import("../tasks.zig");
 const Fallible = tasks.Fallible;
 const EnqueuedFuture = tasks.EnqueuedFuture;
@@ -423,7 +421,7 @@ pub fn Module(T: type) type {
         if (@typeInfo(@TypeOf(T.fimo_paths)) != .@"struct") @compileError("fimo: invalid paths, expected `pub const fimo_paths = .{ .path = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_paths)));
         inline for (std.meta.fieldNames(@TypeOf(T.fimo_paths))) |name| {
             const p = @field(T.fimo_paths, name);
-            if (@TypeOf(p) != path.Path) @compileError("fimo: invalid parameters, expected a path, found: " ++ @typeName(@TypeOf(p)));
+            if (@TypeOf(p) != paths.Path) @compileError("fimo: invalid parameters, expected a path, found: " ++ @typeName(@TypeOf(p)));
             builder = builder.withResource(.{ .name = name, .path = p });
         }
     }
@@ -1060,7 +1058,7 @@ pub const Builder = struct {
 
     pub const Resource = struct {
         name: [:0]const u8,
-        path: path.Path,
+        path: paths.Path,
     };
 
     pub const SymbolImport = struct {
@@ -1186,12 +1184,12 @@ pub const Builder = struct {
                 );
         }
 
-        var paths: [self.resources.len + 1]Builder.Resource = undefined;
-        @memcpy(paths[0..self.resources.len], self.resources);
-        paths[self.resources.len] = resource;
+        var res_paths: [self.resources.len + 1]Builder.Resource = undefined;
+        @memcpy(res_paths[0..self.resources.len], self.resources);
+        res_paths[self.resources.len] = resource;
 
         var x = self;
-        x.resources = &paths;
+        x.resources = &res_paths;
         return x;
     }
 
@@ -1552,12 +1550,12 @@ pub const Builder = struct {
 
     fn ResourceTable(comptime self: Builder) type {
         const PathWrapper = extern struct {
-            ffi: c.FimoUTF8Path,
+            ffi: paths.compat.Path,
             pub fn getCStr(this: @This()) [:0]const u8 {
                 return this.ffi.path[0..this.ffi.length :0];
             }
-            pub fn getPath(this: @This()) path.Path {
-                return path.Path.initC(this.ffi);
+            pub fn getPath(this: @This()) paths.Path {
+                return paths.Path.initC(this.ffi);
             }
             pub fn format(this: @This(), w: *std.Io.Writer) std.Io.Writer.Error!void {
                 try this.getPath().format(w);
