@@ -12,7 +12,7 @@ pub const exports = @import("modules/exports.zig");
 pub const Export = exports.Export;
 pub const Module = exports.Module;
 pub const ModuleBundle = exports.ModuleBundle;
-const path = @import("path.zig");
+const paths = @import("paths.zig");
 const tasks = @import("tasks.zig");
 const EnqueuedFuture = tasks.EnqueuedFuture;
 const Fallible = tasks.Fallible;
@@ -1058,7 +1058,7 @@ pub const LoadingSet = extern struct {
         ) callconv(.c) ctx.Status,
         add_modules_from_path: *const fn (
             ctx: *anyopaque,
-            path: c.FimoUTF8Path,
+            path: paths.compat.Path,
             filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
             filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
             filter_data: ?*anyopaque,
@@ -1233,7 +1233,7 @@ pub const LoadingSet = extern struct {
     /// In case of an error, no modules are appended to the set.
     pub fn addModulesFromPath(
         self: LoadingSet,
-        p: path.Path,
+        p: paths.Path,
         context: anytype,
         comptime filter: fn (module: *const Export, data: @TypeOf(context)) LoadingSet.FilterRequest,
         comptime filter_deinit: ?fn (data: @TypeOf(context)) void,
@@ -1279,7 +1279,7 @@ pub const LoadingSet = extern struct {
     /// In case of an error, no modules are appended to the set.
     pub fn addModulesFromPathCustom(
         self: LoadingSet,
-        p: path.Path,
+        p: paths.Path,
         filter_data: ?*anyopaque,
         filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
         filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,

@@ -3,15 +3,13 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
-const c = @import("c");
-
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const context = @import("../../context.zig");
 const pub_context = @import("../../ctx.zig");
 const pub_modules = @import("../../modules.zig");
-const PathBufferUnmanaged = @import("../../path.zig").PathBufferUnmanaged;
-const PathError = @import("../../path.zig").PathError;
+const paths = @import("../../paths.zig");
+const PathBuffer = paths.PathBuffer;
 const pub_tasks = @import("../../tasks.zig");
 const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const FSMFuture = pub_tasks.FSMFuture;
@@ -1028,10 +1026,10 @@ pub const InitExportedOp = FSMFuture(struct {
 
         // Init resources.
         const exp_resources = self.@"export".getResources();
-        const resources = try allocator.alloc(c.FimoUTF8Path, exp_resources.len);
+        const resources = try allocator.alloc(paths.compat.Path, exp_resources.len);
         instance.resources_ = @ptrCast(resources.ptr);
         for (exp_resources, resources) |src, *dst| {
-            var buf = PathBufferUnmanaged{};
+            var buf = PathBuffer{};
             try buf.pushPath(inner.arena.allocator(), self.handle.path.asPath());
             try buf.pushString(inner.arena.allocator(), std.mem.span(src.path));
             // Append a null-terminator to ensure that the path can be passed to c interfaces.

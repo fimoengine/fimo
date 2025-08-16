@@ -3,7 +3,7 @@ const testing = std.testing;
 
 const fimo_std = @import("fimo_std");
 const Version = fimo_std.Version;
-const Path = fimo_std.path.Path;
+const Path = fimo_std.paths.Path;
 const ctx = fimo_std.ctx;
 const tracing = fimo_std.tracing;
 const modules = fimo_std.modules;

@@ -3,15 +3,14 @@ const Allocator = std.mem.Allocator;
 const ArenaAlloactor = std.heap.ArenaAllocator;
 const Mutex = std.Thread.Mutex;
 
-const c = @import("c");
-
 const AnyError = @import("../../AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const context = @import("../../context.zig");
 const pub_context = @import("../../ctx.zig");
 const pub_modules = @import("../../modules.zig");
-const Path = @import("../../path.zig").Path;
-const OwnedPathUnmanaged = @import("../../path.zig").OwnedPathUnmanaged;
+const paths = @import("../../paths.zig");
+const Path = paths.Path;
+const OwnedPath = paths.OwnedPath;
 const pub_tasks = @import("../../tasks.zig");
 const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const FSMFuture = pub_tasks.FSMFuture;
@@ -1398,7 +1397,7 @@ const VTableImpl = struct {
     }
     fn addModulesFromPath(
         this: *anyopaque,
-        path: c.FimoUTF8Path,
+        path: paths.compat.Path,
         filter_fn: *const fn (
             module: *const pub_modules.Export,
             data: ?*anyopaque,
