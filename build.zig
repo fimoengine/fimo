@@ -3,7 +3,15 @@ const builtin = @import("builtin");
 
 const build_internals = @import("tools/build-internals");
 
-const meta_list: []const struct {
+const exe_list: []const struct {
+    name: [:0]const u8,
+    dep_name: [:0]const u8,
+    pub_name: []const u8,
+} = &.{
+    .{ .name = "profiler", .dep_name = "exe/profiler", .pub_name = "exe-profiler" },
+};
+
+const pkg_list: []const struct {
     name: [:0]const u8,
     dep_name: [:0]const u8,
     pub_name: []const u8,
@@ -43,7 +51,7 @@ pub fn build(b: *std.Build) void {
 
     const test_filter = b.option([]const u8, "test-filter", "Filter the test execution to one specific package or module (default: none)");
 
-    const tool_capture = b.option(bool, "tool-capture", "Enable the capture tool (default: yes)") orelse true;
+    const exe_profiler = b.option(bool, "exe-profiler", "Enable the profiler tool (default: yes)") orelse true;
 
     const pkg_std = b.option(bool, "pkg-std", "Enable the fimo_std package (default: yes)") orelse true;
     const pkg_tasks = b.option(bool, "pkg-tasks", "Enable the fimo_tasks_meta package (default: yes)") orelse true;
@@ -57,6 +65,9 @@ pub fn build(b: *std.Build) void {
         target,
         optimize,
         .{
+            .profiler = exe_profiler,
+        },
+        .{
             .fimo_std = pkg_std,
             .fimo_tasks_meta = pkg_tasks,
             .fimo_worlds_meta = pkg_worlds,
@@ -67,27 +78,42 @@ pub fn build(b: *std.Build) void {
         },
     );
 
-    if (tool_capture) {
-        const fimo_std = builder.builder.getPackage("fimo_std");
-        const capture = b.addExecutable(.{
-            .name = "capture",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .root_source_file = b.path("tools/capture.zig"),
-            }),
-            .use_llvm = if (target.result.os.tag == .linux) true else null,
-        });
-        capture.root_module.addImport("fimo_std", fimo_std.root_module);
-        check_step.dependOn(&capture.step);
-        b.installArtifact(capture);
-    }
-
     const test_pkg_names = if (test_filter) |filter| blk: {
-        for (meta_list) |pkg| if (std.mem.eql(u8, filter, pkg.pub_name)) break :blk pkg.name;
+        for (exe_list) |exe| if (std.mem.eql(u8, filter, exe.pub_name)) break :blk exe.name;
+        for (pkg_list) |pkg| if (std.mem.eql(u8, filter, pkg.pub_name)) break :blk pkg.name;
         for (module_list) |mod| if (std.mem.eql(u8, filter, mod.pub_name)) break :blk mod.name;
         break :blk "_";
     } else null;
+
+    for (builder.builder.graph.exes.values()) |exe| {
+        const test_dir = std.Build.Step.InstallArtifact.Options.Dir{
+            .override = .{
+                .custom = b.fmt("tests/bin/{s}", .{exe.name}),
+            },
+        };
+        for (exe.tests.items) |t| {
+            if (test_pkg_names == null or std.mem.eql(u8, test_pkg_names.?, exe.name))
+                test_step.dependOn(&t.getRunArtifact().step);
+            if (install_tests) {
+                install_step.dependOn(
+                    &b.addInstallArtifact(t.getArtifact(), .{ .dest_dir = test_dir }).step,
+                );
+            }
+        }
+
+        b.installArtifact(exe.getArtifact());
+        const run_step = b.step(exe.name, b.fmt("Run {s} executable", .{exe.name}));
+        const run_artifact = exe.getRunArtifact();
+        if (b.args) |args| run_artifact.addArgs(args);
+        run_step.dependOn(&run_artifact.step);
+
+        const check_target = b.addLibrary(.{
+            .linkage = .static,
+            .name = b.fmt("exe_{s}_check", .{exe.name}),
+            .root_module = exe.root_module,
+        });
+        check_step.dependOn(&check_target.step);
+    }
 
     for (builder.builder.graph.pkgs.values()) |pkg| {
         const test_dir = std.Build.Step.InstallArtifact.Options.Dir{
@@ -184,9 +210,30 @@ fn installModule(b: *std.Build, module: *build_internals.FimoBuild.Module) void 
     }
 }
 
-pub const MetaSelect = blk: {
+pub const ExeSelect = blk: {
     var fields: []const std.builtin.Type.StructField = &.{};
-    for (meta_list) |pkg| {
+    for (exe_list) |exe| {
+        fields = fields ++ [_]std.builtin.Type.StructField{.{
+            .name = exe.name,
+            .type = bool,
+            .default_value_ptr = @as(*const anyopaque, @ptrCast(&false)),
+            .is_comptime = false,
+            .alignment = @alignOf(bool),
+        }};
+    }
+    break :blk @Type(.{
+        .@"struct" = .{
+            .layout = .auto,
+            .fields = fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+};
+
+pub const PkgSelect = blk: {
+    var fields: []const std.builtin.Type.StructField = &.{};
+    for (pkg_list) |pkg| {
         fields = fields ++ [_]std.builtin.Type.StructField{.{
             .name = pkg.name,
             .type = bool,
@@ -236,7 +283,8 @@ pub const FimoBuild = struct {
         b: *std.Build,
         target: std.Build.ResolvedTarget,
         optimize: std.builtin.OptimizeMode,
-        meta_select: MetaSelect,
+        exe_select: ExeSelect,
+        pkg_select: PkgSelect,
         module_select: ModulesSelect,
     ) Self {
         const build_internals_dep = b.dependencyFromBuildZig(build_internals, .{});
@@ -249,14 +297,19 @@ pub const FimoBuild = struct {
             }),
         };
 
-        inline for (meta_list) |pkg| {
-            if (@field(meta_select, pkg.name))
+        inline for (pkg_list) |pkg| {
+            if (@field(pkg_select, pkg.name))
                 _ = self.builder.lazyDependency(pkg.dep_name) orelse unreachable;
         }
 
         inline for (module_list) |mod| {
             if (@field(module_select, mod.name))
                 _ = self.builder.lazyDependency(mod.dep_name) orelse unreachable;
+        }
+
+        inline for (exe_list) |exe| {
+            if (@field(exe_select, exe.name))
+                _ = self.builder.lazyDependency(exe.dep_name) orelse unreachable;
         }
 
         return self;

@@ -27,9 +27,11 @@ pub const SuperBlock = extern struct {
     page_size: u64,
     session_table: SuperBlockOffset,
     event_info_table: SuperBlockOffset,
-    data_table: SuperBlockOffset,
+    intern_table: SuperBlockOffset,
     event_table: SuperBlockOffset,
 };
+
+pub const table_alignment = 4096;
 
 pub const SuperBlockOffset = enum(u64) { _ };
 
@@ -48,14 +50,14 @@ pub const Session = extern struct {
     num_events: u64,
     resolution: Duration,
     available_memory: u64,
-    process_id: u64,
+    process_id: ProcessId,
     num_cores: u16,
     cpu_arch: CpuArch,
     _reserved1: u8 = 0,
     cpu_id: u32,
-    cpu_vendor: DataRef,
-    app_name: DataRef,
-    host_info: DataRef,
+    cpu_vendor: InternedRef,
+    app_name: InternedRef,
+    host_info: InternedRef,
 };
 
 pub const EventInfoTable = extern struct {
@@ -75,10 +77,10 @@ pub const EventInfoTableBucket = extern struct {
 
 pub const EventInfo = extern struct {
     id: EventInfoId,
-    name: DataRef,
-    target: DataRef,
-    scope: DataRef,
-    file_name: DataRef,
+    name: InternedRef,
+    target: InternedRef,
+    scope: InternedRef,
+    file_name: InternedRef,
     line_number: u32,
     level: EventLevel,
 };
@@ -189,40 +191,40 @@ fn rehashEventInfoTable(
     }
 }
 
-pub const DataTable = extern struct {
-    table_end: DataTableOffset,
+pub const InternTable = extern struct {
+    table_end: InternTableOffset,
     capacity: u64,
     num_entries: u64,
-    buffer_start: DataTableOffset,
-    buffer_end: DataTableOffset,
+    buffer_start: InternTableOffset,
+    buffer_end: InternTableOffset,
 };
 
-pub const data_table_buffer_alignment = 16;
+pub const intern_table_buffer_alignment = 16;
 
-pub const DataTableOffset = enum(u64) { _ };
-pub const DataRef = enum(u64) { _ };
-pub const DataOffset = enum(u64) { _ };
+pub const InternTableOffset = enum(u64) { _ };
+pub const InternedRef = enum(u64) { _ };
+pub const InternBufferOffset = enum(u64) { _ };
 
-pub const DataTableBucket = extern struct {
+pub const InternTableBucket = extern struct {
     hash: u64,
-    ref: DataRef,
+    ref: InternedRef,
 };
 
-pub const DataTableEntry = extern struct {
-    start: DataOffset,
-    end: DataOffset,
+pub const InternTableEntry = extern struct {
+    start: InternBufferOffset,
+    end: InternBufferOffset,
 };
 
-fn putDataTableValue(
+fn putInternTableValue(
     header: []u8,
-    buckets: []DataTableBucket,
-    entries: []DataTableEntry,
+    buckets: []InternTableBucket,
+    entries: []InternTableEntry,
     num_entries: *u64,
     buffer: []u8,
     buffer_end: *u64,
     value: []const u8,
     alignment: u64,
-) DataRef {
+) InternedRef {
     debug.assert(header.len * 8 >= buckets.len);
     debug.assert(math.isPowerOfTwo(buckets.len));
     debug.assert(num_entries.* < entries.len);
@@ -262,11 +264,11 @@ fn putDataTableValue(
     unreachable;
 }
 
-fn putDataTableRef(
+fn putInternTableRef(
     header: []u8,
-    buckets: []DataTableBucket,
+    buckets: []InternTableBucket,
     hash: u64,
-    ref: DataRef,
+    ref: InternedRef,
 ) void {
     debug.assert(header.len * 8 >= buckets.len);
     debug.assert(math.isPowerOfTwo(buckets.len));
@@ -285,10 +287,10 @@ fn putDataTableRef(
     }
 }
 
-fn rehashDataTable(
+fn rehashInternTable(
     header: []u8,
-    buckets: []DataTableBucket,
-    entries: []DataTableEntry,
+    buckets: []InternTableBucket,
+    entries: []InternTableEntry,
     buffer: []u8,
 ) void {
     @memset(header, 0);
@@ -297,7 +299,7 @@ fn rehashDataTable(
         const value_end = @intFromEnum(entry.end);
         const entry_value = buffer[value_start..value_end];
         const hash = std.hash.Wyhash.hash(0, entry_value);
-        putDataTableRef(header, buckets, hash, @enumFromInt(i));
+        putInternTableRef(header, buckets, hash, @enumFromInt(i));
     }
 }
 
@@ -312,7 +314,7 @@ pub const max_event_size = @sizeOf(OpaqueEvent);
 pub const EventTableOffset = enum(u64) { _ };
 pub const EventRef = enum(u64) { _ };
 
-pub const EventTag = enum(u16) {
+pub const EventTag = enum(u8) {
     register_thread,
     unregister_thread,
     create_call_stack,
@@ -323,19 +325,28 @@ pub const EventTag = enum(u16) {
     enter_span,
     exit_span,
     log_message,
+    start_thread,
+    stop_thread,
+    load_image,
+    unload_image,
+    context_switch,
+    thread_wakeup,
+    call_stack_sample,
 };
 
 pub const Instant = enum(u64) { _ };
 pub const Time = enum(u64) { _ };
 pub const Duration = enum(u64) { _ };
 pub const ThreadId = enum(u64) { _ };
+pub const ProcessId = enum(u64) { _ };
 pub const StackRef = enum(u64) { _ };
 
 pub const OpaqueEvent = extern struct {
     time: Instant,
     tag: EventTag,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     _data1: u64 = 0,
     _data2: u64 = 0,
 
@@ -369,48 +380,54 @@ comptime {
 pub const RegisterThread = extern struct {
     time: Instant,
     tag: EventTag = .register_thread,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     thread_id: ThreadId,
 };
 
 pub const UnregisterThread = extern struct {
     time: Instant,
     tag: EventTag = .unregister_thread,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     thread_id: ThreadId,
 };
 
 pub const CreateCallStack = extern struct {
     time: Instant,
     tag: EventTag = .create_call_stack,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
 };
 
 pub const DestroyCallStack = extern struct {
     time: Instant,
     tag: EventTag = .destroy_call_stack,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
 };
 
 pub const UnblockCallStack = extern struct {
     time: Instant,
     tag: EventTag = .unblock_call_stack,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
 };
 
 pub const SuspendCallStack = extern struct {
     time: Instant,
     tag: EventTag = .suspend_call_stack,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
     flags: packed struct(u64) {
         mark_blocked: bool,
@@ -421,8 +438,9 @@ pub const SuspendCallStack = extern struct {
 pub const ResumeCallStack = extern struct {
     time: Instant,
     tag: EventTag = .resume_call_stack,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
     thread_id: ThreadId,
 };
@@ -430,22 +448,24 @@ pub const ResumeCallStack = extern struct {
 pub const EnterSpan = extern struct {
     time: Instant,
     tag: EventTag = .enter_span,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
-    extra: DataRef,
+    extra: InternedRef,
 };
 
 pub const EnterSpanExt = extern struct {
     info: EventInfoId,
-    message: DataRef,
+    message: InternedRef,
 };
 
 pub const ExitSpan = extern struct {
     time: Instant,
     tag: EventTag = .exit_span,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
     flags: packed struct(u64) {
         is_unwinding: bool,
@@ -456,15 +476,93 @@ pub const ExitSpan = extern struct {
 pub const LogMessage = extern struct {
     time: Instant,
     tag: EventTag = .log_message,
-    _padding: u16 = 0,
-    _padding2: u32 = 0,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
     stack: StackRef,
-    extra: DataRef,
+    extra: InternedRef,
 };
 
 pub const LogMessageExt = extern struct {
     info: EventInfoId,
-    message: DataRef,
+    message: InternedRef,
+};
+
+pub const StartThread = extern struct {
+    time: Instant,
+    tag: EventTag = .start_thread,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
+    thread_id: ThreadId,
+    process_id: ProcessId,
+};
+
+pub const StopThread = extern struct {
+    time: Instant,
+    tag: EventTag = .stop_thread,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
+    thread_id: ThreadId,
+    process_id: ProcessId,
+};
+
+pub const LoadImage = packed struct(u256) {
+    time: Instant,
+    tag: EventTag = .load_image,
+    _padding1: u8 = 0,
+    image_size: u48,
+    image_base: u64,
+    image_path: InternedRef,
+};
+
+pub const UnloadImage = extern struct {
+    time: Instant,
+    tag: EventTag = .unload_image,
+    _padding1: u8 = 0,
+    _padding2: u16 = 0,
+    _padding3: u32 = 0,
+    _padding4: u64 = 0,
+    image_base: u64,
+};
+
+pub const ContextSwitch = extern struct {
+    time: Instant,
+    tag: EventTag = .context_switch,
+    cpu: u8,
+    old_thread_wait_reason: u8,
+    old_thread_state: u8,
+    previous_cstate: u8,
+    new_thread_priority: i8,
+    old_thread_priority: i8,
+    _padding: u8 = 0,
+    extra: InternedRef,
+};
+
+pub const ContextSwitchExt = extern struct {
+    old_thread_id: ThreadId,
+    new_thread_id: ThreadId,
+};
+
+pub const ThreadWakeup = extern struct {
+    time: Instant,
+    tag: EventTag = .thread_wakeup,
+    cpu: u8,
+    adjust_reason: i8,
+    adjust_increment: i8,
+    padding: u32 = 0,
+    thread_id: ThreadId,
+};
+
+pub const CallStackSample = extern struct {
+    time: Instant,
+    tag: EventTag = .call_stack_sample,
+    padding1: u8 = 0,
+    padding2: u16 = 0,
+    padding3: u32 = 0,
+    thread_id: ThreadId,
+    call_stack: InternedRef,
 };
 
 comptime {
@@ -476,12 +574,12 @@ comptime {
     debug.assert(meta.hasUniqueRepresentation(EventInfoId));
     debug.assert(meta.hasUniqueRepresentation(EventInfoRef));
     debug.assert(meta.hasUniqueRepresentation(EventInfo));
-    debug.assert(meta.hasUniqueRepresentation(DataTable));
-    debug.assert(meta.hasUniqueRepresentation(DataTableOffset));
-    debug.assert(meta.hasUniqueRepresentation(DataRef));
-    debug.assert(meta.hasUniqueRepresentation(DataOffset));
-    debug.assert(meta.hasUniqueRepresentation(DataTableBucket));
-    debug.assert(meta.hasUniqueRepresentation(DataTableEntry));
+    debug.assert(meta.hasUniqueRepresentation(InternTable));
+    debug.assert(meta.hasUniqueRepresentation(InternTableOffset));
+    debug.assert(meta.hasUniqueRepresentation(InternedRef));
+    debug.assert(meta.hasUniqueRepresentation(InternBufferOffset));
+    debug.assert(meta.hasUniqueRepresentation(InternTableBucket));
+    debug.assert(meta.hasUniqueRepresentation(InternTableEntry));
     debug.assert(meta.hasUniqueRepresentation(EventTable));
     debug.assert(meta.hasUniqueRepresentation(EventTableOffset));
     debug.assert(meta.hasUniqueRepresentation(EventRef));
@@ -489,6 +587,7 @@ comptime {
     debug.assert(meta.hasUniqueRepresentation(Time));
     debug.assert(meta.hasUniqueRepresentation(Duration));
     debug.assert(meta.hasUniqueRepresentation(ThreadId));
+    debug.assert(meta.hasUniqueRepresentation(ProcessId));
     debug.assert(meta.hasUniqueRepresentation(StackRef));
     debug.assert(meta.hasUniqueRepresentation(RegisterThread));
     debug.assert(meta.hasUniqueRepresentation(UnregisterThread));
@@ -502,6 +601,14 @@ comptime {
     debug.assert(meta.hasUniqueRepresentation(ExitSpan));
     debug.assert(meta.hasUniqueRepresentation(LogMessage));
     debug.assert(meta.hasUniqueRepresentation(LogMessageExt));
+    debug.assert(meta.hasUniqueRepresentation(StartThread));
+    debug.assert(meta.hasUniqueRepresentation(StopThread));
+    debug.assert(meta.hasUniqueRepresentation(LoadImage));
+    debug.assert(meta.hasUniqueRepresentation(UnloadImage));
+    debug.assert(meta.hasUniqueRepresentation(ContextSwitch));
+    debug.assert(meta.hasUniqueRepresentation(ContextSwitchExt));
+    debug.assert(meta.hasUniqueRepresentation(ThreadWakeup));
+    debug.assert(meta.hasUniqueRepresentation(CallStackSample));
 }
 
 extern "kernel32" fn CreateFileMappingA(
@@ -535,13 +642,13 @@ pub const DBWriter = struct {
         windows.HANDLE
     else
         void,
-    block: *align(heap.page_size_min) SuperBlock,
+    block: *align(table_alignment) SuperBlock,
     file_len: u64,
     page_size: usize,
-    session_table: *align(heap.page_size_min) SessionTable,
-    event_info_table: *align(heap.page_size_min) EventInfoTable,
-    data_table: *align(heap.page_size_min) DataTable,
-    event_table: *align(heap.page_size_min) EventTable,
+    session_table: *align(table_alignment) SessionTable,
+    event_info_table: *align(table_alignment) EventInfoTable,
+    intern_table: *align(table_alignment) InternTable,
+    event_table: *align(table_alignment) EventTable,
 
     const FILE_MAP_WRITE: windows.DWORD = 2;
     const FILE_MAP_READ: windows.DWORD = 4;
@@ -561,14 +668,14 @@ pub const DBWriter = struct {
             sessions_start + @sizeOf(SessionTable),
             page_size,
         );
-        const data_start = mem.alignForward(
+        const intern_start = mem.alignForward(
             u64,
             event_infos_start + @sizeOf(EventInfoTable),
             page_size,
         );
         const events_start = mem.alignForward(
             u64,
-            data_start + @sizeOf(DataTable),
+            intern_start + @sizeOf(InternTable),
             page_size,
         );
 
@@ -578,7 +685,7 @@ pub const DBWriter = struct {
             errdefer windows.CloseHandle(handle);
             const res2 = MapViewOfFileEx(handle, FILE_MAP_READWRITE, 0, 0, 0, null);
             const mapping = res2 orelse return error.FileMappingFailed;
-            const block: *align(heap.page_size_min) SuperBlock = @ptrCast(@alignCast(mapping));
+            const block: *align(table_alignment) SuperBlock = @ptrCast(@alignCast(mapping));
             break :blk .{ handle, block };
         } else blk: {
             const mapping = try posix.mmap(
@@ -589,7 +696,7 @@ pub const DBWriter = struct {
                 file.handle,
                 0,
             );
-            const block: *align(heap.page_size_min) SuperBlock = @ptrCast(@alignCast(mapping));
+            const block: *align(table_alignment) SuperBlock = @ptrCast(@alignCast(mapping));
             break :blk .{ {}, block };
         };
 
@@ -597,18 +704,18 @@ pub const DBWriter = struct {
             .page_size = page_size,
             .session_table = @enumFromInt(sessions_start),
             .event_info_table = @enumFromInt(event_infos_start),
-            .data_table = @enumFromInt(data_start),
+            .intern_table = @enumFromInt(intern_start),
             .event_table = @enumFromInt(events_start),
         };
 
-        const session_table: *align(heap.page_size_min) SessionTable =
+        const session_table: *align(table_alignment) SessionTable =
             @ptrFromInt(@intFromPtr(block) + sessions_start);
         session_table.* = .{
             .table_end = @enumFromInt(page_size),
             .num_entries = 0,
         };
 
-        const event_info_table: *align(heap.page_size_min) EventInfoTable =
+        const event_info_table: *align(table_alignment) EventInfoTable =
             @ptrFromInt(@intFromPtr(block) + event_infos_start);
         event_info_table.* = .{
             .table_end = @enumFromInt(page_size),
@@ -616,9 +723,9 @@ pub const DBWriter = struct {
             .num_entries = 0,
         };
 
-        const data_table: *align(heap.page_size_min) DataTable =
-            @ptrFromInt(@intFromPtr(block) + data_start);
-        data_table.* = .{
+        const intern_table: *align(table_alignment) InternTable =
+            @ptrFromInt(@intFromPtr(block) + intern_start);
+        intern_table.* = .{
             .table_end = @enumFromInt(page_size),
             .capacity = 0,
             .num_entries = 0,
@@ -626,7 +733,7 @@ pub const DBWriter = struct {
             .buffer_end = @enumFromInt(0),
         };
 
-        const event_table: *align(heap.page_size_min) EventTable =
+        const event_table: *align(table_alignment) EventTable =
             @ptrFromInt(@intFromPtr(block) + events_start);
         event_table.* = .{
             .table_end = @enumFromInt(page_size),
@@ -641,7 +748,7 @@ pub const DBWriter = struct {
             .page_size = page_size,
             .session_table = session_table,
             .event_info_table = event_info_table,
-            .data_table = data_table,
+            .intern_table = intern_table,
             .event_table = event_table,
         };
     }
@@ -652,7 +759,7 @@ pub const DBWriter = struct {
             _ = UnmapViewOfFile(self.block);
             windows.CloseHandle(self.handle);
         } else {
-            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(table_alignment) u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.file_len]);
         }
 
@@ -665,15 +772,19 @@ pub const DBWriter = struct {
             if (FlushViewOfFile(self.block, 0) == 0) return error.FlushFailed;
             if (windows.kernel32.FlushFileBuffers(self.file.handle) == 0) return error.FlushFailed;
         } else {
-            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(table_alignment) u8 = @ptrCast(@alignCast(self.block));
             try posix.msync(ptr[0..self.file_len], posix.MSF.SYNC);
         }
     }
 
-    fn extendFile(self: *DBWriter, additional: u64) !u64 {
-        const rounded = mem.alignForward(u64, additional, self.page_size);
-        try self.file.setEndPos(self.file_len + rounded);
-        self.file_len += rounded;
+    fn extendFile(self: *DBWriter, allocated: u64, additional: u64) !u64 {
+        debug.assert(mem.isAligned(allocated, self.page_size));
+        var new_allocated = allocated * 2;
+        while (new_allocated - allocated < additional) new_allocated *= 2;
+
+        const file_len_offset = new_allocated - allocated;
+        try self.file.setEndPos(self.file_len + file_len_offset);
+        defer self.file_len += file_len_offset;
 
         if (comptime builtin.target.os.tag == .windows) {
             const res = CreateFileMappingA(self.file.handle, null, windows.PAGE_READWRITE, 0, 0, null);
@@ -695,17 +806,17 @@ pub const DBWriter = struct {
                 self.file.handle,
                 0,
             );
-            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
-            posix.munmap(ptr[0 .. self.file_len - rounded]);
+            const ptr: [*]align(table_alignment) u8 = @ptrCast(@alignCast(self.block));
+            posix.munmap(ptr[0..self.file_len]);
             self.block = @ptrCast(@alignCast(mapping));
         }
 
         self.session_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.session_table));
         self.event_info_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.event_info_table));
-        self.data_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.data_table));
+        self.intern_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.intern_table));
         self.event_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.event_table));
 
-        return rounded;
+        return file_len_offset;
     }
 
     fn getLastSession(self: *DBWriter) *Session {
@@ -740,9 +851,10 @@ pub const DBWriter = struct {
 
         // Shift the file, if the table ran out of space.
         if (@intFromEnum(self.event_info_table.table_end) < entries_end) {
-            const additional = entries_end - @intFromEnum(self.event_info_table.table_end);
-            const offset = try self.extendFile(additional);
-            const shift_start = @intFromEnum(self.block.data_table);
+            const allocated = @intFromEnum(self.event_info_table.table_end);
+            const additional = entries_end - allocated;
+            const offset = try self.extendFile(allocated, additional);
+            const shift_start = @intFromEnum(self.block.intern_table);
             const file_end = @intFromEnum(self.block.event_table) + @intFromEnum(self.event_table.table_end);
             const bytes: [*]u8 = @ptrCast(self.block);
             const src = bytes[shift_start..file_end];
@@ -750,10 +862,10 @@ pub const DBWriter = struct {
             @memmove(dst, src);
 
             self.event_info_table.table_end = @enumFromInt(@intFromEnum(self.event_info_table.table_end) + offset);
-            self.block.data_table = @enumFromInt(@intFromEnum(self.block.data_table) + offset);
+            self.block.intern_table = @enumFromInt(@intFromEnum(self.block.intern_table) + offset);
             self.block.event_table = @enumFromInt(@intFromEnum(self.block.event_table) + offset);
 
-            self.data_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.data_table));
+            self.intern_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.intern_table));
             self.event_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.event_table));
         }
 
@@ -803,7 +915,7 @@ pub const DBWriter = struct {
         return ref;
     }
 
-    pub fn internStruct(self: *DBWriter, value: anytype) !DataRef {
+    pub fn internStruct(self: *DBWriter, value: anytype) !InternedRef {
         const T = @TypeOf(value);
         if (@typeInfo(T) != .@"struct") @compileError("DBWriter: expected struct, got " ++ @typeName(T));
         if (comptime !meta.hasUniqueRepresentation(T)) @compileError("DBWriter: type has no unique bit pattern, got " ++ @typeName(T));
@@ -811,32 +923,33 @@ pub const DBWriter = struct {
         return self.internData(mem.asBytes(&value), @alignOf(T));
     }
 
-    pub fn internString(self: *DBWriter, value: []const u8) !DataRef {
+    pub fn internString(self: *DBWriter, value: []const u8) !InternedRef {
         return self.internData(value, 1);
     }
 
-    pub fn internData(self: *DBWriter, value: []const u8, alignment: u64) !DataRef {
-        const capacity = if (3 * self.data_table.capacity < 4 * (self.data_table.num_entries + 1))
-            @max(1, self.data_table.capacity * 2)
+    pub fn internData(self: *DBWriter, value: []const u8, alignment: u64) !InternedRef {
+        const capacity = if (3 * self.intern_table.capacity < 4 * (self.intern_table.num_entries + 1))
+            @max(1, self.intern_table.capacity * 2)
         else
-            self.data_table.capacity;
+            self.intern_table.capacity;
         const header_size = mem.alignForward(u64, capacity, 8) / 8;
-        const buckets_size = @sizeOf(DataTableBucket) * capacity;
-        const entries_size = @sizeOf(DataTableEntry) * capacity;
+        const buckets_size = @sizeOf(InternTableBucket) * capacity;
+        const entries_size = @sizeOf(InternTableEntry) * capacity;
         const buffer_size = @as(u64, value.len) +
-            (mem.alignForward(u64, @intFromEnum(self.data_table.buffer_end), alignment) -
-                @intFromEnum(self.data_table.buffer_start));
+            (mem.alignForward(u64, @intFromEnum(self.intern_table.buffer_end), alignment) -
+                @intFromEnum(self.intern_table.buffer_start));
 
-        const header_start = @sizeOf(DataTable);
-        const buckets_start = mem.alignForward(u64, header_start + header_size, @alignOf(DataTableBucket));
-        const entries_start = mem.alignForward(u64, buckets_start + buckets_size, @alignOf(DataTableEntry));
-        const buffer_start = mem.alignForward(u64, entries_start + entries_size, data_table_buffer_alignment);
+        const header_start = @sizeOf(InternTable);
+        const buckets_start = mem.alignForward(u64, header_start + header_size, @alignOf(InternTableBucket));
+        const entries_start = mem.alignForward(u64, buckets_start + buckets_size, @alignOf(InternTableEntry));
+        const buffer_start = mem.alignForward(u64, entries_start + entries_size, intern_table_buffer_alignment);
         const buffer_end = buffer_start + buffer_size;
 
         // Shift the file, if the table ran out of space.
-        if (@intFromEnum(self.data_table.table_end) < buffer_end) {
-            const additional = buffer_end - @intFromEnum(self.data_table.table_end);
-            const offset = try self.extendFile(additional);
+        if (@intFromEnum(self.intern_table.table_end) < buffer_end) {
+            const allocated = @intFromEnum(self.intern_table.table_end);
+            const additional = buffer_end - allocated;
+            const offset = try self.extendFile(allocated, additional);
             const shift_start = @intFromEnum(self.block.event_table);
             const file_end = @intFromEnum(self.block.event_table) + @intFromEnum(self.event_table.table_end);
             const bytes: [*]u8 = @ptrCast(self.block);
@@ -844,30 +957,30 @@ pub const DBWriter = struct {
             const dst = bytes[shift_start + offset .. file_end + offset];
             @memmove(dst, src);
 
-            self.data_table.table_end = @enumFromInt(@intFromEnum(self.data_table.table_end) + offset);
+            self.intern_table.table_end = @enumFromInt(@intFromEnum(self.intern_table.table_end) + offset);
             self.block.event_table = @enumFromInt(@intFromEnum(self.block.event_table) + offset);
 
             self.event_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.event_table));
         }
 
-        const bytes: [*]u8 = @ptrCast(self.data_table);
+        const bytes: [*]u8 = @ptrCast(self.intern_table);
         const header: []u8 = bytes[header_start .. header_start + header_size];
-        const buckets: []DataTableBucket = @ptrCast(@alignCast(bytes[buckets_start .. buckets_start + buckets_size]));
-        const entries: []DataTableEntry = @ptrCast(@alignCast(bytes[entries_start .. entries_start + entries_size]));
+        const buckets: []InternTableBucket = @ptrCast(@alignCast(bytes[buckets_start .. buckets_start + buckets_size]));
+        const entries: []InternTableEntry = @ptrCast(@alignCast(bytes[entries_start .. entries_start + entries_size]));
         const buffer: []u8 = @ptrCast(bytes[buffer_start..buffer_end]);
 
         // Grow the hash table, if we need more capacity.
-        if (capacity != self.data_table.capacity and capacity > 1) {
-            const old_capacity = self.data_table.capacity;
+        if (capacity != self.intern_table.capacity and capacity > 1) {
+            const old_capacity = self.intern_table.capacity;
             const old_header_size = mem.alignForward(u64, old_capacity, 8) / 8;
-            const old_buckets_size = @sizeOf(DataTableBucket) * old_capacity;
-            const old_entries_size = @sizeOf(DataTableEntry) * old_capacity;
+            const old_buckets_size = @sizeOf(InternTableBucket) * old_capacity;
+            const old_entries_size = @sizeOf(InternTableEntry) * old_capacity;
 
-            const old_buckets_start = mem.alignForward(u64, header_start + old_header_size, @alignOf(DataTableBucket));
-            const old_entries_start = mem.alignForward(u64, old_buckets_start + old_buckets_size, @alignOf(DataTableEntry));
+            const old_buckets_start = mem.alignForward(u64, header_start + old_header_size, @alignOf(InternTableBucket));
+            const old_entries_start = mem.alignForward(u64, old_buckets_start + old_buckets_size, @alignOf(InternTableEntry));
             const old_entries_end = old_entries_start + old_entries_size;
-            const old_buffer_start = @intFromEnum(self.data_table.buffer_start);
-            const old_buffer_end = @intFromEnum(self.data_table.buffer_end);
+            const old_buffer_start = @intFromEnum(self.intern_table.buffer_start);
+            const old_buffer_end = @intFromEnum(self.intern_table.buffer_end);
             const buffer_shift_size = old_buffer_end - old_buffer_start;
             const buffer_src = bytes[old_buffer_start..old_buffer_end];
             const buffer_dst = bytes[buffer_start .. buffer_start + buffer_shift_size];
@@ -877,25 +990,25 @@ pub const DBWriter = struct {
             const entries_src = bytes[old_entries_start..old_entries_end];
             const entries_dst = bytes[entries_start .. entries_start + entries_shift_size];
             @memmove(entries_dst, entries_src);
-            rehashDataTable(header, buckets, entries[0..self.data_table.num_entries], buffer);
+            rehashInternTable(header, buckets, entries[0..self.intern_table.num_entries], buffer);
         }
 
         // Insert the value into the buffer.
-        var end = @intFromEnum(self.data_table.buffer_end) - @intFromEnum(self.data_table.buffer_start);
-        const ref = putDataTableValue(
+        var end = @intFromEnum(self.intern_table.buffer_end) - @intFromEnum(self.intern_table.buffer_start);
+        const ref = putInternTableValue(
             header,
             buckets,
             entries,
-            &self.data_table.num_entries,
+            &self.intern_table.num_entries,
             buffer,
             &end,
             value,
             alignment,
         );
 
-        self.data_table.capacity = capacity;
-        self.data_table.buffer_start = @enumFromInt(buffer_start);
-        self.data_table.buffer_end = @enumFromInt(buffer_start + end);
+        self.intern_table.capacity = capacity;
+        self.intern_table.buffer_start = @enumFromInt(buffer_start);
+        self.intern_table.buffer_end = @enumFromInt(buffer_start + end);
         return ref;
     }
 
@@ -914,8 +1027,9 @@ pub const DBWriter = struct {
 
         // Expand the file to fit the events.
         if (@intFromEnum(self.event_table.table_end) < entries_end) {
-            const additional = entries_end - @intFromEnum(self.event_table.table_end);
-            const offset = try self.extendFile(additional);
+            const allocated = @intFromEnum(self.event_table.table_end);
+            const additional = entries_end - allocated;
+            const offset = try self.extendFile(allocated, additional);
             self.event_table.table_end = @enumFromInt(@intFromEnum(self.event_table.table_end) + offset);
         }
 
@@ -961,7 +1075,7 @@ pub const DBWriter = struct {
         epoch: Time,
         resolution: Duration,
         available_memory: u64,
-        process_id: u64,
+        process_id: ProcessId,
         num_cores: u16,
         cpu_arch: CpuArch,
         cpu_id: u32,
@@ -972,8 +1086,9 @@ pub const DBWriter = struct {
         const sessions_start = mem.alignForward(u64, @sizeOf(SessionTable), @alignOf(Session));
         const sessions_end = sessions_start + ((self.session_table.num_entries + 1) * @sizeOf(Session));
         if (@intFromEnum(self.session_table.table_end) < sessions_end) {
-            const additional = sessions_end - @intFromEnum(self.session_table.table_end);
-            const offset = try self.extendFile(additional);
+            const allocated = @intFromEnum(self.session_table.table_end);
+            const additional = sessions_end - allocated;
+            const offset = try self.extendFile(allocated, additional);
             const shift_start = @intFromEnum(self.block.event_info_table);
             const file_end = @intFromEnum(self.block.event_table) + @intFromEnum(self.event_table.table_end);
             const bytes: [*]u8 = @ptrCast(self.block);
@@ -983,11 +1098,11 @@ pub const DBWriter = struct {
 
             self.session_table.table_end = @enumFromInt(@intFromEnum(self.session_table.table_end) + offset);
             self.block.event_info_table = @enumFromInt(@intFromEnum(self.block.event_info_table) + offset);
-            self.block.data_table = @enumFromInt(@intFromEnum(self.block.data_table) + offset);
+            self.block.intern_table = @enumFromInt(@intFromEnum(self.block.intern_table) + offset);
             self.block.event_table = @enumFromInt(@intFromEnum(self.block.event_table) + offset);
 
             self.event_info_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.event_info_table));
-            self.data_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.data_table));
+            self.intern_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.intern_table));
             self.event_table = @ptrFromInt(@intFromPtr(self.block) + @intFromEnum(self.block.event_table));
         }
 
@@ -1116,10 +1231,115 @@ pub const DBWriter = struct {
             .extra = extra,
         });
     }
+
+    pub fn startThread(
+        self: *DBWriter,
+        time: Instant,
+        thread_id: ThreadId,
+        process_id: ProcessId,
+    ) !void {
+        try self.writeEvent(StartThread{
+            .time = time,
+            .thread_id = thread_id,
+            .process_id = process_id,
+        });
+    }
+
+    pub fn stopThread(
+        self: *DBWriter,
+        time: Instant,
+        thread_id: ThreadId,
+        process_id: ProcessId,
+    ) !void {
+        try self.writeEvent(StopThread{
+            .time = time,
+            .thread_id = thread_id,
+            .process_id = process_id,
+        });
+    }
+
+    pub fn loadImage(
+        self: *DBWriter,
+        time: Instant,
+        image_base: u64,
+        image_size: u48,
+        image_path: []const u8,
+    ) !void {
+        const image_path_ref = try self.internString(image_path);
+        try self.writeEvent(LoadImage{
+            .time = time,
+            .image_size = image_size,
+            .image_base = image_base,
+            .image_path = image_path_ref,
+        });
+    }
+
+    pub fn unloadImage(self: *DBWriter, time: Instant, image_base: u64) !void {
+        try self.writeEvent(UnloadImage{ .time = time, .image_base = image_base });
+    }
+
+    pub fn contextSwitch(
+        self: *DBWriter,
+        time: Instant,
+        old_thread_id: ThreadId,
+        new_thread_id: ThreadId,
+        cpu: u8,
+        old_thread_wait_reason: u8,
+        old_thread_state: u8,
+        previous_cstate: u8,
+        new_thread_priority: i8,
+        old_thread_priority: i8,
+    ) !void {
+        const extra = try self.internStruct(ContextSwitchExt{
+            .old_thread_id = old_thread_id,
+            .new_thread_id = new_thread_id,
+        });
+        try self.writeEvent(ContextSwitch{
+            .time = time,
+            .cpu = cpu,
+            .old_thread_wait_reason = old_thread_wait_reason,
+            .old_thread_state = old_thread_state,
+            .previous_cstate = previous_cstate,
+            .new_thread_priority = new_thread_priority,
+            .old_thread_priority = old_thread_priority,
+            .extra = extra,
+        });
+    }
+
+    pub fn threadWakeup(
+        self: *DBWriter,
+        time: Instant,
+        thread_id: ThreadId,
+        cpu: u8,
+        adjust_reason: i8,
+        adjust_increment: i8,
+    ) !void {
+        try self.writeEvent(ThreadWakeup{
+            .time = time,
+            .thread_id = thread_id,
+            .cpu = cpu,
+            .adjust_reason = adjust_reason,
+            .adjust_increment = adjust_increment,
+        });
+    }
+
+    pub fn callStackSample(
+        self: *DBWriter,
+        time: Instant,
+        thread_id: ThreadId,
+        call_stack: []const u64,
+    ) !void {
+        const call_stack_ref = try self.internData(@ptrCast(call_stack), @alignOf(u64));
+        try self.writeEvent(CallStackSample{
+            .time = time,
+            .thread_id = thread_id,
+            .call_stack = call_stack_ref,
+        });
+    }
 };
 
 pub const DBReader = struct {
-    block: *align(heap.page_size_min) const SuperBlock,
+    block: *align(table_alignment) const SuperBlock,
     handle: if (builtin.target.os.tag == .windows)
         windows.HANDLE
     else
@@ -1135,7 +1355,7 @@ pub const DBReader = struct {
         if (!std.mem.eql(u8, &header.file_magic, SuperBlock.expect_magic)) return error.InvalidDB;
         if (header.version_major != SuperBlock.expect_version_major) return error.InvalidDB;
         if (header.version_minor > SuperBlock.expect_version_minor) return error.InvalidDB;
-        if (header.page_size < heap.page_size_min) return error.InvalidDB;
+        if (header.page_size < table_alignment) return error.InvalidDB;
 
         if (comptime builtin.target.os.tag == .windows) {
             const handle = CreateFileMappingA(file.handle, null, windows.PAGE_READONLY, 0, 0, null) orelse
@@ -1171,13 +1391,13 @@ pub const DBReader = struct {
             _ = UnmapViewOfFile(self.block);
             windows.CloseHandle(self.handle);
         } else {
-            const ptr: [*]align(heap.page_size_min) const u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(table_alignment) const u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.handle]);
         }
         self.* = undefined;
     }
 
-    pub fn getSessionTable(self: *const DBReader) *align(heap.page_size_min) const SessionTable {
+    pub fn getSessionTable(self: *const DBReader) *align(table_alignment) const SessionTable {
         const bytes: [*]const u8 = @ptrCast(self.block);
         const offset = @intFromEnum(self.block.session_table);
         return @ptrCast(@alignCast(bytes + offset));
@@ -1220,7 +1440,7 @@ pub const DBReader = struct {
         return std.sort.upperBound(Session, sessions, Context{ .t = @enumFromInt(time) }, Context.compare);
     }
 
-    pub fn getEventInfoTable(self: *const DBReader) *align(heap.page_size_min) const EventInfoTable {
+    pub fn getEventInfoTable(self: *const DBReader) *align(table_alignment) const EventInfoTable {
         const bytes: [*]const u8 = @ptrCast(self.block);
         const offset = @intFromEnum(self.block.event_info_table);
         return @ptrCast(@alignCast(bytes + offset));
@@ -1278,13 +1498,13 @@ pub const DBReader = struct {
         return &entries[@intFromEnum(ref)];
     }
 
-    pub fn getDataTable(self: *const DBReader) *align(heap.page_size_min) const DataTable {
+    pub fn getInternTable(self: *const DBReader) *align(table_alignment) const InternTable {
         const bytes: [*]const u8 = @ptrCast(self.block);
-        const offset = @intFromEnum(self.block.data_table);
+        const offset = @intFromEnum(self.block.intern_table);
         return @ptrCast(@alignCast(bytes + offset));
     }
 
-    pub fn getInternedSlice(self: *const DBReader, T: type, ref: DataRef) []const T {
+    pub fn getInternedSlice(self: *const DBReader, T: type, ref: InternedRef) []const T {
         if (comptime !meta.hasUniqueRepresentation(T)) @compileError("DBReader: type has no unique bit pattern, got " ++ @typeName(T));
         switch (@typeInfo(T)) {
             .int, .float, .@"enum" => {},
@@ -1297,30 +1517,30 @@ pub const DBReader = struct {
             else => @compileError("DBReader: type not supported, got " ++ @typeName(T)),
         }
 
-        const table = self.getDataTable();
+        const table = self.getInternTable();
         debug.assert(@intFromEnum(ref) < table.num_entries);
         const header_size = mem.alignForward(u64, table.capacity, 8) / 8;
-        const buckets_size = @sizeOf(DataTableBucket) * table.capacity;
+        const buckets_size = @sizeOf(InternTableBucket) * table.capacity;
 
-        const header_start = @sizeOf(DataTable);
-        const buckets_start = mem.alignForward(u64, header_start + header_size, @alignOf(DataTableBucket));
-        const entries_start = mem.alignForward(u64, buckets_start + buckets_size, @alignOf(DataTableEntry));
+        const header_start = @sizeOf(InternTable);
+        const buckets_start = mem.alignForward(u64, header_start + header_size, @alignOf(InternTableBucket));
+        const entries_start = mem.alignForward(u64, buckets_start + buckets_size, @alignOf(InternTableEntry));
 
         const bytes: [*]const u8 = @ptrCast(table);
-        const entries: [*]const DataTableEntry = @ptrCast(@alignCast(bytes + entries_start));
+        const entries: [*]const InternTableEntry = @ptrCast(@alignCast(bytes + entries_start));
         const buffer: []const u8 = bytes[@intFromEnum(table.buffer_start)..@intFromEnum(table.buffer_end)];
         const entry = entries[@intFromEnum(ref)];
         const entry_slice = buffer[@intFromEnum(entry.start)..@intFromEnum(entry.end)];
         return @ptrCast(@alignCast(entry_slice));
     }
 
-    pub fn getInternedValue(self: *const DBReader, T: type, ref: DataRef) *const T {
+    pub fn getInternedValue(self: *const DBReader, T: type, ref: InternedRef) *const T {
         const slice = self.getInternedSlice(T, ref);
         debug.assert(slice.len == 1);
         return &slice[0];
     }
 
-    pub fn getEventTable(self: *const DBReader) *align(heap.page_size_min) const EventTable {
+    pub fn getEventTable(self: *const DBReader) *align(table_alignment) const EventTable {
         const bytes: [*]const u8 = @ptrCast(self.block);
         const offset = @intFromEnum(self.block.event_table);
         return @ptrCast(@alignCast(bytes + offset));
@@ -1372,7 +1592,7 @@ test {
     const epoch: Time = @enumFromInt(12345);
     const resolution: Duration = @enumFromInt(100);
     const available_memory = 512;
-    const process_id = 1997;
+    const process_id: ProcessId = @enumFromInt(1997);
     const num_cores = 256;
     const cpu_arch: CpuArch = .aarch64;
     const cpu_id = 99999;

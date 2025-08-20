@@ -562,6 +562,14 @@ pub mod events {
         pub const ENTER_SPAN: Self = Self(9);
         pub const EXIT_SPAN: Self = Self(10);
         pub const LOG_MESSAGE: Self = Self(11);
+        pub const DECLARE_EVENT_INFO: Self = Self(12);
+        pub const START_THREAD: Self = Self(13);
+        pub const STOP_THREAD: Self = Self(14);
+        pub const LOAD_IMAGE: Self = Self(15);
+        pub const UNLOAD_IMAGE: Self = Self(16);
+        pub const CONTEXT_SWITCH: Self = Self(17);
+        pub const THREAD_WAKEUP: Self = Self(18);
+        pub const CALL_STACK_SAMPLE: Self = Self(19);
 
         pub(crate) unsafe fn as_enum<'a>(event: ConstNonNull<Self>) -> EventEnum<'a> {
             unsafe {

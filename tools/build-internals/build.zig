@@ -24,9 +24,21 @@ pub const FimoBuild = struct {
         allocator: Allocator,
         target: Build.ResolvedTarget,
         optimize: std.builtin.OptimizeMode,
+        exes: StringArrayHashMapUnmanaged(*Executable) = .empty,
         pkgs: StringArrayHashMapUnmanaged(*Package) = .empty,
         modules: StringArrayHashMapUnmanaged(*Module) = .empty,
         dependencies: AutoArrayHashMapUnmanaged(usize, void) = .empty,
+
+        pub fn addExecutable(self: *Graph, exe: *Executable) *Executable {
+            if (self.exes.contains(exe.name))
+                std.debug.panic("executable `{s}` already defined", .{exe.name});
+            self.exes.put(self.allocator, exe.name, exe) catch @panic("oom");
+            return exe;
+        }
+
+        pub fn getExecutable(self: *Graph, name: []const u8) ?*Executable {
+            return self.exes.get(name);
+        }
 
         pub fn addPackage(self: *Graph, pkg: *Package) *Package {
             if (self.pkgs.contains(pkg.name))
@@ -56,6 +68,64 @@ pub const FimoBuild = struct {
 
         fn dependencyLoaded(self: *Graph, dep: *Build.Dependency) bool {
             return self.dependencies.contains(@intFromPtr(dep));
+        }
+    };
+
+    pub const CreateExecutableOptions = struct {
+        name: []const u8,
+        root_module: *Build.Module,
+    };
+
+    pub const Executable = struct {
+        owner: *FimoBuild,
+        name: []const u8,
+        root_module: *Build.Module,
+        tests: ArrayListUnmanaged(*Test) = .empty,
+
+        artifact: ?*Build.Step.Compile = null,
+        run_artifact: ?*Build.Step.Run = null,
+
+        pub fn create(owner: *FimoBuild, options: CreateExecutableOptions) *Executable {
+            const allocator = owner.build.allocator;
+            const self = allocator.create(Executable) catch @panic("oom");
+            self.* = .{
+                .owner = owner,
+                .name = owner.build.dupe(options.name),
+                .root_module = options.root_module,
+            };
+            return self;
+        }
+
+        pub fn getArtifact(self: *Executable) *Build.Step.Compile {
+            if (self.artifact) |x| return x;
+
+            const owner = self.owner;
+            const b = owner.build;
+            const artifact = b.addExecutable(.{
+                .name = self.name,
+                .root_module = self.root_module,
+                .use_llvm = if (owner.graph.target.result.os.tag == .linux) true else null,
+            });
+            self.artifact = artifact;
+            return artifact;
+        }
+
+        pub fn getRunArtifact(self: *Executable) *Build.Step.Run {
+            if (self.run_artifact) |x| return x;
+
+            const owner = self.owner;
+            const b = owner.build;
+            const artifact = self.getArtifact();
+
+            const run_artifact = b.addRunArtifact(artifact);
+            self.run_artifact = run_artifact;
+            return run_artifact;
+        }
+
+        pub fn addTest(self: *Executable, options: CreateTestOptions) *Test {
+            const t = Test.create(self.owner, options);
+            self.tests.append(self.owner.build.allocator, t) catch @panic("oom");
+            return t;
         }
     };
 
@@ -397,6 +467,19 @@ pub const FimoBuild = struct {
 
         const full_path = b.pathFromRoot("build.zig.zon");
         std.debug.panic("no dependency named '{s}' in '{s}'. All packages used in build.zig must be declared in this file", .{ name, full_path });
+    }
+
+    pub fn addExecutable(self: *FimoBuild, options: CreateExecutableOptions) *Executable {
+        const exe = Executable.create(self, options);
+        return self.graph.addExecutable(exe);
+    }
+
+    pub fn getExecutable(self: *FimoBuild, name: []const u8) *Executable {
+        return self.graph.getExecutable(name) orelse std.debug.panic("executable `{s}` not found", .{name});
+    }
+
+    pub fn getOptionalExecutable(self: *FimoBuild, name: []const u8) ?*Executable {
+        return self.graph.getExecutable(name);
     }
 
     pub fn addPackage(self: *FimoBuild, options: CreatePackageOptions) *Package {

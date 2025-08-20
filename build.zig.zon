@@ -7,6 +7,10 @@
             .path = "tools/build-internals",
         },
 
+        .@"exe/profiler" = .{
+            .path = "exes/profiler",
+        },
+
         .@"pkg/fimo_std" = .{
             .path = "pkgs/fimo_std",
         },
