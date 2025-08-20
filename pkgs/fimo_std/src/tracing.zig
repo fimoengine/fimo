@@ -5,6 +5,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const ctx = @import("ctx.zig");
+const paths = @import("paths.zig");
 const time = @import("time.zig");
 pub const db = @import("tracing/db.zig");
 pub const net = @import("tracing/net.zig");
@@ -386,7 +387,6 @@ pub const spanNamedWithFormatter = default.spanNamedWithFormatter;
 pub const events = struct {
     /// Common header of all events.
     pub const Event = enum(u32) {
-        // Instrumentation
         start,
         finish,
         register_thread,
@@ -399,9 +399,14 @@ pub const events = struct {
         enter_span,
         exit_span,
         log_message,
-
-        // Hints
-        declare_event_info = 1024,
+        declare_event_info,
+        start_thread,
+        stop_thread,
+        load_image,
+        unload_image,
+        context_switch,
+        thread_wakeup,
+        call_stack_sample,
         _,
     };
 
@@ -492,10 +497,60 @@ pub const events = struct {
         message: [*]const u8,
         message_length: usize,
     };
-
     pub const DeclareEventInfo = extern struct {
         event: Event = .declare_event_info,
         info: *const EventInfo,
+    };
+    pub const StartThread = extern struct {
+        event: Event = .start_thread,
+        time: time.compat.Instant,
+        thread_id: usize,
+        process_id: usize,
+    };
+    pub const StopThread = extern struct {
+        event: Event = .stop_thread,
+        time: time.compat.Instant,
+        thread_id: usize,
+        process_id: usize,
+    };
+    pub const LoadImage = extern struct {
+        event: Event = .load_image,
+        time: time.compat.Instant,
+        image_base: usize,
+        image_size: usize,
+        image_path: paths.compat.Path,
+    };
+    pub const UnloadImage = extern struct {
+        event: Event = .unload_image,
+        time: time.compat.Instant,
+        image_base: usize,
+    };
+    pub const ContextSwitch = extern struct {
+        event: Event = .context_switch,
+        time: time.compat.Instant,
+        old_thread_id: usize,
+        new_thread_id: usize,
+        cpu: u8,
+        old_thread_wait_reason: u8,
+        old_thread_state: u8,
+        previous_cstate: u8,
+        new_thread_priority: i8,
+        old_thread_priority: i8,
+    };
+    pub const ThreadWakeup = extern struct {
+        event: Event = .thread_wakeup,
+        time: time.compat.Instant,
+        thread_id: usize,
+        cpu: u8,
+        adjust_reason: i8,
+        adjust_increment: i8,
+    };
+    pub const CallStackSample = extern struct {
+        event: Event = .call_stack_sample,
+        time: time.compat.Instant,
+        thread_id: usize,
+        call_stack: [*]const usize,
+        call_stack_len: usize,
     };
 };
 
@@ -509,9 +564,13 @@ pub const Subscriber = extern struct {
     on_event: *const fn (data: *anyopaque, event: *const events.Event) callconv(.c) void,
 
     pub fn of(T: type, value: *T) Subscriber {
-        if (!@hasDecl(T, "fimo_subscriber")) @compileError("fimo: invalid module, missing `pub const fimo_subscriber = .{...};` declaration: " ++ @typeName(T));
+        if (!@hasDecl(T, "fimo_subscriber")) @compileError("fimo: invalid subscriber, missing `pub const fimo_subscriber = .{...};` declaration: " ++ @typeName(T));
         const info = T.fimo_subscriber;
         const Info = @TypeOf(info);
+
+        inline for (std.meta.fields(Info)) |f| {
+            if (!@hasField(events.Event, f.name)) @compileError("fimo: invalid subscriber event, got: " ++ f.name);
+        }
 
         const wrapper = struct {
             fn on_event(data: *anyopaque, event: *const events.Event) callconv(.c) void {
@@ -565,12 +624,38 @@ pub const Subscriber = extern struct {
                         const ev: *const events.LogMessage = @alignCast(@fieldParentPtr("event", event));
                         info.log_message(self, ev);
                     },
-
                     .declare_event_info => if (comptime @hasField(Info, "declare_event_info")) {
                         const ev: *const events.DeclareEventInfo = @alignCast(@fieldParentPtr("event", event));
                         info.declare_event_info(self, ev);
                     },
-
+                    .start_thread => if (comptime @hasField(Info, "start_thread")) {
+                        const ev: *const events.StartThread = @alignCast(@fieldParentPtr("event", event));
+                        info.start_thread(self, ev);
+                    },
+                    .stop_thread => if (comptime @hasField(Info, "stop_thread")) {
+                        const ev: *const events.StopThread = @alignCast(@fieldParentPtr("event", event));
+                        info.stop_thread(self, ev);
+                    },
+                    .load_image => if (comptime @hasField(Info, "load_image")) {
+                        const ev: *const events.LoadImage = @alignCast(@fieldParentPtr("event", event));
+                        info.load_image(self, ev);
+                    },
+                    .unload_image => if (comptime @hasField(Info, "unload_image")) {
+                        const ev: *const events.UnloadImage = @alignCast(@fieldParentPtr("event", event));
+                        info.unload_image(self, ev);
+                    },
+                    .context_switch => if (comptime @hasField(Info, "context_switch")) {
+                        const ev: *const events.ContextSwitch = @alignCast(@fieldParentPtr("event", event));
+                        info.context_switch(self, ev);
+                    },
+                    .thread_wakeup => if (comptime @hasField(Info, "thread_wakeup")) {
+                        const ev: *const events.ThreadWakeup = @alignCast(@fieldParentPtr("event", event));
+                        info.thread_wakeup(self, ev);
+                    },
+                    .call_stack_sample => if (comptime @hasField(Info, "call_stack_sample")) {
+                        const ev: *const events.CallStackSample = @alignCast(@fieldParentPtr("event", event));
+                        info.call_stack_sample(self, ev);
+                    },
                     else => {},
                 }
             }
@@ -645,6 +730,41 @@ pub const Subscriber = extern struct {
 
     pub fn declareEventInfo(self: Subscriber, event: events.DeclareEventInfo) void {
         std.debug.assert(event.event == .declare_event_info);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn start_thread(self: Subscriber, event: events.StartThread) void {
+        std.debug.assert(event.event == .start_thread);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn stop_thread(self: Subscriber, event: events.StopThread) void {
+        std.debug.assert(event.event == .stop_thread);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn load_image(self: Subscriber, event: events.LoadImage) void {
+        std.debug.assert(event.event == .load_image);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn unload_image(self: Subscriber, event: events.UnloadImage) void {
+        std.debug.assert(event.event == .unload_image);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn contextSwitch(self: Subscriber, event: events.ContextSwitch) void {
+        std.debug.assert(event.event == .context_switch);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn threadWakeup(self: Subscriber, event: events.ThreadWakeup) void {
+        std.debug.assert(event.event == .thread_wakeup);
+        self.on_event(self.data, &event.event);
+    }
+
+    pub fn callStackSample(self: Subscriber, event: events.CallStackSample) void {
+        std.debug.assert(event.event == .call_stack_sample);
         self.on_event(self.data, &event.event);
     }
 };

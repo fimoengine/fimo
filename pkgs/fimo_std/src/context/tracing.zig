@@ -16,6 +16,7 @@ pub const stackTraceFormatter = pub_tracing.stackTraceFormatter;
 pub const events = pub_tracing.events;
 const ResourceCount = @import("ResourceCount.zig");
 pub const CallStack = @import("tracing/CallStack.zig");
+const Sampler = @import("tracing/Sampler.zig");
 
 const tracing = @This();
 
@@ -426,6 +427,7 @@ pub fn init(config: *const pub_tracing.Config) !void {
         .host_info_length = writer.end,
     });
     if (config.register_thread) registerThread();
+    Sampler.start() catch |err| logWarn(@src(), "could not start tracing sampler: {t}", .{err});
 }
 
 /// Deinitializes the tracing subsystem.
@@ -437,6 +439,7 @@ pub fn deinit() void {
     thread_count.waitUntilZero();
     call_stack_count.waitUntilZero();
 
+    Sampler.stop();
     const now = Instant.now().intoC();
     for (subscribers) |subscriber| subscriber.finish(.{ .time = now });
     allocator.free(subscribers);

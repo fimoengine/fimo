@@ -366,6 +366,8 @@ pub const Instant = struct {
     /// Number of nanoseconds.
     sub_sec_nanos: SubSecondNanos = 0,
 
+    var performance_frequency: std.atomic.Value(u64) = .init(0);
+
     /// The latest possible time point.
     pub const Max = Instant{
         .secs = std.math.maxInt(Seconds),
@@ -388,29 +390,44 @@ pub const Instant = struct {
         };
     }
 
+    pub fn initQPC(counter: u64) Instant {
+        if (builtin.os.tag != .windows) @compileError("initQPC is only supported on Windows");
+        const frequency = blk: {
+            const freq = performance_frequency.load(.monotonic);
+            if (freq == 0) {
+                @branchHint(.unlikely);
+                const f = std.os.windows.QueryPerformanceFrequency();
+                performance_frequency.store(f, .monotonic);
+                break :blk f;
+            }
+            break :blk freq;
+        };
+
+        const ns = blk: {
+            // 10Mhz (1 qpc tick every 100ns) is a common enough QPF value that we can optimize on it.
+            // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
+            const common_frequency = 10_000_000;
+            if (frequency == common_frequency) {
+                break :blk counter * (nanos_per_sec / common_frequency);
+            }
+
+            // Convert to ns using fixed point.
+            const scale = @as(u64, nanos_per_sec << 32) / @as(u32, @intCast(frequency));
+            const result = (@as(u96, counter) * scale) >> 32;
+            break :blk @as(u64, @truncate(result));
+        };
+        return Instant{
+            .secs = @intCast(ns / nanos_per_sec),
+            .sub_sec_nanos = @intCast(ns % nanos_per_sec),
+        };
+    }
+
     /// Returns the current time.
     pub fn now() Instant {
         switch (builtin.os.tag) {
             .windows => {
-                const frequency = std.os.windows.QueryPerformanceFrequency();
                 const counter = std.os.windows.QueryPerformanceCounter();
-                const ns = blk: {
-                    // 10Mhz (1 qpc tick every 100ns) is a common enough QPF value that we can optimize on it.
-                    // https://github.com/microsoft/STL/blob/785143a0c73f030238ef618890fd4d6ae2b3a3a0/stl/inc/chrono#L694-L701
-                    const common_frequency = 10_000_000;
-                    if (frequency == common_frequency) {
-                        break :blk counter * (nanos_per_sec / common_frequency);
-                    }
-
-                    // Convert to ns using fixed point.
-                    const scale = @as(u64, nanos_per_sec << 32) / @as(u32, @intCast(frequency));
-                    const result = (@as(u96, counter) * scale) >> 32;
-                    break :blk @as(u64, @truncate(result));
-                };
-                return Instant{
-                    .secs = @intCast(ns / nanos_per_sec),
-                    .sub_sec_nanos = @intCast(ns % nanos_per_sec),
-                };
+                return .initQPC(counter);
             },
             .wasi => {
                 var ns: std.os.wasi.timestamp_t = undefined;

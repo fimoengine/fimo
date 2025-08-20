@@ -1,0 +1,21 @@
+.{
+    .name = .fimo_profiler,
+    .version = "0.0.0",
+    //.minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .@"tools/build-internals" = .{
+            .path = "../../tools/build-internals",
+        },
+
+        .glfw = .{
+            .url = "git+https://github.com/glfw/glfw.git#acb92944d4e97e6efa36057927c9fcf114710226",
+            .hash = "N-V-__8AAErvSQCo_JysI-2CC8CH0spe0k6hAclCmnWoqG-1",
+        },
+    },
+    .fingerprint = 0x9bcb7532b465d5ee,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

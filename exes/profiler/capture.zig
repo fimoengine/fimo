@@ -102,7 +102,7 @@ pub fn main() !void {
                 @enumFromInt(v.main.epoch),
                 @enumFromInt(v.main.resolution),
                 v.main.available_memory,
-                v.main.process_id,
+                @enumFromInt(v.main.process_id),
                 v.main.num_cores,
                 v.main.cpu_arch,
                 v.main.cpu_id,
@@ -167,6 +167,47 @@ pub fn main() !void {
                 if (v.main.line_number < 0) std.math.maxInt(u32) else @intCast(v.main.line_number),
                 v.main.level,
             ),
+            .start_thread => |v| _ = try writer.startThread(
+                @enumFromInt(v.time),
+                @enumFromInt(v.thread_id),
+                @enumFromInt(v.process_id),
+            ),
+            .stop_thread => |v| _ = try writer.stopThread(
+                @enumFromInt(v.time),
+                @enumFromInt(v.thread_id),
+                @enumFromInt(v.process_id),
+            ),
+            .load_image => |v| _ = try writer.loadImage(
+                @enumFromInt(v.main.time),
+                v.main.image_base,
+                @intCast(v.main.image_size),
+                v.path,
+            ),
+            .unload_image => |v| _ = try writer.unloadImage(@enumFromInt(v.time), v.image_base),
+            .context_switch => |v| _ = try writer.contextSwitch(
+                @enumFromInt(v.time),
+                @enumFromInt(v.old_thread_id),
+                @enumFromInt(v.new_thread_id),
+                v.cpu,
+                v.old_thread_wait_reason,
+                v.old_thread_state,
+                v.previous_cstate,
+                v.new_thread_priority,
+                v.old_thread_priority,
+            ),
+            .thread_wakeup => |v| _ = try writer.threadWakeup(
+                @enumFromInt(v.time),
+                @enumFromInt(v.thread_id),
+                v.cpu,
+                v.adjust_reason,
+                v.adjust_increment,
+            ),
+            .call_stack_sample => |v| _ = try writer.callStackSample(
+                @enumFromInt(v.main.time),
+                @enumFromInt(v.main.thread_id),
+                v.call_stack,
+            ),
+            else => {},
         }
     }
 }

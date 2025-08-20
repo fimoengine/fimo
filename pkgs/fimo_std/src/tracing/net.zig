@@ -122,7 +122,6 @@ pub const protocol = struct {
                     return self.message[0..len];
                 }
             },
-
             declare_event_info: struct {
                 main: DeclareEventInfo,
                 strings: []u8,
@@ -154,6 +153,28 @@ pub const protocol = struct {
                     return self.strings[offset..][0..len];
                 }
             },
+            start_thread: StartThread,
+            stop_thread: StopThread,
+            load_image: struct {
+                main: LoadImage,
+                path: []u8,
+
+                pub fn deinit(self: @This(), gpa: Allocator) void {
+                    gpa.free(self.path);
+                }
+            },
+            unload_image: UnloadImage,
+            context_switch: ContextSwitch,
+            thread_wakeup: ThreadWakeup,
+            call_stack_sample: struct {
+                main: CallStackSample,
+                call_stack: []u64,
+
+                pub fn deinit(self: @This(), gpa: Allocator) void {
+                    gpa.free(self.call_stack);
+                }
+            },
+            _,
 
             pub fn deinit(self: Event, gpa: Allocator) void {
                 switch (self) {
@@ -161,6 +182,8 @@ pub const protocol = struct {
                     .enter_span => |event| event.deinit(gpa),
                     .log_message => |event| event.deinit(gpa),
                     .declare_event_info => |event| event.deinit(gpa),
+                    .load_image => |event| event.deinit(gpa),
+                    .call_stack_sample => |event| event.deinit(gpa),
                     else => {},
                 }
             }
@@ -243,7 +266,6 @@ pub const protocol = struct {
             info_id: u64,
             message_len: u16,
         };
-
         pub const DeclareEventInfo = packed struct(u224) {
             event: tracing.events.Event = .declare_event_info,
             id: u64,
@@ -253,6 +275,56 @@ pub const protocol = struct {
             file_name_len: u16,
             line_number: i32,
             level: Level,
+        };
+        pub const StartThread = packed struct(u224) {
+            event: tracing.events.Event = .start_thread,
+            time: u64,
+            thread_id: u64,
+            process_id: u64,
+        };
+        pub const StopThread = packed struct(u224) {
+            event: tracing.events.Event = .stop_thread,
+            time: u64,
+            thread_id: u64,
+            process_id: u64,
+        };
+        pub const LoadImage = packed struct(u240) {
+            event: tracing.events.Event = .load_image,
+            time: u64,
+            image_base: u64,
+            image_size: u64,
+            image_path_len: u16,
+        };
+        pub const UnloadImage = packed struct(u160) {
+            event: tracing.events.Event = .unload_image,
+            time: u64,
+            image_base: u64,
+        };
+        pub const ContextSwitch = packed struct(u272) {
+            event: tracing.events.Event = .context_switch,
+            time: u64,
+            old_thread_id: u64,
+            new_thread_id: u64,
+            cpu: u8,
+            old_thread_wait_reason: u8,
+            old_thread_state: u8,
+            previous_cstate: u8,
+            new_thread_priority: i8,
+            old_thread_priority: i8,
+        };
+        pub const ThreadWakeup = packed struct(u184) {
+            event: tracing.events.Event = .thread_wakeup,
+            time: u64,
+            thread_id: u64,
+            cpu: u8,
+            adjust_reason: i8,
+            adjust_increment: i8,
+        };
+        pub const CallStackSample = packed struct(u176) {
+            event: tracing.events.Event = .call_stack_sample,
+            time: u64,
+            thread_id: u64,
+            call_stack_len: u16,
         };
     };
 };
@@ -281,8 +353,14 @@ pub const NetLogger = struct {
         .enter_span = onEnterSpan,
         .exit_span = onExitSpan,
         .log_message = onLogMessage,
-
         .declare_event_info = onDeclareEventInfo,
+        .start_thread = onStartThread,
+        .stop_thread = onStopThread,
+        .load_image = onLoadImage,
+        .unload_image = onUnloadImage,
+        .context_switch = onContextSwitch,
+        .thread_wakeup = onThreadWakeup,
+        .call_stack_sample = onCallStackSample,
     };
 
     pub const Options = struct {
@@ -505,6 +583,92 @@ pub const NetLogger = struct {
             .level = event.info.level,
         };
         self.pushMessage(.{ .declare_event_info = .{ .main = ev, .strings = strings } });
+    }
+
+    fn onStartThread(self: *NetLogger, event: *const events.StartThread) void {
+        if (self.closed.load(.acquire)) return;
+        const ev: protocol.events.StartThread = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .thread_id = event.thread_id,
+            .process_id = event.process_id,
+        };
+        self.pushMessage(.{ .start_thread = ev });
+    }
+
+    fn onStopThread(self: *NetLogger, event: *const events.StopThread) void {
+        if (self.closed.load(.acquire)) return;
+        const ev: protocol.events.StopThread = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .thread_id = event.thread_id,
+            .process_id = event.process_id,
+        };
+        self.pushMessage(.{ .stop_thread = ev });
+    }
+
+    fn onLoadImage(self: *NetLogger, event: *const events.LoadImage) void {
+        if (self.closed.load(.acquire)) return;
+
+        const path = self.gpa.dupe(
+            u8,
+            if (event.image_path.path) |p| p[0..event.image_path.length] else "",
+        ) catch @panic("oom");
+        const ev: protocol.events.LoadImage = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .image_base = event.image_base,
+            .image_size = event.image_size,
+            .image_path_len = @intCast(event.image_path.length),
+        };
+        self.pushMessage(.{ .load_image = .{ .main = ev, .path = path } });
+    }
+
+    fn onUnloadImage(self: *NetLogger, event: *const events.UnloadImage) void {
+        if (self.closed.load(.acquire)) return;
+        const ev: protocol.events.UnloadImage = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .image_base = event.image_base,
+        };
+        self.pushMessage(.{ .unload_image = ev });
+    }
+
+    fn onContextSwitch(self: *NetLogger, event: *const events.ContextSwitch) void {
+        if (self.closed.load(.acquire)) return;
+        const ev: protocol.events.ContextSwitch = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .old_thread_id = event.old_thread_id,
+            .new_thread_id = event.new_thread_id,
+            .cpu = event.cpu,
+            .old_thread_wait_reason = event.old_thread_wait_reason,
+            .old_thread_state = event.old_thread_state,
+            .previous_cstate = event.previous_cstate,
+            .new_thread_priority = event.new_thread_priority,
+            .old_thread_priority = event.old_thread_priority,
+        };
+        self.pushMessage(.{ .context_switch = ev });
+    }
+
+    fn onThreadWakeup(self: *NetLogger, event: *const events.ThreadWakeup) void {
+        if (self.closed.load(.acquire)) return;
+        const ev: protocol.events.ThreadWakeup = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .thread_id = event.thread_id,
+            .cpu = event.cpu,
+            .adjust_reason = event.adjust_reason,
+            .adjust_increment = event.adjust_increment,
+        };
+        self.pushMessage(.{ .thread_wakeup = ev });
+    }
+
+    fn onCallStackSample(self: *NetLogger, event: *const events.CallStackSample) void {
+        if (self.closed.load(.acquire)) return;
+        const call_stack = self.gpa.alloc(u64, event.call_stack_len) catch @panic("oom");
+        for (call_stack, event.call_stack[0..event.call_stack_len]) |*dst, src| dst.* = src;
+
+        const ev: protocol.events.CallStackSample = .{
+            .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
+            .thread_id = event.thread_id,
+            .call_stack_len = @truncate(event.call_stack_len),
+        };
+        self.pushMessage(.{ .call_stack_sample = .{ .main = ev, .call_stack = call_stack } });
     }
 
     const Block = struct {
@@ -807,12 +971,27 @@ pub const Server = struct {
                 try self.writeStruct(main);
                 try self.writeString(strings);
             },
-
             .declare_event_info => |m| {
                 const main, const strings = .{ m.main, m.strings };
                 try self.writeStruct(main);
                 try self.writeString(strings);
             },
+            .start_thread => |m| try self.writeStruct(m),
+            .stop_thread => |m| try self.writeStruct(m),
+            .load_image => |m| {
+                const main, const path = .{ m.main, m.path };
+                try self.writeStruct(main);
+                try self.writeString(path);
+            },
+            .unload_image => |m| try self.writeStruct(m),
+            .context_switch => |m| try self.writeStruct(m),
+            .thread_wakeup => |m| try self.writeStruct(m),
+            .call_stack_sample => |m| {
+                const main, const call_stack = .{ m.main, m.call_stack };
+                try self.writeStruct(main);
+                try self.writeString(@ptrCast(call_stack));
+            },
+            else => @panic("unknown event"),
         }
     }
 
@@ -1011,7 +1190,6 @@ pub const Client = struct {
                 try self.readString(message);
                 return .{ .log_message = .{ .main = event, .message = message } };
             },
-
             .declare_event_info => {
                 const event = self.readStruct(protocol.events.DeclareEventInfo);
                 const name_len: usize = event.name_len;
@@ -1022,6 +1200,38 @@ pub const Client = struct {
                 const strings = try self.gpa.alloc(u8, strings_len);
                 try self.readString(strings);
                 return .{ .declare_event_info = .{ .main = event, .strings = strings } };
+            },
+            .start_thread => {
+                const event = self.readStruct(protocol.events.StartThread);
+                return .{ .start_thread = event };
+            },
+            .stop_thread => {
+                const event = self.readStruct(protocol.events.StopThread);
+                return .{ .stop_thread = event };
+            },
+            .load_image => {
+                const event = self.readStruct(protocol.events.LoadImage);
+                const path = try self.gpa.alloc(u8, event.image_path_len);
+                try self.readString(path);
+                return .{ .load_image = .{ .main = event, .path = path } };
+            },
+            .unload_image => {
+                const event = self.readStruct(protocol.events.UnloadImage);
+                return .{ .unload_image = event };
+            },
+            .context_switch => {
+                const event = self.readStruct(protocol.events.ContextSwitch);
+                return .{ .context_switch = event };
+            },
+            .thread_wakeup => {
+                const event = self.readStruct(protocol.events.ThreadWakeup);
+                return .{ .thread_wakeup = event };
+            },
+            .call_stack_sample => {
+                const event = self.readStruct(protocol.events.CallStackSample);
+                const call_stack = try self.gpa.alloc(u64, event.call_stack_len);
+                try self.readString(@ptrCast(call_stack));
+                return .{ .call_stack_sample = .{ .main = event, .call_stack = call_stack } };
             },
             else => return error.UnknownEvent,
         }

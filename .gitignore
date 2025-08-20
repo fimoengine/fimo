@@ -590,3 +590,8 @@ docgen_tmp/
 
 # Traces
 *.ftrdb
+
+# ImGui
+imgui.ini
+*_imgui.ini
+*.imgui.ini

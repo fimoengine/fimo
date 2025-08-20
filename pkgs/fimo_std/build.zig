@@ -11,6 +11,9 @@ pub fn configure(b: *build_internals.FimoBuild) void {
     // const lz4 = lz4_dependency.artifact("lz4");
     // _ = lz4; // autofix
 
+    const win32_dependency = b.build.dependency("win32", .{});
+    const win32 = win32_dependency.module("win32");
+
     // Generate additional build files.
     const wf = b.build.addWriteFiles();
     const context_version = generateVersion(b.build, wf);
@@ -37,6 +40,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
     });
     module.addImport("c", translate_c.createModule());
     module.addImport("context_version", context_version);
+    module.addImport("win32", win32);
     module.addIncludePath(headers.getDirectory());
 
     const pkg = b.addPackage(.{
@@ -58,6 +62,7 @@ pub fn configure(b: *build_internals.FimoBuild) void {
                 });
                 t.addImport("c", translate_c.createModule());
                 t.addImport("context_version", context_version);
+                t.addImport("win32", win32);
                 t.addIncludePath(headers.getDirectory());
                 t.addImport("fimo_std", t);
 
