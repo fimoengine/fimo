@@ -11,10 +11,9 @@
         //     .hash = "lz4-1.10.0-5-ewyzw7YNAADOUkQ7M9fjW005oGzxt9b6m0uPd_kQC48z",
         // },
         .win32 = .{
-            // Switch once the changes have been merged.
-            // .url = "git+https://github.com/marlersoft/zigwin32.git",
-            .url = "git+https://github.com/kcbanner/zigwin32.git#d53efcf7e94b130fb0e84979aef6e5193ed377f7",
-            .hash = "zigwin32-25.0.28-preview-AAAAAGeI5ANWTScxLlUycxTkQN25FlWjLnrYPNBjImlH",
+            .url = "git+https://github.com/marlersoft/zigwin32.git#9d399c0895de4746c1fcab366841e2ab031b0429",
+            .hash = "zigwin32-25.0.28-preview-AAAAANd_5APbcon3QqoYfLKnJ13fiBGJSGq9YrVZsfI-",
+            .lazy = true,
         },
     },
     .fingerprint = 0x6d5533552999aa5,

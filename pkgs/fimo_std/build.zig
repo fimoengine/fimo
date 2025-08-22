@@ -3,47 +3,52 @@ const builtin = @import("builtin");
 
 const build_internals = @import("tools/build-internals");
 
-pub fn configure(b: *build_internals.FimoBuild) void {
+pub fn configure(builder: *build_internals.FimoBuild) void {
+    const b = builder.build;
+    const target = builder.graph.target;
+    const optimize = builder.graph.optimize;
+
     // const lz4_dependency = b.dependency("lz4", .{
-    //     .target = b.graph.target,
-    //     .optimize = b.graph.optimize,
+    //     .target = target,
+    //     .optimize = optimize,
     // });
     // const lz4 = lz4_dependency.artifact("lz4");
     // _ = lz4; // autofix
 
-    const win32_dependency = b.build.dependency("win32", .{});
-    const win32 = win32_dependency.module("win32");
+    const wf = b.addWriteFiles();
+    const context_version = generateVersion(b, wf);
 
-    // Generate additional build files.
-    const wf = b.build.addWriteFiles();
-    const context_version = generateVersion(b.build, wf);
+    const headers = b.addWriteFiles();
+    _ = headers.addCopyDirectory(b.path("include/"), ".", .{});
+    _ = headers.addCopyDirectory(wf.getDirectory().path(b, "include/"), ".", .{});
+    _ = headers.addCopyFile(b.path("LICENSE-MIT"), "fimo_std/LICENSE-MIT");
+    _ = headers.addCopyFile(b.path("LICENSE-APACHE"), "fimo_std/LICENSE-APACHE");
+    _ = headers.addCopyFile(b.path("LICENSE-EXTERNAL"), "fimo_std/LICENSE-EXTERNAL");
 
-    const headers = b.build.addWriteFiles();
-    _ = headers.addCopyDirectory(b.build.path("include/"), ".", .{});
-    _ = headers.addCopyDirectory(wf.getDirectory().path(b.build, "include/"), ".", .{});
-    _ = headers.addCopyFile(b.build.path("LICENSE-MIT"), "fimo_std/LICENSE-MIT");
-    _ = headers.addCopyFile(b.build.path("LICENSE-APACHE"), "fimo_std/LICENSE-APACHE");
-
-    const translate_c = b.build.addTranslateC(.{
-        .root_source_file = headers.getDirectory().path(b.build, "fimo_std/fimo.h"),
-        .target = b.graph.target,
-        .optimize = b.graph.optimize,
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = headers.getDirectory().path(b, "fimo_std/fimo.h"),
+        .target = target,
+        .optimize = optimize,
     });
     translate_c.addIncludePath(headers.getDirectory());
 
-    const module = b.build.addModule("fimo_std", .{
-        .root_source_file = b.build.path("src/root.zig"),
-        .target = b.graph.target,
-        .optimize = b.graph.optimize,
+    const module = b.addModule("fimo_std", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
         .link_libc = true,
         .pic = true,
     });
     module.addImport("c", translate_c.createModule());
     module.addImport("context_version", context_version);
-    module.addImport("win32", win32);
     module.addIncludePath(headers.getDirectory());
+    if (target.result.os.tag == .windows) {
+        if (b.lazyDependency("win32", .{})) |dep| {
+            module.addImport("win32", dep.module("win32"));
+        }
+    }
 
-    const pkg = b.addPackage(.{
+    const pkg = builder.addPackage(.{
         .name = "fimo_std",
         .root_module = module,
         .headers = headers.getDirectory(),
@@ -52,60 +57,65 @@ pub fn configure(b: *build_internals.FimoBuild) void {
     _ = pkg.addTest(.{
         .step = .{
             .module = blk: {
-                const t = b.build.addModule("fimo_std", .{
-                    .root_source_file = b.build.path("src/root.zig"),
-                    .target = b.graph.target,
-                    .optimize = b.graph.optimize,
-                    .valgrind = b.graph.target.result.os.tag == .linux,
+                const t = b.addModule("fimo_std", .{
+                    .root_source_file = b.path("src/root.zig"),
+                    .target = target,
+                    .optimize = optimize,
+                    .valgrind = target.result.os.tag == .linux,
                     .link_libc = true,
                     .pic = true,
                 });
                 t.addImport("c", translate_c.createModule());
                 t.addImport("context_version", context_version);
-                t.addImport("win32", win32);
                 t.addIncludePath(headers.getDirectory());
                 t.addImport("fimo_std", t);
+
+                if (target.result.os.tag == .windows) {
+                    if (b.lazyDependency("win32", .{})) |dep| {
+                        t.addImport("win32", dep.module("win32"));
+                    }
+                }
 
                 break :blk t;
             },
         },
     });
 
-    const event_loop_test = b.build.addExecutable(.{
+    const event_loop_test = b.addExecutable(.{
         .name = "event_loop_test",
-        .root_module = b.build.createModule(.{
-            .target = b.graph.target,
-            .optimize = b.graph.optimize,
-            .root_source_file = b.build.path("tests/event_loop.zig"),
-            .valgrind = b.graph.target.result.os.tag == .linux,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("tests/event_loop.zig"),
+            .valgrind = target.result.os.tag == .linux,
         }),
-        .use_llvm = if (b.graph.target.result.os.tag == .linux) true else null,
+        .use_llvm = if (target.result.os.tag == .linux) true else null,
     });
     event_loop_test.root_module.addImport("fimo_std", pkg.root_module);
     _ = pkg.addTest(.{ .name = "event_loop_test", .step = .{ .executable = event_loop_test } });
 
-    const init_ctx_test = b.build.addExecutable(.{
+    const init_ctx_test = b.addExecutable(.{
         .name = "init_context_test",
-        .root_module = b.build.createModule(.{
-            .target = b.graph.target,
-            .optimize = b.graph.optimize,
-            .root_source_file = b.build.path("tests/init_context.zig"),
-            .valgrind = b.graph.target.result.os.tag == .linux,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("tests/init_context.zig"),
+            .valgrind = target.result.os.tag == .linux,
         }),
-        .use_llvm = if (b.graph.target.result.os.tag == .linux) true else null,
+        .use_llvm = if (target.result.os.tag == .linux) true else null,
     });
     init_ctx_test.root_module.addImport("fimo_std", pkg.root_module);
     _ = pkg.addTest(.{ .name = "init_context_test", .step = .{ .executable = init_ctx_test } });
 
-    const local_modules_test = b.build.addExecutable(.{
+    const local_modules_test = b.addExecutable(.{
         .name = "local_modules_test",
-        .root_module = b.build.createModule(.{
-            .target = b.graph.target,
-            .optimize = b.graph.optimize,
-            .root_source_file = b.build.path("tests/load_local_modules.zig"),
-            .valgrind = b.graph.target.result.os.tag == .linux,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("tests/load_local_modules.zig"),
+            .valgrind = target.result.os.tag == .linux,
         }),
-        .use_llvm = if (b.graph.target.result.os.tag == .linux) true else null,
+        .use_llvm = if (target.result.os.tag == .linux) true else null,
     });
     local_modules_test.root_module.addImport("fimo_std", pkg.root_module);
     _ = pkg.addTest(.{ .name = "local_modules_test", .step = .{ .executable = local_modules_test } });
