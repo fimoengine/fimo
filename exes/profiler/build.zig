@@ -105,13 +105,12 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
             });
         },
         .linux => {
-            // TODO(gabriel): Enable once the package compiles.
-            // if (b.lazyDependency("x11_headers", .{
-            //     .target = target,
-            //     .optimize = optimize,
-            // })) |dep| {
-            //     profiler.root_module.linkLibrary(dep.artifact("x11-headers"));
-            // }
+            if (b.lazyDependency("x11_headers", .{
+                .target = target,
+                .optimize = optimize,
+            })) |dep| {
+                profiler.root_module.addIncludePath(dep.path(""));
+            }
             if (b.lazyDependency("wayland_headers", .{})) |dep| {
                 profiler.root_module.addIncludePath(dep.path("wayland"));
                 profiler.root_module.addIncludePath(dep.path("wayland-protocols"));
