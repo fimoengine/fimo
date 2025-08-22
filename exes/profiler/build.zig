@@ -118,14 +118,17 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
             }
 
             profiler.root_module.addCSourceFiles(.{
+                .root = glfw_dep.path("src"),
                 .files = &glfw_linux_sources,
             });
             profiler.root_module.addCMacro("_GLFW_X11", "1");
             profiler.root_module.addCSourceFiles(.{
+                .root = glfw_dep.path("src"),
                 .files = &glfw_linux_x11_sources,
             });
             profiler.root_module.addCMacro("_GLFW_WAYLAND", "1");
             profiler.root_module.addCSourceFiles(.{
+                .root = glfw_dep.path("src"),
                 .files = &glfw_linux_wl_sources,
                 .flags = &.{
                     "-Wno-implicit-function-declaration",
