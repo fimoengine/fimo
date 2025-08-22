@@ -16,14 +16,15 @@
             .hash = "N-V-__8AALShqgXkvqYU6f__FrA22SMWmi2TXCJjNTO1m8XJ",
             .lazy = true,
         },
-        // TODO(gabriel): Enable once the package compiles.
-        // .x11_headers = .{
-        //     .url = "git+https://github.com/Batres3/x11-headers.git#80dba49598570c241d2c0ba5ac045a2951d45cad",
-        //     .hash = "N-V-__8AABeUQgAUPAOubtaj8TZjdxYJ1rGLi4xxLDErTFwt",
-        // },
+        .x11_headers = .{
+            .url = "git+https://github.com/fimoengine/x11-headers.git#b2729f9eee75c1b8fdde5b007c64f6587de9154d",
+            .hash = "N-V-__8AAO0OQwDhtnnOfNkOXQCGh_jWDP4uP-UL9GpHnBAW",
+            .lazy = true,
+        },
         .wayland_headers = .{
-            .url = "git+https://github.com/Batres3/wayland-headers.git#190b247ebc85546752dcf0255070fe835e2262b8",
-            .hash = "N-V-__8AALvXCgD7AaGEzoGpZFSnomVUd9osYPJN3P4jxxj9",
+            .url = "git+https://github.com/fimoengine/wayland-headers.git#d9c03263fb12a607e55801484956bb07550f0095",
+            .hash = "N-V-__8AAJeaCgCDHbI4-xYUTr12laKmdXV-6NDKZnpHtiVd",
+            .lazy = true,
         },
     },
     .fingerprint = 0x9bcb7532b465d5ee,
