@@ -105,6 +105,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
             });
         },
         .linux => {
+            profiler.root_module.addIncludePath(b.path("Mesa"));
             if (b.lazyDependency("x11_headers", .{
                 .target = target,
                 .optimize = optimize,
