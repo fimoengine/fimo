@@ -11,7 +11,7 @@
             .url = "git+https://github.com/glfw/glfw.git#acb92944d4e97e6efa36057927c9fcf114710226",
             .hash = "N-V-__8AAErvSQCo_JysI-2CC8CH0spe0k6hAclCmnWoqG-1",
         },
-        .@"xcode-frameworks" = .{
+        .xcode_frameworks = .{
             .url = "git+https://github.com/hexops/xcode-frameworks.git#8a1cfb373587ea4c9bb1468b7c986462d8d4e10e",
             .hash = "N-V-__8AALShqgXkvqYU6f__FrA22SMWmi2TXCJjNTO1m8XJ",
             .lazy = true,
