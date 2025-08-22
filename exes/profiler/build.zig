@@ -71,6 +71,18 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                 .files = &glfw_windows_sources,
             });
         },
+        .macos => {
+            profiler.root_module.linkFramework("IOKit", .{});
+            profiler.root_module.linkFramework("Cocoa", .{});
+            profiler.root_module.linkFramework("QuartzCore", .{});
+            profiler.root_module.linkFramework("OpenGL", .{});
+
+            profiler.root_module.addCMacro("_GLFW_COCOA", "1");
+            profiler.root_module.addCSourceFiles(.{
+                .root = glfw_dep.path("src"),
+                .files = &glfw_macos_sources,
+            });
+        },
         else => {},
     }
 

@@ -759,7 +759,7 @@ pub const DBWriter = struct {
             _ = UnmapViewOfFile(self.block);
             windows.CloseHandle(self.handle);
         } else {
-            const ptr: [*]align(table_alignment) u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.file_len]);
         }
 
@@ -772,7 +772,7 @@ pub const DBWriter = struct {
             if (FlushViewOfFile(self.block, 0) == 0) return error.FlushFailed;
             if (windows.kernel32.FlushFileBuffers(self.file.handle) == 0) return error.FlushFailed;
         } else {
-            const ptr: [*]align(table_alignment) u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
             try posix.msync(ptr[0..self.file_len], posix.MSF.SYNC);
         }
     }
@@ -806,7 +806,7 @@ pub const DBWriter = struct {
                 self.file.handle,
                 0,
             );
-            const ptr: [*]align(table_alignment) u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.file_len]);
             self.block = @ptrCast(@alignCast(mapping));
         }
@@ -1391,7 +1391,7 @@ pub const DBReader = struct {
             _ = UnmapViewOfFile(self.block);
             windows.CloseHandle(self.handle);
         } else {
-            const ptr: [*]align(table_alignment) const u8 = @ptrCast(@alignCast(self.block));
+            const ptr: [*]align(heap.page_size_min) const u8 = @ptrCast(@alignCast(self.block));
             posix.munmap(ptr[0..self.handle]);
         }
         self.* = undefined;
