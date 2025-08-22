@@ -6,6 +6,11 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     const b = builder.build;
     const target = builder.graph.target;
     const optimize = builder.graph.optimize;
+    switch (target.result.os.tag) {
+        .linux, .windows, .macos => {},
+        else => return,
+    }
+
     const glfw_dep = b.dependency("glfw", .{});
     const fimo_std_pkg = builder.getPackage("fimo_std");
 
@@ -72,6 +77,22 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
             });
         },
         .macos => {
+            profiler.root_module.addCMacro("__kernel_ptr_semantics", "");
+            if (b.lazyDependency("xcode_frameworks", .{
+                .target = target,
+                .optimize = optimize,
+            })) |dep| {
+                profiler.root_module.addSystemFrameworkPath(dep.path("Frameworks"));
+                profiler.root_module.addSystemIncludePath(dep.path("include"));
+                profiler.root_module.addLibraryPath(dep.path("lib"));
+            }
+
+            profiler.root_module.linkSystemLibrary("objc", .{});
+            profiler.root_module.linkFramework("CoreFoundation", .{});
+            profiler.root_module.linkFramework("AppKit", .{});
+            profiler.root_module.linkFramework("CoreServices", .{});
+            profiler.root_module.linkFramework("CoreGraphics", .{});
+            profiler.root_module.linkFramework("Foundation", .{});
             profiler.root_module.linkFramework("IOKit", .{});
             profiler.root_module.linkFramework("Cocoa", .{});
             profiler.root_module.linkFramework("QuartzCore", .{});
@@ -83,7 +104,35 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                 .files = &glfw_macos_sources,
             });
         },
-        else => {},
+        .linux => {
+            // TODO(gabriel): Enable once the package compiles.
+            // if (b.lazyDependency("x11_headers", .{
+            //     .target = target,
+            //     .optimize = optimize,
+            // })) |dep| {
+            //     profiler.root_module.linkLibrary(dep.artifact("x11-headers"));
+            // }
+            if (b.lazyDependency("wayland_headers", .{})) |dep| {
+                profiler.root_module.addIncludePath(dep.path("wayland"));
+                profiler.root_module.addIncludePath(dep.path("wayland-protocols"));
+            }
+
+            profiler.root_module.addCSourceFiles(.{
+                .files = &glfw_linux_sources,
+            });
+            profiler.root_module.addCMacro("_GLFW_X11", "1");
+            profiler.root_module.addCSourceFiles(.{
+                .files = &glfw_linux_x11_sources,
+            });
+            profiler.root_module.addCMacro("_GLFW_WAYLAND", "1");
+            profiler.root_module.addCSourceFiles(.{
+                .files = &glfw_linux_wl_sources,
+                .flags = &.{
+                    "-Wno-implicit-function-declaration",
+                },
+            });
+        },
+        else => unreachable,
     }
 
     const capture = builder.addExecutable(.{
