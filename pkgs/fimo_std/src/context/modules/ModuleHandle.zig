@@ -26,11 +26,11 @@ pub const ModuleHandleError = error{
 } || PathError || Allocator.Error;
 
 pub const IteratorFn = *const fn (
+    context: ?*anyopaque,
     f: *const fn (
+        context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-        data: ?*anyopaque,
     ) callconv(.c) bool,
-    data: ?*anyopaque,
 ) callconv(.c) void;
 
 const Inner = if (builtin.os.tag == .windows)

@@ -12,7 +12,10 @@ pub const Export = exports.Export;
 pub const Module = exports.Module;
 pub const ModuleBundle = exports.ModuleBundle;
 const paths = @import("paths.zig");
+const Path = paths.Path;
 const tasks = @import("tasks.zig");
+const Waker = tasks.Waker;
+const Poll = tasks.Poll;
 const EnqueuedFuture = tasks.EnqueuedFuture;
 const Fallible = tasks.Fallible;
 const Version = @import("Version.zig");
@@ -1015,188 +1018,74 @@ pub const RootInstance = extern struct {
     }
 };
 
-/// Type-erased set of modules to load by the subsystem.
-pub const LoadingSet = extern struct {
-    data: *anyopaque,
-    vtable: *const LoadingSet.VTable,
-
-    /// Operation of the filter function.
-    pub const FilterRequest = enum(i32) {
-        skip,
-        load,
-    };
-
-    /// VTable of a loading set.
-    ///
-    /// Adding to the VTable is not a breaking change.
-    pub const VTable = extern struct {
-        ref: *const fn (ctx: *anyopaque) callconv(.c) void,
-        unref: *const fn (ctx: *anyopaque) callconv(.c) void,
-        query_module: *const fn (
-            ctx: *anyopaque,
-            module: [*:0]const u8,
-        ) callconv(.c) bool,
-        query_symbol: *const fn (
-            ctx: *anyopaque,
-            symbol: [*:0]const u8,
-            namespace: [*:0]const u8,
-            version: Version.CVersion,
-        ) callconv(.c) bool,
-        add_callback: *const fn (
-            ctx: *anyopaque,
-            module: [*:0]const u8,
-            on_success: *const fn (info: *const Info, data: ?*anyopaque) callconv(.c) void,
-            on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
-            on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-            data: ?*anyopaque,
-        ) callconv(.c) ctx.Status,
-        add_module: *const fn (
-            ctx: *anyopaque,
-            owner: *const OpaqueInstance,
-            module: *const Export,
-        ) callconv(.c) ctx.Status,
-        add_modules_from_path: *const fn (
-            ctx: *anyopaque,
-            path: paths.compat.Path,
-            filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
-            filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-            filter_data: ?*anyopaque,
-        ) callconv(.c) ctx.Status,
-        add_modules_from_local: *const fn (
-            ctx: *anyopaque,
-            filter_fn: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
-            filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-            filter_data: ?*anyopaque,
-            iterator_fn: *const fn (
-                f: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
-                data: ?*anyopaque,
-            ) callconv(.c) void,
-            bin_ptr: *const anyopaque,
-        ) callconv(.c) ctx.Status,
-        commit: *const fn (
-            ctx: *anyopaque,
-        ) callconv(.c) EnqueuedFuture(Fallible(void)),
-    };
-
+/// Handle to a set of modules to load by the subsytem.
+///
+/// Modules can only be loaded after all of their dependencies have been resolved uniquely.
+/// A loading set batches the loading of multiple modules, procedurally determining an appropriate
+/// loading order for as many modules as possible.
+pub const LoadingSet = opaque {
     /// Constructs a new empty set.
-    ///
-    /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
-    /// to determine a suitable load order. A loading set is a utility to facilitate this process,
-    /// by automatically computing a suitable load order for a batch of modules.
-    pub fn init() ctx.Error!LoadingSet {
-        var set: LoadingSet = undefined;
+    pub fn init() ctx.Error!*LoadingSet {
+        var set: *LoadingSet = undefined;
         const handle = ctx.Handle.getHandle();
         try handle.modules_v0.set_new(&set).intoErrorUnion();
         return set;
     }
 
-    /// Increases the reference count of the instance.
-    pub fn ref(self: LoadingSet) void {
-        self.vtable.ref(self.data);
+    /// Drops the loading set.
+    ///
+    /// Scheduled operations will be completed, but the caller invalidates their reference to the handle.
+    pub fn deinit(self: *LoadingSet) void {
+        const handle = ctx.Handle.getHandle();
+        handle.modules_v0.set_destroy(self);
     }
 
-    /// Decreases the reference count of the instance.
-    pub fn unref(self: LoadingSet) void {
-        self.vtable.unref(self.data);
+    /// Checks whether the set contains some module.
+    pub fn containsModule(self: *LoadingSet, module: [:0]const u8) bool {
+        const handle = ctx.Handle.getHandle();
+        return handle.modules_v0.set_contains_module(self, module);
     }
 
-    /// Checks whether the set contains a specific module.
-    pub fn queryModule(
-        self: LoadingSet,
-        module: [:0]const u8,
-    ) bool {
-        return self.vtable.query_module(self.data, module);
+    /// Checks whether the set contains some symbol.
+    pub fn containsSymbol(self: *LoadingSet, symbol: Symbol) bool {
+        return self.containsSymbolRaw(symbol.name, symbol.namespace, symbol.version);
     }
 
-    /// Checks whether the set contains a specific symbol.
-    pub fn querySymbol(
-        self: LoadingSet,
+    /// Checks whether the set contains some symbol.
+    pub fn containsSymbolRaw(
+        self: *LoadingSet,
         name: [:0]const u8,
         namespace: [:0]const u8,
         version: Version,
     ) bool {
-        return self.vtable.query_symbol(
-            self.data,
-            name.ptr,
-            namespace.ptr,
-            version.intoC(),
-        );
+        const handle = ctx.Handle.getHandle();
+        return handle.modules_v0.set_contains_symbol(self, name, namespace, version.intoC());
     }
 
-    /// Adds a status callback to the set.
+    /// Resolved result of `pollModule`.
+    pub const ResolvedModule = extern struct {
+        /// Handle to the loaded instance.
+        ///
+        /// Must be released.
+        info: ?*const Info,
+        export_handle: *const Export,
+    };
+
+    /// Polls the loading set for the state of the specified module.
     ///
-    /// Adds a callback to report a successful or failed loading of a module. The success path will
-    /// be called if the set was able to load all requested modules, whereas the error path will be
-    /// called immediately after the failed loading of the module. Since the module set can be in a
-    /// partially loaded state at the time of calling this function, the error path may be invoked
-    /// immediately. The callbacks will be provided with a user-specified data pointer, which they
-    /// are in charge of cleaning up. If an error occurs during the execution of the function, it
-    /// will invoke the optional `on_abort` function. If the requested module does not exist, the
-    /// function will return an error.
-    pub fn addCallback(
-        self: LoadingSet,
+    /// If the module has not been processed at the time of calling, the waker will be
+    /// signaled once the function can be polled again.
+    pub fn pollModule(
+        self: *LoadingSet,
+        waker: Waker,
         module: [:0]const u8,
-        obj: anytype,
-        comptime callback: fn (
-            status: union(enum) { ok: *const Info, err: *const Export, abort },
-            data: @TypeOf(obj),
-        ) void,
-        comptime on_abort: ?fn (data: @TypeOf(obj)) void,
-    ) ctx.Error!void {
-        const Ptr = @TypeOf(obj);
-        std.debug.assert(@typeInfo(Ptr) == .pointer);
-        std.debug.assert(@typeInfo(Ptr).pointer.size == .one);
-        const Callbacks = struct {
-            fn onOk(info: *const Info, data: ?*anyopaque) callconv(.c) void {
-                const o: Ptr = @ptrCast(@alignCast(@constCast(data)));
-                callback(.{ .ok = info }, o);
-            }
-            fn onErr(mod: *const Export, data: ?*anyopaque) callconv(.c) void {
-                const o: Ptr = @ptrCast(@alignCast(@constCast(data)));
-                callback(.{ .err = mod }, o);
-            }
-            fn onAbort(data: ?*anyopaque) callconv(.c) void {
-                if (on_abort) |f| {
-                    const o: Ptr = @ptrCast(@alignCast(@constCast(data)));
-                    f(o);
-                }
-            }
-        };
-        return self.addCallbackCustom(
-            module.ptr,
-            @constCast(obj),
-            Callbacks.onOk,
-            Callbacks.onErr,
-            if (on_abort) Callbacks.onAbort else null,
-        );
-    }
-
-    /// Adds a status callback to the set.
-    ///
-    /// Adds a callback to report a successful or failed loading of a module. The success path will
-    /// be called if the set was able to load all requested modules, whereas the error path will be
-    /// called immediately after the failed loading of the module. Since the module set can be in a
-    /// partially loaded state at the time of calling this function, the error path may be invoked
-    /// immediately. The callbacks will be provided with a user-specified data pointer, which they
-    /// are in charge of cleaning up. If an error occurs during the execution of the function, it
-    /// will invoke the optional `on_abort` function. If the requested module does not exist, the
-    /// function will return an error.
-    pub fn addCallbackCustom(
-        self: LoadingSet,
-        module: [*:0]const u8,
-        data: ?*anyopaque,
-        on_success: *const fn (info: *const Info, data: ?*anyopaque) callconv(.c) void,
-        on_error: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) void,
-        on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-    ) ctx.Error!void {
-        try self.vtable.add_callback(
-            self.data,
-            module,
-            on_success,
-            on_error,
-            on_abort,
-            data,
-        ).intoErrorUnion();
+    ) Poll(ctx.Error!ResolvedModule) {
+        var result: Fallible(ResolvedModule) = undefined;
+        const handle = ctx.Handle.getHandle();
+        if (handle.modules_v0.set_poll_module(self, waker, module, &result)) {
+            return .{ .ready = result.unwrap() };
+        }
+        return .pending;
     }
 
     /// Adds a module to the set.
@@ -1211,150 +1100,81 @@ pub const LoadingSet = extern struct {
     /// Note that the new module is not setup to automatically depend on the owner, but may prevent
     /// it from being unloaded while the set exists.
     pub fn addModule(
-        self: LoadingSet,
+        self: *LoadingSet,
         owner: *const OpaqueInstance,
         module: *const Export,
     ) ctx.Error!void {
-        try self.vtable.add_module(self.data, owner, module).intoErrorUnion();
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.set_add_module(self, owner, module).intoErrorUnion();
     }
+
+    /// Operation of the filter function.
+    pub const FilterRequest = enum(i32) {
+        skip,
+        load,
+    };
 
     /// Adds modules to the set.
     ///
-    /// Opens up a module binary to select which modules to load. If the path points to a file, the
-    /// function will try to load the file as a binary, whereas, if it points to a directory, it
-    /// will try to load a file named `module.fimo_module` contained in the directory. Each
-    /// exported module is then passed to the filter, along with the provided data, which can then
-    /// filter which modules to load. This function may skip invalid module exports. Trying to
-    /// include a module with duplicate exports or duplicate name will result in an error. This
-    /// function signals an error, if the binary does not contain the symbols necessary to query
-    /// the exported modules, but does not return an error, if it does not export any modules. The
-    /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
-    /// In case of an error, no modules are appended to the set.
+    /// Opens up a module binary to select which modules to load.
+    /// If the path points to a file, the function will try to load the file.
+    /// If it points to a directory, it will search for a file named `module.fimo_module` in the same
+    /// directory.
+    ///
+    /// The filter function can determine which modules to load.
+    /// Trying to load a module with duplicate exports or duplicate name will result in an error.
+    /// Invalid modules may not get passed to the filter function, and should therefore not be utilized
+    /// to list the modules contained in a binary.
+    ///
+    /// This function returns an error, if the binary does not contain the symbols necessary to query
+    /// the exported modules, but does not return an error, if it does not export any modules.
     pub fn addModulesFromPath(
-        self: LoadingSet,
-        p: paths.Path,
+        self: *LoadingSet,
+        path: Path,
         context: anytype,
-        comptime filter: fn (module: *const Export, data: @TypeOf(context)) LoadingSet.FilterRequest,
-        comptime filter_deinit: ?fn (data: @TypeOf(context)) void,
+        filter: fn (context: @TypeOf(context), module: *const Export) FilterRequest,
     ) ctx.Error!void {
-        const Context = @TypeOf(context);
-        const Callbacks = struct {
-            fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
-                const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                    @ptrCast(@alignCast(@constCast(data)))
-                else
-                    @as(*const Context, @ptrCast(@alignCast(data))).*;
-                return filter(module, context_);
-            }
-            fn deinit(data: ?*anyopaque) callconv(.c) void {
-                if (filter_deinit) {
-                    const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                        @ptrCast(@alignCast(@constCast(data)))
-                    else
-                        @as(*const Context, @ptrCast(@alignCast(data))).*;
-                    filter_deinit(context_);
-                }
+        const Wrapper = struct {
+            fn f(ctx_ptr: ?*anyopaque, module: *const Export) callconv(.c) FilterRequest {
+                const f_ctx = @as(*@TypeOf(context), @ptrCast(ctx_ptr)).*;
+                return filter(f_ctx, module);
             }
         };
-        return self.addModulesFromPathCustom(
-            p,
-            if (comptime @typeInfo(Context) == .pointer) @constCast(context) else @constCast(&context),
-            Callbacks.f,
-            if (filter_deinit != null) &Callbacks.deinit else null,
-        );
-    }
 
-    /// Adds modules to the set.
-    ///
-    /// Opens up a module binary to select which modules to load. If the path points to a file, the
-    /// function will try to load the file as a binary, whereas, if it points to a directory, it
-    /// will try to load a file named `module.fimo_module` contained in the directory. Each
-    /// exported module is then passed to the filter, along with the provided data, which can then
-    /// filter which modules to load. This function may skip invalid module exports. Trying to
-    /// include a module with duplicate exports or duplicate name will result in an error. This
-    /// function signals an error, if the binary does not contain the symbols necessary to query
-    /// the exported modules, but does not return an error, if it does not export any modules. The
-    /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
-    /// In case of an error, no modules are appended to the set.
-    pub fn addModulesFromPathCustom(
-        self: LoadingSet,
-        p: paths.Path,
-        filter_data: ?*anyopaque,
-        filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
-        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-    ) ctx.Error!void {
-        try self.vtable.add_modules_from_path(
-            self.data,
-            p.intoC(),
-            filter,
-            filter_deinit,
-            filter_data,
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.set_add_modules_from_path(
+            self,
+            path.intoC(),
+            @constCast(&context),
+            &Wrapper.f,
         ).intoErrorUnion();
     }
 
     /// Adds modules to the set.
     ///
-    /// Iterates over the exported modules of the current binary. Each exported module is then
-    /// passed to the filter, along with the provided data, which can then filter which modules to
-    /// load. This function may skip invalid module exports. Trying to include a module with
-    /// duplicate exports or duplicate name will result in an error. This function signals an
-    /// error, if the binary does not contain the symbols necessary to query the exported modules,
-    /// but does not return an error, if it does not export any modules. The necessary symbols are
-    /// set up automatically, if the binary was linked with the fimo library. In case of an error,
-    /// no modules are appended to the set.
+    /// Iterates over the exported modules of the current binary.
+    ///
+    /// The filter function can determine which modules to load.
+    /// Trying to load a module with duplicate exports or duplicate name will result in an error.
+    /// Invalid modules may not get passed to the filter function, and should therefore not be utilized
+    /// to list the modules contained in a binary.
     pub fn addModulesFromLocal(
-        self: LoadingSet,
+        self: *LoadingSet,
         context: anytype,
-        comptime filter: fn (module: *const Export, data: @TypeOf(context)) LoadingSet.FilterRequest,
-        comptime filter_deinit: ?fn (data: @TypeOf(context)) void,
+        filter: fn (context: @TypeOf(context), module: *const Export) FilterRequest,
     ) ctx.Error!void {
-        const Context = @TypeOf(context);
-        const Callbacks = struct {
-            fn f(module: *const Export, data: ?*anyopaque) callconv(.c) LoadingSet.FilterRequest {
-                const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                    @ptrCast(@alignCast(@constCast(data)))
-                else
-                    @as(*const Context, @ptrCast(@alignCast(data))).*;
-                return filter(module, context_);
-            }
-            fn deinit(data: ?*anyopaque) callconv(.c) void {
-                if (filter_deinit) {
-                    const context_: Context = if (comptime @typeInfo(Context) == .pointer)
-                        @ptrCast(@alignCast(@constCast(data)))
-                    else
-                        @as(*const Context, @ptrCast(@alignCast(data))).*;
-                    filter_deinit(context_);
-                }
+        const Wrapper = struct {
+            fn f(ctx_ptr: ?*anyopaque, module: *const Export) callconv(.c) FilterRequest {
+                const f_ctx = @as(*@TypeOf(context), @ptrCast(ctx_ptr)).*;
+                return filter(f_ctx, module);
             }
         };
-        return self.addModulesFromLocalCustom(
-            if (comptime @typeInfo(Context) == .pointer) @constCast(context) else @constCast(&context),
-            Callbacks.f,
-            if (filter_deinit != null) &Callbacks.deinit else null,
-        );
-    }
 
-    /// Adds modules to the set.
-    ///
-    /// Iterates over the exported modules of the current binary. Each exported module is then
-    /// passed to the filter, along with the provided data, which can then filter which modules to
-    /// load. This function may skip invalid module exports. Trying to include a module with
-    /// duplicate exports or duplicate name will result in an error. This function signals an
-    /// error, if the binary does not contain the symbols necessary to query the exported modules,
-    /// but does not return an error, if it does not export any modules. The necessary symbols are
-    /// set up automatically, if the binary was linked with the fimo library. In case of an error,
-    /// no modules are appended to the set.
-    pub fn addModulesFromLocalCustom(
-        self: LoadingSet,
-        filter_data: ?*anyopaque,
-        filter: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) FilterRequest,
-        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-    ) ctx.Error!void {
-        try self.vtable.add_modules_from_local(
-            self.data,
-            filter,
-            filter_deinit,
-            filter_data,
+        const handle = ctx.Handle.getHandle();
+        try handle.modules_v0.set_add_modules_from_local(
+            self,
+            @constCast(&context),
+            &Wrapper.f,
             exports.ExportIter.fimo_impl_module_export_iterator,
             @ptrCast(&exports.ExportIter.fimo_impl_module_export_iterator),
         ).intoErrorUnion();
@@ -1369,8 +1189,9 @@ pub const LoadingSet = extern struct {
     ///
     /// It is possible to submit multiple concurrent commit requests, even from the same loading
     /// set. In that case, the requests will be handled atomically, in an unspecified order.
-    pub fn commit(self: LoadingSet) EnqueuedFuture(Fallible(void)) {
-        return self.vtable.commit(self.data);
+    pub fn commit(self: *LoadingSet) EnqueuedFuture(Fallible(void)) {
+        const handle = ctx.Handle.getHandle();
+        return handle.modules_v0.set_commit(self);
     }
 };
 
@@ -1423,7 +1244,49 @@ pub const VTable = extern struct {
     profile: *const fn () callconv(.c) Profile,
     features: *const fn (features: *?[*]const FeatureStatus) callconv(.c) usize,
     root_module_new: *const fn (instance: **const RootInstance) callconv(.c) ctx.Status,
-    set_new: *const fn (fut: *LoadingSet) callconv(.c) ctx.Status,
+    set_new: *const fn (set: **LoadingSet) callconv(.c) ctx.Status,
+    set_destroy: *const fn (set: *LoadingSet) callconv(.c) void,
+    set_contains_module: *const fn (set: *LoadingSet, module: [*:0]const u8) callconv(.c) bool,
+    set_contains_symbol: *const fn (
+        set: *LoadingSet,
+        name: [*:0]const u8,
+        namespace: [*:0]const u8,
+        version: Version.CVersion,
+    ) callconv(.c) bool,
+    set_poll_module: *const fn (
+        set: *LoadingSet,
+        waker: Waker,
+        module: [*:0]const u8,
+        result: *Fallible(LoadingSet.ResolvedModule),
+    ) callconv(.c) bool,
+    set_add_module: *const fn (
+        set: *LoadingSet,
+        owner: *const OpaqueInstance,
+        module: *const Export,
+    ) callconv(.c) ctx.Status,
+    set_add_modules_from_path: *const fn (
+        set: *LoadingSet,
+        path: paths.compat.Path,
+        context: ?*anyopaque,
+        filter_fn: *const fn (
+            context: ?*anyopaque,
+            module: *const Export,
+        ) callconv(.c) LoadingSet.FilterRequest,
+    ) callconv(.c) ctx.Status,
+    set_add_modules_from_local: *const fn (
+        set: *LoadingSet,
+        context: ?*anyopaque,
+        filter_fn: *const fn (
+            context: ?*anyopaque,
+            module: *const Export,
+        ) callconv(.c) LoadingSet.FilterRequest,
+        iterator_fn: *const fn (
+            context: ?*anyopaque,
+            f: *const fn (context: ?*anyopaque, module: *const Export) callconv(.c) bool,
+        ) callconv(.c) void,
+        bin_ptr: *const anyopaque,
+    ) callconv(.c) ctx.Status,
+    set_commit: *const fn (set: *LoadingSet) callconv(.c) EnqueuedFuture(Fallible(void)),
     find_by_name: *const fn (name: [*:0]const u8, info: **const Info) callconv(.c) ctx.Status,
     find_by_symbol: *const fn (
         name: [*:0]const u8,

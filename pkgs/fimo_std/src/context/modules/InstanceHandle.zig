@@ -931,7 +931,7 @@ pub const InitExportedOp = FSMFuture(struct {
     /// 4:
     ///     1. wait for export future
     ///     2. goto 3
-    set: pub_modules.LoadingSet,
+    set: *pub_modules.LoadingSet,
     @"export": *const pub_modules.Export,
     handle: *ModuleHandle,
     instance_handle: *Self = undefined,

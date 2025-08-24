@@ -55,9 +55,9 @@ pub fn initTestContext() !TestContext {
     defer async_ctx.deinit();
 
     const set = try modules.LoadingSet.init();
-    defer set.unref();
+    defer set.deinit();
 
-    try set.addModulesFromLocal({}, TestModule.fimo_module_bundle.loadingSetFilter, null);
+    try set.addModulesFromLocal({}, TestModule.fimo_module_bundle.loadingSetFilter);
     try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
 
     const instance = try modules.RootInstance.init();

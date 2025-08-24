@@ -128,7 +128,7 @@ pub const Modifier = extern struct {
     pub const InstanceState = extern struct {
         init: *const fn (
             ctx: *const modules.OpaqueInstance,
-            set: modules.LoadingSet,
+            set: *modules.LoadingSet,
         ) callconv(.c) EnqueuedFuture(Fallible(?*anyopaque)),
         deinit: *const fn (
             ctx: *const modules.OpaqueInstance,
@@ -294,13 +294,13 @@ pub fn ModuleBundle(bundle: anytype) type {
         pub const bundled = bundle;
         pub const fimo_modules_bundle_marker = {};
 
-        pub fn loadingSetFilter(@"export": *const Export, context: void) modules.LoadingSet.FilterRequest {
+        pub fn loadingSetFilter(context: void, @"export": *const Export) modules.LoadingSet.FilterRequest {
             _ = context;
             inline for (@typeInfo(@TypeOf(bundled)).@"struct".fields) |f| {
                 if (comptime @hasDecl(@field(bundle, f.name), "fimo_modules_marker")) {
                     if (@"export" == @field(bundled, f.name).@"export") return .load;
                 } else if (comptime @hasDecl(@field(bundle, f.name), "fimo_modules_bundle_marker")) {
-                    if (@field(bundled, f.name).loadingSetFilter(@"export", {}) == .load) return .load;
+                    if (@field(bundled, f.name).loadingSetFilter({}, @"export") == .load) return .load;
                 } else unreachable;
             }
             return .skip;
@@ -561,7 +561,7 @@ pub fn Module(T: type) type {
             const wrapper = struct {
                 const Sync = struct {
                     successfull: bool = false,
-                    set: modules.LoadingSet,
+                    set: *modules.LoadingSet,
 
                     const EvReturn = @typeInfo(@TypeOf(ev_init)).@"fn".return_type.?;
                     const Result = switch (@typeInfo(EvReturn)) {
@@ -571,7 +571,7 @@ pub fn Module(T: type) type {
                     };
                     const Future = tasks.Future(@This(), Result, poll, Sync.deinit);
 
-                    fn init(inst: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
+                    fn init(inst: *const modules.OpaqueInstance, set: *modules.LoadingSet) Future {
                         if (Global.is_init) @panic("already init");
                         ctx.Handle.registerHandle(inst.handle);
                         Global.instance = @ptrCast(@alignCast(inst));
@@ -598,7 +598,7 @@ pub fn Module(T: type) type {
                         inline for (std.meta.fields(Args), 0..) |f, i| {
                             switch (f.type) {
                                 *T => args[i] = &Global.state,
-                                modules.LoadingSet => args[i] = this.set,
+                                *modules.LoadingSet => args[i] = this.set,
                                 else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
                             }
                         }
@@ -620,7 +620,7 @@ pub fn Module(T: type) type {
                     };
                     const Future = tasks.Future(@This(), Result, poll, Async.deinit);
 
-                    fn init(inst: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
+                    fn init(inst: *const modules.OpaqueInstance, set: *modules.LoadingSet) Future {
                         if (Global.is_init) @panic("already init");
                         ctx.Handle.registerHandle(inst.handle);
                         Global.instance = @ptrCast(@alignCast(inst));
@@ -636,7 +636,7 @@ pub fn Module(T: type) type {
                         inline for (std.meta.fields(Args), 0..) |f, i| {
                             switch (f.type) {
                                 *T => args[i] = &Global.state,
-                                modules.LoadingSet => args[i] = set,
+                                *modules.LoadingSet => args[i] = set,
                                 else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
                             }
                         }
@@ -683,12 +683,12 @@ pub fn Module(T: type) type {
             const wrapper = struct {
                 const Sync = struct {
                     successfull: bool = false,
-                    set: modules.LoadingSet,
+                    set: *modules.LoadingSet,
 
                     const Result = *T;
                     const Future = tasks.Future(@This(), Result, poll, Sync.deinit);
 
-                    fn init(inst: *const modules.OpaqueInstance, set: modules.LoadingSet) Future {
+                    fn init(inst: *const modules.OpaqueInstance, set: *modules.LoadingSet) Future {
                         if (Global.is_init) @panic("already init");
                         ctx.Handle.registerHandle(inst.handle);
                         Global.instance = @ptrCast(@alignCast(inst));
@@ -1343,7 +1343,7 @@ pub const Builder = struct {
     pub fn withState(
         comptime self: Builder,
         comptime Fut: type,
-        comptime initFn: fn (*const modules.OpaqueInstance, modules.LoadingSet) Fut,
+        comptime initFn: fn (*const modules.OpaqueInstance, *modules.LoadingSet) Fut,
         comptime deinitFn: anytype,
     ) Builder {
         const Result = Fut.Result;
@@ -1363,7 +1363,7 @@ pub const Builder = struct {
         const Wrapper = struct {
             fn wrapInit(
                 context: *const modules.OpaqueInstance,
-                set: modules.LoadingSet,
+                set: *modules.LoadingSet,
             ) callconv(.c) tasks.EnqueuedFuture(Fallible(?*anyopaque)) {
                 const fut = initFn(context, set).intoFuture();
                 var mapped_fut = fut.map(
@@ -1954,12 +1954,15 @@ pub const ExportIter = struct {
     }
 
     pub export fn fimo_impl_module_export_iterator(
-        inspector: *const fn (module: *const Export, data: ?*anyopaque) callconv(.c) bool,
-        data: ?*anyopaque,
+        context: ?*anyopaque,
+        inspector: *const fn (
+            context: ?*anyopaque,
+            module: *const Export,
+        ) callconv(.c) bool,
     ) void {
         var it = ExportIter{};
         while (it.next()) |exp| {
-            if (!inspector(exp, data)) {
+            if (!inspector(context, exp)) {
                 return;
             }
         }

@@ -13,6 +13,7 @@
 #include <fimo_std/version.h>
 
 #include <fimo_std/impl/module.h>
+#include "path.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -262,6 +263,17 @@ typedef struct FimoModulesExport FimoModulesExport;
 
 typedef FIMO_TASKS_ENQUEUED_FUTURE(FimoResult) FimoModulesLoadingSetCommitFuture;
 
+/// Result of a poll operation on a loading set module.
+typedef struct FimoModulesLoadingSetResolvedModule {
+    /// Handle to the loaded instance.
+    ///
+    /// Must be released. May be null.
+    const FimoModulesInfo *info;
+    const FimoModulesExport *export_handle;
+} FimoModulesLoadingSetResolvedModule;
+
+typedef FIMO_TASKS_FALLIBLE(FimoModulesLoadingSetResolvedModule) FimoModulesLoadingSetResolvedModuleResult;
+
 /// Operation of the loading set filter function.
 typedef enum FimoModulesLoadingSetFilterRequest : FimoI32 {
     /// Skip the specific module.
@@ -270,91 +282,12 @@ typedef enum FimoModulesLoadingSetFilterRequest : FimoI32 {
     FIMO_MODULES_LOADING_SET_FILTER_LOAD,
 } FimoModulesLoadingSetFilterRequest;
 
-/// VTable of a loading set.
+/// Handle to a set of modules to load by the subsytem.
 ///
-/// Adding fields to the VTable is not a breaking change.
-typedef struct FimoModulesLoadingSetVTable {
-    /// Increases the reference count of the instance.
-    void (*acquire)(void *ctx);
-    /// Decreases the reference count of the instance.
-    void (*release)(void *ctx);
-    /// Checks whether the set contains a specific module.
-    bool (*query_module)(void *ctx, const char *name);
-    /// Checks whether the set contains a specific symbol.
-    bool (*query_symbol)(void *ctx, const char *name, const char *namespace, FimoVersion version);
-    /// Adds a status callback to the set.
-    ///
-    /// Adds a callback to report a successful or failed loading of a module. The success callback
-    /// wil be called if the set was able to load all requested modules, whereas the error callback
-    /// will be called immediately after the failed loading of the module. Since the module set can
-    /// be in a partially loaded state at the time of calling this function, the error path may be
-    /// invoked immediately. The callbacks will be provided with a user-specified data pointer,
-    /// which they are in charge of cleaning up. If an error occurs during the execution of the
-    /// function, it will invoke the optional `on_abort` callback. If the requested module does not
-    /// exist, the function will return an error.
-    FimoStatus (*add_callback)(void *ctx, const char *name, void (*on_success)(const FimoModulesInfo *info, void *data),
-                               void (*on_error)(const FimoModulesExport *exp, void *data), void (*on_abort)(void *data),
-                               void *data);
-    /// Adds a module to the module set.
-    ///
-    /// Adds a module to the set, so that it may be loaded by a future call to `commit`. Trying to
-    /// include an invalid module, a module with duplicate exports or duplicate name will result in
-    /// an error. Unlike `add_modules_from_path`, this function allows for the loading of dynamic
-    /// modules, i.e. modules that are created at runtime, like non-native modules, which may
-    /// require a runtime to be executed in. The new module inherits a strong reference to the same
-    /// binary as the caller's module.
-    ///
-    /// Note that the new module is not set up to automatically depend on the owner, but may
-    /// prevent it from being unloaded while the set exists.
-    FimoStatus (*add_module)(void *ctx, const FimoModulesInstance *owner, const FimoModulesExport *exp);
-    /// Adds modules to the set.
-    ///
-    /// Opens up a module binary to select which modules to load. If the path points to a file, the
-    /// function will try to load the file as a binary, whereas, if it points to a directory, it
-    /// will try to load a file named `module.FIMO_MODULES` contained in the directory. Each
-    /// exported module is then passed to the filter, along with the provided data, which can then
-    /// filter which modules to load. This function may skip invalid module exports. Trying to
-    /// include a module with duplicate exports or duplicate name will result in an error. This
-    /// function signals an error, if the binary does not contain the symbols necessary to query
-    /// the exported modules, but does not return an error, if it does not export any modules. The
-    /// necessary symbols are set up automatically, if the binary was linked with the fimo library.
-    /// In case of an error, no modules are appended to the set.
-    FimoStatus (*add_modules_from_path)(void *ctx, FimoUTF8Path path,
-                                        FimoModulesLoadingSetFilterRequest (*filter_fn)(const FimoModulesExport *exp,
-                                                                                        void *data),
-                                        void (*filter_deinit)(void *data), void *filter_data);
-    /// Adds modules to the set.
-    ///
-    /// Iterates over the exported modules of the current binary. Each exported module is then
-    /// passed to the filter, along with the provided data, which can then filter which modules to
-    /// load. This function may skip invalid module exports. Trying to include a module with
-    /// duplicate exports or duplicate name will result in an error. This function signals an
-    /// error, if the binary does not contain the symbols necessary to query the exported modules,
-    /// but does not return an error, if it does not export any modules. The necessary symbols are
-    /// set up automatically, if the binary was linked with the fimo library. In case of an error,
-    /// no modules are appended to the set.
-    FimoStatus (*add_modules_from_local)(
-            void *ctx, FimoModulesLoadingSetFilterRequest (*filter_fn)(const FimoModulesExport *exp, void *data),
-            void (*filter_deinit)(void *data), void *filter_data,
-            void (*iterator_fn)(bool (*filter_fn)(const FimoModulesExport *exp, void *data), void *data),
-            const void *bin_ptr);
-    /// Loads the modules contained in the set.
-    ///
-    /// If the returned future is successfull, the contained modules and their resources are made
-    /// available to the remaining modules. Some conditions may hinder the loading of some module,
-    /// like missing dependencies, duplicates, and other loading errors. In those cases, the
-    /// modules will be skipped without erroring.
-    ///
-    /// It is possible to submit multiple concurrent commit requests, even from the same loading
-    /// set. In that case, the requests will be handled atomically, in an unspecified order.
-    FimoModulesLoadingSetCommitFuture (*commit)(void *ctx);
-} FimoModulesLoadingSetVTable;
-
-/// Type-erased set of modules to load by the subsystem.
-typedef struct FimoModulesLoadingSet {
-    void *data;
-    const FimoModulesLoadingSetVTable *vtable;
-} FimoModulesLoadingSet;
+/// Modules can only be loaded after all of their dependencies have been resolved uniquely.
+/// A loading set batches the loading of multiple modules, procedurally determining an appropriate
+/// loading order for as many modules as possible.
+typedef struct FimoModulesLoadingSet FimoModulesLoadingSet;
 
 /// Declaration of a module parameter.
 typedef struct FimoModulesParamDecl {
@@ -529,7 +462,7 @@ typedef struct FimoModulesExportModifierInstanceState {
     /// module data, or fetching optional symbols. Returning an error aborts the loading of the
     /// module. Is called before the symbols of the modules are exported/initialized.
     FimoModulesExportModifierInstanceStateFuture (*constructor)(const FimoModulesInstance *module,
-                                                                FimoModulesLoadingSet set);
+                                                                FimoModulesLoadingSet *set);
     /// Destructor function for a module.
     ///
     /// During its destruction, a module is not allowed to access the module subsystem.
@@ -677,19 +610,10 @@ typedef struct FimoModulesConfig {
 ///
 /// The filter function is passed the module export declaration and can then decide whether the
 /// module should be loaded by the subsystem.
-typedef bool (*FimoModulesLoadingFilter)(const FimoModulesExport *arg0, void *arg1);
+typedef FimoModulesLoadingSetFilterRequest (*FimoModulesLoadingFilter)(void *, const FimoModulesExport *);
 
-/// A callback for successfully loading a module.
-///
-/// The callback function is called when the subsystem was successful in loading the requested
-/// module, making it then possible to request symbols.
-typedef void (*FimoModulesLoadingSuccessCallback)(const FimoModulesInfo *arg0, void *arg1);
-
-/// A callback for a module loading error.
-///
-/// The callback function is called when the subsystem was not successful in loading the requested
-/// module.
-typedef void (*FimoModulesLoadingErrorCallback)(const FimoModulesExport *arg0, void *arg1);
+/// Signature of the function which iterates over all functions in a given binary.
+typedef bool (*FimoModulesIterator)(void *, bool (*arg1)(void *, const FimoModulesExport *));
 
 /// VTable of the module subsystem.
 ///
@@ -710,11 +634,71 @@ typedef struct FimoModulesVTable {
     /// i.e., module handles without an associated module.
     FimoStatus (*root_module_new)(const FimoModulesInstance **module);
     /// Constructs a new empty set.
+    FimoStatus (*set_new)(FimoModulesLoadingSet **set);
+    /// Drops the loading set.
     ///
-    /// Modules can only be loaded, if all of their dependencies can be resolved, which requires us
-    /// to determine a suitable load order. A loading set is a utility to facilitate this process,
-    /// by automatically computing a suitable load order for a batch of modules.
-    FimoStatus (*set_new)(FimoModulesLoadingSet *set);
+    /// Scheduled operations will be completed, but the caller invalidates their reference to the handle.
+    FimoStatus (*set_destroy)(FimoModulesLoadingSet *set);
+    /// Checks whether the set contains some module.
+    bool (*set_contains_module)(FimoModulesLoadingSet *set, const char *module);
+    /// Checks whether the set contains some symbol.
+    bool (*set_contains_symbol)(FimoModulesLoadingSet *set, const char *name, const char *namespace,
+                                FimoVersion version);
+    /// Polls the loading set for the state of the specified module.
+    ///
+    /// If the module has not been processed at the time of calling, the waker will be
+    /// signaled once the function can be polled again.
+    bool (*set_poll_module)(FimoModulesLoadingSet *set, FimoTasksWaker waker, const char *module,
+                            FimoModulesLoadingSetResolvedModuleResult *result);
+    /// Adds a module to the set.
+    ///
+    /// Adds a module to the set, so that it may be loaded by a future call to `commit`. Trying to
+    /// include an invalid module, a module with duplicate exports or duplicate name will result in
+    /// an error. Unlike `addModulesFromPath`, this function allows for the loading of dynamic
+    /// modules, i.e. modules that are created at runtime, like non-native modules, which may
+    /// require a runtime to be executed in. The new module inherits a strong reference to the same
+    /// binary as the caller's module.
+    ///
+    /// Note that the new module is not setup to automatically depend on the owner, but may prevent
+    /// it from being unloaded while the set exists.
+    FimoStatus (*set_add_module)(FimoModulesLoadingSet *set, const FimoModulesInstance *owner,
+                                 const FimoModulesExport *module);
+    /// Adds modules to the set.
+    ///
+    /// Opens up a module binary to select which modules to load.
+    /// If the path points to a file, the function will try to load the file.
+    /// If it points to a directory, it will search for a file named `module.fimo_module` in the same
+    /// directory.
+    ///
+    /// The filter function can determine which modules to load.
+    /// Trying to load a module with duplicate exports or duplicate name will result in an error.
+    /// Invalid modules may not get passed to the filter function, and should therefore not be utilized
+    /// to list the modules contained in a binary.
+    ///
+    /// This function returns an error, if the binary does not contain the symbols necessary to query
+    /// the exported modules, but does not return an error, if it does not export any modules.
+    FimoStatus (*set_add_modules_from_path)(FimoModulesLoadingSet *set, FimoUTF8Path path, void *context,
+                                            FimoModulesLoadingFilter filter);
+    /// Adds modules to the set.
+    ///
+    /// Iterates over the exported modules of the current binary.
+    ///
+    /// The filter function can determine which modules to load.
+    /// Trying to load a module with duplicate exports or duplicate name will result in an error.
+    /// Invalid modules may not get passed to the filter function, and should therefore not be utilized
+    /// to list the modules contained in a binary.
+    FimoStatus (*set_add_modules_from_local)(FimoModulesLoadingSet *set, void *context, FimoModulesLoadingFilter filter,
+                                             FimoModulesIterator iterator, const void *bin_ptr);
+    /// Loads the modules contained in the set.
+    ///
+    /// If the returned future is successfull, the contained modules and their resources are made
+    /// available to the remaining modules. Some conditions may hinder the loading of some module,
+    /// like missing dependencies, duplicates, and other loading errors. In those cases, the
+    /// modules will be skipped without erroring.
+    ///
+    /// It is possible to submit multiple concurrent commit requests, even from the same loading
+    /// set. In that case, the requests will be handled atomically, in an unspecified order.
+    FimoModulesLoadingSetCommitFuture (*set_commit)(FimoModulesLoadingSet *set);
     /// Searches for a module by it's name.
     ///
     /// Queries a module by its unique name. The returned `FimoModulesInfo` will have its reference

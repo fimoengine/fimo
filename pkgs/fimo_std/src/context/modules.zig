@@ -8,7 +8,8 @@ const AnyResult = AnyError.AnyResult;
 const context = @import("../context.zig");
 const pub_context = @import("../ctx.zig");
 const pub_modules = @import("../modules.zig");
-const Path = @import("../paths.zig").Path;
+const paths = @import("../paths.zig");
+const Path = paths.Path;
 const pub_tasks = @import("../tasks.zig");
 const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const Fallible = pub_tasks.Fallible;
@@ -587,14 +588,112 @@ const VTableImpl = struct {
         };
         return .ok;
     }
-    fn addLoadingSet(set: *pub_modules.LoadingSet) callconv(.c) pub_context.Status {
+    fn initSet(set: **pub_modules.LoadingSet) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        set.* = LoadingSet.init() catch |e| {
+        set.* = @ptrCast(LoadingSet.init() catch |e| {
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
+            context.setResult(.initErr(.initError(e)));
+            return .err;
+        });
+        return .ok;
+    }
+    fn deinitSet(set: *pub_modules.LoadingSet) callconv(.c) void {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        s.unref();
+    }
+    fn querySetModule(set: *pub_modules.LoadingSet, module: [*:0]const u8) callconv(.c) bool {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        return s.queryModule(std.mem.span(module));
+    }
+    fn querySetSymbol(
+        set: *pub_modules.LoadingSet,
+        name: [*:0]const u8,
+        namespace: [*:0]const u8,
+        version: Version.CVersion,
+    ) callconv(.c) bool {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        return s.querySymbol(std.mem.span(name), std.mem.span(namespace), Version.initC(version));
+    }
+    fn pollSetModule(
+        set: *pub_modules.LoadingSet,
+        waker: pub_tasks.Waker,
+        module: [*:0]const u8,
+        result: *Fallible(pub_modules.LoadingSet.ResolvedModule),
+    ) callconv(.c) bool {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        const status = s.pollModuleStatus(waker, std.mem.span(module)) catch |e| {
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
+            context.setResult(.initErr(.initError(e)));
+            result.* = .wrap(e);
+            return true;
+        } orelse return false;
+        result.* = .wrap(status);
+        return true;
+    }
+    fn addModuleToSet(
+        set: *pub_modules.LoadingSet,
+        owner: *const pub_modules.OpaqueInstance,
+        @"export": *const pub_modules.Export,
+    ) callconv(.c) pub_context.Status {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        s.addModule(InstanceHandle.fromInstancePtr(owner), @"export") catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
         return .ok;
+    }
+    fn addModulesToSetFromPath(
+        set: *pub_modules.LoadingSet,
+        path: paths.compat.Path,
+        filter_context: ?*anyopaque,
+        filter_fn: *const fn (
+            context: ?*anyopaque,
+            module: *const pub_modules.Export,
+        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_context.Status {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        s.addModulesFromPath(Path.initC(path), filter_context, filter_fn) catch |e| {
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
+            context.setResult(.initErr(.initError(e)));
+            return .err;
+        };
+        return .ok;
+    }
+    fn addModulesToSetFromLocal(
+        set: *pub_modules.LoadingSet,
+        filter_context: ?*anyopaque,
+        filter_fn: *const fn (
+            context: ?*anyopaque,
+            module: *const pub_modules.Export,
+        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+        iterator_fn: *const fn (
+            context: ?*anyopaque,
+            f: *const fn (context: ?*anyopaque, module: *const pub_modules.Export) callconv(.c) bool,
+        ) callconv(.c) void,
+        bin_ptr: *const anyopaque,
+    ) callconv(.c) pub_context.Status {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        s.addModulesFromLocal(iterator_fn, filter_context, filter_fn, bin_ptr) catch |e| {
+            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
+            context.setResult(.initErr(.initError(e)));
+            return .err;
+        };
+        return .ok;
+    }
+    fn commitSet(
+        set: *pub_modules.LoadingSet,
+    ) callconv(.c) EnqueuedFuture(Fallible(void)) {
+        std.debug.assert(context.is_init);
+        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        return LoadingSet.CommitOp.Data.init(s);
     }
     fn findInstanceByName(
         name: [*:0]const u8,
@@ -705,7 +804,15 @@ pub const vtable = pub_modules.VTable{
     .profile = &VTableImpl.profile,
     .features = &VTableImpl.features,
     .root_module_new = &VTableImpl.addRootInstance,
-    .set_new = &VTableImpl.addLoadingSet,
+    .set_new = &VTableImpl.initSet,
+    .set_destroy = &VTableImpl.deinitSet,
+    .set_contains_module = &VTableImpl.querySetModule,
+    .set_contains_symbol = &VTableImpl.querySetSymbol,
+    .set_poll_module = &VTableImpl.pollSetModule,
+    .set_add_module = &VTableImpl.addModuleToSet,
+    .set_add_modules_from_path = &VTableImpl.addModulesToSetFromPath,
+    .set_add_modules_from_local = &VTableImpl.addModulesToSetFromLocal,
+    .set_commit = &VTableImpl.commitSet,
     .find_by_name = &VTableImpl.findInstanceByName,
     .find_by_symbol = &VTableImpl.findInstanceBySymbol,
     .namespace_exists = &VTableImpl.queryNamespace,

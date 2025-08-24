@@ -12,8 +12,11 @@ const paths = @import("../../paths.zig");
 const Path = paths.Path;
 const OwnedPath = paths.OwnedPath;
 const pub_tasks = @import("../../tasks.zig");
+const Waker = pub_tasks.Waker;
 const EnqueuedFuture = pub_tasks.EnqueuedFuture;
 const FSMFuture = pub_tasks.FSMFuture;
+const FSMUnwindReason = pub_tasks.FSMUnwindReason;
+const FSMOp = pub_tasks.FSMOp;
 const Fallible = pub_tasks.Fallible;
 const Version = @import("../../Version.zig");
 const graph = @import("../graph.zig");
@@ -37,28 +40,23 @@ string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
 module_infos: std.StringArrayHashMapUnmanaged(ModuleInfo) = .{},
 symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.HashContext, false) = .{},
 
-pub const Callback = struct {
-    data: ?*anyopaque,
-    on_success: *const fn (info: *const pub_modules.Info, data: ?*anyopaque) callconv(.c) void,
-    on_error: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) void,
-};
-
 const ModuleInfo = struct {
     status: Status,
-    allocator: Allocator,
     handle: *ModuleHandle,
-    callbacks: std.ArrayList(Callback) = .{},
 
     const Status = union(enum) {
         unloaded: struct {
-            @"export": *const pub_modules.Export,
+            export_handle: *const pub_modules.Export,
             owner: ?*const pub_modules.OpaqueInstance,
+            wakers: std.ArrayList(Waker),
+            allocator: Allocator,
         },
         err: struct {
-            @"export": *const pub_modules.Export,
+            export_handle: *const pub_modules.Export,
             owner: ?*const pub_modules.OpaqueInstance,
         },
         loaded: struct {
+            export_handle: *const pub_modules.Export,
             info: *const pub_modules.Info,
         },
     };
@@ -78,18 +76,24 @@ const ModuleInfo = struct {
         }
 
         return .{
-            .status = .{ .unloaded = .{ .@"export" = @"export", .owner = owner } },
-            .allocator = allocator,
+            .status = .{
+                .unloaded = .{
+                    .export_handle = @"export",
+                    .owner = owner,
+                    .wakers = .empty,
+                    .allocator = allocator,
+                },
+            },
             .handle = handle,
         };
     }
 
     fn deinit(self: *ModuleInfo) void {
         switch (self.status) {
-            .unloaded => |v| {
-                for (self.callbacks.items) |cb| cb.on_error(v.@"export", cb.data);
-                self.callbacks.clearAndFree(self.allocator);
-                v.@"export".deinit();
+            .unloaded => |*v| {
+                for (v.wakers.items) |w| w.wakeUnref();
+                v.wakers.clearAndFree(v.allocator);
+                v.export_handle.deinit();
                 if (v.owner) |owner| {
                     const handle = InstanceHandle.fromInstancePtr(owner);
                     const inner = handle.lock();
@@ -98,9 +102,7 @@ const ModuleInfo = struct {
                 }
             },
             .err => |v| {
-                for (self.callbacks.items) |cb| cb.on_error(v.@"export", cb.data);
-                self.callbacks.clearAndFree(self.allocator);
-                v.@"export".deinit();
+                v.export_handle.deinit();
                 if (v.owner) |owner| {
                     const handle = InstanceHandle.fromInstancePtr(owner);
                     const inner = handle.lock();
@@ -109,41 +111,66 @@ const ModuleInfo = struct {
                 }
             },
             .loaded => |v| {
-                std.debug.assert(self.callbacks.items.len == 0);
-                self.callbacks.clearAndFree(self.allocator);
+                v.export_handle.deinit();
                 v.info.unref();
             },
         }
         self.handle.unref();
     }
 
-    fn appendCallback(self: *ModuleInfo, callback: Callback) Allocator.Error!void {
+    pub fn pollStatus(self: *ModuleInfo, waker: Waker) !?pub_modules.LoadingSet.ResolvedModule {
         switch (self.status) {
-            .unloaded => try self.callbacks.append(self.allocator, callback),
-            .loaded => |v| callback.on_success(v.info, callback.data),
-            .err => |v| callback.on_error(v.@"export", callback.data),
+            .unloaded => |*v| {
+                const w = waker.ref();
+                try v.wakers.append(v.allocator, w);
+                return null;
+            },
+            .err => |v| {
+                return .{
+                    .info = null,
+                    .export_handle = v.export_handle,
+                };
+            },
+            .loaded => |v| {
+                v.info.ref();
+                return .{
+                    .info = v.info,
+                    .export_handle = v.export_handle,
+                };
+            },
         }
     }
 
     pub fn signalError(self: *ModuleInfo) void {
-        const status = self.status.unloaded;
-        self.status = .{ .err = .{ .@"export" = status.@"export", .owner = status.owner } };
-        while (self.callbacks.pop()) |cb| cb.on_error(status.@"export", cb.data);
+        var status = self.status.unloaded;
+        self.status = .{
+            .err = .{
+                .export_handle = status.export_handle,
+                .owner = status.owner,
+            },
+        };
+        for (status.wakers.items) |w| w.wakeUnref();
+        status.wakers.clearAndFree(status.allocator);
     }
 
     pub fn signalSuccess(self: *ModuleInfo, info: *const pub_modules.Info) void {
-        const status = self.status.unloaded;
-        status.@"export".deinit();
+        var status = self.status.unloaded;
         if (status.owner) |owner| {
             const handle = InstanceHandle.fromInstancePtr(owner);
             const inner = handle.lock();
             defer inner.unlock();
             inner.unrefStrong();
         }
+        for (status.wakers.items) |w| w.wakeUnref();
+        status.wakers.clearAndFree(status.allocator);
 
         info.ref();
-        self.status = .{ .loaded = .{ .info = info } };
-        while (self.callbacks.pop()) |cb| cb.on_success(info, cb.data);
+        self.status = .{
+            .loaded = .{
+                .info = info,
+                .export_handle = status.export_handle,
+            },
+        };
     }
 };
 
@@ -156,12 +183,12 @@ const LoadGraph = struct {
         null,
     ),
     enqueue_count: usize = 0,
-    waiter: ?pub_tasks.Waker = null,
+    waiter: ?Waker = null,
 
     const Node = struct {
         module: []const u8,
-        waiter: ?pub_tasks.Waker = null,
-        fut: ?pub_tasks.EnqueuedFuture(void) = null,
+        waiter: ?Waker = null,
+        fut: ?EnqueuedFuture(void) = null,
 
         fn deinit(self: *Node) void {
             std.debug.assert(self.waiter == null);
@@ -249,7 +276,7 @@ const LoadGraph = struct {
             }
 
             // Check that all imported symbols are already exposed, or will be exposed.
-            for (info.status.unloaded.@"export".getSymbolImports()) |imp| {
+            for (info.status.unloaded.export_handle.getSymbolImports()) |imp| {
                 const imp_name = std.mem.span(imp.name);
                 const imp_ns = std.mem.span(imp.namespace);
                 const imp_ver = Version.initC(imp.version);
@@ -279,7 +306,7 @@ const LoadGraph = struct {
             }
 
             // Check that no exported symbols are already exposed.
-            for (info.status.unloaded.@"export".getSymbolExports()) |e| {
+            for (info.status.unloaded.export_handle.getSymbolExports()) |e| {
                 const e_name = std.mem.span(e.name);
                 const e_ns = std.mem.span(e.namespace);
                 if (modules.getSymbol(e_name, e_ns) != null) {
@@ -293,7 +320,7 @@ const LoadGraph = struct {
                     continue :check;
                 }
             }
-            for (info.status.unloaded.@"export".getDynamicSymbolExports()) |e| {
+            for (info.status.unloaded.export_handle.getDynamicSymbolExports()) |e| {
                 const e_name = std.mem.span(e.name);
                 const e_ns = std.mem.span(e.namespace);
                 if (modules.getSymbol(e_name, e_ns) != null) {
@@ -332,7 +359,7 @@ const LoadGraph = struct {
                 info.signalError();
             }
 
-            for (info.status.unloaded.@"export".getSymbolImports()) |imp| {
+            for (info.status.unloaded.export_handle.getSymbolImports()) |imp| {
                 const i_name = std.mem.span(imp.name);
                 const i_namespace = std.mem.span(imp.namespace);
                 const i_version = Version.initC(imp.version);
@@ -358,7 +385,7 @@ const LoadGraph = struct {
         }
     }
 
-    fn waitForCompletion(self: *LoadGraph, waker: pub_tasks.Waker) enum { done, wait } {
+    fn waitForCompletion(self: *LoadGraph, waker: Waker) enum { done, wait } {
         if (self.enqueue_count == 0) return .done;
         self.notify();
         self.waiter = waker.ref();
@@ -378,7 +405,7 @@ const LoadGraph = struct {
     }
 };
 
-pub fn init() !pub_modules.LoadingSet {
+pub fn init() !*Self {
     tracing.logTrace(@src(), "creating new loading set", .{});
 
     modules.mutex.lock();
@@ -393,14 +420,14 @@ pub fn init() !pub_modules.LoadingSet {
     set.arena = arena;
     modules.loading_set_count.increase();
 
-    return set.asProxySet();
+    return set;
 }
 
 fn ref(self: *@This()) void {
     self.refcount.ref();
 }
 
-fn unref(self: *@This()) void {
+pub fn unref(self: *@This()) void {
     if (self.refcount.unref() == .noop) return;
     std.debug.assert(self.active_commits == 0);
     std.debug.assert(self.active_load_graph == null);
@@ -422,13 +449,6 @@ pub fn unlock(self: *Self) void {
     self.mutex.unlock();
 }
 
-pub fn asProxySet(self: *Self) pub_modules.LoadingSet {
-    return .{
-        .data = self,
-        .vtable = &vtable,
-    };
-}
-
 fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
     if (self.string_cache.getKey(value)) |v| return v;
     const alloc = self.arena.allocator();
@@ -439,12 +459,42 @@ fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
 }
 
 fn addModuleInfo(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
-    const name = try self.cacheString(module_info.status.unloaded.@"export".getName());
+    const name = try self.cacheString(module_info.status.unloaded.export_handle.getName());
     try self.module_infos.put(self.arena.allocator(), name, module_info);
 }
 
 fn getModuleInfo(self: *const Self, name: []const u8) ?*ModuleInfo {
     return self.module_infos.getPtr(name);
+}
+
+pub fn queryModule(self: *Self, module: []const u8) bool {
+    tracing.logTrace(
+        @src(),
+        "querying loading set module, set='{*}', name='{s}'",
+        .{ self, module },
+    );
+
+    self.lock();
+    defer self.unlock();
+    return self.getModuleInfo(module) != null;
+}
+
+pub fn pollModuleStatus(
+    self: *Self,
+    waker: Waker,
+    module: []const u8,
+) !?pub_modules.LoadingSet.ResolvedModule {
+    tracing.logTrace(
+        @src(),
+        "polling loading set module status, set='{*}', module='{s}'",
+        .{ self, module },
+    );
+
+    self.lock();
+    defer self.unlock();
+
+    const info = self.getModuleInfo(module) orelse return error.NotFound;
+    return info.pollStatus(waker);
 }
 
 fn addSymbol(
@@ -477,6 +527,18 @@ fn getSymbol(self: *const Self, name: []const u8, ns: []const u8, version: Versi
     const symbol = self.getSymbolAny(name, ns) orelse return null;
     if (!symbol.version.isCompatibleWith(version)) return null;
     return symbol;
+}
+
+pub fn querySymbol(self: *Self, name: []const u8, ns: []const u8, version: Version) bool {
+    tracing.logTrace(
+        @src(),
+        "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{f}'",
+        .{ self, name, ns, version },
+    );
+
+    self.lock();
+    defer self.unlock();
+    return self.getSymbol(name, ns, version) != null;
 }
 
 fn addModuleInner(
@@ -784,22 +846,22 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
 
 const AppendModulesData = struct {
     err: ?Allocator.Error = null,
-    filter_data: ?*anyopaque,
+    filter_context: ?*anyopaque,
     filter_fn: *const fn (
+        context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-        data: ?*anyopaque,
     ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
     exports: std.ArrayList(*const pub_modules.Export) = .{},
 };
 
-fn appendModules(@"export": *const pub_modules.Export, o_data: ?*anyopaque) callconv(.c) bool {
+fn appendModules(o_data: ?*anyopaque, @"export": *const pub_modules.Export) callconv(.c) bool {
     const data: *AppendModulesData = @ptrCast(@alignCast(o_data));
     validate_export(@"export") catch {
         tracing.logWarn(@src(), "skipping export", .{});
         return true;
     };
 
-    if (data.filter_fn(@"export", data.filter_data) == .load) {
+    if (data.filter_fn(data.filter_context, @"export") == .load) {
         data.exports.append(modules.allocator, @"export") catch |err| {
             @"export".deinit();
             data.err = err;
@@ -810,31 +872,43 @@ fn appendModules(@"export": *const pub_modules.Export, o_data: ?*anyopaque) call
     return true;
 }
 
-fn addModule(
+pub fn addModule(
     self: *Self,
-    owner_inner: *InstanceHandle.Inner,
+    owner: *const InstanceHandle,
     @"export": *const pub_modules.Export,
 ) !void {
+    tracing.logTrace(
+        @src(),
+        "adding module to the loading set, set='{*}', module='{s}'",
+        .{ self, @"export".getName() },
+    );
+
+    const inner = owner.lock();
+    defer inner.unlock();
+
+    self.lock();
+    defer self.unlock();
+
     try validate_export(@"export");
-    try self.addModuleInner(owner_inner.handle.?, @"export", owner_inner.instance.?);
+    try self.addModuleInner(inner.handle.?, @"export", inner.instance.?);
 }
 
 fn addModulesFromHandle(
     self: *Self,
     module_handle: *ModuleHandle,
+    filter_context: ?*anyopaque,
     filter_fn: *const fn (
+        context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-        data: ?*anyopaque,
     ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
-    filter_data: ?*anyopaque,
 ) !void {
     var append_data = AppendModulesData{
+        .filter_context = filter_context,
         .filter_fn = filter_fn,
-        .filter_data = filter_data,
     };
     defer append_data.exports.deinit(modules.allocator);
     errdefer for (append_data.exports.items) |exp| exp.deinit();
-    module_handle.iterator(&appendModules, &append_data);
+    module_handle.iterator(&append_data, &appendModules);
     if (append_data.err) |err| return err;
 
     for (append_data.exports.items) |exp| {
@@ -842,37 +916,55 @@ fn addModulesFromHandle(
     }
 }
 
-fn addModulesFromPath(
+pub fn addModulesFromPath(
     self: *Self,
     path: Path,
+    filter_context: ?*anyopaque,
     filter_fn: *const fn (
+        context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-        data: ?*anyopaque,
     ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
-    filter_data: ?*anyopaque,
 ) !void {
+    tracing.logTrace(
+        @src(),
+        "adding modules to loading set, set='{*}', path='{f}'",
+        .{ self, path },
+    );
+
+    self.lock();
+    defer self.unlock();
+
     const module_handle = try ModuleHandle.initPath(modules.allocator, path);
     defer module_handle.unref();
-    try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
+    try self.addModulesFromHandle(module_handle, filter_context, filter_fn);
 }
 
-fn addModulesFromLocal(
+pub fn addModulesFromLocal(
     self: *Self,
     iterator_fn: ModuleHandle.IteratorFn,
+    filter_context: ?*anyopaque,
     filter_fn: *const fn (
+        context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-        data: ?*anyopaque,
     ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
-    filter_data: ?*anyopaque,
     bin_ptr: *const anyopaque,
 ) !void {
+    tracing.logTrace(
+        @src(),
+        "adding local modules to loading set, set='{*}'",
+        .{self},
+    );
+
+    self.lock();
+    defer self.unlock();
+
     const module_handle = try ModuleHandle.initLocal(
         modules.allocator,
         iterator_fn,
         bin_ptr,
     );
     defer module_handle.unref();
-    try self.addModulesFromHandle(module_handle, filter_fn, filter_data);
+    try self.addModulesFromHandle(module_handle, filter_context, filter_fn);
 }
 
 // ----------------------------------------------------
@@ -908,7 +1000,7 @@ const LoadOp = FSMFuture(struct {
         return self.ret;
     }
 
-    pub fn __unwind0(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
+    pub fn __unwind0(self: *@This(), reason: FSMUnwindReason) void {
         _ = reason;
 
         self.load_graph.set.lock();
@@ -922,7 +1014,7 @@ const LoadOp = FSMFuture(struct {
         self.load_graph.dequeueModule();
     }
 
-    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
+    pub fn __state0(self: *@This(), waker: Waker) FSMOp {
         const set = self.load_graph.set;
         set.lock();
         defer set.unlock();
@@ -971,7 +1063,7 @@ const LoadOp = FSMFuture(struct {
             var status = dep_info.status;
             if (dep_node.fut == null) {
                 const unloaded = status.unloaded;
-                status = .{ .err = .{ .@"export" = unloaded.@"export", .owner = unloaded.owner } };
+                status = .{ .err = .{ .export_handle = unloaded.export_handle, .owner = unloaded.owner } };
             }
 
             switch (status) {
@@ -998,7 +1090,7 @@ const LoadOp = FSMFuture(struct {
         return .next;
     }
 
-    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) void {
+    pub fn __state1(self: *@This(), waker: Waker) void {
         _ = waker;
 
         modules.mutex.lock();
@@ -1014,11 +1106,11 @@ const LoadOp = FSMFuture(struct {
             break :blk self.load_graph.dependency_tree.nodePtr(self.node_id).?;
         };
         const info = set.getModuleInfo(node.module).?;
-        self.name = std.mem.span(info.status.unloaded.@"export".name);
+        self.name = std.mem.span(info.status.unloaded.export_handle.name);
         tracing.logTrace(@src(), "loading instance, instance='{s}'", .{self.name});
 
         // Recheck that all dependencies could be loaded.
-        for (info.status.unloaded.@"export".getSymbolImports()) |i| {
+        for (info.status.unloaded.export_handle.getSymbolImports()) |i| {
             const i_name = std.mem.span(i.name);
             const i_namespace = std.mem.span(i.namespace);
             const i_version = Version.initC(i.version);
@@ -1031,13 +1123,13 @@ const LoadOp = FSMFuture(struct {
         // Initialize the instance future.
         set.unlock();
         self.instance_future = InstanceHandle.InitExportedOp.init(.{
-            .set = set.asProxySet(),
-            .@"export" = info.status.unloaded.@"export",
+            .set = @ptrCast(set),
+            .@"export" = info.status.unloaded.export_handle,
             .handle = info.handle,
         });
     }
 
-    pub fn __unwind2(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
+    pub fn __unwind2(self: *@This(), reason: FSMUnwindReason) void {
         _ = reason;
         const set = self.load_graph.set;
 
@@ -1046,7 +1138,7 @@ const LoadOp = FSMFuture(struct {
         modules.mutex.unlock();
     }
 
-    pub fn __state2(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
+    pub fn __state2(self: *@This(), waker: Waker) FSMOp {
         const set = self.load_graph.set;
         switch (self.instance_future.poll(waker)) {
             .ready => |result| {
@@ -1077,7 +1169,7 @@ const LoadOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state3(self: *@This(), waker: pub_tasks.Waker) void {
+    pub fn __state3(self: *@This(), waker: Waker) void {
         _ = waker;
         const set = self.load_graph.set;
         const instance = self.instance;
@@ -1089,12 +1181,12 @@ const LoadOp = FSMFuture(struct {
         self.start_instance_future = inner.start();
     }
 
-    pub fn __unwind4(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
+    pub fn __unwind4(self: *@This(), reason: FSMUnwindReason) void {
         _ = reason;
         self.start_instance_future.deinit();
     }
 
-    pub fn __state4(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
+    pub fn __state4(self: *@This(), waker: Waker) FSMOp {
         const set = self.load_graph.set;
         const instance = self.instance;
         const instance_handle = InstanceHandle.fromInstancePtr(instance);
@@ -1149,14 +1241,14 @@ const LoadOp = FSMFuture(struct {
     }
 });
 
-const CommitOp = FSMFuture(struct {
+pub const CommitOp = FSMFuture(struct {
     set: *Self,
     load_graph: *LoadGraph = undefined,
     ret: anyerror!void = undefined,
 
     pub const __no_abort = true;
 
-    fn init(set: *Self) EnqueuedFuture(Fallible(void)) {
+    pub fn init(set: *Self) EnqueuedFuture(Fallible(void)) {
         tracing.logTrace(@src(), "commiting loading set, set='{*}'", .{set});
         set.ref();
 
@@ -1183,12 +1275,12 @@ const CommitOp = FSMFuture(struct {
         return self.ret;
     }
 
-    pub fn __unwind0(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
+    pub fn __unwind0(self: *@This(), reason: FSMUnwindReason) void {
         _ = reason;
         self.set.unref();
     }
 
-    pub fn __state0(self: *@This(), waker: pub_tasks.Waker) !pub_tasks.FSMOp {
+    pub fn __state0(self: *@This(), waker: Waker) !FSMOp {
         modules.mutex.lock();
         defer modules.mutex.unlock();
 
@@ -1213,7 +1305,7 @@ const CommitOp = FSMFuture(struct {
         return .next;
     }
 
-    pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
+    pub fn __unwind1(self: *@This(), reason: FSMUnwindReason) void {
         _ = reason;
         modules.mutex.lock();
         defer modules.mutex.unlock();
@@ -1231,7 +1323,7 @@ const CommitOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state1(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
+    pub fn __state1(self: *@This(), waker: Waker) FSMOp {
         waker.wake();
 
         self.set.lock();
@@ -1251,7 +1343,7 @@ const CommitOp = FSMFuture(struct {
         }
     }
 
-    pub fn __state2(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
+    pub fn __state2(self: *@This(), waker: Waker) FSMOp {
         self.set.lock();
         defer self.set.unlock();
 
@@ -1279,204 +1371,3 @@ const CommitOp = FSMFuture(struct {
         }
     }
 });
-
-// ----------------------------------------------------
-// VTable
-// ----------------------------------------------------
-
-const VTableImpl = struct {
-    fn ref(this: *anyopaque) callconv(.c) void {
-        const self: *Self = @ptrCast(@alignCast(this));
-        self.ref();
-    }
-    fn unref(this: *anyopaque) callconv(.c) void {
-        const self: *Self = @ptrCast(@alignCast(this));
-        self.unref();
-    }
-    fn queryModule(
-        this: *anyopaque,
-        module: [*:0]const u8,
-    ) callconv(.c) bool {
-        const self: *Self = @ptrCast(@alignCast(this));
-        const module_ = std.mem.span(module);
-
-        tracing.logTrace(
-            @src(),
-            "querying loading set module, set='{*}', name='{s}'",
-            .{ self, module_ },
-        );
-
-        self.lock();
-        defer self.unlock();
-        return self.getModuleInfo(module_) != null;
-    }
-    fn querySymbol(
-        this: *anyopaque,
-        name: [*:0]const u8,
-        namespace: [*:0]const u8,
-        version: Version.CVersion,
-    ) callconv(.c) bool {
-        const self: *Self = @ptrCast(@alignCast(this));
-        const name_ = std.mem.span(name);
-        const namespace_ = std.mem.span(namespace);
-        const version_ = Version.initC(version);
-
-        tracing.logTrace(
-            @src(),
-            "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{f}'",
-            .{ self, name_, namespace_, version_ },
-        );
-
-        self.lock();
-        defer self.unlock();
-        return self.getSymbol(name_, namespace_, version_) != null;
-    }
-    fn addCallback(
-        this: *anyopaque,
-        module: [*:0]const u8,
-        on_success: *const fn (info: *const pub_modules.Info, data: ?*anyopaque) callconv(.c) void,
-        on_error: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) void,
-        on_abort: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-        data: ?*anyopaque,
-    ) callconv(.c) pub_context.Status {
-        const self: *Self = @ptrCast(@alignCast(this));
-        const module_ = std.mem.span(module);
-        const callback = Callback{
-            .data = data,
-            .on_success = on_success,
-            .on_error = on_error,
-        };
-
-        tracing.logTrace(
-            @src(),
-            "adding callback to the loading set, set='{*}', module='{s}', callback='{}'",
-            .{ self, module_, callback },
-        );
-
-        self.lock();
-        defer self.unlock();
-
-        _ = blk: {
-            const module_info = self.getModuleInfo(module_) orelse break :blk error.NotFound;
-            module_info.appendCallback(callback) catch |err| break :blk err;
-        } catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
-            if (on_abort) |f| f(data);
-            context.setResult(.initErr(.initError(e)));
-            return .err;
-        };
-        return .ok;
-    }
-    fn addModule(
-        this: *anyopaque,
-        owner: *const pub_modules.OpaqueInstance,
-        @"export": *const pub_modules.Export,
-    ) callconv(.c) pub_context.Status {
-        const self: *Self = @ptrCast(@alignCast(this));
-
-        tracing.logTrace(
-            @src(),
-            "adding module to the loading set, set='{*}', module='{s}'",
-            .{ self, @"export".getName() },
-        );
-
-        self.lock();
-        defer self.unlock();
-
-        _ = blk: {
-            const owner_handle = InstanceHandle.fromInstancePtr(owner);
-            const owner_inner = owner_handle.lock();
-            defer owner_inner.unlock();
-            self.addModule(owner_inner, @"export") catch |err| break :blk err;
-        } catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
-            context.setResult(.initErr(.initError(e)));
-            return .err;
-        };
-        return .ok;
-    }
-    fn addModulesFromPath(
-        this: *anyopaque,
-        path: paths.compat.Path,
-        filter_fn: *const fn (
-            module: *const pub_modules.Export,
-            data: ?*anyopaque,
-        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
-        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-        filter_data: ?*anyopaque,
-    ) callconv(.c) pub_context.Status {
-        const self: *Self = @ptrCast(@alignCast(this));
-        const path_ = Path.initC(path);
-
-        tracing.logTrace(
-            @src(),
-            "adding modules to loading set, set='{*}', path='{f}'",
-            .{ self, path_ },
-        );
-
-        self.lock();
-        defer self.unlock();
-        defer if (filter_deinit) |f| f(filter_data);
-
-        self.addModulesFromPath(path_, filter_fn, filter_data) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
-            context.setResult(.initErr(.initError(e)));
-            return .err;
-        };
-        return .ok;
-    }
-    fn addModulesFromLocal(
-        this: *anyopaque,
-        filter_fn: *const fn (
-            module: *const pub_modules.Export,
-            data: ?*anyopaque,
-        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
-        filter_deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void,
-        filter_data: ?*anyopaque,
-        iterator_fn: *const fn (
-            f: *const fn (module: *const pub_modules.Export, data: ?*anyopaque) callconv(.c) bool,
-            data: ?*anyopaque,
-        ) callconv(.c) void,
-        bin_ptr: *const anyopaque,
-    ) callconv(.c) pub_context.Status {
-        const self: *Self = @ptrCast(@alignCast(this));
-
-        tracing.logTrace(
-            @src(),
-            "adding local modules to loading set, set='{*}'",
-            .{self},
-        );
-
-        self.lock();
-        defer self.unlock();
-        defer if (filter_deinit) |f| f(filter_data);
-
-        self.addModulesFromLocal(
-            iterator_fn,
-            filter_fn,
-            filter_data,
-            bin_ptr,
-        ) catch |e| {
-            if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
-            context.setResult(.initErr(.initError(e)));
-            return .err;
-        };
-        return .ok;
-    }
-    fn commit(this: *anyopaque) callconv(.c) EnqueuedFuture(Fallible(void)) {
-        const self: *Self = @ptrCast(@alignCast(this));
-        return CommitOp.Data.init(self);
-    }
-};
-
-const vtable = pub_modules.LoadingSet.VTable{
-    .ref = &VTableImpl.ref,
-    .unref = &VTableImpl.unref,
-    .query_module = &VTableImpl.queryModule,
-    .query_symbol = &VTableImpl.querySymbol,
-    .add_callback = &VTableImpl.addCallback,
-    .add_module = &VTableImpl.addModule,
-    .add_modules_from_path = &VTableImpl.addModulesFromPath,
-    .add_modules_from_local = &VTableImpl.addModulesFromLocal,
-    .commit = &VTableImpl.commit,
-};

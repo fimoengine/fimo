@@ -198,9 +198,9 @@ pub fn main() !void {
     defer async_ctx.deinit();
 
     const set = try modules.LoadingSet.init();
-    defer set.unref();
+    defer set.deinit();
 
-    try set.addModulesFromLocal({}, Modules.loadingSetFilter, null);
+    try set.addModulesFromLocal({}, Modules.loadingSetFilter);
     try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
 
     var instance_init = true;
