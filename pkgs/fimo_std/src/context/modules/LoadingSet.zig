@@ -756,7 +756,7 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
     for (modifiers, 0..) |mod, i| {
         switch (mod.tag) {
             .destructor, .dependency => {},
-            .debug_info, .instance_state, .start_event, .stop_event => {
+            .instance_state, .start_event, .stop_event => {
                 for (modifiers[0..i]) |x| {
                     if (x.tag == mod.tag) {
                         tracing.logWarn(

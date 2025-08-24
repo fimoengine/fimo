@@ -91,7 +91,6 @@ pub const Modifier = extern struct {
     tag: enum(i32) {
         destructor,
         dependency,
-        debug_info,
         instance_state,
         start_event,
         stop_event,
@@ -100,7 +99,6 @@ pub const Modifier = extern struct {
     value: extern union {
         destructor: *const Destructor,
         dependency: *const Dependency,
-        debug_info: *const DebugInfo,
         instance_state: *const InstanceState,
         start_event: *const StartEvent,
         stop_event: *const StopEvent,
@@ -120,15 +118,6 @@ pub const Modifier = extern struct {
     /// The instance will acquire a static dependency to the provided instance. Multiple
     /// dependencies may be provided.
     pub const Dependency = modules.Info;
-
-    /// Accessor to the debug info of a module.
-    ///
-    /// The subsystem may utilize the debug info to provide additional features, like symbol
-    /// tracing. May only be specified once.
-    pub const DebugInfo = extern struct {
-        data: ?*anyopaque,
-        construct: *const fn (ptr: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) ctx.Status,
-    };
 
     /// A constructor and destructor for the state of a module.
     ///
@@ -199,7 +188,7 @@ pub const Export = extern struct {
                     const dependency = modifier.value.dependency;
                     dependency.unref();
                 },
-                .debug_info, .instance_state, .start_event, .stop_event => {},
+                .instance_state, .start_event, .stop_event => {},
                 else => @panic("Unknown modifier"),
             }
         }
@@ -266,14 +255,6 @@ pub const Export = extern struct {
     /// Returns the modifiers.
     pub fn getModifiers(self: *const Export) []const Modifier {
         return if (self.modifiers) |x| x[0..self.modifiers_count] else &.{};
-    }
-
-    /// Returns the debug info modifier, if specified.
-    pub fn getDebugInfoModifier(self: *const Export) ?*const Modifier.DebugInfo {
-        for (self.getModifiers()) |mod| {
-            if (mod.tag == .debug_info) return mod.value.debug_info;
-        }
-        return null;
     }
 
     /// Returns the instance state modifier, if specified.
@@ -348,10 +329,6 @@ pub fn Module(T: type) type {
             if (@hasField(M, "description")) b = b.withDescription(module.description);
             if (@hasField(M, "author")) b = b.withAuthor(module.author);
             if (@hasField(M, "license")) b = b.withLicense(module.license);
-            if (@hasField(M, "debug_info")) {
-                if (@TypeOf(module.debug_info) != bool) @compileError("fimo: invalid debug option, expected `pub const fimo_module = .{ ..., .debug_info = true };` declaration, found: " ++ @typeName(@TypeOf(module.debug_info)));
-                if (M.debug_info) b = b.withDebugInfo() else b.debug_info = null;
-            }
 
             break :blk b;
         },
@@ -1021,11 +998,7 @@ pub const Builder = struct {
     namespaces: []const Namespace = &.{},
     imports: []const Builder.SymbolImport = &.{},
     exports: []const Builder.SymbolExport = &.{},
-    modifiers: []const Builder.Modifier = if (!builtin.strip_debug_info)
-        &.{.{ .debug_info = {} }}
-    else
-        &.{},
-    debug_info: ?modules.DebugInfo.Builder = if (!builtin.strip_debug_info) .{} else null,
+    modifiers: []const Builder.Modifier = &.{},
     stateType: type = void,
     instance_state: ?ExportsRoot.Modifier.InstanceState = null,
     start_event: ?ExportsRoot.Modifier.StartEvent = null,
@@ -1091,7 +1064,6 @@ pub const Builder = struct {
     };
 
     const Modifier = union(enum) {
-        debug_info: void,
         instance_state: void,
         start_event: void,
         stop_event: void,
@@ -1255,7 +1227,6 @@ pub const Builder = struct {
 
         var x = self.withNamespace(import.symbol.namespace);
         x.imports = &imports;
-        if (x.debug_info) |*info| info.addImport(import.symbol.T);
         return x;
     }
 
@@ -1280,12 +1251,6 @@ pub const Builder = struct {
 
         var x = self;
         x.exports = &exports;
-        if (x.debug_info) |*info| {
-            switch (@"export".value) {
-                .static => info.addExport(@"export".symbol.T),
-                .dynamic => info.addDynamicExport(@"export".symbol.T),
-            }
-        }
         return x;
     }
 
@@ -1374,27 +1339,6 @@ pub const Builder = struct {
         return x;
     }
 
-    /// Ensures that the module embeds the debug info.
-    ///
-    /// The debug info is embedded automatically, whenever the plugin is built with debug info.
-    pub fn withDebugInfo(comptime self: Builder) Builder {
-        if (self.debug_info != null) return self;
-
-        var debug_info = modules.DebugInfo.Builder{};
-        for (self.imports) |sym| debug_info.addImport(sym.symbol.T);
-        for (self.exports) |sym| {
-            if (sym.value == .static)
-                debug_info.addExport(sym.symbol.T)
-            else
-                debug_info.addDynamicExport(sym.symbol.T);
-        }
-        debug_info.addType(self.stateType);
-
-        var x = self;
-        x.debug_info = debug_info;
-        return x.withModifierInner(.{ .debug_info = {} });
-    }
-
     /// Adds a state to the module.
     pub fn withState(
         comptime self: Builder,
@@ -1457,7 +1401,6 @@ pub const Builder = struct {
             .init = &Wrapper.wrapInit,
             .deinit = &Wrapper.wrapDeinit,
         };
-        if (x.debug_info) |*info| _ = info.addType(T);
         return x.withModifierInner(.{ .instance_state = {} });
     }
 
@@ -1833,26 +1776,6 @@ pub const Builder = struct {
         var modifiers: [self.modifiers.len]ExportsRoot.Modifier = undefined;
         for (self.modifiers, &modifiers) |src, *dst| {
             switch (src) {
-                .debug_info => {
-                    const debug_info = self.debug_info.?.build();
-                    const construct = struct {
-                        fn f(data: ?*anyopaque, info: *modules.DebugInfo) callconv(.c) ctx.Status {
-                            _ = data;
-                            info.* = debug_info.asFfi();
-                            return .ok;
-                        }
-                    }.f;
-
-                    dst.* = .{
-                        .tag = .debug_info,
-                        .value = .{
-                            .debug_info = &.{
-                                .data = null,
-                                .construct = construct,
-                            },
-                        },
-                    };
-                },
                 .instance_state => {
                     const instance_state = self.instance_state.?;
                     dst.* = .{

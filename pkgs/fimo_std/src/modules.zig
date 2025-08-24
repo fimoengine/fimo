@@ -7,7 +7,6 @@ const builtin = @import("builtin");
 const c = @import("c");
 
 const ctx = @import("ctx.zig");
-pub const DebugInfo = @import("modules/DebugInfo.zig");
 pub const exports = @import("modules/exports.zig");
 pub const Export = exports.Export;
 pub const Module = exports.Module;
