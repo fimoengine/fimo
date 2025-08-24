@@ -332,6 +332,7 @@ pub const EventTag = enum(u8) {
     context_switch,
     thread_wakeup,
     call_stack_sample,
+    _,
 };
 
 pub const Instant = enum(u64) { _ };
@@ -1425,7 +1426,7 @@ pub const DBReader = struct {
             }
         };
         const sessions = self.getAllSessions();
-        return std.sort.lowerBound(Session, sessions, Context{ .t = @enumFromInt(time) }, Context.compare);
+        return std.sort.lowerBound(Session, sessions, Context{ .t = @intFromEnum(time) }, Context.compare);
     }
 
     pub fn getSessionUpperBound(self: *const DBReader, time: Instant) u64 {
@@ -1437,7 +1438,7 @@ pub const DBReader = struct {
             }
         };
         const sessions = self.getAllSessions();
-        return std.sort.upperBound(Session, sessions, Context{ .t = @enumFromInt(time) }, Context.compare);
+        return std.sort.upperBound(Session, sessions, Context{ .t = @intFromEnum(time) }, Context.compare);
     }
 
     pub fn getEventInfoTable(self: *const DBReader) *align(table_alignment) const EventInfoTable {
@@ -1564,7 +1565,7 @@ pub const DBReader = struct {
             }
         };
         const events = self.getAllEvents();
-        return std.sort.lowerBound(OpaqueEvent, events, Context{ .t = @enumFromInt(time) }, Context.compare);
+        return std.sort.lowerBound(OpaqueEvent, events, Context{ .t = @intFromEnum(time) }, Context.compare);
     }
 
     pub fn getEventsUpperBound(self: *const DBReader, time: Instant) u64 {
@@ -1576,7 +1577,7 @@ pub const DBReader = struct {
             }
         };
         const events = self.getAllEvents();
-        return std.sort.upperBound(OpaqueEvent, events, Context{ .t = @enumFromInt(time) }, Context.compare);
+        return std.sort.upperBound(OpaqueEvent, events, Context{ .t = @intFromEnum(time) }, Context.compare);
     }
 
     pub fn getSessionEvents(self: *const DBReader, session_idx: u64) []const OpaqueEvent {
