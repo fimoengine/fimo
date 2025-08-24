@@ -2,9 +2,6 @@ name: CI
 
 on: [push, pull_request]
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   build:
     strategy:
@@ -23,20 +20,10 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: master
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
-          components: clippy, rustfmt
 
       - name: Run zig fmt
         if: matrix.os == 'ubuntu-latest'
         run: zig fmt --check .
-
-      - name: Run rust fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
 
       - name: Test zig
         shell: bash
@@ -45,15 +32,4 @@ jobs:
             zig build check test -Doptimize=ReleaseSafe
           else
             zig build check test
-          fi
-
-      - name: Test rust
-        shell: bash
-        run: |
-          if ${{ matrix.build-type == 'Release' }}; then
-            cargo clippy --release
-            cargo test --release
-          else
-            cargo clippy
-            cargo test
           fi
