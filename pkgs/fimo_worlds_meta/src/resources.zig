@@ -165,9 +165,7 @@ test "resource: unique lock" {
     const world = try World.init(.{ .label = "test-world" });
     defer world.deinit();
 
-    const executor = world.getPool();
-    defer executor.unref();
-
+    const executor = world.getExecutor();
     try handle.addToWorld(world, 0);
     defer _ = handle.removeFromWorld(world) catch unreachable;
 
@@ -215,8 +213,7 @@ test "resource: shared lock" {
     const world = try World.init(.{ .label = "test-world" });
     defer world.deinit();
 
-    const executor = world.getPool();
-    defer executor.unref();
+    const executor = world.getExecutor();
 
     try handle.addToWorld(world, 0);
     defer _ = handle.removeFromWorld(world) catch unreachable;
@@ -268,11 +265,11 @@ test "resource: shared lock" {
                 const term1 = rnd.int(usize);
                 self.term1 = term1;
 
-                fimo_tasks_meta.task.yield();
+                fimo_tasks_meta.tasks.yield();
 
                 const term2 = rnd.int(usize);
                 self.term2 = term2;
-                fimo_tasks_meta.task.yield();
+                fimo_tasks_meta.tasks.yield();
 
                 self.term_sum = term1 +% term2;
                 writes.* += 1;
@@ -281,10 +278,10 @@ test "resource: shared lock" {
 
         fn check(self: *const Self) void {
             const term_sum = self.term_sum;
-            fimo_tasks_meta.task.yield();
+            fimo_tasks_meta.tasks.yield();
 
             const term2 = self.term2;
-            fimo_tasks_meta.task.yield();
+            fimo_tasks_meta.tasks.yield();
 
             const term1 = self.term1;
             std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;

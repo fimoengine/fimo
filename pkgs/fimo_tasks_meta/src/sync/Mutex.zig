@@ -16,9 +16,12 @@ const time = fimo_std.time;
 const Duration = time.Duration;
 const Instant = time.Instant;
 
-const task = @import("../task.zig");
-const yield = task.yield;
-const TaskId = task.Id;
+const root = @import("../root.zig");
+const yield = root.yield;
+const Task = root.Task;
+const CmdBufCmd = root.CmdBufCmd;
+const CmdBuf = root.CmdBuf;
+const Executor = root.Executor;
 const testing = @import("../testing.zig");
 const Futex = @import("Futex.zig");
 
@@ -205,52 +208,34 @@ test "Mutex: many uncontended (tasks)" {
             const num_threads = 4;
             const num_increments = 1000;
 
-            var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-            defer arena.deinit();
-            const allocator = arena.allocator();
-
             const Runner = struct {
                 mutex: Mutex = .{},
                 counter: NonAtomicCounter = .{},
+                task: Task = .{ .run = run },
+
+                fn run(task: *Task, idx: usize) callconv(.c) void {
+                    _ = idx;
+                    const self: *@This() = @alignCast(@fieldParentPtr("task", task));
+                    var i: usize = num_increments;
+                    while (i > 0) : (i -= 1) {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+                        self.counter.inc();
+                    }
+                }
             };
             var runners = [_]Runner{.{}} ** num_threads;
-
-            var tasks = blk: {
-                const config = task.BuilderConfig(*Runner){
-                    .on_start = struct {
-                        fn f(t: *task.Task(*Runner)) void {
-                            var i: usize = num_increments;
-                            while (i > 0) : (i -= 1) {
-                                t.state.mutex.lock();
-                                defer t.state.mutex.unlock();
-                                t.state.counter.inc();
-                            }
-                        }
-                    }.f,
-                };
-                var tasks_: [num_threads]task.Task(*Runner) = undefined;
-                for (&tasks_, &runners) |*t, *r| {
-                    const b = task.Builder(config){ .state = r };
-                    t.* = b.build();
-                }
-                break :blk tasks_;
+            var cmds: [num_threads]CmdBufCmd = undefined;
+            for (&runners, &cmds) |*r, *cmd| cmd.* = .{
+                .tag = .enqueue_task,
+                .payload = .{ .enqueue_task = &r.task },
             };
+            var cmd_buf = CmdBuf{ .cmds = .init(&cmds) };
 
-            var buffer = blk: {
-                const command_buffer = @import("../command_buffer.zig");
-                const config = command_buffer.BuilderConfig(void){};
-                var buff = command_buffer.Builder(config){ .state = {} };
-                for (&tasks) |*t| try buff.enqueueTask(allocator, @ptrCast(t));
-                break :blk buff.build();
-            };
-            errdefer buffer.abort();
+            const exe = Executor.current().?;
+            const handle = exe.enqueue(&cmd_buf);
 
-            const p = @import("../pool.zig").Pool.current().?;
-            defer p.unref();
-
-            const handle = try p.enqueueCommandBuffer(&buffer);
-            defer handle.unref();
-            try std.testing.expectEqual(.completed, handle.waitOn());
+            try std.testing.expectEqual(.completed, handle.join());
             for (runners) |r| try std.testing.expectEqual(r.counter.get(), num_increments);
         }
     }.f);
@@ -296,15 +281,14 @@ test "Mutex: many contended (tasks)" {
             const num_threads = 4;
             const num_increments = 1000;
 
-            var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-            defer arena.deinit();
-            const allocator = arena.allocator();
-
             const Runner = struct {
                 mutex: Mutex = .{},
                 counter: NonAtomicCounter = .{},
+                task: Task = .{ .batch_len = num_threads, .run = run },
 
-                fn run(self: *@This()) void {
+                fn run(task: *Task, idx: usize) callconv(.c) void {
+                    _ = idx;
+                    const self: *@This() = @alignCast(@fieldParentPtr("task", task));
                     var i: usize = num_increments;
                     while (i > 0) : (i -= 1) {
                         // Occasionally hint to let another thread run.
@@ -318,36 +302,16 @@ test "Mutex: many contended (tasks)" {
                 }
             };
             var runner = Runner{};
-
-            var tasks = blk: {
-                const config = task.BuilderConfig(*Runner){
-                    .on_start = struct {
-                        fn f(self: *task.Task(*Runner)) void {
-                            self.state.run();
-                        }
-                    }.f,
-                };
-                const builder = task.Builder(config){ .state = &runner };
-                var tasks_: [num_threads]task.Task(*Runner) = undefined;
-                for (&tasks_) |*t| t.* = builder.build();
-                break :blk tasks_;
+            var cmd = CmdBufCmd{
+                .tag = .enqueue_task,
+                .payload = .{ .enqueue_task = &runner.task },
             };
+            var cmd_buf = CmdBuf{ .cmds = .init(@ptrCast(&cmd)) };
 
-            var buffer = blk: {
-                const command_buffer = @import("../command_buffer.zig");
-                const config = command_buffer.BuilderConfig(void){};
-                var buff = command_buffer.Builder(config){ .state = {} };
-                for (&tasks) |*t| try buff.enqueueTask(allocator, @ptrCast(t));
-                break :blk buff.build();
-            };
-            errdefer buffer.abort();
+            const exe = Executor.current().?;
+            const handle = exe.enqueue(&cmd_buf);
 
-            const p = @import("../pool.zig").Pool.current().?;
-            defer p.unref();
-
-            const handle = try p.enqueueCommandBuffer(&buffer);
-            defer handle.unref();
-            try std.testing.expectEqual(.completed, handle.waitOn());
+            try std.testing.expectEqual(.completed, handle.join());
             try std.testing.expectEqual(runner.counter.get(), num_increments * num_threads);
         }
     }.f);

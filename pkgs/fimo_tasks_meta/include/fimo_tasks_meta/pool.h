@@ -26,39 +26,36 @@ typedef struct FimoTasksMeta_CommandBufferHandle FimoTasksMeta_CommandBufferHand
 /// VTable of a pool.
 typedef struct FimoTasksMeta_PoolVTable {
     /// Returns the id of the pool.
-    FimoTasksMeta_PoolId(*id)(void *pool);
+    FimoTasksMeta_PoolId (*id)(void *pool);
     /// Acquires a new reference to the pool.
-    void(*acquire)(void *pool);
+    void (*acquire)(void *pool);
     /// Releases the reference to the pool.
-    void(*release)(void *pool);
+    void (*release)(void *pool);
     /// Sends a request to stop accepting new requests.
-    void(*request_close)(void *pool);
+    void (*request_close)(void *pool);
     /// Checks if the pool accepts new requests.
-    bool(*accepts_requests)(void *pool);
+    bool (*accepts_requests)(void *pool);
     /// Checks if the current thread is managed by the pool.
-    bool(*owns_current_thread)(void *pool);
+    bool (*owns_current_thread)(void *pool);
     /// Returns the optional label of the pool.
     ///
     /// The label is not null-terminated.
-    const char*(*label)(void *pool, FimoUSize *len);
+    const char *(*label)(void *pool, FimoUSize *len);
     /// Writes the ids of all workers managed by the pool into the provided array.
     ///
     /// The function writes up to `len` elements and returns the number of written elements.
-    FimoUSize(*workers)(void *pool, FimoTasksMeta_PoolWorker *ptr, FimoUSize len);
+    FimoUSize (*workers)(void *pool, FimoTasksMeta_PoolWorker *ptr, FimoUSize len);
     /// Writes all supported stack sizes of the pool into the provided array.
     ///
     /// The function writes up to `len` elements and returns the number of written elements.
-    FimoUSize(*stack_sizes)(void *pool, FimoTasksMeta_PoolStackSize *ptr, FimoUSize len);
+    FimoUSize (*stack_sizes)(void *pool, FimoTasksMeta_PoolStackSize *ptr, FimoUSize len);
     /// Enqueues the command buffer in the pool.
     ///
     /// The buffer must remain valid until it is deinitialized by the pool. If `handle` is not
     /// `NULL`, it will be initialized with the handle of the enqueued buffer. Otherwise, the
     /// buffer will be enqueued in a detached state.
-    FimoResult(*enqueue_buffer)(
-        void *pool,
-        FimoTasksMeta_CommandBuffer *buffer,
-        FimoTasksMeta_CommandBufferHandle *handle
-    );
+    FimoResult (*enqueue_buffer)(void *pool, FimoTasksMeta_CommandBuffer *buffer,
+                                 FimoTasksMeta_CommandBufferHandle *handle);
 } FimoTasksMeta_PoolVTable;
 
 /// A worker pool.
@@ -124,29 +121,24 @@ typedef struct FimoTasksMeta_PoolQueryNode {
 /// The pool references are owned by the query and are released upon calling deinit.
 typedef struct FimoTasksMeta_PoolQuery {
     FimoTasksMeta_PoolQueryNode *root;
-    void(*destroy)(FimoTasksMeta_PoolQueryNode *root);
+    void (*destroy)(FimoTasksMeta_PoolQueryNode *root);
 } FimoTasksMeta_PoolQuery;
 
 /// Returns the id of the current worker.
-typedef bool(*FimoTasksMeta_worker_id)(FimoTasksMeta_PoolWorker *id);
+typedef bool (*FimoTasksMeta_worker_id)(FimoTasksMeta_PoolWorker *id);
 
 /// Returns the pool managing the current thread.
-typedef bool(*FimoTasksMeta_worker_pool)(FimoTasksMeta_Pool *pool);
+typedef bool (*FimoTasksMeta_worker_pool)(FimoTasksMeta_Pool *pool);
 
 /// Acquires a reference to the worker pool with the provided id.
-typedef bool(*FimoTasksMeta_worker_pool_by_id)(
-    FimoTasksMeta_PoolId id,
-    FimoTasksMeta_Pool *pool
-);
+typedef bool (*FimoTasksMeta_worker_pool_by_id)(FimoTasksMeta_PoolId id, FimoTasksMeta_Pool *pool);
 
 /// Queries all public and active worker pools managed by the runtime.
-typedef FimoResult(*FimoTasksMeta_query_worker_pools)(FimoTasksMeta_PoolQuery *query);
+typedef FimoResult (*FimoTasksMeta_query_worker_pools)(FimoTasksMeta_PoolQuery *query);
 
 /// Creates a new worker pool with the specified configuration.
-typedef FimoResult(*FimoTasksMeta_create_worker_pool)(
-    const FimoTasksMeta_PoolConfig *config,
-    FimoTasksMeta_Pool *pool
-);
+typedef FimoResult (*FimoTasksMeta_create_worker_pool)(const FimoTasksMeta_PoolConfig *config,
+                                                       FimoTasksMeta_Pool *pool);
 
 #ifdef __cplusplus
 }

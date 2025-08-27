@@ -14,12 +14,13 @@ const Duration = time.Duration;
 const Instant = time.Instant;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const symbols = fimo_tasks_meta.symbols;
+const win32 = @import("win32");
 
 const context = @import("context.zig");
+const Executor = @import("Executor.zig");
+const Worker = Executor.Worker;
+const CmdBuf = Executor.CmdBuf;
 const Futex = @import("Futex.zig");
-const Pool = @import("Pool.zig");
-const PoolMap = @import("PoolMap.zig");
-const Worker = @import("Worker.zig");
 
 debug_allocator: switch (builtin.mode) {
     .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}),
@@ -27,10 +28,13 @@ debug_allocator: switch (builtin.mode) {
 },
 allocator: Allocator,
 futex: Futex,
-pool_map: PoolMap = .{},
+executor: *Executor,
 
-pub const default_stack_size: usize = 8 * 1024 * 1024;
-pub const default_worker_count: usize = 0; // One worker per cpu core.
+pub const default_cmd_buf_capacity = 128;
+pub const default_worker_count = 0; // One worker per cpu core.
+pub const default_max_load_factor = 16;
+pub const default_stack_size = 8 * 1024 * 1024;
+pub const default_worker_stack_cache_len = 4;
 pub const Module = modules.Module(@This());
 
 comptime {
@@ -45,13 +49,28 @@ pub const fimo_module = .{
 };
 
 pub const fimo_parameters = .{
-    .default_stack_size = .{
-        .default = @as(u32, @intCast(default_stack_size)),
+    .default_cmd_buf_capacity = .{
+        .default = @as(u16, default_cmd_buf_capacity),
         .read_group = .dependency,
         .write_group = .dependency,
     },
     .default_worker_count = .{
-        .default = @as(u8, @intCast(default_worker_count)),
+        .default = @as(u8, default_worker_count),
+        .read_group = .dependency,
+        .write_group = .dependency,
+    },
+    .default_max_load_factor = .{
+        .default = @as(u8, default_max_load_factor),
+        .read_group = .dependency,
+        .write_group = .dependency,
+    },
+    .default_stack_size = .{
+        .default = @as(u32, default_stack_size),
+        .read_group = .dependency,
+        .write_group = .dependency,
+    },
+    .default_worker_stack_cache_len = .{
+        .default = @as(u8, default_worker_stack_cache_len),
         .read_group = .dependency,
         .write_group = .dependency,
     },
@@ -60,16 +79,24 @@ pub const fimo_parameters = .{
 pub const fimo_exports = .{
     .{ .symbol = symbols.task_id, .value = &taskId },
     .{ .symbol = symbols.worker_id, .value = &workerId },
-    .{ .symbol = symbols.worker_pool, .value = &workerPool },
-    .{ .symbol = symbols.worker_pool_by_id, .value = &workerPoolById },
-    .{ .symbol = symbols.query_worker_pools, .value = &queryWorkerPool },
-    .{ .symbol = symbols.create_worker_pool, .value = &createWorkerPool },
     .{ .symbol = symbols.yield, .value = &yield },
     .{ .symbol = symbols.abort, .value = &abort },
+    .{ .symbol = symbols.cancel_requested, .value = &cancelRequested },
     .{ .symbol = symbols.sleep, .value = &sleep },
     .{ .symbol = symbols.task_local_set, .value = &taskLocalSet },
     .{ .symbol = symbols.task_local_get, .value = &taskLocalGet },
     .{ .symbol = symbols.task_local_clear, .value = &taskLocalClear },
+    .{ .symbol = symbols.cmd_buf_join, .value = &cmdBufJoin },
+    .{ .symbol = symbols.cmd_buf_detach, .value = &cmdBufDetach },
+    .{ .symbol = symbols.cmd_buf_cancel, .value = &cmdBufCancel },
+    .{ .symbol = symbols.cmd_buf_cancel_detach, .value = &cmdBufCancelDetach },
+    .{ .symbol = symbols.executor_global, .value = .{ .init = executorGlobal } },
+    .{ .symbol = symbols.executor_new, .value = &executorNew },
+    .{ .symbol = symbols.executor_current, .value = &executorCurrent },
+    .{ .symbol = symbols.executor_join, .value = &executorJoin },
+    .{ .symbol = symbols.executor_join_requested, .value = &executorJoinRequested },
+    .{ .symbol = symbols.executor_enqueue, .value = &executorEnqueue },
+    .{ .symbol = symbols.executor_enqueue_detached, .value = &executorEnqueueDetached },
     .{ .symbol = symbols.futex_wait, .value = &futexWait },
     .{ .symbol = symbols.futex_waitv, .value = &futexWaitv },
     .{ .symbol = symbols.futex_wake, .value = &futexWake },
@@ -81,12 +108,9 @@ pub const fimo_events = .{
     .deinit = deinit,
 };
 
-extern "winmm" fn timeBeginPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
-extern "winmm" fn timeEndPeriod(uPeriod: c_uint) callconv(.winapi) c_uint;
-
-fn init(self: *@This()) void {
+fn init(self: *@This()) !void {
     if (comptime builtin.target.os.tag == .windows) {
-        if (timeBeginPeriod(1) != 0) {
+        if (win32.media.timeBeginPeriod(1) != win32.media.TIMERR_NOERROR) {
             tracing.logWarn(@src(), "`timeBeginPeriod` failed, defaulting to default timer resolution", .{});
         }
     }
@@ -97,31 +121,38 @@ fn init(self: *@This()) void {
     } else std.heap.smp_allocator;
     self.allocator = allocator;
     self.futex = .init(allocator);
+    self.executor = try Executor.init(.{
+        .label = "default executor",
+        .futex = &self.futex,
+        .allocator = allocator,
+        .cmd_buf_capacity = default_cmd_buf_capacity,
+        .worker_count = @max(std.Thread.getCpuCount() catch 1, 1),
+        .max_load_factor = default_max_load_factor,
+        .stack_size = default_stack_size,
+        .worker_stack_cache_len = default_worker_stack_cache_len,
+    });
 }
 
 fn deinit(self: *@This()) void {
-    self.pool_map.deinit(self.allocator);
+    // TODO(gabriel): This is blocking. Switch to a polling alternative.
+    self.executor.join(&self.futex);
     self.futex.deinit();
 
     if (@TypeOf(self.debug_allocator) != void)
         if (self.debug_allocator.deinit() == .leak) @panic("memory leak");
     self.* = undefined;
-    if (comptime builtin.target.os.tag == .windows) _ = timeEndPeriod(1);
+    if (comptime builtin.target.os.tag == .windows) _ = win32.media.timeEndPeriod(1);
 }
 
 pub fn get() *@This() {
     return Module.state();
 }
 
-pub fn getDefaultStackSize() usize {
-    const min = context.StackAllocator.minStackSize();
-    const max = context.StackAllocator.maxStackSize();
-
-    const param = Module.parameters().default_stack_size;
-    const size: usize = @intCast(param.read());
-    if (size < min) return min;
-    if (size > max) return max;
-    return size;
+pub fn getDefaultCmdBufCapacity() usize {
+    const param = Module.parameters().default_cmd_buf_capacity;
+    const count: usize = @intCast(param.read());
+    if (count == 0) return default_cmd_buf_capacity;
+    return count;
 }
 
 pub fn getDefaultWorkerCount() usize {
@@ -131,15 +162,40 @@ pub fn getDefaultWorkerCount() usize {
     return count;
 }
 
-fn taskId(id: *fimo_tasks_meta.task.Id) callconv(.c) bool {
+pub fn getDefaultMaxLoadFactor() usize {
+    const param = Module.parameters().default_max_load_factor;
+    const count: usize = @intCast(param.read());
+    if (count == 0) return default_max_load_factor;
+    return count;
+}
+
+pub fn getDefaultStackSize() usize {
+    const min = context.minStackSize();
+    const max = context.maxStackSize();
+
+    const param = Module.parameters().default_stack_size;
+    const size: usize = @intCast(param.read());
+    if (size < min) return min;
+    if (size > max) return max;
+    return size;
+}
+
+pub fn getWorkerStackCacheLen() usize {
+    const param = Module.parameters().default_worker_stack_cache_len;
+    const count: usize = @intCast(param.read());
+    if (count == 0) return default_worker_stack_cache_len;
+    return count;
+}
+
+fn taskId(id: *fimo_tasks_meta.TaskId) callconv(.c) bool {
     if (Worker.currentTask()) |curr| {
-        id.* = curr.id;
+        id.* = @enumFromInt(@intFromPtr(curr));
         return true;
     }
     return false;
 }
 
-fn workerId(id: *fimo_tasks_meta.pool.Worker) callconv(.c) bool {
+fn workerId(id: *fimo_tasks_meta.Worker) callconv(.c) bool {
     if (Worker.currentId()) |curr| {
         id.* = curr;
         return true;
@@ -147,222 +203,16 @@ fn workerId(id: *fimo_tasks_meta.pool.Worker) callconv(.c) bool {
     return false;
 }
 
-fn workerPool(pool: *fimo_tasks_meta.pool.Pool) callconv(.c) bool {
-    if (Worker.currentPool()) |curr| {
-        pool.* = curr.ref().asMetaPool();
-        return true;
-    }
-    return false;
-}
-
-fn workerPoolById(
-    id: fimo_tasks_meta.pool.Id,
-    pool: *fimo_tasks_meta.pool.Pool,
-) callconv(.c) bool {
-    const self = get();
-    const p = self.pool_map.queryPoolById(id) orelse return false;
-    pool.* = p.asMetaPool();
-    return true;
-}
-
-fn queryWorkerPool(query: *fimo_tasks_meta.pool.Query) callconv(.c) Status {
-    const self = get();
-    const q = self.pool_map.queryAllPools(self.allocator) catch |err| {
-        ctx.setResult(.initErr(.initError(err)));
-        return .err;
-    };
-
-    const deinitFn = struct {
-        fn f(root: ?*fimo_tasks_meta.pool.Query.Node) callconv(.c) void {
-            var len: usize = 0;
-            var current: ?*fimo_tasks_meta.pool.Query.Node = root orelse return;
-            while (current) |curr| {
-                const pool: *Pool = @ptrCast(@alignCast(curr.pool.data));
-                pool.unref();
-                len += 1;
-                current = curr.next;
-            }
-
-            const nodes = @as([*]fimo_tasks_meta.pool.Query.Node, @ptrCast(root))[0..len];
-            const allocator = get().allocator;
-            allocator.free(nodes);
-        }
-    }.f;
-
-    if (q.len == 0) {
-        get().allocator.free(q);
-        query.* = .{ .root = null, .deinit_fn = &deinitFn };
-    } else {
-        query.* = .{ .root = &q[0], .deinit_fn = &deinitFn };
-    }
-    return .ok;
-}
-
-fn createWorkerPool(
-    config: *const fimo_tasks_meta.pool.Config,
-    pool: *fimo_tasks_meta.pool.Pool,
-) callconv(.c) Status {
-    const self = get();
-    const allocator = self.allocator;
-
-    if (config.next != null) {
-        tracing.logErr(@src(), "the next key is reserved for future use, pool=`{s}`", .{config.label()});
-        ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-        return .err;
-    }
-    if (config.stacks_len == 0) {
-        tracing.logErr(@src(), "expected at least one stack, pool=`{s}`", .{config.label()});
-        ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-        return .err;
-    }
-    if (config.default_stack_index >= config.stacks_len) {
-        tracing.logErr(@src(), "default stack index out of bounds, pool=`{s}`, stacks=`{}`, default=`{}`", .{
-            config.label(),
-            config.stacks_len,
-            config.default_stack_index,
-        });
-        ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-        return .err;
-    }
-    for (config.stacks(), 0..) |stack, i| {
-        if (stack.next != null) {
-            tracing.logErr(@src(), "the next key is reserved for future use, pool=`{s}`, stack_index=`{}`", .{
-                config.label(),
-                i,
-            });
-            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-            return .err;
-        }
-        if (stack.preallocated_count > stack.max_allocated) {
-            tracing.logErr(@src(), "number of preallocated stacks exceeds the specified maximum number of stacks," ++
-                " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, max_allocated=`{}`", .{
-                config.label(),
-                i,
-                stack.preallocated_count,
-                stack.max_allocated,
-            });
-            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-            return .err;
-        }
-        if (stack.cold_count + stack.hot_count < stack.preallocated_count) {
-            tracing.logErr(@src(), "number of preallocated stacks stacks exceeds the combined cold and hot stacks count," ++
-                " pool=`{s}`, stack_index=`{}`, preallocated=`{}`, cold=`{}`, hot=`{}`", .{
-                config.label(),
-                i,
-                stack.preallocated_count,
-                stack.cold_count,
-                stack.hot_count,
-            });
-            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-            return .err;
-        }
-        if (stack.cold_count + stack.hot_count > stack.max_allocated) {
-            tracing.logErr(@src(), "number of cold and hot stacks exceeds the specified maximum number of stacks," ++
-                " pool=`{s}`, stack_index=`{}`, cold=`{}`, hot=`{}`, max_allocated=`{}`", .{
-                config.label(),
-                i,
-                stack.cold_count,
-                stack.hot_count,
-                stack.max_allocated,
-            });
-            ctx.setResult(.initErr(.initError(error.InvalidConfig)));
-            return .err;
-        }
-    }
-
-    const min_stack_size = context.StackAllocator.minStackSize();
-    const max_stack_size = context.StackAllocator.maxStackSize();
-
-    const Pair = struct {
-        size: usize,
-        idx: usize,
-        is_default: bool,
-        skip: bool = false,
-
-        fn cmp(c: void, a: @This(), b: @This()) bool {
-            _ = c;
-            return a.size < b.size;
-        }
-    };
-    var stacks = ArrayList(Pair).initCapacity(allocator, config.stacks_len) catch |err| {
-        ctx.setResult(.initErr(.initError(err)));
-        return .err;
-    };
-    defer stacks.deinit(allocator);
-
-    for (config.stacks(), 0..) |stack, i| {
-        const size = if (stack.size != .default)
-            @max(@min(@intFromEnum(stack.size), max_stack_size), min_stack_size)
-        else
-            getDefaultStackSize();
-        stacks.appendAssumeCapacity(.{
-            .size = size,
-            .idx = i,
-            .is_default = i == config.default_stack_index,
-        });
-    }
-    std.mem.sort(Pair, stacks.items, {}, Pair.cmp);
-
-    var num_filtered_stacks: usize = 0;
-    for (stacks.items[0 .. stacks.items.len - 1], stacks.items[1..]) |*curr, *next| {
-        if (curr.size == next.size) {
-            curr.skip = true;
-            next.is_default = curr.is_default;
-            curr.is_default = false;
-            num_filtered_stacks += 1;
-        }
-    }
-
-    const num_stacks = config.stacks_len - num_filtered_stacks;
-    var default_stack_idx: usize = undefined;
-    var stack_cfg = ArrayList(Pool.InitOptions.StackOptions)
-        .initCapacity(allocator, num_stacks) catch |err| {
-        ctx.setResult(.initErr(.initError(err)));
-        return .err;
-    };
-    defer stack_cfg.deinit(allocator);
-    for (stacks.items) |stack| {
-        if (stack.skip) continue;
-        if (stack.is_default) default_stack_idx = stack_cfg.items.len;
-        const cfg = config.stacks()[stack.idx];
-        stack_cfg.appendAssumeCapacity(.{
-            .size = stack.size,
-            .preallocated = cfg.preallocated_count,
-            .cold = cfg.cold_count,
-            .hot = cfg.hot_count,
-            .max_allocated = if (cfg.max_allocated != 0)
-                cfg.max_allocated
-            else
-                std.math.maxInt(usize),
-        });
-    }
-
-    const options = Pool.InitOptions{
-        .allocator = allocator,
-        .label = config.label(),
-        .stacks = stack_cfg.items,
-        .default_stack = default_stack_idx,
-        .worker_count = if (config.worker_count == 0)
-            getDefaultWorkerCount()
-        else
-            config.worker_count,
-        .is_public = config.is_queryable,
-    };
-
-    const p = self.pool_map.spawnPool(self.allocator, options) catch |err| {
-        ctx.setResult(.initErr(.initError(err)));
-        return .err;
-    };
-    pool.* = p.asMetaPool();
-    return .ok;
-}
-
 fn yield() callconv(.c) void {
     Worker.yield();
 }
 
 fn abort() callconv(.c) void {
-    Worker.abortTask();
+    Worker.abort();
+}
+
+fn cancelRequested() callconv(.c) bool {
+    return Worker.cancelRequested();
 }
 
 fn sleep(duration: fimo_std.time.compat.Duration) callconv(.c) void {
@@ -370,22 +220,111 @@ fn sleep(duration: fimo_std.time.compat.Duration) callconv(.c) void {
 }
 
 fn taskLocalSet(
-    key: *const fimo_tasks_meta.task_local.OpaqueKey,
+    key: *const fimo_tasks_meta.AnyTssKey,
     value: ?*anyopaque,
     dtor: ?*const fn (value: ?*anyopaque) callconv(.c) void,
 ) callconv(.c) void {
     const task = Worker.currentTask() orelse @panic("not a task");
-    task.setLocal(key, .{ .value = value, .dtor = dtor }) catch @panic("oom");
+    task.setLocal(.{ .key = key, .value = value, .dtor = dtor });
 }
 
-fn taskLocalGet(key: *const fimo_tasks_meta.task_local.OpaqueKey) callconv(.c) ?*anyopaque {
+fn taskLocalGet(key: *const fimo_tasks_meta.AnyTssKey) callconv(.c) ?*anyopaque {
     const task = Worker.currentTask() orelse @panic("not a task");
     return task.getLocal(key);
 }
 
-fn taskLocalClear(key: *const fimo_tasks_meta.task_local.OpaqueKey) callconv(.c) void {
+fn taskLocalClear(key: *const fimo_tasks_meta.AnyTssKey) callconv(.c) void {
     const task = Worker.currentTask() orelse @panic("not a task");
     task.clearLocal(key);
+}
+
+pub fn cmdBufJoin(
+    handle: *fimo_tasks_meta.CmdBufHandle,
+) callconv(.c) fimo_tasks_meta.CmdBufHandle.CompletionStatus {
+    const self = get();
+    const cmd_buf: *CmdBuf = @ptrCast(@alignCast(handle));
+    return cmd_buf.join(&self.futex);
+}
+
+pub fn cmdBufDetach(handle: *fimo_tasks_meta.CmdBufHandle) callconv(.c) void {
+    const self = get();
+    const cmd_buf: *CmdBuf = @ptrCast(@alignCast(handle));
+    cmd_buf.detach(&self.futex);
+}
+
+pub fn cmdBufCancel(handle: *fimo_tasks_meta.CmdBufHandle) callconv(.c) void {
+    const self = get();
+    const cmd_buf: *CmdBuf = @ptrCast(@alignCast(handle));
+    cmd_buf.cancel(&self.futex);
+}
+
+pub fn cmdBufCancelDetach(handle: *fimo_tasks_meta.CmdBufHandle) callconv(.c) void {
+    const self = get();
+    const cmd_buf: *CmdBuf = @ptrCast(@alignCast(handle));
+    cmd_buf.cancelDetach(&self.futex);
+}
+
+pub fn executorGlobal() callconv(.c) *fimo_tasks_meta.Executor {
+    const self = get();
+    return @ptrCast(self.executor);
+}
+
+pub fn executorNew(
+    exe: **fimo_tasks_meta.Executor,
+    cfg: *const fimo_tasks_meta.ExecutorCfg,
+) callconv(.c) Status {
+    const self = get();
+    const options: Executor.InitOptions = .{
+        .label = cfg.label.get(),
+        .futex = &self.futex,
+        .allocator = self.allocator,
+        .cmd_buf_capacity = if (cfg.cmd_buf_capacity == 0) getDefaultCmdBufCapacity() else cfg.cmd_buf_capacity,
+        .worker_count = if (cfg.worker_count == 0) getDefaultWorkerCount() else cfg.worker_count,
+        .max_load_factor = if (cfg.max_load_factor == 0) getDefaultMaxLoadFactor() else cfg.max_load_factor,
+        .stack_size = if (cfg.stack_size == 0) getDefaultStackSize() else cfg.stack_size,
+        .worker_stack_cache_len = if (cfg.worker_stack_cache_len == 0) getWorkerStackCacheLen() else cfg.worker_stack_cache_len,
+        .disable_stack_cache = cfg.disable_stack_cache,
+    };
+    const executor = Executor.init(options) catch |e| {
+        ctx.setResult(.initErr(.initError(e)));
+        return .err;
+    };
+    exe.* = @ptrCast(executor);
+    return .ok;
+}
+
+pub fn executorCurrent() callconv(.c) ?*fimo_tasks_meta.Executor {
+    return @ptrCast(Worker.currentExecutor());
+}
+
+pub fn executorJoin(exe: *fimo_tasks_meta.Executor) callconv(.c) void {
+    const self = get();
+    const executor: *Executor = @ptrCast(@alignCast(exe));
+    std.debug.assert(executor != self.executor);
+    executor.join(&self.futex);
+}
+
+pub fn executorJoinRequested(exe: *fimo_tasks_meta.Executor) callconv(.c) bool {
+    const executor: *Executor = @ptrCast(@alignCast(exe));
+    return executor.joinRequested();
+}
+
+pub fn executorEnqueue(
+    exe: *fimo_tasks_meta.Executor,
+    cmd_buf: *fimo_tasks_meta.CmdBuf,
+) callconv(.c) *fimo_tasks_meta.CmdBufHandle {
+    const self = get();
+    const executor: *Executor = @ptrCast(@alignCast(exe));
+    return @ptrCast(executor.enqueue(&self.futex, cmd_buf));
+}
+
+pub fn executorEnqueueDetached(
+    exe: *fimo_tasks_meta.Executor,
+    cmd_buf: *fimo_tasks_meta.CmdBuf,
+) callconv(.c) void {
+    const self = get();
+    const executor: *Executor = @ptrCast(@alignCast(exe));
+    executor.enqueueDetached(&self.futex, cmd_buf);
 }
 
 fn futexWait(

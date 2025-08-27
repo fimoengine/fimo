@@ -7,12 +7,14 @@ const Symbol = fimo_std.modules.Symbol;
 const Duration = fimo_std.time.compat.Duration;
 const Instant = fimo_std.time.compat.Instant;
 
-const pool = @import("pool.zig");
-const Pool = pool.Pool;
-const PoolConfig = pool.Config;
-const PoolId = pool.Id;
-const Query = pool.Query;
-const Worker = pool.Worker;
+const root = @import("root.zig");
+const TaskId = root.TaskId;
+const AnyTssKey = root.AnyTssKey;
+const CmdBuf = root.CmdBuf;
+const CmdBufHandle = root.CmdBufHandle;
+const Worker = root.Worker;
+const ExecutorCfg = root.ExecutorCfg;
+const Executor = root.Executor;
 const sync = @import("sync.zig");
 const ParkingLot = sync.ParkingLot;
 const ParkToken = ParkingLot.ParkToken;
@@ -23,10 +25,6 @@ const UnparkResult = ParkingLot.UnparkResult;
 const RequeueOp = ParkingLot.RequeueOp;
 const FilterOp = ParkingLot.FilterOp;
 const Futex = @import("sync/Futex.zig");
-const task = @import("task.zig");
-const TaskId = task.Id;
-const task_local = @import("task_local.zig");
-const TssKey = task_local.OpaqueKey;
 
 /// Namespace for all symbols of the package.
 pub const symbol_namespace: [:0]const u8 = "fimo-tasks";
@@ -35,16 +33,29 @@ pub const symbol_namespace: [:0]const u8 = "fimo-tasks";
 pub const all_symbols = .{
     task_id,
     worker_id,
-    worker_pool,
-    worker_pool_by_id,
-    query_worker_pools,
-    create_worker_pool,
+
     yield,
     abort,
+    cancel_requested,
     sleep,
+
     task_local_set,
     task_local_get,
     task_local_clear,
+
+    cmd_buf_join,
+    cmd_buf_detach,
+    cmd_buf_cancel,
+    cmd_buf_cancel_detach,
+
+    executor_global,
+    executor_new,
+    executor_current,
+    executor_join,
+    executor_join_requested,
+    executor_enqueue,
+    executor_enqueue_detached,
+
     futex_wait,
     futex_waitv,
     futex_wake,
@@ -63,30 +74,7 @@ pub const worker_id = Symbol{
     .version = ctx.context_version,
     .T = fn (id: *Worker) callconv(.c) bool,
 };
-pub const worker_pool = Symbol{
-    .name = "worker_pool",
-    .namespace = symbol_namespace,
-    .version = ctx.context_version,
-    .T = fn (pool: *Pool) callconv(.c) bool,
-};
-pub const worker_pool_by_id = Symbol{
-    .name = "worker_pool_by_id",
-    .namespace = symbol_namespace,
-    .version = ctx.context_version,
-    .T = fn (id: PoolId, pool: *Pool) callconv(.c) bool,
-};
-pub const query_worker_pools = Symbol{
-    .name = "query_worker_pools",
-    .namespace = symbol_namespace,
-    .version = ctx.context_version,
-    .T = fn (query: *Query) callconv(.c) Status,
-};
-pub const create_worker_pool = Symbol{
-    .name = "create_worker_pool",
-    .namespace = symbol_namespace,
-    .version = ctx.context_version,
-    .T = fn (config: *const PoolConfig, pool: *Pool) callconv(.c) Status,
-};
+
 pub const yield = Symbol{
     .name = "yield",
     .namespace = symbol_namespace,
@@ -98,6 +86,12 @@ pub const abort = Symbol{
     .namespace = symbol_namespace,
     .version = ctx.context_version,
     .T = fn () callconv(.c) void,
+};
+pub const cancel_requested = Symbol{
+    .name = "cancel_requested",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn () callconv(.c) bool,
 };
 pub const sleep = Symbol{
     .name = "sleep",
@@ -111,7 +105,7 @@ pub const task_local_set = Symbol{
     .namespace = symbol_namespace,
     .version = ctx.context_version,
     .T = fn (
-        key: *const TssKey,
+        key: *const AnyTssKey,
         value: ?*anyopaque,
         dtor: ?*const fn (value: ?*anyopaque) callconv(.c) void,
     ) callconv(.c) void,
@@ -120,13 +114,81 @@ pub const task_local_get = Symbol{
     .name = "task_local_get",
     .namespace = symbol_namespace,
     .version = ctx.context_version,
-    .T = fn (key: *const TssKey) callconv(.c) ?*anyopaque,
+    .T = fn (key: *const AnyTssKey) callconv(.c) ?*anyopaque,
 };
 pub const task_local_clear = Symbol{
     .name = "task_local_clear",
     .namespace = symbol_namespace,
     .version = ctx.context_version,
-    .T = fn (key: *const TssKey) callconv(.c) void,
+    .T = fn (key: *const AnyTssKey) callconv(.c) void,
+};
+
+pub const cmd_buf_join = Symbol{
+    .name = "cmd_buf_join",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (cmd_buf: *CmdBufHandle) callconv(.c) CmdBufHandle.CompletionStatus,
+};
+pub const cmd_buf_detach = Symbol{
+    .name = "cmd_buf_detach",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (cmd_buf: *CmdBufHandle) callconv(.c) void,
+};
+pub const cmd_buf_cancel = Symbol{
+    .name = "cmd_buf_cancel",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (cmd_buf: *CmdBufHandle) callconv(.c) void,
+};
+pub const cmd_buf_cancel_detach = Symbol{
+    .name = "cmd_buf_cancel_detach",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (cmd_buf: *CmdBufHandle) callconv(.c) void,
+};
+
+pub const executor_global = Symbol{
+    .name = "executor_global",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = Executor,
+};
+pub const executor_new = Symbol{
+    .name = "executor_new",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (ex: **Executor, cfg: *const ExecutorCfg) callconv(.c) Status,
+};
+pub const executor_current = Symbol{
+    .name = "executor_current",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn () callconv(.c) ?*Executor,
+};
+pub const executor_join = Symbol{
+    .name = "executor_join",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (ex: *Executor) callconv(.c) void,
+};
+pub const executor_join_requested = Symbol{
+    .name = "executor_join_requested",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (ex: *Executor) callconv(.c) bool,
+};
+pub const executor_enqueue = Symbol{
+    .name = "executor_enqueue",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (ex: *Executor, cmds: *CmdBuf) callconv(.c) *CmdBufHandle,
+};
+pub const executor_enqueue_detached = Symbol{
+    .name = "executor_enqueue_detached",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn (ex: *Executor, cmds: *CmdBuf) callconv(.c) void,
 };
 
 pub const futex_wait = Symbol{
@@ -141,7 +203,6 @@ pub const futex_wait = Symbol{
         timeout: ?*const Instant,
     ) callconv(.c) Futex.Status,
 };
-
 pub const futex_waitv = Symbol{
     .name = "futex_waitv",
     .namespace = symbol_namespace,
@@ -153,7 +214,6 @@ pub const futex_waitv = Symbol{
         wake_index: *usize,
     ) callconv(.c) Futex.Status,
 };
-
 pub const futex_wake = Symbol{
     .name = "futex_wake",
     .namespace = symbol_namespace,
@@ -164,7 +224,6 @@ pub const futex_wake = Symbol{
         filter: Futex.Filter,
     ) callconv(.c) usize,
 };
-
 pub const futex_requeue = Symbol{
     .name = "futex_requeue",
     .namespace = symbol_namespace,

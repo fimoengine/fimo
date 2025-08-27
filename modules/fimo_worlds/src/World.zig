@@ -6,8 +6,8 @@ const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 const fimo_std = @import("fimo_std");
 const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
+const Executor = fimo_tasks_meta.Executor;
 const RwLock = fimo_tasks_meta.sync.RwLock;
-const Pool = fimo_tasks_meta.pool.Pool;
 
 const FimoWorlds = @import("FimoWorlds.zig");
 const heap = @import("heap.zig");
@@ -19,8 +19,7 @@ const World = @This();
 
 rwlock: RwLock = .{},
 label: []u8,
-executor: Pool,
-inherited_executor: bool,
+executor: *Executor,
 allocator: heap.TracingAllocator,
 system_group_count: atomic.Value(usize) = .init(0),
 resources: AutoArrayHashMapUnmanaged(*Resource, *ResourceValue) = .empty,
@@ -33,7 +32,7 @@ const ResourceValue = struct {
 
 pub const InitOptions = struct {
     label: ?[]const u8 = null,
-    executor: ?Pool = null,
+    executor: ?*Executor = null,
 };
 
 pub fn init(options: InitOptions) !*World {
@@ -42,28 +41,19 @@ pub fn init(options: InitOptions) !*World {
     const allocator = world_allocator.allocator();
 
     const label = try allocator.dupe(u8, options.label orelse "<unlabelled>");
-    const executor, const inherited_executor = if (options.executor) |ex| .{ ex.ref(), true } else blk: {
-        const executor_label = try std.fmt.allocPrint(allocator, "world `{s}` executor", .{label});
-        defer allocator.free(executor_label);
-
-        break :blk .{ try Pool.init(
-            &.{ .label_ = executor_label.ptr, .label_len = executor_label.len },
-        ), false };
-    };
-    errdefer executor.unref();
+    const executor = if (options.executor) |ex| ex else Executor.globalExecutor();
 
     const world = try allocator.create(World);
     world.* = .{
         .label = label,
         .executor = executor,
-        .inherited_executor = inherited_executor,
         .allocator = world_allocator,
     };
     FimoWorlds.get().universe.notifyWorldInit();
-    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, executor=`{x}`", .{
+    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, executor=`{*}`", .{
         world,
         label,
-        executor.id(),
+        executor,
     });
     return world;
 }
@@ -72,9 +62,6 @@ pub fn deinit(self: *World) void {
     tracing.logDebug(@src(), "destroying `{*}`", .{self});
     if (self.system_group_count.load(.acquire) != 0) @panic("world not empty");
     if (self.resources.count() != 0) @panic("world not empty");
-
-    if (!self.inherited_executor) self.executor.requestClose();
-    self.executor.unref();
 
     var allocator = self.allocator;
     allocator.deinit();

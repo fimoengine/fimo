@@ -10,11 +10,11 @@ const fimo_tasks_meta = @import("fimo_tasks_meta");
 const meta_pool = fimo_tasks_meta.pool;
 const StackSize = meta_pool.StackSize;
 const MetaWorker = meta_pool.Worker;
-const meta_task = fimo_tasks_meta.task;
-const MetaId = meta_task.Id;
-const MetaTask = meta_task.OpaqueTask;
+const meta_tasks = fimo_tasks_meta.tasks;
+const MetaId = meta_tasks.Id;
+const MetaTask = meta_tasks.Task;
 
-const CommandBuffer = @import("CommandBuffer.zig");
+const CmdBuf = @import("CmdBuf.zig");
 const context_ = @import("context.zig");
 const Context = context_.Context;
 const Transfer = context_.Transfer;
@@ -29,7 +29,7 @@ allocator: Allocator,
 id: MetaId,
 worker: ?MetaWorker = null,
 task: *MetaTask,
-owner: *CommandBuffer,
+owner: *CmdBuf,
 entry_index: usize,
 stack: Stack,
 stack_size: StackSize,
@@ -67,9 +67,8 @@ pub fn ensureReady(self: *Self) void {
 }
 
 /// Runs the cleanup operations that must occur while the task is running.
-pub fn exit(self: *Self, is_abort: bool) void {
+pub fn exit(self: *Self) void {
     self.clearAllLocals();
-    if (is_abort) self.task.abort() else self.task.complete();
     self.state = .stopped;
 }
 

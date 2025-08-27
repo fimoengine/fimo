@@ -3,7 +3,7 @@ const Symbol = fimo_std.modules.Symbol;
 const Status = fimo_std.ctx.Status;
 const context_version = fimo_std.ctx.context_version;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const Pool = fimo_tasks_meta.pool.Pool;
+const Executor = fimo_tasks_meta.Executor;
 
 const Job = @import("Job.zig");
 const Fence = Job.Fence;
@@ -30,7 +30,7 @@ pub const all_symbols = .{
     system_group_destroy,
     system_group_get_world,
     system_group_get_label,
-    system_group_get_pool,
+    system_group_get_executor,
     system_group_add_systems,
     system_group_remove_system,
     system_group_schedule,
@@ -44,7 +44,7 @@ pub const all_symbols = .{
     world_create,
     world_destroy,
     world_get_label,
-    world_get_pool,
+    world_get_executor,
     world_has_resource,
     world_add_resource,
     world_remove_resource,
@@ -122,11 +122,11 @@ pub const system_group_get_label = Symbol{
     .T = fn (group: *systems.SystemGroup, len: *usize) callconv(.c) ?[*]const u8,
 };
 
-pub const system_group_get_pool = Symbol{
-    .name = "system_group_get_pool",
+pub const system_group_get_executor = Symbol{
+    .name = "system_group_get_executor",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (group: *systems.SystemGroup) callconv(.c) Pool,
+    .T = fn (group: *systems.SystemGroup) callconv(.c) *Executor,
 };
 
 pub const system_group_add_systems = Symbol{
@@ -255,11 +255,11 @@ pub const world_get_label = Symbol{
     .T = fn (world: *World, len: *usize) callconv(.c) ?[*]const u8,
 };
 
-pub const world_get_pool = Symbol{
-    .name = "world_get_pool",
+pub const world_get_executor = Symbol{
+    .name = "world_get_executor",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (world: *World) callconv(.c) Pool,
+    .T = fn (world: *World) callconv(.c) *Executor,
 };
 
 pub const world_has_resource = Symbol{

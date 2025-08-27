@@ -13,8 +13,8 @@ pub const KeyExpect = fimo_tasks_meta.sync.Futex.KeyExpect;
 pub const Filter = fimo_tasks_meta.sync.Futex.Filter;
 pub const RequeueResult = fimo_tasks_meta.sync.Futex.RequeueResult;
 
-const Pool = @import("Pool.zig");
-const Worker = @import("Worker.zig");
+const Executor = @import("Executor.zig");
+const Worker = Executor.Worker;
 
 const Self = @This();
 
@@ -27,20 +27,20 @@ const Waiter = struct {
     futex: atomic.Value(u32) = .init(1),
     signaled_key: ?*const anyopaque = null,
     entry_count: usize,
-    pool: ?*Pool,
+    executor: ?*Executor,
 
     const futex_empty: u32 = 0;
     const futex_waiting: u32 = 1;
     const futex_signaling: u32 = 2;
 
     fn init(entry_count: usize) Waiter {
-        return .{ .entry_count = entry_count, .pool = Worker.currentPoolIfInTask() };
+        return .{ .entry_count = entry_count, .executor = Worker.currentExecutorIfInTask() };
     }
 
     fn wait(self: *Waiter, timeout: ?Instant) bool {
         var value = self.futex.load(.acquire);
         while (value != futex_empty) {
-            if (self.pool == null) {
+            if (self.executor == null) {
                 if (timeout) |t| {
                     const now = Instant.now();
                     if (now.order(t) == .gt) return false;
@@ -66,9 +66,9 @@ const Waiter = struct {
                     if (now.order(t) == .gt) return false;
 
                     // Wait for the specified duration.
-                    Worker.timedWaitTask(&self.futex, value, t) catch return false;
+                    Worker.timedWait(&self.futex, value, t) catch return false;
                 } else {
-                    Worker.waitTask(&self.futex, value);
+                    Worker.wait(&self.futex, value);
                 }
             }
             value = self.futex.load(.acquire);
@@ -92,10 +92,10 @@ const Waiter = struct {
         return true;
     }
 
-    fn wake(self: *Waiter) void {
+    fn wake(self: *Waiter, futex: *Self) void {
         self.futex.store(futex_empty, .release);
-        if (self.pool) |pool| {
-            pool.wakeByAddress(&self.futex, 1);
+        if (self.executor) |exe| {
+            exe.wakeByAddress(futex, &self.futex);
         } else {
             Thread.Futex.wake(&self.futex, 1);
         }
@@ -616,7 +616,7 @@ pub fn wakeFilter(self: *Self, key: *const anyopaque, max_waiters: usize, filter
         // The read of the `next` pointer must occur first, as the entry is
         // invalidated after `wake`.
         wake_list_head = entry.next;
-        entry.waiter.wake();
+        entry.waiter.wake(self);
     }
 
     return wake_count;
@@ -734,7 +734,7 @@ pub fn requeueFilter(
         // The read of the `next` pointer must occur first, as the entry is
         // invalidated after `wake`.
         wake_list_head = entry.next;
-        entry.waiter.wake();
+        entry.waiter.wake(self);
     }
 
     return .{ .wake_count = wake_count, .requeue_count = requeue_count };

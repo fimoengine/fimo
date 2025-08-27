@@ -8,7 +8,7 @@
 #include <fimo_std/integers.h>
 
 #include <fimo_tasks_meta/pool.h>
-#include <fimo_tasks_meta/task.h>
+#include <fimo_tasks_meta/tasks.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,19 +25,19 @@ typedef enum FimoTasksMeta_CommandBufferHandleCompletionStatus {
 /// VTable of a command buffer handle.
 typedef struct FimoTasksMeta_CommandBufferHandleVTable {
     /// Acquires a reference to the handle.
-    void(*acquire)(void *handle);
+    void (*acquire)(void *handle);
     /// Releases the reference to the handle.
-    void(*release)(void *handle);
+    void (*release)(void *handle);
     /// Returns a reference to the worker pool owning the handle.
-    FimoTasksMeta_Pool(*owner_pool)(void *handle);
+    FimoTasksMeta_Pool (*owner_pool)(void *handle);
     /// Waits for the completion of the command buffer.
-    FimoTasksMeta_CommandBufferHandleCompletionStatus(*wait_on)(void *handle);
+    FimoTasksMeta_CommandBufferHandleCompletionStatus (*wait_on)(void *handle);
 } FimoTasksMeta_CommandBufferHandleVTable;
 
 /// A handle to an enqueued command buffer.
 typedef struct FimoTasksMeta_CommandBufferHandle {
     void *data;
-    const FimoTasksMeta_CommandBufferHandleVTable* vtable;
+    const FimoTasksMeta_CommandBufferHandleVTable *vtable;
 } FimoTasksMeta_CommandBufferHandle;
 
 /// Type of an entry of a command buffer.
@@ -112,13 +112,13 @@ typedef struct FimoTasksMeta_CommandBuffer {
     ///
     /// Will be invoked after successfull completion of the command bufer on an arbitrary
     /// thread.
-    void(*on_complete)(FimoTasksMeta_CommandBuffer *buffer);
+    void (*on_complete)(FimoTasksMeta_CommandBuffer *buffer);
     /// Optional abortion handler of the command buffer..
     ///
     /// Will be invoked on an arbitrary thread, if the command buffer is aborted.
-    void(*on_abort)(FimoTasksMeta_CommandBuffer *buffer);
+    void (*on_abort)(FimoTasksMeta_CommandBuffer *buffer);
     /// Optional deinitialization routine.
-    void(*on_deinit)(FimoTasksMeta_CommandBuffer *buffer);
+    void (*on_deinit)(FimoTasksMeta_CommandBuffer *buffer);
 } FimoTasksMeta_CommandBuffer;
 
 #ifdef __cplusplus

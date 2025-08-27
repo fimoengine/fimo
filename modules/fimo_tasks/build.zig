@@ -69,7 +69,11 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     module.addImport("fimo_std", fimo_std_pkg.root_module);
     module.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
     module.linkLibrary(context);
-    if (builder.graph.target.result.os.tag == .windows) module.linkSystemLibrary("Winmm", .{});
+    if (builder.graph.target.result.os.tag == .windows) {
+        if (b.lazyDependency("win32", .{})) |dep| {
+            module.addImport("win32", dep.module("win32"));
+        }
+    }
 
     const mod = builder.addModule(.{
         .name = "fimo_tasks",
@@ -89,7 +93,11 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                 t.addImport("fimo_std", fimo_std_pkg.root_module);
                 t.addImport("fimo_tasks_meta", fimo_tasks_meta_pkg.root_module);
                 t.linkLibrary(context);
-                if (builder.graph.target.result.os.tag == .windows) t.linkSystemLibrary("Winmm", .{});
+                if (builder.graph.target.result.os.tag == .windows) {
+                    if (b.lazyDependency("win32", .{})) |dep| {
+                        t.addImport("win32", dep.module("win32"));
+                    }
+                }
 
                 break :blk t;
             },

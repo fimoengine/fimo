@@ -8,13 +8,7 @@ const fimo_std = @import("fimo_std");
 const Duration = fimo_std.time.Duration;
 const Instant = fimo_std.time.Instant;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const future = fimo_tasks_meta.future;
-const Handle = fimo_tasks_meta.command_buffer.Handle;
-const StackSize = fimo_tasks_meta.pool.StackSize;
-const Worker = fimo_tasks_meta.pool.Worker;
-const Pool = fimo_tasks_meta.pool.Pool;
 const Futex = fimo_tasks_meta.sync.Futex;
-const ParkingLot = fimo_tasks_meta.sync.ParkingLot;
 
 /// A fence to synchronize the execution of individual jobs.
 pub const Fence = extern struct {
@@ -171,94 +165,3 @@ pub const TimelineSemaphore = extern struct {
         _ = Futex.wakeFilter(&self.state, std.math.maxInt(usize), filter);
     }
 };
-
-/// Options for spawning a new job.
-pub const SpawnOptions = struct {
-    /// Executor of the job.
-    executor: Pool,
-    /// Allocator used to spawn the job.
-    ///
-    /// Must outlive the job.
-    allocator: Allocator,
-    /// Label of the underlying job command buffer.
-    label: ?[]const u8 = null,
-    /// Minimum stack size of the job.
-    stack_size: ?StackSize = null,
-    /// Worker to assign the job to.
-    worker: ?Worker = null,
-    /// List of dependencies to wait for before starting the job.
-    ///
-    /// The job will be aborted if any one dependency fails.
-    /// Each handle must belong to the same pool as the one the job will be spawned in.
-    dependencies: []const *const Handle = &.{},
-    /// List of fences to wait for before starting the job.
-    fences: []const *Fence = &.{},
-    /// List of semaphores to wait for before starting the job.
-    semaphores: []const TimelineSemaphoreInfo = &.{},
-    /// Optional object to signal upon completion of the job.
-    signal: ?SignalObject = null,
-
-    /// Information required for a wait/signal operation on a semaphore.
-    pub const TimelineSemaphoreInfo = struct {
-        semaphore: *TimelineSemaphore,
-        counter: u64,
-    };
-
-    /// Object that can be signaled at the end of a job.
-    pub const SignalObject = union(enum) {
-        fence: *Fence,
-        timeline_semaphore: TimelineSemaphoreInfo,
-        _,
-    };
-};
-
-/// Spawns a new job.
-pub fn go(
-    function: anytype,
-    args: std.meta.ArgsTuple(@TypeOf(function)),
-    options: SpawnOptions,
-) future.SpawnError!void {
-    const fences = try options.allocator.dupe(*Fence, options.fences);
-    const semaphores = try options.allocator.dupe(SpawnOptions.TimelineSemaphoreInfo, options.semaphores);
-    const Wrapper = struct {
-        fn start(
-            wait: []*Fence,
-            wait_sem: []SpawnOptions.TimelineSemaphoreInfo,
-            args_: std.meta.ArgsTuple(@TypeOf(function)),
-        ) void {
-            for (wait) |f| f.wait();
-            for (wait_sem) |i| i.semaphore.wait(i.counter);
-            @call(.auto, function, args_);
-        }
-
-        fn cleanup(
-            allocator: Allocator,
-            f: []*Fence,
-            sem: []SpawnOptions.TimelineSemaphoreInfo,
-            signal: ?SpawnOptions.SignalObject,
-        ) void {
-            allocator.free(f);
-            allocator.free(sem);
-            if (signal) |s| switch (s) {
-                .fence => |x| x.signal(),
-                .timeline_semaphore => |x| x.semaphore.signal(x.counter),
-                else => unreachable,
-            };
-        }
-    };
-
-    try future.goWithCleanup(
-        options.executor,
-        Wrapper.start,
-        .{ fences, semaphores, args },
-        Wrapper.cleanup,
-        .{ options.allocator, fences, semaphores, options.signal },
-        .{
-            .allocator = options.allocator,
-            .label = options.label,
-            .stack_size = options.stack_size,
-            .worker = options.worker,
-            .dependencies = options.dependencies,
-        },
-    );
-}

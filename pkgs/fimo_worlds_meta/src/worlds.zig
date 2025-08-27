@@ -5,7 +5,8 @@ const Alignment = std.mem.Alignment;
 const fimo_std = @import("fimo_std");
 const Error = fimo_std.ctx.Error;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const Pool = fimo_tasks_meta.pool.Pool;
+const Label = fimo_tasks_meta.Label;
+const Executor = fimo_tasks_meta.Executor;
 
 const resources = @import("resources.zig");
 const Resource = resources.Resource;
@@ -20,23 +21,17 @@ pub const CreateOptions = struct {
     label: ?[]const u8 = null,
     /// Executor for the world.
     ///
-    /// If this value is `null`, the world will spawn a default executor.
-    /// If the value is not null, the world will increase its reference count.
-    pool: ?Pool = null,
+    /// If this value is `null`, the world will use the default executor.
+    executor: ?*Executor = null,
 
     /// Descriptor of a new world.
     pub const Descriptor = extern struct {
-        /// Reserved. Must be null.
-        next: ?*const anyopaque,
         /// Optional label of the world.
-        label: ?[*]const u8,
-        /// Length in characters of the world label.
-        label_len: usize,
+        label: Label,
         /// Executor for the world.
         ///
-        /// If this value is `null`, the world will spawn a default executor.
-        /// If the value is not null, the world will increase its reference count.
-        pool: ?*const Pool,
+        /// If this value is `null`, the world will use the default executor.
+        executor: ?*Executor,
     };
 };
 
@@ -47,7 +42,7 @@ pub const AddSystemGroupOptions = struct {
     /// Executor for the system group.
     ///
     /// A default value will inherit the executor of the world.
-    pool: ?Pool = null,
+    executor: ?*Executor = null,
 };
 
 /// A container for resources and scheduable systems.
@@ -84,8 +79,8 @@ pub const World = opaque {
     }
 
     /// Returns a reference to the executor used by the world.
-    pub fn getPool(self: *World) Pool {
-        const sym = symbols.world_get_pool.getGlobal().get();
+    pub fn getExecutor(self: *World) *Executor {
+        const sym = symbols.world_get_executor.getGlobal().get();
         return sym(self);
     }
 
@@ -215,18 +210,15 @@ test "World: custom pool" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const executor = try Pool.init(&.{});
-    defer {
-        executor.requestClose();
-        executor.unref();
-    }
+    const exe = try Executor.init(&.{});
+    defer exe.join();
 
-    const world = try World.init(.{ .label = "test-world", .pool = executor });
+    const world = try World.init(.{ .label = "test-world", .executor = exe });
     defer world.deinit();
 
     const ex = world.getPool();
     defer ex.unref();
-    try std.testing.expectEqual(executor.id(), ex.id());
+    try std.testing.expectEqual(exe.id(), ex.id());
 }
 
 test "WorldAllocator: base" {

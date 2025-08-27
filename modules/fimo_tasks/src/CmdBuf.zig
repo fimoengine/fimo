@@ -5,16 +5,11 @@ const Allocator = std.mem.Allocator;
 const fimo_std = @import("fimo_std");
 const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const meta_command_buffer = fimo_tasks_meta.command_buffer;
-const Entry = meta_command_buffer.Entry;
-const MetaCommandBuffer = meta_command_buffer.OpaqueCommandBuffer;
-const Handle = meta_command_buffer.Handle;
-const meta_task = fimo_tasks_meta.task;
-const MetaTask = meta_task.OpaqueTask;
-const meta_pool = fimo_tasks_meta.pool;
-const StackSize = meta_pool.StackSize;
-const MetaWorker = meta_pool.Worker;
-const MetaPool = meta_pool.Pool;
+const PWorker = fimo_tasks_meta.Worker;
+const PTask = fimo_tasks_meta.Task;
+const PCmdBufCmd = fimo_tasks_meta.CmdBufCmd;
+const PCmdBuf = fimo_tasks_meta.CmdBuf;
+const PCmdBufHandle = fimo_tasks_meta.CmdBufHandle;
 
 const FimoTasks = @import("FimoTasks.zig");
 const Futex = @import("Futex.zig");
@@ -24,15 +19,14 @@ const Task = @import("Task.zig");
 owner: *Pool,
 entry_index: usize = 0,
 completed_index: usize = 0,
-buffer: *MetaCommandBuffer,
+buffer: *PCmdBuf,
 next: ?*Self = null,
 waiters_head: ?*Self = null,
 waiters_tail: ?*Self = null,
 enqueue_status: EnqueueStatus = .dequeued,
 entry_status: []EntryStatus,
 has_error: bool = false,
-worker: ?MetaWorker = null,
-stack_size: StackSize = .default,
+worker: ?PWorker = null,
 abort_on_error: bool = false,
 processing_entries_count: usize = 0,
 state: atomic.Value(u8) = .init(running),
@@ -55,11 +49,10 @@ const EnqueueStatus = enum {
 const EntryStatus = union(enum) {
     not_processed,
     running_task: Task,
-    running_buffer: *Self,
     processed,
 };
 
-pub fn init(owner: *Pool, buffer: *MetaCommandBuffer) Allocator.Error!*Self {
+pub fn init(owner: *Pool, buffer: *PCmdBuf) Allocator.Error!*Self {
     _ = owner.ref();
     errdefer owner.unref();
 
@@ -156,12 +149,6 @@ pub fn processEntry(self: *Self) void {
     while (self.entry_index < entries.len) {
         const entry = entries[self.entry_index];
         switch (entry.tag) {
-            .abort_on_error => self.processAbortOnError(
-                entry,
-            ) catch return,
-            .set_min_stack_size => self.processMinStackSize(
-                entry,
-            ) catch return,
             .select_worker => self.processSelectWorker(
                 entry,
             ) catch return,
@@ -171,13 +158,7 @@ pub fn processEntry(self: *Self) void {
             .enqueue_task => self.processEnqueueTask(
                 entry,
             ) catch return,
-            .enqueue_command_buffer => self.processEnqueueCommandBuffer(
-                entry,
-            ) catch return,
             .wait_on_barrier => self.processWaitOnBarrier(
-                entry,
-            ) catch return,
-            .wait_on_command_buffer => self.processWaitOnCommandBuffer(
                 entry,
             ) catch return,
             .wait_on_command_indirect => self.processWaitOnCommandIndirect(
@@ -202,41 +183,7 @@ pub fn processEntry(self: *Self) void {
 
 const ProcessError = error{Block};
 
-fn processAbortOnError(self: *Self, entry: Entry) ProcessError!void {
-    std.debug.assert(entry.tag == .abort_on_error);
-    self.abort_on_error = entry.payload.abort_on_error;
-    tracing.logDebug(
-        @src(),
-        "`{*}` setting `abort on error` to `{}`, index=`{}`",
-        .{ self, self.abort_on_error, self.entry_index },
-    );
-    self.markStatus(.processed);
-}
-
-fn processMinStackSize(self: *Self, entry: Entry) ProcessError!void {
-    std.debug.assert(entry.tag == .set_min_stack_size);
-    const min_stack_size = entry.payload.set_min_stack_size;
-    tracing.logDebug(
-        @src(),
-        "`{*}` setting `min stack size` to `{}`, index=`{}`",
-        .{ self, min_stack_size, self.entry_index },
-    );
-    if (self.owner.getStackAllocator(min_stack_size) == null) {
-        tracing.logErr(@src(), "`{*}` validation failed:" ++
-            " invalid stack size, entry=`{s}`, index=`{}`, stack_size=`{}`", .{
-            self,
-            @tagName(entry.tag),
-            self.entry_index,
-            @intFromEnum(min_stack_size),
-        });
-        self.abortCurrentAndForward();
-        return;
-    }
-    self.stack_size = min_stack_size;
-    self.markStatus(.processed);
-}
-
-fn processSelectWorker(self: *Self, entry: Entry) ProcessError!void {
+fn processSelectWorker(self: *Self, entry: PCmdBufCmd) ProcessError!void {
     std.debug.assert(entry.tag == .select_worker);
     const worker = entry.payload.select_worker;
     tracing.logDebug(
@@ -259,7 +206,7 @@ fn processSelectWorker(self: *Self, entry: Entry) ProcessError!void {
     self.markStatus(.processed);
 }
 
-fn processSelectAnyWorker(self: *Self, entry: Entry) ProcessError!void {
+fn processSelectAnyWorker(self: *Self, entry: PCmdBufCmd) ProcessError!void {
     std.debug.assert(entry.tag == .select_any_worker);
     self.worker = null;
     tracing.logDebug(@src(), "`{*}` setting `worker` to `any`, index=`{}`", .{
@@ -269,7 +216,7 @@ fn processSelectAnyWorker(self: *Self, entry: Entry) ProcessError!void {
     self.markStatus(.processed);
 }
 
-fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
+fn processEnqueueTask(self: *Self, entry: PCmdBufCmd) ProcessError!void {
     std.debug.assert(entry.tag == .enqueue_task);
     const stack_allocator = self.owner.getStackAllocator(self.stack_size).?;
     const stack = stack_allocator.allocate() catch |err| switch (err) {
@@ -312,31 +259,7 @@ fn processEnqueueTask(self: *Self, entry: Entry) ProcessError!void {
     self.owner.enqueueTask(task_ptr, self.worker);
 }
 
-fn processEnqueueCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
-    std.debug.assert(entry.tag == .enqueue_command_buffer);
-    const buffer = Self.init(self.owner, entry.payload.enqueue_command_buffer) catch {
-        tracing.logErr(@src(), "`{*}` validation failed:" ++
-            " enqueue of command buffer failed, entry=`{s}`, index=`{}`, enqueue-buffer=`{s}`", .{
-            self,
-            @tagName(entry.tag),
-            self.entry_index,
-            entry.payload.enqueue_command_buffer.label(),
-        });
-        self.abortCurrentAndForward();
-        return;
-    };
-    tracing.logDebug(@src(), "`{*}` spawning `{*}` to `{*}`, index=`{}`", .{
-        self,
-        buffer,
-        self.owner,
-        self.entry_index,
-    });
-    self.owner.command_buffer_count += 1;
-    buffer.enqueueToPool();
-    self.markStatus(.{ .running_buffer = buffer.ref() });
-}
-
-fn processWaitOnBarrier(self: *Self, entry: Entry) ProcessError!void {
+fn processWaitOnBarrier(self: *Self, entry: PCmdBufCmd) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_barrier);
     tracing.logDebug(@src(), "`{*}` waiting on barrier, index=`{}`", .{ self, self.entry_index });
 
@@ -347,47 +270,7 @@ fn processWaitOnBarrier(self: *Self, entry: Entry) ProcessError!void {
     return self.markStatus(.processed);
 }
 
-fn processWaitOnCommandBuffer(self: *Self, entry: Entry) ProcessError!void {
-    std.debug.assert(entry.tag == .wait_on_command_buffer);
-    tracing.logDebug(@src(), "`{*}` waiting on child command buffer, index=`{}`", .{
-        self,
-        self.entry_index,
-    });
-
-    const handle = entry.payload.wait_on_command_buffer;
-    if (handle.vtable != &vtable) {
-        tracing.logErr(@src(), "`{*}` validation failed:" ++
-            " invalid handle, entry=`{s}`, index=`{}`", .{
-            self,
-            @tagName(entry.tag),
-            self.entry_index,
-        });
-        self.abortCurrentAndForward();
-        return;
-    }
-    const buffer: *Self = @ptrCast(@alignCast(handle.data));
-    if (buffer.owner != self.owner) {
-        tracing.logErr(@src(), "`{*}` validation failed:" ++
-            " handle owner mismatch, entry=`{s}`, index=`{}`," ++
-            " expected=`{s}`, got=`{s}`", .{
-            self,
-            @tagName(entry.tag),
-            self.entry_index,
-            self.owner.label,
-            buffer.owner.label,
-        });
-        self.abortCurrentAndForward();
-        return;
-    }
-
-    // If we are waiting on another command buffer, we have to register
-    // ourselves as a waiter on that buffer
-    const status = try self.waitOnBuffer(buffer);
-    self.markStatus(.processed);
-    if (status == .aborted) self.abortForward();
-}
-
-fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
+fn processWaitOnCommandIndirect(self: *Self, entry: PCmdBufCmd) ProcessError!void {
     std.debug.assert(entry.tag == .wait_on_command_indirect);
     tracing.logDebug(@src(), "`{*}` waiting on command, index=`{}`", .{ self, self.entry_index });
 
@@ -410,14 +293,14 @@ fn processWaitOnCommandIndirect(self: *Self, entry: Entry) ProcessError!void {
     self.markStatus(.processed);
 }
 
-fn processUnknown(self: *Self, entry: Entry) void {
+fn processUnknown(self: *Self, entry: PCmdBufCmd) void {
     tracing.logErr(@src(), "`{*}` validation failed:" ++
         " unknown entry type, entry=`{}`, index=`{}`", .{
         self,
         @intFromEnum(entry.tag),
         self.entry_index,
     });
-    self.abortCurrentAndForward();
+    @panic("unknown cmd");
 }
 
 pub fn enqueueToPool(self: *Self) void {
@@ -629,32 +512,3 @@ fn waitOn(self: *Self) Handle.CompletionStatus {
     else
         .aborted;
 }
-
-pub fn asHandle(self: *Self) Handle {
-    return .{ .data = self, .vtable = &vtable };
-}
-
-const VTableImpl = struct {
-    fn ref(handle: *anyopaque) callconv(.c) void {
-        const this: *Self = @ptrCast(@alignCast(handle));
-        _ = this.ref();
-    }
-    fn unref(handle: *anyopaque) callconv(.c) void {
-        const this: *Self = @ptrCast(@alignCast(handle));
-        this.unref();
-    }
-    fn owner_pool(handle: *anyopaque) callconv(.c) MetaPool {
-        const this: *Self = @ptrCast(@alignCast(handle));
-        return this.owner.ref().asMetaPool();
-    }
-    fn wait_on(handle: *anyopaque) callconv(.c) Handle.CompletionStatus {
-        const this: *Self = @ptrCast(@alignCast(handle));
-        return this.waitOn();
-    }
-};
-const vtable = Handle.VTable{
-    .ref = &VTableImpl.ref,
-    .unref = &VTableImpl.unref,
-    .owner_pool = &VTableImpl.owner_pool,
-    .wait_on = &VTableImpl.wait_on,
-};

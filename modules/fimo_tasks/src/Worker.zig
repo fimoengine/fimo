@@ -105,7 +105,7 @@ pub fn yield() void {
 fn completeTask() noreturn {
     const worker = _current orelse @panic("not a worker");
     const task = worker.active_task orelse @panic("no active task");
-    task.exit(false);
+    task.exit();
 
     sendMsgToScheduler(.complete);
     unreachable;
@@ -115,7 +115,7 @@ fn completeTask() noreturn {
 pub fn abortTask() noreturn {
     const worker = _current orelse @panic("not a worker");
     const task = worker.active_task orelse @panic("no active task");
-    task.exit(true);
+    task.exit();
 
     sendMsgToScheduler(.abort);
     unreachable;
@@ -241,7 +241,7 @@ pub fn taskEntry(tr: context_.Transfer) callconv(.c) noreturn {
         defer span.exit();
 
         task.state = .running;
-        task.task.on_start(task.task);
+        task.task.run(task.task);
     }
 
     completeTask();

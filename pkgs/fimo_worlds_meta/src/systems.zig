@@ -5,7 +5,8 @@ const Alignment = std.mem.Alignment;
 const fimo_std = @import("fimo_std");
 const Error = fimo_std.ctx.Error;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const Pool = fimo_tasks_meta.pool.Pool;
+const Label = fimo_tasks_meta.Label;
+const Executor = fimo_tasks_meta.Executor;
 
 const Job = @import("Job.zig");
 const Fence = Job.Fence;
@@ -38,24 +39,18 @@ pub const SystemGroup = opaque {
         /// Executor for the system group.
         ///
         /// A null value will inherit the executor of the world.
-        /// If the value is not null, the system group will increase its reference count.
-        pool: ?Pool = null,
+        Executor: ?*Executor = null,
         /// World to add the group to.
         world: *World,
 
         /// Descriptor a a new system group.
         pub const Descriptor = extern struct {
-            /// Reserved. Must be null.
-            next: ?*const anyopaque,
             /// Optional label of the system group.
-            label: ?[*]const u8,
-            /// Length in characters of the system group label.
-            label_len: usize,
+            label: Label,
             /// Optional executor for the system group.
             ///
             /// A null value will inherit the executor of the world.
-            /// If the value is not null, the system group will increase its reference count.
-            pool: ?*const Pool,
+            executor: ?*Executor,
             /// World to add the group to.
             world: *World,
         };
@@ -64,10 +59,8 @@ pub const SystemGroup = opaque {
     /// Initializes a new empty system group.
     pub fn init(options: CreateOptions) Error!*SystemGroup {
         const desc = CreateOptions.Descriptor{
-            .next = null,
-            .label = if (options.label) |l| l.ptr else null,
-            .label_len = if (options.label) |l| l.len else 0,
-            .pool = if (options.pool) |*p| p else null,
+            .label = .init(options.label),
+            .executor = options.Executor,
             .world = options.world,
         };
 
@@ -101,8 +94,8 @@ pub const SystemGroup = opaque {
     }
 
     /// Returns a reference to the executor used by the group.
-    pub fn getPool(self: *SystemGroup) Pool {
-        const sym = symbols.system_group_get_pool.getGlobal().get();
+    pub fn getPool(self: *SystemGroup) *Executor {
+        const sym = symbols.system_group_get_executor.getGlobal().get();
         return sym(self);
     }
 
@@ -194,21 +187,18 @@ test "SystemGroup: custom pool" {
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const executor = try Pool.init(&.{});
-    defer {
-        executor.requestClose();
-        executor.unref();
-    }
+    const exe = try Executor.init(&.{});
+    defer exe.join();
 
     const world = try World.init(.{ .label = "test-world" });
     defer world.deinit();
 
-    const group = try world.addSystemGroup(.{ .label = "test-group", .pool = executor });
+    const group = try world.addSystemGroup(.{ .label = "test-group", .executor = exe });
     defer group.deinit();
 
     const ex = group.getPool();
     defer ex.unref();
-    try std.testing.expectEqual(executor.id(), ex.id());
+    try std.testing.expectEqual(exe.id(), ex.id());
 }
 
 test "SystemGroup: schedule" {

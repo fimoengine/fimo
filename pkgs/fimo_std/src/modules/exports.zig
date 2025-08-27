@@ -463,7 +463,7 @@ pub fn Module(T: type) type {
             } else {
                 const wrapper = struct {
                     const Sync = struct {
-                        const Result = @typeInfo(value.init).@"fn".return_type.?;
+                        const Result = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
                         const Future = tasks.Future(@This(), Result, poll, null);
 
                         fn init(inst: *const modules.OpaqueInstance) Future {
@@ -520,8 +520,10 @@ pub fn Module(T: type) type {
                     fn deinit(inst: *const modules.OpaqueInstance, sym: *symbol.T) void {
                         _ = inst;
                         symbol.getGlobal().unregister();
-                        const f: fn (*symbol.T) void = value.deinit;
-                        f(sym);
+                        if (comptime @hasField(@TypeOf(value), "deinit")) {
+                            const f: fn (*symbol.T) void = value.deinit;
+                            f(sym);
+                        }
                     }
                 };
                 if (@typeInfo(@TypeOf(value.init)) == .@"fn") {
@@ -539,17 +541,6 @@ pub fn Module(T: type) type {
                         wrapper.deinit,
                     );
                 }
-
-                const return_type = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
-                if (return_type == *symbol.T)
-                    builder = builder.withOnStartEvent(wrapper.Sync.Future, wrapper.Sync.init)
-                else if (@typeInfo(return_type) == .error_union) {
-                    const payload = @typeInfo(return_type).error_union.payload;
-                    if (payload == *symbol.T)
-                        builder = builder.withOnStartEvent(wrapper.Sync.Future, wrapper.Sync.init)
-                    else
-                        builder.withOnStartEvent(wrapper.Async.Future, wrapper.Async.init);
-                } else builder.withOnStartEvent(wrapper.Async.Future, wrapper.Async.init);
             }
         }
     }

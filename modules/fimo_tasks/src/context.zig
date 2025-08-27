@@ -2,6 +2,70 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
+const Executor = @import("Executor.zig");
+
+var page_size_: std.atomic.Value(usize) = if (std.heap.page_size_min == std.heap.page_size_max)
+    .init(std.heap.page_size_min)
+else
+    .init(0);
+var min_stack_size_: std.atomic.Value(usize) = switch (builtin.os.tag) {
+    .windows => if (builtin.cpu.arch == .x86) .init(4 * 1024) else .init(8 * 1024),
+    else => .init(0),
+};
+var max_stack_size_: std.atomic.Value(usize) = switch (builtin.os.tag) {
+    .windows => .init(std.math.maxInt(usize)),
+    else => .init(0),
+};
+
+fn pageSize() usize {
+    var size = page_size_.load(.monotonic);
+    if (size != 0) return size;
+    if (builtin.os.tag == .windows) unreachable;
+    size = std.heap.pageSize();
+    page_size_.store(size, .monotonic);
+    return size;
+}
+
+pub fn minStackSize() usize {
+    var size = min_stack_size_.load(.monotonic);
+    if (size != 0) return size;
+
+    if (builtin.os.tag == .windows) unreachable;
+    size = pageSize();
+    min_stack_size_.store(size, .monotonic);
+    return size;
+}
+
+pub fn maxStackSize() usize {
+    var size = max_stack_size_.load(.monotonic);
+    if (size != 0) return size;
+
+    if (builtin.os.tag == .windows) unreachable;
+    const stack_limit = std.posix.getrlimit(.STACK) catch unreachable;
+    if (stack_limit.max == std.c.RLIM.INFINITY or stack_limit.max >= std.math.maxInt(usize)) {
+        size = std.math.maxInt(usize);
+        max_stack_size_.store(size, .monotonic);
+        return size;
+    }
+
+    size = @intCast(stack_limit.max);
+    max_stack_size_.store(size, .monotonic);
+    return size;
+}
+
+pub const Stack = struct {
+    memory: []align(std.heap.page_size_min) u8,
+    commited_size: if (builtin.os.tag == .windows) usize else void,
+
+    pub fn updateFromContext(self: *Stack, context: Context) void {
+        if (builtin.os.tag == .windows) {
+            std.debug.assert(@intFromPtr(self.memory.ptr) == context.ptr.deallocation_stack);
+            std.debug.assert(self.memory.len == context.ptr.stack_base - context.ptr.deallocation_stack);
+            self.commited_size = context.ptr.stack_base - context.ptr.stack_limit;
+        }
+    }
+};
+
 pub const StackInfo = extern struct {
     start: [*]u8,
     reserved_size: usize,
@@ -370,217 +434,8 @@ test "yield to context" {
     }
 }
 
-test "auto commit stack" {
-    if (builtin.os.tag != .windows) return;
-
-    var stack = try Stack.init(1024 * 1024 * 2);
-    defer stack.deinit();
-
-    try std.testing.expectEqual(stack.commited_size, std.heap.page_size_min);
-    const f = struct {
-        fn f(t: Transfer) callconv(.c) noreturn {
-            const x = [_]u8{69} ** (1024 * 8);
-            std.mem.doNotOptimizeAway(x);
-            _ = t.context.yieldTo(0);
-            unreachable;
-        }
-    }.f;
-
-    var t = Transfer{ .context = Context.init(.forStack(stack), &f) };
-    t = t.context.yieldTo(0);
-    stack.updateCommitedSizeFromContext(t.context);
-    try std.testing.expect(stack.commited_size > std.heap.page_size_min);
-}
-
 /// Data passed between contexts during a context switch.
 pub const Transfer = extern struct {
     context: Context,
     data: usize = 0,
 };
-
-pub const Stack = struct {
-    memory: []align(std.heap.page_size_min) u8,
-    commited_size: if (builtin.os.tag == .windows) usize else void,
-
-    pub fn init(size: usize) Allocator.Error!Stack {
-        return StackAllocator.allocate(size);
-    }
-
-    pub fn deinit(self: Stack) void {
-        StackAllocator.deallocate(self);
-    }
-
-    pub fn transitionCold(self: Stack) Stack {
-        return StackAllocator.transitionCold(self);
-    }
-
-    pub fn updateCommitedSizeFromContext(self: *Stack, context: Context) void {
-        if (builtin.os.tag == .windows) {
-            std.debug.assert(@intFromPtr(self.memory.ptr) == context.ptr.deallocation_stack);
-            std.debug.assert(self.memory.len == context.ptr.stack_base - context.ptr.deallocation_stack);
-            self.commited_size = context.ptr.stack_base - context.ptr.stack_limit;
-        }
-    }
-};
-
-pub const StackAllocator = struct {
-    var page_size_: std.atomic.Value(usize) = if (std.heap.page_size_min == std.heap.page_size_max)
-        .init(std.heap.page_size_min)
-    else
-        .init(0);
-    var min_stack_size_: std.atomic.Value(usize) = switch (builtin.os.tag) {
-        .windows => if (builtin.cpu.arch == .x86) .init(4 * 1024) else .init(8 * 1024),
-        else => .init(0),
-    };
-    var max_stack_size_: std.atomic.Value(usize) = switch (builtin.os.tag) {
-        .windows => .init(std.math.maxInt(usize)),
-        else => .init(0),
-    };
-
-    fn pageSize() usize {
-        var size = page_size_.load(.monotonic);
-        if (size != 0) return size;
-        if (builtin.os.tag == .windows) unreachable;
-        size = std.heap.pageSize();
-        page_size_.store(size, .monotonic);
-        return size;
-    }
-
-    pub fn minStackSize() usize {
-        var size = min_stack_size_.load(.monotonic);
-        if (size != 0) return size;
-
-        if (builtin.os.tag == .windows) unreachable;
-        size = pageSize();
-        min_stack_size_.store(size, .monotonic);
-        return size;
-    }
-
-    pub fn maxStackSize() usize {
-        var size = max_stack_size_.load(.monotonic);
-        if (size != 0) return size;
-
-        if (builtin.os.tag == .windows) unreachable;
-        const stack_limit = std.posix.getrlimit(.STACK) catch unreachable;
-        if (stack_limit.max == std.c.RLIM.INFINITY or stack_limit.max >= std.math.maxInt(usize)) {
-            size = std.math.maxInt(usize);
-            max_stack_size_.store(size, .monotonic);
-            return size;
-        }
-
-        size = @intCast(stack_limit.max);
-        max_stack_size_.store(size, .monotonic);
-        return size;
-    }
-
-    /// Allocates a new stack.
-    fn allocate(size: usize) Allocator.Error!Stack {
-        const page_size = pageSize();
-        const min_stack_size = minStackSize();
-        const pages = (@max(size, min_stack_size) + page_size - 1) / page_size;
-        const rounded_size = (pages + 1) * page_size;
-
-        const max_stack_size = maxStackSize();
-        if (rounded_size > max_stack_size) return Allocator.Error.OutOfMemory;
-
-        if (builtin.os.tag == .windows) {
-            const memory: [*]align(std.heap.page_size_min) u8 = @ptrCast(@alignCast(std.os.windows.VirtualAlloc(
-                null,
-                rounded_size,
-                std.os.windows.MEM_RESERVE,
-                std.os.windows.PAGE_READWRITE,
-            ) catch return Allocator.Error.OutOfMemory));
-            errdefer std.os.windows.VirtualFree(memory, 0, std.os.windows.MEM_RELEASE);
-
-            // Commit first two pages.
-            const commited_memory = memory[rounded_size - 2 * page_size .. rounded_size];
-            _ = std.os.windows.VirtualAlloc(
-                commited_memory.ptr,
-                commited_memory.len,
-                std.os.windows.MEM_COMMIT,
-                std.os.windows.PAGE_READWRITE,
-            ) catch return Allocator.Error.OutOfMemory;
-
-            // Protect last page.
-            var old: std.os.windows.DWORD = undefined;
-            std.os.windows.VirtualProtect(
-                commited_memory.ptr,
-                page_size,
-                std.os.windows.PAGE_READWRITE | std.os.windows.PAGE_GUARD,
-                &old,
-            ) catch return Allocator.Error.OutOfMemory;
-            return Stack{ .memory = memory[0..rounded_size], .commited_size = page_size };
-        } else {
-            const opt: std.posix.system.MAP = if (@hasField(std.posix.system.MAP, "STACK"))
-                .{ .TYPE = .PRIVATE, .ANONYMOUS = true, .STACK = true }
-            else
-                .{ .TYPE = .PRIVATE, .ANONYMOUS = true };
-
-            const memory = std.posix.mmap(
-                null,
-                rounded_size,
-                std.posix.PROT.READ | std.posix.PROT.WRITE,
-                opt,
-                -1,
-                0,
-            ) catch return Allocator.Error.OutOfMemory;
-            errdefer std.posix.munmap(memory);
-
-            // Protect last page.
-            std.posix.mprotect(
-                memory[0..page_size],
-                std.posix.PROT.NONE,
-            ) catch return Allocator.Error.OutOfMemory;
-            return Stack{ .memory = memory, .commited_size = {} };
-        }
-    }
-
-    /// Deallocates a stack.
-    pub fn deallocate(stack: Stack) void {
-        if (builtin.os.tag == .windows) {
-            std.os.windows.VirtualFree(stack.memory.ptr, 0, std.os.windows.MEM_RELEASE);
-        } else {
-            std.posix.munmap(stack.memory);
-        }
-    }
-
-    /// Marks the stack memory as cold.
-    ///
-    /// Depending on the operating system, this function may decommit the stack memory.
-    pub fn transitionCold(stack: Stack) Stack {
-        if (builtin.os.tag == .windows) {
-            var s = stack;
-            const page_size = pageSize();
-            const commited_memory = s.memory[s.memory.len - s.commited_size - page_size ..];
-            const decommit_memory = commited_memory[0 .. commited_memory.len - 2 * page_size];
-            const remaining_memory = commited_memory[decommit_memory.len..];
-            if (decommit_memory.len == 0) return stack;
-            std.debug.assert(remaining_memory.len == 2 * page_size);
-            std.os.windows.VirtualFree(decommit_memory.ptr, decommit_memory.len, std.os.windows.MEM_DECOMMIT);
-
-            // Protect last page.
-            var old: std.os.windows.DWORD = undefined;
-            std.os.windows.VirtualProtect(
-                remaining_memory.ptr,
-                page_size,
-                std.os.windows.PAGE_READWRITE | std.os.windows.PAGE_GUARD,
-                &old,
-            ) catch unreachable;
-            s.commited_size = page_size;
-            return s;
-        } else {
-            std.posix.madvise(
-                stack.memory.ptr,
-                stack.memory.len,
-                std.posix.MADV.DONTNEED,
-            ) catch unreachable;
-            return stack;
-        }
-    }
-};
-
-test "Stack: smoke test" {
-    const stack = try Stack.init(1024 * 1024);
-    defer stack.deinit();
-    try std.testing.expect(stack.memory.len >= 1024 * 1024);
-}
