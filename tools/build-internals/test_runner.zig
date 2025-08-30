@@ -15,7 +15,8 @@ const BORDER = "=" ** 80;
 var current_test: ?[]const u8 = null;
 
 // use for initializing the test context
-var logger: tracing.net.NetLogger = undefined;
+var console_logger: tracing.StdErrLogger = undefined;
+var net_logger: tracing.net.NetLogger = undefined;
 pub var tracing_cfg: tracing.Config = undefined;
 
 pub fn main() !void {
@@ -38,17 +39,22 @@ pub fn main() !void {
     var printer = Printer.init();
     printer.fmt("\r\x1b[0K", .{}); // beginning of line and clear to end of line
 
-    try logger.init(.{
+    defer std.posix.exit(if (fail == 0) 0 else 1);
+
+    try console_logger.init(.{ .gpa = std.heap.smp_allocator, .max_level = .info });
+    defer console_logger.deinit();
+
+    try net_logger.init(.{
         .gpa = std.heap.smp_allocator,
         .server = .{
             .host_name = env.host_name orelse tracing.net.protocol.default_host,
             .port = env.port,
         },
     });
-    defer logger.deinit();
+    defer net_logger.deinit();
     tracing_cfg = .{
         .max_level = .trace,
-        .subscribers = &.{logger.subscriber()},
+        .subscribers = &.{ console_logger.subscriber(), net_logger.subscriber() },
         .subscriber_count = 1,
         .app_name = undefined,
         .app_name_length = undefined,
@@ -123,7 +129,6 @@ pub fn main() !void {
     printer.fmt("\n", .{});
     try slowest.display(&printer);
     printer.fmt("\n", .{});
-    std.posix.exit(if (fail == 0) 0 else 1);
 }
 
 const Printer = struct {

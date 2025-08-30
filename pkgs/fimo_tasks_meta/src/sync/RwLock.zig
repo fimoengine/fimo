@@ -441,17 +441,16 @@ test "RwLock: concurrent access (threads)" {
 }
 
 test "RwLock: concurrent access (tasks)" {
-    const task = @import("../task.zig");
-    const yield = task.yield;
-    const pool = @import("../pool.zig");
-    const future = @import("../future.zig");
+    const root = @import("../root.zig");
+    const yield = root.yield;
+    const Task = root.Task;
+    const CmdBufCmd = root.CmdBufCmd;
+    const CmdBuf = root.CmdBuf;
+    const Executor = root.Executor;
     const testing = @import("../testing.zig");
 
     try testing.initTestContextInTask(struct {
         fn f() !void {
-            const executor = pool.Pool.current().?;
-            defer executor.unref();
-
             const num_writers: usize = 2;
             const num_readers: usize = 4;
             const num_writes: usize = 10000;
@@ -466,7 +465,12 @@ test "RwLock: concurrent access (tasks)" {
                 term2: usize = 0,
                 term_sum: usize = 0,
 
-                fn reader(self: *@This()) void {
+                read_task: Task = .{ .batch_len = num_readers, .run = reader },
+                write_task: Task = .{ .batch_len = num_writers, .run = writer },
+
+                fn reader(task: *Task, idx: usize) callconv(.c) void {
+                    _ = idx;
+                    const self: *@This() = @alignCast(@fieldParentPtr("read_task", task));
                     while (true) {
                         self.rwl.lockRead();
                         defer self.rwl.unlockRead();
@@ -480,8 +484,9 @@ test "RwLock: concurrent access (tasks)" {
                     }
                 }
 
-                fn writer(self: *@This(), thread_idx: usize) void {
-                    var prng = std.Random.DefaultPrng.init(thread_idx);
+                fn writer(task: *Task, idx: usize) callconv(.c) void {
+                    const self: *@This() = @alignCast(@fieldParentPtr("write_task", task));
+                    var prng = std.Random.DefaultPrng.init(idx);
                     var rnd = prng.random();
 
                     while (true) {
@@ -517,28 +522,16 @@ test "RwLock: concurrent access (tasks)" {
                     std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;
                 }
             };
-
             var runner = Runner{};
-            var futures: [num_readers + num_writers]future.Future(void) = undefined;
+            var cmds: [2]CmdBufCmd = undefined;
+            cmds[0] = .{ .tag = .enqueue_task, .payload = .{ .enqueue_task = &runner.read_task } };
+            cmds[1] = .{ .tag = .enqueue_task, .payload = .{ .enqueue_task = &runner.write_task } };
+            var cmd_buf = CmdBuf{ .cmds = .init(&cmds) };
 
-            for (futures[0..num_writers], 0..) |*fu, i| fu.* = try future.init(
-                executor,
-                Runner.writer,
-                .{ &runner, i },
-                .{ .allocator = std.testing.allocator },
-            );
-            for (futures[num_writers..]) |*fu| fu.* = try future.init(
-                executor,
-                Runner.reader,
-                .{&runner},
-                .{ .allocator = std.testing.allocator },
-            );
+            const exe = Executor.current().?;
+            const handle = exe.enqueue(&cmd_buf);
 
-            for (futures) |fu| {
-                _ = fu.await() catch {};
-                fu.deinit();
-            }
-
+            try std.testing.expectEqual(.completed, handle.join());
             try std.testing.expectEqual(num_writes, runner.writes);
         }
     }.f);

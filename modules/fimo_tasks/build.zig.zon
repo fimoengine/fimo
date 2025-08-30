@@ -9,6 +9,11 @@
             .url = "git+https://github.com/boostorg/context#boost-1.88.0",
             .hash = "N-V-__8AABULGgBHBYkz_t6_qyRzDoIG-1xDz6mHJcUVFDL0",
         },
+        .win32 = .{
+            .url = "git+https://github.com/marlersoft/zigwin32.git#9d399c0895de4746c1fcab366841e2ab031b0429",
+            .hash = "zigwin32-25.0.28-preview-AAAAANd_5APbcon3QqoYfLKnJ13fiBGJSGq9YrVZsfI-",
+            .lazy = true,
+        },
     },
     .paths = .{
         "build.zig",

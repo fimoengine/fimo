@@ -6,8 +6,7 @@
 #include <fimo_tasks_meta/command_buffer.h>
 #include <fimo_tasks_meta/futex.h>
 #include <fimo_tasks_meta/pool.h>
-#include <fimo_tasks_meta/task.h>
-#include <fimo_tasks_meta/task_local.h>
+#include <fimo_tasks_meta/tasks.h>
 
 /// Namespace for all symbols of the package.
 #define FIMO_TASKS_META_SYMBOL_NAMESPACE "fimo-tasks"

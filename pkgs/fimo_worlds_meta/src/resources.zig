@@ -3,6 +3,10 @@ const std = @import("std");
 const fimo_std = @import("fimo_std");
 const Error = fimo_std.ctx.Error;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
+const Task = fimo_tasks_meta.Task;
+const CmdBufCmd = fimo_tasks_meta.CmdBufCmd;
+const CmdBuf = fimo_tasks_meta.CmdBuf;
+const Executor = fimo_tasks_meta.Executor;
 
 const Job = @import("Job.zig");
 const Fence = Job.Fence;
@@ -165,9 +169,7 @@ test "resource: unique lock" {
     const world = try World.init(.{ .label = "test-world" });
     defer world.deinit();
 
-    const executor = world.getPool();
-    defer executor.unref();
-
+    const executor = world.getExecutor();
     try handle.addToWorld(world, 0);
     defer _ = handle.removeFromWorld(world) catch unreachable;
 
@@ -177,8 +179,11 @@ test "resource: unique lock" {
     const Runner = struct {
         handle: *TypedResource(usize),
         world: *World,
+        task: Task = .{ .batch_len = num_jobs, .run = run },
 
-        fn run(self: @This()) void {
+        fn run(task: *Task, idx: usize) callconv(.c) void {
+            _ = idx;
+            const self: *@This() = @alignCast(@fieldParentPtr("task", task));
             for (0..iterations) |_| {
                 const ptr = self.handle.lockInWorldExclusive(self.world);
                 defer self.handle.unlockInWorldExclusive(self.world);
@@ -186,18 +191,14 @@ test "resource: unique lock" {
             }
         }
     };
-
-    var fences = [_]Fence{.{}} ** num_jobs;
-    for (&fences) |*fence| try Job.go(
-        Runner.run,
-        .{.{ .handle = handle, .world = world }},
-        .{
-            .allocator = std.testing.allocator,
-            .executor = executor,
-            .signal = .{ .fence = fence },
-        },
-    );
-    for (&fences) |*fence| fence.wait();
+    var runner = Runner{ .handle = handle, .world = world };
+    var cmd = CmdBufCmd{
+        .tag = .enqueue_task,
+        .payload = .{ .enqueue_task = &runner.task },
+    };
+    var cmd_buf = CmdBuf{ .cmds = .init(@ptrCast(&cmd)) };
+    const cmd_handle = executor.enqueue(&cmd_buf);
+    try std.testing.expectEqual(.completed, cmd_handle.join());
 
     const ptr = handle.lockInWorldExclusive(world);
     defer handle.unlockInWorldExclusive(world);
@@ -215,8 +216,7 @@ test "resource: shared lock" {
     const world = try World.init(.{ .label = "test-world" });
     defer world.deinit();
 
-    const executor = world.getPool();
-    defer executor.unref();
+    const executor = world.getExecutor();
 
     try handle.addToWorld(world, 0);
     defer _ = handle.removeFromWorld(world) catch unreachable;
@@ -236,9 +236,14 @@ test "resource: shared lock" {
         term2: usize = 0,
         term_sum: usize = 0,
 
+        read_task: Task = .{ .batch_len = num_readers, .run = reader },
+        write_task: Task = .{ .batch_len = num_writers, .run = writer },
+
         const Self = @This();
 
-        fn reader(self: *Self) void {
+        fn reader(task: *Task, idx: usize) callconv(.c) void {
+            _ = idx;
+            const self: *@This() = @alignCast(@fieldParentPtr("read_task", task));
             while (true) {
                 const writes = self.writes.lockInWorldShared(self.world);
                 defer self.writes.unlockInWorldShared(self.world);
@@ -252,8 +257,9 @@ test "resource: shared lock" {
             }
         }
 
-        fn writer(self: *Self, thread_idx: usize) void {
-            var prng = std.Random.DefaultPrng.init(thread_idx);
+        fn writer(task: *Task, idx: usize) callconv(.c) void {
+            const self: *@This() = @alignCast(@fieldParentPtr("write_task", task));
+            var prng = std.Random.DefaultPrng.init(idx);
             var rnd = prng.random();
 
             while (true) {
@@ -268,11 +274,11 @@ test "resource: shared lock" {
                 const term1 = rnd.int(usize);
                 self.term1 = term1;
 
-                fimo_tasks_meta.task.yield();
+                fimo_tasks_meta.yield();
 
                 const term2 = rnd.int(usize);
                 self.term2 = term2;
-                fimo_tasks_meta.task.yield();
+                fimo_tasks_meta.yield();
 
                 self.term_sum = term1 +% term2;
                 writes.* += 1;
@@ -281,31 +287,23 @@ test "resource: shared lock" {
 
         fn check(self: *const Self) void {
             const term_sum = self.term_sum;
-            fimo_tasks_meta.task.yield();
+            fimo_tasks_meta.yield();
 
             const term2 = self.term2;
-            fimo_tasks_meta.task.yield();
+            fimo_tasks_meta.yield();
 
             const term1 = self.term1;
             std.testing.expectEqual(term_sum, term1 +% term2) catch unreachable;
         }
     };
-
     var runner = Runner{ .world = world, .writes = handle };
-    var fences = [_]Fence{.{}} ** (num_writers + num_readers);
+    var cmds: [2]CmdBufCmd = undefined;
+    cmds[0] = .{ .tag = .enqueue_task, .payload = .{ .enqueue_task = &runner.read_task } };
+    cmds[1] = .{ .tag = .enqueue_task, .payload = .{ .enqueue_task = &runner.write_task } };
+    var cmd_buf = CmdBuf{ .cmds = .init(&cmds) };
+    const cmd_handle = executor.enqueue(&cmd_buf);
 
-    for (fences[0..num_writers], 0..) |*f, i| try Job.go(
-        Runner.writer,
-        .{ &runner, i },
-        .{ .allocator = std.testing.allocator, .executor = executor, .signal = .{ .fence = f } },
-    );
-    for (fences[num_writers..]) |*f| try Job.go(
-        Runner.reader,
-        .{&runner},
-        .{ .allocator = std.testing.allocator, .executor = executor, .signal = .{ .fence = f } },
-    );
-
-    for (&fences) |*fence| fence.wait();
+    try std.testing.expectEqual(.completed, cmd_handle.join());
 
     const writes = handle.lockInWorldShared(world);
     defer handle.unlockInWorldShared(world);

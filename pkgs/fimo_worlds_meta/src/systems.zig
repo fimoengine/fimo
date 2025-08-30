@@ -5,14 +5,18 @@ const Alignment = std.mem.Alignment;
 const fimo_std = @import("fimo_std");
 const Error = fimo_std.ctx.Error;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const Pool = fimo_tasks_meta.pool.Pool;
+const Label = fimo_tasks_meta.Label;
+const Task = fimo_tasks_meta.Task;
+const CmdBufCmd = fimo_tasks_meta.CmdBufCmd;
+const CmdBuf = fimo_tasks_meta.CmdBuf;
+const Executor = fimo_tasks_meta.Executor;
 
-const Job = @import("Job.zig");
-const Fence = Job.Fence;
 const resources = @import("resources.zig");
 const TypedResource = resources.TypedResource;
 const Resource = resources.Resource;
 const symbols = @import("symbols.zig");
+const sync = @import("Job.zig");
+const Fence = sync.Fence;
 const testing = @import("testing.zig");
 const worlds = @import("worlds.zig");
 const World = worlds.World;
@@ -38,24 +42,18 @@ pub const SystemGroup = opaque {
         /// Executor for the system group.
         ///
         /// A null value will inherit the executor of the world.
-        /// If the value is not null, the system group will increase its reference count.
-        pool: ?Pool = null,
+        executor: ?*Executor = null,
         /// World to add the group to.
         world: *World,
 
         /// Descriptor a a new system group.
         pub const Descriptor = extern struct {
-            /// Reserved. Must be null.
-            next: ?*const anyopaque,
             /// Optional label of the system group.
-            label: ?[*]const u8,
-            /// Length in characters of the system group label.
-            label_len: usize,
+            label: Label,
             /// Optional executor for the system group.
             ///
             /// A null value will inherit the executor of the world.
-            /// If the value is not null, the system group will increase its reference count.
-            pool: ?*const Pool,
+            executor: ?*Executor,
             /// World to add the group to.
             world: *World,
         };
@@ -64,10 +62,8 @@ pub const SystemGroup = opaque {
     /// Initializes a new empty system group.
     pub fn init(options: CreateOptions) Error!*SystemGroup {
         const desc = CreateOptions.Descriptor{
-            .next = null,
-            .label = if (options.label) |l| l.ptr else null,
-            .label_len = if (options.label) |l| l.len else 0,
-            .pool = if (options.pool) |*p| p else null,
+            .label = .init(options.label),
+            .executor = options.executor,
             .world = options.world,
         };
 
@@ -101,8 +97,8 @@ pub const SystemGroup = opaque {
     }
 
     /// Returns a reference to the executor used by the group.
-    pub fn getPool(self: *SystemGroup) Pool {
-        const sym = symbols.system_group_get_pool.getGlobal().get();
+    pub fn getExecutor(self: *SystemGroup) *Executor {
+        const sym = symbols.system_group_get_executor.getGlobal().get();
         return sym(self);
     }
 
@@ -179,36 +175,30 @@ test "SystemGroup: smoke test" {
     defer group.deinit();
     try std.testing.expectEqual(world, group.getWorld());
 
-    const world_ex = world.getPool();
-    defer world_ex.unref();
-    const group_ex = group.getPool();
-    defer group_ex.unref();
-    try std.testing.expectEqual(world_ex.id(), group_ex.id());
+    const world_ex = world.getExecutor();
+    const group_ex = group.getExecutor();
+    try std.testing.expectEqual(world_ex, group_ex);
 
     const label = group.getLabel().?;
     try std.testing.expectEqualSlices(u8, "test-group", label);
 }
 
-test "SystemGroup: custom pool" {
+test "SystemGroup: custom executor" {
     const GlobalCtx = testing.GlobalCtx;
     try GlobalCtx.init();
     defer GlobalCtx.deinit();
 
-    const executor = try Pool.init(&.{});
-    defer {
-        executor.requestClose();
-        executor.unref();
-    }
+    const exe = try Executor.init(.{});
+    defer exe.join();
 
     const world = try World.init(.{ .label = "test-world" });
     defer world.deinit();
 
-    const group = try world.addSystemGroup(.{ .label = "test-group", .pool = executor });
+    const group = try world.addSystemGroup(.{ .label = "test-group", .executor = exe });
     defer group.deinit();
 
-    const ex = group.getPool();
-    defer ex.unref();
-    try std.testing.expectEqual(executor.id(), ex.id());
+    const group_exe = group.getExecutor();
+    try std.testing.expectEqual(exe, group_exe);
 }
 
 test "SystemGroup: schedule" {
@@ -536,19 +526,38 @@ test "SystemContext: deferred" {
             fence: *Fence,
         ) void {
             _ = shared;
-            const executor = ctx.getGroup().getPool();
-            defer executor.unref();
-            const allocator = ctx.getSingleGenerationAllocator().allocator();
-            Job.go(runTest, .{exclusive.completed}, .{
-                .executor = executor,
-                .allocator = allocator,
-                .signal = .{ .fence = fence },
-            }) catch |err| {
-                exclusive.err.* = err;
+            const Job = struct {
+                completed: *bool,
+                fence: *Fence,
+                task: Task = .{ .run = runTest },
+                cmd: CmdBufCmd = undefined,
+                cmd_buf: CmdBuf = .{ .deinit = deinit },
+
+                fn runTest(task: *Task, idx: usize) callconv(.c) void {
+                    _ = idx;
+                    const self: *@This() = @fieldParentPtr("task", task);
+                    self.completed.* = true;
+                }
+
+                fn deinit(cmd_buf: *CmdBuf) callconv(.c) void {
+                    const self: *@This() = @fieldParentPtr("cmd_buf", cmd_buf);
+                    self.fence.signal();
+                }
             };
-        }
-        fn runTest(completed: *bool) void {
-            completed.* = true;
+
+            const executor = ctx.getGroup().getExecutor();
+            const allocator = ctx.getSingleGenerationAllocator().allocator();
+            const job = allocator.create(Job) catch |err| {
+                exclusive.err.* = err;
+                return;
+            };
+            job.* = .{
+                .completed = exclusive.completed,
+                .fence = fence,
+                .cmd = .{ .tag = .enqueue_task, .payload = .{ .enqueue_task = &job.task } },
+            };
+            job.cmd_buf.cmds = .init(@ptrCast(&job.cmd));
+            executor.enqueueDetached(&job.cmd_buf);
         }
     }.run);
     const sys = try Sys.register(.{

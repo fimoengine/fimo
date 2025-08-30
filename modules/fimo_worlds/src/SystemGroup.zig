@@ -9,10 +9,10 @@ const AutoArrayHashMapUnmanaged = std.AutoArrayHashMapUnmanaged;
 const fimo_std = @import("fimo_std");
 const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const Pool = fimo_tasks_meta.pool.Pool;
-const Entry = fimo_tasks_meta.command_buffer.Entry;
-const OpaqueCommandBuffer = fimo_tasks_meta.command_buffer.OpaqueCommandBuffer;
-const OpaqueTask = fimo_tasks_meta.task.OpaqueTask;
+const Executor = fimo_tasks_meta.Executor;
+const Task = fimo_tasks_meta.Task;
+const CmdBufCmd = fimo_tasks_meta.CmdBufCmd;
+const CmdBuf = fimo_tasks_meta.CmdBuf;
 const Mutex = fimo_tasks_meta.sync.Mutex;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
 const Job = fimo_worlds_meta.Job;
@@ -31,7 +31,7 @@ const SystemGroup = @This();
 
 label: []u8,
 world: *World,
-executor: Pool,
+executor: *Executor,
 generation: usize = 0,
 system_graph: Graph = .{},
 single_allocator: heap.SingleGenerationAllocator = .{},
@@ -42,7 +42,7 @@ const Graph = struct {
     dirty: bool = true,
     next_generation: usize = 0,
     schedule_semaphore: TimelineSemaphore = .{},
-    entries: []Entry = &.{},
+    cmds: []CmdBufCmd = &.{},
     resources: AutoArrayHashMapUnmanaged(*Resource, *anyopaque) = .empty,
     arena: ArenaAllocator = .init(std.heap.page_allocator),
     systems: AutoArrayHashMapUnmanaged(*System, *SystemContext) = .empty,
@@ -198,9 +198,10 @@ const Graph = struct {
         const TaskInfo = struct {
             ctx: *SystemContext,
             generation: usize,
-            task: OpaqueTask = undefined,
+            task: Task = undefined,
 
-            fn taskStart(task: *OpaqueTask) callconv(.c) void {
+            fn run(task: *Task, idx: usize) callconv(.c) void {
+                _ = idx;
                 const info: *@This() = @fieldParentPtr("task", task);
                 const sys = info.ctx;
                 sys.run();
@@ -235,12 +236,7 @@ const Graph = struct {
                 tasks.appendAssumeCapacity(.{
                     .ctx = ctx,
                     .generation = generation,
-                    .task = .{
-                        .label_ = ctx.sys.label.ptr,
-                        .label_len = ctx.sys.label.len,
-                        .on_start = &taskStart,
-                        .state = {},
-                    },
+                    .task = .{ .label = .init(ctx.sys.label), .run = &@This().run },
                 });
                 return idx;
             }
@@ -270,7 +266,7 @@ const Graph = struct {
         for (resource_infos) |*info| info.* = .{};
 
         var running_systems = AutoArrayHashMapUnmanaged(*System, usize).empty;
-        var entries = try ArrayList(Entry).initCapacity(allocator, self.systems.count());
+        var cmds = try ArrayList(CmdBufCmd).initCapacity(allocator, self.systems.count());
         for (tasks.items) |*task| {
             task.ctx.sys.rwlock.lockRead();
             defer task.ctx.sys.rwlock.unlockRead();
@@ -279,10 +275,10 @@ const Graph = struct {
             for (task.ctx.sys.before.keys()) |dep| {
                 const entry = running_systems.fetchSwapRemove(dep) orelse continue;
                 const entry_idx = entry.value;
-                try entries.append(allocator, Entry{
-                    .tag = .wait_on_command_indirect,
+                try cmds.append(allocator, .{
+                    .tag = .wait_on_cmd_indirect,
                     .payload = .{
-                        .wait_on_command_indirect = entries.items.len - entry_idx,
+                        .wait_on_cmd_indirect = cmds.items.len - entry_idx,
                     },
                 });
             }
@@ -294,10 +290,10 @@ const Graph = struct {
                 for (res_info.referenced_by.items) |id| {
                     const entry = running_systems.fetchSwapRemove(id) orelse continue;
                     const entry_idx = entry.value;
-                    try entries.append(allocator, Entry{
-                        .tag = .wait_on_command_indirect,
+                    try cmds.append(allocator, .{
+                        .tag = .wait_on_cmd_indirect,
                         .payload = .{
-                            .wait_on_command_indirect = entries.items.len - entry_idx,
+                            .wait_on_cmd_indirect = cmds.items.len - entry_idx,
                         },
                     });
                 }
@@ -314,10 +310,10 @@ const Graph = struct {
                     for (res_info.referenced_by.items) |id| {
                         const entry = running_systems.fetchSwapRemove(id) orelse continue;
                         const entry_idx = entry.value;
-                        try entries.append(allocator, Entry{
-                            .tag = .wait_on_command_indirect,
+                        try cmds.append(allocator, .{
+                            .tag = .wait_on_cmd_indirect,
                             .payload = .{
-                                .wait_on_command_indirect = entries.items.len - entry_idx,
+                                .wait_on_cmd_indirect = cmds.items.len - entry_idx,
                             },
                         });
                     }
@@ -327,14 +323,14 @@ const Graph = struct {
                 try res_info.referenced_by.append(allocator, task.ctx.sys);
             }
 
-            const entry_idx = entries.items.len;
+            const entry_idx = cmds.items.len;
             try running_systems.put(allocator, task.ctx.sys, entry_idx);
-            try entries.append(allocator, Entry{
+            try cmds.append(allocator, .{
                 .tag = .enqueue_task,
                 .payload = .{ .enqueue_task = &task.task },
             });
         }
-        self.entries = entries.items;
+        self.cmds = cmds.items;
     }
 
     fn acquireResources(self: *Graph) void {
@@ -353,7 +349,7 @@ const Graph = struct {
 
 pub const InitOptions = struct {
     label: ?[]const u8 = null,
-    executor: ?Pool = null,
+    executor: ?*Executor = null,
     world: *World,
 };
 
@@ -361,17 +357,16 @@ pub fn init(options: InitOptions) !*SystemGroup {
     const allocator = FimoWorlds.get().allocator;
     const label = try allocator.dupe(u8, options.label orelse "<unlabelled>");
     errdefer allocator.free(label);
-    const executor = if (options.executor) |ex| ex.ref() else options.world.executor.ref();
-    errdefer executor.unref();
+    const executor = if (options.executor) |ex| ex else options.world.executor;
 
     const group = try allocator.create(SystemGroup);
     group.* = .{ .label = label, .world = options.world, .executor = executor };
     _ = options.world.system_group_count.fetchAdd(1, .monotonic);
-    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, world=`{*}`, executor=`{}`", .{
+    tracing.logDebug(@src(), "created `{*}`, label=`{s}`, world=`{*}`, executor=`{*}`", .{
         group,
         label,
         options.world,
-        executor.id(),
+        executor,
     });
     return group;
 }
@@ -388,7 +383,6 @@ pub fn deinit(self: *SystemGroup) void {
     const allocator = FimoWorlds.get().allocator;
     allocator.free(self.label);
     _ = self.world.system_group_count.fetchSub(1, .monotonic);
-    self.executor.unref();
     self.system_graph.systems.clearAndFree(allocator);
     self.system_graph.arena.deinit();
     self.single_allocator.deinit();
@@ -433,21 +427,52 @@ pub fn schedule(self: *SystemGroup, fences: []const *Fence, fence: ?*Fence) !voi
     const generation = self.system_graph.next_generation;
     tracing.logDebug(@src(), "scheduling generation {} of `{*}`", .{ generation, self });
 
-    try Job.go(
-        run,
-        .{ self, generation },
-        .{
-            .executor = self.executor,
-            .allocator = FimoWorlds.get().allocator,
-            .label = self.label,
-            .fences = fences,
-            .semaphores = &.{.{
-                .semaphore = &self.system_graph.schedule_semaphore,
-                .counter = generation,
-            }},
-            .signal = if (fence) |f| .{ .fence = f } else null,
-        },
-    );
+    var arena: ArenaAllocator = .init(FimoWorlds.get().allocator);
+    errdefer arena.deinit();
+    const allocator = arena.allocator();
+    const fences_dupe = try allocator.dupe(*Fence, fences);
+
+    const ScheduleJob = struct {
+        arena: ArenaAllocator,
+        group: *SystemGroup,
+        fences: []*Fence,
+        signal_fence: ?*Fence,
+        generation: usize,
+        task: Task,
+        cmd: CmdBufCmd,
+        cmd_buf: CmdBuf,
+
+        fn run(task: *Task, idx: usize) callconv(.c) void {
+            _ = idx;
+            const job: *@This() = @alignCast(@fieldParentPtr("task", task));
+            for (job.fences) |f| f.wait();
+            job.group.system_graph.schedule_semaphore.wait(job.generation);
+            job.group.run(job.generation);
+        }
+
+        fn deinit(cmd_buf: *CmdBuf) callconv(.c) void {
+            const job: *@This() = @alignCast(@fieldParentPtr("cmd_buf", cmd_buf));
+            // NOTE(gabriel):
+            //
+            // Deallocate before signaling to ensure that the group remains alive.
+            const signal_fence = job.signal_fence;
+            const job_arena = job.arena;
+            job_arena.deinit();
+            if (signal_fence) |f| f.signal();
+        }
+    };
+    const job = try allocator.create(ScheduleJob);
+    job.* = .{
+        .arena = arena,
+        .group = self,
+        .fences = fences_dupe,
+        .signal_fence = fence,
+        .generation = generation,
+        .task = .{ .label = .init(self.label), .run = &ScheduleJob.run },
+        .cmd = .{ .tag = .enqueue_task, .payload = .{ .enqueue_task = &job.task } },
+        .cmd_buf = .{ .cmds = .init(@ptrCast(&job.cmd)), .deinit = ScheduleJob.deinit },
+    };
+    self.executor.enqueueDetached(&job.cmd_buf);
     self.system_graph.next_generation +%= 1;
 }
 
@@ -463,16 +488,12 @@ fn run(self: *SystemGroup, generation: usize) void {
 
     const allocator = self.single_allocator.allocator();
     const label = std.fmt.allocPrint(allocator, "{*} systems", .{self}) catch @panic("oom");
-    var buffer = OpaqueCommandBuffer{
-        .label_ = label.ptr,
-        .label_len = label.len,
-        .entries_ = self.system_graph.entries.ptr,
-        .entries_len = self.system_graph.entries.len,
-        .state = {},
+    var buffer = CmdBuf{
+        .label = .init(label),
+        .cmds = .init(self.system_graph.cmds),
     };
-    const handle = self.executor.enqueueCommandBuffer(&buffer) catch |err| @panic(@errorName(err));
-    _ = handle.waitOn();
-    handle.unref();
+    const handle = self.executor.enqueue(&buffer);
+    _ = handle.join();
 
     var it = self.system_graph.resources.iterator();
     while (it.next()) |res| {

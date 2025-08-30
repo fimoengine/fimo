@@ -10,7 +10,7 @@ const ctx = fimo_std.ctx;
 const modules = fimo_std.modules;
 const tracing = fimo_std.tracing;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
-const pools = fimo_tasks_meta.pool;
+const Executor = fimo_tasks_meta.Executor;
 const fimo_worlds_meta = @import("fimo_worlds_meta");
 const Fence = fimo_worlds_meta.Job.Fence;
 const resources = fimo_worlds_meta.resources;
@@ -54,7 +54,7 @@ pub const fimo_exports = .{
     .{ .symbol = symbols.system_group_destroy, .value = &systemGroupDestroy },
     .{ .symbol = symbols.system_group_get_world, .value = &systemGroupGetWorld },
     .{ .symbol = symbols.system_group_get_label, .value = &systemGroupGetLabel },
-    .{ .symbol = symbols.system_group_get_pool, .value = &systemGroupGetPool },
+    .{ .symbol = symbols.system_group_get_executor, .value = &systemGroupGetExecutor },
     .{ .symbol = symbols.system_group_add_systems, .value = &systemGroupAddSystems },
     .{ .symbol = symbols.system_group_remove_system, .value = &systemGroupRemoveSystem },
     .{ .symbol = symbols.system_group_schedule, .value = &systemGroupSchedule },
@@ -67,7 +67,7 @@ pub const fimo_exports = .{
     .{ .symbol = symbols.world_create, .value = &worldCreate },
     .{ .symbol = symbols.world_destroy, .value = &worldDestroy },
     .{ .symbol = symbols.world_get_label, .value = &worldGetLabel },
-    .{ .symbol = symbols.world_get_pool, .value = &worldGetPool },
+    .{ .symbol = symbols.world_get_executor, .value = &worldGetExecutor },
     .{ .symbol = symbols.world_has_resource, .value = &worldHasResource },
     .{ .symbol = symbols.world_add_resource, .value = &worldAddResource },
     .{ .symbol = symbols.world_remove_resource, .value = &worldRemoveResource },
@@ -177,8 +177,8 @@ fn systemGroupCreate(
     group: **systems.SystemGroup,
 ) callconv(.c) Status {
     const grp = SystemGroup.init(.{
-        .label = if (descriptor.label_len != 0) descriptor.label.?[0..descriptor.label_len] else null,
-        .executor = if (descriptor.pool) |p| p.* else null,
+        .label = descriptor.label.get(),
+        .executor = descriptor.executor,
         .world = @ptrCast(@alignCast(descriptor.world)),
     }) catch |err| {
         ctx.setResult(.initErr(.initError(err)));
@@ -204,9 +204,9 @@ fn systemGroupGetLabel(group: *systems.SystemGroup, len: *usize) callconv(.c) ?[
     return grp.label.ptr;
 }
 
-fn systemGroupGetPool(group: *systems.SystemGroup) callconv(.c) pools.Pool {
+fn systemGroupGetExecutor(group: *systems.SystemGroup) callconv(.c) *Executor {
     const grp: *SystemGroup = @ptrCast(@alignCast(group));
-    return grp.executor.ref();
+    return grp.executor;
 }
 
 fn systemGroupAddSystems(
@@ -314,8 +314,8 @@ fn worldCreate(
     world: **worlds.World,
 ) callconv(.c) Status {
     const w = World.init(.{
-        .label = if (descriptor.label_len != 0) descriptor.label.?[0..descriptor.label_len] else null,
-        .executor = if (descriptor.pool) |p| p.* else null,
+        .label = descriptor.label.get(),
+        .executor = descriptor.executor,
     }) catch |err| {
         ctx.setResult(.initErr(.initError(err)));
         return .err;
@@ -335,9 +335,9 @@ fn worldGetLabel(world: *worlds.World, len: *usize) callconv(.c) ?[*]const u8 {
     return w.label.ptr;
 }
 
-fn worldGetPool(world: *worlds.World) callconv(.c) pools.Pool {
+fn worldGetExecutor(world: *worlds.World) callconv(.c) *Executor {
     const w: *World = @ptrCast(@alignCast(world));
-    return w.executor.ref();
+    return w.executor;
 }
 
 fn worldHasResource(world: *worlds.World, handle: *resources.Resource) callconv(.c) bool {
