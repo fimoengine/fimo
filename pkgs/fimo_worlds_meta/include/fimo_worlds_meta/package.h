@@ -1,7 +1,7 @@
 #ifndef FIMO_WORLDS_META_PACKAGE_H
 #define FIMO_WORLDS_META_PACKAGE_H
 
-#include <fimo_std/impl/context_version_.h>
+#include <fimo_std.h>
 
 #include <fimo_worlds_meta/jobs.h>
 #include <fimo_worlds_meta/resources.h>

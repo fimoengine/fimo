@@ -5,7 +5,7 @@
 #include <stdalign.h>
 #include <stdbool.h>
 
-#include <fimo_std/integers.h>
+#include <fimo_std.h>
 
 #include <fimo_tasks_meta/pool.h>
 #include <fimo_tasks_meta/tasks.h>
@@ -41,7 +41,7 @@ typedef struct FimoTasksMeta_CommandBufferHandle {
 } FimoTasksMeta_CommandBufferHandle;
 
 /// Type of an entry of a command buffer.
-typedef enum FimoTasksMeta_CommandBufferEntryType : FimoI32 {
+typedef enum FimoTasksMeta_CommandBufferEntryType : FSTD_I32 {
     FIMO_TASKS_META_COMMAND_BUFFER_ENTRY_TYPE_ABORT_ON_ERROR,
     FIMO_TASKS_META_COMMAND_BUFFER_ENTRY_TYPE_SET_MIN_STACK_SIZE,
     FIMO_TASKS_META_COMMAND_BUFFER_ENTRY_TYPE_SELECT_WORKER,
@@ -64,7 +64,7 @@ typedef union FimoTasksMeta_CommandBufferEntryPayload {
     /// Specifies that the following tasks may be enqueued on any worker of the pool.
     ///
     /// The value is ignored.
-    FimoU8 select_any_worker;
+    FSTD_U8 select_any_worker;
     /// Enqueues a task.
     ///
     /// The command will complete when the task is completed.
@@ -76,17 +76,17 @@ typedef union FimoTasksMeta_CommandBufferEntryPayload {
     /// Waits for the completion of all preceding commands.
     ///
     /// The value is ignored.
-    FimoU8 wait_on_barrier;
+    FSTD_U8 wait_on_barrier;
     /// Waits for the completion of the command buffer handle.
     FimoTasksMeta_CommandBufferHandle wait_on_command_buffer;
     /// Waits for the completion of some specific command contained in the buffer.
     ///
     /// Waits for the completion of the command at index `this_command - value`.
-    FimoUSize wait_on_command_indirect;
+    FSTD_USize wait_on_command_indirect;
 } FimoTasksMeta_CommandBufferEntryPayload;
 
-static_assert(sizeof(FimoTasksMeta_CommandBufferEntryPayload) == sizeof(FimoUSize[2]), "");
-static_assert(alignof(FimoTasksMeta_CommandBufferEntryPayload) <= alignof(FimoUSize), "");
+static_assert(sizeof(FimoTasksMeta_CommandBufferEntryPayload) == sizeof(FSTD_USize[2]), "");
+static_assert(alignof(FimoTasksMeta_CommandBufferEntryPayload) <= alignof(FSTD_USize), "");
 
 /// An entry of a command buffer.
 typedef struct FimoTasksMeta_CommandBufferEntry {
@@ -103,11 +103,11 @@ typedef struct FimoTasksMeta_CommandBuffer {
     /// the `on_deinit` function. Is not null-terminated.
     const char *label;
     /// Length of the label string.
-    FimoUSize label_len;
+    FSTD_USize label_len;
     /// List of commands.
     const FimoTasksMeta_CommandBufferEntry *entries;
     /// Length of the command list.
-    FimoUSize entries_len;
+    FSTD_USize entries_len;
     /// Optional completion handler of the command buffer.
     ///
     /// Will be invoked after successfull completion of the command bufer on an arbitrary

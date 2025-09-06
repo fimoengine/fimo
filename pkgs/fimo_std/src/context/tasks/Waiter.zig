@@ -17,7 +17,7 @@ cvar: Condition = .{},
 notified: bool = false,
 waiter: ?Thread.Id = null,
 
-pub fn init() Allocator.Error!pub_tasks.BlockingContext {
+pub fn init() Allocator.Error!pub_tasks.Waiter {
     const self = try tasks.allocator.create(Self);
     errdefer tasks.allocator.destroy(self);
     self.* = .{};
@@ -32,21 +32,21 @@ pub fn init() Allocator.Error!pub_tasks.BlockingContext {
             const this: *Self = @ptrCast(@alignCast(ptr));
             return this.asWaker();
         }
-        fn block_until_notified(ptr: ?*anyopaque) callconv(.c) void {
+        fn block(ptr: ?*anyopaque) callconv(.c) void {
             const this: *Self = @ptrCast(@alignCast(ptr));
-            this.block_until_notified();
+            this.block();
         }
     };
 
-    const context_vtable = pub_tasks.BlockingContext.VTable{
+    const waiter_vtable = pub_tasks.Waiter.VTable{
         .deinit = &Wrapper.deinit,
         .waker_ref = &Wrapper.waker_ref,
-        .block_until_notified = &Wrapper.block_until_notified,
+        .block = &Wrapper.block,
     };
 
-    return pub_tasks.BlockingContext{
+    return .{
         .data = self,
-        .vtable = &context_vtable,
+        .vtable = &waiter_vtable,
     };
 }
 
@@ -88,7 +88,6 @@ fn asWaker(self: *Self) pub_tasks.Waker {
         .unref = &Wrapper.unref,
         .wake = &Wrapper.wake,
         .wake_unref = &Wrapper.wakeUnref,
-        .next = null,
     };
 
     return .{
@@ -104,7 +103,7 @@ fn notify(self: *Self) void {
     self.cvar.signal();
 }
 
-fn block_until_notified(self: *Self) void {
+fn block(self: *Self) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     const id = Thread.getCurrentId();

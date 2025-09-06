@@ -3,15 +3,14 @@
 
 #include <stdbool.h>
 
-#include <fimo_std/error.h>
-#include <fimo_std/time.h>
+#include <fimo_std.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /// Identifier of a task.
-typedef FimoUSize FimoTasksMeta_TaskId;
+typedef FSTD_USize FimoTasksMeta_TaskId;
 
 /// A unit of work.
 typedef struct FimoTasksMeta_Task {
@@ -22,7 +21,7 @@ typedef struct FimoTasksMeta_Task {
     /// Is not null-terminated.
     const char *label;
     /// Length of the label string.
-    FimoUSize label_len;
+    FSTD_USize label_len;
     /// Entry function of the task.
     void (*run)(struct FimoTasksMeta_Task *task);
 } FimoTasksMeta_Task;
@@ -40,7 +39,7 @@ typedef void (*FimoTasksMeta_abort)();
 typedef bool (*FimoTasksMeta_cancel_requested)();
 
 /// Puts the current task to sleep for the specified amount of time.
-typedef void (*FimoTasksMeta_sleep)(FimoDuration duration);
+typedef void (*FimoTasksMeta_sleep)(FSTD_Duration duration);
 
 
 /// A key for a task-specific-storage.

@@ -15,15 +15,11 @@ pub const Waker = extern struct {
     data: ?*anyopaque,
     vtable: *const Waker.VTable,
 
-    /// VTable of a Waker.
-    ///
-    /// Changing the VTable is a breaking change.
     pub const VTable = extern struct {
         ref: *const fn (data: ?*anyopaque) callconv(.c) Waker,
         unref: *const fn (data: ?*anyopaque) callconv(.c) void,
         wake_unref: *const fn (data: ?*anyopaque) callconv(.c) void,
         wake: *const fn (data: ?*anyopaque) callconv(.c) void,
-        next: ?*const anyopaque,
     };
 
     /// Increases the reference count of the waker.
@@ -48,50 +44,50 @@ pub const Waker = extern struct {
     }
 };
 
-/// A context that blocks the current thread until it is notified.
-pub const BlockingContext = extern struct {
+/// A waiter that blocks the current thread until it is notified.
+///
+/// The waiter is intended to be used by threads other than the event loop thread, as they are not
+/// bound to a waker. Using this waiter inside the event loop will result in a deadlock.
+pub const Waiter = extern struct {
     data: ?*anyopaque,
-    vtable: *const BlockingContext.VTable,
+    vtable: *const Waiter.VTable,
 
-    /// VTable of an BlockingContext.
-    ///
-    /// Changing the VTable is **not** a breaking change.
     pub const VTable = extern struct {
         deinit: *const fn (data: ?*anyopaque) callconv(.c) void,
         waker_ref: *const fn (data: ?*anyopaque) callconv(.c) Waker,
-        block_until_notified: *const fn (data: ?*anyopaque) callconv(.c) void,
+        block: *const fn (data: ?*anyopaque) callconv(.c) void,
     };
 
-    /// Initializes a new blocking context.
-    pub fn init() ctx.Error!BlockingContext {
-        var context: BlockingContext = undefined;
+    /// Initializes a new waiter.
+    pub fn init() ctx.Error!Waiter {
+        var context: Waiter = undefined;
         const handle = ctx.Handle.getHandle();
-        try handle.tasks_v0.context_new_blocking(&context).intoErrorUnion();
+        try handle.tasks_v0.waiter_init(&context).intoErrorUnion();
         return context;
     }
 
-    /// Deinitializes the context.
-    pub fn deinit(self: BlockingContext) void {
+    /// Deinitializes the waiter.
+    pub fn deinit(self: Waiter) void {
         self.vtable.deinit(self.data);
     }
 
-    /// Returns a reference to the waker for the context.
+    /// Returns a reference to the waker for the waiter.
     ///
     /// The caller does not own the waker.
-    pub fn waker(self: BlockingContext) Waker {
+    pub fn waker(self: Waiter) Waker {
         return self.vtable.waker_ref(self.data);
     }
 
     /// Blocks the current thread until it has been notified.
     ///
-    /// The thread can be notified through the waker of the context.
-    pub fn blockUntilNotified(self: BlockingContext) void {
-        self.vtable.block_until_notified(self.data);
+    /// The thread can be notified through the waker of the waiter.
+    pub fn block(self: Waiter) void {
+        self.vtable.block(self.data);
     }
 
     /// Blocks the current thread until the future is completed.
     pub fn awaitFuture(
-        self: BlockingContext,
+        self: Waiter,
         comptime T: type,
         future: anytype,
     ) T {
@@ -103,7 +99,7 @@ pub const BlockingContext = extern struct {
         while (true) {
             switch (future.poll(waker_ref)) {
                 .ready => |v| return v,
-                .pending => self.blockUntilNotified(),
+                .pending => self.block(),
             }
         }
     }
@@ -118,7 +114,12 @@ pub fn Poll(comptime T: type) type {
 }
 
 /// An asynchronous operation.
-pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U), deinit_fn: ?fn (*T) void) type {
+pub fn Future(
+    comptime T: type,
+    comptime U: type,
+    poll_fn: fn (*T, Waker) Poll(U),
+    deinit_fn: ?fn (*T) void,
+) type {
     return struct {
         data: T,
 
@@ -189,7 +190,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
         /// Moves the future on the async executor.
         ///
         /// Polling the new future will block the current task.
-        pub fn enqueue(self: @This(), comptime deinit_result_fn: ?fn (*U) void) ctx.Error!EnqueuedFuture(U) {
+        pub fn enqueue(self: @This(), comptime deinit_result_fn: ?fn (*U) void) ctx.Error!OpaqueFuture(U) {
             const This = @This();
             const Wrapper = struct {
                 fn poll(data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool {
@@ -213,7 +214,7 @@ pub fn Future(comptime T: type, comptime U: type, poll_fn: fn (*T, Waker) Poll(U
                 }
             };
 
-            var enqueued: OpaqueFuture = undefined;
+            var enqueued: EnqueuedFuture = undefined;
             const handle = ctx.Handle.getHandle();
             try handle.tasks_v0.future_enqueue(
                 std.mem.asBytes(&self),
@@ -247,13 +248,13 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
     return extern struct {
         data: T,
         poll_fn: *const fn (data: OptT, waker: Waker, result: OptU) callconv(.c) bool,
-        cleanup_fn: ?*const fn (data: OptT) callconv(.c) void,
+        deinit_fn: ?*const fn (data: OptT) callconv(.c) void,
 
         pub const Result = U;
         pub const Future = SelfTy.Future(@This(), U, poll, deinit);
 
         /// Initializes a new future.
-        pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), cleanup_fn: ?fn (*T) void) @This() {
+        pub fn init(data: T, poll_fn: fn (*T, Waker) Poll(U), deinit_fn: ?fn (*T) void) @This() {
             const Wrapper = struct {
                 fn poll(dat: OptT, waker: Waker, result: OptU) callconv(.c) bool {
                     const d = OptPointer.unwrap(T, dat);
@@ -266,14 +267,14 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
                 }
                 fn cleanup(dat: OptT) callconv(.c) void {
                     const d = OptPointer.unwrap(T, dat);
-                    if (cleanup_fn) |cl| cl(d);
+                    if (deinit_fn) |cl| cl(d);
                 }
             };
 
             return .{
                 .data = data,
                 .poll_fn = &Wrapper.poll,
-                .cleanup_fn = if (cleanup_fn != null) &Wrapper.cleanup else null,
+                .deinit_fn = if (deinit_fn != null) &Wrapper.cleanup else null,
             };
         }
 
@@ -281,7 +282,7 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
         ///
         /// Can be called at any time to abort the future.
         pub fn deinit(self: *@This()) void {
-            if (self.cleanup_fn) |cl| cl(&self.data);
+            if (self.deinit_fn) |cl| cl(&self.data);
         }
 
         /// Constructs a future from the current instance.
@@ -309,13 +310,13 @@ pub fn ExternFuture(comptime T: type, comptime U: type) type {
     };
 }
 
-/// An enqueued future.
-pub fn EnqueuedFuture(comptime T: type) type {
+/// A future with an opaque handle and specified return type.
+pub fn OpaqueFuture(comptime T: type) type {
     return ExternFuture(*anyopaque, T);
 }
 
-/// An enqueued future with an unknown result type.
-pub const OpaqueFuture = EnqueuedFuture(anyopaque);
+/// Type of an enqueued future.
+pub const EnqueuedFuture = OpaqueFuture(anyopaque);
 
 /// A future that returns immediately.
 pub fn ReadyFuture(comptime T: type, deinit_fn: ?fn (*T) void) type {
@@ -669,7 +670,7 @@ pub fn Fallible(comptime T: type) type {
 ///
 /// Changing this definition is a breaking change.
 pub const VTable = extern struct {
-    context_new_blocking: *const fn (context: *BlockingContext) callconv(.c) ctx.Status,
+    waiter_init: *const fn (context: *Waiter) callconv(.c) ctx.Status,
     future_enqueue: *const fn (
         data: ?[*]const u8,
         data_size: usize,
@@ -679,6 +680,6 @@ pub const VTable = extern struct {
         poll: *const fn (data: ?*anyopaque, waker: Waker, result: ?*anyopaque) callconv(.c) bool,
         cleanup_data: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-        future: *OpaqueFuture,
+        future: *EnqueuedFuture,
     ) callconv(.c) ctx.Status,
 };

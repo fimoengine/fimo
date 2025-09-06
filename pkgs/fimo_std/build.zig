@@ -19,14 +19,11 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     const context_version = generateVersion(b, wf);
 
     const headers = b.addWriteFiles();
-    _ = headers.addCopyDirectory(b.path("include/"), ".", .{});
-    _ = headers.addCopyDirectory(wf.getDirectory().path(b, "include/"), ".", .{});
-    _ = headers.addCopyFile(b.path("LICENSE-MIT"), "fimo_std/LICENSE-MIT");
-    _ = headers.addCopyFile(b.path("LICENSE-APACHE"), "fimo_std/LICENSE-APACHE");
-    _ = headers.addCopyFile(b.path("LICENSE-EXTERNAL"), "fimo_std/LICENSE-EXTERNAL");
+    _ = headers.addCopyFile(b.path("fimo_std.h"), "fimo_std.h");
+    _ = headers.addCopyFile(b.path("NOTICES"), "FIMO_STD_NOTICES");
 
     const translate_c = b.addTranslateC(.{
-        .root_source_file = headers.getDirectory().path(b, "fimo_std/fimo.h"),
+        .root_source_file = headers.getDirectory().path(b, "fimo_std.h"),
         .target = target,
         .optimize = optimize,
     });

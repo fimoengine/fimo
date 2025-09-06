@@ -198,7 +198,7 @@ fn onEnterSpan(self: *Self, event: *const events.EnterSpan) void {
     const frame = blk: {
         stack.lock.lock();
         defer stack.lock.unlock();
-        const message = event.message[0..event.message_length];
+        const message = event.message.intoSliceOrEmpty();
         break :blk Frame.init(event.span, message, stack.arena.allocator());
     };
     self.pushMessage(.{ .append_frame = .{ .stack = stack, .frame = frame } });
@@ -217,7 +217,7 @@ fn onLogMessage(self: *Self, event: *const events.LogMessage) void {
     const dupe = blk: {
         stack.lock.lock();
         defer stack.lock.unlock();
-        const message = event.message[0..event.message_length];
+        const message = event.message.intoSliceOrEmpty();
         break :blk stack.arena.allocator().dupe(u8, message) catch @panic("oom");
     };
     self.pushMessage(.{ .log = .{ .stack = stack, .info = event.info, .message = dupe } });
@@ -399,14 +399,14 @@ fn emitLogEC(
     stderr.writeAll(print_buffer[0..cursor]) catch {};
 }
 
-export fn fimo_tracing_stderr_logger_new() Subscriber {
+export fn fstd_stderr_logger_init() Subscriber {
     const allocator = std.heap.c_allocator;
     const logger = allocator.create(Self) catch @panic("oom");
     logger.init(.{ .gpa = allocator }) catch |err| @panic(@errorName(err));
     return logger.subscriber();
 }
 
-export fn fimo_tracing_stderr_logger_destroy(sub: Subscriber) void {
+export fn fstd_stderr_logger_deinit(sub: Subscriber) void {
     const logger: *Self = @ptrCast(@alignCast(sub.data));
     logger.deinit();
 }

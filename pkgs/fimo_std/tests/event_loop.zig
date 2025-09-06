@@ -14,19 +14,17 @@ pub fn main() !void {
     try logger.init(.{ .gpa = gpa.allocator() });
     defer logger.deinit();
 
-    const tracing_cfg = tracing.Config{
+    const tracing_cfg = tracing.Cfg{
         .max_level = .trace,
-        .subscribers = &.{logger.subscriber()},
-        .subscriber_count = 1,
+        .subscribers = .fromSlice(&.{logger.subscriber()}),
     };
-    const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
-    try ctx.init(init_options);
+    try ctx.init(&.{&tracing_cfg.cfg});
     defer ctx.deinit();
 
-    const async_ctx = try tasks.BlockingContext.init();
-    defer async_ctx.deinit();
+    const waiter = try tasks.Waiter.init();
+    defer waiter.deinit();
 
-    const ab: NestedFuture.Result = (try NestedFuture.init()).awaitBlocking(async_ctx);
+    const ab: NestedFuture.Result = (try NestedFuture.init()).awaitBlocking(waiter);
     const a = ab.a;
     const b = ab.b;
 
@@ -36,12 +34,12 @@ pub fn main() !void {
 
 const NestedFuture = union(enum) {
     start: struct {
-        a: tasks.EnqueuedFuture(usize),
-        b: tasks.EnqueuedFuture(usize),
+        a: tasks.OpaqueFuture(usize),
+        b: tasks.OpaqueFuture(usize),
     },
     stage_0: struct {
         a: usize,
-        b: tasks.EnqueuedFuture(usize),
+        b: tasks.OpaqueFuture(usize),
     },
     stage_1: struct {
         a: usize,

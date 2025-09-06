@@ -190,7 +190,7 @@ pub const protocol = struct {
         };
 
         pub const Start = packed struct(u400) {
-            event: tracing.events.Event = .start,
+            tag: tracing.events.EventTag = .start,
             time: u64,
             epoch: u64,
             resolution: u16,
@@ -204,70 +204,70 @@ pub const protocol = struct {
             host_info_len: u16,
         };
         pub const Finish = packed struct(u96) {
-            event: tracing.events.Event = .finish,
+            tag: tracing.events.EventTag = .finish,
             time: u64,
         };
         pub const RegisterThread = packed struct(u160) {
-            event: tracing.events.Event = .register_thread,
+            tag: tracing.events.EventTag = .register_thread,
             time: u64,
             thread_id: u64,
         };
         pub const UnregisterThread = packed struct(u160) {
-            event: tracing.events.Event = .unregister_thread,
+            tag: tracing.events.EventTag = .unregister_thread,
             time: u64,
             thread_id: u64,
         };
         pub const CreateCallStack = packed struct(u160) {
-            event: tracing.events.Event = .create_call_stack,
+            tag: tracing.events.EventTag = .create_call_stack,
             time: u64,
             stack: u64,
         };
         pub const DestroyCallStack = packed struct(u160) {
-            event: tracing.events.Event = .destroy_call_stack,
+            tag: tracing.events.EventTag = .destroy_call_stack,
             time: u64,
             stack: u64,
         };
         pub const UnblockCallStack = packed struct(u160) {
-            event: tracing.events.Event = .unblock_call_stack,
+            tag: tracing.events.EventTag = .unblock_call_stack,
             time: u64,
             stack: u64,
         };
         pub const SuspendCallStack = packed struct(u168) {
-            event: tracing.events.Event = .suspend_call_stack,
+            tag: tracing.events.EventTag = .suspend_call_stack,
             time: u64,
             stack: u64,
             mark_blocked: bool,
             padding: u7 = 0,
         };
         pub const ResumeCallStack = packed struct(u224) {
-            event: tracing.events.Event = .resume_call_stack,
+            tag: tracing.events.EventTag = .resume_call_stack,
             time: u64,
             stack: u64,
             thread_id: u64,
         };
         pub const EnterSpan = packed struct(u240) {
-            event: tracing.events.Event = .enter_span,
+            tag: tracing.events.EventTag = .enter_span,
             time: u64,
             stack: u64,
             info_id: u64,
             message_len: u16,
         };
         pub const ExitSpan = packed struct(u168) {
-            event: tracing.events.Event = .exit_span,
+            tag: tracing.events.EventTag = .exit_span,
             time: u64,
             stack: u64,
             is_unwinding: bool,
             padding: u7 = 0,
         };
         pub const LogMessage = packed struct(u240) {
-            event: tracing.events.Event = .log_message,
+            tag: tracing.events.EventTag = .log_message,
             time: u64,
             stack: u64,
             info_id: u64,
             message_len: u16,
         };
         pub const DeclareEventInfo = packed struct(u224) {
-            event: tracing.events.Event = .declare_event_info,
+            tag: tracing.events.EventTag = .declare_event_info,
             id: u64,
             name_len: u16,
             target_len: u16,
@@ -277,31 +277,31 @@ pub const protocol = struct {
             level: Level,
         };
         pub const StartThread = packed struct(u224) {
-            event: tracing.events.Event = .start_thread,
+            tag: tracing.events.EventTag = .start_thread,
             time: u64,
             thread_id: u64,
             process_id: u64,
         };
         pub const StopThread = packed struct(u224) {
-            event: tracing.events.Event = .stop_thread,
+            tag: tracing.events.EventTag = .stop_thread,
             time: u64,
             thread_id: u64,
             process_id: u64,
         };
         pub const LoadImage = packed struct(u240) {
-            event: tracing.events.Event = .load_image,
+            tag: tracing.events.EventTag = .load_image,
             time: u64,
             image_base: u64,
             image_size: u64,
             image_path_len: u16,
         };
         pub const UnloadImage = packed struct(u160) {
-            event: tracing.events.Event = .unload_image,
+            tag: tracing.events.EventTag = .unload_image,
             time: u64,
             image_base: u64,
         };
         pub const ContextSwitch = packed struct(u272) {
-            event: tracing.events.Event = .context_switch,
+            tag: tracing.events.EventTag = .context_switch,
             time: u64,
             old_thread_id: u64,
             new_thread_id: u64,
@@ -313,7 +313,7 @@ pub const protocol = struct {
             old_thread_priority: i8,
         };
         pub const ThreadWakeup = packed struct(u184) {
-            event: tracing.events.Event = .thread_wakeup,
+            tag: tracing.events.EventTag = .thread_wakeup,
             time: u64,
             thread_id: u64,
             cpu: u8,
@@ -321,7 +321,7 @@ pub const protocol = struct {
             adjust_increment: i8,
         };
         pub const CallStackSample = packed struct(u176) {
-            event: tracing.events.Event = .call_stack_sample,
+            tag: tracing.events.EventTag = .call_stack_sample,
             time: u64,
             thread_id: u64,
             call_stack_len: u16,
@@ -416,16 +416,20 @@ pub const NetLogger = struct {
 
     fn onStart(self: *NetLogger, event: *const events.Start) void {
         if (self.closed.load(.acquire)) return;
-        const cpu_vendor_len = @min(event.cpu_vendor_length, std.math.maxInt(u8));
-        const app_name_len = @min(event.app_name_length, std.math.maxInt(u16));
-        const host_info_len = @min(event.host_info_length, std.math.maxInt(u16));
+        const cpu_vendor = event.cpu_vendor.intoSliceOrEmpty();
+        const app_name = event.app_name.intoSliceOrEmpty();
+        const host_info = event.host_info.intoSliceOrEmpty();
+
+        const cpu_vendor_len = @min(cpu_vendor.len, std.math.maxInt(u8));
+        const app_name_len = @min(app_name.len, std.math.maxInt(u16));
+        const host_info_len = @min(host_info.len, std.math.maxInt(u16));
         const strings_len = cpu_vendor_len + app_name_len + host_info_len;
 
         const strings = self.gpa.alloc(u8, strings_len) catch @panic("oom");
         var w: std.Io.Writer = .fixed(strings);
-        w.writeAll(event.cpu_vendor[0..cpu_vendor_len]) catch unreachable;
-        w.writeAll(event.app_name[0..app_name_len]) catch unreachable;
-        w.writeAll(event.host_info[0..host_info_len]) catch unreachable;
+        w.writeAll(cpu_vendor[0..cpu_vendor_len]) catch unreachable;
+        w.writeAll(app_name[0..app_name_len]) catch unreachable;
+        w.writeAll(host_info[0..host_info_len]) catch unreachable;
 
         const ev: protocol.events.Start = .{
             .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
@@ -519,8 +523,9 @@ pub const NetLogger = struct {
 
     fn onEnterSpan(self: *NetLogger, event: *const events.EnterSpan) void {
         if (self.closed.load(.acquire)) return;
-        const message_len = @min(event.message_length, std.math.maxInt(u16));
-        const message = self.gpa.dupe(u8, event.message[0..message_len]) catch @panic("oom");
+        const msg = event.message.intoSliceOrEmpty();
+        const message_len = @min(msg.len, std.math.maxInt(u16));
+        const message = self.gpa.dupe(u8, msg[0..message_len]) catch @panic("oom");
 
         const ev: protocol.events.EnterSpan = .{
             .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
@@ -543,8 +548,9 @@ pub const NetLogger = struct {
 
     fn onLogMessage(self: *NetLogger, event: *const events.LogMessage) void {
         if (self.closed.load(.acquire)) return;
-        const message_len = @min(event.message_length, std.math.maxInt(u16));
-        const message = self.gpa.dupe(u8, event.message[0..message_len]) catch @panic("oom");
+        const msg = event.message.intoSliceOrEmpty();
+        const message_len = @min(msg.len, std.math.maxInt(u16));
+        const message = self.gpa.dupe(u8, msg[0..message_len]) catch @panic("oom");
 
         const ev: protocol.events.LogMessage = .{
             .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
@@ -608,15 +614,12 @@ pub const NetLogger = struct {
     fn onLoadImage(self: *NetLogger, event: *const events.LoadImage) void {
         if (self.closed.load(.acquire)) return;
 
-        const path = self.gpa.dupe(
-            u8,
-            if (event.image_path.path) |p| p[0..event.image_path.length] else "",
-        ) catch @panic("oom");
+        const path = self.gpa.dupe(u8, event.image_path.intoSliceOrEmpty()) catch @panic("oom");
         const ev: protocol.events.LoadImage = .{
             .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
             .image_base = event.image_base,
             .image_size = event.image_size,
-            .image_path_len = @intCast(event.image_path.length),
+            .image_path_len = @intCast(event.image_path.len),
         };
         self.pushMessage(.{ .load_image = .{ .main = ev, .path = path } });
     }
@@ -660,13 +663,14 @@ pub const NetLogger = struct {
 
     fn onCallStackSample(self: *NetLogger, event: *const events.CallStackSample) void {
         if (self.closed.load(.acquire)) return;
-        const call_stack = self.gpa.alloc(u64, event.call_stack_len) catch @panic("oom");
-        for (call_stack, event.call_stack[0..event.call_stack_len]) |*dst, src| dst.* = src;
+        const cs = event.call_stack.intoSliceOrEmpty();
+        const call_stack = self.gpa.alloc(u64, cs.len) catch @panic("oom");
+        for (call_stack, cs) |*dst, src| dst.* = src;
 
         const ev: protocol.events.CallStackSample = .{
             .time = @intCast((Instant.initC(event.time).durationSince(.{}) catch unreachable).nanos()),
             .thread_id = event.thread_id,
-            .call_stack_len = @truncate(event.call_stack_len),
+            .call_stack_len = @truncate(cs.len),
         };
         self.pushMessage(.{ .call_stack_sample = .{ .main = ev, .call_stack = call_stack } });
     }
@@ -1101,10 +1105,10 @@ pub const Client = struct {
         self.unprocessed = self.buffer[0..block.len];
     }
 
-    fn peekTag(self: *Client) tracing.events.Event {
-        std.debug.assert(self.unprocessed.len >= @divExact(@bitSizeOf(tracing.events.Event), 8));
+    fn peekTag(self: *Client) tracing.events.EventTag {
+        std.debug.assert(self.unprocessed.len >= @divExact(@bitSizeOf(tracing.events.EventTag), 8));
         var r: std.Io.Reader = .fixed(self.unprocessed);
-        const tag = r.peekInt(@typeInfo(tracing.events.Event).@"enum".tag_type, .little) catch unreachable;
+        const tag = r.peekInt(@typeInfo(tracing.events.EventTag).@"enum".tag_type, .little) catch unreachable;
         return @enumFromInt(tag);
     }
 
@@ -1278,12 +1282,9 @@ test "Client-Server" {
         .num_cores = 9,
         .cpu_arch = .x86_64,
         .cpu_id = 0,
-        .cpu_vendor = cpu_vendor,
-        .cpu_vendor_length = cpu_vendor.len,
-        .app_name = app_name,
-        .app_name_length = app_name.len,
-        .host_info = host_info,
-        .host_info_length = host_info.len,
+        .cpu_vendor = .fromSlice(cpu_vendor),
+        .app_name = .fromSlice(app_name),
+        .host_info = .fromSlice(host_info),
     };
     const ev1 = tracing.events.RegisterThread{
         .time = t1.intoC(),
@@ -1297,8 +1298,7 @@ test "Client-Server" {
         .time = t3.intoC(),
         .stack = @ptrFromInt(12345),
         .info = &info,
-        .message = message,
-        .message_length = message.len,
+        .message = .fromSlice(message),
     };
     const ev4 = tracing.events.Finish{
         .time = t4.intoC(),

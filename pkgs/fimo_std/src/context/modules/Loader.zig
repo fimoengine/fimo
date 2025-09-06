@@ -13,7 +13,7 @@ const Path = paths.Path;
 const OwnedPath = paths.OwnedPath;
 const pub_tasks = @import("../../tasks.zig");
 const Waker = pub_tasks.Waker;
-const EnqueuedFuture = pub_tasks.EnqueuedFuture;
+const OpaqueFuture = pub_tasks.OpaqueFuture;
 const FSMFuture = pub_tasks.FSMFuture;
 const FSMUnwindReason = pub_tasks.FSMUnwindReason;
 const FSMOp = pub_tasks.FSMOp;
@@ -47,17 +47,17 @@ const ModuleInfo = struct {
     const Status = union(enum) {
         unloaded: struct {
             export_handle: *const pub_modules.Export,
-            owner: ?*const pub_modules.OpaqueInstance,
+            owner: ?*pub_modules.OpaqueInstance,
             wakers: std.ArrayList(Waker),
             allocator: Allocator,
         },
         err: struct {
             export_handle: *const pub_modules.Export,
-            owner: ?*const pub_modules.OpaqueInstance,
+            owner: ?*pub_modules.OpaqueInstance,
         },
         loaded: struct {
             export_handle: *const pub_modules.Export,
-            info: *const pub_modules.Info,
+            handle: *pub_modules.Handle,
         },
     };
 
@@ -65,11 +65,11 @@ const ModuleInfo = struct {
         allocator: Allocator,
         @"export": *const pub_modules.Export,
         handle: *ModuleHandle,
-        owner: ?*const pub_modules.OpaqueInstance,
+        owner: ?*pub_modules.OpaqueInstance,
     ) !ModuleInfo {
         handle.ref();
         if (owner) |o| {
-            const i_handle = InstanceHandle.fromInstancePtr(o);
+            const i_handle = InstanceHandle.fromInstancePtr(@ptrCast(@alignCast(o)));
             const inner = i_handle.lock();
             defer inner.unlock();
             try inner.refStrong();
@@ -93,7 +93,8 @@ const ModuleInfo = struct {
             .unloaded => |*v| {
                 for (v.wakers.items) |w| w.wakeUnref();
                 v.wakers.clearAndFree(v.allocator);
-                v.export_handle.deinit();
+                const export_deinit = v.export_handle.eventDeinitExport();
+                if (export_deinit.deinit) |f| f(export_deinit.data);
                 if (v.owner) |owner| {
                     const handle = InstanceHandle.fromInstancePtr(owner);
                     const inner = handle.lock();
@@ -102,7 +103,8 @@ const ModuleInfo = struct {
                 }
             },
             .err => |v| {
-                v.export_handle.deinit();
+                const export_deinit = v.export_handle.eventDeinitExport();
+                if (export_deinit.deinit) |f| f(export_deinit.data);
                 if (v.owner) |owner| {
                     const handle = InstanceHandle.fromInstancePtr(owner);
                     const inner = handle.lock();
@@ -111,14 +113,15 @@ const ModuleInfo = struct {
                 }
             },
             .loaded => |v| {
-                v.export_handle.deinit();
-                v.info.unref();
+                const export_deinit = v.export_handle.eventDeinitExport();
+                if (export_deinit.deinit) |f| f(export_deinit.data);
+                v.handle.unref();
             },
         }
         self.handle.unref();
     }
 
-    pub fn pollStatus(self: *ModuleInfo, waker: Waker) !?pub_modules.LoadingSet.ResolvedModule {
+    pub fn pollStatus(self: *ModuleInfo, waker: Waker) !?pub_modules.Loader.ResolvedModule {
         switch (self.status) {
             .unloaded => |*v| {
                 const w = waker.ref();
@@ -127,14 +130,14 @@ const ModuleInfo = struct {
             },
             .err => |v| {
                 return .{
-                    .info = null,
+                    .handle = null,
                     .export_handle = v.export_handle,
                 };
             },
             .loaded => |v| {
-                v.info.ref();
+                v.handle.ref();
                 return .{
-                    .info = v.info,
+                    .handle = v.handle,
                     .export_handle = v.export_handle,
                 };
             },
@@ -153,21 +156,21 @@ const ModuleInfo = struct {
         status.wakers.clearAndFree(status.allocator);
     }
 
-    pub fn signalSuccess(self: *ModuleInfo, info: *const pub_modules.Info) void {
+    pub fn signalSuccess(self: *ModuleInfo, handle: *pub_modules.Handle) void {
         var status = self.status.unloaded;
         if (status.owner) |owner| {
-            const handle = InstanceHandle.fromInstancePtr(owner);
-            const inner = handle.lock();
+            const owner_handle = InstanceHandle.fromInstancePtr(owner);
+            const inner = owner_handle.lock();
             defer inner.unlock();
             inner.unrefStrong();
         }
         for (status.wakers.items) |w| w.wakeUnref();
         status.wakers.clearAndFree(status.allocator);
 
-        info.ref();
+        handle.ref();
         self.status = .{
             .loaded = .{
-                .info = info,
+                .handle = handle,
                 .export_handle = status.export_handle,
             },
         };
@@ -188,7 +191,7 @@ const LoadGraph = struct {
     const Node = struct {
         module: []const u8,
         waiter: ?Waker = null,
-        fut: ?EnqueuedFuture(void) = null,
+        fut: ?OpaqueFuture(void) = null,
 
         fn deinit(self: *Node) void {
             std.debug.assert(self.waiter == null);
@@ -276,9 +279,9 @@ const LoadGraph = struct {
             }
 
             // Check that all imported symbols are already exposed, or will be exposed.
-            for (info.status.unloaded.export_handle.getSymbolImports()) |imp| {
-                const imp_name = std.mem.span(imp.name);
-                const imp_ns = std.mem.span(imp.namespace);
+            for (info.status.unloaded.export_handle.imports.intoSliceOrEmpty()) |imp| {
+                const imp_name = imp.name.intoSliceOrEmpty();
+                const imp_ns = imp.namespace.intoSliceOrEmpty();
                 const imp_ver = Version.initC(imp.version);
                 // Skip the module if a dependency could not be loaded.
                 if (set.getSymbol(imp_name, imp_ns, imp_ver)) |sym| {
@@ -306,23 +309,9 @@ const LoadGraph = struct {
             }
 
             // Check that no exported symbols are already exposed.
-            for (info.status.unloaded.export_handle.getSymbolExports()) |e| {
-                const e_name = std.mem.span(e.name);
-                const e_ns = std.mem.span(e.namespace);
-                if (modules.getSymbol(e_name, e_ns) != null) {
-                    tracing.logWarn(
-                        @src(),
-                        "instance exports duplicate symbol...skipping," ++
-                            " instance='{s}', symbol='{s}', namespace='{s}'",
-                        .{ name, e_name, e_ns },
-                    );
-                    info.signalError();
-                    continue :check;
-                }
-            }
-            for (info.status.unloaded.export_handle.getDynamicSymbolExports()) |e| {
-                const e_name = std.mem.span(e.name);
-                const e_ns = std.mem.span(e.namespace);
+            for (info.status.unloaded.export_handle.exports.intoSliceOrEmpty()) |exp| {
+                const e_name = exp.symbol.name.intoSliceOrEmpty();
+                const e_ns = exp.symbol.namespace.intoSliceOrEmpty();
                 if (modules.getSymbol(e_name, e_ns) != null) {
                     tracing.logWarn(
                         @src(),
@@ -359,9 +348,9 @@ const LoadGraph = struct {
                 info.signalError();
             }
 
-            for (info.status.unloaded.export_handle.getSymbolImports()) |imp| {
-                const i_name = std.mem.span(imp.name);
-                const i_namespace = std.mem.span(imp.namespace);
+            for (info.status.unloaded.export_handle.imports.intoSliceOrEmpty()) |imp| {
+                const i_name = imp.name.intoSliceOrEmpty();
+                const i_namespace = imp.namespace.intoSliceOrEmpty();
                 const i_version = Version.initC(imp.version);
                 if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
                     const owner_id = self.modules.get(sym.owner);
@@ -406,7 +395,7 @@ const LoadGraph = struct {
 };
 
 pub fn init() !*Self {
-    tracing.logTrace(@src(), "creating new loading set", .{});
+    tracing.logTrace(@src(), "creating new loader", .{});
 
     modules.mutex.lock();
     defer modules.mutex.unlock();
@@ -418,7 +407,7 @@ pub fn init() !*Self {
     const set = try allocator.create(Self);
     set.* = .{ .arena = undefined };
     set.arena = arena;
-    modules.loading_set_count.increase();
+    modules.loader_count.increase();
 
     return set;
 }
@@ -438,7 +427,7 @@ pub fn unref(self: *@This()) void {
 
     var arena = self.arena;
     arena.deinit();
-    modules.loading_set_count.decrease();
+    modules.loader_count.decrease();
 }
 
 pub fn lock(self: *Self) void {
@@ -459,7 +448,7 @@ fn cacheString(self: *Self, value: []const u8) Allocator.Error![]const u8 {
 }
 
 fn addModuleInfo(self: *Self, module_info: ModuleInfo) Allocator.Error!void {
-    const name = try self.cacheString(module_info.status.unloaded.export_handle.getName());
+    const name = try self.cacheString(module_info.status.unloaded.export_handle.name.intoSliceOrEmpty());
     try self.module_infos.put(self.arena.allocator(), name, module_info);
 }
 
@@ -470,7 +459,7 @@ fn getModuleInfo(self: *const Self, name: []const u8) ?*ModuleInfo {
 pub fn queryModule(self: *Self, module: []const u8) bool {
     tracing.logTrace(
         @src(),
-        "querying loading set module, set='{*}', name='{s}'",
+        "querying loader module, set='{*}', name='{s}'",
         .{ self, module },
     );
 
@@ -483,10 +472,10 @@ pub fn pollModuleStatus(
     self: *Self,
     waker: Waker,
     module: []const u8,
-) !?pub_modules.LoadingSet.ResolvedModule {
+) !?pub_modules.Loader.ResolvedModule {
     tracing.logTrace(
         @src(),
-        "polling loading set module status, set='{*}', module='{s}'",
+        "polling loader module status, set='{*}', module='{s}'",
         .{ self, module },
     );
 
@@ -525,14 +514,14 @@ fn getSymbolAny(self: *const Self, name: []const u8, ns: []const u8) ?*SymbolRef
 
 fn getSymbol(self: *const Self, name: []const u8, ns: []const u8, version: Version) ?*SymbolRef {
     const symbol = self.getSymbolAny(name, ns) orelse return null;
-    if (!symbol.version.isCompatibleWith(version)) return null;
+    if (!symbol.version.sattisfies(version)) return null;
     return symbol;
 }
 
 pub fn querySymbol(self: *Self, name: []const u8, ns: []const u8, version: Version) bool {
     tracing.logTrace(
         @src(),
-        "querying loading set symbol, set='{*}', name='{s}', namespace='{s}', version='{f}'",
+        "querying loader symbol, set='{*}', name='{s}', namespace='{s}', version='{f}'",
         .{ self, name, ns, version },
     );
 
@@ -545,12 +534,12 @@ fn addModuleInner(
     self: *Self,
     module_handle: *ModuleHandle,
     @"export": *const pub_modules.Export,
-    owner: ?*const pub_modules.OpaqueInstance,
+    owner: ?*pub_modules.OpaqueInstance,
 ) !void {
-    if (self.getModuleInfo(@"export".getName()) != null) return error.Duplicate;
-    for (@"export".getSymbolExports()) |exp| {
-        const name = std.mem.span(exp.name);
-        const namespace = std.mem.span(exp.namespace);
+    if (self.getModuleInfo(@"export".name.intoSliceOrEmpty()) != null) return error.Duplicate;
+    for (@"export".exports.intoSliceOrEmpty()) |exp| {
+        const name = exp.symbol.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
         if (self.getSymbolAny(name, namespace)) |sym| {
             tracing.logErr(
                 @src(),
@@ -560,51 +549,21 @@ fn addModuleInner(
             return error.Duplicate;
         }
     }
-    for (@"export".getDynamicSymbolExports()) |exp| {
-        const name = std.mem.span(exp.name);
-        const namespace = std.mem.span(exp.namespace);
-        if (self.getSymbolAny(name, namespace)) |sym| {
-            tracing.logErr(
-                @src(),
-                "duplicate symbol, owner='{s}', name='{s}', namespace='{s}', version='{f}'",
-                .{ sym.owner, name, namespace, sym.version },
-            );
-            return error.Duplicate;
-        }
-    }
-    errdefer {
-        for (@"export".getSymbolExports()) |exp| {
-            const name = std.mem.span(exp.name);
-            const namespace = std.mem.span(exp.namespace);
-            if (self.getSymbolAny(name, namespace)) |_| self.removeSymbol(name, namespace);
-        }
-        for (@"export".getDynamicSymbolExports()) |exp| {
-            const name = std.mem.span(exp.name);
-            const namespace = std.mem.span(exp.namespace);
-            if (self.getSymbolAny(name, namespace)) |_| self.removeSymbol(name, namespace);
-        }
-    }
+    errdefer for (@"export".exports.intoSliceOrEmpty()) |exp| {
+        const name = exp.symbol.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
+        if (self.getSymbolAny(name, namespace)) |_| self.removeSymbol(name, namespace);
+    };
 
-    for (@"export".getSymbolExports()) |exp| {
-        const name = std.mem.span(exp.name);
-        const namespace = std.mem.span(exp.namespace);
-        const version = Version.initC(exp.version);
+    for (@"export".exports.intoSliceOrEmpty()) |exp| {
+        const name = exp.symbol.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
+        const version = Version.initC(exp.symbol.version);
         try self.addSymbol(
             name,
             namespace,
             version,
-            @"export".getName(),
-        );
-    }
-    for (@"export".getDynamicSymbolExports()) |exp| {
-        const name = std.mem.span(exp.name);
-        const namespace = std.mem.span(exp.namespace);
-        const version = Version.initC(exp.version);
-        try self.addSymbol(
-            name,
-            namespace,
-            version,
-            @"export".getName(),
+            @"export".name.intoSliceOrEmpty(),
         );
     }
 
@@ -621,56 +580,56 @@ fn addModuleInner(
 }
 
 fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!void {
-    if (@"export".next != null) {
-        tracing.logWarn(@src(), "the next field is reserved for future use", .{});
-        return error.InvalidExport;
-    }
-    if (!pub_context.context_version.isCompatibleWith(@"export".getVersion())) {
+    if (!pub_context.context_version.sattisfies(.initC(@"export".version))) {
         tracing.logWarn(
             @src(),
             "incompatible context version, got='{f}', required='{f}'",
-            .{ pub_context.context_version, @"export".getVersion() },
+            .{ pub_context.context_version, Version.initC(@"export".version) },
         );
         return error.InvalidExport;
     }
 
     var has_error = false;
-    if (std.mem.startsWith(u8, @"export".getName(), "__")) {
-        tracing.logWarn(@src(), "export uses reserved name, export='{s}'", .{@"export".name});
+    if (@"export".name.intoSlice() == null) {
+        tracing.logWarn(@src(), "export has no name", .{});
+        return error.InvalidExport;
+    }
+    if (std.mem.startsWith(u8, @"export".name.intoSliceOrEmpty(), "__")) {
+        tracing.logWarn(@src(), "export uses reserved name, export='{s}'", .{@"export".name.intoSliceOrEmpty()});
         return error.InvalidExport;
     }
 
-    const namespaces = @"export".getNamespaceImports();
+    const namespaces = @"export".namespaces.intoSliceOrEmpty();
     for (namespaces, 0..) |ns, i| {
-        if (std.mem.eql(u8, std.mem.span(ns.name), "")) {
+        if (std.mem.eql(u8, ns.intoSliceOrEmpty(), "")) {
             tracing.logWarn(
                 @src(),
                 "can not import global namespace, export='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), ns.name, i },
+                .{ @"export".name.intoSliceOrEmpty(), ns.intoSliceOrEmpty(), i },
             );
             has_error = true;
         }
 
         var count: usize = 0;
         for (namespaces[0..i]) |x| {
-            if (std.mem.eql(u8, std.mem.span(ns.name), std.mem.span(x.name))) count += 1;
+            if (std.mem.eql(u8, ns.intoSliceOrEmpty(), x.intoSliceOrEmpty())) count += 1;
         }
         if (count > 1) {
             tracing.logWarn(
                 @src(),
                 "duplicate namespace, export='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), ns.name, i },
+                .{ @"export".name.intoSliceOrEmpty(), ns.intoSliceOrEmpty(), i },
             );
             has_error = true;
         }
     }
 
-    const imports = @"export".getSymbolImports();
+    const imports = @"export".imports.intoSliceOrEmpty();
     for (imports, 0..) |imp, i| {
-        var ns_found = std.mem.eql(u8, std.mem.span(imp.namespace), "");
+        var ns_found = std.mem.eql(u8, imp.namespace.intoSliceOrEmpty(), "");
         for (namespaces) |ns| {
             if (ns_found) break;
-            if (std.mem.eql(u8, std.mem.span(imp.namespace), std.mem.span(ns.name))) {
+            if (std.mem.eql(u8, imp.namespace.intoSliceOrEmpty(), ns.intoSliceOrEmpty())) {
                 ns_found = true;
             }
         }
@@ -678,21 +637,21 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
             tracing.logWarn(
                 @src(),
                 "required namespace not imported, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), imp.name, imp.namespace, i },
+                .{ @"export".name.intoSliceOrEmpty(), imp.name.intoSliceOrEmpty(), imp.namespace.intoSliceOrEmpty(), i },
             );
             has_error = true;
         }
     }
 
-    const exports = @"export".getSymbolExports();
+    const exports = @"export".exports.intoSliceOrEmpty();
     for (exports, 0..) |exp, i| {
-        const name = std.mem.span(exp.name);
-        const namespace = std.mem.span(exp.namespace);
+        const name = exp.symbol.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
         if (std.mem.startsWith(u8, name, "__")) {
             tracing.logWarn(
                 @src(),
                 "can not export a symbol with a reserved name, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), name, namespace, i },
+                .{ @"export".name.intoSliceOrEmpty(), name, namespace, i },
             );
             has_error = true;
         }
@@ -700,7 +659,7 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
             tracing.logWarn(
                 @src(),
                 "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), name, namespace, i },
+                .{ @"export".name.intoSliceOrEmpty(), name, namespace, i },
             );
             has_error = true;
         }
@@ -708,21 +667,21 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
             tracing.logWarn(
                 @src(),
                 "unknown symbol linkage specified, export='{s}', symbol='{s}', ns='{s}', linkage='{}', index='{}'",
-                .{ @"export".getName(), name, namespace, @intFromEnum(exp.linkage), i },
+                .{ @"export".name.intoSliceOrEmpty(), name, namespace, @intFromEnum(exp.linkage), i },
             );
             has_error = true;
         }
 
         for (imports) |imp| {
-            const imp_name = std.mem.span(imp.name);
-            const imp_namespace = std.mem.span(imp.namespace);
+            const imp_name = imp.name.intoSliceOrEmpty();
+            const imp_namespace = imp.namespace.intoSliceOrEmpty();
             if (std.mem.eql(u8, name, imp_name) and
                 std.mem.eql(u8, namespace, imp_namespace))
             {
                 tracing.logWarn(
                     @src(),
                     "can not import and export the same symbol, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                    .{ @"export".getName(), name, namespace, i },
+                    .{ @"export".name.intoSliceOrEmpty(), name, namespace, i },
                 );
                 has_error = true;
                 break;
@@ -731,8 +690,8 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
 
         var count: usize = 0;
         for (exports[0..i]) |x| {
-            const exp_name = std.mem.span(x.name);
-            const exp_namespace = std.mem.span(x.namespace);
+            const exp_name = x.symbol.name.intoSliceOrEmpty();
+            const exp_namespace = x.symbol.namespace.intoSliceOrEmpty();
             if (std.mem.eql(u8, name, exp_name) and
                 std.mem.eql(u8, namespace, exp_namespace)) count += 1;
         }
@@ -740,104 +699,9 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
             tracing.logWarn(
                 @src(),
                 "duplicate export, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), name, namespace, i },
+                .{ @"export".name.intoSliceOrEmpty(), name, namespace, i },
             );
             has_error = true;
-        }
-    }
-
-    const dynamic_exports = @"export".getDynamicSymbolExports();
-    for (dynamic_exports, 0..) |exp, i| {
-        const name = std.mem.span(exp.name);
-        const namespace = std.mem.span(exp.namespace);
-        if (std.mem.startsWith(u8, name, "__")) {
-            tracing.logWarn(
-                @src(),
-                "can not export a symbol with a reserved name, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), name, namespace, i },
-            );
-            has_error = true;
-        }
-        if (std.mem.startsWith(u8, name, "__")) {
-            tracing.logWarn(
-                @src(),
-                "can not export a symbol in a reserved namespace, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), name, namespace, i },
-            );
-            has_error = true;
-        }
-        if (exp.linkage != .global) {
-            tracing.logWarn(
-                @src(),
-                "unknown symbol linkage specified, export='{s}', symbol='{s}', ns='{s}', linkage='{}', index='{}'",
-                .{ @"export".getName(), name, namespace, @intFromEnum(exp.linkage), i },
-            );
-            has_error = true;
-        }
-
-        for (imports) |imp| {
-            const imp_name = std.mem.span(imp.name);
-            const imp_namespace = std.mem.span(imp.namespace);
-            if (std.mem.eql(u8, name, imp_name) and
-                std.mem.eql(u8, namespace, imp_namespace))
-            {
-                tracing.logWarn(
-                    @src(),
-                    "can not import and export the same symbol, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                    .{ @"export".getName(), name, namespace, i },
-                );
-                has_error = true;
-                break;
-            }
-        }
-
-        var count: usize = 0;
-        for (exports) |x| {
-            const exp_name = std.mem.span(x.name);
-            const exp_namespace = std.mem.span(x.namespace);
-            if (std.mem.eql(u8, name, exp_name) and
-                std.mem.eql(u8, namespace, exp_namespace)) count += 1;
-        }
-        for (dynamic_exports[0..i]) |x| {
-            const exp_name = std.mem.span(x.name);
-            const exp_namespace = std.mem.span(x.namespace);
-            if (std.mem.eql(u8, name, exp_name) and
-                std.mem.eql(u8, namespace, exp_namespace)) count += 1;
-        }
-        if (count > 1) {
-            tracing.logWarn(
-                @src(),
-                "duplicate export, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".getName(), name, namespace, i },
-            );
-            has_error = true;
-        }
-    }
-
-    const modifiers = @"export".getModifiers();
-    for (modifiers, 0..) |mod, i| {
-        switch (mod.tag) {
-            .destructor, .dependency => {},
-            .instance_state, .start_event, .stop_event => {
-                for (modifiers[0..i]) |x| {
-                    if (x.tag == mod.tag) {
-                        tracing.logWarn(
-                            @src(),
-                            "the modifier may only appear once, export='{s}', modifier=`{s}`, index='{}'",
-                            .{ @"export".getName(), @tagName(mod.tag), i },
-                        );
-                        has_error = true;
-                    }
-                }
-            },
-            else => {
-                tracing.logWarn(
-                    @src(),
-                    "unknown modifier, export='{s}', modifier='{}', index='{}'",
-                    .{ @"export".getName(), @intFromEnum(mod.tag), i },
-                );
-                has_error = true;
-            },
         }
     }
 
@@ -850,7 +714,7 @@ const AppendModulesData = struct {
     filter_fn: *const fn (
         context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.Loader.FilterRequest,
     exports: std.ArrayList(*const pub_modules.Export) = .{},
 };
 
@@ -863,7 +727,8 @@ fn appendModules(o_data: ?*anyopaque, @"export": *const pub_modules.Export) call
 
     if (data.filter_fn(data.filter_context, @"export") == .load) {
         data.exports.append(modules.allocator, @"export") catch |err| {
-            @"export".deinit();
+            const export_deinit = @"export".eventDeinitExport();
+            if (export_deinit.deinit) |f| f(export_deinit.data);
             data.err = err;
             return false;
         };
@@ -874,13 +739,13 @@ fn appendModules(o_data: ?*anyopaque, @"export": *const pub_modules.Export) call
 
 pub fn addModule(
     self: *Self,
-    owner: *const InstanceHandle,
+    owner: *InstanceHandle,
     @"export": *const pub_modules.Export,
 ) !void {
     tracing.logTrace(
         @src(),
-        "adding module to the loading set, set='{*}', module='{s}'",
-        .{ self, @"export".getName() },
+        "adding module to the loader, set='{*}', module='{s}'",
+        .{ self, @"export".name.intoSliceOrEmpty() },
     );
 
     const inner = owner.lock();
@@ -890,7 +755,7 @@ pub fn addModule(
     defer self.unlock();
 
     try validate_export(@"export");
-    try self.addModuleInner(inner.handle.?, @"export", inner.instance.?);
+    try self.addModuleInner(inner.handle.?, @"export", @ptrCast(@alignCast(inner.instance.?)));
 }
 
 fn addModulesFromHandle(
@@ -900,14 +765,17 @@ fn addModulesFromHandle(
     filter_fn: *const fn (
         context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.Loader.FilterRequest,
 ) !void {
     var append_data = AppendModulesData{
         .filter_context = filter_context,
         .filter_fn = filter_fn,
     };
     defer append_data.exports.deinit(modules.allocator);
-    errdefer for (append_data.exports.items) |exp| exp.deinit();
+    errdefer for (append_data.exports.items) |exp| {
+        const export_deinit = exp.eventDeinitExport();
+        if (export_deinit.deinit) |f| f(export_deinit.data);
+    };
     module_handle.iterator(&append_data, &appendModules);
     if (append_data.err) |err| return err;
 
@@ -923,11 +791,11 @@ pub fn addModulesFromPath(
     filter_fn: *const fn (
         context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.Loader.FilterRequest,
 ) !void {
     tracing.logTrace(
         @src(),
-        "adding modules to loading set, set='{*}', path='{f}'",
+        "adding modules to loader, set='{*}', path='{f}'",
         .{ self, path },
     );
 
@@ -939,19 +807,19 @@ pub fn addModulesFromPath(
     try self.addModulesFromHandle(module_handle, filter_context, filter_fn);
 }
 
-pub fn addModulesFromLocal(
+pub fn addModulesFromIter(
     self: *Self,
     iterator_fn: ModuleHandle.IteratorFn,
     filter_context: ?*anyopaque,
     filter_fn: *const fn (
         context: ?*anyopaque,
         @"export": *const pub_modules.Export,
-    ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+    ) callconv(.c) pub_modules.Loader.FilterRequest,
     bin_ptr: *const anyopaque,
 ) !void {
     tracing.logTrace(
         @src(),
-        "adding local modules to loading set, set='{*}'",
+        "adding modules to loader from iterator, set='{*}'",
         .{self},
     );
 
@@ -974,7 +842,7 @@ pub fn addModulesFromLocal(
 const LoadOp = FSMFuture(struct {
     node_id: graph.NodeId,
     load_graph: *LoadGraph,
-    name: [:0]const u8 = undefined,
+    name: []const u8 = undefined,
     instance_future: InstanceHandle.InitExportedOp = undefined,
     instance: *pub_modules.OpaqueInstance = undefined,
     start_instance_future: InstanceHandle.StartInstanceOp = undefined,
@@ -982,7 +850,7 @@ const LoadOp = FSMFuture(struct {
 
     pub const __no_abort = true;
 
-    fn init(node_id: graph.NodeId, load_graph: *LoadGraph) !EnqueuedFuture(void) {
+    fn init(node_id: graph.NodeId, load_graph: *LoadGraph) !OpaqueFuture(void) {
         const data = @This(){
             .node_id = node_id,
             .load_graph = load_graph,
@@ -1106,13 +974,13 @@ const LoadOp = FSMFuture(struct {
             break :blk self.load_graph.dependency_tree.nodePtr(self.node_id).?;
         };
         const info = set.getModuleInfo(node.module).?;
-        self.name = std.mem.span(info.status.unloaded.export_handle.name);
+        self.name = info.status.unloaded.export_handle.name.intoSliceOrEmpty();
         tracing.logTrace(@src(), "loading instance, instance='{s}'", .{self.name});
 
         // Recheck that all dependencies could be loaded.
-        for (info.status.unloaded.export_handle.getSymbolImports()) |i| {
-            const i_name = std.mem.span(i.name);
-            const i_namespace = std.mem.span(i.namespace);
+        for (info.status.unloaded.export_handle.imports.intoSliceOrEmpty()) |i| {
+            const i_name = i.name.intoSliceOrEmpty();
+            const i_namespace = i.namespace.intoSliceOrEmpty();
             const i_version = Version.initC(i.version);
             if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
                 const owner = set.getModuleInfo(sym.owner).?;
@@ -1123,7 +991,7 @@ const LoadOp = FSMFuture(struct {
         // Initialize the instance future.
         set.unlock();
         self.instance_future = InstanceHandle.InitExportedOp.init(.{
-            .set = @ptrCast(set),
+            .loader = @ptrCast(set),
             .@"export" = info.status.unloaded.export_handle,
             .handle = info.handle,
         });
@@ -1149,8 +1017,8 @@ const LoadOp = FSMFuture(struct {
                         tracing.logWarn(
                             @src(),
                             "instance construction error...skipping," ++
-                                " instance='{s}', error='{f}:{f}'",
-                            .{ self.name, std.fmt.alt(e, .formatName), e },
+                                " instance='{s}', error='{f}'",
+                            .{ self.name, e },
                         );
                     } else tracing.logWarn(
                         @src(),
@@ -1201,8 +1069,8 @@ const LoadOp = FSMFuture(struct {
                         defer e.deinit();
                         tracing.logWarn(
                             @src(),
-                            "instance `on_start` error...skipping, instance='{s}', error='{f}:{f}'",
-                            .{ self.name, std.fmt.alt(e, .formatName), e },
+                            "instance `on_start` error...skipping, instance='{s}', error='{f}'",
+                            .{ self.name, e },
                         );
                     } else tracing.logWarn(
                         @src(),
@@ -1235,7 +1103,7 @@ const LoadOp = FSMFuture(struct {
         defer inner.unlock();
         defer inner.unrefStrong();
 
-        set.getModuleInfo(self.name).?.signalSuccess(self.instance.info);
+        set.getModuleInfo(self.name).?.signalSuccess(self.instance.handle());
         tracing.logTrace(@src(), "instance loaded, instance='{s}'", .{self.name});
         return .ret;
     }
@@ -1248,8 +1116,8 @@ pub const CommitOp = FSMFuture(struct {
 
     pub const __no_abort = true;
 
-    pub fn init(set: *Self) EnqueuedFuture(Fallible(void)) {
-        tracing.logTrace(@src(), "commiting loading set, set='{*}'", .{set});
+    pub fn init(set: *Self) OpaqueFuture(Fallible(void)) {
+        tracing.logTrace(@src(), "commiting loader, set='{*}'", .{set});
         set.ref();
 
         const data = @This(){
@@ -1288,14 +1156,14 @@ pub const CommitOp = FSMFuture(struct {
         defer self.set.unlock();
 
         // Ensure that no two commit operations are running in parallel.
-        if (modules.state == .loading_set) {
-            try modules.loading_set_waiters.append(
+        if (modules.state == .loading) {
+            try modules.loader_waiters.append(
                 modules.allocator,
                 .{ .waiter = self, .waker = waker.ref() },
             );
             return .yield;
         }
-        modules.state = .loading_set;
+        modules.state = .loading;
         errdefer modules.state = .idle;
 
         self.load_graph = try LoadGraph.init(self.set);
@@ -1318,7 +1186,7 @@ pub const CommitOp = FSMFuture(struct {
 
         self.load_graph.deinit();
         modules.state = .idle;
-        if (modules.loading_set_waiters.pop()) |waiter| {
+        if (modules.loader_waiters.pop()) |waiter| {
             waiter.waker.wakeUnref();
         }
     }

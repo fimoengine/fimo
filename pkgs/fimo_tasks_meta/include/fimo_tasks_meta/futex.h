@@ -3,7 +3,7 @@
 #ifndef FIMO_TASKS_META_FUTEX_H
 #define FIMO_TASKS_META_FUTEX_H
 
-#include <fimo_std/fimo.h>
+#include <fimo_std.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,7 +13,7 @@ extern "C" {
 #define FIMO_TASKS_META_FUTEX_MAX_WAITV_KEY_COUNT 128
 
 /// Possible status codes of the futex symbols.
-typedef enum FimoTasksMeta_FutexStatus : FimoI32 {
+typedef enum FimoTasksMeta_FutexStatus : FSTD_I32 {
     /// Operation completed successfully.
     FIMO_TASKS_META_FUTEX_STATUS_OK = 0,
     /// Futex value does not match the expected value.
@@ -27,9 +27,9 @@ typedef enum FimoTasksMeta_FutexStatus : FimoI32 {
 /// Information required for a wait operation.
 typedef struct FimoTasksMeta_FutexKeyExpect {
     const void *key;
-    FimoUSize key_size;
-    FimoU64 expect;
-    FimoUSize token;
+    FSTD_USize key_size;
+    FSTD_U64 expect;
+    FSTD_USize token;
 } FimoTasksMeta_FutexKeyExpect;
 
 /// Filter for a filter operation.
@@ -44,30 +44,30 @@ typedef struct FimoTasksMeta_FutexKeyExpect {
 /// return cmp;
 /// ```
 typedef struct FimoTasksMeta_FutexFilter {
-    FimoUSize op;
-    FimoUSize token_mask;
-    FimoUSize cmp_arg;
+    FSTD_USize op;
+    FSTD_USize token_mask;
+    FSTD_USize cmp_arg;
 } FimoTasksMeta_FutexFilter;
 
-typedef enum FimoTasksMeta_FutexFilterTokenOp : FimoUSize {
+typedef enum FimoTasksMeta_FutexFilterTokenOp : FSTD_USize {
     /// TokenType token_value = token
     FIMO_TASKS_META_FUTEX_FILTER_TOKEN_OP_NOOP = 0,
     /// TokenType token_value = *(const TokenType*)token
     FIMO_TASKS_META_FUTEX_FILTER_TOKEN_OP_DEREF = 1,
 } FimoTasksMeta_FutexFilterTokenOp;
 
-typedef enum FimoTasksMeta_FutexFilterTokenType : FimoUSize {
-    /// typedef FimoU8 TokenType;
+typedef enum FimoTasksMeta_FutexFilterTokenType : FSTD_USize {
+    /// typedef FSTD_U8 TokenType;
     FIMO_TASKS_META_FUTEX_FILTER_TOKEN_TYPE_U8 = 0,
-    /// typedef FimoU16 TokenType;
+    /// typedef FSTD_U16 TokenType;
     FIMO_TASKS_META_FUTEX_FILTER_TOKEN_TYPE_U16 = 1,
-    /// typedef FimoU32 TokenType;
+    /// typedef FSTD_U32 TokenType;
     FIMO_TASKS_META_FUTEX_FILTER_TOKEN_TYPE_U32 = 2,
-    /// typedef FimoU64 TokenType;
+    /// typedef FSTD_U64 TokenType;
     FIMO_TASKS_META_FUTEX_FILTER_TOKEN_TYPE_U64 = 3,
 } FimoTasksMeta_FutexFilterTokenType;
 
-typedef enum FimoTasksMeta_FutexFilterCmpOp : FimoUSize {
+typedef enum FimoTasksMeta_FutexFilterCmpOp : FSTD_USize {
     /// bool cmp = token_value == cmp_value
     FIMO_TASKS_META_FUTEX_FILTER_CMP_OP_EQ = 0,
     /// bool cmp = token_value != cmp_value
@@ -82,7 +82,7 @@ typedef enum FimoTasksMeta_FutexFilterCmpOp : FimoUSize {
     FIMO_TASKS_META_FUTEX_FILTER_CMP_OP_GE = 5,
 } FimoTasksMeta_FutexFilterCmpOp;
 
-typedef enum FimoTasksMeta_FutexFilterCmpArgOp : FimoUSize {
+typedef enum FimoTasksMeta_FutexFilterCmpArgOp : FSTD_USize {
     /// TokenType cmp_value = cmp_arg
     FIMO_TASKS_META_FUTEX_FILTER_CMP_ARG_OP_NOOP = 0,
     /// TokenType cmp_value = *(const TokenType*)cmp_arg
@@ -90,11 +90,11 @@ typedef enum FimoTasksMeta_FutexFilterCmpArgOp : FimoUSize {
 } FimoTasksMeta_FutexFilterCmpArgOp;
 
 /// Initializes a new operation of a filter.
-static FIMO_INLINE_ALWAYS FimoUSize FimoTasksMeta_futex_filter_op_init(FimoTasksMeta_FutexFilterTokenOp token_op,
-                                                                       FimoTasksMeta_FutexFilterTokenType token_type,
-                                                                       FimoTasksMeta_FutexFilterCmpOp cmp_op,
-                                                                       FimoTasksMeta_FutexFilterCmpArgOp cmp_arg_op) {
-    FimoUSize op = 0;
+static FSTD_USize FimoTasksMeta_futex_filter_op_init(FimoTasksMeta_FutexFilterTokenOp token_op,
+                                                     FimoTasksMeta_FutexFilterTokenType token_type,
+                                                     FimoTasksMeta_FutexFilterCmpOp cmp_op,
+                                                     FimoTasksMeta_FutexFilterCmpArgOp cmp_arg_op) {
+    FSTD_USize op = 0;
     op |= token_op & 0b1;
     op |= (token_type & 0b11) << 1;
     op |= (cmp_op & 0b111) << 3;
@@ -104,8 +104,8 @@ static FIMO_INLINE_ALWAYS FimoUSize FimoTasksMeta_futex_filter_op_init(FimoTasks
 
 
 /// Initializes a filter.
-static FIMO_INLINE_ALWAYS FimoTasksMeta_FutexFilter FimoTasksMeta_futex_filter_init(FimoUSize op, FimoUSize token_mask,
-                                                                                    FimoUSize cmp_arg) {
+static FimoTasksMeta_FutexFilter FimoTasksMeta_futex_filter_init(FSTD_USize op, FSTD_USize token_mask,
+                                                                 FSTD_USize cmp_arg) {
     return (FimoTasksMeta_FutexFilter){
             .op = op,
             .token_mask = token_mask,
@@ -115,13 +115,13 @@ static FIMO_INLINE_ALWAYS FimoTasksMeta_FutexFilter FimoTasksMeta_futex_filter_i
 
 /// Constructs a filter that accept all tokens.
 ///
-/// Builds the operation: `return (FimoU8)(token & 0) == 0`
+/// Builds the operation: `return (FSTD_U8)(token & 0) == 0`
 #define FIMO_TASKS_META_FUTEX_FILTER_ALL FimoTasksMeta_futex_filter_init(0, 0, 0)
 
 /// Result of the requeue operation.
 typedef struct FimoTasksMeta_FutexRequeueResult {
-    FimoUSize wake_count;
-    FimoUSize requeue_count;
+    FSTD_USize wake_count;
+    FSTD_USize requeue_count;
 } FimoTasksMeta_FutexRequeueResult;
 
 /// Puts the caller to sleep if the value pointed to by `key` equals `expect`.
@@ -135,8 +135,8 @@ typedef struct FimoTasksMeta_FutexRequeueResult {
 ///
 /// If `timeout` is set, and it is reached before a wake operation wakes the task, the task will be
 /// resumed, and the function returns `FIMO_TASKS_META_FUTEX_STATUS_TIMEOUT`.
-typedef FimoTasksMeta_FutexStatus (*FimoTasksMeta_futex_wait)(const void *key, FimoUSize key_size, FimoU64 expect,
-                                                              FimoUSize token, const FimoInstant *timeout);
+typedef FimoTasksMeta_FutexStatus (*FimoTasksMeta_futex_wait)(const void *key, FSTD_USize key_size, FSTD_U64 expect,
+                                                              FSTD_USize token, const FSTD_Instant *timeout);
 
 /// Puts the caller to sleep if all keys match their expected values.
 ///
@@ -145,14 +145,15 @@ typedef FimoTasksMeta_FutexStatus (*FimoTasksMeta_futex_wait)(const void *key, F
 /// `FIMO_TASKS_META_FUTEX_STATUS_KEY_ERROR`. On wakeup, the index of the woken up key is stored
 /// into `wake_index`.
 typedef FimoTasksMeta_FutexStatus (*FimoTasksMeta_futex_waitv)(const FimoTasksMeta_FutexKeyExpect *keys,
-                                                               FimoUSize key_count, const FimoInstant *timeout,
-                                                               FimoUSize *wake_index);
+                                                               FSTD_USize key_count, const FSTD_Instant *timeout,
+                                                               FSTD_USize *wake_index);
 
 /// Wakes at most `max_waiters` waiting on `key`.
 ///
 /// Uses the token provided by the waiter and the `filter` to determine whether to ignore it from
 /// being woken up. Returns the number of woken waiters.
-typedef FimoUSize (*FimoTasksMeta_futex_wake)(const void *key, FimoUSize max_waiters, FimoTasksMeta_FutexFilter filter);
+typedef FSTD_USize (*FimoTasksMeta_futex_wake)(const void *key, FSTD_USize max_waiters,
+                                               FimoTasksMeta_FutexFilter filter);
 
 /// Requeues waiters from `key_from` to `key_to`.
 ///
@@ -162,8 +163,8 @@ typedef FimoUSize (*FimoTasksMeta_futex_wake)(const void *key, FimoUSize max_wai
 /// the function returns `FIMO_TASKS_META_FUTEX_STATUS_INVALID`. Uses the token provided by the
 /// waiter and the `filter` to determine whether to ignore it from being woken up.
 typedef FimoTasksMeta_FutexStatus (*FimoTasksMeta_futex_requeue)(const void *key_from, const void *key_to,
-                                                                 FimoUSize key_size, FimoU64 expect,
-                                                                 FimoUSize max_wakes, FimoUSize max_requeues,
+                                                                 FSTD_USize key_size, FSTD_U64 expect,
+                                                                 FSTD_USize max_wakes, FSTD_USize max_requeues,
                                                                  FimoTasksMeta_FutexFilter filter,
                                                                  FimoTasksMeta_FutexRequeueResult *result);
 

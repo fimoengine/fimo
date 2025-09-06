@@ -17,7 +17,7 @@ var current_test: ?[]const u8 = null;
 // use for initializing the test context
 var console_logger: tracing.StdErrLogger = undefined;
 var net_logger: tracing.net.NetLogger = undefined;
-pub var tracing_cfg: tracing.Config = undefined;
+pub var tracing_cfg: tracing.Cfg = undefined;
 
 pub fn main() !void {
     var mem: [8192]u8 = undefined;
@@ -54,10 +54,8 @@ pub fn main() !void {
     defer net_logger.deinit();
     tracing_cfg = .{
         .max_level = .trace,
-        .subscribers = &.{ console_logger.subscriber(), net_logger.subscriber() },
-        .subscriber_count = 1,
+        .subscribers = .fromSlice(&.{ console_logger.subscriber(), net_logger.subscriber() }),
         .app_name = undefined,
-        .app_name_length = undefined,
     };
 
     for (builtin.test_functions) |t| {
@@ -74,12 +72,10 @@ pub fn main() !void {
         printer.status(.text, "{s}\n", .{t.name});
 
         current_test = t.name;
-        tracing_cfg.app_name = t.name.ptr;
-        tracing_cfg.app_name_length = t.name.len;
+        tracing_cfg.app_name = .fromSlice(t.name);
         std.testing.allocator_instance = .{};
         const result = t.func();
         tracing_cfg.app_name = undefined;
-        tracing_cfg.app_name_length = undefined;
         current_test = null;
 
         const ns_taken = slowest.endTiming(t.name);

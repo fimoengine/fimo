@@ -14,6 +14,8 @@ const tracing = @import("context/tracing.zig");
 const pub_ctx = @import("ctx.zig");
 const pub_modules = @import("modules.zig");
 const pub_tracing = @import("tracing.zig");
+const utils = @import("utils.zig");
+const SliceConst = utils.SliceConst;
 const Version = @import("Version.zig");
 
 const Self = @This();
@@ -143,7 +145,7 @@ pub const ThreadData = struct {
         @compileError("unsupported target");
 };
 
-pub fn init(options: [:null]const ?*const pub_ctx.ConfigHead) !void {
+pub fn init(options: []const *const pub_ctx.Cfg) !void {
     lock.lock();
     defer lock.unlock();
     if (is_init) return error.AlreadyInitialized;
@@ -158,18 +160,17 @@ pub fn init(options: [:null]const ?*const pub_ctx.ConfigHead) !void {
     };
     try ThreadData.Impl.init();
 
-    var tracing_cfg: ?*const pub_tracing.Config = null;
-    var modules_cfg: ?*const pub_modules.Config = null;
+    var tracing_cfg: ?*const pub_tracing.Cfg = null;
+    var modules_cfg: ?*const pub_modules.Cfg = null;
     for (options) |opt| {
-        const o = if (opt) |o| o else return error.InvalidInput;
-        switch (o.id) {
+        switch (opt.id) {
             .tracing => {
                 if (tracing_cfg != null) return error.InvalidInput;
-                tracing_cfg = @ptrCast(@alignCast(o));
+                tracing_cfg = @alignCast(@fieldParentPtr("cfg", opt));
             },
             .modules => {
                 if (modules_cfg != null) return error.InvalidInput;
-                modules_cfg = @ptrCast(@alignCast(o));
+                modules_cfg = @alignCast(@fieldParentPtr("cfg", opt));
             },
             else => return error.InvalidInput,
         }
@@ -249,7 +250,7 @@ pub fn setResult(res: AnyResult) void {
 // ----------------------------------------------------
 
 const HandleImpl = struct {
-    fn getVersion() callconv(.c) Version.CVersion {
+    fn getVersion() callconv(.c) Version.compat.Version {
         return pub_ctx.context_version.intoC();
     }
     fn deinit() callconv(.c) void {
@@ -263,7 +264,7 @@ const HandleImpl = struct {
     }
 };
 
-pub const handle = pub_ctx.Handle{
+pub var handle = pub_ctx.Handle{
     .get_version = &HandleImpl.getVersion,
     .core_v0 = .{
         .deinit = &HandleImpl.deinit,
@@ -290,9 +291,9 @@ comptime {
 // ----------------------------------------------------
 
 const ffi = struct {
-    export fn fimo_context_init(options: [*:null]const ?*const pub_ctx.ConfigHead, h: **const pub_ctx.Handle) AnyResult {
-        init(std.mem.span(options)) catch |err| return AnyError.initError(err).intoResult();
-        h.* = &handle;
+    export fn fstd_ctx_init(ctx: **const pub_ctx.Handle, options: SliceConst(*const pub_ctx.Cfg)) AnyResult {
+        init(options.intoSliceOrEmpty()) catch |err| return AnyError.initError(err).intoResult();
+        ctx.* = &handle;
         return AnyResult.ok;
     }
 };

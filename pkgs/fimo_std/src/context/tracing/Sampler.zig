@@ -342,8 +342,7 @@ const WindowsImpl = struct {
                         const event: tracing.events.CallStackSample = .{
                             .time = time.Instant.initQPC(stack_walk.EventTimeStamp).intoC(),
                             .thread_id = stack_walk.StackThread,
-                            .call_stack = @ptrCast(&stack_walk.Stack),
-                            .call_stack_len = len,
+                            .call_stack = .fromSlice(@as([*]const usize, @ptrCast(&stack_walk.Stack))[0..len]),
                         };
                         for (tracing.subscribers) |subscriber| subscriber.callStackSample(event);
                     },

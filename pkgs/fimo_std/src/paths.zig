@@ -4,6 +4,10 @@ const unicode = std.unicode;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 
+const utils = @import("utils.zig");
+const Slice = utils.Slice;
+const SliceConst = utils.SliceConst;
+
 const separator = if (builtin.os.tag == .windows) '\\' else '/';
 
 // Derived from the Rust project, licensed as MIT and Apache License (Version 2.0).
@@ -37,10 +41,7 @@ pub const compat = struct {
         length: usize,
         capacity: usize,
     };
-    pub const OwnedPath = extern struct {
-        path: ?[*]u8,
-        length: usize,
-    };
+    pub const OwnedPath = Slice(u8);
     pub const OwnedOsPath = extern struct {
         path: ?[*:0]OsPathChar,
         length: usize,
@@ -49,12 +50,16 @@ pub const compat = struct {
         path: ?[*:0]const OsPathChar,
         length: usize,
     };
-    pub const Path = extern struct {
-        path: ?[*]const u8,
-        length: usize,
-    };
-    pub const Prefix = extern struct {
-        type: enum(i32) { verbatim, verbatim_unc, verbatim_disk, device_ns, unc, disk },
+    pub const Path = SliceConst(u8);
+    pub const Win32Prefix = extern struct {
+        type: enum(i32) {
+            verbatim = 0,
+            verbatim_unc = 1,
+            verbatim_disk = 2,
+            device_ns = 3,
+            unc = 4,
+            disk = 5,
+        },
         data: extern union {
             verbatim: compat.Path,
             verbatim_unc: extern struct {
@@ -71,11 +76,17 @@ pub const compat = struct {
         },
     };
     pub const Component = extern struct {
-        type: enum(i32) { prefix, root_dir, cur_dir, parent_dir, normal },
+        type: enum(i32) {
+            prefix = 0,
+            root_dir = 1,
+            cur_dir = 2,
+            parent_dir = 3,
+            normal = 4,
+        },
         data: extern union {
             prefix: extern struct {
                 raw: compat.Path,
-                prefix: compat.Prefix,
+                prefix: compat.Win32Prefix,
             },
             root_dir: u8,
             cur_dir: u8,
@@ -86,12 +97,17 @@ pub const compat = struct {
     pub const ComponentIterator = extern struct {
         current: compat.Path,
         has_prefix: bool,
-        prefix: compat.Prefix,
+        win32_prefix: compat.Win32Prefix,
         has_root_separator: bool,
         front: State,
         back: State,
 
-        pub const State = enum(i32) { prefix, start_dir, body, done };
+        pub const State = enum(i32) {
+            prefix = 0,
+            start_dir = 1,
+            body = 2,
+            done = 3,
+        };
     };
 };
 
@@ -120,8 +136,6 @@ pub const PathBuffer = struct {
     }
 
     /// Casts the object to a ffi object.
-    ///
-    /// The memory must have been allocated with the fimo allocator.
     pub fn intoC(self: Self) compat.PathBuffer {
         return if (self.buffer.items.len == 0) .{
             .buffer = null,
@@ -153,13 +167,6 @@ pub const PathBuffer = struct {
     pub fn toOwnedPath(self: *Self, allocator: Allocator) Allocator.Error!OwnedPath {
         const slice = try self.buffer.toOwnedSlice(allocator);
         return .{ .raw = slice };
-    }
-
-    /// Convert the buffer into an analogous memory-managed one.
-    ///
-    /// The returned buffer has ownership of the underlying memory.
-    pub fn toManaged(self: Self, allocator: Allocator) PathBufferManaged {
-        return PathBufferManaged{ .buffer = self, .allocator = allocator };
     }
 
     /// Extends the path buffer with a path.
@@ -263,120 +270,6 @@ pub const PathBuffer = struct {
     }
 };
 
-/// A growable filesystem path encoded as UTF-8.
-pub const PathBufferManaged = struct {
-    buffer: PathBuffer = .{},
-    allocator: Allocator,
-
-    const Self = @This();
-
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: compat.PathBuffer) Self {
-        const p = PathBuffer.initC(obj);
-        return p.toManaged(std.heap.c_allocator);
-    }
-
-    /// Casts the object to a ffi object.
-    ///
-    /// The memory must have been allocated with the c allocator.
-    pub fn intoC(self: Self) compat.PathBuffer {
-        std.debug.assert(self.allocator.vtable == std.heap.c_allocator.vtable);
-        return self.buffer.intoC();
-    }
-
-    /// Initialize an empty buffer.
-    pub fn init(allocator: Allocator) Self {
-        return .{ .allocator = allocator };
-    }
-
-    /// Initialize the capacity to hold `capacity` bytes.
-    pub fn initCapacity(allocator: Allocator, capacity: usize) Allocator.Error!Self {
-        const buffer = try PathBuffer.initCapacity(allocator, capacity);
-        return buffer.toManaged(allocator);
-    }
-
-    /// Release all allocated memory.
-    pub fn deinit(self: *Self) void {
-        self.buffer.deinit(self.allocator);
-    }
-
-    /// Extracts a reference to the path.
-    pub fn asPath(self: *const Self) Path {
-        return self.buffer.asPath();
-    }
-
-    /// Clears the buffer and returns the old contents.
-    pub fn toOwnedPath(self: *Self) Allocator.Error!OwnedPathManaged {
-        const path = try self.buffer.toOwnedPath(self.allocator);
-        return path.toManaged(self.allocator);
-    }
-
-    /// Extends the path buffer with a path.
-    ///
-    /// If `path` is absolute, it replaces the current path.
-    ///
-    /// On Windows:
-    ///
-    /// - if `path` has a root but no prefix (e.g., `\windows`), it replaces everything except for
-    ///   the prefix (if any) of `buf`.
-    /// - if `path` has a prefix but no root, it replaces `buf`.
-    /// - if `buf` has a verbatim prefix (e.g. `\\?\C:\windows`) and `path` is not empty, the new
-    ///   path is normalized: all references to `.` and `..` are removed`.
-    pub fn pushPath(self: *Self, path: Path) Allocator.Error!void {
-        return self.buffer.pushPath(self.allocator, path);
-    }
-
-    /// Extends the path buffer with a UTF-8 string.
-    ///
-    /// Is equivalent `pushPath` after initializing a `Path` from the string.
-    pub fn pushString(
-        self: *Self,
-        path: []const u8,
-    ) (Allocator.Error || PathError)!void {
-        return self.buffer.pushString(self.allocator, path);
-    }
-
-    test pushString {
-        var buf = PathBufferManaged.init(testing.allocator);
-        defer buf.deinit();
-        try buf.pushString("/tmp");
-        try buf.pushString("file.bk");
-        try switch (builtin.os.tag) {
-            .windows => testing.expectEqualStrings("/tmp\\file.bk", buf.asPath().raw),
-            else => testing.expectEqualStrings("/tmp/file.bk", buf.asPath().raw),
-        };
-
-        var buf2 = PathBufferManaged.init(testing.allocator);
-        defer buf2.deinit();
-        try buf2.pushString("/tmp");
-        try buf2.pushString("/etc");
-        try testing.expectEqualStrings("/etc", buf2.asPath().raw);
-    }
-
-    /// Truncates the path buffer to its parent.
-    ///
-    /// Returns `false` and does nothing if there is no parent. Otherwise, returns `true`.
-    pub fn pop(self: *Self) bool {
-        return self.buffer.pop();
-    }
-
-    test pop {
-        var buf = PathBufferManaged.init(testing.allocator);
-        defer buf.deinit();
-        try buf.pushString("/spirited/away.c");
-
-        try testing.expect(buf.pop());
-        try testing.expectEqualStrings("/spirited", buf.asPath().raw);
-
-        try testing.expect(buf.pop());
-        try testing.expectEqualStrings("/", buf.asPath().raw);
-    }
-
-    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try self.buffer.format(w);
-    }
-};
-
 /// An owned filesystem path encoded as UTF-8.
 pub const OwnedPath = struct {
     raw: []u8,
@@ -385,14 +278,12 @@ pub const OwnedPath = struct {
 
     /// Initializes the object from a ffi object.
     pub fn initC(obj: compat.OwnedPath) Self {
-        return .{ .raw = if (obj.path) |p| p[0..obj.length] else "" };
+        return .{ .raw = obj.intoSliceOrEmpty() };
     }
 
     /// Casts the object to a ffi object.
-    ///
-    /// The memory must have been allocated with the fimo allocator.
     pub fn intoC(self: Self) compat.OwnedPath {
-        return .{ .path = self.raw.ptr, .length = self.raw.len };
+        return .fromSlice(self.raw);
     }
 
     /// Constructs a new owned path by copying a UTF-8 string.
@@ -437,13 +328,6 @@ pub const OwnedPath = struct {
         return .{ .raw = self.raw };
     }
 
-    /// Convert the path into an analogous memory-managed one.
-    ///
-    /// The returned path has ownership of the underlying memory.
-    pub fn toManaged(self: Self, allocator: Allocator) OwnedPathManaged {
-        return OwnedPathManaged{ .path = self, .allocator = allocator };
-    }
-
     /// Coerces the owned path to a path buffer.
     pub fn toPathBuffer(self: Self) PathBuffer {
         const buffer = std.ArrayList(u8).fromOwnedSlice(self.raw);
@@ -452,105 +336,6 @@ pub const OwnedPath = struct {
 
     pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
         try w.writeAll(self.raw);
-    }
-};
-
-/// An owned filesystem path encoded as UTF-8.
-pub const OwnedPathManaged = struct {
-    path: OwnedPath,
-    allocator: Allocator,
-
-    const Self = @This();
-
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: compat.OwnedPath) Self {
-        const p = OwnedPath.initC(obj);
-        return p.toManaged(std.heap.c_allocator);
-    }
-
-    /// Casts the object to a ffi object.
-    ///
-    /// The memory must have been allocated with the c allocator.
-    pub fn intoC(self: Self) compat.OwnedPath {
-        std.debug.assert(self.allocator.vtable == std.heap.c_allocator);
-        return self.path.intoC();
-    }
-
-    /// Constructs a new owned path by copying a UTF-8 string.
-    pub fn initString(
-        allocator: Allocator,
-        path: []const u8,
-    ) (Allocator.Error || PathError)!Self {
-        const p = try OwnedPath.initString(allocator, path);
-        return p.toManaged(allocator);
-    }
-
-    test "invalid utf-8" {
-        const str = "\xc3\x28";
-        try testing.expectError(
-            error.InvalidUtf8,
-            OwnedPathManaged.initString(testing.allocator, str),
-        );
-    }
-
-    test initString {
-        const path = "foo.txt";
-        const owned = try OwnedPathManaged.initString(testing.allocator, path);
-        defer owned.deinit();
-        try testing.expectEqualStrings("foo.txt", owned.asPath().raw);
-    }
-
-    /// Constructs a new owned path by copying the contents of another path.
-    pub fn initPath(allocator: Allocator, path: Path) Allocator.Error!Self {
-        const p = OwnedPath.initPath(allocator, path);
-        return p.toManaged(allocator);
-    }
-
-    test initPath {
-        const path = try Path.init("foo.txt");
-        const owned = try OwnedPathManaged.initPath(testing.allocator, path);
-        defer owned.deinit();
-        try testing.expectEqualStrings("foo.txt", owned.asPath().raw);
-    }
-
-    /// Constructs a new owned path from an os path.
-    ///
-    /// On Windows the path will re-encode the os path string from UTF-16 to UTF-8. No other
-    /// conversions will be performed.
-    pub fn initOsPath(
-        allocator: Allocator,
-        path: OsPath,
-    ) (unicode.Utf16LeToUtf8AllocError || PathError)!Self {
-        const p = OwnedPath.initOsPath(allocator, path);
-        return p.toManaged(allocator);
-    }
-
-    test initOsPath {
-        const path = &.{ 'f', 'o', 'o', '.', 't', 'x', 't', 0 };
-        const os_path = .{ .raw = path[0..7 :0] };
-        const owned: OwnedPathManaged = try .initOsPath(testing.allocator, os_path);
-        defer owned.deinit();
-        try testing.expectEqualStrings("foo.txt", owned.asPath().raw);
-    }
-
-    /// Releases the memory associated with the path.
-    pub fn deinit(self: Self) void {
-        self.path.deinit(self.allocator);
-    }
-
-    /// Coerces the owned path to a path buffer.
-    pub fn asPath(self: Self) Path {
-        return self.path.asPath();
-    }
-
-    /// Coerces the owned path to a path buffer.
-    pub fn toPathBuffer(self: Self) PathBufferManaged {
-        const buffer = self.path.toPathBuffer();
-        return buffer.toManaged(self.allocator);
-    }
-
-    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try self.path.format(w);
     }
 };
 
@@ -569,8 +354,6 @@ pub const OwnedOsPath = struct {
     }
 
     /// Casts the object to a ffi object.
-    ///
-    /// The memory must have been allocated with the fimo allocator.
     pub fn intoC(self: Self) compat.OwnedOsPath {
         return .{ .path = self.raw.ptr, .length = self.raw.len };
     }
@@ -607,65 +390,8 @@ pub const OwnedOsPath = struct {
         return .{ .raw = self.raw };
     }
 
-    /// Convert the path into an analogous memory-managed one.
-    ///
-    /// The returned path has ownership of the underlying memory.
-    pub fn toManaged(self: Self, allocator: Allocator) OwnedOsPathManaged {
-        return .{ .path = self, .allocator = allocator };
-    }
-
     pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
         try w.writeAll(self.raw);
-    }
-};
-
-/// An owned path that may be passed to the native os apis.
-pub const OwnedOsPathManaged = struct {
-    path: OwnedOsPath,
-    allocator: Allocator,
-
-    const Self = @This();
-
-    /// Initializes the object from a ffi object.
-    pub fn initC(obj: compat.OwnedOsPath) Self {
-        const p = OwnedOsPath.initC(obj);
-        return p.toManaged(std.heap.c_allocator);
-    }
-
-    /// Casts the object to a ffi object.
-    ///
-    /// The memory must have been allocated with the c allocator.
-    pub fn intoC(self: Self) compat.OwnedOsPath {
-        std.debug.assert(self.allocator.vtable == std.heap.c_allocator);
-        return self.path.intoC();
-    }
-
-    /// Initializes the os path from another os path.
-    pub fn initOsPath(allocator: Allocator, path: OsPath) Allocator.Error!Self {
-        const p = try OwnedOsPath.initOsPath(allocator, path);
-        return p.toManaged(allocator);
-    }
-
-    /// Constructs a new owned os from a UTF-8 path.
-    ///
-    /// On Windows the path will be re-encoded to UTF-16.
-    pub fn initPath(allocator: Allocator, path: Path) (PathError || Allocator.Error)!Self {
-        const p = try OwnedOsPath.initPath(allocator, path);
-        return p.toManaged(allocator);
-    }
-
-    /// Frees the memory associated with the os path.
-    pub fn deinit(self: Self) void {
-        self.path.deinit(self.allocator);
-    }
-
-    /// Extracts the os path from the owned os path.
-    pub fn asOsPath(self: Self) OsPath {
-        return self.path.asOsPath();
-    }
-
-    pub fn format(self: Self, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        try self.path.format(w);
     }
 };
 
@@ -706,7 +432,7 @@ pub const Path = struct {
         disk: u8,
 
         /// Initializes the object from a ffi object.
-        pub fn initC(obj: compat.Prefix) Prefix {
+        pub fn initC(obj: compat.Win32Prefix) Prefix {
             return switch (obj.type) {
                 .verbatim => .{ .verbatim = Path.initC(obj.data.verbatim) },
                 .verbatim_unc => .{
@@ -726,7 +452,7 @@ pub const Path = struct {
         }
 
         /// Casts the object to a ffi object.
-        pub fn intoC(self: Prefix) compat.Prefix {
+        pub fn intoC(self: Prefix) compat.Win32Prefix {
             return switch (self) {
                 .verbatim => |v| .{
                     .type = .verbatim,
@@ -954,7 +680,7 @@ pub const Path = struct {
         pub fn initC(obj: compat.ComponentIterator) Iterator {
             return .{
                 .rest = .initC(obj.current),
-                .prefix = if (obj.has_prefix) .initC(obj.prefix) else null,
+                .prefix = if (obj.has_prefix) .initC(obj.win32_prefix) else null,
                 .has_root_separator = obj.has_root_separator,
                 .front_state = @enumFromInt(@intFromEnum(obj.front)),
                 .back_state = @enumFromInt(@intFromEnum(obj.back)),
@@ -966,7 +692,7 @@ pub const Path = struct {
             return .{
                 .current = self.rest.intoC(),
                 .has_prefix = self.prefix != null,
-                .prefix = if (self.prefix) |p| p.intoC() else std.mem.zeroes(compat.Prefix),
+                .win32_prefix = if (self.prefix) |p| p.intoC() else std.mem.zeroes(compat.Win32Prefix),
                 .has_root_separator = self.has_root_separator,
                 .front = @enumFromInt(@intFromEnum(self.front_state)),
                 .back = @enumFromInt(@intFromEnum(self.back_state)),
@@ -1207,12 +933,12 @@ pub const Path = struct {
 
     /// Initializes the object from a ffi object.
     pub fn initC(obj: compat.Path) Path {
-        return .{ .raw = if (obj.path) |p| p[0..obj.length] else "" };
+        return .{ .raw = obj.intoSliceOrEmpty() };
     }
 
     /// Casts the object to a ffi object.
     pub fn intoC(self: Path) compat.Path {
-        return .{ .path = self.raw.ptr, .length = self.raw.len };
+        return .fromSlice(self.raw);
     }
 
     /// Initializes a new path, validating that it is valid UTF-8.
@@ -1425,175 +1151,77 @@ pub const Path = struct {
 const ffi = struct {
     const AnyError = @import("AnyError.zig");
     const AnyResult = AnyError.AnyResult;
+    const memory = @import("memory.zig");
+    const Alloc = memory.Allocator;
 
-    export fn fimo_utf8_path_buf_new() compat.PathBuffer {
-        const p = PathBuffer{};
-        return p.intoC();
-    }
-
-    export fn fimo_utf8_path_buf_with_capacity(capacity: usize, buf: *compat.PathBuffer) AnyResult {
-        const p = PathBuffer.initCapacity(
-            std.heap.c_allocator,
-            capacity,
-        ) catch |err| return AnyError.initError(err).intoResult();
-        buf.* = p.intoC();
-        return AnyResult.ok;
-    }
-
-    export fn fimo_utf8_path_buf_free(buf: *compat.PathBuffer) void {
-        var p = PathBuffer.initC(buf.*);
-        p.deinit(std.heap.c_allocator);
-    }
-
-    export fn fimo_utf8_path_buf_as_path(buf: *const compat.PathBuffer) compat.Path {
-        const p = PathBuffer.initC(buf.*);
-        return p.asPath().intoC();
-    }
-
-    export fn fimo_utf8_path_buf_into_owned_path(buf: *compat.PathBuffer, owned: *compat.OwnedPath) AnyResult {
-        var p = PathBuffer.initC(buf.*);
-        const o = p.toOwnedPath(std.heap.c_allocator) catch |err| return AnyError.initError(err).intoResult();
-        owned.* = o.intoC();
-        return AnyResult.ok;
-    }
-
-    export fn fimo_utf8_path_buf_push_path(buf: *compat.PathBuffer, path: compat.Path) AnyResult {
-        var b = PathBuffer.initC(buf.*);
+    export fn fstd_path_buf_push_alloc(buffer: *compat.PathBuffer, alloc: Alloc, path: compat.Path) AnyResult {
+        var b = PathBuffer.initC(buffer.*);
         const p = Path.initC(path);
-        b.pushPath(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).intoResult();
+        b.pushPath(alloc.adaptIntoStdAllocator(), p) catch |err|
+            return AnyError.initError(err).intoResult();
         return AnyResult.ok;
     }
 
-    export fn fimo_utf8_path_buf_push_string(buf: *compat.PathBuffer, path: [*:0]const u8) AnyResult {
-        var b = PathBuffer.initC(buf.*);
-        const p = std.mem.span(path);
-        b.pushString(std.heap.c_allocator, p) catch |err| return AnyError.initError(err).intoResult();
+    export fn fstd_path_buf_push_str_alloc(buffer: *compat.PathBuffer, alloc: Alloc, path: Slice(u8)) AnyResult {
+        var b = PathBuffer.initC(buffer.*);
+        const p = path.intoSliceOrEmpty();
+        b.pushString(alloc.adaptIntoStdAllocator(), p) catch |err|
+            return AnyError.initError(err).intoResult();
         return AnyResult.ok;
     }
 
-    export fn fimo_utf8_path_buf_pop(buf: *compat.PathBuffer) bool {
-        var b = PathBuffer.initC(buf.*);
+    export fn fstd_path_buf_pop(buffer: *compat.PathBuffer) bool {
+        var b = PathBuffer.initC(buffer.*);
         return b.pop();
     }
 
-    export fn fimo_owned_utf8_path_from_string(path: [*:0]const u8, owned: *compat.OwnedPath) AnyResult {
-        const p = std.mem.span(path);
-        const o = OwnedPath.initString(
-            std.heap.c_allocator,
-            p,
-        ) catch |err| return AnyError.initError(err).intoResult();
-        owned.* = o.intoC();
-        return AnyResult.ok;
-    }
-
-    export fn fimo_owned_utf8_path_from_path(path: compat.Path, owned: *compat.OwnedPath) AnyResult {
-        const p = Path.initC(path);
-        const o = OwnedPath.initPath(
-            std.heap.c_allocator,
-            p,
-        ) catch |err| return AnyError.initError(err).intoResult();
-        owned.* = o.intoC();
-        return AnyResult.ok;
-    }
-
-    export fn fimo_owned_utf8_path_from_os_path(path: compat.OsPath, owned: *compat.OwnedPath) AnyResult {
-        const p = OsPath.initC(path);
-        const o = OwnedPath.initOsPath(
-            std.heap.c_allocator,
-            p,
-        ) catch |err| return AnyError.initError(err).intoResult();
-        owned.* = o.intoC();
-        return AnyResult.ok;
-    }
-
-    export fn fimo_owned_utf8_path_free(path: compat.OwnedPath) void {
-        var o = OwnedPath.initC(path);
-        o.deinit(std.heap.c_allocator);
-    }
-
-    export fn fimo_owned_utf8_path_as_path(path: compat.OwnedPath) compat.Path {
-        const o = OwnedPath.initC(path);
-        return o.asPath().intoC();
-    }
-
-    export fn fimo_owned_utf8_path_into_path_buf(path: compat.OwnedPath) compat.PathBuffer {
-        const o = OwnedPath.initC(path);
-        const buf = o.toPathBuffer();
-        return buf.intoC();
-    }
-
-    export fn fimo_utf8_path_new(path_str: [*:0]const u8, path: *compat.Path) AnyResult {
-        const str = std.mem.span(path_str);
+    export fn fstd_path_init(path: *compat.Path, path_str: Slice(u8)) AnyResult {
+        const str = path_str.intoSliceOrEmpty();
         const p = Path.init(str) catch |err| return AnyError.initError(err).intoResult();
         path.* = p.intoC();
         return AnyResult.ok;
     }
 
-    export fn fimo_utf8_path_is_absolute(path: compat.Path) bool {
+    export fn fstd_path_is_absolute(path: compat.Path) bool {
         const p = Path.initC(path);
         return p.isAbsolute();
     }
 
-    export fn fimo_utf8_path_is_relative(path: compat.Path) bool {
+    export fn fstd_path_is_relative(path: compat.Path) bool {
         const p = Path.initC(path);
         return p.isRelative();
     }
 
-    export fn fimo_utf8_path_has_root(path: compat.Path) bool {
+    export fn fstd_path_has_root(path: compat.Path) bool {
         const p = Path.initC(path);
         return p.hasRoot();
     }
 
-    export fn fimo_utf8_path_parent(path: compat.Path, parent: *compat.Path) bool {
+    export fn fstd_path_parent(path: compat.Path, parent: *compat.Path) bool {
         const p = Path.initC(path);
         const par = p.parent() orelse return false;
         parent.* = par.intoC();
         return true;
     }
 
-    export fn fimo_utf8_path_file_name(path: compat.Path, file_name: *compat.Path) bool {
+    export fn fstd_path_file_name(path: compat.Path, file_name: *compat.Path) bool {
         const p = Path.initC(path);
         const f = p.fileName() orelse return false;
         file_name.* = f.intoC();
         return true;
     }
 
-    export fn fimo_owned_os_path_from_path(path: compat.Path, os_path: *compat.OwnedOsPath) AnyResult {
-        const p = Path.initC(path);
-        const o = OwnedOsPath.initPath(
-            std.heap.c_allocator,
-            p,
-        ) catch |err| return AnyError.initError(err).intoResult();
-        os_path.* = o.intoC();
-        return AnyResult.ok;
-    }
-
-    export fn fimo_owned_os_path_free(path: compat.OwnedOsPath) void {
-        const o = OwnedOsPath.initC(path);
-        o.deinit(std.heap.c_allocator);
-    }
-
-    export fn fimo_owned_os_path_as_os_path(path: compat.OwnedOsPath) compat.OsPath {
-        const o = OwnedOsPath.initC(path);
-        return o.asOsPath().intoC();
-    }
-
-    export fn fimo_os_path_new(path: [*:0]const OsPathChar) compat.OsPath {
-        const p: OsPath = .{ .raw = std.mem.span(path) };
-        return p.intoC();
-    }
-
-    export fn fimo_utf8_path_component_iter_new(path: compat.Path) compat.ComponentIterator {
+    export fn fstd_path_iter_new(path: compat.Path) compat.ComponentIterator {
         const p = Path.initC(path);
         return p.iterator().intoC();
     }
 
-    export fn fimo_utf8_path_component_iter_as_path(iter: *const compat.ComponentIterator) compat.Path {
+    export fn fstd_path_iter_as_path(iter: *const compat.ComponentIterator) compat.Path {
         const it = Path.Iterator.initC(iter.*);
         return it.asPath().intoC();
     }
 
-    export fn fimo_utf8_path_component_iter_next(iter: *compat.ComponentIterator, component: *compat.Component) bool {
+    export fn fstd_path_iter_next(iter: *compat.ComponentIterator, component: *compat.Component) bool {
         var it = Path.Iterator.initC(iter.*);
         const comp = it.next();
         iter.* = it.intoC();
@@ -1601,7 +1229,7 @@ const ffi = struct {
         return true;
     }
 
-    export fn fimo_utf8_path_component_iter_next_back(iter: *compat.ComponentIterator, component: *compat.Component) bool {
+    export fn fstd_path_iter_next_back(iter: *compat.ComponentIterator, component: *compat.Component) bool {
         var it = Path.Iterator.initC(iter.*);
         const comp = it.nextBack();
         iter.* = it.intoC();
@@ -1609,7 +1237,7 @@ const ffi = struct {
         return true;
     }
 
-    export fn fimo_utf8_path_component_as_path(component: *const compat.Component) compat.Path {
+    export fn fstd_path_component_as_path(component: *const compat.Component) compat.Path {
         const comp = Path.Component.initC(component.*);
         return comp.asPath().intoC();
     }

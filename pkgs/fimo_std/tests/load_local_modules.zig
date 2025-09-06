@@ -106,7 +106,7 @@ const C = struct {
     };
 
     fn init() !void {
-        tracing.logInfo(@src(), "initializing instance: name='{s}'", .{Module.info().name});
+        tracing.logInfo(@src(), "initializing instance: name='{s}'", .{Module.handle().name()});
 
         const parameters = Module.parameters();
         try testing.expectEqual(0, parameters.pub_pub.read());
@@ -136,10 +136,10 @@ const C = struct {
         tracing.logTrace(@src(), "img: '{f}'", .{paths.img});
 
         const imports = Module.imports();
-        try testing.expectEqual(imports.@"0".*, 5);
-        try testing.expectEqual(imports.@"1".*, 10);
-        try testing.expectEqual(imports.@"2".*, -2);
-        try testing.expectEqual(imports.@"3".*, 77);
+        try testing.expectEqual(5, imports.@"0".*);
+        try testing.expectEqual(10, imports.@"1".*);
+        try testing.expectEqual(-2, imports.@"2".*);
+        try testing.expectEqual(77, imports.@"3".*);
 
         try testing.expectEqual(5, Module.provideSymbol(A0).*);
         try testing.expectEqual(10, Module.provideSymbol(A1).*);
@@ -158,15 +158,15 @@ const C = struct {
     }
 
     fn deinit() void {
-        tracing.logInfo(@src(), "deinitializing instance: name='{s}'", .{Module.info().name});
+        tracing.logInfo(@src(), "deinitializing instance: name='{s}'", .{Module.handle().name()});
     }
 
     fn on_start() void {
-        tracing.logInfo(@src(), "starting instance: name='{s}'", .{Module.info().name});
+        tracing.logInfo(@src(), "starting instance: name='{s}'", .{Module.handle().name()});
     }
 
     fn on_stop() void {
-        tracing.logInfo(@src(), "stopping instance: name='{s}'", .{Module.info().name});
+        tracing.logInfo(@src(), "stopping instance: name='{s}'", .{Module.handle().name()});
     }
 };
 
@@ -178,14 +178,11 @@ pub fn main() !void {
     try logger.init(.{ .gpa = gpa.allocator() });
     defer logger.deinit();
 
-    const tracing_cfg = tracing.Config{
+    const tracing_cfg = tracing.Cfg{
         .max_level = .trace,
-        .subscribers = &.{logger.subscriber()},
-        .subscriber_count = 1,
+        .subscribers = .fromSlice(&.{logger.subscriber()}),
     };
-    const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
-
-    try ctx.init(init_options);
+    try ctx.init(&.{&tracing_cfg.cfg});
     defer ctx.deinit();
     errdefer if (ctx.hasErrorResult()) {
         const e = ctx.takeResult().unwrapErr();
@@ -194,24 +191,24 @@ pub fn main() !void {
         e.deinit();
     };
 
-    const async_ctx = try tasks.BlockingContext.init();
-    defer async_ctx.deinit();
+    const waiter = try tasks.Waiter.init();
+    defer waiter.deinit();
 
-    const set = try modules.LoadingSet.init();
-    defer set.deinit();
+    const loader = try modules.Loader.init();
+    defer loader.deinit();
 
-    try set.addModulesFromLocal({}, Modules.loadingSetFilter);
-    try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
+    try loader.addModulesFromIter({}, Modules.loaderFilter);
+    try loader.commit().intoFuture().awaitBlocking(waiter).unwrap();
 
     var instance_init = true;
     const instance = try modules.RootInstance.init();
     defer if (instance_init) instance.deinit();
 
-    const a = try modules.Info.findByName("a");
+    const a = try modules.Handle.findByName("a");
     defer a.unref();
-    const b = try modules.Info.findByName("b");
+    const b = try modules.Handle.findByName("b");
     defer b.unref();
-    const c = try modules.Info.findByName("c");
+    const c = try modules.Handle.findByName("c");
     defer c.unref();
 
     try testing.expect(a.isLoaded());
@@ -229,14 +226,6 @@ pub fn main() !void {
     try instance.addNamespace(B0.namespace);
 
     _ = try instance.loadSymbol(B0);
-
-    // Increase the strong reference to ensure that it is not unloaded.
-    const info = instance.castOpaque().info;
-    info.ref();
-    defer info.unref();
-
-    try testing.expect(info.tryRefInstanceStrong());
-    defer info.unrefInstanceStrong();
 
     instance.deinit();
     instance_init = false;

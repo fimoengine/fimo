@@ -37,13 +37,12 @@ pub const GlobalCtx = struct {
 };
 
 const TestContext = struct {
-    instance: *const RootInstance,
+    instance: *RootInstance,
     symbols: SymbolGroup(symbols.all_symbols ++ fimo_tasks_meta.symbols.all_symbols),
 
     fn init() !@This() {
         const tracing_cfg = @import("root").tracing_cfg;
-        const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
-        try ctx.init(init_options);
+        try ctx.init(&.{&tracing_cfg.cfg});
         errdefer ctx.deinit();
         errdefer if (ctx.hasErrorResult()) {
             const e = ctx.takeResult().unwrapErr();
@@ -52,25 +51,25 @@ const TestContext = struct {
             e.deinit();
         };
 
-        const async_ctx = try tasks.BlockingContext.init();
-        defer async_ctx.deinit();
+        const waiter = try tasks.Waiter.init();
+        defer waiter.deinit();
 
-        const set = try modules.LoadingSet.init();
-        defer set.deinit();
+        const loader = try modules.Loader.init();
+        defer loader.deinit();
 
-        try set.addModulesFromLocal({}, TestModule.fimo_module_bundle.loadingSetFilter);
-        try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
+        try loader.addModulesFromIter({}, TestModule.fimo_module_bundle.loaderFilter);
+        try loader.commit().intoFuture().awaitBlocking(waiter).unwrap();
 
         const instance = try modules.RootInstance.init();
         errdefer instance.deinit();
 
-        const tasks_info = try modules.Info.findByName("fimo_tasks");
-        defer tasks_info.unref();
-        const worlds_info = try modules.Info.findByName("fimo_worlds");
-        defer worlds_info.unref();
+        const tasks_handle = try modules.Handle.findByName("fimo_tasks");
+        defer tasks_handle.unref();
+        const worlds_handle = try modules.Handle.findByName("fimo_worlds");
+        defer worlds_handle.unref();
 
-        try instance.addDependency(tasks_info);
-        try instance.addDependency(worlds_info);
+        try instance.addDependency(tasks_handle);
+        try instance.addDependency(worlds_handle);
         try instance.addNamespace(symbols.symbol_namespace);
         try instance.addNamespace(fimo_tasks_meta.symbols.symbol_namespace);
 

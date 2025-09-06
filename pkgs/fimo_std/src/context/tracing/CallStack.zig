@@ -251,15 +251,14 @@ pub fn enterFrame(
     };
 
     const now = Instant.now().intoC();
-    const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
+    const message_len = formatter(formatter_data, self.fmt_buffer.ptr, self.fmt_buffer.len);
     const message = self.fmt_buffer[0..message_len];
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.EnterSpan{
             .time = now,
             .stack = self,
             .span = id,
-            .message = message.ptr,
-            .message_length = message.len,
+            .message = .fromSlice(message),
         };
         subscriber.enterSpan(event);
     }
@@ -317,15 +316,14 @@ pub fn logMessage(
     };
 
     const now = Instant.now().intoC();
-    const message_len = formatter(self.fmt_buffer.ptr, self.fmt_buffer.len, formatter_data);
+    const message_len = formatter(formatter_data, self.fmt_buffer.ptr, self.fmt_buffer.len);
     const message = self.fmt_buffer[0..message_len];
     for (tracing.subscribers) |subscriber| {
         const event = tracing.events.LogMessage{
             .time = now,
             .stack = self,
             .info = info,
-            .message = message.ptr,
-            .message_length = message.len,
+            .message = .fromSlice(message),
         };
         subscriber.logMessage(event);
     }

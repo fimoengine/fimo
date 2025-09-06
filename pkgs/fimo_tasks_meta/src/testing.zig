@@ -16,7 +16,7 @@ const Future = root.Future;
 const symbols = @import("symbols.zig");
 
 pub const TestContext = struct {
-    instance: *const RootInstance,
+    instance: *RootInstance,
     symbols: SymbolGroup(symbols.all_symbols),
 
     pub fn deinit(self: *TestContext) void {
@@ -34,8 +34,7 @@ pub const TestContext = struct {
 
 pub fn initTestContext() !TestContext {
     const tracing_cfg = @import("root").tracing_cfg;
-    const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
-    try ctx.init(init_options);
+    try ctx.init(&.{&tracing_cfg.cfg});
     errdefer ctx.deinit();
     errdefer if (ctx.hasErrorResult()) {
         const e = ctx.takeResult().unwrapErr();
@@ -44,22 +43,22 @@ pub fn initTestContext() !TestContext {
         e.deinit();
     };
 
-    const async_ctx = try fimo_std.tasks.BlockingContext.init();
-    defer async_ctx.deinit();
+    const waiter = try fimo_std.tasks.Waiter.init();
+    defer waiter.deinit();
 
-    const set = try modules.LoadingSet.init();
-    defer set.deinit();
+    const loader = try modules.Loader.init();
+    defer loader.deinit();
 
-    try set.addModulesFromLocal({}, TestModule.fimo_module_bundle.loadingSetFilter);
-    try set.commit().intoFuture().awaitBlocking(async_ctx).unwrap();
+    try loader.addModulesFromIter({}, TestModule.fimo_module_bundle.loaderFilter);
+    try loader.commit().intoFuture().awaitBlocking(waiter).unwrap();
 
     const instance = try modules.RootInstance.init();
     errdefer instance.deinit();
 
-    const info = try modules.Info.findByName("fimo_tasks");
-    defer info.unref();
+    const handle = try modules.Handle.findByName("fimo_tasks");
+    defer handle.unref();
 
-    try instance.addDependency(info);
+    try instance.addDependency(handle);
     try instance.addNamespace(symbols.symbol_namespace);
 
     const test_ctx = TestContext{

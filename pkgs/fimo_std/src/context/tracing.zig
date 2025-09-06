@@ -296,12 +296,9 @@ const MEMORYSTATUSEX = extern struct {
 extern "kernel32" fn GlobalMemoryStatusEx(*MEMORYSTATUSEX) callconv(.winapi) std.os.windows.BOOL;
 
 /// Initializes the tracing subsystem.
-pub fn init(config: *const pub_tracing.Config) !void {
+pub fn init(config: *const pub_tracing.Cfg) !void {
     allocator = context.allocator;
-    const subs = if (config.subscribers) |s| s[0..config.subscriber_count] else @as(
-        []pub_tracing.Subscriber,
-        &.{},
-    );
+    const subs = config.subscribers.intoSliceOrEmpty();
     subscribers = try allocator.dupe(pub_tracing.Subscriber, subs);
     buffer_size = if (config.format_buffer_len != 0) config.format_buffer_len else 1024;
     max_level = config.max_level;
@@ -419,12 +416,9 @@ pub fn init(config: *const pub_tracing.Config) !void {
         .num_cores = num_cores,
         .cpu_arch = cpu_arch,
         .cpu_id = cpu_id,
-        .cpu_vendor = &cpu_vendor,
-        .cpu_vendor_length = cpu_vendor.len,
+        .cpu_vendor = .fromSlice(&cpu_vendor),
         .app_name = config.app_name,
-        .app_name_length = config.app_name_length,
-        .host_info = writer.buffer.ptr,
-        .host_info_length = writer.end,
+        .host_info = .fromSlice(writer.buffered()),
     });
     if (config.register_thread) registerThread();
     Sampler.start() catch |err| logWarn(@src(), "could not start tracing sampler: {t}", .{err});
@@ -585,17 +579,17 @@ const VTableImpl = struct {
         std.debug.assert(context.is_init);
         tracing.unregisterThread();
     }
-    fn createCallStack() callconv(.c) *pub_tracing.CallStack {
+    fn initCallStack() callconv(.c) *pub_tracing.CallStack {
         std.debug.assert(context.is_init);
         const stack = CallStack.init();
         return @ptrCast(stack);
     }
-    fn destroyCallStack(stack: *pub_tracing.CallStack, abort: bool) callconv(.c) void {
+    fn deinitCallStack(stack: *pub_tracing.CallStack, abort: bool) callconv(.c) void {
         std.debug.assert(context.is_init);
         const stack_: *CallStack = @ptrCast(@alignCast(stack));
         if (abort) stack_.abort() else stack_.finish();
     }
-    fn swapCallStack(stack: *pub_tracing.CallStack) callconv(.c) *pub_tracing.CallStack {
+    fn replaceCurrentCallStack(stack: *pub_tracing.CallStack) callconv(.c) *pub_tracing.CallStack {
         std.debug.assert(context.is_init);
         const stack_: *CallStack = @ptrCast(@alignCast(stack));
         const old = stack_.swapCurrent();
@@ -615,16 +609,16 @@ const VTableImpl = struct {
         CallStack.resumeCurrent();
     }
     fn enterSpan(
-        id: *const EventInfo,
+        info: *const EventInfo,
         formatter: *const Formatter,
         formatter_data: *const anyopaque,
     ) callconv(.c) void {
         std.debug.assert(context.is_init);
-        (Span{ .id = id }).enter(formatter, formatter_data);
+        (Span{ .id = info }).enter(formatter, formatter_data);
     }
-    fn exitSpan(id: *const EventInfo) callconv(.c) void {
+    fn exitSpan(info: *const EventInfo) callconv(.c) void {
         std.debug.assert(context.is_init);
-        (Span{ .id = id }).exit();
+        (Span{ .id = info }).exit();
     }
     fn logMessage(
         info: *const EventInfo,
@@ -640,9 +634,9 @@ pub const vtable = pub_tracing.VTable{
     .is_enabled = &VTableImpl.isEnabled,
     .register_thread = &VTableImpl.registerThread,
     .unregister_thread = &VTableImpl.unregisterThread,
-    .create_call_stack = &VTableImpl.createCallStack,
-    .destroy_call_stack = &VTableImpl.destroyCallStack,
-    .swap_call_stack = &VTableImpl.swapCallStack,
+    .init_call_stack = &VTableImpl.initCallStack,
+    .deinit_call_stack = &VTableImpl.deinitCallStack,
+    .replace_current_call_stack = &VTableImpl.replaceCurrentCallStack,
     .unblock_call_stack = &VTableImpl.unblockCallStack,
     .suspend_current_call_stack = &VTableImpl.suspendCurrentCallStack,
     .resume_current_call_stack = &VTableImpl.resumeCurrentCallStack,

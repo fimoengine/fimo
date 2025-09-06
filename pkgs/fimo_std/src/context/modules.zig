@@ -11,12 +11,14 @@ const pub_modules = @import("../modules.zig");
 const paths = @import("../paths.zig");
 const Path = paths.Path;
 const pub_tasks = @import("../tasks.zig");
-const EnqueuedFuture = pub_tasks.EnqueuedFuture;
+const OpaqueFuture = pub_tasks.OpaqueFuture;
 const Fallible = pub_tasks.Fallible;
+const utils = @import("../utils.zig");
+const SliceConst = utils.SliceConst;
 const Version = @import("../Version.zig");
 const graph = @import("graph.zig");
 const InstanceHandle = @import("modules/InstanceHandle.zig");
-const LoadingSet = @import("modules/LoadingSet.zig");
+const Loader = @import("modules/Loader.zig");
 const ModuleHandle = @import("modules/ModuleHandle.zig");
 const SymbolRef = @import("modules/SymbolRef.zig");
 const ResourceCount = @import("ResourceCount.zig");
@@ -31,11 +33,11 @@ pub var allocator: Allocator = undefined;
 var arena: ArenaAllocator = undefined;
 var profile: pub_modules.Profile = undefined;
 var features: [feature_count]pub_modules.FeatureStatus = undefined;
-pub var state: enum { idle, loading_set } = .idle;
+pub var state: enum { idle, loading } = .idle;
 pub var instance_count: ResourceCount = .{};
-pub var loading_set_count: ResourceCount = .{};
-pub var loading_set_waiters: std.ArrayList(LoadingSetWaiter) = .empty;
-var dep_graph: graph.GraphUnmanaged(*const pub_modules.OpaqueInstance, void) = undefined;
+pub var loader_count: ResourceCount = .{};
+pub var loader_waiters: std.ArrayList(LoaderWaiter) = .empty;
+var dep_graph: graph.GraphUnmanaged(*pub_modules.OpaqueInstance, void) = undefined;
 var string_cache: std.StringArrayHashMapUnmanaged(void) = .empty;
 var instances: std.StringArrayHashMapUnmanaged(InstanceRef) = .empty;
 var namespaces: std.StringArrayHashMapUnmanaged(NamespaceInfo) = .empty;
@@ -44,14 +46,14 @@ var symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, SymbolRef, SymbolRef.Id.Has
 pub const global_namespace = "";
 const feature_count = std.meta.fields(pub_modules.FeatureTag).len;
 
-pub const LoadingSetWaiter = struct {
+pub const LoaderWaiter = struct {
     waiter: *anyopaque,
     waker: pub_tasks.Waker,
 };
 
 const InstanceRef = struct {
     id: graph.NodeId,
-    instance: *const pub_modules.OpaqueInstance,
+    instance: *pub_modules.OpaqueInstance,
 };
 
 const NamespaceInfo = struct {
@@ -59,7 +61,7 @@ const NamespaceInfo = struct {
     num_references: usize,
 };
 
-pub fn init(config: *const pub_modules.Config) !void {
+pub fn init(config: *const pub_modules.Cfg) !void {
     allocator = context.allocator;
     arena = .init(context.allocator);
     profile = switch (config.profile) {
@@ -95,14 +97,14 @@ pub fn init(config: *const pub_modules.Config) !void {
 pub fn deinit() void {
     pruneInstances() catch |err| @panic(@errorName(err));
     instance_count.waitUntilZero();
-    loading_set_count.waitUntilZero();
+    loader_count.waitUntilZero();
     std.debug.assert(state == .idle);
-    std.debug.assert(loading_set_waiters.items.len == 0);
+    std.debug.assert(loader_waiters.items.len == 0);
 
     profile = undefined;
     features = undefined;
 
-    loading_set_waiters.clearAndFree(allocator);
+    loader_waiters.clearAndFree(allocator);
     dep_graph.clear(allocator);
 
     string_cache = .empty;
@@ -130,10 +132,10 @@ pub fn getInstance(name: []const u8) ?*InstanceRef {
 
 pub fn addInstance(inner: *InstanceHandle.Inner) !void {
     const handle = InstanceHandle.fromInnerPtr(inner);
-    if (instances.contains(std.mem.span(handle.info.name))) return error.Duplicate;
+    if (instances.contains(handle.handle.name.intoSliceOrEmpty())) return error.Duplicate;
 
     const instance = inner.instance.?;
-    const node = try dep_graph.addNode(allocator, instance);
+    const node = try dep_graph.addNode(allocator, @ptrCast(instance));
     errdefer _ = dep_graph.removeNode(allocator, node) catch unreachable;
 
     // Validate symbols and namespaces.
@@ -150,7 +152,8 @@ pub fn addInstance(inner: *InstanceHandle.Inner) !void {
     var dep_it = inner.dependencies.iterator();
     while (dep_it.next()) |entry| {
         const data = getInstance(entry.key_ptr.*) orelse return error.NotFound;
-        if (&entry.value_ptr.instance.info != data.instance.info) @panic("unexpected instance info");
+        if (@intFromPtr(&entry.value_ptr.instance.handle) != @intFromPtr(data.instance.handle()))
+            @panic("unexpected instance handle");
         _ = dep_graph.addEdge(
             allocator,
             {},
@@ -162,13 +165,10 @@ pub fn addInstance(inner: *InstanceHandle.Inner) !void {
         };
     }
     if (inner.@"export") |exp| {
-        for (exp.getModifiers()) |mod| {
-            if (mod.tag != .dependency) continue;
-            const dependency = mod.value.dependency;
-            const dep_instance = getInstance(
-                std.mem.span(dependency.name),
-            ) orelse return error.NotFound;
-            if (dep_instance.instance.info != dependency) @panic("unexpected instance info");
+        const dependencies_event = exp.eventDependencies();
+        for (dependencies_event.handles.intoSliceOrEmpty()) |dependency| {
+            const dep_instance = getInstance(dependency.name()) orelse return error.NotFound;
+            if (dep_instance.instance.handle() != dependency) @panic("unexpected instance handle");
             _ = dep_graph.addEdge(
                 allocator,
                 {},
@@ -197,12 +197,12 @@ pub fn addInstance(inner: *InstanceHandle.Inner) !void {
             entry.key_ptr.name,
             entry.key_ptr.namespace,
             entry.value_ptr.version,
-            std.mem.span(instance.info.name),
+            instance.handle.name(),
         );
     }
 
-    const data = InstanceRef{ .id = node, .instance = instance };
-    const key = try cacheString(std.mem.span(instance.info.name));
+    const data = InstanceRef{ .id = node, .instance = @ptrCast(instance) };
+    const key = try cacheString(instance.handle.name());
     try instances.put(arena.allocator(), key, data);
 }
 
@@ -210,7 +210,7 @@ pub fn addInstance(inner: *InstanceHandle.Inner) !void {
 ///
 /// The root instance provides access to the subsystem for non-instances, and is mainly intended
 /// for bootstrapping.
-pub fn addRootInstance() !*const pub_modules.RootInstance {
+pub fn addRootInstance() !*pub_modules.RootInstance {
     tracing.logTrace(@src(), "adding new root instance", .{});
     mutex.lock();
     defer mutex.unlock();
@@ -227,7 +227,7 @@ pub fn addRootInstance() !*const pub_modules.RootInstance {
     }
 
     const instance = try InstanceHandle.initRootInstance(name);
-    const handle = InstanceHandle.fromInstancePtr(&instance.instance);
+    const handle = InstanceHandle.fromInstancePtr(@ptrCast(@alignCast(instance)));
     const inner = handle.lock();
     errdefer {
         inner.stop();
@@ -242,7 +242,7 @@ pub fn addRootInstance() !*const pub_modules.RootInstance {
 pub fn removeInstance(inner: *InstanceHandle.Inner) !void {
     const handle = InstanceHandle.fromInnerPtr(inner);
     if (!inner.canUnload()) return error.NotPermitted;
-    if (!instances.contains(std.mem.span(handle.info.name))) return error.NotFound;
+    if (!instances.contains(handle.handle.name.intoSliceOrEmpty())) return error.NotFound;
 
     for (inner.symbols.keys()) |key| removeSymbol(key.name, key.namespace);
     for (inner.namespaces.keys()) |ns| unrefNamespace(ns);
@@ -254,7 +254,7 @@ pub fn removeInstance(inner: *InstanceHandle.Inner) !void {
                 entry.key_ptr.name,
                 entry.key_ptr.namespace,
                 entry.value_ptr.version,
-                std.mem.span(handle.info.name),
+                handle.handle.name.intoSliceOrEmpty(),
             ) catch |e| @panic(@errorName(e));
         }
     }
@@ -267,7 +267,7 @@ pub fn removeInstance(inner: *InstanceHandle.Inner) !void {
     }
     inner.clearDependencies();
 
-    const instance_id = instances.fetchSwapRemove(std.mem.span(handle.info.name)).?.value.id;
+    const instance_id = instances.fetchSwapRemove(handle.handle.name.intoSliceOrEmpty()).?.value.id;
     _ = dep_graph.removeNode(allocator, instance_id) catch |err| @panic(@errorName(err));
 }
 
@@ -275,11 +275,11 @@ pub fn linkInstances(inner: *InstanceHandle.Inner, other: *InstanceHandle.Inner)
     const handle = InstanceHandle.fromInnerPtr(inner);
     const other_handle = InstanceHandle.fromInnerPtr(other);
     if (inner.isDetached() or other.isDetached()) return error.NotFound;
-    if (inner.getDependency(std.mem.span(other_handle.info.name)) != null) return error.Duplicate;
+    if (inner.getDependency(other_handle.handle.name.intoSliceOrEmpty()) != null) return error.Duplicate;
     if (other_handle.type == .root) return error.NotPermitted;
 
-    const instance_ref = getInstance(std.mem.span(handle.info.name)).?;
-    const other_instance_ref = getInstance(std.mem.span(other_handle.info.name)).?;
+    const instance_ref = getInstance(handle.handle.name.intoSliceOrEmpty()).?;
+    const other_instance_ref = getInstance(other_handle.handle.name.intoSliceOrEmpty()).?;
 
     const would_cycle = dep_graph.pathExists(
         allocator,
@@ -309,12 +309,12 @@ pub fn unlinkInstances(inner: *InstanceHandle.Inner, other: *InstanceHandle.Inne
     const other_handle = InstanceHandle.fromInnerPtr(other);
 
     const dependency_info = inner.getDependency(
-        std.mem.span(other_handle.info.name),
+        other_handle.handle.name.intoSliceOrEmpty(),
     ) orelse return error.NotADependency;
     if (dependency_info.type == .static) return error.NotPermitted;
 
-    const instance_ref = getInstance(std.mem.span(handle.info.name)).?;
-    const other_instance_ref = getInstance(std.mem.span(other_handle.info.name)).?;
+    const instance_ref = getInstance(handle.handle.name.intoSliceOrEmpty()).?;
+    const other_instance_ref = getInstance(other_handle.handle.name.intoSliceOrEmpty()).?;
 
     const edge = (dep_graph.findEdge(
         instance_ref.id,
@@ -350,7 +350,7 @@ pub fn pruneInstances() !void {
             inner.enqueueUnload() catch return error.EnqueueError;
             continue;
         }
-        tracing.logTrace(@src(), "unloading unused instance, instance='{s}'", .{instance.info.name});
+        tracing.logTrace(@src(), "unloading unused instance, instance='{s}'", .{instance.handle().name()});
         try removeInstance(inner);
         inner.stop();
         inner.deinit();
@@ -359,18 +359,18 @@ pub fn pruneInstances() !void {
 }
 
 /// Searches for an instance by its name.
-pub fn findInstanceByName(name: []const u8) !*const pub_modules.Info {
+pub fn findInstanceByName(name: []const u8) !*pub_modules.Handle {
     tracing.logTrace(@src(), "searching for instance, name='{s}'", .{name});
     mutex.lock();
     defer mutex.unlock();
 
     const instance_ref = getInstance(name) orelse return error.NotFound;
-    instance_ref.instance.info.ref();
-    return instance_ref.instance.info;
+    instance_ref.instance.handle().ref();
+    return instance_ref.instance.handle();
 }
 
 /// Searches for the instance that exports a specific symbol.
-pub fn findInstanceBySymbol(name: []const u8, namespace: []const u8, version: Version) !*const pub_modules.Info {
+pub fn findInstanceBySymbol(name: []const u8, namespace: []const u8, version: Version) !*pub_modules.Handle {
     tracing.logTrace(@src(), "searching for symbol owner, name='{s}', namespace='{s}', version='{f}'", .{ name, namespace, version });
     mutex.lock();
     defer mutex.unlock();
@@ -381,8 +381,8 @@ pub fn findInstanceBySymbol(name: []const u8, namespace: []const u8, version: Ve
         version,
     ) orelse return error.NotFound;
     const instance_ref = getInstance(symbol_ref.owner) orelse unreachable;
-    instance_ref.instance.info.ref();
-    return instance_ref.instance.info;
+    instance_ref.instance.handle().ref();
+    return instance_ref.instance.handle();
 }
 
 /// Queries whether a namespace exists.
@@ -439,7 +439,7 @@ pub fn getSymbol(name: []const u8, namespace: []const u8) ?*SymbolRef {
 
 pub fn getSymbolCompatible(name: []const u8, namespace: []const u8, version: Version) ?*SymbolRef {
     const symbol = getSymbol(name, namespace) orelse return null;
-    if (!symbol.version.isCompatibleWith(version)) return null;
+    if (!symbol.version.sattisfies(version)) return null;
     return symbol;
 }
 
@@ -474,12 +474,12 @@ fn removeSymbol(name: []const u8, namespace: []const u8) void {
     cleanupUnusedNamespace(namespace);
 }
 
-/// Initializes a new empty loading set.
-pub fn addLoadingSet(err: *?AnyError) !EnqueuedFuture(Fallible(*LoadingSet)) {
-    tracing.logTrace(@src(), "creating new loading set", .{});
-    var fut = LoadingSet.init(&context.global).intoFuture().map(
-        Fallible(*LoadingSet),
-        Fallible(*LoadingSet).Wrapper(anyerror),
+/// Initializes a new  loader.
+pub fn addLoader(err: *?AnyError) !OpaqueFuture(Fallible(*Loader)) {
+    tracing.logTrace(@src(), "creating new loader", .{});
+    var fut = Loader.init(&context.global).intoFuture().map(
+        Fallible(*Loader),
+        Fallible(*Loader).Wrapper(anyerror),
     ).intoFuture();
     errdefer fut.deinit();
     return tasks.Task.initFuture(
@@ -491,11 +491,7 @@ pub fn addLoadingSet(err: *?AnyError) !EnqueuedFuture(Fallible(*LoadingSet)) {
 }
 
 /// Queries the info of a module parameter.
-pub fn queryParameter(owner: []const u8, parameter: []const u8) error{NotFound}!struct {
-    type: pub_modules.ParameterType,
-    read_group: pub_modules.ParameterAccessGroup,
-    write_group: pub_modules.ParameterAccessGroup,
-} {
+pub fn queryParameter(owner: []const u8, parameter: []const u8) error{NotFound}!pub_modules.ParamInfo {
     tracing.logTrace(@src(), "querying parameter, owner='{s}', parameter='{s}'", .{ owner, parameter });
     mutex.lock();
     defer mutex.unlock();
@@ -507,7 +503,7 @@ pub fn queryParameter(owner: []const u8, parameter: []const u8) error{NotFound}!
 
     const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
     return .{
-        .type = param.type(),
+        .tag = param.tag(),
         .read_group = param.read_group,
         .write_group = param.write_group,
     };
@@ -515,15 +511,15 @@ pub fn queryParameter(owner: []const u8, parameter: []const u8) error{NotFound}!
 
 /// Atomically reads the value and type of a public parameter.
 pub fn readParameter(
-    value: *anyopaque,
-    @"type": pub_modules.ParameterType,
+    tag: pub_modules.ParamTag,
     owner: []const u8,
     parameter: []const u8,
+    value: *anyopaque,
 ) !void {
     tracing.logTrace(
         @src(),
-        "reading public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
-        .{ value, @tagName(@"type"), owner, parameter },
+        "reading public parameter, value='{*}', tag='{t}', owner='{s}', parameter='{s}'",
+        .{ value, tag, owner, parameter },
     );
     mutex.lock();
     defer mutex.unlock();
@@ -534,22 +530,22 @@ pub fn readParameter(
     defer owner_inner.unlock();
 
     const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
-    try param.checkType(@"type");
+    try param.checkTag(tag);
     try param.checkReadPublic();
     param.readTo(value);
 }
 
 /// Atomically reads the value and type of a public parameter.
 pub fn writeParameter(
-    value: *const anyopaque,
-    @"type": pub_modules.ParameterType,
+    tag: pub_modules.ParamTag,
     owner: []const u8,
     parameter: []const u8,
+    value: *const anyopaque,
 ) !void {
     tracing.logTrace(
         @src(),
-        "write public parameter, value='{*}', type='{s}', owner='{s}', parameter='{s}'",
-        .{ value, @tagName(@"type"), owner, parameter },
+        "write public parameter, value='{*}', tag='{t}', owner='{s}', parameter='{s}'",
+        .{ value, tag, owner, parameter },
     );
     mutex.lock();
     defer mutex.unlock();
@@ -560,7 +556,7 @@ pub fn writeParameter(
     defer owner_inner.unlock();
 
     const param: *InstanceHandle.Parameter = owner_inner.getParameter(parameter) orelse return error.NotFound;
-    try param.checkType(@"type");
+    try param.checkTag(tag);
     try param.checkWritePublic();
     param.writeFrom(value);
 }
@@ -574,12 +570,11 @@ const VTableImpl = struct {
         std.debug.assert(context.is_init);
         return modules.profile;
     }
-    fn features(out: *?[*]const pub_modules.FeatureStatus) callconv(.c) usize {
+    fn features() callconv(.c) SliceConst(pub_modules.FeatureStatus) {
         std.debug.assert(context.is_init);
-        out.* = &modules.features;
-        return modules.features.len;
+        return .fromSlice(&modules.features);
     }
-    fn addRootInstance(instance: **const pub_modules.RootInstance) callconv(.c) pub_context.Status {
+    fn addRootInstance(instance: **pub_modules.RootInstance) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         instance.* = modules.addRootInstance() catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
@@ -588,44 +583,43 @@ const VTableImpl = struct {
         };
         return .ok;
     }
-    fn initSet(set: **pub_modules.LoadingSet) callconv(.c) pub_context.Status {
+    fn initLoader(loader: **pub_modules.Loader) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        set.* = @ptrCast(LoadingSet.init() catch |e| {
+        loader.* = @ptrCast(Loader.init() catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         });
         return .ok;
     }
-    fn deinitSet(set: *pub_modules.LoadingSet) callconv(.c) void {
+    fn deinitLoader(loader: *pub_modules.Loader) callconv(.c) void {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        const s: *Loader = @ptrCast(@alignCast(loader));
         s.unref();
     }
-    fn querySetModule(set: *pub_modules.LoadingSet, module: [*:0]const u8) callconv(.c) bool {
+    fn queryLoaderModule(loader: *pub_modules.Loader, module: SliceConst(u8)) callconv(.c) bool {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
-        return s.queryModule(std.mem.span(module));
+        const s: *Loader = @ptrCast(@alignCast(loader));
+        return s.queryModule(module.intoSliceOrEmpty());
     }
-    fn querySetSymbol(
-        set: *pub_modules.LoadingSet,
-        name: [*:0]const u8,
-        namespace: [*:0]const u8,
-        version: Version.CVersion,
-    ) callconv(.c) bool {
+    fn queryLoaderSymbol(loader: *pub_modules.Loader, symbol: pub_modules.SymbolId) callconv(.c) bool {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
-        return s.querySymbol(std.mem.span(name), std.mem.span(namespace), Version.initC(version));
+        const s: *Loader = @ptrCast(@alignCast(loader));
+        return s.querySymbol(
+            symbol.name.intoSliceOrEmpty(),
+            symbol.namespace.intoSliceOrEmpty(),
+            .initC(symbol.version),
+        );
     }
-    fn pollSetModule(
-        set: *pub_modules.LoadingSet,
+    fn pollLoaderModule(
+        loader: *pub_modules.Loader,
         waker: pub_tasks.Waker,
-        module: [*:0]const u8,
-        result: *Fallible(pub_modules.LoadingSet.ResolvedModule),
+        module: SliceConst(u8),
+        result: *Fallible(pub_modules.Loader.ResolvedModule),
     ) callconv(.c) bool {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
-        const status = s.pollModuleStatus(waker, std.mem.span(module)) catch |e| {
+        const s: *Loader = @ptrCast(@alignCast(loader));
+        const status = s.pollModuleStatus(waker, module.intoSliceOrEmpty()) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             result.* = .wrap(e);
@@ -634,13 +628,13 @@ const VTableImpl = struct {
         result.* = .wrap(status);
         return true;
     }
-    fn addModuleToSet(
-        set: *pub_modules.LoadingSet,
-        owner: *const pub_modules.OpaqueInstance,
+    fn addModuleToLoader(
+        loader: *pub_modules.Loader,
+        owner: *pub_modules.OpaqueInstance,
         @"export": *const pub_modules.Export,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        const s: *Loader = @ptrCast(@alignCast(loader));
         s.addModule(InstanceHandle.fromInstancePtr(owner), @"export") catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
@@ -649,16 +643,16 @@ const VTableImpl = struct {
         return .ok;
     }
     fn addModulesToSetFromPath(
-        set: *pub_modules.LoadingSet,
+        loader: *pub_modules.Loader,
         path: paths.compat.Path,
         filter_context: ?*anyopaque,
         filter_fn: *const fn (
             context: ?*anyopaque,
             module: *const pub_modules.Export,
-        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+        ) callconv(.c) pub_modules.Loader.FilterRequest,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
+        const s: *Loader = @ptrCast(@alignCast(loader));
         s.addModulesFromPath(Path.initC(path), filter_context, filter_fn) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
@@ -666,13 +660,13 @@ const VTableImpl = struct {
         };
         return .ok;
     }
-    fn addModulesToSetFromLocal(
-        set: *pub_modules.LoadingSet,
+    fn addModulesToSetFromIter(
+        loader: *pub_modules.Loader,
         filter_context: ?*anyopaque,
         filter_fn: *const fn (
             context: ?*anyopaque,
             module: *const pub_modules.Export,
-        ) callconv(.c) pub_modules.LoadingSet.FilterRequest,
+        ) callconv(.c) pub_modules.Loader.FilterRequest,
         iterator_fn: *const fn (
             context: ?*anyopaque,
             f: *const fn (context: ?*anyopaque, module: *const pub_modules.Export) callconv(.c) bool,
@@ -680,8 +674,8 @@ const VTableImpl = struct {
         bin_ptr: *const anyopaque,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
-        s.addModulesFromLocal(iterator_fn, filter_context, filter_fn, bin_ptr) catch |e| {
+        const s: *Loader = @ptrCast(@alignCast(loader));
+        s.addModulesFromIter(iterator_fn, filter_context, filter_fn, bin_ptr) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -689,35 +683,27 @@ const VTableImpl = struct {
         return .ok;
     }
     fn commitSet(
-        set: *pub_modules.LoadingSet,
-    ) callconv(.c) EnqueuedFuture(Fallible(void)) {
+        loader: *pub_modules.Loader,
+    ) callconv(.c) OpaqueFuture(Fallible(void)) {
         std.debug.assert(context.is_init);
-        const s: *LoadingSet = @ptrCast(@alignCast(set));
-        return LoadingSet.CommitOp.Data.init(s);
+        const s: *Loader = @ptrCast(@alignCast(loader));
+        return Loader.CommitOp.Data.init(s);
     }
-    fn findInstanceByName(
-        name: [*:0]const u8,
-        info: **const pub_modules.Info,
-    ) callconv(.c) pub_context.Status {
+    fn findInstanceByName(handle: **pub_modules.Handle, name: SliceConst(u8)) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        info.* = modules.findInstanceByName(std.mem.span(name)) catch |e| {
+        handle.* = modules.findInstanceByName(name.intoSliceOrEmpty()) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
         return .ok;
     }
-    fn findInstanceBySymbol(
-        name: [*:0]const u8,
-        namespace: [*:0]const u8,
-        version: Version.CVersion,
-        info: **const pub_modules.Info,
-    ) callconv(.c) pub_context.Status {
+    fn findInstanceBySymbol(handle: **pub_modules.Handle, symbol: pub_modules.SymbolId) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        info.* = modules.findInstanceBySymbol(
-            std.mem.span(name),
-            std.mem.span(namespace),
-            Version.initC(version),
+        handle.* = modules.findInstanceBySymbol(
+            symbol.name.intoSliceOrEmpty(),
+            symbol.namespace.intoSliceOrEmpty(),
+            .initC(symbol.version),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
@@ -725,10 +711,9 @@ const VTableImpl = struct {
         };
         return .ok;
     }
-    fn queryNamespace(namespace: [*:0]const u8, exists: *bool) callconv(.c) pub_context.Status {
+    fn queryNamespace(ns: SliceConst(u8)) callconv(.c) bool {
         std.debug.assert(context.is_init);
-        exists.* = modules.queryNamespace(std.mem.span(namespace));
-        return .ok;
+        return modules.queryNamespace(ns.intoSliceOrEmpty());
     }
     fn pruneInstances() callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
@@ -740,39 +725,29 @@ const VTableImpl = struct {
         return .ok;
     }
     fn queryParameter(
-        owner: [*:0]const u8,
-        parameter: [*:0]const u8,
-        @"type": *pub_modules.ParameterType,
-        read_group: *pub_modules.ParameterAccessGroup,
-        write_group: *pub_modules.ParameterAccessGroup,
+        owner: SliceConst(u8),
+        parameter: SliceConst(u8),
+        info: *pub_modules.ParamInfo,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        const info = modules.queryParameter(
-            std.mem.span(owner),
-            std.mem.span(parameter),
+        info.* = modules.queryParameter(
+            owner.intoSliceOrEmpty(),
+            parameter.intoSliceOrEmpty(),
         ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
-        @"type".* = info.type;
-        read_group.* = info.read_group;
-        write_group.* = info.write_group;
         return .ok;
     }
     fn readParameter(
+        tag: pub_modules.ParamTag,
+        owner: SliceConst(u8),
+        parameter: SliceConst(u8),
         value: *anyopaque,
-        @"type": pub_modules.ParameterType,
-        owner: [*:0]const u8,
-        parameter: [*:0]const u8,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        modules.readParameter(
-            value,
-            @"type",
-            std.mem.span(owner),
-            std.mem.span(parameter),
-        ) catch |e| {
+        modules.readParameter(tag, owner.intoSliceOrEmpty(), parameter.intoSliceOrEmpty(), value) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -780,18 +755,13 @@ const VTableImpl = struct {
         return .ok;
     }
     fn writeParameter(
+        tag: pub_modules.ParamTag,
+        owner: SliceConst(u8),
+        parameter: SliceConst(u8),
         value: *const anyopaque,
-        @"type": pub_modules.ParameterType,
-        owner: [*:0]const u8,
-        parameter: [*:0]const u8,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        modules.writeParameter(
-            value,
-            @"type",
-            std.mem.span(owner),
-            std.mem.span(parameter),
-        ) catch |e| {
+        modules.writeParameter(tag, owner.intoSliceOrEmpty(), parameter.intoSliceOrEmpty(), value) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -803,18 +773,18 @@ const VTableImpl = struct {
 pub const vtable = pub_modules.VTable{
     .profile = &VTableImpl.profile,
     .features = &VTableImpl.features,
-    .root_module_new = &VTableImpl.addRootInstance,
-    .set_new = &VTableImpl.initSet,
-    .set_destroy = &VTableImpl.deinitSet,
-    .set_contains_module = &VTableImpl.querySetModule,
-    .set_contains_symbol = &VTableImpl.querySetSymbol,
-    .set_poll_module = &VTableImpl.pollSetModule,
-    .set_add_module = &VTableImpl.addModuleToSet,
-    .set_add_modules_from_path = &VTableImpl.addModulesToSetFromPath,
-    .set_add_modules_from_local = &VTableImpl.addModulesToSetFromLocal,
-    .set_commit = &VTableImpl.commitSet,
-    .find_by_name = &VTableImpl.findInstanceByName,
-    .find_by_symbol = &VTableImpl.findInstanceBySymbol,
+    .root_instance_init = &VTableImpl.addRootInstance,
+    .loader_init = &VTableImpl.initLoader,
+    .loader_deinit = &VTableImpl.deinitLoader,
+    .loader_contains_module = &VTableImpl.queryLoaderModule,
+    .loader_contains_symbol = &VTableImpl.queryLoaderSymbol,
+    .loader_poll_module = &VTableImpl.pollLoaderModule,
+    .loader_add_module = &VTableImpl.addModuleToLoader,
+    .loader_add_modules_from_path = &VTableImpl.addModulesToSetFromPath,
+    .loader_add_modules_from_iter = &VTableImpl.addModulesToSetFromIter,
+    .loader_commit = &VTableImpl.commitSet,
+    .handle_find_by_name = &VTableImpl.findInstanceByName,
+    .handle_find_by_symbol = &VTableImpl.findInstanceBySymbol,
     .namespace_exists = &VTableImpl.queryNamespace,
     .prune_instances = &VTableImpl.pruneInstances,
     .query_parameter = &VTableImpl.queryParameter,

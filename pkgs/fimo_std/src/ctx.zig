@@ -14,16 +14,16 @@ const Version = @import("Version.zig");
 /// Interface version compiled against.
 pub const context_version = Version.initSemanticVersion(context_version_opt.version);
 
-/// Id of the fimo std interface types.
-pub const ConfigId = enum(i32) {
-    tracing,
-    modules,
+pub const CfgId = enum(i32) {
+    _unknown = 0,
+    tracing = 1,
+    modules = 2,
     _,
 };
 
-/// Head of a config instance for some subsystem.
-pub const ConfigHead = extern struct {
-    id: ConfigId,
+/// Common member of all config structures.
+pub const Cfg = extern struct {
+    id: CfgId,
 };
 
 /// Status code.
@@ -75,7 +75,7 @@ pub const Error = error{
 /// Is not intended to be instantiated outside of the current module, as it may gain additional
 /// fields without being considered a breaking change.
 pub const Handle = extern struct {
-    get_version: *const fn () callconv(.c) Version.CVersion,
+    get_version: *const fn () callconv(.c) Version.compat.Version,
     core_v0: CoreVTable,
     tracing_v0: tracing.VTable,
     modules_v0: modules.VTable,
@@ -86,7 +86,7 @@ pub const Handle = extern struct {
     var global: ?*const @This() = null;
 
     pub fn registerHandle(handle: *const @This()) void {
-        std.debug.assert(Version.initC(handle.get_version()).isCompatibleWith(context_version));
+        std.debug.assert(Version.initC(handle.get_version()).sattisfies(context_version));
         lock.lock();
         defer lock.unlock();
 
@@ -128,7 +128,7 @@ pub const CoreVTable = extern struct {
 /// Initializes a new context with the given options.
 ///
 /// Only one context may be initialized at any given moment.
-pub fn init(options: [:null]const ?*const ConfigHead) !void {
+pub fn init(options: []const *const Cfg) !void {
     try Inner.init(options);
     Handle.registerHandle(&Inner.handle);
 }

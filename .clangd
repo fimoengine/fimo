@@ -1,0 +1,13 @@
+If:
+  PathMatch: pkgs/.*
+CompileFlags:
+  Add:
+    - "--include-directory=pkgs/fimo_std/"
+    - "--include-directory=pkgs/fimo_tasks_meta/"
+    - "--include-directory=pkgs/fimo_worlds_meta/"
+    - "-std=c++20"
+    - "-Wall"
+    - "-Wextra"
+    - "-Werror"
+    - "-Wno-missing-designated-field-initializers"
+  Compiler: clang++

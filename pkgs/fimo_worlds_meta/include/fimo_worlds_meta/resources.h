@@ -1,7 +1,7 @@
 #ifndef FIMO_WORLDS_META_RESOURCES_H
 #define FIMO_WORLDS_META_RESOURCES_H
 
-#include <fimo_std/fimo.h>
+#include <fimo_std.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,18 +19,18 @@ typedef struct FimoWorldsMeta_ResourceDescriptor {
     /// Optional label of the resource.
     const char *label;
     /// Length in characters of the resource label.
-    FimoUSize label_len;
+    FSTD_USize label_len;
     /// Size in bytes of the resource.
-    FimoUSize size;
+    FSTD_USize size;
     /// Alignment in bytes of the resource. Must be a power-of-two.
-    FimoUSize alignment;
+    FSTD_USize alignment;
 } FimoWorldsMeta_ResourceDescriptor;
 
 /// Registers a new resource to the universe.
 ///
 /// Registered resources may be instantiated by any world that knows its handle.
-typedef FimoStatus (*FimoWorldsMeta_resource_register)(const FimoWorldsMeta_ResourceDescriptor *resource,
-                                                       FimoWorldsMeta_ResourceHandle *handle);
+typedef FSTD_Status (*FimoWorldsMeta_resource_register)(const FimoWorldsMeta_ResourceDescriptor *resource,
+                                                        FimoWorldsMeta_ResourceHandle *handle);
 
 /// Unregister the resource from the universe.
 ///

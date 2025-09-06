@@ -11,8 +11,8 @@ const context = @import("../context.zig");
 const pub_context = @import("../ctx.zig");
 const pub_tasks = @import("../tasks.zig");
 const ResourceCount = @import("ResourceCount.zig");
-pub const BlockingContext = @import("tasks/BlockingContext.zig");
 pub const Task = @import("tasks/Task.zig");
+pub const Waiter = @import("tasks/Waiter.zig");
 const tracing = @import("tracing.zig");
 
 const tasks = @This();
@@ -69,7 +69,7 @@ fn runEventLoop() void {
     }
 }
 
-pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(pub_tasks.Fallible(T)) {
+pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.OpaqueFuture(pub_tasks.Fallible(T)) {
     const Wrapper = struct {
         fn poll(data: **anyopaque, waker: pub_tasks.Waker) pub_tasks.Poll(pub_tasks.Fallible(T)) {
             _ = waker;
@@ -83,7 +83,7 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(p
     };
 
     const e_ptr: *anyopaque = @ptrFromInt(@intFromError(e));
-    return pub_tasks.EnqueuedFuture(pub_tasks.Fallible(T)).init(
+    return pub_tasks.OpaqueFuture(pub_tasks.Fallible(T)).init(
         e_ptr,
         Wrapper.poll,
         null,
@@ -95,11 +95,11 @@ pub fn initErrorFuture(comptime T: type, e: anyerror) pub_tasks.EnqueuedFuture(p
 // ----------------------------------------------------
 
 const VTableImpl = struct {
-    fn contextNewBlocking(
-        blk_ctx: *pub_tasks.BlockingContext,
+    fn waiterInit(
+        waiter: *pub_tasks.Waiter,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
-        blk_ctx.* = BlockingContext.init() catch |err| {
+        waiter.* = Waiter.init() catch |err| {
             context.setResult(.initErr(.initError(err)));
             return .err;
         };
@@ -119,7 +119,7 @@ const VTableImpl = struct {
         ) callconv(.c) bool,
         cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
         cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-        future: *pub_tasks.OpaqueFuture,
+        future: *pub_tasks.EnqueuedFuture,
     ) callconv(.c) pub_context.Status {
         std.debug.assert(context.is_init);
         future.* = Task.init(
@@ -140,6 +140,6 @@ const VTableImpl = struct {
 };
 
 pub const vtable = pub_tasks.VTable{
-    .context_new_blocking = &VTableImpl.contextNewBlocking,
+    .waiter_init = &VTableImpl.waiterInit,
     .future_enqueue = &VTableImpl.futureEnqueue,
 };

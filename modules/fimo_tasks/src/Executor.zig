@@ -1215,7 +1215,7 @@ pub const Worker = struct {
             debug.assert(self.task == null);
             self.task = task;
             CallStack.suspendCurrent(false);
-            self.call_stack = task.call_stack.swapCurrent();
+            self.call_stack = task.call_stack.replaceCurrent();
             CallStack.resumeCurrent();
 
             const old_result: AnyResult = ctx.replaceResult(task.local_result);
@@ -1230,7 +1230,7 @@ pub const Worker = struct {
             switch (msg.*) {
                 .complete => {
                     CallStack.suspendCurrent(false);
-                    task.call_stack = self.call_stack.swapCurrent();
+                    task.call_stack = self.call_stack.replaceCurrent();
                     CallStack.resumeCurrent();
                     task.postExit(false);
                     task.msg = .{ .tag = .task_complete };
@@ -1241,7 +1241,7 @@ pub const Worker = struct {
                 },
                 .abort => {
                     CallStack.suspendCurrent(false);
-                    task.call_stack = self.call_stack.swapCurrent();
+                    task.call_stack = self.call_stack.replaceCurrent();
                     CallStack.resumeCurrent();
                     task.postExit(true);
                     task.msg = .{ .tag = .task_abort };
@@ -1252,7 +1252,7 @@ pub const Worker = struct {
                 },
                 .yield => {
                     CallStack.suspendCurrent(false);
-                    task.call_stack = self.call_stack.swapCurrent();
+                    task.call_stack = self.call_stack.replaceCurrent();
                     CallStack.resumeCurrent();
                     task.msg = .{ .tag = .task_to_worker };
                     self.local_queue.push(futex, task);
@@ -1261,7 +1261,7 @@ pub const Worker = struct {
                     // NOTE(gabriel): A timeout behaves like a yield.
                     if (Instant.now().order(task.timeout.timeout) != .lt) {
                         CallStack.suspendCurrent(false);
-                        task.call_stack = self.call_stack.swapCurrent();
+                        task.call_stack = self.call_stack.replaceCurrent();
                         CallStack.resumeCurrent();
                         task.msg = .{ .tag = .task_to_worker };
                         self.local_queue.push(futex, task);
@@ -1269,7 +1269,7 @@ pub const Worker = struct {
                     }
 
                     CallStack.suspendCurrent(true);
-                    task.call_stack = self.call_stack.swapCurrent();
+                    task.call_stack = self.call_stack.replaceCurrent();
                     CallStack.resumeCurrent();
                     task.msg = .{ .tag = .task_sleep };
                     debug.assert(!task.enqueued);
@@ -1281,7 +1281,7 @@ pub const Worker = struct {
                     if (Instant.now().order(task.timeout.timeout) != .lt) {
                         task.wait_state.timed_out.* = true;
                         CallStack.suspendCurrent(false);
-                        task.call_stack = self.call_stack.swapCurrent();
+                        task.call_stack = self.call_stack.replaceCurrent();
                         CallStack.resumeCurrent();
                         task.msg = .{ .tag = .task_to_worker };
                         self.local_queue.push(futex, task);
@@ -1292,7 +1292,7 @@ pub const Worker = struct {
                     if (task.wait_state.value.load(.acquire) != task.wait_state.expect) {
                         task.wait_state.timed_out.* = false;
                         CallStack.suspendCurrent(false);
-                        task.call_stack = self.call_stack.swapCurrent();
+                        task.call_stack = self.call_stack.replaceCurrent();
                         CallStack.resumeCurrent();
                         task.msg = .{ .tag = .task_to_worker };
                         self.local_queue.push(futex, task);
@@ -1300,7 +1300,7 @@ pub const Worker = struct {
                     }
 
                     CallStack.suspendCurrent(true);
-                    task.call_stack = self.call_stack.swapCurrent();
+                    task.call_stack = self.call_stack.replaceCurrent();
                     CallStack.resumeCurrent();
                     task.msg = .{ .tag = .task_wait };
                     debug.assert(!task.enqueued);

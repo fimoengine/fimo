@@ -120,7 +120,7 @@ pub fn initLocal(allocator: Allocator, iterator: IteratorFn, bin_ptr: *const any
         );
         errdefer owned_module_dir.deinit(allocator);
 
-        const is_current_module = iterator == &pub_modules.exports.ExportIter.fimo_impl_module_export_iterator;
+        const is_current_module = iterator == &pub_modules.exports.ExportIter.fstd__module_export_iter;
         const module_path: ?[*:0]const u8 = if (is_current_module)
             null
         else
@@ -210,12 +210,12 @@ pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
     const iterator = if (comptime builtin.os.tag == .windows)
         windows.kernel32.GetProcAddress(
             raw_handle,
-            "fimo_impl_module_export_iterator",
+            "fstd__module_export_iter",
         ) orelse return error.InvalidModule
     else
         std.c.dlsym(
             raw_handle,
-            "fimo_impl_module_export_iterator",
+            "fstd__module_export_iter",
         ) orelse return error.InvalidModule;
     handle.iterator = @ptrCast(@alignCast(iterator));
 

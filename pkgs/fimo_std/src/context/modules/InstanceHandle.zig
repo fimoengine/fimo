@@ -11,15 +11,17 @@ const pub_modules = @import("../../modules.zig");
 const paths = @import("../../paths.zig");
 const PathBuffer = paths.PathBuffer;
 const pub_tasks = @import("../../tasks.zig");
-const EnqueuedFuture = pub_tasks.EnqueuedFuture;
+const OpaqueFuture = pub_tasks.OpaqueFuture;
 const FSMFuture = pub_tasks.FSMFuture;
 const Fallible = pub_tasks.Fallible;
+const utils = @import("../../utils.zig");
+const SliceConst = utils.SliceConst;
 const Version = @import("../../Version.zig");
 const modules = @import("../modules.zig");
 const RefCount = @import("../RefCount.zig");
 const tasks = @import("../tasks.zig");
 const tracing = @import("../tracing.zig");
-const LoadingSet = @import("LoadingSet.zig");
+const Loader = @import("Loader.zig");
 const ModuleHandle = @import("ModuleHandle.zig");
 const SymbolRef = @import("SymbolRef.zig");
 
@@ -27,7 +29,7 @@ const Self = @This();
 
 inner: Inner,
 type: InstanceType,
-info: pub_modules.Info,
+handle: pub_modules.Handle.Inner,
 ref_count: RefCount = .{},
 
 pub const InstanceType = enum { regular, root };
@@ -35,7 +37,7 @@ pub const InstanceType = enum { regular, root };
 pub const DependencyType = enum { static, dynamic };
 
 pub const InstanceDependency = struct {
-    instance: *const Self,
+    instance: *Self,
     type: DependencyType,
 };
 
@@ -43,13 +45,16 @@ pub const Symbol = struct {
     version: Version,
     symbol: *const anyopaque,
     dtor: ?*const fn (
-        ctx: *const pub_modules.OpaqueInstance,
+        ctx: *pub_modules.OpaqueInstance,
+        waker: pub_tasks.Waker,
         symbol: *anyopaque,
-    ) callconv(.c) void,
+    ) callconv(.c) bool,
 
-    fn destroySymbol(self: *const Symbol, ctx: *const pub_modules.OpaqueInstance) void {
+    fn destroySymbol(self: *const Symbol, ctx: *pub_modules.OpaqueInstance) void {
         if (self.dtor) |dtor| {
-            dtor(ctx, @constCast(self.symbol));
+            if (!dtor(ctx, undefined, @constCast(self.symbol))) {
+                @panic("TODO");
+            }
         }
     }
 };
@@ -57,15 +62,15 @@ pub const Symbol = struct {
 pub const Parameter = struct {
     inner: Data,
     owner: *Self,
-    read_group: pub_modules.ParameterAccessGroup,
-    write_group: pub_modules.ParameterAccessGroup,
-    proxy: pub_modules.OpaqueParameter,
+    read_group: pub_modules.ParamAccessGroup,
+    write_group: pub_modules.ParamAccessGroup,
+    proxy: pub_modules.OpaqueParam.Inner,
     read_fn: *const fn (
-        data: pub_modules.OpaqueParameterData,
+        data: pub_modules.OpaqueParamData,
         value: *anyopaque,
     ) callconv(.c) void,
     write_fn: *const fn (
-        data: pub_modules.OpaqueParameterData,
+        data: pub_modules.OpaqueParamData,
         value: *const anyopaque,
     ) callconv(.c) void,
 
@@ -81,7 +86,7 @@ pub const Parameter = struct {
             i64: std.atomic.Value(i64),
         },
 
-        fn @"type"(self: *const @This()) pub_modules.ParameterType {
+        fn tag(self: *const @This()) pub_modules.ParamTag {
             return switch (self.value) {
                 .u8 => .u8,
                 .u16 => .u16,
@@ -120,7 +125,7 @@ pub const Parameter = struct {
             }
         }
 
-        fn asProxyParameter(self: *@This()) pub_modules.OpaqueParameterData {
+        fn asProxyParameter(self: *@This()) pub_modules.OpaqueParamData {
             return .{
                 .data = self,
                 .vtable = &param_data_vtable,
@@ -131,23 +136,23 @@ pub const Parameter = struct {
     fn init(
         owner: *Self,
         inner: Data,
-        read_group: pub_modules.ParameterAccessGroup,
-        write_group: pub_modules.ParameterAccessGroup,
+        read_group: pub_modules.ParamAccessGroup,
+        write_group: pub_modules.ParamAccessGroup,
         read_fn: ?*const fn (
-            data: pub_modules.OpaqueParameterData,
+            data: pub_modules.OpaqueParamData,
             value: *anyopaque,
         ) callconv(.c) void,
         write_fn: ?*const fn (
-            data: pub_modules.OpaqueParameterData,
+            data: pub_modules.OpaqueParamData,
             value: *const anyopaque,
         ) callconv(.c) void,
     ) Allocator.Error!*Parameter {
         const Wrapper = struct {
-            fn read(this: pub_modules.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
+            fn read(this: pub_modules.OpaqueParamData, value: *anyopaque) callconv(.c) void {
                 const self: *Data = @ptrCast(@alignCast(this.data));
                 self.readTo(value);
             }
-            fn write(this: pub_modules.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
+            fn write(this: pub_modules.OpaqueParamData, value: *const anyopaque) callconv(.c) void {
                 const self: *Data = @ptrCast(@alignCast(this.data));
                 self.writeFrom(value);
             }
@@ -159,17 +164,15 @@ pub const Parameter = struct {
             .owner = owner,
             .read_group = read_group,
             .write_group = write_group,
-            .proxy = .{
-                .vtable = param_vtable,
-            },
+            .proxy = param_inner,
             .read_fn = read_fn orelse &Wrapper.read,
             .write_fn = write_fn orelse &Wrapper.write,
         };
         return p;
     }
 
-    pub fn checkType(self: *const Parameter, ty: pub_modules.ParameterType) !void {
-        if (!(self.inner.type() == ty)) return error.InvalidParameterType;
+    pub fn checkTag(self: *const Parameter, ty: pub_modules.ParamTag) !void {
+        if (!(self.inner.tag() == ty)) return error.InvalidParameterTag;
     }
 
     pub fn checkReadPublic(self: *const Parameter) !void {
@@ -181,21 +184,21 @@ pub const Parameter = struct {
     }
 
     fn checkReadDependency(self: *const Parameter, reader: *const Inner) !void {
-        const min_permission = pub_modules.ParameterAccessGroup.dependency;
+        const min_permission: pub_modules.ParamAccessGroup = .dependency;
         if (@intFromEnum(self.read_group) > @intFromEnum(min_permission)) return error.NotPermitted;
-        const owner_name = std.mem.span(self.owner.info.name);
+        const owner_name = self.owner.handle.name.intoSliceOrEmpty();
         if (!reader.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
     fn checkWriteDependency(self: *const Parameter, writer: *const Inner) !void {
-        const min_permission = pub_modules.ParameterAccessGroup.dependency;
+        const min_permission: pub_modules.ParamAccessGroup = .dependency;
         if (@intFromEnum(self.write_group) > @intFromEnum(min_permission)) return error.NotPermitted;
-        const owner_name = std.mem.span(self.owner.info.name);
+        const owner_name = self.owner.handle.name.intoSliceOrEmpty();
         if (!writer.dependencies.contains(owner_name)) return error.NotADependency;
     }
 
-    pub fn @"type"(self: *const Parameter) pub_modules.ParameterType {
-        return self.inner.type();
+    pub fn tag(self: *const Parameter) pub_modules.ParamTag {
+        return self.inner.tag();
     }
 
     pub fn readTo(self: *const Parameter, value: *anyopaque) void {
@@ -218,7 +221,7 @@ pub const Inner = struct {
     unload_waiter: ?pub_tasks.Waker = null,
     handle: ?*ModuleHandle = null,
     @"export": ?*const pub_modules.Export = null,
-    instance: ?*const pub_modules.OpaqueInstance = null,
+    instance: ?*pub_modules.OpaqueInstance.Inner = null,
     string_cache: std.StringArrayHashMapUnmanaged(void) = .{},
     symbols: std.ArrayHashMapUnmanaged(SymbolRef.Id, Symbol, SymbolRef.Id.HashContext, false) = .{},
     parameters: std.StringArrayHashMapUnmanaged(*Parameter) = .{},
@@ -310,7 +313,7 @@ pub const Inner = struct {
             .name = name,
             .namespace = namespace,
         }) orelse return null;
-        if (!sym.version.isCompatibleWith(version)) return null;
+        if (!sym.version.sattisfies(version)) return null;
         return sym;
     }
 
@@ -360,7 +363,7 @@ pub const Inner = struct {
         if (self.isDetached() or other.isDetached()) return error.Detached;
 
         const handle = Self.fromInnerPtr(other);
-        const name = std.mem.span(handle.info.name);
+        const name = handle.handle.name.intoSliceOrEmpty();
         const dep = InstanceDependency{
             .instance = handle,
             .type = @"type",
@@ -380,7 +383,7 @@ pub const Inner = struct {
         std.debug.assert(!other.isDetached());
 
         const handle = Self.fromInnerPtr(other);
-        const name = std.mem.span(handle.info.name);
+        const name = handle.handle.name.intoSliceOrEmpty();
         if (!self.dependencies.swapRemove(name)) return error.NotFound;
         other.dependents_count -= 1;
         other.unblockUnload();
@@ -409,10 +412,14 @@ pub const Inner = struct {
         std.debug.assert(self.state == .started);
         self.is_detached = true;
         if (self.@"export") |@"export"| {
-            if (@"export".getStopEventModifier()) |event| {
+            const stop_event = @"export".eventStop();
+            if (stop_event.poll) |poll| {
                 self.unlock();
                 modules.mutex.unlock();
-                event.on_event(self.instance.?);
+                // TODO: Implement
+                while (!poll(@ptrCast(self.instance.?), undefined)) {
+                    @panic("TODO");
+                }
                 modules.mutex.lock();
                 self.mutex.lock();
             }
@@ -430,13 +437,20 @@ pub const Inner = struct {
         self.is_detached = true;
         if (self.@"export") |exp| {
             if (self.state == .init) {
-                if (exp.getInstanceStateModifier()) |state|
-                    state.deinit(instance, @constCast(instance.state_));
+                const deinit_event = exp.eventDeinit();
+                if (deinit_event.poll) |poll| {
+                    // TODO: Implement
+                    while (!poll(@ptrCast(instance), undefined, instance.state)) {
+                        @panic("TODO");
+                    }
+                }
             }
-            exp.deinit();
+
+            const deinit_export_event = exp.eventDeinitExport();
+            if (deinit_export_event.deinit) |f| f(deinit_export_event.data);
         }
 
-        for (self.symbols.values()) |sym| sym.destroySymbol(instance);
+        for (self.symbols.values()) |sym| sym.destroySymbol(@ptrCast(instance));
 
         self.symbols.clearRetainingCapacity();
         self.parameters.clearRetainingCapacity();
@@ -473,13 +487,18 @@ fn init(
             .@"export" = @"export",
         },
         .type = @"type",
-        .info = .{
-            .name = (try allocator.dupeZ(u8, name)).ptr,
-            .description = if (description) |str| (try allocator.dupeZ(u8, str)).ptr else null,
-            .author = if (author) |str| (try allocator.dupeZ(u8, str)).ptr else null,
-            .license = if (license) |str| (try allocator.dupeZ(u8, str)).ptr else null,
-            .module_path = if (module_path) |str| (try allocator.dupeZ(u8, str)).ptr else null,
-            .vtable = info_vtable,
+        .handle = .{
+            .name = .fromSlice(try allocator.dupe(u8, name)),
+            .description = .fromSlice(if (description) |str| try allocator.dupe(u8, str) else null),
+            .author = .fromSlice(if (author) |str| try allocator.dupe(u8, str) else null),
+            .license = .fromSlice(if (license) |str| try allocator.dupe(u8, str) else null),
+            .module_path = .fromSlice(if (module_path) |str| try allocator.dupe(u8, str) else null),
+            .ref = &HandleImpl.ref,
+            .unref = &HandleImpl.unref,
+            .mark_unloadable = &HandleImpl.markUnloadable,
+            .is_loaded = &HandleImpl.isLoaded,
+            .try_ref_instance_strong = &HandleImpl.tryRefInstanceStrong,
+            .unref_instance_strong = &HandleImpl.unrefInstanceStrong,
         },
     };
     // Move the new state of the arena into the allocated handle.
@@ -490,75 +509,64 @@ fn init(
 }
 
 pub fn initRootInstance(name: []const u8) !*pub_modules.RootInstance {
-    const iterator = &pub_modules.exports.ExportIter.fimo_impl_module_export_iterator;
+    const iterator = &pub_modules.exports.ExportIter.fstd__module_export_iter;
     const handle = try ModuleHandle.initLocal(modules.allocator, iterator, iterator);
     errdefer handle.unref();
 
     const instance_handle = try Self.init(name, null, null, null, null, handle, null, .root);
     errdefer instance_handle.unref();
 
-    const instance = try instance_handle.inner.arena.allocator().create(pub_modules.RootInstance);
-    comptime {
-        std.debug.assert(@sizeOf(pub_modules.RootInstance) == @sizeOf(pub_modules.OpaqueInstance));
-        std.debug.assert(@alignOf(pub_modules.RootInstance) == @alignOf(pub_modules.OpaqueInstance));
-        std.debug.assert(@offsetOf(pub_modules.RootInstance, "instance") == 0);
-    }
+    const instance = try instance_handle.inner.arena.allocator().create(pub_modules.OpaqueInstance.Inner);
     instance.* = .{
-        .instance = .{
-            .vtable = &instance_vtable,
-            .parameters_ = null,
-            .resources_ = null,
-            .imports_ = null,
-            .exports_ = null,
-            .info = &instance_handle.info,
-            .handle = &context.handle,
-            .state_ = null,
-        },
+        .vtable = &instance_vtable,
+        .parameters = null,
+        .resources = null,
+        .imports = null,
+        .exports = null,
+        .handle = @ptrCast(&instance_handle.handle),
+        .ctx_handle = @ptrCast(&context.handle),
+        .state = undefined,
     };
     instance_handle.inner.state = .started;
-    instance_handle.inner.instance = &instance.instance;
-    return instance;
+    instance_handle.inner.instance = instance;
+    return @ptrCast(instance);
 }
 
-pub fn fromInstancePtr(instance: *const pub_modules.OpaqueInstance) *const Self {
-    std.debug.assert(instance.vtable == &instance_vtable);
-    return fromInfoPtr(instance.info);
+pub fn fromInstancePtr(instance: *pub_modules.OpaqueInstance) *Self {
+    return fromHandlePtr(@ptrCast(@alignCast(instance.handle())));
 }
 
-pub fn fromInfoPtr(info: *const pub_modules.Info) *const Self {
-    return @fieldParentPtr("info", @constCast(info));
+pub fn fromHandlePtr(handle: *pub_modules.Handle.Inner) *Self {
+    return @fieldParentPtr("handle", handle);
 }
 
-pub fn fromInnerPtr(inner: *Inner) *const Self {
+pub fn fromInnerPtr(inner: *Inner) *Self {
     return @fieldParentPtr("inner", inner);
 }
 
-fn ref(self: *const Self) void {
-    const this: *Self = @constCast(self);
-    this.ref_count.ref();
+fn ref(self: *Self) void {
+    self.ref_count.ref();
 }
 
-fn unref(self: *const Self) void {
-    const this: *Self = @constCast(self);
-    if (this.ref_count.unref() == .noop) return;
+fn unref(self: *Self) void {
+    if (self.ref_count.unref() == .noop) return;
 
-    const inner = this.lock();
+    const inner = self.lock();
     if (!inner.isDetached()) inner.detach();
     inner.arena.deinit();
     modules.instance_count.decrease();
 }
 
-pub fn lock(self: *const Self) *Inner {
-    const this: *Self = @constCast(self);
-    this.inner.mutex.lock();
-    return &this.inner;
+pub fn lock(self: *Self) *Inner {
+    self.inner.mutex.lock();
+    return &self.inner;
 }
 
-fn addNamespace(self: *const Self, namespace: []const u8) !void {
+fn addNamespace(self: *Self, namespace: []const u8) !void {
     tracing.logTrace(
         @src(),
         "adding namespace to instance, instance='{s}', namespace='{s}'",
-        .{ self.info.name, namespace },
+        .{ self.handle.name.intoSliceOrEmpty(), namespace },
     );
 
     if (std.mem.eql(u8, namespace, modules.global_namespace)) return error.NotPermitted;
@@ -576,11 +584,11 @@ fn addNamespace(self: *const Self, namespace: []const u8) !void {
     try inner.addNamespace(namespace, .dynamic);
 }
 
-fn removeNamespace(self: *const Self, namespace: []const u8) !void {
+fn removeNamespace(self: *Self, namespace: []const u8) !void {
     tracing.logTrace(
         @src(),
         "removing namespace from instance, instance='{s}', namespace='{s}'",
-        .{ self.info.name, namespace },
+        .{ self.handle.name.intoSliceOrEmpty(), namespace },
     );
 
     if (std.mem.eql(u8, namespace, modules.global_namespace)) return error.NotPermitted;
@@ -598,14 +606,14 @@ fn removeNamespace(self: *const Self, namespace: []const u8) !void {
     modules.unrefNamespace(namespace);
 }
 
-fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
+fn addDependency(self: *Self, handle: *pub_modules.Handle) !void {
     tracing.logTrace(
         @src(),
         "adding dependency to instance, instance='{s}', other='{s}'",
-        .{ self.info.name, info.name },
+        .{ self.handle.name.intoSliceOrEmpty(), handle.name() },
     );
 
-    const info_handle = Self.fromInfoPtr(info);
+    const info_handle = Self.fromHandlePtr(@ptrCast(@alignCast(handle)));
     if (self == info_handle) return error.CyclicDependency;
 
     modules.mutex.lock();
@@ -620,14 +628,14 @@ fn addDependency(self: *const Self, info: *const pub_modules.Info) !void {
     try modules.linkInstances(inner, info_inner);
 }
 
-fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
+fn removeDependency(self: *Self, handle: *pub_modules.Handle) !void {
     tracing.logTrace(
         @src(),
         "removing dependency from instance, instance='{s}', other='{s}'",
-        .{ self.info.name, info.name },
+        .{ self.handle.name.intoSliceOrEmpty(), handle.name() },
     );
 
-    const info_handle = Self.fromInfoPtr(info);
+    const info_handle = Self.fromHandlePtr(@ptrCast(@alignCast(handle)));
     if (self == info_handle) return error.NotADependency;
 
     modules.mutex.lock();
@@ -642,11 +650,11 @@ fn removeDependency(self: *const Self, info: *const pub_modules.Info) !void {
     try modules.unlinkInstances(inner, info_inner);
 }
 
-fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
+fn loadSymbol(self: *Self, name: []const u8, namespace: []const u8, version: Version) !*const anyopaque {
     tracing.logTrace(
         @src(),
         "loading symbol, instance='{s}', name='{s}', namespace='{s}', version='{f}'",
-        .{ self.info.name, name, namespace, version },
+        .{ self.handle.name.intoSliceOrEmpty(), name, namespace, version },
     );
     modules.mutex.lock();
     defer modules.mutex.unlock();
@@ -679,17 +687,11 @@ fn loadSymbol(self: *const Self, name: []const u8, namespace: []const u8, versio
     return symbol.symbol;
 }
 
-fn readParameter(
-    self: *const Self,
-    value: *anyopaque,
-    @"type": pub_modules.ParameterType,
-    module: []const u8,
-    parameter: []const u8,
-) !void {
+fn readParameter(self: *Self, value: *anyopaque, tag: pub_modules.ParamTag, module: []const u8, parameter: []const u8) !void {
     tracing.logTrace(
         @src(),
-        "reading dependency parameter, reader='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
-        .{ self.info.name, value, @tagName(@"type"), module, parameter },
+        "reading dependency parameter, reader='{s}', value='{*}', tag='{t}', module='{s}', parameter='{s}'",
+        .{ self.handle.name.intoSliceOrEmpty(), value, tag, module, parameter },
     );
     const inner = self.lock();
     defer inner.unlock();
@@ -703,17 +705,11 @@ fn readParameter(
     param.readTo(value);
 }
 
-fn writeParameter(
-    self: *const Self,
-    value: *const anyopaque,
-    @"type": pub_modules.ParameterType,
-    module: []const u8,
-    parameter: []const u8,
-) !void {
+fn writeParameter(self: *Self, value: *const anyopaque, tag: pub_modules.ParamTag, module: []const u8, parameter: []const u8) !void {
     tracing.logTrace(
         @src(),
-        "writing dependency parameter, writer='{s}', value='{*}', type='{s}', module='{s}', parameter='{s}'",
-        .{ self.info.name, value, @tagName(@"type"), module, parameter },
+        "writing dependency parameter, writer='{s}', value='{*}', tag='{t}', module='{s}', parameter='{s}'",
+        .{ self.handle.name.intoSliceOrEmpty(), value, tag, module, parameter },
     );
     const inner = self.lock();
     defer inner.unlock();
@@ -732,22 +728,22 @@ fn writeParameter(
 // ----------------------------------------------------
 
 const ParamVTableImpl = struct {
-    fn @"type"(data: *const pub_modules.OpaqueParameter) callconv(.c) pub_modules.ParameterType {
+    fn tag(data: *const pub_modules.OpaqueParam.Inner) callconv(.c) pub_modules.ParamTag {
         const self: *const Parameter = @fieldParentPtr("proxy", data);
-        return self.type();
+        return self.tag();
     }
-    fn read(data: *const pub_modules.OpaqueParameter, value: *anyopaque) callconv(.c) void {
+    fn read(data: *const pub_modules.OpaqueParam.Inner, value: *anyopaque) callconv(.c) void {
         const self: *const Parameter = @fieldParentPtr("proxy", data);
         return self.readTo(value);
     }
-    fn write(data: *pub_modules.OpaqueParameter, value: *const anyopaque) callconv(.c) void {
+    fn write(data: *pub_modules.OpaqueParam.Inner, value: *const anyopaque) callconv(.c) void {
         const self: *Parameter = @fieldParentPtr("proxy", data);
         return self.writeFrom(value);
     }
 };
 
-const param_vtable = pub_modules.OpaqueParameter.VTable{
-    .type = &ParamVTableImpl.type,
+const param_inner = pub_modules.OpaqueParam.Inner{
+    .tag = &ParamVTableImpl.tag,
     .read = &ParamVTableImpl.read,
     .write = &ParamVTableImpl.write,
 };
@@ -757,9 +753,9 @@ const param_vtable = pub_modules.OpaqueParameter.VTable{
 // ----------------------------------------------------
 
 const ParamDataVTableImpl = struct {
-    fn @"type"(data: *anyopaque) callconv(.c) pub_modules.ParameterType {
+    fn tag(data: *anyopaque) callconv(.c) pub_modules.ParamTag {
         const self: *Parameter.Data = @ptrCast(@alignCast(data));
-        return self.type();
+        return self.tag();
     }
     fn read(data: *anyopaque, value: *anyopaque) callconv(.c) void {
         const self: *Parameter.Data = @ptrCast(@alignCast(data));
@@ -771,8 +767,8 @@ const ParamDataVTableImpl = struct {
     }
 };
 
-const param_data_vtable = pub_modules.OpaqueParameterData.VTable{
-    .type = &ParamDataVTableImpl.type,
+const param_data_vtable = pub_modules.OpaqueParamData.VTable{
+    .tag = &ParamDataVTableImpl.tag,
     .read = &ParamDataVTableImpl.read,
     .write = &ParamDataVTableImpl.write,
 };
@@ -782,13 +778,17 @@ const param_data_vtable = pub_modules.OpaqueParameterData.VTable{
 // ----------------------------------------------------
 
 const EnqueueUnloadOp = FSMFuture(struct {
-    handle: *const Self,
+    handle: *Self,
     ret: void = undefined,
 
     pub const __no_abort = true;
 
-    fn init(handle: *const Self) !void {
-        tracing.logTrace(@src(), "enqueueing unload of instance, instance='{s}'", .{handle.info.name});
+    fn init(handle: *Self) !void {
+        tracing.logTrace(
+            @src(),
+            "enqueueing unload of instance, instance='{s}'",
+            .{handle.handle.name.intoSliceOrEmpty()},
+        );
         handle.ref();
 
         const f = EnqueueUnloadOp.init(@This(){
@@ -813,7 +813,7 @@ const EnqueueUnloadOp = FSMFuture(struct {
         tracing.logTrace(
             @src(),
             "attempting to unload instance, instance=`{s}`",
-            .{self.handle.info.name},
+            .{self.handle.handle.name.intoSliceOrEmpty()},
         );
 
         const inner = self.handle.lock();
@@ -823,13 +823,17 @@ const EnqueueUnloadOp = FSMFuture(struct {
                 tracing.logTrace(
                     @src(),
                     "skipping unload, already unloaded, instance=`{s}`",
-                    .{self.handle.info.name},
+                    .{self.handle.handle.name.intoSliceOrEmpty()},
                 );
                 self.ret = {};
                 return .ret;
             },
             .wait => {
-                tracing.logTrace(@src(), "unload blocked, instance=`{s}`", .{self.handle.info.name});
+                tracing.logTrace(
+                    @src(),
+                    "unload blocked, instance=`{s}`",
+                    .{self.handle.handle.name.intoSliceOrEmpty()},
+                );
                 return .yield;
             },
             .unload => return .next,
@@ -847,7 +851,11 @@ const EnqueueUnloadOp = FSMFuture(struct {
         modules.mutex.lock();
         defer modules.mutex.unlock();
 
-        tracing.logTrace(@src(), "unloading instance, instance=`{s}`", .{self.handle.info.name});
+        tracing.logTrace(
+            @src(),
+            "unloading instance, instance=`{s}`",
+            .{self.handle.handle.name.intoSliceOrEmpty()},
+        );
         const inner = self.handle.lock();
         modules.removeInstance(inner) catch |err| @panic(@errorName(err));
         inner.stop();
@@ -857,52 +865,43 @@ const EnqueueUnloadOp = FSMFuture(struct {
 });
 
 // ----------------------------------------------------
-// Info VTable
+// Handle implementation
 // ----------------------------------------------------
 
-const InfoVTableImpl = struct {
-    fn ref(info: *const pub_modules.Info) callconv(.c) void {
-        const x = Self.fromInfoPtr(info);
+const HandleImpl = struct {
+    fn ref(handle: *pub_modules.Handle.Inner) callconv(.c) void {
+        const x = fromHandlePtr(handle);
         x.ref();
     }
-    fn unref(info: *const pub_modules.Info) callconv(.c) void {
-        const x = Self.fromInfoPtr(info);
+    fn unref(handle: *pub_modules.Handle.Inner) callconv(.c) void {
+        const x = fromHandlePtr(handle);
         x.unref();
     }
-    fn markUnloadable(info: *const pub_modules.Info) callconv(.c) void {
-        const x = Self.fromInfoPtr(info);
+    fn markUnloadable(handle: *pub_modules.Handle.Inner) callconv(.c) void {
+        const x = fromHandlePtr(handle);
         const inner = x.lock();
         defer inner.unlock();
         inner.enqueueUnload() catch |e| @panic(@errorName(e));
     }
-    fn isLoaded(info: *const pub_modules.Info) callconv(.c) bool {
-        const x = Self.fromInfoPtr(info);
+    fn isLoaded(handle: *pub_modules.Handle.Inner) callconv(.c) bool {
+        const x = fromHandlePtr(handle);
         const inner = x.lock();
         defer inner.unlock();
         return !inner.isDetached();
     }
-    fn tryRefInstanceStrong(info: *const pub_modules.Info) callconv(.c) bool {
-        const x = Self.fromInfoPtr(info);
+    fn tryRefInstanceStrong(handle: *pub_modules.Handle.Inner) callconv(.c) bool {
+        const x = fromHandlePtr(handle);
         const inner = x.lock();
         defer inner.unlock();
         inner.refStrong() catch return false;
         return true;
     }
-    fn unrefInstanceStrong(info: *const pub_modules.Info) callconv(.c) void {
-        const x = Self.fromInfoPtr(info);
+    fn unrefInstanceStrong(handle: *pub_modules.Handle.Inner) callconv(.c) void {
+        const x = fromHandlePtr(handle);
         const inner = x.lock();
         defer inner.unlock();
         inner.unrefStrong();
     }
-};
-
-const info_vtable = pub_modules.Info.VTable{
-    .ref = &InfoVTableImpl.ref,
-    .unref = &InfoVTableImpl.unref,
-    .mark_unloadable = &InfoVTableImpl.markUnloadable,
-    .is_loaded = &InfoVTableImpl.isLoaded,
-    .try_ref_instance_strong = &InfoVTableImpl.tryRefInstanceStrong,
-    .unref_instance_strong = &InfoVTableImpl.unrefInstanceStrong,
 };
 
 // ----------------------------------------------------
@@ -922,25 +921,23 @@ pub const InitExportedOp = FSMFuture(struct {
     ///     1. wait for state future to complete
     ///     2. goto 2
     /// 2:
-    ///     1. init static exports
-    ///     2. init dynamic exports
-    ///     3. goto 3
-    /// 3:
-    ///     1. if (no dynamic symbol left) return
-    ///     2. init export future
-    /// 4:
-    ///     1. wait for export future
+    ///     1. init exports array
     ///     2. goto 3
-    set: *pub_modules.LoadingSet,
+    /// 3:
+    ///     1. if (no export left) return
+    ///     2. poll next export
+    ///         2.1. if (error) goto 4
+    /// 4:
+    ///     1. poll deinit in reverse
+    loader: *pub_modules.Loader,
     @"export": *const pub_modules.Export,
     handle: *ModuleHandle,
     instance_handle: *Self = undefined,
     inner: *Inner = undefined,
-    instance: *pub_modules.OpaqueInstance = undefined,
-    state_future: EnqueuedFuture(Fallible(?*anyopaque)) = undefined,
-    dyn_export_index: usize = 0,
+    instance: *pub_modules.OpaqueInstance.Inner = undefined,
+    init_event: pub_modules.exports.events.Init = undefined,
+    export_index: usize = 0,
     exports: []*const anyopaque = undefined,
-    dyn_export_future: EnqueuedFuture(Fallible(*anyopaque)) = undefined,
     ret: Error!*pub_modules.OpaqueInstance = undefined,
 
     pub const Error = anyerror;
@@ -959,10 +956,10 @@ pub const InitExportedOp = FSMFuture(struct {
         _ = waker;
 
         const instance_handle = try Self.init(
-            self.@"export".getName(),
-            self.@"export".getDescription(),
-            self.@"export".getAuthor(),
-            self.@"export".getLicense(),
+            self.@"export".name.intoSliceOrEmpty(),
+            self.@"export".description.intoSlice(),
+            self.@"export".author.intoSlice(),
+            self.@"export".license.intoSlice(),
             self.handle.path.raw,
             self.handle,
             self.@"export",
@@ -979,28 +976,29 @@ pub const InitExportedOp = FSMFuture(struct {
         inner.refStrong() catch unreachable;
         errdefer inner.unrefStrong();
 
-        const instance = try instance_handle.inner.arena.allocator().create(pub_modules.OpaqueInstance);
+        const instance = try instance_handle.inner.arena
+            .allocator().create(pub_modules.OpaqueInstance.Inner);
         instance.* = .{
             .vtable = &instance_vtable,
-            .parameters_ = null,
-            .resources_ = null,
-            .imports_ = null,
-            .exports_ = null,
-            .info = &instance_handle.info,
-            .handle = &context.handle,
-            .state_ = null,
+            .parameters = null,
+            .resources = null,
+            .imports = null,
+            .exports = null,
+            .handle = @ptrCast(&instance_handle.handle),
+            .ctx_handle = &context.handle,
+            .state = undefined,
         };
         inner.instance = instance;
         self.instance = instance;
         const allocator = inner.arena.allocator();
 
         // Init parameters.
-        const exp_parameters = self.@"export".getParameters();
-        const parameters = try allocator.alloc(*pub_modules.OpaqueParameter, exp_parameters.len);
-        instance.parameters_ = @ptrCast(parameters.ptr);
+        const exp_parameters = self.@"export".parameters.intoSliceOrEmpty();
+        const parameters = try allocator.alloc(*pub_modules.OpaqueParam, exp_parameters.len);
+        instance.parameters = @ptrCast(parameters.ptr);
         for (exp_parameters, parameters) |src, *dst| {
             const data = Parameter.Data{
-                .value = switch (src.type) {
+                .value = switch (src.tag) {
                     .u8 => .{ .u8 = std.atomic.Value(u8).init(src.default_value.u8) },
                     .u16 => .{ .u16 = std.atomic.Value(u16).init(src.default_value.u16) },
                     .u32 => .{ .u32 = std.atomic.Value(u32).init(src.default_value.u32) },
@@ -1009,7 +1007,7 @@ pub const InitExportedOp = FSMFuture(struct {
                     .i16 => .{ .i16 = std.atomic.Value(i16).init(src.default_value.i16) },
                     .i32 => .{ .i32 = std.atomic.Value(i32).init(src.default_value.i32) },
                     .i64 => .{ .i64 = std.atomic.Value(i64).init(src.default_value.i64) },
-                    else => return error.InvalidParameterType,
+                    else => return error.InvalidParameterTag,
                 },
             };
             var param: *Parameter = try Parameter.init(
@@ -1020,38 +1018,38 @@ pub const InitExportedOp = FSMFuture(struct {
                 src.read,
                 src.write,
             );
-            try inner.addParameter(std.mem.span(src.name), param);
-            dst.* = &param.proxy;
+            try inner.addParameter(src.name.intoSliceOrEmpty(), param);
+            dst.* = @ptrCast(&param.proxy);
         }
 
         // Init resources.
-        const exp_resources = self.@"export".getResources();
+        const exp_resources = self.@"export".resources.intoSliceOrEmpty();
         const resources = try allocator.alloc(paths.compat.Path, exp_resources.len);
-        instance.resources_ = @ptrCast(resources.ptr);
+        instance.resources = @ptrCast(resources.ptr);
         for (exp_resources, resources) |src, *dst| {
             var buf = PathBuffer{};
             try buf.pushPath(inner.arena.allocator(), self.handle.path.asPath());
-            try buf.pushString(inner.arena.allocator(), std.mem.span(src.path));
+            try buf.pushString(inner.arena.allocator(), src.intoSliceOrEmpty());
             // Append a null-terminator to ensure that the path can be passed to c interfaces.
             try buf.buffer.append(inner.arena.allocator(), 0);
             dst.* = buf.asPath().intoC();
-            dst.length -= 1;
+            dst.len -= 1;
         }
 
         // Init namespaces.
-        for (self.@"export".getNamespaceImports()) |imp| {
-            const name = std.mem.span(imp.name);
+        for (self.@"export".namespaces.intoSliceOrEmpty()) |imp| {
+            const name = imp.intoSliceOrEmpty();
             if (modules.getNamespace(name) == null) return error.NotFound;
             try inner.addNamespace(name, .static);
         }
 
         // Init imports.
-        const exp_imports = self.@"export".getSymbolImports();
+        const exp_imports = self.@"export".imports.intoSliceOrEmpty();
         const imports = try allocator.alloc(*const anyopaque, exp_imports.len);
-        instance.imports_ = @ptrCast(imports.ptr);
+        instance.imports = @ptrCast(imports.ptr);
         for (exp_imports, imports) |src, *dst| {
-            const src_name = std.mem.span(src.name);
-            const src_namespace = std.mem.span(src.namespace);
+            const src_name = src.name.intoSliceOrEmpty();
+            const src_namespace = src.namespace.intoSliceOrEmpty();
             const src_version = Version.initC(src.version);
             const sym = modules.getSymbolCompatible(
                 src_name,
@@ -1074,10 +1072,11 @@ pub const InitExportedOp = FSMFuture(struct {
         }
 
         // Init instance data.
-        if (self.@"export".getInstanceStateModifier()) |state| {
+        const init_event = self.@"export".eventInit();
+        if (init_event.poll != null) {
+            self.init_event = init_event;
             inner.unlock();
             modules.mutex.unlock();
-            self.state_future = state.init(instance, self.set);
             return .{ .transition = 1 };
         }
         inner.state = .init;
@@ -1091,18 +1090,14 @@ pub const InitExportedOp = FSMFuture(struct {
     }
 
     pub fn __state1(self: *@This(), waker: pub_tasks.Waker) Error!pub_tasks.FSMOp {
-        errdefer self.state_future.deinit();
-        switch (self.state_future.poll(waker)) {
-            .ready => |result| {
-                modules.mutex.lock();
-                _ = self.instance_handle.lock();
-                self.instance.state_ = @ptrCast(try result.unwrap());
-                self.state_future.deinit();
-                self.inner.state = .init;
-                return .next;
-            },
-            .pending => return .yield,
-        }
+        const poll = self.init_event.poll.?;
+        var state: Fallible(*anyopaque) = undefined;
+        if (!poll(@ptrCast(self.instance), self.loader, waker, &state)) return .yield;
+        modules.mutex.lock();
+        _ = self.instance_handle.lock();
+        self.instance.state = try state.unwrap();
+        self.inner.state = .init;
+        return .next;
     }
 
     pub fn __state2(self: *@This(), waker: pub_tasks.Waker) Error!void {
@@ -1111,86 +1106,80 @@ pub const InitExportedOp = FSMFuture(struct {
         const inner = self.inner;
         const allocator = inner.arena.allocator();
 
-        // Init static exports.
-        const exp_exports = @"export".getSymbolExports();
-        const exp_dyn_exports = @"export".getDynamicSymbolExports();
-        const exports = try allocator.alloc(*const anyopaque, exp_exports.len + exp_dyn_exports.len);
+        // Init exports array.
+        const exports = try allocator.alloc(*const anyopaque, @"export".exports.len);
         self.exports = exports;
-        self.instance.exports_ = @ptrCast(exports.ptr);
-        for (exp_exports, exports[0..exp_exports.len]) |src, *dst| {
-            const sym = src.symbol;
-            const src_name = std.mem.span(src.name);
-            const src_namespace = std.mem.span(src.namespace);
-            const src_version = Version.initC(src.version);
-            try inner.addSymbol(src_name, src_namespace, .{
-                .symbol = sym,
-                .version = src_version,
-                .dtor = null,
-            });
-            dst.* = sym;
-        }
+        self.instance.exports = @ptrCast(exports.ptr);
     }
 
     pub fn __state3(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
-        _ = waker;
-        // Check if there is another dynamic export.
-        const exp_dyn_exports = self.@"export".getDynamicSymbolExports();
-        if (self.dyn_export_index >= exp_dyn_exports.len) {
-            self.ret = self.instance;
-            return .ret;
-        }
-
-        // Initialize the future.
-        const src = exp_dyn_exports[self.dyn_export_index];
         self.inner.unlock();
         modules.mutex.unlock();
-        self.dyn_export_future = src.constructor(self.instance);
-        return .next;
-    }
-
-    pub fn __unwind4(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
-        if (reason != .completed) self.dyn_export_future.deinit();
-    }
-
-    pub fn __state4(self: *@This(), waker: pub_tasks.Waker) Error!pub_tasks.FSMOpExt(@This()) {
-        // Wait for the future and jump back to the loop in state 3.
-        switch (self.dyn_export_future.poll(waker)) {
-            .ready => |result| {
-                modules.mutex.lock();
-                _ = self.instance_handle.lock();
-                const sym = try result.unwrap();
-
-                const i = self.dyn_export_index;
-                const src = self.@"export".getDynamicSymbolExports()[i];
-                const dst = &self.exports[i];
-                var skip_dtor = false;
-                errdefer if (!skip_dtor) src.destructor(self.instance, sym);
-
-                const src_name = std.mem.span(src.name);
-                const src_namespace = std.mem.span(src.namespace);
-                const src_version = Version.initC(src.version);
-                try self.inner.addSymbol(src_name, src_namespace, .{
-                    .symbol = sym,
-                    .version = src_version,
-                    .dtor = src.destructor,
-                });
-                skip_dtor = true;
-                dst.* = sym;
-
-                self.dyn_export_future.deinit();
-                self.dyn_export_index += 1;
-                return .{ .transition = 3 };
-            },
-            .pending => return .yield,
+        defer {
+            modules.mutex.lock();
+            _ = self.instance_handle.lock();
         }
+
+        const exports = self.@"export".exports.intoSliceOrEmpty();
+        while (self.export_index < exports.len) : (self.export_index += 1) {
+            const exp = exports[self.export_index];
+            const sym, const dtor = switch (exp.sym_ty) {
+                .static => .{ exp.value.static, null },
+                .dynamic => blk: {
+                    var result: Fallible(*anyopaque) = undefined;
+                    if (!exp.value.dynamic.poll_init(@ptrCast(self.instance), waker, &result)) return .yield;
+                    const value = result.unwrap() catch |err| {
+                        self.ret = err;
+                        return .next;
+                    };
+                    break :blk .{ value, exp.value.dynamic.poll_deinit };
+                },
+                else => unreachable,
+            };
+
+            const exp_name = exp.symbol.name.intoSliceOrEmpty();
+            const exp_namespace = exp.symbol.namespace.intoSliceOrEmpty();
+            const exp_version = Version.initC(exp.symbol.version);
+            self.exports[self.export_index] = sym;
+            self.inner.addSymbol(exp_name, exp_namespace, .{
+                .symbol = sym,
+                .version = exp_version,
+                .dtor = dtor,
+            }) catch |err| {
+                self.ret = err;
+                self.export_index += 1;
+                return .next;
+            };
+        }
+        self.ret = @ptrCast(self.instance);
+        return .ret;
+    }
+
+    pub fn __state4(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
+        self.inner.unlock();
+        modules.mutex.unlock();
+        defer {
+            modules.mutex.lock();
+            _ = self.instance_handle.lock();
+        }
+
+        // TODO
+        _ = waker;
+        const exports = self.@"export".exports.intoSliceOrEmpty();
+        while (self.export_index > 0) : (self.export_index -= 1) {
+            _ = exports;
+            @panic("TODO");
+        }
+        return .ret;
     }
 });
 
 pub const StartInstanceOp = FSMFuture(struct {
     inner: *Inner,
     @"export": *const pub_modules.Export,
-    instance: *const pub_modules.OpaqueInstance,
-    future: pub_tasks.EnqueuedFuture(pub_tasks.Fallible(void)) = undefined,
+    instance: *pub_modules.OpaqueInstance,
+    start_event: pub_modules.exports.events.Start = undefined,
+    future: pub_tasks.OpaqueFuture(pub_tasks.Fallible(void)) = undefined,
     ret: pub_context.Error!void = undefined,
 
     pub const __no_abort = true;
@@ -1212,38 +1201,36 @@ pub const StartInstanceOp = FSMFuture(struct {
         return StartInstanceOp.init(.{
             .inner = inner,
             .@"export" = inner.@"export".?,
-            .instance = inner.instance.?,
+            .instance = @ptrCast(inner.instance.?),
         });
     }
 
     pub fn __state0(self: *@This(), waker: pub_tasks.Waker) pub_tasks.FSMOp {
         _ = waker;
-        if (self.@"export".getStartEventModifier()) |event| {
+        const start_event = self.@"export".eventStart();
+        if (start_event.poll != null) {
             self.inner.unlock();
             modules.mutex.unlock();
-            self.future = event.on_event(self.instance);
+            self.start_event = start_event;
             return .next;
         }
         self.inner.state = .started;
         return .ret;
     }
 
-    pub fn __unwind1(self: *@This(), reason: pub_tasks.FSMUnwindReason) void {
-        _ = reason;
-        self.future.deinit();
-    }
-
     pub fn __state1(self: *@This(), waker: pub_tasks.Waker) pub_context.Error!pub_tasks.FSMOp {
-        switch (self.future.poll(waker)) {
-            .ready => |result| {
-                modules.mutex.lock();
-                self.inner.mutex.lock();
-                try result.unwrap();
-                self.inner.state = .started;
-                return .ret;
-            },
-            .pending => return .yield,
+        var result: AnyResult = undefined;
+        const poll = self.start_event.poll.?;
+        if (!poll(self.instance, waker, &result)) return .yield;
+        modules.mutex.lock();
+        self.inner.mutex.lock();
+
+        if (result.isErr()) {
+            context.setResult(result);
+            return error.OperationFailed;
         }
+        self.inner.state = .started;
+        return .ret;
     }
 });
 
@@ -1252,66 +1239,52 @@ pub const StartInstanceOp = FSMFuture(struct {
 // ----------------------------------------------------
 
 const InstanceVTableImpl = struct {
-    fn ref(ctx: *const pub_modules.OpaqueInstance) callconv(.c) void {
-        const x = Self.fromInstancePtr(ctx);
-        const inner = x.lock();
+    fn ref(ctx: *pub_modules.OpaqueInstance.Inner) callconv(.c) void {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        const inner = self.lock();
         defer inner.unlock();
         inner.refStrong() catch unreachable;
     }
-    fn unref(ctx: *const pub_modules.OpaqueInstance) callconv(.c) void {
-        const x = Self.fromInstancePtr(ctx);
-        const inner = x.lock();
+    fn unref(ctx: *pub_modules.OpaqueInstance.Inner) callconv(.c) void {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        const inner = self.lock();
         defer inner.unlock();
         inner.unrefStrong();
     }
     fn queryNamespace(
-        ctx: *const pub_modules.OpaqueInstance,
-        namespace: [*:0]const u8,
-        has_dependency: *bool,
-        is_static: *bool,
+        ctx: *pub_modules.OpaqueInstance.Inner,
+        ns: SliceConst(u8),
+        dependency: *pub_modules.Dependency,
     ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const namespace_ = std.mem.span(namespace);
+        const self = fromInstancePtr(@ptrCast(ctx));
         tracing.logTrace(
             @src(),
             "querying namespace info, instance='{s}', namespace='{s}'",
-            .{ ctx.info.name, namespace },
+            .{ ctx.handle.name(), ns.intoSliceOrEmpty() },
         );
 
         const inner = self.lock();
         defer inner.unlock();
 
-        if (inner.getNamespace(namespace_)) |info| {
-            has_dependency.* = true;
-            is_static.* = info.* == .static;
+        if (inner.getNamespace(ns.intoSliceOrEmpty())) |info| {
+            dependency.* = if (info.* == .static) .static else .dynamic;
         } else {
-            has_dependency.* = false;
-            is_static.* = false;
+            dependency.* = .none;
         }
         return .ok;
     }
-    fn addNamespace(
-        ctx: *const pub_modules.OpaqueInstance,
-        namespace: [*:0]const u8,
-    ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const namespace_ = std.mem.span(namespace);
-
-        self.addNamespace(namespace_) catch |e| {
+    fn addNamespace(ctx: *pub_modules.OpaqueInstance.Inner, ns: SliceConst(u8)) callconv(.c) pub_context.Status {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        self.addNamespace(ns.intoSliceOrEmpty()) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
         return .ok;
     }
-    fn removeNamespace(
-        ctx: *const pub_modules.OpaqueInstance,
-        namespace: [*:0]const u8,
-    ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const namespace_ = std.mem.span(namespace);
-
-        self.removeNamespace(namespace_) catch |e| {
+    fn removeNamespace(ctx: *pub_modules.OpaqueInstance.Inner, ns: SliceConst(u8)) callconv(.c) pub_context.Status {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        self.removeNamespace(ns.intoSliceOrEmpty()) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -1319,51 +1292,39 @@ const InstanceVTableImpl = struct {
         return .ok;
     }
     fn queryDependency(
-        ctx: *const pub_modules.OpaqueInstance,
-        info: *const pub_modules.Info,
-        has_dependency: *bool,
-        is_static: *bool,
+        ctx: *pub_modules.OpaqueInstance.Inner,
+        handle: *pub_modules.Handle,
+        dependency: *pub_modules.Dependency,
     ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const dependency = std.mem.span(info.name);
+        const self = fromInstancePtr(@ptrCast(ctx));
         tracing.logTrace(
             @src(),
             "querying dependency info, instance='{s}', other='{s}'",
-            .{ ctx.info.name, dependency },
+            .{ ctx.handle.name(), handle.name() },
         );
 
         const inner = self.lock();
         defer inner.unlock();
 
-        if (inner.getDependency(dependency)) |x| {
-            has_dependency.* = true;
-            is_static.* = x.type == .static;
+        if (inner.getDependency(handle.name())) |x| {
+            dependency.* = if (x.type == .static) .static else .dynamic;
         } else {
-            has_dependency.* = false;
-            is_static.* = false;
+            dependency.* = .none;
         }
         return .ok;
     }
-    fn addDependency(
-        ctx: *const pub_modules.OpaqueInstance,
-        info: *const pub_modules.Info,
-    ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-
-        self.addDependency(info) catch |e| {
+    fn addDependency(ctx: *pub_modules.OpaqueInstance.Inner, handle: *pub_modules.Handle) callconv(.c) pub_context.Status {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        self.addDependency(handle) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
         };
         return .ok;
     }
-    fn removeDependency(
-        ctx: *const pub_modules.OpaqueInstance,
-        info: *const pub_modules.Info,
-    ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-
-        self.removeDependency(info) catch |e| {
+    fn removeDependency(ctx: *pub_modules.OpaqueInstance.Inner, handle: *pub_modules.Handle) callconv(.c) pub_context.Status {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        self.removeDependency(handle) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -1371,18 +1332,16 @@ const InstanceVTableImpl = struct {
         return .ok;
     }
     fn loadSymbol(
-        ctx: *const pub_modules.OpaqueInstance,
-        name: [*:0]const u8,
-        namespace: [*:0]const u8,
-        version: Version.CVersion,
-        symbol: **const anyopaque,
+        ctx: *pub_modules.OpaqueInstance.Inner,
+        symbol: pub_modules.SymbolId,
+        value: **const anyopaque,
     ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const name_ = std.mem.span(name);
-        const namespace_ = std.mem.span(namespace);
-        const version_ = Version.initC(version);
-
-        symbol.* = self.loadSymbol(name_, namespace_, version_) catch |e| {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        value.* = self.loadSymbol(
+            symbol.name.intoSliceOrEmpty(),
+            symbol.namespace.intoSliceOrEmpty(),
+            .initC(symbol.version),
+        ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -1390,17 +1349,19 @@ const InstanceVTableImpl = struct {
         return .ok;
     }
     fn readParameter(
-        ctx: *const pub_modules.OpaqueInstance,
+        ctx: *pub_modules.OpaqueInstance.Inner,
+        tag: pub_modules.ParamTag,
+        module: SliceConst(u8),
+        parameter: SliceConst(u8),
         value: *anyopaque,
-        @"type": pub_modules.ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
     ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const module_ = std.mem.span(module);
-        const parameter_ = std.mem.span(parameter);
-
-        self.readParameter(value, @"type", module_, parameter_) catch |e| {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        self.readParameter(
+            value,
+            tag,
+            module.intoSliceOrEmpty(),
+            parameter.intoSliceOrEmpty(),
+        ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -1408,17 +1369,19 @@ const InstanceVTableImpl = struct {
         return .ok;
     }
     fn writeParameter(
-        ctx: *const pub_modules.OpaqueInstance,
+        ctx: *pub_modules.OpaqueInstance.Inner,
+        tag: pub_modules.ParamTag,
+        module: SliceConst(u8),
+        parameter: SliceConst(u8),
         value: *const anyopaque,
-        @"type": pub_modules.ParameterType,
-        module: [*:0]const u8,
-        parameter: [*:0]const u8,
     ) callconv(.c) pub_context.Status {
-        const self = Self.fromInstancePtr(ctx);
-        const module_ = std.mem.span(module);
-        const parameter_ = std.mem.span(parameter);
-
-        self.writeParameter(value, @"type", module_, parameter_) catch |e| {
+        const self = fromInstancePtr(@ptrCast(ctx));
+        self.writeParameter(
+            value,
+            tag,
+            module.intoSliceOrEmpty(),
+            parameter.intoSliceOrEmpty(),
+        ) catch |e| {
             if (@errorReturnTrace()) |tr| tracing.logStackTrace(@src(), tr.*);
             context.setResult(.initErr(.initError(e)));
             return .err;
@@ -1427,7 +1390,7 @@ const InstanceVTableImpl = struct {
     }
 };
 
-const instance_vtable = pub_modules.OpaqueInstance.VTable{
+const instance_vtable = pub_modules.OpaqueInstance.Inner.VTable{
     .ref = &InstanceVTableImpl.ref,
     .unref = &InstanceVTableImpl.unref,
     .query_namespace = &InstanceVTableImpl.queryNamespace,

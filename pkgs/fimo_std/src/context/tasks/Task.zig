@@ -244,7 +244,7 @@ const State = struct {
     }
 };
 
-pub fn initFuture(comptime T: type, future: *const T) !pub_tasks.EnqueuedFuture(T.Result) {
+pub fn initFuture(comptime T: type, future: *const T) !pub_tasks.OpaqueFuture(T.Result) {
     const Wrapper = struct {
         fn poll(
             data: ?*anyopaque,
@@ -302,7 +302,7 @@ pub fn init(
     ) callconv(.c) bool,
     cleanup_data_fn: ?*const fn (data: ?*anyopaque) callconv(.c) void,
     cleanup_result_fn: ?*const fn (result: ?*anyopaque) callconv(.c) void,
-) !pub_tasks.OpaqueFuture {
+) !pub_tasks.EnqueuedFuture {
     const allocator = tasks.allocator;
     const buffer_align: usize = @max(data_alignment, result_alignment);
     const buffer_size = std.mem.alignForward(usize, data_size, result_alignment) +
@@ -366,7 +366,7 @@ pub fn init(
     const future = pub_tasks.ExternFuture(*@This(), anyopaque){
         .data = self,
         .poll_fn = &pollPublic,
-        .cleanup_fn = &deinitPublic,
+        .deinit_fn = &deinitPublic,
     };
 
     return @bitCast(future);
@@ -417,7 +417,6 @@ fn asWaker(self: *Self) pub_tasks.Waker {
         .unref = &Wrapper.unref,
         .wake = &Wrapper.wake,
         .wake_unref = &Wrapper.wakeUnref,
-        .next = null,
     };
 
     return .{

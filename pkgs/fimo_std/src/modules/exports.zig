@@ -2,283 +2,145 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const AnyError = @import("../AnyError.zig");
+const AnyResult = AnyError.AnyResult;
 const ctx = @import("../ctx.zig");
 const modules = @import("../modules.zig");
 const paths = @import("../paths.zig");
 const tasks = @import("../tasks.zig");
 const Fallible = tasks.Fallible;
-const EnqueuedFuture = tasks.EnqueuedFuture;
+const OpaqueFuture = tasks.OpaqueFuture;
+const utils = @import("../utils.zig");
+const SliceConst = utils.SliceConst;
 const Version = @import("../Version.zig");
 
 const ExportsRoot = @This();
 
-/// Declaration of a module parameter.
 pub const Parameter = extern struct {
-    type: modules.ParameterType,
-    read_group: modules.ParameterAccessGroup = .private,
-    write_group: modules.ParameterAccessGroup = .private,
-    read: ?*const fn (
-        data: modules.OpaqueParameterData,
-        value: *anyopaque,
-    ) callconv(.c) void = null,
-    write: ?*const fn (
-        data: modules.OpaqueParameterData,
-        value: *const anyopaque,
-    ) callconv(.c) void = null,
-    name: [*:0]const u8,
-    default_value: extern union {
-        u8: u8,
-        u16: u16,
-        u32: u32,
-        u64: u64,
-        i8: i8,
-        i16: i16,
-        i32: i32,
-        i64: i64,
-    },
+    name: SliceConst(u8),
+    tag: modules.ParamTag,
+    read_group: modules.ParamAccessGroup,
+    write_group: modules.ParamAccessGroup,
+    read: ?*const fn (data: modules.OpaqueParamData, value: *anyopaque) callconv(.c) void = null,
+    write: ?*const fn (data: modules.OpaqueParamData, value: *const anyopaque) callconv(.c) void = null,
+    default_value: extern union { u8: u8, u16: u16, u32: u32, u64: u64, i8: i8, i16: i16, i32: i32, i64: i64 },
 };
 
-/// Declaration of a module resource.
-pub const Resource = extern struct {
-    path: [*:0]const u8,
-};
-
-/// Declaration of a module namespace import.
-pub const Namespace = extern struct {
-    name: [*:0]const u8,
-};
-
-/// Declaration of a module symbol import.
-pub const SymbolImport = extern struct {
-    version: Version.CVersion,
-    name: [*:0]const u8,
-    namespace: [*:0]const u8 = "",
-};
-
-/// Linkage of an symbol export.
-pub const SymbolLinkage = enum(i32) {
-    /// The symbol is visible to other instances and is unique.
-    global,
-    _,
-};
-
-/// Declaration of a static module symbol export.
 pub const SymbolExport = extern struct {
-    symbol: *const anyopaque,
-    linkage: SymbolLinkage,
-    version: Version.CVersion,
-    name: [*:0]const u8,
-    namespace: [*:0]const u8 = "",
-};
-
-/// Declaration of a dynamic module symbol export.
-pub const DynamicSymbolExport = extern struct {
-    constructor: *const fn (
-        ctx: *const modules.OpaqueInstance,
-    ) callconv(.c) EnqueuedFuture(Fallible(*anyopaque)),
-    destructor: *const fn (
-        ctx: *const modules.OpaqueInstance,
-        symbol: *anyopaque,
-    ) callconv(.c) void,
-    linkage: SymbolLinkage,
-    version: Version.CVersion,
-    name: [*:0]const u8,
-    namespace: [*:0]const u8 = "",
-};
-
-/// A modifier declaration for a module export.
-pub const Modifier = extern struct {
-    tag: enum(i32) {
-        destructor,
-        dependency,
-        instance_state,
-        start_event,
-        stop_event,
-        _,
-    },
+    symbol: modules.SymbolId,
+    sym_ty: enum(i32) { static = 0, dynamic = 1, _ },
+    linkage: enum(i32) { global = 0, _ },
     value: extern union {
-        destructor: *const Destructor,
-        dependency: *const Dependency,
-        instance_state: *const InstanceState,
-        start_event: *const StartEvent,
-        stop_event: *const StopEvent,
+        static: *const anyopaque,
+        dynamic: extern struct {
+            poll_init: *const fn (
+                ctx: *modules.OpaqueInstance,
+                waker: tasks.Waker,
+                result: *tasks.Fallible(*anyopaque),
+            ) callconv(.c) bool,
+            poll_deinit: ?*const fn (
+                ctx: *modules.OpaqueInstance,
+                waker: tasks.Waker,
+                value: *anyopaque,
+            ) callconv(.c) bool = null,
+        },
     },
+};
 
-    /// A destructor function for a module export.
+pub const events = struct {
+    /// Common member of all module events.
     ///
-    /// Is called once the export is no longer in use by the subsystem. An export may declare
-    /// multiple destructors.
-    pub const Destructor = extern struct {
-        data: ?*anyopaque,
-        destructor: *const fn (ptr: ?*anyopaque) callconv(.c) void,
+    /// If a module supports an event, it must respond to the event by writing some
+    /// data into the provided event buffer.
+    pub const Tag = enum(i32) {
+        init = 0,
+        deinit = 1,
+        start = 2,
+        stop = 3,
+        deinit_export = 4,
+        dependencies = 5,
+        _,
     };
 
-    /// A dependency to an already loaded instance.
-    ///
-    /// The instance will acquire a static dependency to the provided instance. Multiple
-    /// dependencies may be provided.
-    pub const Dependency = modules.Info;
-
-    /// A constructor and destructor for the state of a module.
-    ///
-    /// Can be specified to bind a state to an instance. The constructor will be called before the
-    /// modules exports are initialized and returning an error will abort the loading of the
-    /// instance. Inversely, the destructor function will be called after all exports have been
-    /// deinitialized. May only be specified once.
-    pub const InstanceState = extern struct {
-        init: *const fn (
-            ctx: *const modules.OpaqueInstance,
-            set: *modules.LoadingSet,
-        ) callconv(.c) EnqueuedFuture(Fallible(?*anyopaque)),
-        deinit: *const fn (
-            ctx: *const modules.OpaqueInstance,
-            state: ?*anyopaque,
-        ) callconv(.c) void,
+    pub const Init = extern struct {
+        tag: Tag = .init,
+        poll: ?*const fn (
+            ctx: *modules.OpaqueInstance,
+            loader: *modules.Loader,
+            waker: tasks.Waker,
+            state: *tasks.Fallible(*anyopaque),
+        ) callconv(.c) bool = null,
     };
-
-    /// A listener for the start event of the instance.
-    ///
-    /// The event will be dispatched immediately after the instance has been loaded. An error will
-    /// result in the destruction of the instance. May only be specified once.
-    pub const StartEvent = extern struct {
-        on_event: *const fn (ctx: *const modules.OpaqueInstance) callconv(.c) EnqueuedFuture(Fallible(void)),
+    pub const Deinit = extern struct {
+        tag: Tag = .deinit,
+        poll: ?*const fn (ctx: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool = null,
     };
-
-    /// A listener for the stop event of the instance.
-    ///
-    /// The event will be dispatched immediately before any exports are deinitialized. May only be
-    /// specified once.
-    pub const StopEvent = extern struct {
-        on_event: *const fn (ctx: *const modules.OpaqueInstance) callconv(.c) void,
+    pub const Start = extern struct {
+        tag: Tag = .start,
+        poll: ?*const fn (ctx: *modules.OpaqueInstance, waker: tasks.Waker, result: *AnyResult) callconv(.c) bool = null,
+    };
+    pub const Stop = extern struct {
+        tag: Tag = .stop,
+        poll: ?*const fn (ctx: *modules.OpaqueInstance, waker: tasks.Waker) callconv(.c) bool = null,
+    };
+    pub const DeinitExport = extern struct {
+        tag: Tag = .deinit_export,
+        data: ?*anyopaque = null,
+        deinit: ?*const fn (data: ?*anyopaque) callconv(.c) void = null,
+    };
+    pub const Dependencies = extern struct {
+        tag: Tag = .dependencies,
+        handles: SliceConst(*modules.Handle) = .fromSlice(null),
     };
 };
 
-/// Declaration of a module export.
 pub const Export = extern struct {
-    next: ?*anyopaque = null,
-    version: Version.CVersion = ctx.context_version.intoC(),
-    name: [*:0]const u8,
-    description: ?[*:0]const u8 = null,
-    author: ?[*:0]const u8 = null,
-    license: ?[*:0]const u8 = null,
-    parameters: ?[*]const Parameter = null,
-    parameters_count: usize = 0,
-    resources: ?[*]const Resource = null,
-    resources_count: usize = 0,
-    namespace_imports: ?[*]const Namespace = null,
-    namespace_imports_count: usize = 0,
-    symbol_imports: ?[*]const SymbolImport = null,
-    symbol_imports_count: usize = 0,
-    symbol_exports: ?[*]const SymbolExport = null,
-    symbol_exports_count: usize = 0,
-    dynamic_symbol_exports: ?[*]const DynamicSymbolExport = null,
-    dynamic_symbol_exports_count: usize = 0,
-    modifiers: ?[*]const Modifier = null,
-    modifiers_count: usize = 0,
+    version: Version.compat.Version = ctx.context_version.intoC(),
+    name: SliceConst(u8),
+    description: SliceConst(u8) = .fromSlice(null),
+    author: SliceConst(u8) = .fromSlice(null),
+    license: SliceConst(u8) = .fromSlice(null),
+    parameters: SliceConst(Parameter) = .fromSlice(null),
+    resources: SliceConst(paths.compat.Path) = .fromSlice(null),
+    namespaces: SliceConst(SliceConst(u8)) = .fromSlice(null),
+    imports: SliceConst(modules.SymbolId) = .fromSlice(null),
+    exports: SliceConst(SymbolExport) = .fromSlice(null),
+    on_event: *const fn (module: *const Export, tag: *events.Tag) callconv(.c) void,
 
-    /// Runs the registered cleanup routines.
-    pub fn deinit(self: *const Export) void {
-        for (self.getModifiers()) |modifier| {
-            switch (modifier.tag) {
-                .destructor => {
-                    const destructor = modifier.value.destructor;
-                    destructor.destructor(destructor.data);
-                },
-                .dependency => {
-                    const dependency = modifier.value.dependency;
-                    dependency.unref();
-                },
-                .instance_state, .start_event, .stop_event => {},
-                else => @panic("Unknown modifier"),
-            }
-        }
+    pub fn eventInit(self: *const Export) events.Init {
+        var event: events.Init = .{};
+        self.on_event(self, &event.tag);
+        return event;
     }
 
-    /// Returns the version of the context compiled agains.
-    pub fn getVersion(self: *const Export) Version {
-        return Version.initC(self.version);
+    pub fn eventDeinit(self: *const Export) events.Deinit {
+        var event: events.Deinit = .{};
+        self.on_event(self, &event.tag);
+        return event;
     }
 
-    /// Returns the name of the export.
-    pub fn getName(self: *const Export) []const u8 {
-        return std.mem.span(self.name);
+    pub fn eventStart(self: *const Export) events.Start {
+        var event: events.Start = .{};
+        self.on_event(self, &event.tag);
+        return event;
     }
 
-    /// Returns the description of the export.
-    pub fn getDescription(self: *const Export) ?[]const u8 {
-        return if (self.description) |x| std.mem.span(x) else null;
+    pub fn eventStop(self: *const Export) events.Stop {
+        var event: events.Stop = .{};
+        self.on_event(self, &event.tag);
+        return event;
     }
 
-    /// Returns the author of the export.
-    pub fn getAuthor(self: *const Export) ?[]const u8 {
-        return if (self.author) |x| std.mem.span(x) else null;
+    pub fn eventDeinitExport(self: *const Export) events.DeinitExport {
+        var event: events.DeinitExport = .{};
+        self.on_event(self, &event.tag);
+        return event;
     }
 
-    /// Returns the license of the export.
-    pub fn getLicense(self: *const Export) ?[]const u8 {
-        return if (self.license) |x| std.mem.span(x) else null;
-    }
-
-    /// Returns the parameters.
-    pub fn getParameters(self: *const Export) []const Parameter {
-        return if (self.parameters) |x| x[0..self.parameters_count] else &.{};
-    }
-
-    /// Returns the resources.
-    pub fn getResources(self: *const Export) []const Resource {
-        return if (self.resources) |x| x[0..self.resources_count] else &.{};
-    }
-
-    /// Returns the namespace imports.
-    pub fn getNamespaceImports(self: *const Export) []const Namespace {
-        return if (self.namespace_imports) |x| x[0..self.namespace_imports_count] else &.{};
-    }
-
-    /// Returns the symbol imports.
-    pub fn getSymbolImports(self: *const Export) []const SymbolImport {
-        return if (self.symbol_imports) |x| x[0..self.symbol_imports_count] else &.{};
-    }
-
-    /// Returns the static symbol exports.
-    pub fn getSymbolExports(self: *const Export) []const SymbolExport {
-        return if (self.symbol_exports) |x| x[0..self.symbol_exports_count] else &.{};
-    }
-
-    /// Returns the dynamic symbol exports.
-    pub fn getDynamicSymbolExports(self: *const Export) []const DynamicSymbolExport {
-        return if (self.dynamic_symbol_exports) |x|
-            x[0..self.dynamic_symbol_exports_count]
-        else
-            &.{};
-    }
-
-    /// Returns the modifiers.
-    pub fn getModifiers(self: *const Export) []const Modifier {
-        return if (self.modifiers) |x| x[0..self.modifiers_count] else &.{};
-    }
-
-    /// Returns the instance state modifier, if specified.
-    pub fn getInstanceStateModifier(self: *const Export) ?*const Modifier.InstanceState {
-        for (self.getModifiers()) |mod| {
-            if (mod.tag == .instance_state) return mod.value.instance_state;
-        }
-        return null;
-    }
-
-    /// Returns the start event modifier, if specified.
-    pub fn getStartEventModifier(self: *const Export) ?*const Modifier.StartEvent {
-        for (self.getModifiers()) |mod| {
-            if (mod.tag == .start_event) return mod.value.start_event;
-        }
-        return null;
-    }
-
-    /// Returns the start event modifier, if specified.
-    pub fn getStopEventModifier(self: *const Export) ?*const Modifier.StopEvent {
-        for (self.getModifiers()) |mod| {
-            if (mod.tag == .stop_event) return mod.value.stop_event;
-        }
-        return null;
+    pub fn eventDependencies(self: *const Export) events.Dependencies {
+        var event: events.Dependencies = .{};
+        self.on_event(self, &event.tag);
+        return event;
     }
 };
 
@@ -294,13 +156,13 @@ pub fn ModuleBundle(bundle: anytype) type {
         pub const bundled = bundle;
         pub const fimo_modules_bundle_marker = {};
 
-        pub fn loadingSetFilter(context: void, @"export": *const Export) modules.LoadingSet.FilterRequest {
+        pub fn loaderFilter(context: void, module: *const Export) modules.Loader.FilterRequest {
             _ = context;
             inline for (@typeInfo(@TypeOf(bundled)).@"struct".fields) |f| {
                 if (comptime @hasDecl(@field(bundle, f.name), "fimo_modules_marker")) {
-                    if (@"export" == @field(bundled, f.name).@"export") return .load;
+                    if (module == @field(bundled, f.name).module_export) return .load;
                 } else if (comptime @hasDecl(@field(bundle, f.name), "fimo_modules_bundle_marker")) {
-                    if (@field(bundled, f.name).loadingSetFilter({}, @"export") == .load) return .load;
+                    if (@field(bundled, f.name).loaderFilter({}, module) == .load) return .load;
                 } else unreachable;
             }
             return .skip;
@@ -315,30 +177,73 @@ pub fn Module(T: type) type {
     const Global = struct {
         var is_init: bool = false;
         var state: T = undefined;
-        var instance: *const modules.OpaqueInstance = undefined;
+        var instance: *modules.OpaqueInstance = undefined;
     };
-    comptime var builder = switch (@typeInfo(@TypeOf(T.fimo_module))) {
-        .enum_literal => Builder.init(@tagName(T.fimo_module)),
-        .@"struct" => blk: {
+    comptime var name: []const u8 = undefined;
+    comptime var description: ?[]const u8 = null;
+    comptime var author: ?[]const u8 = null;
+    comptime var license: ?[]const u8 = null;
+
+    comptime var parameter_types: []const type = &.{};
+    comptime var parameter_names: []const [:0]const u8 = &.{};
+    comptime var parameter_infos: []const Parameter = &.{};
+
+    comptime var resource_names: []const [:0]const u8 = &.{};
+    comptime var resource_infos: []const paths.compat.Path = &.{};
+
+    comptime var namespace_infos: []const SliceConst(u8) = &.{};
+
+    comptime var import_symbols: []const modules.Symbol = &.{};
+    comptime var import_infos: []const modules.SymbolId = &.{};
+
+    comptime var export_symbols: []const modules.Symbol = &.{};
+    comptime var export_infos: []const SymbolExport = &.{};
+
+    comptime var ev_init_poll: ?*const fn (
+        ctx: *modules.OpaqueInstance,
+        loader: *modules.Loader,
+        waker: tasks.Waker,
+        state: *tasks.Fallible(*anyopaque),
+    ) callconv(.c) bool = null;
+
+    comptime var ev_deinit_poll: ?*const fn (
+        ctx: *modules.OpaqueInstance,
+        waker: tasks.Waker,
+        state: *anyopaque,
+    ) callconv(.c) bool = null;
+
+    comptime var ev_start_poll: ?*const fn (
+        ctx: *modules.OpaqueInstance,
+        waker: tasks.Waker,
+        result: *AnyResult,
+    ) callconv(.c) bool = null;
+
+    comptime var ev_stop_poll: ?*const fn (
+        ctx: *modules.OpaqueInstance,
+        waker: tasks.Waker,
+    ) callconv(.c) bool = null;
+
+    switch (@typeInfo(@TypeOf(T.fimo_module))) {
+        .enum_literal => name = @tagName(T.fimo_module),
+        .@"struct" => {
             const module = T.fimo_module;
             const M = @TypeOf(module);
             if (!@hasField(M, "name")) @compileError("fimo: invalid module, missing `pub const fimo_module = .{ .name = .foo_name };` declaration: " ++ @typeName(T));
             if (@typeInfo(@TypeOf(module.name)) != .enum_literal) @compileError("fimo: invalid module, expected `pub const fimo_module = .{ .name = .foo_name };` declaration, found: " ++ @typeName(@TypeOf(module.name)));
 
-            var b = Builder.init(@tagName(module.name));
-            if (@hasField(M, "description")) b = b.withDescription(module.description);
-            if (@hasField(M, "author")) b = b.withAuthor(module.author);
-            if (@hasField(M, "license")) b = b.withLicense(module.license);
-
-            break :blk b;
+            name = @tagName(module.name);
+            if (@hasField(M, "description")) description = module.description;
+            if (@hasField(M, "author")) author = module.author;
+            if (@hasField(M, "license")) license = module.license;
         },
         else => @compileError("fimo: invalid module, expected `pub const fimo_module = .foo_name;` declaration, found: " ++ @typeName(@TypeOf(T.mach_module))),
-    };
+    }
 
     if (@hasDecl(T, "fimo_parameters")) {
         if (@typeInfo(@TypeOf(T.fimo_parameters)) != .@"struct") @compileError("fimo: invalid parameters, expected `pub const fimo_parameters = .{ .param = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_parameters)));
-        inline for (std.meta.fieldNames(@TypeOf(T.fimo_parameters))) |name| {
-            const param = @field(T.fimo_parameters, name);
+        const info = @typeInfo(@TypeOf(T.fimo_parameters)).@"struct";
+        inline for (info.fields) |field| {
+            const param = @field(T.fimo_parameters, field.name);
             if (!@hasField(@TypeOf(param), "default")) @compileError("fimo: invalid parameter default value, expected `pub const fimo_parameters = .{ .param = .{ .default = @as(..., ...) }, ... };` declaration, found: " ++ @typeName(@TypeOf(param)));
             const default = param.default;
             switch (@TypeOf(default)) {
@@ -356,7 +261,7 @@ pub fn Module(T: type) type {
                 break :blk2 group;
             } else .private;
             const read = if (@hasField(@TypeOf(param), "read")) &struct {
-                fn f(p: modules.OpaqueParameterData, value: *anyopaque) callconv(.c) void {
+                fn f(p: modules.OpaqueParamData, value: *anyopaque) callconv(.c) void {
                     const func: fn (modules.ParameterData(@TypeOf(default))) @TypeOf(default) = param.read;
                     const d = modules.ParameterData(@TypeOf(default)).castFromOpaque(p);
                     const v: *@TypeOf(default) = @ptrCast(@alignCast(value));
@@ -364,7 +269,7 @@ pub fn Module(T: type) type {
                 }
             }.f else null;
             const write = if (@hasField(@TypeOf(param), "write")) &struct {
-                fn f(p: modules.OpaqueParameterData, value: *const anyopaque) callconv(.c) void {
+                fn f(p: modules.OpaqueParamData, value: *const anyopaque) callconv(.c) void {
                     const func: fn (modules.ParameterData(@TypeOf(default)), @TypeOf(default)) void = param.write;
                     const d = modules.ParameterData(@TypeOf(default)).castFromOpaque(p);
                     const v: *const @TypeOf(default) = @ptrCast(@alignCast(value));
@@ -372,9 +277,25 @@ pub fn Module(T: type) type {
                 }
             }.f else null;
 
-            builder = builder.withParameter(.{
-                .name = name,
-                .member_name = name,
+            parameter_types = parameter_types ++ [_]type{@TypeOf(default)};
+            parameter_names = parameter_names ++ [_][:0]const u8{field.name};
+            parameter_infos = parameter_infos ++ [_]Parameter{.{
+                .name = .fromSlice(field.name),
+                .tag = switch (@TypeOf(default)) {
+                    u8 => .u8,
+                    u16 => .u16,
+                    u32 => .u32,
+                    u64 => .u64,
+                    i8 => .i8,
+                    i16 => .i16,
+                    i32 => .i32,
+                    i64 => .i64,
+                    else => unreachable,
+                },
+                .read_group = read_group,
+                .write_group = write_group,
+                .read = read,
+                .write = write,
                 .default_value = switch (@TypeOf(default)) {
                     u8 => .{ .u8 = default },
                     u16 => .{ .u16 = default },
@@ -386,107 +307,116 @@ pub fn Module(T: type) type {
                     i64 => .{ .i64 = default },
                     else => unreachable,
                 },
-                .read_group = read_group,
-                .write_group = write_group,
-                .read = read,
-                .write = write,
-            });
+            }};
         }
     }
 
     if (@hasDecl(T, "fimo_paths")) {
         if (@typeInfo(@TypeOf(T.fimo_paths)) != .@"struct") @compileError("fimo: invalid paths, expected `pub const fimo_paths = .{ .path = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_paths)));
-        inline for (std.meta.fieldNames(@TypeOf(T.fimo_paths))) |name| {
-            const p = @field(T.fimo_paths, name);
-            if (@TypeOf(p) != paths.Path) @compileError("fimo: invalid parameters, expected a path, found: " ++ @typeName(@TypeOf(p)));
-            builder = builder.withResource(.{ .name = name, .path = p });
+        const info = @typeInfo(@TypeOf(T.fimo_paths)).@"struct";
+        inline for (info.fields) |field| {
+            const path = @field(T.fimo_paths, field.name);
+            if (@TypeOf(path) != paths.Path) @compileError("fimo: invalid parameters, expected a path, found: " ++ @typeName(@TypeOf(path)));
+            resource_names = resource_names ++ [_][:0]const u8{field.name};
+            resource_infos = resource_infos ++ [_]paths.compat.Path{path.intoC()};
         }
     }
 
     if (@hasDecl(T, "fimo_imports")) {
         if (@typeInfo(@TypeOf(T.fimo_imports)) != .@"struct") @compileError("fimo: invalid imports, expected `pub const fimo_imports = .{ imp, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_imports)));
-        var imps: []const modules.Symbol = &.{};
         inline for (T.fimo_imports) |imp| {
-            if (@TypeOf(imp) == modules.Symbol)
-                imps = imps ++ [_]modules.Symbol{imp}
-            else inline for (imp) |imp2| imps = imps ++ [_]modules.Symbol{imp2};
+            if (@TypeOf(imp) == modules.Symbol) {
+                const imp_s: modules.Symbol = imp;
+                import_symbols = import_symbols ++ [_]modules.Symbol{imp_s};
+                import_infos = import_infos ++ [_]modules.SymbolId{imp_s.intoId()};
+            } else inline for (imp) |imp2| {
+                const imp_s: modules.Symbol = imp2;
+                import_symbols = import_symbols ++ [_]modules.Symbol{imp_s};
+                import_infos = import_infos ++ [_]modules.SymbolId{imp_s.intoId()};
+            }
         }
-        const Tup = std.meta.Tuple(&([_]type{modules.Symbol} ** imps.len));
-        var tup: Tup = undefined;
-        inline for (imps, 0..) |imp, i| {
-            tup[i] = imp;
-        }
-        builder = builder.withMultipleImports(tup);
+    }
+
+    blk: inline for (import_symbols) |imp| {
+        if (std.mem.eql(u8, imp.namespace, "")) continue;
+        for (namespace_infos) |ns| if (std.mem.eql(u8, ns.intoSliceOrEmpty(), imp.namespace)) continue :blk;
+        namespace_infos = namespace_infos ++ [_]SliceConst(u8){.fromSlice(imp.namespace)};
     }
 
     if (@hasDecl(T, "fimo_exports")) {
         if (@typeInfo(@TypeOf(T.fimo_exports)) != .@"struct") @compileError("fimo: invalid exports, expected `pub const fimo_exports = .{ .exp = .{ ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(T.fimo_exports)));
-        inline for (std.meta.fieldNames(@TypeOf(T.fimo_exports))) |name| {
-            const exp = @field(T.fimo_exports, name);
+        const info = @typeInfo(@TypeOf(T.fimo_exports)).@"struct";
+        inline for (info.fields) |field| {
+            const exp = @field(T.fimo_exports, field.name);
             if (!@hasField(@TypeOf(exp), "symbol")) @compileError("fimo: invalid export, expected `pub const fimo_exports = .{ .exp = .{ .symbol = foo, ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(exp)));
             const symbol: modules.Symbol = exp.symbol;
+            export_symbols = export_symbols ++ [_]modules.Symbol{symbol};
             const linkage = if (@hasField(@TypeOf(exp), "linkage")) blk2: {
                 break :blk2 exp.linkage;
             } else .global;
+
             if (!@hasField(@TypeOf(exp), "value")) @compileError("fimo: invalid export value, expected `pub const fimo_exports = .{ .exp = .{ .value = ..., ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(exp)));
             const value = exp.value;
             if (@typeInfo(@TypeOf(value)) == .pointer) {
                 if (@TypeOf(value) != *const symbol.T) @compileError("fimo: invalid export value, expected `" ++ @typeName(*const symbol.T) ++ "`, found " ++ @typeName(@TypeOf(value)));
                 const wrapper = struct {
-                    const Sync = struct {
-                        const Result = *symbol.T;
-                        const Future = tasks.Future(@This(), Result, poll, null);
-
-                        fn init(inst: *const modules.OpaqueInstance) Future {
-                            _ = inst;
-                            return Future.init(.{});
-                        }
-                        fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                            _ = this;
-                            _ = waker;
-                            symbol.getGlobal().register(value);
-                            return .{ .ready = @constCast(value) };
-                        }
-                    };
-                    fn deinit(inst: *const modules.OpaqueInstance, sym: *symbol.T) void {
+                    fn pollInit(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
                         _ = inst;
-                        _ = sym;
+                        _ = waker;
+                        symbol.getGlobal().register(value);
+                        result.* = .wrap(@constCast(value));
+                        return true;
+                    }
+                    fn pollDeinit(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
+                        _ = inst;
+                        _ = waker;
+                        _ = val;
                         symbol.getGlobal().unregister();
+                        return true;
                     }
                 };
-                builder = builder.withDynamicExport(
-                    .{ .symbol = symbol, .name = name, .linkage = linkage },
-                    wrapper.Sync.Future,
-                    wrapper.Sync.init,
-                    wrapper.deinit,
-                );
+
+                export_infos = export_infos ++ [_]SymbolExport{.{
+                    .symbol = symbol.intoId(),
+                    .sym_ty = .dynamic,
+                    .linkage = linkage,
+                    .value = .{ .dynamic = .{
+                        .poll_init = &wrapper.pollInit,
+                        .poll_deinit = &wrapper.pollDeinit,
+                    } },
+                }};
             } else {
                 const wrapper = struct {
                     const Sync = struct {
                         const Result = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
-                        const Future = tasks.Future(@This(), Result, poll, null);
-
-                        fn init(inst: *const modules.OpaqueInstance) Future {
+                        fn pollInit(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
                             _ = inst;
-                            return Future.init(.{});
-                        }
-                        fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                            _ = this;
                             _ = waker;
                             const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
-                                value.init() catch |err| return .{ .ready = err }
+                                value.init() catch |err| {
+                                    result.* = .wrap(err);
+                                    return true;
+                                }
                             else
                                 value.init();
                             symbol.getGlobal().register(sym);
-                            return .{ .ready = sym };
+                            result.* = .wrap(sym);
+                            return true;
+                        }
+                        fn pollDeinit(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
+                            _ = inst;
+                            _ = waker;
+                            symbol.getGlobal().unregister();
+                            if (comptime @hasField(@TypeOf(value), "deinit")) {
+                                const f: fn (*symbol.T) void = value.deinit;
+                                f(val);
+                            }
+                            return true;
                         }
                     };
-                    const Async = struct {
-                        inner: Inner,
-
+                    const AsyncInit = struct {
                         const Inner = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
                         const Result = Inner.Result;
-                        const Future = tasks.Future(@This(), Result, poll, Async.deinit);
                         comptime {
                             if (Inner.Result != *symbol.T) switch (@typeInfo(Inner.Result)) {
                                 .error_union => |v| {
@@ -496,51 +426,76 @@ pub fn Module(T: type) type {
                             };
                         }
 
-                        fn init(inst: *const modules.OpaqueInstance) Future {
+                        var future: ?Inner = null;
+                        fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
                             _ = inst;
-                            return Future.init(.{ .inner = value.init() });
-                        }
-                        fn deinit(this: *@This()) void {
-                            if (@hasDecl(Inner, "deinit")) this.inner.deinit();
-                        }
-                        fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                            switch (this.inner.poll(waker)) {
-                                .ready => |v| {
-                                    const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
-                                        v catch |err| return .{ .ready = err }
-                                    else
-                                        v;
-                                    symbol.getGlobal().register(sym);
-                                    return .{ .ready = sym };
-                                },
-                                .pending => return .pending,
+                            if (future == null) future = value.init();
+                            if (future) |*fut| {
+                                switch (fut.poll(waker)) {
+                                    .ready => |v| {
+                                        future = null;
+                                        const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
+                                            v catch |err| {
+                                                result.* = .wrap(err);
+                                                return true;
+                                            }
+                                        else
+                                            v;
+                                        symbol.getGlobal().register(sym);
+                                        result.* = .wrap(sym);
+                                        return true;
+                                    },
+                                    .pending => return false,
+                                }
                             }
                         }
                     };
-                    fn deinit(inst: *const modules.OpaqueInstance, sym: *symbol.T) void {
-                        _ = inst;
-                        symbol.getGlobal().unregister();
-                        if (comptime @hasField(@TypeOf(value), "deinit")) {
-                            const f: fn (*symbol.T) void = value.deinit;
-                            f(sym);
+                    const AsyncDeinit = struct {
+                        const Inner = @typeInfo(@TypeOf(value.deinit)).@"fn".return_type.?;
+                        const Result = Inner.Result;
+                        comptime {
+                            if (Inner.Result != void) @compileError("fimo: invalid deinit return type, expected `void`, found " ++ @typeName(Inner.Result));
                         }
-                    }
+
+                        var future: ?Inner = null;
+                        fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
+                            _ = inst;
+                            _ = val;
+                            if (future == null) {
+                                symbol.getGlobal().unregister();
+                                future = value.deinit();
+                            }
+                            if (future) |*fut| {
+                                switch (fut.poll(waker)) {
+                                    .ready => {
+                                        future = null;
+                                        return true;
+                                    },
+                                    .pending => return false,
+                                }
+                            }
+                        }
+                    };
                 };
-                if (@typeInfo(@TypeOf(value.init)) == .@"fn") {
-                    builder = builder.withDynamicExport(
-                        .{ .symbol = symbol, .name = name, .linkage = linkage },
-                        wrapper.Sync.Future,
-                        wrapper.Sync.init,
-                        wrapper.deinit,
-                    );
-                } else {
-                    builder = builder.withDynamicExport(
-                        .{ .symbol = symbol, .name = name, .linkage = linkage },
-                        wrapper.Async.Future,
-                        wrapper.Async.init,
-                        wrapper.deinit,
-                    );
-                }
+
+                const init_fn = if (comptime @typeInfo(@TypeOf(value.init)) == .@"fn")
+                    &wrapper.Sync.pollInit
+                else
+                    &wrapper.AsyncInit.poll;
+                const deinit_fn = if (comptime !@hasField(@TypeOf(value), "deinit") or @typeInfo(@TypeOf(value.deinit)) == .@"fn")
+                    &wrapper.Sync.pollDeinit
+                else
+                    &wrapper.AsyncDeinit.poll;
+
+                export_infos = export_infos ++ [_]SymbolExport{.{
+                    .symbol = symbol.intoId(),
+                    .sym_ty = .dynamic,
+                    .linkage = linkage,
+                    .value = .{ .dynamic = .{
+                        .poll_init = init_fn,
+                        .poll_deinit = deinit_fn,
+                    } },
+                }};
             }
         }
     }
@@ -551,173 +506,219 @@ pub fn Module(T: type) type {
             const ev_init = T.fimo_events.init;
             const wrapper = struct {
                 const Sync = struct {
-                    successfull: bool = false,
-                    set: *modules.LoadingSet,
-
                     const EvReturn = @typeInfo(@TypeOf(ev_init)).@"fn".return_type.?;
                     const Result = switch (@typeInfo(EvReturn)) {
-                        .error_union => |v| v.error_set!*T,
-                        .void => *T,
-                        else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(EvReturn)),
+                        .error_union => |v| v.error_set!void,
+                        .void => void,
+                        else => @compileError("fimo: invalid init return type, expected `void` or `err!void`, found " ++ @typeName(EvReturn)),
                     };
-                    const Future = tasks.Future(@This(), Result, poll, Sync.deinit);
 
-                    fn init(inst: *const modules.OpaqueInstance, set: *modules.LoadingSet) Future {
-                        if (Global.is_init) @panic("already init");
-                        ctx.Handle.registerHandle(inst.handle);
-                        Global.instance = @ptrCast(@alignCast(inst));
-                        Global.is_init = true;
-                        return Future.init(.{ .set = set });
-                    }
-                    fn deinit(this: *@This()) void {
-                        if (!this.successfull) {
-                            ctx.Handle.unregisterHandle();
-                            Global.instance = undefined;
-                            Global.is_init = false;
-                        }
-                    }
-                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
+                    fn poll(inst: *modules.OpaqueInstance, loader: *modules.Loader, waker: tasks.Waker, state: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
                         _ = waker;
+
+                        if (Global.is_init) @panic("already init");
+                        ctx.Handle.registerHandle(inst.ctxHandle());
+                        Global.is_init = true;
+                        Global.instance = inst;
+
                         if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
                             if (f.default_value_ptr) |default| {
                                 @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
                             }
                         };
+
+                        const inst_imports = @as([*]const *const anyopaque, @ptrCast(@alignCast(inst.imports())));
+                        inline for (inst_imports[0..import_infos.len], import_symbols) |imp, sym| {
+                            sym.getGlobal().register(@ptrCast(@alignCast(imp)));
+                        }
+
                         const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
                         if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
                         var args: Args = undefined;
                         inline for (std.meta.fields(Args), 0..) |f, i| {
                             switch (f.type) {
                                 *T => args[i] = &Global.state,
-                                *modules.LoadingSet => args[i] = this.set,
+                                *modules.Loader => args[i] = loader,
                                 else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
                             }
                         }
                         const result = @call(.auto, ev_init, args);
-                        if (@typeInfo(Result) == .error_union) result catch |err| return .{ .ready = err };
-                        this.successfull = true;
-                        return .{ .ready = &Global.state };
+                        if (@typeInfo(Result) == .error_union) result catch |err| {
+                            state.* = .wrap(err);
+                            Global.is_init = false;
+                            Global.instance = undefined;
+                            return true;
+                        };
+                        state.* = .wrap(&Global.state);
+                        return true;
                     }
                 };
                 const Async = struct {
-                    inner: Inner,
-                    successfull: bool = false,
-
                     const Inner = @typeInfo(@TypeOf(ev_init)).@"fn".return_type.?;
                     const Result = switch (@typeInfo(Inner.Result)) {
-                        .error_union => |v| v.error_set!*T,
-                        .void => *T,
-                        else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result)),
+                        .error_union => |v| v.error_set!void,
+                        .void => void,
+                        else => @compileError("fimo: invalid init return type, expected `void` or `err!void`, found " ++ @typeName(Inner.Result)),
                     };
-                    const Future = tasks.Future(@This(), Result, poll, Async.deinit);
 
-                    fn init(inst: *const modules.OpaqueInstance, set: *modules.LoadingSet) Future {
-                        if (Global.is_init) @panic("already init");
-                        ctx.Handle.registerHandle(inst.handle);
-                        Global.instance = @ptrCast(@alignCast(inst));
-                        Global.is_init = true;
-                        if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
-                            if (f.default_value_ptr) |default| {
-                                @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
+                    var future: ?Inner = null;
+                    fn poll(inst: *modules.OpaqueInstance, loader: *modules.Loader, waker: tasks.Waker, state: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
+                        if (future == null) {
+                            if (Global.is_init) @panic("already init");
+                            ctx.Handle.registerHandle(inst.ctxHandle());
+                            Global.is_init = true;
+                            Global.instance = inst;
+
+                            if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
+                                if (f.default_value_ptr) |default| {
+                                    @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
+                                }
+                            };
+
+                            const inst_imports = @as([*]const usize, inst.imports())[0..import_infos.len];
+                            inline for (inst_imports, import_symbols) |imp, sym| {
+                                sym.getGlobal().register(@ptrFromInt(imp));
                             }
-                        };
-                        const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
-                        if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
-                        var args: Args = undefined;
-                        inline for (std.meta.fields(Args), 0..) |f, i| {
-                            switch (f.type) {
-                                *T => args[i] = &Global.state,
-                                *modules.LoadingSet => args[i] = set,
-                                else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
+
+                            const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
+                            if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
+                            var args: Args = undefined;
+                            inline for (std.meta.fields(Args), 0..) |f, i| {
+                                switch (f.type) {
+                                    *T => args[i] = &Global.state,
+                                    *modules.Loader => args[i] = loader,
+                                    else => @compileError("fimo: invalid init event, got invalid parameter type, found: " ++ @typeName(f.type)),
+                                }
                             }
+                            future = @call(.auto, ev_init, args);
                         }
-                        const result = @call(.auto, ev_init, args);
-                        return Future.init(.{ .inner = result });
-                    }
-                    fn deinit(this: *@This()) void {
-                        if (!this.successfull) {
-                            ctx.Handle.unregisterHandle();
-                            Global.instance = undefined;
-                            Global.state = undefined;
-                            Global.is_init = false;
-                        }
-                    }
-                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                        switch (this.inner.poll(waker)) {
-                            .ready => |v| {
-                                if (@typeInfo(Result) == .error_union) v catch |err| return .{ .ready = err };
-                                this.successfull = true;
-                                return .{ .ready = &Global.state };
-                            },
-                            .pending => return .pending,
+                        if (future) |*fut| {
+                            switch (fut.poll(waker)) {
+                                .ready => |v| {
+                                    future = null;
+                                    if (@typeInfo(Result) == .error_union) v catch |err| {
+                                        state.* = .wrap(err);
+                                        Global.is_init = false;
+                                        Global.instance = undefined;
+                                        return true;
+                                    };
+                                    state.* = .wrap(&Global.state);
+                                    return true;
+                                },
+                                .pending => return false,
+                            }
                         }
                     }
                 };
-                fn deinit(inst: *const modules.OpaqueInstance, state: *T) void {
-                    _ = inst;
-                    if (@hasField(@TypeOf(T.fimo_events), "deinit")) {
-                        const f = T.fimo_events.deinit;
-                        if (@typeInfo(@TypeOf(f)).@"fn".params.len == 1) f(state) else f();
-                    }
-                    ctx.Handle.unregisterHandle();
-                    Global.instance = undefined;
-                    Global.state = undefined;
-                    Global.is_init = false;
-                }
             };
 
-            switch (@typeInfo(@typeInfo(@TypeOf(ev_init)).@"fn".return_type.?)) {
-                .void, .error_union => builder = builder.withState(wrapper.Sync.Future, wrapper.Sync.init, wrapper.deinit),
-                else => builder.withState(wrapper.Async.Future, wrapper.Async.init, wrapper.deinit),
-            }
+            ev_init_poll = switch (comptime @typeInfo(@typeInfo(@TypeOf(ev_init)).@"fn".return_type.?)) {
+                .void, .error_union => &wrapper.Sync.poll,
+                else => &wrapper.Async.poll,
+            };
         } else {
             const wrapper = struct {
-                const Sync = struct {
-                    successfull: bool = false,
-                    set: *modules.LoadingSet,
+                fn poll(inst: *modules.OpaqueInstance, loader: *modules.Loader, waker: tasks.Waker, state: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
+                    _ = loader;
+                    _ = waker;
 
-                    const Result = *T;
-                    const Future = tasks.Future(@This(), Result, poll, Sync.deinit);
+                    if (Global.is_init) @panic("already init");
+                    ctx.Handle.registerHandle(inst.ctxHandle());
+                    Global.is_init = true;
+                    Global.instance = inst;
 
-                    fn init(inst: *const modules.OpaqueInstance, set: *modules.LoadingSet) Future {
-                        if (Global.is_init) @panic("already init");
-                        ctx.Handle.registerHandle(inst.handle);
-                        Global.instance = @ptrCast(@alignCast(inst));
-                        Global.is_init = true;
-                        if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
-                            if (f.default_value_ptr) |default| {
-                                @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
-                            }
-                        };
-                        return Future.init(.{ .set = set });
-                    }
-                    fn deinit(this: *@This()) void {
-                        if (!this.successfull) {
-                            ctx.Handle.unregisterHandle();
-                            Global.instance = undefined;
-                            Global.is_init = false;
+                    if (@typeInfo(T) == .@"struct") inline for (@typeInfo(T).@"struct".fields) |f| {
+                        if (f.default_value_ptr) |default| {
+                            @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
                         }
+                    };
+
+                    const inst_imports = @as([*]const usize, inst.imports())[0..import_infos.len];
+                    inline for (inst_imports, import_symbols) |imp, sym| {
+                        sym.getGlobal().register(@ptrFromInt(imp));
                     }
-                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                        _ = waker;
-                        this.successfull = true;
-                        return .{ .ready = &Global.state };
-                    }
-                };
-                fn deinit(inst: *const modules.OpaqueInstance, state: *T) void {
-                    _ = inst;
-                    if (@hasField(@TypeOf(T.fimo_events), "deinit")) {
-                        const f = T.fimo_events.deinit;
-                        if (@typeInfo(@TypeOf(f)).@"fn".params.len == 1) f(state) else f();
-                    }
-                    ctx.Handle.unregisterHandle();
-                    Global.instance = undefined;
-                    Global.state = undefined;
-                    Global.is_init = false;
+
+                    state.* = .wrap(&Global.state);
+                    return true;
                 }
             };
-            builder = builder.withState(wrapper.Sync.Future, wrapper.Sync.init, wrapper.deinit);
+            ev_init_poll = &wrapper.poll;
         }
+
+        if (@hasField(@TypeOf(T.fimo_events), "deinit")) {
+            const ev_deinit = T.fimo_events.deinit;
+            const wrapper = struct {
+                const Sync = struct {
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool {
+                        _ = inst;
+                        _ = waker;
+                        _ = state;
+
+                        if (!Global.is_init) @panic("not init");
+                        if (@typeInfo(@TypeOf(ev_deinit)).@"fn".params.len == 1) ev_deinit(&Global.state) else ev_deinit();
+                        ctx.Handle.unregisterHandle();
+                        Global.instance = undefined;
+                        inline for (import_symbols) |sym| sym.getGlobal().unregister();
+                        Global.state = undefined;
+                        Global.is_init = false;
+                        return true;
+                    }
+                };
+                const Async = struct {
+                    const Inner = @typeInfo(@TypeOf(ev_deinit)).@"fn".return_type.?;
+                    comptime {
+                        if (Inner.Result != void)
+                            @compileError("fimo: invalid deinit return type, expected `void`, found " ++ @typeName(Inner.Result));
+                    }
+
+                    var future: ?Inner = null;
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool {
+                        _ = inst;
+                        _ = state;
+
+                        if (future == null) {
+                            if (!Global.is_init) @panic("not init");
+                            future = if (@typeInfo(@TypeOf(ev_deinit)).@"fn".params.len == 1) ev_deinit(&Global.state) else ev_deinit();
+                        }
+                        if (future) |*fut| switch (fut.poll(waker)) {
+                            .ready => {
+                                future = null;
+                                ctx.Handle.unregisterHandle();
+                                Global.instance = undefined;
+                                inline for (import_symbols) |sym| sym.getGlobal().unregister();
+                                Global.state = undefined;
+                                Global.is_init = false;
+                                return true;
+                            },
+                            .pending => return false,
+                        };
+                    }
+                };
+            };
+
+            ev_deinit_poll = switch (comptime @typeInfo(@typeInfo(@TypeOf(ev_deinit)).@"fn".return_type.?)) {
+                .void => &wrapper.Sync.poll,
+                else => &wrapper.Async.poll,
+            };
+        } else {
+            const wrapper = struct {
+                fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool {
+                    _ = inst;
+                    _ = waker;
+                    _ = state;
+
+                    if (!Global.is_init) @panic("not init");
+                    ctx.Handle.unregisterHandle();
+                    Global.instance = undefined;
+                    inline for (import_symbols) |sym| sym.getGlobal().unregister();
+                    Global.state = undefined;
+                    Global.is_init = false;
+                    return true;
+                }
+            };
+            ev_deinit_poll = &wrapper.poll;
+        }
+
         if (@hasField(@TypeOf(T.fimo_events), "on_start")) {
             const on_start = T.fimo_events.on_start;
             const wrapper = struct {
@@ -728,103 +729,309 @@ pub fn Module(T: type) type {
                         .void => void,
                         else => @compileError("fimo: invalid on_start return type, expected `void` or `err!void`, found " ++ @typeName(EvReturn)),
                     };
-                    const Future = tasks.Future(@This(), Result, poll, null);
 
-                    fn init(inst: *const modules.OpaqueInstance) Future {
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *AnyResult) callconv(.c) bool {
                         _ = inst;
-                        return Future.init(.{});
-                    }
-                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                        _ = this;
                         _ = waker;
-                        const result = on_start();
-                        if (@typeInfo(Result) == .error_union) result catch |err| return .{ .ready = err };
-                        return .{ .ready = {} };
+
+                        if (!Global.is_init) @panic("not init");
+                        const res = on_start();
+                        if (@typeInfo(Result) == .error_union) res catch |err| {
+                            result.* = .initErr(err);
+                            return true;
+                        };
+                        result.* = .ok;
+                        return true;
                     }
                 };
                 const Async = struct {
-                    inner: Inner,
-
                     const Inner = @typeInfo(@TypeOf(on_start)).@"fn".return_type.?;
                     const Result = switch (@typeInfo(Inner.Result)) {
                         .error_union => |v| v.error_set!void,
                         .void => void,
-                        else => @compileError("fimo: invalid init return type, expected `void` or `err!void`, found " ++ @typeName(Inner.Result)),
+                        else => @compileError("fimo: invalid on_start return type, expected `void` or `err!void`, found " ++ @typeName(Inner.Result)),
                     };
-                    const Future = tasks.Future(@This(), Result, poll, Async.deinit);
 
-                    fn init(inst: *const modules.OpaqueInstance) Future {
+                    var future: ?Inner = null;
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *AnyResult) callconv(.c) bool {
                         _ = inst;
-                        return Future.init(.{ .inner = on_start() });
-                    }
-                    fn deinit(this: *@This()) void {
-                        if (@hasDecl(Inner, "deinit")) this.inner.deinit();
-                    }
-                    fn poll(this: *@This(), waker: tasks.Waker) tasks.Poll(Result) {
-                        switch (this.inner.poll(waker)) {
-                            .ready => |v| return v,
-                            .pending => return .pending,
+                        if (future == null) {
+                            if (!Global.is_init) @panic("not init");
+                            future = on_start();
                         }
+                        if (future) |*fut| switch (fut.poll(waker)) {
+                            .ready => |v| {
+                                future = null;
+                                if (@typeInfo(Result) == .error_union) v catch |err| {
+                                    result.* = .initErr(err);
+                                    return true;
+                                };
+                                result.* = .ok;
+                                return true;
+                            },
+                            .pending => return false,
+                        };
                     }
                 };
             };
-            switch (@typeInfo(@typeInfo(@TypeOf(on_start)).@"fn".return_type.?)) {
-                .void, .error_union => builder = builder.withOnStartEvent(wrapper.Sync.Future, wrapper.Sync.init),
-                else => builder.withOnStartEvent(wrapper.Async.Future, wrapper.Async.init),
-            }
+
+            ev_start_poll = switch (comptime @typeInfo(@typeInfo(@TypeOf(on_start)).@"fn".return_type.?)) {
+                .void => &wrapper.Sync.poll,
+                else => &wrapper.Async.poll,
+            };
         }
+
         if (@hasField(@TypeOf(T.fimo_events), "on_stop")) {
             const on_stop = T.fimo_events.on_stop;
             const wrapper = struct {
-                fn f(inst: *const modules.OpaqueInstance) void {
-                    _ = inst;
-                    on_stop();
-                }
+                const Sync = struct {
+                    const EvReturn = @typeInfo(@TypeOf(on_stop)).@"fn".return_type.?;
+                    comptime {
+                        if (EvReturn != void)
+                            @compileError("fimo: invalid on_stop return type, expected `void`, found " ++ @typeName(EvReturn));
+                    }
+
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker) callconv(.c) bool {
+                        _ = inst;
+                        _ = waker;
+                        if (!Global.is_init) @panic("not init");
+                        on_stop();
+                        return true;
+                    }
+                };
+                const Async = struct {
+                    const Inner = @typeInfo(@TypeOf(on_stop)).@"fn".return_type.?;
+                    comptime {
+                        if (Inner.Result != void)
+                            @compileError("fimo: invalid on_stop return type, expected `void`, found " ++ @typeName(Inner.Result));
+                    }
+
+                    var future: ?Inner = null;
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker) callconv(.c) bool {
+                        _ = inst;
+                        if (future == null) {
+                            if (!Global.is_init) @panic("not init");
+                            future = on_stop();
+                        }
+                        if (future) |*fut| switch (fut.poll(waker)) {
+                            .ready => {
+                                future = null;
+                                return true;
+                            },
+                            .pending => return false,
+                        };
+                    }
+                };
             };
-            builder = builder.withOnStopEvent(wrapper.f);
+
+            ev_stop_poll = switch (comptime @typeInfo(@typeInfo(@TypeOf(on_stop)).@"fn".return_type.?)) {
+                .void => &wrapper.Sync.poll,
+                else => &wrapper.Async.poll,
+            };
         }
     }
 
-    const InstanceT = builder.exportModule();
+    const wrapper = struct {
+        fn on_event(module: *const Export, tag: *events.Tag) callconv(.c) void {
+            _ = module;
+            switch (tag.*) {
+                .init => if (comptime ev_init_poll != null) {
+                    const event: *events.Init = @alignCast(@fieldParentPtr("tag", tag));
+                    event.poll = ev_init_poll;
+                },
+                .deinit => if (comptime ev_deinit_poll != null) {
+                    const event: *events.Deinit = @alignCast(@fieldParentPtr("tag", tag));
+                    event.poll = ev_deinit_poll;
+                },
+                .start => if (comptime ev_start_poll != null) {
+                    const event: *events.Start = @alignCast(@fieldParentPtr("tag", tag));
+                    event.poll = ev_start_poll;
+                },
+                .stop => if (comptime ev_stop_poll != null) {
+                    const event: *events.Stop = @alignCast(@fieldParentPtr("tag", tag));
+                    event.poll = ev_stop_poll;
+                },
+
+                // Not supported for static modules
+                .deinit_export => {},
+                .dependencies => {},
+                else => {},
+            }
+        }
+        fn provider(instance: anytype, comptime symbol: modules.Symbol) *const anyopaque {
+            const field_name, const is_import = comptime blk: {
+                for (import_symbols, 0..) |sym, i| {
+                    if (std.mem.eql(u8, sym.name, symbol.name) and
+                        std.mem.eql(u8, sym.namespace, symbol.namespace) and
+                        sym.version.sattisfies(symbol.version))
+                        break :blk .{ std.meta.fieldNames(@TypeOf(instance.imports().*))[i], true };
+                }
+                for (export_symbols, 0..) |sym, i| {
+                    if (std.mem.eql(u8, sym.name, symbol.name) and
+                        std.mem.eql(u8, sym.namespace, symbol.namespace) and
+                        sym.version.sattisfies(symbol.version))
+                        break :blk .{ std.meta.fieldNames(@TypeOf(instance.exports().*))[i], false };
+                }
+            };
+            return if (is_import) @field(instance.imports(), field_name) else @field(instance.exports(), field_name);
+        }
+    };
+
+    const Parameters = if (parameter_types.len != 0) blk: {
+        var fields: []const std.builtin.Type.StructField = &.{};
+        for (parameter_names, parameter_types) |field_name, param_ty| {
+            fields = fields ++ [_]std.builtin.Type.StructField{.{
+                .name = field_name,
+                .type = *modules.Param(param_ty),
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(*anyopaque),
+            }};
+        }
+        break :blk @Type(.{ .@"struct" = .{
+            .layout = .@"extern",
+            .fields = fields,
+            .decls = &.{},
+            .is_tuple = false,
+        } });
+    } else anyopaque;
+
+    const Resources = if (resource_names.len != 0) blk: {
+        const Wrapper = extern struct {
+            path: paths.compat.Path,
+            pub fn get(this: @This()) paths.Path {
+                return .initC(this.path);
+            }
+            pub fn format(this: @This(), w: *std.Io.Writer) std.Io.Writer.Error!void {
+                try this.get().format(w);
+            }
+        };
+        var fields: []const std.builtin.Type.StructField = &.{};
+        for (resource_names) |field_name| {
+            fields = fields ++ [_]std.builtin.Type.StructField{.{
+                .name = field_name,
+                .type = Wrapper,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(Wrapper),
+            }};
+        }
+        break :blk @Type(.{ .@"struct" = .{
+            .layout = .@"extern",
+            .fields = fields,
+            .decls = &.{},
+            .is_tuple = false,
+        } });
+    } else anyopaque;
+
+    const Imports = if (import_symbols.len != 0) blk: {
+        var fields: []const std.builtin.Type.StructField = &.{};
+        for (import_symbols, 0..) |sym, i| {
+            @setEvalBranchQuota(10_000);
+            var num_buf: [128]u8 = undefined;
+            fields = fields ++ [_]std.builtin.Type.StructField{.{
+                .name = std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable,
+                .type = *const sym.T,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(*const sym.T),
+            }};
+        }
+        break :blk @Type(.{ .@"struct" = .{
+            .layout = .@"extern",
+            .fields = fields,
+            .decls = &.{},
+            .is_tuple = false,
+        } });
+    } else anyopaque;
+
+    const Exports = if (export_symbols.len != 0) blk: {
+        var fields: []const std.builtin.Type.StructField = &.{};
+        for (export_symbols, 0..) |sym, i| {
+            @setEvalBranchQuota(10_000);
+            var num_buf: [128]u8 = undefined;
+            fields = fields ++ [_]std.builtin.Type.StructField{.{
+                .name = std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable,
+                .type = *const sym.T,
+                .default_value_ptr = null,
+                .is_comptime = false,
+                .alignment = @alignOf(*const sym.T),
+            }};
+        }
+        break :blk @Type(.{ .@"struct" = .{
+            .layout = .@"extern",
+            .fields = fields,
+            .decls = &.{},
+            .is_tuple = false,
+        } });
+    } else anyopaque;
+
+    const exp = &Export{
+        .name = .fromSlice(name),
+        .description = .fromSlice(description),
+        .author = .fromSlice(author),
+        .license = .fromSlice(license),
+        .parameters = .fromSlice(parameter_infos),
+        .resources = .fromSlice(resource_infos),
+        .namespaces = .fromSlice(namespace_infos),
+        .imports = .fromSlice(import_infos),
+        .exports = .fromSlice(export_infos),
+        .on_event = &wrapper.on_event,
+    };
+    embedStaticModuleExport(exp);
+
+    const InstanceT = modules.Instance(.{
+        .ParametersType = Parameters,
+        .ResourcesType = Resources,
+        .ImportsType = Imports,
+        .ExportsType = Exports,
+        .StateType = T,
+        .module_export = exp,
+        .provider = wrapper.provider,
+    });
     return struct {
         pub const is_init: *bool = &Global.is_init;
-        pub const @"export" = Instance.@"export";
+        pub const module_export = Instance.module_export;
         pub const Instance = InstanceT;
         pub const fimo_modules_marker = {};
 
-        pub fn instance() *const Instance {
+        pub fn instance() *Instance {
             std.debug.assert(is_init.*);
             return @ptrCast(Global.instance);
         }
 
-        /// Returns the parameter table.
+        /// Returns the parameter table of the module.
         pub fn parameters() *const Instance.Parameters {
             return instance().parameters();
         }
 
-        /// Returns the paths table.
+        /// Returns the paths table of the module.
         pub fn paths() *const Instance.Resources {
             return instance().resources();
         }
 
-        /// Returns the import table.
+        /// Returns the import table of the module.
         pub fn imports() *const Instance.Imports {
             return instance().imports();
         }
 
-        /// Returns the export table.
+        /// Returns the exports table of the module.
+        ///
+        /// Exports are ordered the in declaration order of the module export.
         pub fn exports() *const Instance.Exports {
             return instance().exports();
         }
 
-        /// Returns the module info.
-        pub fn info() *const modules.Info {
-            return instance().info;
+        /// Returns the shared handle of the module.
+        ///
+        /// NOTE: The reference count is not modified.
+        pub fn handle() *modules.Handle {
+            return instance().handle();
         }
 
-        /// Returns the context handle.
-        pub fn handle() *const ctx.Handle {
-            return instance().handle;
+        /// Returns the handle to the context.
+        pub fn ctxHandle() *ctx.Handle {
+            return instance().ctxHandle();
         }
 
         /// Returns the instance state.
@@ -841,13 +1048,16 @@ pub fn Module(T: type) type {
         ///
         /// Will prevent the module from being unloaded. This may be used to pass data, like callbacks,
         /// between modules, without registering the dependency with the subsystem.
+        ///
+        /// NOTE: Use with caution. Prefer structuring your code in a way that does not necessitate
+        /// dependency tracking.
         pub fn ref() void {
             instance().ref();
         }
 
         /// Decreases the strong reference count of the module instance.
         ///
-        /// Should only be called after `ref`, when the dependency is no longer required.
+        /// May only be called after the reference count has been increased.
         pub fn unref() void {
             instance().unref();
         }
@@ -857,29 +1067,25 @@ pub fn Module(T: type) type {
         /// Checks if the module includes the namespace. In that case, the module is allowed access
         /// to the symbols in the namespace. Additionally, this function also queries whether the
         /// include is static, i.e., it was specified by the module at load time.
-        pub fn queryNamespace(namespace: [:0]const u8) ctx.Error!enum { removed, added, static } {
-            return switch (try instance().queryNamespace(namespace)) {
-                .removed => .removed,
-                .added => .added,
-                .static => .static,
-            };
+        pub fn queryNamespace(ns: []const u8) ctx.Error!modules.Dependency {
+            return instance().queryNamespace(ns);
         }
 
-        /// Includes a namespace by the module.
+        /// Adds a namespace dependency to the module.
         ///
-        /// Once included, the module gains access to the symbols of its dependencies that are
-        /// exposed in said namespace. A namespace can not be included multiple times.
-        pub fn addNamespace(namespace: [:0]const u8) ctx.Error!void {
-            try instance().addNamespace(namespace);
+        /// Once added, the module gains access to the symbols of its dependencies that are
+        /// exposed in said namespace. A namespace can not be added multiple times.
+        pub fn addNamespace(ns: []const u8) ctx.Error!void {
+            try instance().addNamespace(ns);
         }
 
-        /// Removes a namespace include from the module.
+        /// Removes a namespace dependency from the module.
         ///
         /// Once excluded, the caller guarantees to relinquish access to the symbols contained in
         /// said namespace. It is only possible to exclude namespaces that were manually added,
-        /// whereas static namespace includes remain valid until the module is unloaded.
-        pub fn removeNamespace(namespace: [:0]const u8) ctx.Error!void {
-            try instance().removeNamespace(namespace);
+        /// whereas static namespace dependencies remain valid until the module is unloaded.
+        pub fn removeNamespace(ns: []const u8) ctx.Error!void {
+            try instance().removeNamespace(ns);
         }
 
         /// Checks if a module depends on another module.
@@ -888,22 +1094,18 @@ pub fn Module(T: type) type {
         /// the instance is allowed to access the symbols exported by the module. Additionally,
         /// this function also queries whether the dependency is static, i.e., the dependency was
         /// specified by the module at load time.
-        pub fn queryDependency(dep: *const modules.Info) ctx.Error!enum { removed, added, static } {
-            return switch (try instance().queryDependency(dep)) {
-                .removed => .removed,
-                .added => .added,
-                .static => .static,
-            };
+        pub fn queryDependency(h: *modules.Handle) ctx.Error!modules.Dependency {
+            return instance().queryDependency(h);
         }
 
-        /// Acquires another module as a dependency.
+        /// Adds another module as a dependency.
         ///
-        /// After acquiring a module as a dependency, the module is allowed access to the symbols
-        /// and protected parameters of said dependency. Trying to acquire a dependency to a module
+        /// After adding a module as a dependency, the module is allowed access to the symbols
+        /// and protected parameters of said dependency. Trying to adding a dependency to a module
         /// that is already a dependency, or to a module that would result in a circular dependency
         /// will result in an error.
-        pub fn addDependency(dep: *const modules.Info) ctx.Error!void {
-            try instance().addDependency(dep);
+        pub fn addDependency(h: *modules.Handle) ctx.Error!void {
+            try instance().addDependency(h);
         }
 
         /// Removes a module as a dependency.
@@ -912,15 +1114,15 @@ pub fn Module(T: type) type {
         /// references to resources originating from the former dependency, and allows for the
         /// unloading of the module. A module can only relinquish dependencies to modules that were
         /// acquired dynamically, as static dependencies remain valid until the module is unloaded.
-        pub fn removeDependency(dep: *const modules.Info) ctx.Error!void {
-            try instance().removeDependency(dep);
+        pub fn removeDependency(h: *modules.Handle) ctx.Error!void {
+            try instance().removeDependency(h);
         }
 
         /// Loads a group of symbols from the module subsystem.
         ///
         /// Is equivalent to calling `loadSymbol` for each symbol of the group independently.
         pub fn loadSymbolGroup(comptime symbols: anytype) ctx.Error!modules.SymbolGroup(symbols) {
-            return try instance().loadSymbolGroup(symbols);
+            return instance().loadSymbolGroup(symbols);
         }
 
         /// Loads a symbol from the module subsystem.
@@ -931,7 +1133,7 @@ pub fn Module(T: type) type {
         /// dependency to the module that exported the symbol. This function fails, if the module
         /// containing the symbol is not a dependency of the module.
         pub fn loadSymbol(comptime symbol: modules.Symbol) ctx.Error!modules.SymbolWrapper(symbol) {
-            return try instance().loadSymbol(symbol);
+            return instance().loadSymbol(symbol);
         }
 
         /// Loads a symbol from the module subsystem.
@@ -941,12 +1143,8 @@ pub fn Module(T: type) type {
         /// symbol, if it exists, is returned, and can be used until the module relinquishes the
         /// dependency to the module that exported the symbol. This function fails, if the module
         /// containing the symbol is not a dependency of the module.
-        pub fn loadSymbolRaw(
-            name: [:0]const u8,
-            namespace: [:0]const u8,
-            version: Version,
-        ) ctx.Error!*const anyopaque {
-            return try instance().loadSymbolRaw(name, namespace, version);
+        pub fn loadSymbolRaw(symbol: modules.SymbolId) ctx.Error!*const anyopaque {
+            return instance().loadSymbolRaw(symbol);
         }
 
         /// Reads a module parameter with dependency read access.
@@ -954,11 +1152,7 @@ pub fn Module(T: type) type {
         /// Reads the value of a module parameter with dependency read access. The operation fails,
         /// if the parameter does not exist, or if the parameter does not allow reading with a
         /// dependency access.
-        pub fn readParameter(
-            comptime ParamT: type,
-            module: [:0]const u8,
-            parameter: [:0]const u8,
-        ) ctx.Error!ParamT {
+        pub fn readParameter(comptime ParamT: type, module: []const u8, parameter: []const u8) ctx.Error!ParamT {
             return try instance().readParameter(ParamT, module, parameter);
         }
 
@@ -967,883 +1161,11 @@ pub fn Module(T: type) type {
         /// Sets the value of a module parameter with dependency write access. The operation fails,
         /// if the parameter does not exist, or if the parameter does not allow writing with a
         /// dependency access.
-        pub fn writeParameter(
-            comptime ParamT: type,
-            value: ParamT,
-            module: [:0]const u8,
-            parameter: [:0]const u8,
-        ) ctx.Error!void {
+        pub fn writeParameter(comptime ParamT: type, value: ParamT, module: []const u8, parameter: []const u8) ctx.Error!void {
             try instance().writeParameter(ParamT, value, module, parameter);
         }
     };
 }
-
-/// Builder for a module export.
-pub const Builder = struct {
-    name: [:0]const u8,
-    description: ?[:0]const u8 = null,
-    author: ?[:0]const u8 = null,
-    license: ?[:0]const u8 = null,
-    parameters: []const Builder.Parameter = &.{},
-    resources: []const Builder.Resource = &.{},
-    namespaces: []const Namespace = &.{},
-    imports: []const Builder.SymbolImport = &.{},
-    exports: []const Builder.SymbolExport = &.{},
-    modifiers: []const Builder.Modifier = &.{},
-    stateType: type = void,
-    instance_state: ?ExportsRoot.Modifier.InstanceState = null,
-    start_event: ?ExportsRoot.Modifier.StartEvent = null,
-    stop_event: ?ExportsRoot.Modifier.StopEvent = null,
-
-    pub const Parameter = struct {
-        name: []const u8,
-        member_name: [:0]const u8,
-        default_value: union(enum) {
-            u8: u8,
-            u16: u16,
-            u32: u32,
-            u64: u64,
-            i8: i8,
-            i16: i16,
-            i32: i32,
-            i64: i64,
-        },
-        read_group: modules.ParameterAccessGroup = .private,
-        write_group: modules.ParameterAccessGroup = .private,
-        read: ?*const fn (
-            data: modules.OpaqueParameterData,
-            value: *anyopaque,
-        ) callconv(.c) void = null,
-        write: ?*const fn (
-            data: modules.OpaqueParameterData,
-            value: *const anyopaque,
-        ) callconv(.c) void = null,
-    };
-
-    pub const Resource = struct {
-        name: [:0]const u8,
-        path: paths.Path,
-    };
-
-    pub const SymbolImport = struct {
-        name: ?[:0]const u8 = null,
-        symbol: modules.Symbol,
-    };
-
-    pub const SymbolExportOptions = struct {
-        symbol: modules.Symbol,
-        name: ?[:0]const u8 = null,
-        linkage: SymbolLinkage = .global,
-    };
-
-    const SymbolExport = struct {
-        symbol: modules.Symbol,
-        name: ?[:0]const u8,
-        linkage: SymbolLinkage,
-        value: union(enum) {
-            static: *const anyopaque,
-            dynamic: struct {
-                initFn: *const fn (
-                    ctx: *const modules.OpaqueInstance,
-                ) callconv(.c) EnqueuedFuture(Fallible(*anyopaque)),
-                deinitFn: *const fn (
-                    ctx: *const modules.OpaqueInstance,
-                    symbol: *anyopaque,
-                ) callconv(.c) void,
-            },
-        },
-    };
-
-    const Modifier = union(enum) {
-        instance_state: void,
-        start_event: void,
-        stop_event: void,
-        _,
-    };
-
-    fn EnqueueError(comptime T: type) tasks.EnqueuedFuture(Fallible(T)) {
-        return .{
-            .data = @ptrCast(@constCast(&{})),
-            .poll_fn = &struct {
-                fn f(
-                    data: **anyopaque,
-                    waker: tasks.Waker,
-                    res: *Fallible(T),
-                ) callconv(.c) bool {
-                    _ = data;
-                    _ = waker;
-                    res.* = Fallible(T).wrap(error.EnqueueError);
-                    return true;
-                }
-            }.f,
-            .cleanup_fn = null,
-        };
-    }
-
-    /// Initializes a new builder.
-    pub fn init(comptime name: [:0]const u8) Builder {
-        return .{ .name = name };
-    }
-
-    /// Adds a description to the module.
-    pub fn withDescription(comptime self: Builder, comptime description: ?[:0]const u8) Builder {
-        var x = self;
-        x.description = description;
-        return x;
-    }
-
-    /// Adds a author to the module.
-    pub fn withAuthor(comptime self: Builder, comptime author: ?[:0]const u8) Builder {
-        var x = self;
-        x.author = author;
-        return x;
-    }
-
-    /// Adds a license to the module.
-    pub fn withLicense(comptime self: Builder, comptime license: ?[:0]const u8) Builder {
-        var x = self;
-        x.license = license;
-        return x;
-    }
-
-    /// Adds a parameter to the module.
-    pub fn withParameter(
-        comptime self: Builder,
-        comptime parameter: Builder.Parameter,
-    ) Builder {
-        for (self.parameters) |p| {
-            if (std.mem.eql(u8, p.name, parameter.name)) @compileError(
-                std.fmt.comptimePrint("duplicate parameter name: '{s}'", .{parameter.name}),
-            );
-            if (std.mem.eql(u8, p.member_name, parameter.member_name)) @compileError(
-                std.fmt.comptimePrint(
-                    "duplicate parameter member name: '{s}'",
-                    .{parameter.member_name},
-                ),
-            );
-        }
-
-        var parameters: [self.parameters.len + 1]Builder.Parameter = undefined;
-        @memcpy(parameters[0..self.parameters.len], self.parameters);
-        parameters[self.parameters.len] = parameter;
-
-        var x = self;
-        x.parameters = &parameters;
-        return x;
-    }
-
-    /// Adds a resource path to the module.
-    pub fn withResource(
-        comptime self: Builder,
-        comptime resource: Builder.Resource,
-    ) Builder {
-        for (self.resources) |res| {
-            if (std.mem.eql(u8, res.name, resource.name))
-                @compileError(
-                    std.fmt.comptimePrint(
-                        "duplicate resource member name: '{s}'",
-                        .{res.name},
-                    ),
-                );
-        }
-
-        var res_paths: [self.resources.len + 1]Builder.Resource = undefined;
-        @memcpy(res_paths[0..self.resources.len], self.resources);
-        res_paths[self.resources.len] = resource;
-
-        var x = self;
-        x.resources = &res_paths;
-        return x;
-    }
-
-    /// Adds a namespace import to the module.
-    ///
-    /// A namespace may be imported multiple times.
-    pub fn withNamespace(
-        comptime self: Builder,
-        comptime name: []const u8,
-    ) Builder {
-        if (std.mem.eql(u8, name, "")) return self;
-        for (self.namespaces) |ns| {
-            if (std.mem.eql(u8, std.mem.span(ns.name), name)) return self;
-        }
-
-        var namespaces: [self.namespaces.len + 1]Namespace = undefined;
-        @memcpy(namespaces[0..self.namespaces.len], self.namespaces);
-        namespaces[self.namespaces.len] = .{ .name = name ++ "\x00" };
-
-        var x = self;
-        x.namespaces = &namespaces;
-        return x;
-    }
-
-    /// Adds multiple imports to the module.
-    ///
-    /// Automatically imports the required namespaces.
-    pub fn withMultipleImports(comptime self: Builder, comptime imports: anytype) Builder {
-        var builder = self;
-        const imports_info = @typeInfo(@TypeOf(imports)).@"struct";
-        inline for (imports_info.fields) |f| {
-            const name = f.name;
-            const symbol = @field(imports, name);
-            builder = builder.withImport(.{
-                .name = if (imports_info.is_tuple) null else name,
-                .symbol = symbol,
-            });
-        }
-        return builder;
-    }
-
-    /// Adds an import to the module.
-    ///
-    /// Automatically imports the required namespace.
-    pub fn withImport(
-        comptime self: Builder,
-        comptime import: Builder.SymbolImport,
-    ) Builder {
-        if (import.name) |import_name| for (self.imports) |imp| {
-            const imp_name = imp.name orelse continue;
-            if (std.mem.eql(u8, imp_name, import_name))
-                @compileError(
-                    std.fmt.comptimePrint(
-                        "duplicate import member name: '{s}'",
-                        .{imp.name},
-                    ),
-                );
-        };
-
-        var imports: [self.imports.len + 1]Builder.SymbolImport = undefined;
-        @memcpy(imports[0..self.imports.len], self.imports);
-        imports[self.imports.len] = import;
-
-        var x = self.withNamespace(import.symbol.namespace);
-        x.imports = &imports;
-        return x;
-    }
-
-    fn withExportInner(
-        comptime self: Builder,
-        comptime @"export": Builder.SymbolExport,
-    ) Builder {
-        if (@"export".name) |export_name| for (self.exports) |exp| {
-            const exp_name = exp.name orelse continue;
-            if (std.mem.eql(u8, exp_name, export_name))
-                @compileError(
-                    std.fmt.comptimePrint(
-                        "duplicate export member name: '{s}'",
-                        .{exp.name},
-                    ),
-                );
-        };
-
-        var exports: [self.exports.len + 1]Builder.SymbolExport = undefined;
-        @memcpy(exports[0..self.exports.len], self.exports);
-        exports[self.exports.len] = @"export";
-
-        var x = self;
-        x.exports = &exports;
-        return x;
-    }
-
-    /// Adds a static export to the module.
-    pub fn withExport(
-        comptime self: Builder,
-        comptime options: SymbolExportOptions,
-        comptime value: *const options.symbol.T,
-    ) Builder {
-        const exp = Builder.SymbolExport{
-            .symbol = options.symbol,
-            .name = options.name,
-            .linkage = options.linkage,
-            .value = .{ .static = value },
-        };
-        return self.withExportInner(exp);
-    }
-
-    /// Adds a dynamic export to the module.
-    pub fn withDynamicExport(
-        comptime self: Builder,
-        comptime options: SymbolExportOptions,
-        comptime Fut: type,
-        comptime initFn: fn (ctx: *const modules.OpaqueInstance) Fut,
-        comptime deinitFn: fn (ctx: *const modules.OpaqueInstance, symbol: *options.symbol.T) void,
-    ) Builder {
-        const Result = Fut.Result;
-        switch (@typeInfo(Result)) {
-            .error_union => |x| std.debug.assert(x.payload == *options.symbol.T),
-            else => std.debug.assert(Result == *options.symbol.T),
-        }
-        const Wrapper = struct {
-            fn wrapInit(
-                context: *const modules.OpaqueInstance,
-            ) callconv(.c) tasks.EnqueuedFuture(Fallible(*anyopaque)) {
-                const fut = initFn(context).intoFuture();
-                var mapped_fut = fut.map(
-                    Fallible(*anyopaque),
-                    struct {
-                        fn map(v: Result) Fallible(*anyopaque) {
-                            const x = if (@typeInfo(Result) == .error_union)
-                                v catch |err| return Fallible(?*anyopaque).wrap(err)
-                            else
-                                v;
-                            return Fallible(*anyopaque).wrap(@ptrCast(x));
-                        }
-                    }.map,
-                ).intoFuture();
-                return mapped_fut.enqueue(null) catch {
-                    mapped_fut.deinit();
-                    return EnqueueError(*anyopaque);
-                };
-            }
-            fn wrapDeinit(
-                context: *const modules.OpaqueInstance,
-                symbol_ptr: *anyopaque,
-            ) callconv(.c) void {
-                return deinitFn(context, @ptrCast(@alignCast(symbol_ptr)));
-            }
-        };
-
-        const exp = Builder.SymbolExport{
-            .symbol = options.symbol,
-            .name = options.name,
-            .linkage = options.linkage,
-            .value = .{
-                .dynamic = .{
-                    .initFn = &Wrapper.wrapInit,
-                    .deinitFn = &Wrapper.wrapDeinit,
-                },
-            },
-        };
-        return self.withExportInner(exp);
-    }
-
-    fn withModifierInner(
-        comptime self: Builder,
-        comptime modifier: Builder.Modifier,
-    ) Builder {
-        var modifiers: [self.modifiers.len + 1]Builder.Modifier = undefined;
-        @memcpy(modifiers[0..self.modifiers.len], self.modifiers);
-        modifiers[self.modifiers.len] = modifier;
-
-        var x = self;
-        x.modifiers = &modifiers;
-        return x;
-    }
-
-    /// Adds a state to the module.
-    pub fn withState(
-        comptime self: Builder,
-        comptime Fut: type,
-        comptime initFn: fn (*const modules.OpaqueInstance, *modules.LoadingSet) Fut,
-        comptime deinitFn: anytype,
-    ) Builder {
-        const Result = Fut.Result;
-        const T: type = switch (@typeInfo(Result)) {
-            .error_union => |x| blk: {
-                const payload = x.payload;
-                const info = @typeInfo(payload);
-                std.debug.assert(payload == *info.pointer.child);
-                break :blk info.pointer.child;
-            },
-            .pointer => |x| blk: {
-                std.debug.assert(Result == *x.child);
-                break :blk x.child;
-            },
-            else => @compileError("fimo: invalid return type, expected `*T` or `err!*T`, found " ++ @typeName(Result)),
-        };
-        const Wrapper = struct {
-            fn wrapInit(
-                context: *const modules.OpaqueInstance,
-                set: *modules.LoadingSet,
-            ) callconv(.c) tasks.EnqueuedFuture(Fallible(?*anyopaque)) {
-                const fut = initFn(context, set).intoFuture();
-                var mapped_fut = fut.map(
-                    Fallible(?*anyopaque),
-                    struct {
-                        fn f(v: Result) Fallible(?*anyopaque) {
-                            const x = if (@typeInfo(Result) == .error_union)
-                                v catch |err| return Fallible(?*anyopaque).wrap(err)
-                            else
-                                v;
-                            return Fallible(?*anyopaque).wrap(@ptrCast(x));
-                        }
-                    }.f,
-                ).intoFuture();
-                return mapped_fut.enqueue(null) catch {
-                    mapped_fut.deinit();
-                    return EnqueueError(?*anyopaque);
-                };
-            }
-
-            fn wrapDeinit(
-                context: *const modules.OpaqueInstance,
-                data: ?*anyopaque,
-            ) callconv(.c) void {
-                const f: fn (*const modules.OpaqueInstance, *T) void = deinitFn;
-                const state: *T = @ptrCast(@alignCast(data));
-                f(context, state);
-            }
-        };
-
-        if (self.instance_state != null) @compileError("a state has already been assigned");
-        var x = self;
-        x.stateType = T;
-        x.instance_state = .{
-            .init = &Wrapper.wrapInit,
-            .deinit = &Wrapper.wrapDeinit,
-        };
-        return x.withModifierInner(.{ .instance_state = {} });
-    }
-
-    pub fn withOnStartEvent(
-        comptime self: Builder,
-        comptime Fut: type,
-        comptime f: fn (ctx: *const modules.OpaqueInstance) Fut,
-    ) Builder {
-        const Result = Fut.Result;
-        const T: type = switch (@typeInfo(Result)) {
-            .error_union => |x| x.payload,
-            else => Result,
-        };
-        std.debug.assert(T == void);
-        const Wrapper = struct {
-            fn wrapF(
-                context: *const modules.OpaqueInstance,
-            ) callconv(.c) tasks.EnqueuedFuture(Fallible(void)) {
-                const fut = f(context).intoFuture();
-                var mapped_fut = fut.map(
-                    Fallible(void),
-                    Fallible(void).wrap,
-                ).intoFuture();
-                return mapped_fut.enqueue(null) catch {
-                    mapped_fut.deinit();
-                    return EnqueueError(void);
-                };
-            }
-        };
-
-        if (self.start_event != null)
-            @compileError("the `on_start` event is already defined");
-
-        var x = self;
-        x.start_event = .{ .on_event = &Wrapper.wrapF };
-        return x.withModifierInner(.{ .start_event = {} });
-    }
-
-    /// Adds an `on_stop` event to the module.
-    pub fn withOnStopEvent(
-        comptime self: Builder,
-        comptime f: fn (ctx: *const modules.OpaqueInstance) void,
-    ) Builder {
-        if (self.stop_event != null)
-            @compileError("the `on_stop` event is already defined");
-
-        const wrapped = struct {
-            fn wrapper(context: *const modules.OpaqueInstance) callconv(.c) void {
-                f(context);
-            }
-        }.wrapper;
-
-        var x = self;
-        x.stop_event = .{ .on_event = &wrapped };
-        return x.withModifierInner(.{ .stop_event = {} });
-    }
-
-    fn ParameterTable(comptime self: Builder) type {
-        if (self.parameters.len == 0) return void;
-        var fields: [self.parameters.len]std.builtin.Type.StructField = undefined;
-        for (self.parameters, &fields) |p, *f| {
-            const pType = switch (p.default_value) {
-                .u8 => u8,
-                .u16 => u16,
-                .u32 => u32,
-                .u64 => u64,
-                .i8 => i8,
-                .i16 => i16,
-                .i32 => i32,
-                .i64 => i64,
-            };
-            f.* = std.builtin.Type.StructField{
-                .name = p.member_name,
-                .type = *modules.Parameter(pType),
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(*anyopaque),
-            };
-        }
-        const t: std.builtin.Type = .{
-            .@"struct" = std.builtin.Type.Struct{
-                .layout = .@"extern",
-                .fields = &fields,
-                .decls = &.{},
-                .is_tuple = false,
-            },
-        };
-        return @Type(t);
-    }
-
-    fn ResourceTable(comptime self: Builder) type {
-        const PathWrapper = extern struct {
-            ffi: paths.compat.Path,
-            pub fn getCStr(this: @This()) [:0]const u8 {
-                return this.ffi.path[0..this.ffi.length :0];
-            }
-            pub fn getPath(this: @This()) paths.Path {
-                return paths.Path.initC(this.ffi);
-            }
-            pub fn format(this: @This(), w: *std.Io.Writer) std.Io.Writer.Error!void {
-                try this.getPath().format(w);
-            }
-        };
-
-        if (self.resources.len == 0) return void;
-        var fields: [self.resources.len]std.builtin.Type.StructField = undefined;
-        for (self.resources, &fields) |x, *f| {
-            f.* = std.builtin.Type.StructField{
-                .name = x.name,
-                .type = PathWrapper,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf([*:0]const u8),
-            };
-        }
-        const t: std.builtin.Type = .{
-            .@"struct" = std.builtin.Type.Struct{
-                .layout = .@"extern",
-                .fields = &fields,
-                .decls = &.{},
-                .is_tuple = false,
-            },
-        };
-        return @Type(t);
-    }
-
-    fn ImportTable(comptime self: Builder) type {
-        if (self.imports.len == 0) return void;
-        var fields: [self.imports.len]std.builtin.Type.StructField = undefined;
-        for (self.imports, &fields, 0..) |x, *f, i| {
-            @setEvalBranchQuota(10_000);
-            var num_buf: [128]u8 = undefined;
-            f.* = std.builtin.Type.StructField{
-                .name = x.name orelse (std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable),
-                .type = *const x.symbol.T,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(*const anyopaque),
-            };
-        }
-        const t: std.builtin.Type = .{
-            .@"struct" = std.builtin.Type.Struct{
-                .layout = .@"extern",
-                .fields = &fields,
-                .decls = &.{},
-                .is_tuple = false,
-            },
-        };
-        return @Type(t);
-    }
-
-    fn ExportsTable(comptime self: Builder) type {
-        if (self.exports.len == 0) return void;
-        var i: usize = 0;
-        var fields: [self.exports.len]std.builtin.Type.StructField = undefined;
-        for (self.exports) |x| {
-            @setEvalBranchQuota(10_000);
-            if (x.value != .static) continue;
-            var num_buf: [128]u8 = undefined;
-            fields[i] = std.builtin.Type.StructField{
-                .name = x.name orelse (std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable),
-                .type = *const x.symbol.T,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(*const anyopaque),
-            };
-            i += 1;
-        }
-        for (self.exports) |x| {
-            if (x.value != .dynamic) continue;
-            var num_buf: [128]u8 = undefined;
-            fields[i] = std.builtin.Type.StructField{
-                .name = x.name orelse (std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable),
-                .type = *const x.symbol.T,
-                .default_value_ptr = null,
-                .is_comptime = false,
-                .alignment = @alignOf(*const anyopaque),
-            };
-            i += 1;
-        }
-        const t: std.builtin.Type = .{
-            .@"struct" = std.builtin.Type.Struct{
-                .layout = .@"extern",
-                .fields = &fields,
-                .decls = &.{},
-                .is_tuple = false,
-            },
-        };
-        return @Type(t);
-    }
-
-    fn SymbolProvider(comptime self: Builder) fn (anytype, comptime modules.Symbol) *const anyopaque {
-        const SymbolInfo = struct {
-            name: [:0]const u8,
-            symbol: modules.Symbol,
-            location: enum { imp, exp },
-        };
-        var infos: [self.imports.len + self.exports.len]SymbolInfo = undefined;
-        for (infos[0..self.imports.len], self.imports, 0..) |*info, sym, i| {
-            @setEvalBranchQuota(10_000);
-            info.* = .{
-                .name = sym.name orelse std.fmt.comptimePrint("{d}", .{i})[0..],
-                .symbol = sym.symbol,
-                .location = .imp,
-            };
-        }
-        var i: usize = 0;
-        for (infos[self.imports.len..], self.exports) |*info, sym| {
-            @setEvalBranchQuota(10_000);
-            if (sym.value != .static) continue;
-            info.* = .{
-                .name = sym.name orelse std.fmt.comptimePrint("{d}", .{i})[0..],
-                .symbol = sym.symbol,
-                .location = .exp,
-            };
-            i += 1;
-        }
-        for (infos[self.imports.len..], self.exports) |*info, sym| {
-            @setEvalBranchQuota(10_000);
-            if (sym.value != .dynamic) continue;
-            info.* = .{
-                .name = sym.name orelse std.fmt.comptimePrint("{d}", .{i})[0..],
-                .symbol = sym.symbol,
-                .location = .exp,
-            };
-            i += 1;
-        }
-        const infos_c = infos;
-        return struct {
-            fn provide(instance: anytype, comptime symbol: modules.Symbol) *const anyopaque {
-                const name, const location = comptime blk: {
-                    for (&infos_c) |info| {
-                        if (std.mem.eql(u8, info.symbol.name, symbol.name) and
-                            std.mem.eql(u8, info.symbol.namespace, symbol.namespace) and
-                            info.symbol.version.isCompatibleWith(symbol.version))
-                        {
-                            break :blk .{ info.name, info.location };
-                        }
-                    }
-                    @compileError(std.fmt.comptimePrint(
-                        "the instance does not provide the symbol {}",
-                        .{symbol},
-                    ));
-                };
-                return if (comptime location == .imp)
-                    @field(instance.imports(), name)
-                else
-                    @field(instance.exports(), name);
-            }
-        }.provide;
-    }
-
-    fn ffiParameters(comptime self: Builder) []const ExportsRoot.Parameter {
-        var parameters: [self.parameters.len]ExportsRoot.Parameter = undefined;
-        for (self.parameters, &parameters) |src, *dst| {
-            dst.* = ExportsRoot.Parameter{
-                .name = src.name ++ "\x00",
-                .read_group = src.read_group,
-                .write_group = src.write_group,
-                .read = src.read,
-                .write = src.write,
-                .type = switch (src.default_value) {
-                    .u8 => .u8,
-                    .u16 => .u16,
-                    .u32 => .u32,
-                    .u64 => .u64,
-                    .i8 => .i8,
-                    .i16 => .i16,
-                    .i32 => .i32,
-                    .i64 => .i64,
-                },
-                .default_value = switch (src.default_value) {
-                    .u8 => |v| .{ .u8 = v },
-                    .u16 => |v| .{ .u16 = v },
-                    .u32 => |v| .{ .u32 = v },
-                    .u64 => |v| .{ .u64 = v },
-                    .i8 => |v| .{ .i8 = v },
-                    .i16 => |v| .{ .i16 = v },
-                    .i32 => |v| .{ .i32 = v },
-                    .i64 => |v| .{ .i64 = v },
-                },
-            };
-        }
-        const parameters_c = parameters;
-        return &parameters_c;
-    }
-
-    fn ffiResources(comptime self: Builder) []const ExportsRoot.Resource {
-        var resources: [self.resources.len]ExportsRoot.Resource = undefined;
-        for (self.resources, &resources) |src, *dst| {
-            dst.* = ExportsRoot.Resource{
-                .path = src.path.raw ++ "\x00",
-            };
-        }
-        const resources_c = resources;
-        return &resources_c;
-    }
-
-    fn ffiNamespaces(comptime self: Builder) []const Namespace {
-        var namespaces: [self.namespaces.len]Namespace = undefined;
-        for (self.namespaces, &namespaces) |src, *dst| {
-            dst.* = Namespace{
-                .name = src.name,
-            };
-        }
-        const namespaces_c = namespaces;
-        return &namespaces_c;
-    }
-
-    fn ffiImports(comptime self: Builder) []const ExportsRoot.SymbolImport {
-        var imports: [self.imports.len]ExportsRoot.SymbolImport = undefined;
-        for (self.imports, &imports) |src, *dst| {
-            dst.* = ExportsRoot.SymbolImport{
-                .name = src.symbol.name,
-                .namespace = src.symbol.namespace,
-                .version = src.symbol.version.intoC(),
-            };
-        }
-        const imports_c = imports;
-        return &imports_c;
-    }
-
-    fn ffiExports(comptime self: Builder) []const ExportsRoot.SymbolExport {
-        var count: usize = 0;
-        for (self.exports) |exp| {
-            if (exp.value != .static) continue;
-            count += 1;
-        }
-
-        var i: usize = 0;
-        var exports: [count]ExportsRoot.SymbolExport = undefined;
-        for (self.exports) |src| {
-            if (src.value != .static) continue;
-            exports[i] = ExportsRoot.SymbolExport{
-                .symbol = src.value.static,
-                .linkage = src.linkage,
-                .version = src.symbol.version.intoC(),
-                .name = src.symbol.name,
-                .namespace = src.symbol.namespace,
-            };
-            i += 1;
-        }
-        const exports_c = exports;
-        return &exports_c;
-    }
-
-    fn ffiDynamicExports(comptime self: Builder) []const DynamicSymbolExport {
-        var count: usize = 0;
-        for (self.exports) |exp| {
-            if (exp.value != .dynamic) continue;
-            count += 1;
-        }
-
-        var i: usize = 0;
-        var exports: [count]DynamicSymbolExport = undefined;
-        for (self.exports) |src| {
-            if (src.value != .dynamic) continue;
-            exports[i] = DynamicSymbolExport{
-                .constructor = src.value.dynamic.initFn,
-                .destructor = src.value.dynamic.deinitFn,
-                .linkage = src.linkage,
-                .version = src.symbol.version.intoC(),
-                .name = src.symbol.name,
-                .namespace = src.symbol.namespace,
-            };
-            i += 1;
-        }
-        const exports_c = exports;
-        return &exports_c;
-    }
-
-    fn ffiModifiers(comptime self: Builder) []const ExportsRoot.Modifier {
-        var modifiers: [self.modifiers.len]ExportsRoot.Modifier = undefined;
-        for (self.modifiers, &modifiers) |src, *dst| {
-            switch (src) {
-                .instance_state => {
-                    const instance_state = self.instance_state.?;
-                    dst.* = .{
-                        .tag = .instance_state,
-                        .value = .{
-                            .instance_state = &instance_state,
-                        },
-                    };
-                },
-                .start_event => {
-                    const start_event = self.start_event.?;
-                    dst.* = .{
-                        .tag = .start_event,
-                        .value = .{
-                            .start_event = &start_event,
-                        },
-                    };
-                },
-                .stop_event => {
-                    const stop_event = self.stop_event.?;
-                    dst.* = .{
-                        .tag = .stop_event,
-                        .value = .{
-                            .stop_event = &stop_event,
-                        },
-                    };
-                },
-                else => @compileError("unknown modifier"),
-            }
-        }
-
-        const modifiers_c: [self.modifiers.len]ExportsRoot.Modifier = modifiers;
-        return &modifiers_c;
-    }
-
-    /// Exports the module with the specified configuration.
-    pub fn exportModule(comptime self: Builder) type {
-        const parameters = self.ffiParameters();
-        const resources = self.ffiResources();
-        const namespaces = self.ffiNamespaces();
-        const imports = self.ffiImports();
-        const exports = self.ffiExports();
-        const dynamic_exports = self.ffiDynamicExports();
-        const modifiers = self.ffiModifiers();
-        const exp = &Export{
-            .name = self.name,
-            .description = self.description orelse null,
-            .author = self.author orelse null,
-            .license = self.license orelse null,
-            .parameters = if (parameters.len > 0) parameters.ptr else null,
-            .parameters_count = parameters.len,
-            .resources = if (resources.len > 0) resources.ptr else null,
-            .resources_count = resources.len,
-            .namespace_imports = if (namespaces.len > 0) namespaces.ptr else null,
-            .namespace_imports_count = namespaces.len,
-            .symbol_imports = if (imports.len > 0) imports.ptr else null,
-            .symbol_imports_count = imports.len,
-            .symbol_exports = if (exports.len > 0) exports.ptr else null,
-            .symbol_exports_count = exports.len,
-            .dynamic_symbol_exports = if (dynamic_exports.len > 0) dynamic_exports.ptr else null,
-            .dynamic_symbol_exports_count = dynamic_exports.len,
-            .modifiers = if (modifiers.len > 0) modifiers.ptr else null,
-            .modifiers_count = modifiers.len,
-        };
-        embedStaticModuleExport(exp);
-
-        return modules.Instance(.{
-            .ParametersType = self.ParameterTable(),
-            .ResourcesType = self.ResourceTable(),
-            .ImportsType = self.ImportTable(),
-            .ExportsType = self.ExportsTable(),
-            .StateType = self.stateType,
-            .@"export" = exp,
-            .provider = self.SymbolProvider(),
-        });
-    }
-};
 
 const exports_section = switch (builtin.target.os.tag) {
     .macos, .ios, .watchos, .tvos, .visionos => struct {
@@ -1944,12 +1266,9 @@ pub const ExportIter = struct {
         return null;
     }
 
-    pub export fn fimo_impl_module_export_iterator(
+    pub export fn fstd__module_export_iter(
         context: ?*anyopaque,
-        inspector: *const fn (
-            context: ?*anyopaque,
-            module: *const Export,
-        ) callconv(.c) bool,
+        inspector: *const fn (context: ?*anyopaque, module: *const Export) callconv(.c) bool,
     ) void {
         var it = ExportIter{};
         while (it.next()) |exp| {
@@ -1964,7 +1283,7 @@ pub const ExportIter = struct {
 ///
 /// For internal use only, as the pointer should not generally be null.
 fn embedStaticModuleExport(comptime module: ?*const Export) void {
-    const name = if (module) |m| std.mem.span(m.name) else "unknown";
+    const name = if (module) |m| m.name.intoSliceOrEmpty() else "unknown";
     _ = struct {
         const data = module;
         comptime {

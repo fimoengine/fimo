@@ -1,17 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const win32 = @import("win32");
+
 const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
-
-const os_ext = switch (builtin.target.os.tag) {
-    .windows => struct {
-        pub extern "kernel32" fn GetSystemTimeAsFileTime(
-            lpSystemTimeAsFileTime: *std.os.windows.FILETIME,
-        ) callconv(.winapi) void;
-    },
-    else => struct {},
-};
 
 /// Number of milliseconds per second.
 pub const millis_per_sec = 1000;
@@ -63,6 +56,17 @@ pub const SubSecondNanos = std.math.IntFittingRange(0, nanos_per_sec - 1);
 
 /// Redeclaration of the C-API types.
 pub const compat = struct {
+    pub const TimeInt = extern struct {
+        low: u64,
+        high: u32,
+
+        pub fn init(int: u96) TimeInt {
+            return .{
+                .low = @truncate(int),
+                .high = @intCast(int >> 64),
+            };
+        }
+    };
     pub const Duration = extern struct {
         secs: u64,
         nanos: u32,
@@ -277,8 +281,8 @@ pub const Time = struct {
                 // FileTime has a granularity of 100 nanoseconds and uses the NTFS/Windows epoch,
                 // which is 1601-01-01.
                 const epoch_adj = 11644473600 * (micros_per_sec * 10);
-                var ft: std.os.windows.FILETIME = undefined;
-                os_ext.GetSystemTimeAsFileTime(&ft);
+                var ft: win32.foundation.FILETIME = undefined;
+                win32.system.system_information.GetSystemTimeAsFileTime(&ft);
                 const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
                 std.debug.assert(ft64 >= epoch_adj);
                 const ft_unix = ft64 - epoch_adj;
@@ -511,82 +515,27 @@ pub const Instant = struct {
 // ----------------------------------------------------
 
 const ffi = struct {
-    export fn fimo_duration_zero() compat.Duration {
-        return Duration.Zero.intoC();
-    }
-
-    export fn fimo_duration_max() compat.Duration {
-        return Duration.Max.intoC();
-    }
-
-    export fn fimo_duration_from_seconds(seconds: u64) compat.Duration {
-        return Duration.initSeconds(seconds).intoC();
-    }
-
-    export fn fimo_duration_from_millis(millis: u64) compat.Duration {
-        return Duration.initMillis(millis).intoC();
-    }
-
-    export fn fimo_duration_from_nanos(nanos: u64) compat.Duration {
-        return Duration.initNanos(nanos).intoC();
-    }
-
-    export fn fimo_duration_is_zero(duration: *const compat.Duration) bool {
-        const d = Duration.initC(duration.*);
-        return d.isZero();
-    }
-
-    export fn fimo_duration_as_secs(duration: *const compat.Duration) u64 {
-        return duration.secs;
-    }
-
-    export fn fimo_duration_subsec_millis(duration: *const compat.Duration) u32 {
-        const d = Duration.initC(duration.*);
-        return d.subSecMillis();
-    }
-
-    export fn fimo_duration_subsec_micros(duration: *const compat.Duration) u32 {
-        const d = Duration.initC(duration.*);
-        return d.subSecMicros();
-    }
-
-    export fn fimo_duration_subsec_nanos(duration: *const compat.Duration) u32 {
-        return duration.nanos;
-    }
-
-    export fn fimo_duration_as_millis(duration: *const compat.Duration, high: ?*u32) u64 {
-        const d = Duration.initC(duration.*);
+    export fn fstd_duration_millis(duration: compat.Duration) compat.TimeInt {
+        const d = Duration.initC(duration);
         const millis = d.millis();
-
-        if (high) |h| {
-            h.* = @intCast(millis >> 64);
-        }
-        return @truncate(millis);
+        return .init(millis);
     }
 
-    export fn fimo_duration_as_micros(duration: *const compat.Duration, high: ?*u32) u64 {
-        const d = Duration.initC(duration.*);
+    export fn fstd_duration_micros(duration: compat.Duration) compat.TimeInt {
+        const d = Duration.initC(duration);
         const micros = d.micros();
-
-        if (high) |h| {
-            h.* = @intCast(micros >> 64);
-        }
-        return @truncate(micros);
+        return .init(micros);
     }
 
-    export fn fimo_duration_as_nanos(duration: *const compat.Duration, high: ?*u32) u64 {
-        const d = Duration.initC(duration.*);
+    export fn fstd_duration_nanos(duration: compat.Duration) compat.TimeInt {
+        const d = Duration.initC(duration);
         const nanos = d.nanos();
-
-        if (high) |h| {
-            h.* = @intCast(nanos >> 64);
-        }
-        return @truncate(nanos);
+        return .init(nanos);
     }
 
-    export fn fimo_duration_cmp(lhs: *const compat.Duration, rhs: *const compat.Duration) i32 {
-        const d1 = Duration.initC(lhs.*);
-        const d2 = Duration.initC(rhs.*);
+    export fn fstd_duration_order(lhs: compat.Duration, rhs: compat.Duration) i32 {
+        const d1 = Duration.initC(lhs);
+        const d2 = Duration.initC(rhs);
         return switch (d1.order(d2)) {
             .lt => -1,
             .eq => 0,
@@ -594,65 +543,43 @@ const ffi = struct {
         };
     }
 
-    export fn fimo_duration_add(
-        lhs: *const compat.Duration,
-        rhs: *const compat.Duration,
-        out: *compat.Duration,
-    ) AnyResult {
-        const d1 = Duration.initC(lhs.*);
-        const d2 = Duration.initC(rhs.*);
+    export fn fstd_duration_add(out: *compat.Duration, lhs: compat.Duration, rhs: compat.Duration) AnyResult {
+        const d1 = Duration.initC(lhs);
+        const d2 = Duration.initC(rhs);
         if (d1.add(d2)) |d| {
             out.* = d.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_duration_saturating_add(
-        lhs: *const compat.Duration,
-        rhs: *const compat.Duration,
-    ) compat.Duration {
-        const d1 = Duration.initC(lhs.*);
-        const d2 = Duration.initC(rhs.*);
+    export fn fstd_duration_add_saturating(lhs: compat.Duration, rhs: compat.Duration) compat.Duration {
+        const d1 = Duration.initC(lhs);
+        const d2 = Duration.initC(rhs);
         return d1.addSaturating(d2).intoC();
     }
 
-    export fn fimo_duration_sub(
-        lhs: *const compat.Duration,
-        rhs: *const compat.Duration,
-        out: *compat.Duration,
-    ) AnyResult {
-        const d1 = Duration.initC(lhs.*);
-        const d2 = Duration.initC(rhs.*);
+    export fn fstd_duration_sub(out: *compat.Duration, lhs: compat.Duration, rhs: compat.Duration) AnyResult {
+        const d1 = Duration.initC(lhs);
+        const d2 = Duration.initC(rhs);
         if (d1.sub(d2)) |d| {
             out.* = d.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_duration_saturating_sub(
-        lhs: *const compat.Duration,
-        rhs: *const compat.Duration,
-    ) compat.Duration {
-        const d1 = Duration.initC(lhs.*);
-        const d2 = Duration.initC(rhs.*);
+    export fn fstd_duration_sub_saturating(lhs: compat.Duration, rhs: compat.Duration) compat.Duration {
+        const d1 = Duration.initC(lhs);
+        const d2 = Duration.initC(rhs);
         return d1.subSaturating(d2).intoC();
     }
 
-    export fn fimo_time_now() compat.Time {
+    export fn fstd_time_now() compat.Time {
         return Time.now().intoC();
     }
 
-    export fn fimo_time_elapsed(time_point: *const compat.Time, out: *compat.Duration) AnyResult {
-        const t = Time.initC(time_point.*);
-        if (t.elapsed()) |dur| {
-            out.* = dur.intoC();
-            return AnyResult.ok;
-        } else |err| return AnyError.initError(err).intoResult();
-    }
-
-    export fn fimo_time_cmp(lhs: *const compat.Time, rhs: *const compat.Time) i32 {
-        const d1 = Time.initC(lhs.*);
-        const d2 = Time.initC(rhs.*);
+    export fn fstd_time_order(lhs: compat.Time, rhs: compat.Time) i32 {
+        const d1 = Time.initC(lhs);
+        const d2 = Time.initC(rhs);
         return switch (d1.order(d2)) {
             .lt => -1,
             .eq => 0,
@@ -660,81 +587,60 @@ const ffi = struct {
         };
     }
 
-    export fn fimo_time_duration_since(
-        time_point: *const compat.Time,
-        earlier_time_point: *const compat.Time,
-        out: *compat.Duration,
-    ) AnyResult {
-        const t1 = Time.initC(time_point.*);
-        const t2 = Time.initC(earlier_time_point.*);
-        if (t1.durationSince(t2)) |dur| {
-            out.* = dur.intoC();
+    export fn fstd_time_elapsed(elapsed: *compat.Duration, from: compat.Time) AnyResult {
+        const t = Time.initC(from);
+        if (t.elapsed()) |dur| {
+            elapsed.* = dur.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_time_add(
-        time_point: *const compat.Time,
-        duration: *const compat.Duration,
-        out: *compat.Time,
-    ) AnyResult {
-        const t = Time.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_time_duration_since(elapsed: *compat.Duration, since: compat.Time, to: compat.Time) AnyResult {
+        const t1 = Time.initC(since);
+        const t2 = Time.initC(to);
+        if (t2.durationSince(t1)) |dur| {
+            elapsed.* = dur.intoC();
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fstd_time_add(out: *compat.Time, time: compat.Time, duration: compat.Duration) AnyResult {
+        const t = Time.initC(time);
+        const d = Duration.initC(duration);
         if (t.add(d)) |shifted| {
             out.* = shifted.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_time_saturating_add(
-        time_point: *const compat.Time,
-        duration: *const compat.Duration,
-    ) compat.Time {
-        const t = Time.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_time_add_saturating(time: compat.Time, duration: compat.Duration) compat.Time {
+        const t = Time.initC(time);
+        const d = Duration.initC(duration);
         return t.addSaturating(d).intoC();
     }
 
-    export fn fimo_time_sub(
-        time_point: *const compat.Time,
-        duration: *const compat.Duration,
-        out: *compat.Time,
-    ) AnyResult {
-        const t = Time.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_time_sub(out: *compat.Time, time: compat.Time, duration: compat.Duration) AnyResult {
+        const t = Time.initC(time);
+        const d = Duration.initC(duration);
         if (t.sub(d)) |shifted| {
             out.* = shifted.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_time_saturating_sub(
-        time_point: *const compat.Time,
-        duration: *const compat.Duration,
-    ) compat.Time {
-        const t = Time.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_time_sub_saturating(time: compat.Time, duration: compat.Duration) compat.Time {
+        const t = Time.initC(time);
+        const d = Duration.initC(duration);
         return t.subSaturating(d).intoC();
     }
 
-    export fn fimo_instant_now() compat.Instant {
+    export fn fstd_instant_now() compat.Instant {
         return Instant.now().intoC();
     }
 
-    export fn fimo_instant_elapsed(
-        time_point: *const compat.Instant,
-        out: *compat.Duration,
-    ) AnyResult {
-        const t = Instant.initC(time_point.*);
-        if (t.elapsed()) |dur| {
-            out.* = dur.intoC();
-            return AnyResult.ok;
-        } else |err| return AnyError.initError(err).intoResult();
-    }
-
-    export fn fimo_instant_cmp(lhs: *const compat.Instant, rhs: *const compat.Instant) i32 {
-        const d1 = Instant.initC(lhs.*);
-        const d2 = Instant.initC(rhs.*);
+    export fn fstd_instant_order(lhs: compat.Instant, rhs: compat.Instant) i32 {
+        const d1 = Instant.initC(lhs);
+        const d2 = Instant.initC(rhs);
         return switch (d1.order(d2)) {
             .lt => -1,
             .eq => 0,
@@ -742,60 +648,53 @@ const ffi = struct {
         };
     }
 
-    export fn fimo_instant_duration_since(
-        time_point: *const compat.Instant,
-        earlier_time_point: *const compat.Instant,
-        out: *compat.Duration,
-    ) AnyResult {
-        const t1 = Instant.initC(time_point.*);
-        const t2 = Instant.initC(earlier_time_point.*);
-        if (t1.durationSince(t2)) |dur| {
-            out.* = dur.intoC();
+    export fn fstd_instant_elapsed(elapsed: *compat.Duration, from: compat.Instant) AnyResult {
+        const t = Instant.initC(from);
+        if (t.elapsed()) |dur| {
+            elapsed.* = dur.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_instant_add(
-        time_point: *const compat.Instant,
-        duration: *const compat.Duration,
-        out: *compat.Instant,
-    ) AnyResult {
-        const t = Instant.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_instant_duration_since(elapsed: *compat.Duration, since: compat.Instant, to: compat.Instant) AnyResult {
+        const t1 = Instant.initC(since);
+        const t2 = Instant.initC(to);
+        if (t2.durationSince(t1)) |dur| {
+            elapsed.* = dur.intoC();
+            return AnyResult.ok;
+        } else |err| return AnyError.initError(err).intoResult();
+    }
+
+    export fn fstd_instant_add(out: *compat.Instant, time: compat.Instant, duration: compat.Duration) AnyResult {
+        const t = Instant.initC(time);
+        const d = Duration.initC(duration);
         if (t.add(d)) |shifted| {
             out.* = shifted.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_instant_saturating_add(
-        time_point: *const compat.Instant,
-        duration: *const compat.Duration,
-    ) compat.Instant {
-        const t = Instant.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_instant_add_saturating(time: compat.Instant, duration: compat.Duration) compat.Instant {
+        const t = Instant.initC(time);
+        const d = Duration.initC(duration);
         return t.addSaturating(d).intoC();
     }
 
-    export fn fimo_instant_sub(
-        time_point: *const compat.Instant,
-        duration: *const compat.Duration,
-        out: *compat.Instant,
-    ) AnyResult {
-        const t = Instant.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+    export fn fstd_instant_sub(out: *compat.Instant, time: compat.Instant, duration: compat.Duration) AnyResult {
+        const t = Instant.initC(time);
+        const d = Duration.initC(duration);
         if (t.sub(d)) |shifted| {
             out.* = shifted.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_instant_saturating_sub(
-        time_point: *const compat.Instant,
-        duration: *const compat.Duration,
+    export fn fstd_instant_sub_saturating(
+        time: compat.Instant,
+        duration: compat.Duration,
     ) compat.Instant {
-        const t = Instant.initC(time_point.*);
-        const d = Duration.initC(duration.*);
+        const t = Instant.initC(time);
+        const d = Duration.initC(duration);
         return t.subSaturating(d).intoC();
     }
 };

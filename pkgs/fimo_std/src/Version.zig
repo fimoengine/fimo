@@ -2,77 +2,70 @@
 
 const std = @import("std");
 
+const utils = @import("utils.zig");
+const Slice = utils.Slice;
+const SliceConst = utils.SliceConst;
+
 major: usize,
 minor: usize,
 patch: usize,
-pre: ?[*]const u8 = null,
-pre_len: usize = 0,
-build: ?[*]const u8 = null,
-build_len: usize = 0,
+pre: ?[]const u8 = null,
+build: ?[]const u8 = null,
 
 const Version = @This();
 
-pub const CVersion = extern struct {
-    major: usize,
-    minor: usize,
-    patch: usize,
-    pre: ?[*]const u8 = null,
-    pre_len: usize = 0,
-    build: ?[*]const u8 = null,
-    build_len: usize = 0,
+/// Redeclaration of the C-API types.
+pub const compat = struct {
+    pub const Version = extern struct {
+        major: usize,
+        minor: usize,
+        patch: usize,
+        pre: SliceConst(u8) = .fromSlice(""),
+        build: SliceConst(u8) = .fromSlice(""),
+    };
 };
 
 /// Initializes the object from a semantic version.
 pub fn initSemanticVersion(version: std.SemanticVersion) Version {
-    const pre, const pre_len = if (version.pre) |str| .{ str.ptr, str.len } else .{ null, 0 };
-    const build, const build_len = if (version.build) |str| .{ str.ptr, str.len } else .{ null, 0 };
-    return Version{
-        .major = version.major,
-        .minor = version.minor,
-        .patch = version.patch,
-        .pre = pre,
-        .pre_len = pre_len,
-        .build = build,
-        .build_len = build_len,
-    };
-}
-
-/// Casts the object to a semantic version.
-pub fn intoSemanticVersion(self: Version) std.SemanticVersion {
-    const pre = if (self.pre) |str| str[0..self.pre_len] else null;
-    const build = if (self.build) |str| str[0..self.build_len] else null;
-    return std.SemanticVersion{
-        .major = self.major,
-        .minor = self.minor,
-        .patch = self.patch,
-        .pre = pre,
-        .build = build,
-    };
-}
-
-/// Initializes the object from a ffi version.
-pub fn initC(version: CVersion) Version {
     return Version{
         .major = version.major,
         .minor = version.minor,
         .patch = version.patch,
         .pre = version.pre,
-        .pre_len = version.pre_len,
         .build = version.build,
-        .build_len = version.build_len,
     };
 }
 
-/// Casts the object to a ffi version.
-pub fn intoC(self: Version) CVersion {
-    return CVersion{
+/// Casts the object to a semantic version.
+pub fn intoSemanticVersion(self: Version) std.SemanticVersion {
+    return std.SemanticVersion{
         .major = self.major,
         .minor = self.minor,
         .patch = self.patch,
         .pre = self.pre,
-        .pre_len = self.pre_len,
         .build = self.build,
-        .build_len = self.build_len,
+    };
+}
+
+/// Initializes the object from a ffi version.
+pub fn initC(version: compat.Version) Version {
+    return Version{
+        .major = version.major,
+        .minor = version.minor,
+        .patch = version.patch,
+        .pre = version.pre.intoSlice(),
+        .build = version.build.intoSlice(),
+    };
+}
+
+/// Casts the object to a ffi version.
+pub fn intoC(self: Version) compat.Version {
+    return compat.Version{
+        .major = self.major,
+        .minor = self.minor,
+        .patch = self.patch,
+        .pre = .fromSlice(self.pre),
+        .build = .fromSlice(self.build),
     };
 }
 
@@ -85,10 +78,16 @@ pub fn order(lhs: Version, rhs: Version) std.math.Order {
 
 /// Checks for the compatibility of two versions.
 ///
-/// If `got` is compatible with `required` it indicated that an object which is versioned with the
-/// version `got` can be used instead of an object implementing the same interface carrying the
-/// version `required`.
-pub fn isCompatibleWith(got: Version, required: Version) bool {
+/// If `got` sattisfies `required` it indicates that an object which is versioned with the
+/// version `got` can be used instead of an object of the same type carrying the version
+/// `required`.
+///
+/// The compatibility of `got` with `required` is determined by the following algorithm:
+///
+/// 1. The major versions of `got` and `required` must be equal.
+/// 2. If the major version is `0`, the minor versions must be equal.
+/// 3. `got >= required`.
+pub fn sattisfies(got: Version, required: Version) bool {
     if (got.major != required.major) return false;
     if (got.major == 0 and got.minor != required.minor) return false;
     const got_sem = got.intoSemanticVersion();
@@ -231,48 +230,41 @@ const ffi = struct {
         return x;
     }
 
-    export fn fimo_version_parse_str(
-        str: [*]const u8,
-        str_len: usize,
-        version: *CVersion,
-    ) AnyResult {
-        const text = str[0..str_len];
+    export fn fstd_version_init_str(version: *compat.Version, version_str: SliceConst(u8)) AnyResult {
+        const text = version_str.intoSliceOrEmpty();
         if (Version.parse(text)) |v| {
             version.* = v.intoC();
             return AnyResult.ok;
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_version_str_len(version: *const CVersion) usize {
+    export fn fstd_version_str_len(version: *const compat.Version) usize {
         const major_len: usize = numDigits(version.major);
         const minor_len: usize = numDigits(version.minor);
         const patch_len: usize = numDigits(version.patch);
         return major_len + minor_len + patch_len + 2;
     }
 
-    export fn fimo_version_str_len_full(version: *const CVersion) usize {
+    export fn fstd_version_str_len_full(version: *const compat.Version) usize {
         const v = Version.initC(version.*);
         var len: usize = 0;
         len += numDigits(v.major);
         len += numDigits(v.minor);
         len += numDigits(v.patch);
-        if (v.pre_len != 0) len += v.pre_len + 1;
-        if (v.build_len != 0) len += v.build_len + 1;
+        if (v.pre) |pre| {
+            if (pre.len != 0) len += pre.len + 1;
+        }
+        if (v.build) |build| {
+            if (build.len != 0) len += build.len + 1;
+        }
         return len;
     }
 
-    export fn fimo_version_write_str(
-        version: *const CVersion,
-        str: [*]u8,
-        str_len: usize,
-        written: ?*usize,
-    ) AnyResult {
+    export fn fstd_version_write_str(version: *const compat.Version, dst: Slice(u8), written: ?*usize) AnyResult {
         var v = Version.initC(version.*);
         v.pre = null;
-        v.pre_len = 0;
         v.build = null;
-        v.build_len = 0;
-        const buffer = str[0..str_len];
+        const buffer = dst.intoSliceOrEmpty();
         if (std.fmt.bufPrint(buffer, "{f}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
@@ -280,14 +272,9 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_version_write_str_full(
-        version: *const CVersion,
-        str: [*]u8,
-        str_len: usize,
-        written: ?*usize,
-    ) AnyResult {
+    export fn fstd_version_write_full_str(version: *const compat.Version, dst: Slice(u8), written: ?*usize) AnyResult {
         const v = Version.initC(version.*);
-        const buffer = str[0..str_len];
+        const buffer = dst.intoSliceOrEmpty();
         if (std.fmt.bufPrint(buffer, "{f}", .{v})) |b| {
             if (written) |w| w.* = b.len;
             if (b.len < buffer.len) buffer[b.len + 1] = '\x00';
@@ -295,7 +282,7 @@ const ffi = struct {
         } else |err| return AnyError.initError(err).intoResult();
     }
 
-    export fn fimo_version_cmp(lhs: *const CVersion, rhs: *const CVersion) c_int {
+    export fn fstd_version_order(lhs: *const compat.Version, rhs: *const compat.Version) c_int {
         const l = Version.initC(lhs.*);
         const r = Version.initC(rhs.*);
         return switch (l.order(r)) {
@@ -305,10 +292,10 @@ const ffi = struct {
         };
     }
 
-    export fn fimo_version_compatible(got: *const CVersion, required: *const CVersion) bool {
+    export fn fstd_version_sattisfies(got: *const compat.Version, required: *const compat.Version) bool {
         const g = Version.initC(got.*);
         const r = Version.initC(required.*);
-        return g.isCompatibleWith(r);
+        return g.sattisfies(r);
     }
 };
 

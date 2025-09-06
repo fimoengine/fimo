@@ -12,13 +12,11 @@ pub fn main() !void {
     try logger.init(.{ .gpa = gpa.allocator() });
     defer logger.deinit();
 
-    const tracing_cfg = tracing.Config{
+    const tracing_cfg = tracing.Cfg{
         .max_level = .trace,
-        .subscribers = &.{logger.subscriber()},
-        .subscriber_count = 1,
+        .subscribers = .fromSlice(&.{logger.subscriber()}),
     };
-    const init_options: [:null]const ?*const ctx.ConfigHead = &.{@ptrCast(&tracing_cfg)};
 
-    try ctx.init(init_options);
+    try ctx.init(&.{&tracing_cfg.cfg});
     defer ctx.deinit();
 }

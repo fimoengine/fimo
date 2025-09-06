@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 
-#include <fimo_std/fimo.h>
+#include <fimo_std.h>
 #include <fimo_tasks_meta/package.h>
 
 #include <fimo_worlds_meta/resources.h>
@@ -23,7 +23,7 @@ typedef struct FimoWorldsMeta_WorldDescriptor {
     /// Optional label of the world.
     const char *label;
     /// Length in characters of the world label.
-    FimoUSize label_len;
+    FSTD_USize label_len;
     /// Executor for the world.
     ///
     /// If this value is `null`, the world will spawn a default executor.
@@ -32,8 +32,8 @@ typedef struct FimoWorldsMeta_WorldDescriptor {
 } FimoWorldsMeta_WorldDescriptor;
 
 /// Initializes a new empty world.
-typedef FimoStatus (*FimoWorldsMeta_world_create)(const FimoWorldsMeta_WorldDescriptor *descriptor,
-                                                  FimoWorldsMeta_World **world);
+typedef FSTD_Status (*FimoWorldsMeta_world_create)(const FimoWorldsMeta_WorldDescriptor *descriptor,
+                                                   FimoWorldsMeta_World **world);
 
 /// Destroys the world.
 ///
@@ -41,7 +41,7 @@ typedef FimoStatus (*FimoWorldsMeta_world_create)(const FimoWorldsMeta_WorldDesc
 typedef void (*FimoWorldsMeta_world_destroy)(FimoWorldsMeta_World *world);
 
 /// Returns the label of the world.
-typedef const char *(*FimoWorldsMeta_world_get_label)(FimoWorldsMeta_World *world, FimoUSize *len);
+typedef const char *(*FimoWorldsMeta_world_get_label)(FimoWorldsMeta_World *world, FSTD_USize *len);
 
 /// Returns a reference to the executor used by the world.
 typedef FimoTasksMeta_Pool (*FimoWorldsMeta_world_get_pool)(FimoWorldsMeta_World *world);
@@ -50,12 +50,12 @@ typedef FimoTasksMeta_Pool (*FimoWorldsMeta_world_get_pool)(FimoWorldsMeta_World
 typedef bool (*FimoWorldsMeta_world_has_resource)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceHandle handle);
 
 /// Adds the resource to the world.
-typedef FimoStatus (*FimoWorldsMeta_world_add_resource)(FimoWorldsMeta_World *world,
-                                                        FimoWorldsMeta_ResourceHandle handle, const void *value);
+typedef FSTD_Status (*FimoWorldsMeta_world_add_resource)(FimoWorldsMeta_World *world,
+                                                         FimoWorldsMeta_ResourceHandle handle, const void *value);
 
 /// Removes the resource from the world.
-typedef FimoStatus (*FimoWorldsMeta_world_remove_resource)(FimoWorldsMeta_World *world,
-                                                           FimoWorldsMeta_ResourceHandle handle, void *value);
+typedef FSTD_Status (*FimoWorldsMeta_world_remove_resource)(FimoWorldsMeta_World *world,
+                                                            FimoWorldsMeta_ResourceHandle handle, void *value);
 
 /// Acquires a set of exclusive and shared resource references.
 ///
@@ -68,9 +68,9 @@ typedef FimoStatus (*FimoWorldsMeta_world_remove_resource)(FimoWorldsMeta_World 
 /// The caller will block until all resources are locked.
 typedef void(FimoWorldsMeta_world_lock_resources)(FimoWorldsMeta_World *world,
                                                   const FimoWorldsMeta_ResourceHandle *exclusive_handles,
-                                                  FimoUSize exclusive_handles_len,
+                                                  FSTD_USize exclusive_handles_len,
                                                   const FimoWorldsMeta_ResourceHandle *shared_handles,
-                                                  FimoUSize shared_handles_len, void **resources);
+                                                  FSTD_USize shared_handles_len, void **resources);
 
 /// Unlocks an exclusive resource lock.
 typedef void (*FimoWorldsMeta_world_unlock_resource_exclusive)(FimoWorldsMeta_World *world,
@@ -85,8 +85,8 @@ typedef void (*FimoWorldsMeta_world_unlock_resource_shared)(FimoWorldsMeta_World
 /// The buffer has a size of `size` and is aligned to `alignment`.
 /// `ret_addr` is optionally provided as the first return address of the allocation call stack.
 /// If the value is 0 it means no return address has been provided.
-typedef void *(*FimoWorldsMeta_world_allocator_alloc)(FimoWorldsMeta_World *world, FimoUSize size, FimoUSize alignment,
-                                                      FimoUSize ret_addr);
+typedef void *(*FimoWorldsMeta_world_allocator_alloc)(FimoWorldsMeta_World *world, FSTD_USize size,
+                                                      FSTD_USize alignment, FSTD_USize ret_addr);
 
 /// Attempt to expand or shrink the memory in place.
 ///
@@ -95,8 +95,8 @@ typedef void *(*FimoWorldsMeta_world_allocator_alloc)(FimoWorldsMeta_World *worl
 /// A result of `true` indicates the resize was successful and the allocation now has the same
 /// address but a size of `new_size`. `ret_addr` is optionally provided as the first return address
 /// of the allocation call stack. If the value is 0 it means no return address has been provided.
-typedef bool (*FimoWorldsMeta_world_allocator_resize)(FimoWorldsMeta_World *world, void *ptr, FimoUSize size,
-                                                      FimoUSize alignment, FimoUSize new_size, FimoUSize ret_addr);
+typedef bool (*FimoWorldsMeta_world_allocator_resize)(FimoWorldsMeta_World *world, void *ptr, FSTD_USize size,
+                                                      FSTD_USize alignment, FSTD_USize new_size, FSTD_USize ret_addr);
 
 /// Attempt to expand or shrink memory, allowing relocation.
 ///
@@ -104,8 +104,8 @@ typedef bool (*FimoWorldsMeta_world_allocator_resize)(FimoWorldsMeta_World *worl
 /// `size` must equal the size requested from the most recent `alloc`, `resize` or `remap`.
 /// `ret_addr` is optionally provided as the first return address of the allocation call stack.
 /// If the value is 0 it means no return address has been provided.
-typedef void *(*FimoWorldsMeta_world_allocator_remap)(FimoWorldsMeta_World *world, void *ptr, FimoUSize size,
-                                                      FimoUSize alignment, FimoUSize new_size, FimoUSize ret_addr);
+typedef void *(*FimoWorldsMeta_world_allocator_remap)(FimoWorldsMeta_World *world, void *ptr, FSTD_USize size,
+                                                      FSTD_USize alignment, FSTD_USize new_size, FSTD_USize ret_addr);
 
 /// Free and invalidate a region of memory.
 ///
@@ -113,8 +113,8 @@ typedef void *(*FimoWorldsMeta_world_allocator_remap)(FimoWorldsMeta_World *worl
 /// `size` must equal the size requested from the most recent `alloc`, `resize` or `remap`.
 /// `ret_addr` is optionally provided as the first return address of the allocation call stack.
 /// If the value is 0 it means no return address has been provided.
-typedef void *(*FimoWorldsMeta_world_allocator_free)(FimoWorldsMeta_World *world, void *ptr, FimoUSize size,
-                                                     FimoUSize alignment, FimoUSize ret_addr);
+typedef void *(*FimoWorldsMeta_world_allocator_free)(FimoWorldsMeta_World *world, void *ptr, FSTD_USize size,
+                                                     FSTD_USize alignment, FSTD_USize ret_addr);
 
 #ifdef __cplusplus
 }
