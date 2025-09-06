@@ -99,6 +99,14 @@
 #include <stdlib.h>
 #endif
 
+#if (defined(_M_AMD64) && !defined(_M_ARM64EC)) || defined(__x86_64__)
+#define FSTD_ARCH_X86_64
+#elif defined(_M_ARM64) || defined(_M_ARM64EC) || defined(__aarch64__)
+#define FSTD_ARCH_AARCH64
+#else
+#error "unknown architecture"
+#endif
+
 #if defined(_WIN32)
 #define FSTD_PLATFORM_WINDOWS
 #elif defined(__APPLE__)
@@ -139,6 +147,18 @@ extern "C" {
 // global utilities ------------------------
 // -----------------------------------------
 
+#if defined(FSTD_COMPILER_GCC_COMPATIBLE)
+#define FSTD_EXPAND_GCC_COMPATIBLE(x) x
+#else
+#define FSTD_EXPAND_GCC_COMPATIBLE(x)
+#endif
+
+#if defined(FSTD_COMPILER_MSC_COMPATIBLE)
+#define FSTD_EXPAND_MSC_COMPATIBLE(x) x
+#else
+#define FSTD_EXPAND_MSC_COMPATIBLE(x)
+#endif
+
 #define FSTD_PRAGMA(x) _Pragma(#x)
 
 #if defined(FSTD_COMPILER_GCC_COMPATIBLE)
@@ -160,7 +180,6 @@ extern "C" {
 #endif
 
 FSTD_PRAGMA_GCC(GCC diagnostic push)
-FSTD_PRAGMA_GCC(GCC diagnostic ignored "-Wunused-function")
 
 #if defined(__clang__)
 FSTD_PRAGMA_GCC(GCC diagnostic ignored "-Wgnu-alignof-expression")
@@ -200,18 +219,18 @@ FSTD_PRAGMA_GCC(GCC diagnostic ignored "-Wgnu-alignof-expression")
 
 #define fstd_internal static
 #define fstd_external extern
-#define fstd_util static
+#define fstd_util static inline
 
 #ifdef FSTD_STATIC
-#define fstd__glob static
-#define fstd__func static
-#define fstd__glob_impl static
-#define fstd__func_impl static
+#define fstd_glob static
+#define fstd_func static
+#define fstd_glob_impl static
+#define fstd_func_impl static
 #else
-#define fstd__glob extern
-#define fstd__func extern
-#define fstd__glob_impl
-#define fstd__func_impl
+#define fstd_glob extern
+#define fstd_func extern
+#define fstd_glob_impl
+#define fstd_func_impl
 #endif
 
 #define FSTD_MAYBE_NULL
@@ -313,9 +332,9 @@ fstd_static_assert(sizeof(void *) == sizeof(uintptr_t), "invalid pointer size");
 #define FSTD_USIZE_MAX UINTPTR_MAX
 
 #if FSTD_USIZE_MAX == FSTD_U64_MAX
-#define FSTD_PTR_64
+#define FSTD_PTR_64 1
 #elif FSTD_USIZE_MAX == FSTD_U32_MAX
-#define FSTD_PTR_32
+#define FSTD_PTR_32 1
 #else
 #error "platform not supported"
 #endif
@@ -1345,18 +1364,18 @@ typedef union {
 /// Fetches the current active context.
 ///
 /// May only be called after registering a context.
-fstd__func FSTD_Ctx *fstd_ctx_get(void);
+fstd_func FSTD_Ctx *fstd_ctx_get(void);
 
 /// Registers the context as active.
 ///
 /// May panic if a different context is already active.
 /// May be called multiple times.
-fstd__func void fstd_ctx_register(FSTD_Ctx *ctx);
+fstd_func void fstd_ctx_register(FSTD_Ctx *ctx);
 
 /// Unregisters the context.
 ///
 /// Must be paired up with a `fstd_ctx_register` call.
-fstd__func void fstd_ctx_unregister(void);
+fstd_func void fstd_ctx_unregister(void);
 
 typedef struct {
     void (*deinit)(void);
@@ -1375,29 +1394,29 @@ FSTD_CHECK_USE fstd_external FSTD_Status fstd_ctx_init(FSTD_Ctx **ctx, FSTD_Cfgs
 /// Deinitializes the global context.
 ///
 /// May block until all resources owned by the context are shut down.
-fstd__func void fstd_ctx_deinit(void);
+fstd_func void fstd_ctx_deinit(void);
 
 /// Returns the version of the initialized context.
 ///
 /// May differ from the one specified during compilation.
-fstd__func FSTD_Version fstd_ctx_get_version(void);
+fstd_func FSTD_Version fstd_ctx_get_version(void);
 
 /// Checks whether the context has an error stored for the current thread.
-fstd__func bool fstd_ctx_has_error_result(void);
+fstd_func bool fstd_ctx_has_error_result(void);
 
 /// Replaces the thread-local result stored in the context with a new one.
 ///
 /// The old result is returned.
-fstd__func FSTD_Result fstd_ctx_replace_result(FSTD_Result new_result);
+fstd_func FSTD_Result fstd_ctx_replace_result(FSTD_Result new_result);
 
 /// Swaps out the thread-local result with the `ok` result.
-fstd__func FSTD_Result fstd_ctx_take_result(void);
+fstd_func FSTD_Result fstd_ctx_take_result(void);
 
 /// Clears the thread-local result.
-fstd__func void fstd_ctx_clear_result(void);
+fstd_func void fstd_ctx_clear_result(void);
 
 /// Sets the thread-local result, destroying the old one.
-fstd__func void fstd_ctx_set_result(FSTD_Result new_result);
+fstd_func void fstd_ctx_set_result(FSTD_Result new_result);
 
 // -----------------------------------------
 // async subsystem -------------------------
@@ -1450,7 +1469,7 @@ typedef struct {
 } FSTD_TaskWaiter;
 
 /// Initializes a new waiter.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_waiter_init(FSTD_TaskWaiter *waiter);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_waiter_init(FSTD_TaskWaiter *waiter);
 
 /// Deinitializes the waiter.
 fstd_util void fstd_waiter_deinit(FSTD_TaskWaiter waiter) { waiter.vtable->deinit(waiter.data); }
@@ -1523,12 +1542,12 @@ typedef struct {
 ///
 /// Polling the new future will block the current task.
 /// NOTE: The deinit functions may be null.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_future_enqueue(const void *FSTD_MAYBE_NULL data, FSTD_USize data_size,
-                                                          FSTD_USize data_alignment, FSTD_USize result_size,
-                                                          FSTD_USize result_alignment, FSTD_TaskWaiterPollFn poll,
-                                                          FSTD_TaskDeinitFn FSTD_MAYBE_NULL deinit_data,
-                                                          FSTD_TaskDeinitFn FSTD_MAYBE_NULL deinit_result,
-                                                          FSTD_EnqueuedFuture *future);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_future_enqueue(const void *FSTD_MAYBE_NULL data, FSTD_USize data_size,
+                                                         FSTD_USize data_alignment, FSTD_USize result_size,
+                                                         FSTD_USize result_alignment, FSTD_TaskWaiterPollFn poll,
+                                                         FSTD_TaskDeinitFn FSTD_MAYBE_NULL deinit_data,
+                                                         FSTD_TaskDeinitFn FSTD_MAYBE_NULL deinit_result,
+                                                         FSTD_EnqueuedFuture *future);
 
 // -----------------------------------------
 // tracing subsystem -----------------------
@@ -1914,7 +1933,7 @@ typedef struct FSTD_CallStack FSTD_CallStack;
 /// Creates a new empty call stack.
 ///
 /// The call stack is marked as suspended.
-fstd__func FSTD_CallStack *fstd_call_stack_init(void);
+fstd_func FSTD_CallStack *fstd_call_stack_init(void);
 
 /// Destroys an empty call stack.
 ///
@@ -1922,13 +1941,13 @@ fstd__func FSTD_CallStack *fstd_call_stack_init(void);
 /// i.e., there must be no active spans on the stack, and must not be active. The call stack may
 /// not be used afterwards. The active call stack of the thread is destroyed automatically, on
 /// thread exit or during destruction of the context.
-fstd__func void fstd_call_stack_finish(FSTD_CallStack *stack);
+fstd_func void fstd_call_stack_finish(FSTD_CallStack *stack);
 
 /// Unwinds and destroys the call stack.
 ///
 /// Marks that the task was aborted. Before calling this function, the call stack must not be
 /// active. The call stack may not be used afterwards.
-fstd__func void fstd_call_stack_abort(FSTD_CallStack *stack);
+fstd_func void fstd_call_stack_abort(FSTD_CallStack *stack);
 
 /// Replaces the call stack of the current thread.
 ///
@@ -1936,26 +1955,26 @@ fstd__func void fstd_call_stack_abort(FSTD_CallStack *stack);
 /// stack is returned, enabling the caller to switch back to it afterwards. This call stack
 /// must be in a suspended, but unblocked, state and not be active. The active call stack must
 /// also be in a suspended state, but may also be blocked.
-fstd__func FSTD_CallStack *fstd_call_stack_replace_current(FSTD_CallStack *stack);
+fstd_func FSTD_CallStack *fstd_call_stack_replace_current(FSTD_CallStack *stack);
 
 /// Unblocks the blocked call stack.
 ///
 /// Once unblocked, the call stack may be resumed. The call stack may not be active and must be
 /// marked as blocked.
-fstd__func void fstd_call_stack_unblock(FSTD_CallStack *stack);
+fstd_func void fstd_call_stack_unblock(FSTD_CallStack *stack);
 
 /// Marks the current call stack as being suspended.
 ///
 /// While suspended, the call stack can not be utilized for tracing messages. The call stack
 /// optionally also be marked as being blocked. In that case, the call stack must be unblocked
 /// prior to resumption.
-fstd__func void fstd_call_stack_suspend_current(bool mark_blocked);
+fstd_func void fstd_call_stack_suspend_current(bool mark_blocked);
 
 /// Marks the current call stack as being resumed.
 ///
 /// Once resumed, the context can be used to trace messages. To be successful, the current call
 /// stack must be suspended and unblocked.
-fstd__func void fstd_call_stack_resume_current(void);
+fstd_func void fstd_call_stack_resume_current(void);
 
 /// Type of a formatter function.
 ///
@@ -2022,7 +2041,7 @@ typedef struct {
 /// This function can be used to check whether to call into the subsystem at all. Calling this
 /// function is not necessary, as the remaining functions of the subsystem are guaranteed to return
 /// default values, in case the subsystem is disabled.
-fstd__func void fstd_tracing_is_enabled(void);
+fstd_func void fstd_tracing_is_enabled(void);
 
 /// Registers the calling thread with the tracing subsystem.
 ///
@@ -2031,21 +2050,21 @@ fstd__func void fstd_tracing_is_enabled(void);
 /// the tracing subsystem and is assigned a new empty call stack. A registered thread must be
 /// unregistered from the tracing subsystem before the context is destroyed, by terminating the
 /// tread, or by manually unregistering it. A registered thread may not try to register itself.
-fstd__func void fstd_tracing_register_thread(void);
+fstd_func void fstd_tracing_register_thread(void);
 
 /// Unregisters the calling thread from the tracing subsystem.
 ///
 /// Once unregistered, the calling thread looses access to the tracing subsystem until it is
 /// registered again. The thread can not be unregistered until the call stack is empty.
-fstd__func void fstd_tracing_unregister_thread(void);
+fstd_func void fstd_tracing_unregister_thread(void);
 
 /// Enters the span.
 ///
 /// Once entered, the span is used as the context for succeeding events. Each `enter` operation
 /// must be accompanied with a `exit` operation in reverse entering order. A span may be entered
 /// multiple times. The formatting function may be used to assign a name to the entered span.
-fstd__func void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
-                                        const void *FSTD_MAYBE_NULL fmt_data);
+fstd_func void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+                                       const void *FSTD_MAYBE_NULL fmt_data);
 
 /// Enters the span.
 ///
@@ -2067,15 +2086,15 @@ fstd_util void fstd_tracing_enter_span_fmt(const FSTD_TracingEventInfo *info, co
 ///
 /// The events won't occur inside the context of the exited span anymore. The span must be the
 /// span at the top of the current call stack.
-fstd__func void fstd_tracing_exit_span(const FSTD_TracingEventInfo *info);
+fstd_func void fstd_tracing_exit_span(const FSTD_TracingEventInfo *info);
 
 /// Logs a message with a custom format function.
-fstd__func void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
-                                         const void *FSTD_MAYBE_NULL fmt_data);
+fstd_func void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+                                        const void *FSTD_MAYBE_NULL fmt_data);
 
 /// Logs a message with a formatter accepting a `printf` format string.
 FSTD_PRINT_F_FMT_ATTR(2, 3)
-fstd__func void fstd_tracing_log_message_fmt(const FSTD_TracingEventInfo *info, const char *fmt, ...) {
+fstd_func void fstd_tracing_log_message_fmt(const FSTD_TracingEventInfo *info, const char *fmt, ...) {
     va_list vlist;
     va_start(vlist, fmt);
     FSTD__TracingFmtPrintArgs args = {.fmt = fmt, .vlist = &vlist};
@@ -2510,6 +2529,9 @@ FSTD__MODULE_PARAM_DATA(I64, i64)
 /// Global symbol namespace.
 #define FSTD_DEFAULT_NS FSTD_STR("")
 
+#define FSTD_MODULE_SYMBOL(name, version) FSTD_MODULE_SYMBOL_NS(name, "", version)
+#define FSTD_MODULE_SYMBOL_NS(name, ns, version) {.name = FSTD_STR(name), .ns = FSTD_STR(ns), .version = version}
+
 /// Identifier of a symbol.
 typedef struct {
     FSTD_StrConst name;
@@ -2613,14 +2635,14 @@ fstd_util void fstd_module_handle_unref_instance_strong(FSTD_ModuleHandle *handl
 ///
 /// Queries a module by its unique name.
 /// The returned handle will have its reference count increased.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_handle_find_by_name(FSTD_ModuleHandle **handle, FSTD_StrConst module);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_handle_find_by_name(FSTD_ModuleHandle **handle, FSTD_StrConst module);
 
 /// Searches for a module by a symbol it exports.
 ///
 /// Queries the module that exported the specified symbol.
 /// The returned handle will have its reference count increased.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_handle_find_by_symbol(FSTD_ModuleHandle **handle,
-                                                                        FSTD_ModuleSymbol symbol);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_handle_find_by_symbol(FSTD_ModuleHandle **handle,
+                                                                       FSTD_ModuleSymbol symbol);
 
 typedef FSTD_I32 FSTD_ModuleDependency;
 enum {
@@ -2866,7 +2888,7 @@ FSTD__MODULE_INSTANCE_PARAM(I64, i64)
 typedef struct FSTD_ModuleRootInstance FSTD_ModuleRootInstance;
 
 /// Constructs a new root instance.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_root_instance_init(FSTD_ModuleRootInstance **ctx);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_root_instance_init(FSTD_ModuleRootInstance **ctx);
 
 /// Destroys the root module.
 ///
@@ -3039,25 +3061,25 @@ typedef FSTD_ModuleLoaderFilterRequest (*FSTD_ModuleLoaderFilter)(FSTD_MAYBE_NUL
 typedef FSTD_OpaqueFuture(FSTD_Result) FSTD_ModuleLoaderCommitResult;
 
 /// Constructs a new loader.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_init(FSTD_ModuleLoader **loader);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_loader_init(FSTD_ModuleLoader **loader);
 
 /// Drops the loader.
 ///
 /// Scheduled operations will be completed, but the caller invalidates their reference to the handle.
-fstd__func void fstd_module_loader_deinit(FSTD_ModuleLoader *loader);
+fstd_func void fstd_module_loader_deinit(FSTD_ModuleLoader *loader);
 
 /// Checks whether the loader contains some module.
-fstd__func bool fstd_module_loader_contains_module(FSTD_ModuleLoader *loader, FSTD_StrConst module);
+fstd_func bool fstd_module_loader_contains_module(FSTD_ModuleLoader *loader, FSTD_StrConst module);
 
 /// Checks whether the loader contains some symbol.
-fstd__func bool fstd_module_loader_contains_symbol(FSTD_ModuleLoader *loader, FSTD_ModuleSymbol symbol);
+fstd_func bool fstd_module_loader_contains_symbol(FSTD_ModuleLoader *loader, FSTD_ModuleSymbol symbol);
 
 /// Polls the loader for the state of the specified module.
 ///
 /// If the module has not been processed at the time of calling, the waker will be
 /// signaled once the function can be polled again.
-fstd__func bool fstd_module_loader_poll_module(FSTD_ModuleLoader *loader, FSTD_TaskWaker waker, FSTD_StrConst module,
-                                               FSTD_ModuleLoaderPollModuleResult *result);
+fstd_func bool fstd_module_loader_poll_module(FSTD_ModuleLoader *loader, FSTD_TaskWaker waker, FSTD_StrConst module,
+                                              FSTD_ModuleLoaderPollModuleResult *result);
 
 /// Adds a module to the loader.
 ///
@@ -3069,9 +3091,9 @@ fstd__func bool fstd_module_loader_poll_module(FSTD_ModuleLoader *loader, FSTD_T
 ///
 /// Note that the new module is not setup to automatically depend on the owner, but may prevent
 /// it from being unloaded while the loader exists.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_add_module(FSTD_ModuleLoader *loader,
-                                                                    FSTD_ModuleInstance *owner,
-                                                                    const FSTD_ModuleExport *module);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_loader_add_module(FSTD_ModuleLoader *loader,
+                                                                   FSTD_ModuleInstance *owner,
+                                                                   const FSTD_ModuleExport *module);
 
 /// Adds modules to the loader.
 ///
@@ -3087,10 +3109,9 @@ FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_add_module(FSTD_ModuleL
 ///
 /// This function returns an error, if the binary does not contain the symbols necessary to query
 /// the exported modules, but does not return an error, if it does not export any modules.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_add_modules_from_path(FSTD_ModuleLoader *loader,
-                                                                               FSTD_Path path,
-                                                                               FSTD_MAYBE_NULL void *filter_data,
-                                                                               FSTD_ModuleLoaderFilter filter);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_loader_add_modules_from_path(FSTD_ModuleLoader *loader, FSTD_Path path,
+                                                                              FSTD_MAYBE_NULL void *filter_data,
+                                                                              FSTD_ModuleLoaderFilter filter);
 
 /// Adds modules to the loader.
 ///
@@ -3100,9 +3121,9 @@ FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_add_modules_from_path(F
 /// Trying to load a module with duplicate exports or duplicate name will result in an error.
 /// Invalid modules may not get passed to the filter function, and should therefore not be utilized
 /// to list the modules contained in a binary.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_add_modules_from_iter(FSTD_ModuleLoader *loader,
-                                                                               FSTD_MAYBE_NULL void *filter_data,
-                                                                               FSTD_ModuleLoaderFilter filter);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_module_loader_add_modules_from_iter(FSTD_ModuleLoader *loader,
+                                                                              FSTD_MAYBE_NULL void *filter_data,
+                                                                              FSTD_ModuleLoaderFilter filter);
 
 /// Loads the modules contained in the loader.
 ///
@@ -3113,7 +3134,7 @@ FSTD_CHECK_USE fstd__func FSTD_Status fstd_module_loader_add_modules_from_iter(F
 ///
 /// It is possible to submit multiple concurrent commit requests, even from the same  loader.
 /// In that case, the requests will be handled atomically, in an unspecified order.
-FSTD_CHECK_USE fstd__func FSTD_ModuleLoaderCommitResult fstd_module_loader_commit(FSTD_ModuleLoader *loader);
+FSTD_CHECK_USE fstd_func FSTD_ModuleLoaderCommitResult fstd_module_loader_commit(FSTD_ModuleLoader *loader);
 
 typedef struct {
     FSTD_StrConst name;
@@ -3286,41 +3307,41 @@ fstd_util FSTD_ModuleExportEventDependencies fstd_module_export_event_dependenci
 #endif
 
 #define FSTD_SYMBOL(prefix, type, name)                                                                                \
-    fstd__func const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void);                                         \
-    fstd__func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const type *ptr);                                \
-    fstd__func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                         \
-    fstd__glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_func const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void);                                          \
+    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const type *ptr);                                 \
+    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                          \
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
 
 #define FSTD_SYMBOL_FN(prefix, ret, name, ...)                                                                         \
-    fstd__func ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(__VA_ARGS__))(void);                                 \
-    fstd__func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(ret(*const ptr)(__VA_ARGS__));                   \
-    fstd__func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                         \
-    fstd__glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_func ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void))(__VA_ARGS__);                                  \
+    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(ret(*const ptr)(__VA_ARGS__));                    \
+    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                          \
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
 
 #define FSTD_SYMBOL_IMPL(prefix, type, name)                                                                           \
-    fstd__func_impl const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void) {                                   \
+    fstd_func_impl const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void) {                                    \
         return (const type *)FSTD_CONCAT(prefix, name).handle;                                                         \
     }                                                                                                                  \
-    fstd__func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _register)(const type *ptr) {                  \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _register)(const type *ptr) {                   \
         fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), (const void *)ptr);                              \
     }                                                                                                                  \
-    fstd__func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _unregister)(void) {                           \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _unregister)(void) {                            \
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
     }                                                                                                                  \
-    fstd__glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
 
 
 #define FSTD_SYMBOL_FN_IMPL(prefix, ret, name, ...)                                                                    \
-    fstd__func_impl ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(__VA_ARGS__))(void) {                           \
+    fstd_func_impl ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)())(__VA_ARGS__) {                                \
         return (ret (*)(__VA_ARGS__))FSTD_CONCAT(prefix, name).handle;                                                 \
     }                                                                                                                  \
-    fstd__func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _register)(ret(*const ptr)(__VA_ARGS__)) {     \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _register)(ret(*const ptr)(__VA_ARGS__)) {      \
         fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), (const void *)ptr);                              \
     }                                                                                                                  \
-    fstd__func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _unregister)(void) {                           \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _unregister)(void) {                            \
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
     }                                                                                                                  \
-    fstd__glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
 
 #define FSTD_MODULE_EXPORT() FSTD_MODULE_EXPORT_NAMED(FSTD_IDENT(fstd__module_export_))
 #define FSTD_MODULE_EXPORT_NAMED(name) FSTD__MODULE_EXPORT(name, FSTD_IDENT(FSTD_CONCAT(fstd__module_export_, name)))
@@ -3434,42 +3455,42 @@ typedef struct {
 } FSTD_ModulesVtable;
 
 /// Returns the active profile of the module subsystem.
-fstd__func FSTD_ModulesProfile fstd_modules_profile(void);
+fstd_func FSTD_ModulesProfile fstd_modules_profile(void);
 
 /// Returns the status of all features known to the subsystem.
-fstd__func FSTD_ModulesFeatureStatuses fstd_modules_features(void);
+fstd_func FSTD_ModulesFeatureStatuses fstd_modules_features(void);
 
 /// Checks for the presence of a namespace in the module subsystem.
 ///
 /// A namespace exists, if at least one loaded module exports one symbol in said namespace.
-fstd__func bool fstd_modules_namespace_exists(FSTD_StrConst ns);
+fstd_func bool fstd_modules_namespace_exists(FSTD_StrConst ns);
 
 /// Marks all instances as unloadable.
 ///
 /// Tries to unload all instances that are not referenced by any other modules. If the instance is
 /// still referenced, this will mark the instance as unloadable and enqueue it for unloading.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_modules_prune_instances(void);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_modules_prune_instances(void);
 
 /// Queries the info of a module parameter.
 ///
 /// This function can be used to query the datatype, the read access, and the write access of a
 /// module parameter. This function fails, if the parameter can not be found.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_modules_query_parameter(FSTD_StrConst module, FSTD_StrConst parameter,
-                                                                   FSTD_ModuleParamInfo *info);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_modules_query_parameter(FSTD_StrConst module, FSTD_StrConst parameter,
+                                                                  FSTD_ModuleParamInfo *info);
 
 /// Reads a module parameter with public read access.
 ///
 /// Reads the value of a module parameter with public read access. The operation fails, if the
 /// parameter does not exist, or if the parameter does not allow reading with a public access.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_modules_read_parameter_opaque(FSTD_ModuleParamTag tag, FSTD_StrConst module,
-                                                                         FSTD_StrConst parameter, void *value);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_modules_read_parameter_opaque(FSTD_ModuleParamTag tag, FSTD_StrConst module,
+                                                                        FSTD_StrConst parameter, void *value);
 
 /// Sets a module parameter with public write access.
 ///
 /// Sets the value of a module parameter with public write access. The operation fails, if the
 /// parameter does not exist, or if the parameter does not allow writing with a public access.
-FSTD_CHECK_USE fstd__func FSTD_Status fstd_modules_write_parameter_opaque(FSTD_ModuleParamTag tag, FSTD_StrConst module,
-                                                                          FSTD_StrConst parameter, const void *value);
+FSTD_CHECK_USE fstd_func FSTD_Status fstd_modules_write_parameter_opaque(FSTD_ModuleParamTag tag, FSTD_StrConst module,
+                                                                         FSTD_StrConst parameter, const void *value);
 
 #define FSTD__MODULES_PARAM(int, int_lower)                                                                            \
     FSTD___MODULES_PARAM(FSTD_CONCAT(FSTD_, int), int_lower, FSTD_CONCAT(FSTD_ModuleParamTag_, int))
@@ -3510,8 +3531,6 @@ FSTD_PRAGMA_GCC(GCC diagnostic pop)
 }
 #endif
 
-#endif // FIMO_STD_HEADER
-
 #ifdef FIMO_STD_IMPLEMENTATION
 
 #ifdef __cplusplus
@@ -3522,43 +3541,43 @@ extern "C" {
 // context api -----------------------------
 // -----------------------------------------
 
-fstd__glob_impl FSTD__Ctx fstd__ctx_global;
+fstd_glob_impl FSTD__Ctx fstd__ctx_global;
 
 // NOTE(gabriel): Is sound, as while registered the pointer won't change.
-fstd__func_impl FSTD_Ctx *fstd_ctx_get(void) { return fstd__ctx_global.ctx; }
+fstd_func_impl FSTD_Ctx *fstd_ctx_get(void) { return fstd__ctx_global.ctx; }
 
-fstd__func_impl void fstd_ctx_register(FSTD_Ctx *ctx) {
+fstd_func_impl void fstd_ctx_register(FSTD_Ctx *ctx) {
     fstd__ref_counted_handle_register(&fstd__ctx_global.handle, ctx);
 }
 
-fstd__func_impl void fstd_ctx_unregister(void) { fstd__ref_counted_handle_unregister(&fstd__ctx_global.handle); }
+fstd_func_impl void fstd_ctx_unregister(void) { fstd__ref_counted_handle_unregister(&fstd__ctx_global.handle); }
 
-fstd__func_impl void fstd_ctx_deinit(void) {
+fstd_func_impl void fstd_ctx_deinit(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->core_v0.deinit();
     fstd_ctx_unregister();
 }
 
-fstd__func_impl FSTD_Version fstd_ctx_get_version(void) {
+fstd_func_impl FSTD_Version fstd_ctx_get_version(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->get_version();
 }
 
-fstd__func_impl bool fstd_ctx_has_error_result(void) {
+fstd_func_impl bool fstd_ctx_has_error_result(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->core_v0.has_error_result();
 }
 
-fstd__func_impl FSTD_Result fstd_ctx_replace_result(FSTD_Result new_result) {
+fstd_func_impl FSTD_Result fstd_ctx_replace_result(FSTD_Result new_result) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->core_v0.replace_result(new_result);
 }
 
-fstd__func_impl FSTD_Result fstd_ctx_take_result(void) { return fstd_ctx_replace_result(FSTD_Result_Ok); }
+fstd_func_impl FSTD_Result fstd_ctx_take_result(void) { return fstd_ctx_replace_result(FSTD_Result_Ok); }
 
-fstd__func_impl void fstd_ctx_clear_result(void) { fstd_result_deinit(fstd_ctx_take_result()); }
+fstd_func_impl void fstd_ctx_clear_result(void) { fstd_result_deinit(fstd_ctx_take_result()); }
 
-fstd__func_impl void fstd_ctx_set_result(FSTD_Result new_result) {
+fstd_func_impl void fstd_ctx_set_result(FSTD_Result new_result) {
     fstd_result_deinit(fstd_ctx_replace_result(new_result));
 }
 
@@ -3566,17 +3585,17 @@ fstd__func_impl void fstd_ctx_set_result(FSTD_Result new_result) {
 // async subsystem -------------------------
 // -----------------------------------------
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_waiter_init(FSTD_TaskWaiter *waiter) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_waiter_init(FSTD_TaskWaiter *waiter) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->tasks_v0.waiter_init(waiter);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_future_enqueue(const void *data, FSTD_USize data_size,
-                                                               FSTD_USize data_alignment, FSTD_USize result_size,
-                                                               FSTD_USize result_alignment, FSTD_TaskWaiterPollFn poll,
-                                                               FSTD_TaskDeinitFn deinit_data,
-                                                               FSTD_TaskDeinitFn deinit_result,
-                                                               FSTD_EnqueuedFuture *future) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_future_enqueue(const void *data, FSTD_USize data_size,
+                                                              FSTD_USize data_alignment, FSTD_USize result_size,
+                                                              FSTD_USize result_alignment, FSTD_TaskWaiterPollFn poll,
+                                                              FSTD_TaskDeinitFn deinit_data,
+                                                              FSTD_TaskDeinitFn deinit_result,
+                                                              FSTD_EnqueuedFuture *future) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->tasks_v0.future_enqueue(data, data_size, data_alignment, result_size, result_alignment, poll,
                                            deinit_data, deinit_result, future);
@@ -3586,69 +3605,69 @@ FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_future_enqueue(const void *data,
 // tracing subsystem -----------------------
 // -----------------------------------------
 
-fstd__func_impl FSTD_CallStack *fstd_call_stack_init(void) {
+fstd_func_impl FSTD_CallStack *fstd_call_stack_init(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->tracing_v0.init_call_stack();
 }
 
-fstd__func_impl void fstd_call_stack_finish(FSTD_CallStack *stack) {
+fstd_func_impl void fstd_call_stack_finish(FSTD_CallStack *stack) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.deinit_call_stack(stack, false);
 }
 
-fstd__func_impl void fstd_call_stack_abort(FSTD_CallStack *stack) {
+fstd_func_impl void fstd_call_stack_abort(FSTD_CallStack *stack) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.deinit_call_stack(stack, true);
 }
 
-fstd__func_impl FSTD_CallStack *fstd_call_stack_replace_current(FSTD_CallStack *stack) {
+fstd_func_impl FSTD_CallStack *fstd_call_stack_replace_current(FSTD_CallStack *stack) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->tracing_v0.replace_current_call_stack(stack);
 }
 
-fstd__func_impl void fstd_call_stack_unblock(FSTD_CallStack *stack) {
+fstd_func_impl void fstd_call_stack_unblock(FSTD_CallStack *stack) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.unblock_call_stack(stack);
 }
 
-fstd__func_impl void fstd_call_stack_suspend_current(bool mark_blocked) {
+fstd_func_impl void fstd_call_stack_suspend_current(bool mark_blocked) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.suspend_current_call_stack(mark_blocked);
 }
 
-fstd__func_impl void fstd_call_stack_resume_current(void) {
+fstd_func_impl void fstd_call_stack_resume_current(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.resume_current_call_stack();
 }
 
-fstd__func_impl void fstd_tracing_is_enabled(void) {
+fstd_func_impl void fstd_tracing_is_enabled(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.is_enabled();
 }
 
-fstd__func_impl void fstd_tracing_register_thread(void) {
+fstd_func_impl void fstd_tracing_register_thread(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.register_thread();
 }
 
-fstd__func_impl void fstd_tracing_unregister_thread(void) {
+fstd_func_impl void fstd_tracing_unregister_thread(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.unregister_thread();
 }
 
-fstd__func_impl void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
-                                             const void *fmt_data) {
+fstd_func_impl void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+                                            const void *fmt_data) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.enter_span(info, fmt, fmt_data);
 }
 
-fstd__func_impl void fstd_tracing_exit_span(const FSTD_TracingEventInfo *info) {
+fstd_func_impl void fstd_tracing_exit_span(const FSTD_TracingEventInfo *info) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.exit_span(info);
 }
 
-fstd__func_impl void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
-                                              const void *fmt_data) {
+fstd_func_impl void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+                                             const void *fmt_data) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.log_message(info, fmt, fmt_data);
 }
@@ -3657,113 +3676,113 @@ fstd__func_impl void fstd_tracing_log_message(const FSTD_TracingEventInfo *info,
 // modules subsystem -----------------------
 // -----------------------------------------
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_handle_find_by_name(FSTD_ModuleHandle **handle,
-                                                                           FSTD_StrConst module) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_handle_find_by_name(FSTD_ModuleHandle **handle,
+                                                                          FSTD_StrConst module) {
     FSTD_Ctx *h = fstd_ctx_get();
     return h->modules_v0.handle_find_by_name(handle, module);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_handle_find_by_symbol(FSTD_ModuleHandle **handle,
-                                                                             FSTD_ModuleSymbol symbol) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_handle_find_by_symbol(FSTD_ModuleHandle **handle,
+                                                                            FSTD_ModuleSymbol symbol) {
     FSTD_Ctx *h = fstd_ctx_get();
     return h->modules_v0.handle_find_by_symbol(handle, symbol);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_root_instance_init(FSTD_ModuleRootInstance **ctx) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_root_instance_init(FSTD_ModuleRootInstance **ctx) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.root_instance_init(ctx);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_loader_init(FSTD_ModuleLoader **loader) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_loader_init(FSTD_ModuleLoader **loader) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_init(loader);
 }
 
-fstd__func_impl void fstd_module_loader_deinit(FSTD_ModuleLoader *loader) {
+fstd_func_impl void fstd_module_loader_deinit(FSTD_ModuleLoader *loader) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->modules_v0.loader_deinit(loader);
 }
 
-fstd__func_impl bool fstd_module_loader_contains_module(FSTD_ModuleLoader *loader, FSTD_StrConst module) {
+fstd_func_impl bool fstd_module_loader_contains_module(FSTD_ModuleLoader *loader, FSTD_StrConst module) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_contains_module(loader, module);
 }
 
-fstd__func_impl bool fstd_module_loader_contains_symbol(FSTD_ModuleLoader *loader, FSTD_ModuleSymbol symbol) {
+fstd_func_impl bool fstd_module_loader_contains_symbol(FSTD_ModuleLoader *loader, FSTD_ModuleSymbol symbol) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_contains_symbol(loader, symbol);
 }
 
-fstd__func_impl bool fstd_module_loader_poll_module(FSTD_ModuleLoader *loader, FSTD_TaskWaker waker,
-                                                    FSTD_StrConst module, FSTD_ModuleLoaderPollModuleResult *result) {
+fstd_func_impl bool fstd_module_loader_poll_module(FSTD_ModuleLoader *loader, FSTD_TaskWaker waker,
+                                                   FSTD_StrConst module, FSTD_ModuleLoaderPollModuleResult *result) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_poll_module(loader, waker, module, result);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_loader_add_module(FSTD_ModuleLoader *loader,
-                                                                         FSTD_ModuleInstance *owner,
-                                                                         const FSTD_ModuleExport *module) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_loader_add_module(FSTD_ModuleLoader *loader,
+                                                                        FSTD_ModuleInstance *owner,
+                                                                        const FSTD_ModuleExport *module) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_add_module(loader, owner, module);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_loader_add_modules_from_path(FSTD_ModuleLoader *loader,
-                                                                                    FSTD_Path path, void *filter_data,
-                                                                                    FSTD_ModuleLoaderFilter filter) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_loader_add_modules_from_path(FSTD_ModuleLoader *loader,
+                                                                                   FSTD_Path path, void *filter_data,
+                                                                                   FSTD_ModuleLoaderFilter filter) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_add_modules_from_path(loader, path, filter_data, filter);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_module_loader_add_modules_from_iter(FSTD_ModuleLoader *loader,
-                                                                                    void *filter_data,
-                                                                                    FSTD_ModuleLoaderFilter filter) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_module_loader_add_modules_from_iter(FSTD_ModuleLoader *loader,
+                                                                                   void *filter_data,
+                                                                                   FSTD_ModuleLoaderFilter filter) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_add_modules_from_iter(loader, filter_data, filter, fstd__module_export_iter,
                                                            (const void *)fstd__module_export_iter);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_ModuleLoaderCommitResult fstd_module_loader_commit(FSTD_ModuleLoader *loader) {
+FSTD_CHECK_USE fstd_func_impl FSTD_ModuleLoaderCommitResult fstd_module_loader_commit(FSTD_ModuleLoader *loader) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.loader_commit(loader);
 }
 
-fstd__func_impl FSTD_ModulesProfile fstd_modules_profile(void) {
+fstd_func_impl FSTD_ModulesProfile fstd_modules_profile(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.profile();
 }
 
-fstd__func_impl FSTD_ModulesFeatureStatuses fstd_modules_features(void) {
+fstd_func_impl FSTD_ModulesFeatureStatuses fstd_modules_features(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.features();
 }
 
-fstd__func_impl bool fstd_modules_namespace_exists(FSTD_StrConst ns) {
+fstd_func_impl bool fstd_modules_namespace_exists(FSTD_StrConst ns) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.namespace_exists(ns);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_modules_prune_instances(void) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_modules_prune_instances(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.prune_instances();
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_modules_query_parameter(FSTD_StrConst module, FSTD_StrConst parameter,
-                                                                        FSTD_ModuleParamInfo *info) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_modules_query_parameter(FSTD_StrConst module, FSTD_StrConst parameter,
+                                                                       FSTD_ModuleParamInfo *info) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.query_parameter(module, parameter, info);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_modules_read_parameter_opaque(FSTD_ModuleParamTag tag,
-                                                                              FSTD_StrConst module,
-                                                                              FSTD_StrConst parameter, void *value) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_modules_read_parameter_opaque(FSTD_ModuleParamTag tag,
+                                                                             FSTD_StrConst module,
+                                                                             FSTD_StrConst parameter, void *value) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.read_parameter(tag, module, parameter, value);
 }
 
-FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_modules_write_parameter_opaque(FSTD_ModuleParamTag tag,
-                                                                               FSTD_StrConst module,
-                                                                               FSTD_StrConst parameter,
-                                                                               const void *value) {
+FSTD_CHECK_USE fstd_func_impl FSTD_Status fstd_modules_write_parameter_opaque(FSTD_ModuleParamTag tag,
+                                                                              FSTD_StrConst module,
+                                                                              FSTD_StrConst parameter,
+                                                                              const void *value) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->modules_v0.write_parameter(tag, module, parameter, value);
 }
@@ -3773,6 +3792,8 @@ FSTD_CHECK_USE fstd__func_impl FSTD_Status fstd_modules_write_parameter_opaque(F
 #endif
 
 #endif // FIMO_STD_IMPLEMENTATION
+
+#endif // FIMO_STD_HEADER
 
 /// LICENSE
 /// MIT License

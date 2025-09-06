@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 #include <fimo_std.h>
-#include <fimo_tasks_meta/package.h>
+#include <fimo_tasks.h>
 
 #include <fimo_worlds_meta/jobs.h>
 #include <fimo_worlds_meta/resources.h>
@@ -125,7 +125,7 @@ typedef struct FimoWorldsMeta_SystemGroupDescriptor {
     ///
     /// A null value will inherit the executor of the world.
     /// If the value is not null, the system group will increase its reference count.
-    const FimoTasksMeta_Pool *pool;
+    const FTSK_Executor *pool;
     /// World to add the group to.
     FimoWorldsMeta_World *world;
 } FimoWorldsMeta_SystemGroupDescriptor;
@@ -182,7 +182,7 @@ typedef FimoWorldsMeta_World (*FimoWorldsMeta_system_group_get_world)(FimoWorlds
 typedef const char *(*FimoWorldsMeta_system_group_get_label)(FimoWorldsMeta_SystemGroup *group, FSTD_USize *len);
 
 /// Returns a reference to the executor used by the group.
-typedef FimoTasksMeta_Pool (*FimoWorldsMeta_system_group_get_pool)(FimoWorldsMeta_SystemGroup *group);
+typedef FTSK_Executor *(*FimoWorldsMeta_system_group_get_pool)(FimoWorldsMeta_SystemGroup *group);
 
 /// Adds a set of systems to the group.
 ///

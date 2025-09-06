@@ -12,6 +12,7 @@ const tracing = fimo_std.tracing;
 const time = fimo_std.time;
 const Duration = time.Duration;
 const Instant = time.Instant;
+const SliceConst = fimo_std.utils.SliceConst;
 const fimo_tasks_meta = @import("fimo_tasks_meta");
 const symbols = fimo_tasks_meta.symbols;
 const win32 = @import("win32");
@@ -91,7 +92,7 @@ pub const fimo_exports = .{
     .{ .symbol = symbols.cmd_buf_cancel, .value = &cmdBufCancel },
     .{ .symbol = symbols.cmd_buf_cancel_detach, .value = &cmdBufCancelDetach },
     .{ .symbol = symbols.executor_global, .value = .{ .init = executorGlobal } },
-    .{ .symbol = symbols.executor_new, .value = &executorNew },
+    .{ .symbol = symbols.executor_init, .value = &executorInit },
     .{ .symbol = symbols.executor_current, .value = &executorCurrent },
     .{ .symbol = symbols.executor_join, .value = &executorJoin },
     .{ .symbol = symbols.executor_join_requested, .value = &executorJoinRequested },
@@ -269,7 +270,7 @@ pub fn executorGlobal() callconv(.c) *fimo_tasks_meta.Executor {
     return @ptrCast(self.executor);
 }
 
-pub fn executorNew(
+pub fn executorInit(
     exe: **fimo_tasks_meta.Executor,
     cfg: *const fimo_tasks_meta.ExecutorCfg,
 ) callconv(.c) Status {
@@ -349,14 +350,13 @@ fn futexWait(
 }
 
 fn futexWaitv(
-    keys: [*]const fimo_tasks_meta.sync.Futex.KeyExpect,
-    key_count: usize,
+    keys: SliceConst(fimo_tasks_meta.sync.Futex.KeyExpect),
     timeout: ?*const fimo_std.time.compat.Instant,
     wake_index: *usize,
 ) callconv(.c) fimo_tasks_meta.sync.Futex.Status {
     const self = get();
     wake_index.* = self.futex.waitv(
-        keys[0..key_count],
+        keys.intoSliceOrEmpty(),
         if (timeout) |t| Instant.initC(t.*) else null,
     ) catch |err| switch (err) {
         error.KeyError => return .KeyError,

@@ -31,8 +31,6 @@ futex: atomic.Value(u32) = .init(0),
 ///
 /// Given wait() can be interrupted spuriously, the blocking condition should be checked continuously
 /// irrespective of any notifications from `signal()` or `broadcast()`.
-///
-/// May only be called from within a task.
 pub fn wait(self: *Condition, mutex: *Mutex) void {
     self.waitInternal(mutex, null) catch unreachable;
 }
@@ -52,8 +50,6 @@ pub fn wait(self: *Condition, mutex: *Mutex) void {
 ///
 /// Given `timedWait()` can be interrupted spuriously, the blocking condition should be checked continuously
 /// irrespective of any notifications from `signal()` or `broadcast()`.
-///
-/// May only be called from within a task.
 pub fn timedWait(
     self: *Condition,
     mutex: *Mutex,

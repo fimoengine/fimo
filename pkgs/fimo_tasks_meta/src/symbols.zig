@@ -6,6 +6,7 @@ const Status = ctx.Status;
 const Symbol = fimo_std.modules.Symbol;
 const Duration = fimo_std.time.compat.Duration;
 const Instant = fimo_std.time.compat.Instant;
+const SliceConst = fimo_std.utils.SliceConst;
 
 const root = @import("root.zig");
 const TaskId = root.TaskId;
@@ -49,7 +50,7 @@ pub const all_symbols = .{
     cmd_buf_cancel_detach,
 
     executor_global,
-    executor_new,
+    executor_init,
     executor_current,
     executor_join,
     executor_join_requested,
@@ -154,8 +155,8 @@ pub const executor_global = Symbol{
     .version = ctx.context_version,
     .T = Executor,
 };
-pub const executor_new = Symbol{
-    .name = "executor_new",
+pub const executor_init = Symbol{
+    .name = "executor_init",
     .namespace = symbol_namespace,
     .version = ctx.context_version,
     .T = fn (ex: **Executor, cfg: *const ExecutorCfg) callconv(.c) Status,
@@ -208,8 +209,7 @@ pub const futex_waitv = Symbol{
     .namespace = symbol_namespace,
     .version = ctx.context_version,
     .T = fn (
-        keys: [*]const Futex.KeyExpect,
-        key_count: usize,
+        keys: SliceConst(Futex.KeyExpect),
         timeout: ?*const Instant,
         wake_index: *usize,
     ) callconv(.c) Futex.Status,

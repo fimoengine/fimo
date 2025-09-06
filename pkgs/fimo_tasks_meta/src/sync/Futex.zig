@@ -16,7 +16,7 @@ const Futex = @This();
 /// Maximum number of keys allowed for the `waitv` operation.
 pub const max_waitv_key_count = 128;
 
-/// Possible status codes of the futex symbols.
+/// Possible status codes of the futex operations.
 pub const Status = enum(i32) {
     Ok = 0,
     Invalid = 1,
@@ -36,10 +36,10 @@ pub const KeyExpect = extern struct {
 /// Filter for a filter operation.
 pub const Filter = extern struct {
     op: packed struct(usize) {
-        token_op: enum(u1) { noop, deref },
-        token_type: enum(u2) { u8, u16, u32, u64 },
-        cmp_op: enum(u3) { eq, ne, lt, le, gt, ge },
-        cmp_arg_op: enum(u1) { noop, deref },
+        token_op: enum(u1) { noop = 0, deref = 1 },
+        token_type: enum(u2) { u8 = 0, u16 = 1, u32 = 2, u64 = 3 },
+        cmp_op: enum(u3) { eq = 0, ne = 1, lt = 2, le = 3, gt = 4, ge = 5 },
+        cmp_arg_op: enum(u1) { noop = 0, deref = 1 },
         reserved: @Type(.{ .int = .{ .bits = @bitSizeOf(usize) - 7, .signedness = .unsigned } }) = undefined,
     },
     token_mask: usize,
@@ -170,7 +170,7 @@ pub fn timedWaitv(keys: []const KeyExpect, timeout: Instant) error{ KeyError, In
     const t = timeout.intoC();
     var wake_index: usize = undefined;
     const sym = symbols.futex_waitv.getGlobal().get();
-    return switch (sym(keys.ptr, keys.len, &t, &wake_index)) {
+    return switch (sym(.fromSlice(keys), &t, &wake_index)) {
         .Ok => wake_index,
         .Invalid => error.Invalid,
         .Timeout => error.Timeout,
@@ -186,7 +186,7 @@ pub fn timedWaitv(keys: []const KeyExpect, timeout: Instant) error{ KeyError, In
 pub fn waitv(keys: []const KeyExpect) error{ KeyError, Invalid }!usize {
     var wake_index: usize = undefined;
     const sym = symbols.futex_waitv.getGlobal().get();
-    return switch (sym(keys.ptr, keys.len, null, &wake_index)) {
+    return switch (sym(.fromSlice(keys), null, &wake_index)) {
         .Ok => wake_index,
         .Invalid => error.Invalid,
         .KeyError => error.KeyError,

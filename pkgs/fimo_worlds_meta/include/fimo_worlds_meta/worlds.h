@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 #include <fimo_std.h>
-#include <fimo_tasks_meta/package.h>
+#include <fimo_tasks.h>
 
 #include <fimo_worlds_meta/resources.h>
 #include <fimo_worlds_meta/systems.h>
@@ -28,7 +28,7 @@ typedef struct FimoWorldsMeta_WorldDescriptor {
     ///
     /// If this value is `null`, the world will spawn a default executor.
     /// If the value is not null, the world will increase its reference count.
-    const FimoTasksMeta_Pool *pool;
+    const FTSK_Executor *pool;
 } FimoWorldsMeta_WorldDescriptor;
 
 /// Initializes a new empty world.
@@ -44,7 +44,7 @@ typedef void (*FimoWorldsMeta_world_destroy)(FimoWorldsMeta_World *world);
 typedef const char *(*FimoWorldsMeta_world_get_label)(FimoWorldsMeta_World *world, FSTD_USize *len);
 
 /// Returns a reference to the executor used by the world.
-typedef FimoTasksMeta_Pool (*FimoWorldsMeta_world_get_pool)(FimoWorldsMeta_World *world);
+typedef FTSK_Executor *(*FimoWorldsMeta_world_get_pool)(FimoWorldsMeta_World *world);
 
 /// Checks if the resource is instantiated in the world.
 typedef bool (*FimoWorldsMeta_world_has_resource)(FimoWorldsMeta_World *world, FimoWorldsMeta_ResourceHandle handle);

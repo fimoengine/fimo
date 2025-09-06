@@ -6,13 +6,13 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     const b = builder.build;
     const fimo_std_pkg = builder.getPackage("fimo_std");
 
-    const module_c = b.addTranslateC(.{
-        .root_source_file = b.path("include/fimo_tasks_meta/package.h"),
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("fimo_tasks.h"),
         .target = builder.graph.target,
         .optimize = builder.graph.optimize,
     });
-    module_c.addIncludePath(b.path("include/"));
-    module_c.addIncludePath(fimo_std_pkg.headers.?);
+    translate_c.addIncludePath(fimo_std_pkg.headers.?);
+    const module_c = translate_c.createModule();
 
     const module = b.addModule("fimo_tasks_meta", .{
         .root_source_file = b.path("src/root.zig"),
@@ -20,25 +20,16 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
         .optimize = builder.graph.optimize,
     });
     module.addImport("fimo_std", fimo_std_pkg.root_module);
-    module.addImport("c", module_c.createModule());
+    module.addImport("c", module_c);
 
     const pkg = builder.addPackage(.{
         .name = "fimo_tasks_meta",
         .root_module = module,
-        .headers = b.path("include/"),
+        .headers = b.path(""),
     });
 
     const wf = b.addWriteFiles();
-    const test_c_headers = wf.addCopyDirectory(b.path("include/"), "include", .{});
     const test_src = wf.addCopyDirectory(b.path("src/"), "src", .{});
-
-    const test_module_c = b.addTranslateC(.{
-        .root_source_file = test_c_headers.path(b, "fimo_tasks_meta/package.h"),
-        .target = builder.graph.target,
-        .optimize = builder.graph.optimize,
-    });
-    test_module_c.addIncludePath(b.path("include/"));
-    test_module_c.addIncludePath(fimo_std_pkg.headers.?);
 
     const test_module = b.createModule(.{
         .root_source_file = test_src.path(b, "root.zig"),
@@ -47,7 +38,7 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
         .valgrind = builder.graph.target.result.os.tag == .linux,
     });
     test_module.addImport("fimo_std", fimo_std_pkg.root_module);
-    test_module.addImport("c", test_module_c.createModule());
+    test_module.addImport("c", module_c);
 
     _ = pkg.addTest(.{
         .name = "fimo_tasks_meta_test",

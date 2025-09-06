@@ -5,7 +5,7 @@ CompileFlags:
     - "--include-directory=pkgs/fimo_std/"
     - "--include-directory=pkgs/fimo_tasks_meta/"
     - "--include-directory=pkgs/fimo_worlds_meta/"
-    - "-std=c++20"
+    - "-std=c++23"
     - "-Wall"
     - "-Wextra"
     - "-Werror"

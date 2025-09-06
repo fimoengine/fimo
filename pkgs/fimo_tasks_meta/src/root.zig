@@ -228,11 +228,11 @@ pub const AnyTssKey = TssKey(anyopaque);
 /// An entry of a command buffer.
 pub const CmdBufCmd = extern struct {
     tag: enum(i32) {
-        select_worker,
-        select_any_worker,
-        enqueue_task,
-        wait_on_barrier,
-        wait_on_cmd_indirect,
+        select_worker = 0,
+        select_any_worker = 1,
+        enqueue_task = 2,
+        wait_on_barrier = 3,
+        wait_on_cmd_indirect = 4,
         _,
     },
     payload: extern union {
@@ -275,8 +275,8 @@ pub const CmdBuf = extern struct {
 /// A handle to an enqueued command buffer.
 pub const CmdBufHandle = opaque {
     pub const CompletionStatus = enum(i32) {
-        completed,
-        cancelled,
+        completed = 0,
+        cancelled = 1,
     };
 
     /// Waits for the command buffer to complete.
@@ -340,6 +340,7 @@ pub const ExecutorCfg = extern struct {
 
 /// A handle to an executor.
 pub const Executor = opaque {
+    /// Returns the global executor.
     pub fn globalExecutor() *Executor {
         const sym = symbols.executor_global.getGlobal().get();
         return @constCast(sym);
@@ -348,7 +349,7 @@ pub const Executor = opaque {
     /// Creates a new executor with the provided configuration.
     pub fn init(cfg: ExecutorCfg) Error!*Executor {
         var ex: *Executor = undefined;
-        const sym = symbols.executor_new.getGlobal().get();
+        const sym = symbols.executor_init.getGlobal().get();
         try sym(&ex, &cfg).intoErrorUnion();
         return ex;
     }
