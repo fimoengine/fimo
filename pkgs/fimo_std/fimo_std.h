@@ -3655,7 +3655,7 @@ extern "C" {
 // context api -----------------------------
 // -----------------------------------------
 
-fstd_glob_impl FSTD__Ctx fstd__ctx_global;
+fstd_glob_impl FSTD__Ctx fstd__ctx_global = {};
 
 // NOTE(gabriel): Is sound, as while registered the pointer won't change.
 fstd_func_impl FSTD_Ctx *fstd_ctx_get(void) { return fstd__ctx_global.ctx; }

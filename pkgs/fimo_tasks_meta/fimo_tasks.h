@@ -624,7 +624,7 @@ fstd_func_impl bool ftsk_cancel_requested(void) { return ftsk_sym_cancel_request
 
 fstd_func_impl void ftsk_sleep(FSTD_Duration duration) { ftsk_sym_sleep_get()(duration); }
 
-fstd_func_impl FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void) { return ftsk_sym_task_arena()(); }
+fstd_func_impl FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void) { return ftsk_sym_task_arena_get()(); }
 
 fstd_func_impl void ftsk_tss_key_set(const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                                      FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor) {
