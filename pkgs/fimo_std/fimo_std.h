@@ -578,7 +578,7 @@ typedef struct {
 fstd_util void fstd__ref_counted_handle_register(FSTD__RefCountedHandle *ref, const void *handle) {
     FSTD_USize locked = FSTD__REF_COUNTED_HANDLE_LOCKED;
 #if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    while ((__atomic_or_fetch(&ref->count, locked, __ATOMIC_ACQUIRE) & locked) != 0) {
+    while ((__atomic_fetch_or(&ref->count, locked, __ATOMIC_ACQUIRE) & locked) != 0) {
     }
 #elif FSTD_COMPILER_MSC_COMPATIBLE
 #ifdef FSTD_PTR_64
@@ -595,12 +595,12 @@ fstd_util void fstd__ref_counted_handle_register(FSTD__RefCountedHandle *ref, co
     FSTD_USize count = ref->count & ~locked;
     fstd_dbg_assert(count < locked - 1);
     fstd_dbg_assert(ref->handle == fstd_nullptr || ref->handle == handle);
-    fstd_dbg_assert(ref->handle == fstd_nullptr || count == 0);
+    fstd_dbg_assert(ref->handle == fstd_nullptr || count > 0);
     ref->handle = handle;
     ref->count += 1;
 
 #if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    __atomic_and_fetch(&ref->count, ~locked, __ATOMIC_RELEASE);
+    __atomic_fetch_and(&ref->count, ~locked, __ATOMIC_RELEASE);
 #elif FSTD_COMPILER_MSC_COMPATIBLE
 #ifdef FSTD_PTR_64
     _InterlockedAnd64((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)~locked);
@@ -613,7 +613,7 @@ fstd_util void fstd__ref_counted_handle_register(FSTD__RefCountedHandle *ref, co
 fstd_util void fstd__ref_counted_handle_unregister(FSTD__RefCountedHandle *ref) {
     FSTD_USize locked = FSTD__REF_COUNTED_HANDLE_LOCKED;
 #if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    while ((__atomic_or_fetch(&ref->count, locked, __ATOMIC_ACQUIRE) & locked) != 0) {
+    while ((__atomic_fetch_or(&ref->count, locked, __ATOMIC_ACQUIRE) & locked) != 0) {
     }
 #elif FSTD_COMPILER_MSC_COMPATIBLE
 #ifdef FSTD_PTR_64
@@ -635,7 +635,7 @@ fstd_util void fstd__ref_counted_handle_unregister(FSTD__RefCountedHandle *ref) 
         ref->handle = fstd_nullptr;
 
 #if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    __atomic_and_fetch(&ref->count, ~locked, __ATOMIC_RELEASE);
+    __atomic_fetch_and(&ref->count, ~locked, __ATOMIC_RELEASE);
 #elif FSTD_COMPILER_MSC_COMPATIBLE
 #ifdef FSTD_PTR_64
     _InterlockedAnd64((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)~locked);
@@ -903,8 +903,8 @@ fstd_util FSTD_USize fstd_result_write(FSTD_Result result, FSTD_Str dst, FSTD_US
 #define FSTD_VERSION(major, minor, patch) FSTD_VERSION_PB(major, minor, patch, "", "")
 #define FSTD_VERSION_P(major, minor, patch, pre) FSTD_VERSION_PB(major, minor, patch, pre, "")
 #define FSTD_VERSION_B(major, minor, patch, build) FSTD_VERSION_PB(major, minor, patch, "", build)
-#define FSTD_VERSION_PB(major, minor, patch, pre, build)                                                               \
-    {.major = major, .minor = minor, .patch = patch, .pre = FSTD_STR(pre), .build = FSTD_STR(build)}
+#define FSTD_VERSION_PB(major_, minor_, patch_, pre_, build_)                                                          \
+    {.major = (major_), .minor = (minor_), .patch = (patch_), .pre = FSTD_STR(pre_), .build = FSTD_STR(build_)}
 
 /// A version specifier following the Semantic Versioning 2.0.0 specification.
 typedef struct {
@@ -1323,7 +1323,7 @@ fstd_external FSTD_Path fstd_path_component_as_path(const FSTD_PathComponent *co
 #define FSTD_CTX_VERSION_PATCH 0
 
 #ifndef FSTD_CTX_VERSION_PRE
-#define FSTD_CTX_VERSION_PRE ""
+#define FSTD_CTX_VERSION_PRE "dev"
 #endif
 
 #ifndef FSTD_CTX_VERSION_BUILD
@@ -1389,7 +1389,7 @@ typedef FSTD_SliceConst(FSTD_Cfg *const) FSTD_Cfgs;
 ///
 /// The initialized context is written to `ctx`.
 /// Only one context may be initialized at any given moment.
-FSTD_CHECK_USE fstd_external FSTD_Status fstd_ctx_init(FSTD_Ctx **ctx, FSTD_Cfgs cfgs);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_ctx_init(FSTD_Ctx **ctx, FSTD_Cfgs cfgs);
 
 /// Deinitializes the global context.
 ///
@@ -1489,6 +1489,8 @@ typedef bool (*FSTD_TaskWaiterPollFn)(void *FSTD_MAYBE_NULL, FSTD_TaskWaker, voi
 
 /// Blocks the current thread until the future is completed.
 #define fstd_waiter_await(waiter, future, result)                                                                      \
+    fstd__waiter_await(waiter, &future.data, (FSTD_TaskWaiterPollFn)future.poll, result)
+#define fstd_waiter_await_ref(waiter, future, result)                                                                  \
     fstd__waiter_await(waiter, &future->data, (FSTD_TaskWaiterPollFn)future->poll, result)
 fstd_util void fstd__waiter_await(FSTD_TaskWaiter waiter, void *FSTD_MAYBE_NULL data, FSTD_TaskWaiterPollFn poll,
                                   void *result) {
@@ -2530,7 +2532,7 @@ FSTD__MODULE_PARAM_DATA(I64, i64)
 #define FSTD_DEFAULT_NS FSTD_STR("")
 
 #define FSTD_MODULE_SYMBOL(name, version) FSTD_MODULE_SYMBOL_NS(name, "", version)
-#define FSTD_MODULE_SYMBOL_NS(name, ns, version) {.name = FSTD_STR(name), .ns = FSTD_STR(ns), .version = version}
+#define FSTD_MODULE_SYMBOL_NS(name_, ns_, version_) {.name = FSTD_STR(name_), .ns = FSTD_STR(ns_), .version = version_}
 
 /// Identifier of a symbol.
 typedef struct {
@@ -3322,10 +3324,10 @@ fstd_util FSTD_ModuleExportEventDependencies fstd_module_export_event_dependenci
     fstd_func_impl const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void) {                                    \
         return (const type *)FSTD_CONCAT(prefix, name).handle;                                                         \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _register)(const type *ptr) {                   \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const type *ptr) {                           \
         fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), (const void *)ptr);                              \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _unregister)(void) {                            \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void) {                                    \
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
     }                                                                                                                  \
     fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
@@ -3335,10 +3337,10 @@ fstd_util FSTD_ModuleExportEventDependencies fstd_module_export_event_dependenci
     fstd_func_impl ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)())(__VA_ARGS__) {                                \
         return (ret (*)(__VA_ARGS__))FSTD_CONCAT(prefix, name).handle;                                                 \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _register)(ret(*const ptr)(__VA_ARGS__)) {      \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(ret(*const ptr)(__VA_ARGS__)) {              \
         fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), (const void *)ptr);                              \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(fstd___symbol_, name), _unregister)(void) {                            \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void) {                                    \
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
     }                                                                                                                  \
     fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
@@ -3555,7 +3557,6 @@ fstd_func_impl void fstd_ctx_unregister(void) { fstd__ref_counted_handle_unregis
 fstd_func_impl void fstd_ctx_deinit(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->core_v0.deinit();
-    fstd_ctx_unregister();
 }
 
 fstd_func_impl FSTD_Version fstd_ctx_get_version(void) {
