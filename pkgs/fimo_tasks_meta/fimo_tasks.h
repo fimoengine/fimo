@@ -48,6 +48,9 @@ fstd_func bool ftsk_cancel_requested(void);
 /// Puts the current task or thread to sleep for the specified amount of time.
 fstd_func void ftsk_sleep(FSTD_Duration duration);
 
+/// Fetches the arena of the current task.
+fstd_func FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void);
+
 /// A key for a task-specific-storage.
 ///
 /// A new key can be defined by casting from a stable address.
@@ -151,6 +154,10 @@ typedef struct {
     /// The maximum number of spawned tasks is determined as `worker_count * max_load_factor`.
     /// A value of `0` indicates to use the default load factor.
     FSTD_USize max_load_factor;
+    /// Minimum size of the per-task arena.
+    ///
+    /// A value of `0` indicates to use the default arena size.
+    FSTD_USize arena_size;
     /// Minimum stack size in bytes.
     ///
     /// A value of `0` indicates to use the default stack size.
@@ -539,6 +546,7 @@ FSTD_SYMBOL_FN(ftsk_sym_, void, yield, void)
 FSTD_SYMBOL_FN(ftsk_sym_, void, abort, void)
 FSTD_SYMBOL_FN(ftsk_sym_, bool, cancel_requested, void)
 FSTD_SYMBOL_FN(ftsk_sym_, void, sleep, FSTD_Duration duration)
+FSTD_SYMBOL_FN(ftsk_sym_, FSTD_Arena *FSTD_MAYBE_NULL, task_arena, void)
 FSTD_SYMBOL_FN(ftsk_sym_, void, task_local_set, const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
 FSTD_SYMBOL_FN(ftsk_sym_, void *FSTD_MAYBE_NULL, task_local_get, const FTSK_TssKey *key)
@@ -579,6 +587,7 @@ FSTD_SYMBOL_FN_IMPL(ftsk_sym_, void, yield, void)
 FSTD_SYMBOL_FN_IMPL(ftsk_sym_, void, abort, void)
 FSTD_SYMBOL_FN_IMPL(ftsk_sym_, bool, cancel_requested, void)
 FSTD_SYMBOL_FN_IMPL(ftsk_sym_, void, sleep, FSTD_Duration duration)
+FSTD_SYMBOL_FN_IMPL(ftsk_sym_, FSTD_Arena *FSTD_MAYBE_NULL, task_arena, void)
 FSTD_SYMBOL_FN_IMPL(ftsk_sym_, void, task_local_set, const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                     FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
 FSTD_SYMBOL_FN_IMPL(ftsk_sym_, void *FSTD_MAYBE_NULL, task_local_get, const FTSK_TssKey *key)
@@ -614,6 +623,8 @@ fstd_func_impl void ftsk_abort(void) { ftsk_sym_abort_get()(); }
 fstd_func_impl bool ftsk_cancel_requested(void) { return ftsk_sym_cancel_requested_get()(); }
 
 fstd_func_impl void ftsk_sleep(FSTD_Duration duration) { ftsk_sym_sleep_get()(duration); }
+
+fstd_func_impl FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void) { return ftsk_sym_task_arena()(); }
 
 fstd_func_impl void ftsk_tss_key_set(const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                                      FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor) {

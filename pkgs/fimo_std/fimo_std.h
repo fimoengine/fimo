@@ -87,6 +87,7 @@
 #include <limits.h>
 #include <stdalign.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -137,6 +138,10 @@
 
 #ifdef FSTD_COMPILER_MSC
 #include <intrin.h>
+#endif
+
+#ifndef FSTD_COMPILER_GCC_COMPATIBLE
+#include <string.h>
 #endif
 
 #ifdef __cplusplus
@@ -333,8 +338,6 @@ fstd_static_assert(sizeof(void *) == sizeof(uintptr_t), "invalid pointer size");
 
 #if FSTD_USIZE_MAX == FSTD_U64_MAX
 #define FSTD_PTR_64 1
-#elif FSTD_USIZE_MAX == FSTD_U32_MAX
-#define FSTD_PTR_32 1
 #else
 #error "platform not supported"
 #endif
@@ -389,9 +392,7 @@ fstd_util FSTD_USize fstd_next_power_of_two_usize(FSTD_USize v) {
     v |= v >> 4;
     v |= v >> 8;
     v |= v >> 16;
-#ifdef FSTD_PTR_64
     v |= v >> 32;
-#endif
     return v + 1;
 }
 
@@ -564,33 +565,21 @@ typedef union {
 
 typedef struct {
     const void *handle;
-    FSTD_USize count;
+    _Atomic(FSTD_USize) count;
 } FSTD__RefCountedHandle;
+fstd_static_assert(sizeof(FSTD__RefCountedHandle) == 2 * sizeof(FSTD_USize), "invalid FSTD__RefCountedHandle size");
+fstd_static_assert(alignof(FSTD__RefCountedHandle) == alignof(FSTD_USize), "invalid FSTD__RefCountedHandle align");
 
 #ifdef FSTD_PTR_64
 #define FSTD__REF_COUNTED_HANDLE_LOCKED ((FSTD_USize)1) << 63
-#elif defined(FSTD_PTR_32)
-#define FSTD__REF_COUNTED_HANDLE_LOCKED ((FSTD_USize)1) << 31
 #else
 #error "unsupported platform"
 #endif
 
 fstd_util void fstd__ref_counted_handle_register(FSTD__RefCountedHandle *ref, const void *handle) {
     FSTD_USize locked = FSTD__REF_COUNTED_HANDLE_LOCKED;
-#if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    while ((__atomic_fetch_or(&ref->count, locked, __ATOMIC_ACQUIRE) & locked) != 0) {
+    while ((atomic_fetch_or_explicit(&ref->count, locked, memory_order_acquire) & locked) != 0) {
     }
-#elif FSTD_COMPILER_MSC_COMPATIBLE
-#ifdef FSTD_PTR_64
-    while (_InterlockedOr64((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)locked) < 0) {
-    }
-#elif defined(FSTD_PTR_32)
-    while (_InterlockedOr((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)locked) < 0) {
-    }
-#endif
-#else
-#error "unknown compiler"
-#endif
 
     FSTD_USize count = ref->count & ~locked;
     fstd_dbg_assert(count < locked - 1);
@@ -599,33 +588,13 @@ fstd_util void fstd__ref_counted_handle_register(FSTD__RefCountedHandle *ref, co
     ref->handle = handle;
     ref->count += 1;
 
-#if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    __atomic_fetch_and(&ref->count, ~locked, __ATOMIC_RELEASE);
-#elif FSTD_COMPILER_MSC_COMPATIBLE
-#ifdef FSTD_PTR_64
-    _InterlockedAnd64((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)~locked);
-#elif defined(FSTD_PTR_32)
-    _InterlockedAnd((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)~locked);
-#endif
-#endif
+    atomic_fetch_and_explicit(&ref->count, ~locked, memory_order_release);
 }
 
 fstd_util void fstd__ref_counted_handle_unregister(FSTD__RefCountedHandle *ref) {
     FSTD_USize locked = FSTD__REF_COUNTED_HANDLE_LOCKED;
-#if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    while ((__atomic_fetch_or(&ref->count, locked, __ATOMIC_ACQUIRE) & locked) != 0) {
+    while ((atomic_fetch_or_explicit(&ref->count, locked, memory_order_acquire) & locked) != 0) {
     }
-#elif FSTD_COMPILER_MSC_COMPATIBLE
-#ifdef FSTD_PTR_64
-    while (_InterlockedOr64((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)locked) < 0) {
-    }
-#else
-    while (_InterlockedOr((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)locked) < 0) {
-    }
-#endif
-#else
-#error "unknown compiler"
-#endif
 
     FSTD_USize count = ref->count & ~locked;
     fstd_dbg_assert(count > 0);
@@ -634,15 +603,7 @@ fstd_util void fstd__ref_counted_handle_unregister(FSTD__RefCountedHandle *ref) 
     if (ref->count == 0)
         ref->handle = fstd_nullptr;
 
-#if defined(FSTD_COMPILER_GCC_COMPATIBLE)
-    __atomic_fetch_and(&ref->count, ~locked, __ATOMIC_RELEASE);
-#elif FSTD_COMPILER_MSC_COMPATIBLE
-#ifdef FSTD_PTR_64
-    _InterlockedAnd64((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)~locked);
-#else
-    _InterlockedAnd((volatile FSTD_ISize *)&ref->count, (FSTD_ISize)~locked);
-#endif
-#endif
+    atomic_fetch_and_explicit(&ref->count, ~locked, memory_order_release);
 }
 
 // -----------------------------------------
@@ -732,13 +693,28 @@ fstd_internal const FSTD_Allocator FSTD_Allocator_Null = {
         .vtable = &FSTD__AllocatorVtable_Null,
 };
 
-/// A growable non thread-safe memory arena.
+typedef FSTD_U32 FSTD_ArenaFlags;
+enum {
+    FSTD_ArenaFlags_LargePages = (1 << 0),
+    FSTD__ArenaFlags_ = FSTD_I32_MAX,
+};
+
+#define FSTD_ARENA_MIN_ALIGN 16
+
+/// A growable thread-safe memory arena.
 typedef struct {
+    _Atomic(FSTD_U32) grow_futex;
+    FSTD_ArenaFlags flags;
+    FSTD_USize page_size;
     FSTD_USize reserve_len;
-    FSTD_USize commit_len;
+    _Atomic(FSTD_USize) commit_len;
     void *FSTD_MAYBE_NULL ptr;
-    FSTD_USize pos;
+    _Atomic(FSTD_USize) pos;
 } FSTD_Arena;
+fstd_static_assert(sizeof(_Atomic(FSTD_U32)) == sizeof(FSTD_U32), "invalid atomic size");
+fstd_static_assert(sizeof(_Atomic(FSTD_USize)) == sizeof(FSTD_USize), "invalid atomic size");
+fstd_static_assert(alignof(_Atomic(FSTD_U32)) == alignof(FSTD_U32), "invalid atomic align");
+fstd_static_assert(alignof(_Atomic(FSTD_USize)) == alignof(FSTD_USize), "invalid atomic align");
 
 /// Temporary scope of a memory arena.
 typedef struct {
@@ -746,20 +722,156 @@ typedef struct {
     FSTD_USize pos;
 } FSTD_TmpArena;
 
-/// A growable thread-safe memory arena.
-typedef struct {
-    FSTD_U32 grow_futex;
-    FSTD_USize reserve_len;
-    FSTD_USize commit_len;
-    void *FSTD_MAYBE_NULL ptr;
-    FSTD_USize pos;
-} FSTD_SharedArena;
+/// Allocates a new arena. Returns whether the operation is successfull.
+///
+/// The `base` argument is reserved and must be `null`.
+fstd_external bool fstd_arena_init(FSTD_Arena *arena, void *base, FSTD_ArenaFlags flags, FSTD_USize reserve,
+                                   FSTD_USize commit);
 
-/// Temporary scope of a shared memory arena.
-typedef struct {
-    FSTD_SharedArena *arena;
-    FSTD_USize pos;
-} FSTD_TmpSharedArena;
+/// Frees the resources of the arena.
+fstd_external void fstd_arena_deinit(FSTD_Arena *arena);
+
+/// Tries to grow the arena inplace.
+fstd_external void fstd_arena_grow(FSTD_Arena *arena, FSTD_USize new_len);
+
+#define fstd_arena_create(arena, type) fstd_arena_push(arena, type, 1)
+#define fstd_arena_create_zero(arena, type) fstd_arena_push_zero(arena, type, 1)
+
+/// Pushes the arena at least `len` bytes forwards.
+///
+/// The contents of the returned range is undefined.
+#define fstd_arena_push(arena, type, n) (type *)fstd__arena_push((arena), sizeof(type) * (n), alignof(type))
+fstd_util void *fstd__arena_push(FSTD_Arena *arena, FSTD_USize len, FSTD_USize align) {
+    align = FSTD__MAX(align, FSTD_ARENA_MIN_ALIGN);
+    if (len == 0)
+        return fstd_nullptr;
+
+    FSTD_USize pos = atomic_load_explicit(&arena->pos, memory_order_relaxed);
+    FSTD_USize start_pos;
+    FSTD_USize offset = (FSTD_USize)arena->ptr;
+    for (;;) {
+        start_pos = fstd_align_forwards_usize(offset + pos, align) - offset;
+        FSTD_USize end_pos = start_pos + len;
+        if (atomic_load_explicit(&arena->commit_len, memory_order_relaxed) < end_pos) {
+            fstd_arena_grow(arena, end_pos);
+        }
+        if (atomic_compare_exchange_weak_explicit(&arena->pos, &pos, end_pos, memory_order_relaxed,
+                                                  memory_order_relaxed))
+            break;
+    }
+    return ((char *)arena->ptr) + start_pos;
+}
+
+/// Pushes the arena at least `len` bytes forwards.
+///
+/// The returned range of [ptr, ptr+len) is zeroed.
+#define fstd_arena_push_zero(arena, type, n) (type *)fstd__arena_push_zero((arena), sizeof(type) * (n), alignof(type))
+fstd_util void *fstd__arena_push_zero(FSTD_Arena *arena, FSTD_USize len, FSTD_USize align) {
+    void *ptr = fstd__arena_push(arena, len, align);
+#if FSTD_COMPILER_GCC_COMPATIBLE
+    __builtin_memset(ptr, 0, len);
+#else
+    memset(ptr, 0, len);
+#endif
+    return ptr;
+}
+
+/// Pops `n` elements of type `type` from the end of the arena.
+///
+/// The freed memory region is not cleared.
+/// CAUTION: Use only if you are certain that the arena is not being shared
+/// and that you own the memory at the end of the arena.
+#define fstd_arena_pop(arena, type, n) fstd__arena_pop((arena), sizeof(type) * (n))
+fstd_util void fstd__arena_pop(FSTD_Arena *arena, FSTD_USize bytes) {
+    FSTD_USize pos = atomic_fetch_sub_explicit(&arena->pos, bytes, memory_order_relaxed);
+    fstd_dbg_assert(pos >= bytes);
+}
+
+/// Tries to grow the allocation inplace.
+#define fstd_arena_resize(arena, ptr, n, new_n)                                                                        \
+    (type *)fstd__arena_resize((arena), (ptr), sizeof(*ptr) * (n), sizeof(*ptr) * (new_n))
+fstd_util bool fstd__arena_resize(FSTD_Arena *arena, void *ptr, FSTD_USize len, FSTD_USize new_len) {
+    if (len == 0)
+        return false;
+    if (new_len <= len)
+        return true;
+
+    FSTD_USize arena_ptr_int = (FSTD_USize)arena->ptr;
+    FSTD_USize ptr_int = (FSTD_USize)ptr;
+    fstd_dbg_assert(arena_ptr_int <= ptr_int);
+
+    FSTD_USize start_pos = ptr_int - arena_ptr_int;
+    FSTD_USize end_pos = start_pos + len;
+    FSTD_USize new_end_pos = start_pos + new_len;
+    fstd_dbg_assert(end_pos <= atomic_load_explicit(&arena->pos, memory_order_relaxed));
+    return atomic_compare_exchange_strong_explicit(&arena->pos, &end_pos, new_end_pos, memory_order_relaxed,
+                                                   memory_order_relaxed);
+}
+
+/// Tries to grow the allocation, allocating a new block if it can not be done inplace.
+#define fstd_arena_remap(arena, ptr, n, new_n)                                                                         \
+    (type *)fstd__arena_remap((arena), (ptr), sizeof(*ptr) * (n), fstd__alignof(*ptr), sizeof(*ptr) * (new_n))
+fstd_util void *fstd__arena_remap(FSTD_Arena *arena, void *ptr, FSTD_USize len, FSTD_USize align, FSTD_USize new_len) {
+    if (len == 0)
+        return fstd__arena_push(arena, new_len, align);
+    if (new_len <= len)
+        return ptr;
+
+    FSTD_USize arena_ptr_int = (FSTD_USize)arena->ptr;
+    FSTD_USize ptr_int = (FSTD_USize)ptr;
+    fstd_dbg_assert(arena_ptr_int <= ptr_int);
+
+    FSTD_USize start_pos = ptr_int - arena_ptr_int;
+    FSTD_USize end_pos = start_pos + len;
+    FSTD_USize new_end_pos = start_pos + new_len;
+    fstd_dbg_assert(end_pos <= atomic_load_explicit(&arena->pos, memory_order_relaxed));
+    if (atomic_compare_exchange_strong_explicit(&arena->pos, &end_pos, new_end_pos, memory_order_relaxed,
+                                                memory_order_relaxed))
+        return ptr;
+
+    void *new_ptr = fstd__arena_push(arena, new_len, align);
+    __builtin_memcpy(new_ptr, ptr, len);
+    return new_ptr;
+}
+
+/// Frees the allocated pointer, if it is at the end of the arena.
+#define fstd_arena_free(arena, ptr, n) fstd__arena_free((arena), ptr, sizeof(*ptr) * (n))
+fstd_util void fstd__arena_free(FSTD_Arena *arena, void *ptr, FSTD_USize len) {
+    if (len == 0)
+        return;
+
+    FSTD_USize arena_ptr_int = (FSTD_USize)arena->ptr;
+    FSTD_USize ptr_int = (FSTD_USize)ptr;
+    fstd_dbg_assert(arena_ptr_int <= ptr_int);
+
+    FSTD_USize start_pos = ptr_int - arena_ptr_int;
+    FSTD_USize end_pos = start_pos + len;
+    fstd_dbg_assert(end_pos <= atomic_load_explicit(&arena->pos, memory_order_relaxed));
+    atomic_compare_exchange_strong_explicit(&arena->pos, &end_pos, start_pos, memory_order_relaxed,
+                                            memory_order_relaxed);
+}
+
+/// Fetches the current position of the arena.
+fstd_util FSTD_USize fstd_arena_get_pos(FSTD_Arena *arena) {
+    return atomic_load_explicit(&arena->pos, memory_order_relaxed);
+}
+
+/// Resets the position of the arena to a previous position.
+fstd_util void fstd_arena_set_pos(FSTD_Arena *arena, FSTD_USize pos) {
+    fstd_dbg_assert(atomic_load_explicit(&arena->pos, memory_order_relaxed) >= pos);
+    atomic_store_explicit(&arena->pos, pos, memory_order_relaxed);
+}
+
+/// Resets the arena position without relinquishing any memory.
+fstd_util void fstd_arena_clear(FSTD_Arena *arena) { fstd_arena_set_pos(arena, 0); }
+
+/// Creates a scope for the arena.
+fstd_util FSTD_TmpArena fstd_arena_scope(FSTD_Arena *arena) {
+    return FSTD_INIT(FSTD_TmpArena){
+            .arena = arena,
+            .pos = fstd_arena_get_pos(arena),
+    };
+}
 
 // -----------------------------------------
 // errors ----------------------------------

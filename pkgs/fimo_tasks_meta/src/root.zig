@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 
 pub const c = @import("c");
 const fimo_std = @import("fimo_std");
+const Arena = fimo_std.memory.Arena;
 const Error = fimo_std.ctx.Error;
 const tracing = fimo_std.tracing;
 const time = fimo_std.time;
@@ -175,6 +176,33 @@ test "short sleep" {
     }.f);
 }
 
+/// Fetches the arena of the current task.
+pub fn taskArena() ?*Arena {
+    const sym = symbols.task_arena.getGlobal().get();
+    return sym();
+}
+
+test "task arena no task" {
+    var ctx = try testing.initTestContext();
+    defer ctx.deinit();
+    try std.testing.expectEqual(null, taskArena());
+}
+
+test "task arena in task" {
+    try testing.initTestContextInTask(struct {
+        fn f() anyerror!void {
+            try std.testing.expect(taskArena() != null);
+            const arena = taskArena().?;
+            const allocator = arena.allocator();
+
+            try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
+            try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
+            try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());
+            try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
+        }
+    }.f);
+}
+
 /// A key for a task-specific-storage.
 ///
 /// A new key can be defined by casting from a stable address.
@@ -329,6 +357,10 @@ pub const ExecutorCfg = extern struct {
     ///
     /// A value of `0` indicates to use the default stack size.
     stack_size: usize = 0,
+    /// Minimum size of the per-task arena.
+    ///
+    /// A value of `0` indicates to use the default arena size.
+    arena_size: usize = 0,
     /// Number of cached stacks per worker.
     ///
     /// The cache is shared among all workers.

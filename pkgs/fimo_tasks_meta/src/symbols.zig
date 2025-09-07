@@ -3,6 +3,7 @@ const std = @import("std");
 const fimo_std = @import("fimo_std");
 const ctx = fimo_std.ctx;
 const Status = ctx.Status;
+const Arena = fimo_std.memory.Arena;
 const Symbol = fimo_std.modules.Symbol;
 const Duration = fimo_std.time.compat.Duration;
 const Instant = fimo_std.time.compat.Instant;
@@ -39,6 +40,7 @@ pub const all_symbols = .{
     abort,
     cancel_requested,
     sleep,
+    task_arena,
 
     task_local_set,
     task_local_get,
@@ -99,6 +101,12 @@ pub const sleep = Symbol{
     .namespace = symbol_namespace,
     .version = ctx.context_version,
     .T = fn (duration: Duration) callconv(.c) void,
+};
+pub const task_arena = Symbol{
+    .name = "task_arena",
+    .namespace = symbol_namespace,
+    .version = ctx.context_version,
+    .T = fn () callconv(.c) ?*Arena,
 };
 
 pub const task_local_set = Symbol{

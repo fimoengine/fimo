@@ -1,11 +1,17 @@
 const std = @import("std");
 const atomic = std.atomic;
+const Thread = std.Thread;
 const math = std.math;
 const mem = std.mem;
+const heap = std.heap;
 const testing = std.testing;
 const Alignment = mem.Alignment;
 const StdAllocator = mem.Allocator;
 pub const Error = StdAllocator.Error;
+const posix = std.posix;
+const builtin = @import("builtin");
+
+const win32 = @import("win32");
 
 const utils = @import("utils.zig");
 
@@ -333,12 +339,245 @@ test "wrap std allocator" {
     try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
 }
 
-/// A growable non thread-safe memory arena.
+/// Flags for the creation of an arena.
+pub const ArenaFlags = packed struct(u32) {
+    large_pages: bool = false,
+    _: u31 = 0,
+};
+
+/// A growable thread-safe memory arena.
 pub const Arena = extern struct {
+    grow_futex: atomic.Value(u32) = .init(unlocked),
+    flags: ArenaFlags = .{},
+    page_size: usize = 0,
     reserve_len: usize = 0,
-    commit_len: usize = 0,
+    commit_len: atomic.Value(usize) = .init(0),
     ptr: ?[*]u8 = null,
-    pos: usize = 0,
+    pos: atomic.Value(usize) = .init(0),
+
+    const unlocked: u32 = 0;
+    const locked: u32 = 1;
+    const contended: u32 = 2;
+
+    pub const InitOptions = struct {
+        flags: ArenaFlags = .{},
+        reserve: usize,
+        commit: usize = 0,
+    };
+
+    pub fn init(options: InitOptions) Error!Arena {
+        std.debug.assert(options.commit <= options.reserve);
+        const page_size = if (options.flags.large_pages) blk: {
+            if (comptime builtin.target.os.tag == .windows) {
+                const large_size = win32.system.memory.GetLargePageMinimum();
+                if (large_size == 0) break :blk heap.pageSize();
+                break :blk large_size;
+            } else break :blk heap.pageSize();
+        } else heap.pageSize();
+
+        const reserve = mem.alignForward(usize, options.reserve, page_size);
+        const commit = mem.alignForward(usize, options.commit, page_size);
+
+        const ptr = if (comptime builtin.target.os.tag == .windows) blk: {
+            const allocated = win32.system.memory.VirtualAlloc(
+                null,
+                reserve + page_size,
+                .{ .RESERVE = 1, .LARGE_PAGES = if (options.flags.large_pages) 1 else 0 },
+                .{ .PAGE_READWRITE = 1 },
+            ) orelse return error.OutOfMemory;
+            errdefer _ = win32.system.memory.VirtualFree(allocated, reserve + page_size, .RELEASE);
+            const allocated_u8: [*]u8 = @ptrCast(allocated);
+
+            _ = win32.system.memory.VirtualAlloc(
+                allocated_u8 + reserve,
+                page_size,
+                .{ .COMMIT = 1, .LARGE_PAGES = if (options.flags.large_pages) 1 else 0 },
+                .{ .PAGE_READWRITE = 1, .PAGE_GUARD = 1 },
+            ) orelse return error.OutOfMemory;
+            break :blk allocated_u8;
+        } else blk: {
+            const allocated = posix.mmap(
+                null,
+                reserve + page_size,
+                posix.PROT.NONE,
+                .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+                -1,
+                0,
+            ) catch return error.OutOfMemory;
+            break :blk allocated.ptr;
+        };
+
+        var arena: Arena = .{
+            .flags = options.flags,
+            .page_size = page_size,
+            .reserve_len = reserve,
+            .ptr = ptr,
+        };
+        errdefer arena.deinit();
+        try arena.grow(commit);
+        return arena;
+    }
+
+    pub fn deinit(self: *Arena) void {
+        std.debug.assert(self.page_size != 0);
+        const ptr = self.ptr orelse return;
+        if (comptime builtin.target.os.tag == .windows) {
+            _ = win32.system.memory.VirtualFree(ptr, self.reserve_len + self.page_size, .RELEASE);
+        } else {
+            posix.munmap(@alignCast(ptr[0 .. self.reserve_len + self.page_size]));
+        }
+    }
+
+    pub fn grow(self: *Arena, len: usize) Error!void {
+        std.debug.assert(self.page_size != 0);
+        std.debug.assert(self.ptr != null);
+        if (self.commit_len.load(.monotonic) >= len) return;
+        if (self.reserve_len < len) return error.OutOfMemory;
+
+        self.lock();
+        defer self.unlock();
+
+        const commited = self.commit_len.load(.monotonic);
+        if (commited >= len) return;
+        const additional = mem.alignForward(usize, len - commited, self.page_size);
+        std.debug.assert(additional <= self.reserve_len);
+        if (comptime builtin.target.os.tag == .windows) {
+            _ = win32.system.memory.VirtualAlloc(
+                self.ptr.? + commited,
+                additional,
+                .{ .COMMIT = 1, .LARGE_PAGES = if (self.flags.large_pages) 1 else 0 },
+                .{ .PAGE_READWRITE = 1 },
+            ) orelse return error.OutOfMemory;
+        } else {
+            posix.mprotect(
+                @alignCast(self.ptr.?[commited .. commited + additional]),
+                posix.PROT.READ | posix.PROT.WRITE,
+            ) catch return error.OutOfMemory;
+        }
+
+        self.commit_len.store(commited + additional, .monotonic);
+    }
+
+    fn lock(self: *Arena) void {
+        if (self.grow_futex.cmpxchgWeak(unlocked, locked, .acquire, .monotonic)) |v| {
+            var orig = v;
+            while (true) {
+                if (orig == unlocked) {
+                    orig = self.grow_futex.cmpxchgWeak(
+                        unlocked,
+                        locked,
+                        .acquire,
+                        .monotonic,
+                    ) orelse return;
+                    continue;
+                }
+
+                if (orig & contended == 0) {
+                    if (self.grow_futex.cmpxchgWeak(orig, orig | contended, .acquire, .monotonic)) |n| {
+                        orig = n;
+                        continue;
+                    }
+                }
+
+                Thread.Futex.wait(&self.grow_futex, contended);
+                orig = self.grow_futex.load(.monotonic);
+            }
+        }
+    }
+
+    fn unlock(self: *Arena) void {
+        const state = self.grow_futex.swap(unlocked, .release);
+        if (state & contended != 0) Thread.Futex.wake(&self.grow_futex, 1);
+    }
+
+    const min_align: usize = 16;
+    const allocator_vtable: Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    fn alloc(ptr: ?*anyopaque, len: usize, alignment: usize) callconv(.c) ?[*]u8 {
+        const self: *Arena = @ptrCast(@alignCast(ptr));
+        const al = @max(alignment, min_align);
+        if (len == 0) return null;
+
+        var pos = self.pos.load(.monotonic);
+        var start_pos: usize = undefined;
+        const offset = @intFromPtr(self.ptr);
+        while (true) {
+            start_pos = mem.alignForward(usize, offset + pos, al) - offset;
+            const end_pos = start_pos + len;
+            if (self.commit_len.load(.monotonic) < end_pos) {
+                self.grow(end_pos) catch return null;
+            }
+            pos = self.pos.cmpxchgWeak(pos, end_pos, .monotonic, .monotonic) orelse break;
+        }
+
+        return self.ptr.? + start_pos;
+    }
+
+    fn resize(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) bool {
+        _ = alignment;
+        const self: *Arena = @ptrCast(@alignCast(ptr));
+        const slice = memory.intoSliceOrEmpty();
+        if (slice.len == 0) return false;
+        if (new_len <= slice.len) return true;
+
+        const arena_ptr = @intFromPtr(self.ptr);
+        const mem_ptr = @intFromPtr(slice.ptr);
+        std.debug.assert(arena_ptr <= mem_ptr);
+
+        const start_pos = mem_ptr - arena_ptr;
+        const end_pos = start_pos + slice.len;
+        const new_end_pos = start_pos + new_len;
+        std.debug.assert(end_pos <= self.pos.load(.monotonic));
+        return self.pos.cmpxchgStrong(end_pos, new_end_pos, .monotonic, .monotonic) == null;
+    }
+
+    fn remap(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) ?[*]u8 {
+        const self: *Arena = @ptrCast(@alignCast(ptr));
+        const slice = memory.intoSliceOrEmpty();
+        if (slice.len == 0) return alloc(ptr, new_len, alignment);
+        if (new_len <= slice.len) return slice.ptr;
+
+        const arena_ptr = @intFromPtr(self.ptr);
+        const mem_ptr = @intFromPtr(slice.ptr);
+        std.debug.assert(arena_ptr <= mem_ptr);
+
+        const start_pos = mem_ptr - arena_ptr;
+        const end_pos = start_pos + slice.len;
+        const new_end_pos = start_pos + new_len;
+        std.debug.assert(end_pos <= self.pos.load(.monotonic));
+        if (self.pos.cmpxchgStrong(end_pos, new_end_pos, .monotonic, .monotonic) == null) {
+            return slice.ptr;
+        }
+
+        const new_mem = alloc(ptr, new_len, alignment).?;
+        @memcpy(new_mem[0..slice.len], slice);
+        return new_mem;
+    }
+
+    fn free(ptr: ?*anyopaque, memory: Memory, alignment: usize) callconv(.c) void {
+        _ = alignment;
+        const self: *Arena = @ptrCast(@alignCast(ptr));
+        const slice = memory.intoSliceOrEmpty();
+        if (slice.len == 0) return;
+
+        const arena_ptr = @intFromPtr(self.ptr);
+        const mem_ptr = @intFromPtr(slice.ptr);
+        std.debug.assert(arena_ptr <= mem_ptr);
+
+        const start_pos = mem_ptr - arena_ptr;
+        const end_pos = start_pos + slice.len;
+        std.debug.assert(end_pos <= self.pos.load(.monotonic));
+        _ = self.pos.cmpxchgStrong(end_pos, start_pos, .monotonic, .monotonic);
+    }
+
+    pub fn allocator(self: *Arena) Allocator {
+        return .{ .ptr = self, .vtable = &allocator_vtable };
+    }
 };
 
 /// Temporary scope of a memory arena.
@@ -347,17 +586,44 @@ pub const TmpArena = extern struct {
     pos: usize,
 };
 
-/// A growable thread-safe memory arena.
-pub const SharedArena = extern struct {
-    grow_futex: atomic.Value(u32) = .init(0),
-    reserve_len: usize = 0,
-    commit_len: atomic.Value(usize) = .init(0),
-    ptr: ?[*]u8 = null,
-    pos: atomic.Value(usize) = .init(0),
+test Arena {
+    var arena = try Arena.init(.{ .reserve = 16 * 1024 * 1024 });
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+    try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
+}
+
+// ----------------------------------------------------
+// FFI
+// ----------------------------------------------------
+
+const ffi = struct {
+    export fn fstd_arena_init(arena: *Arena, base: ?[*]u8, flags: ArenaFlags, reserve: usize, commit: usize) bool {
+        std.debug.assert(base == null);
+        arena.* = Arena.init(.{
+            .flags = flags,
+            .reserve = reserve,
+            .commit = commit,
+        }) catch return false;
+        return true;
+    }
+
+    export fn fstd_arena_deinit(arena: *Arena) void {
+        arena.deinit();
+    }
+
+    export fn fstd_arena_grow(arena: *Arena, new_len: usize) void {
+        arena.grow(new_len) catch {
+            @breakpoint();
+            @trap();
+        };
+    }
 };
 
-/// A growable thread-safe memory arena.
-pub const TmpSharedArena = extern struct {
-    arena: *SharedArena,
-    pos: usize,
-};
+comptime {
+    _ = ffi;
+}

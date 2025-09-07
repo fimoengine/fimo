@@ -13,6 +13,7 @@ const posix = std.posix;
 const builtin = @import("builtin");
 
 const fimo_std = @import("fimo_std");
+const Arena = fimo_std.memory.Arena;
 const ctx = fimo_std.ctx;
 const Status = ctx.Status;
 const AnyResult = fimo_std.AnyError.AnyResult;
@@ -123,18 +124,35 @@ fn ItemPool(Item: type) type {
     };
 }
 
-const StackPool = struct {
+const MemoryPool = struct {
     allocated: []align(heap.page_size_min) u8,
     page_size: usize,
-    cache: ArrayList(Stack),
-    free_list: ArrayList(Stack),
+    cache: ArrayList(Node),
+    free_list: ArrayList(Node),
     wait_queue: DoublyLinkedList = .{},
 
-    fn init(min_stack_size: usize, stack_count: usize, cache_len: usize) error{OutOfMemory}!StackPool {
+    const Node = struct {
+        stack: Stack,
+        arena: Arena,
+    };
+
+    fn init(
+        min_arena_size: usize,
+        min_stack_size: usize,
+        stack_count: usize,
+        cache_len: usize,
+    ) error{OutOfMemory}!MemoryPool {
+        // NOTE(gabriel):
+        //
+        // We reserve an additional page for each arena.
+        const page_size = heap.pageSize();
+        const arena_size = mem.alignForward(usize, min_arena_size, page_size);
+        const arena_size_with_guard = arena_size + page_size;
+        const all_arenas_size = arena_size_with_guard * stack_count;
+
         // NOTE(gabriel):
         //
         // We allocate an additional guard page for each stack.
-        const page_size = heap.pageSize();
         const platform_min_stack_size = @import("context.zig").minStackSize();
         const platform_max_stack_size = @import("context.zig").maxStackSize();
         const stack_size = mem.alignForward(
@@ -143,16 +161,16 @@ const StackPool = struct {
             page_size,
         );
 
-        const cache_size = mem.alignForward(usize, @sizeOf(Stack) * stack_count, page_size);
+        const cache_size = mem.alignForward(usize, @sizeOf(Node) * stack_count, page_size);
         const all_stacks_size = stack_count * stack_size;
-        const alloc_size = cache_size + all_stacks_size;
+        const alloc_size = cache_size + all_stacks_size + all_arenas_size;
         const allocated: []align(heap.page_size_min) u8 = switch (comptime builtin.os.tag) {
             .windows => blk: {
                 const alloc = win32.system.memory.VirtualAlloc(
                     null,
                     alloc_size,
                     .{ .RESERVE = 1 },
-                    .{ .PAGE_READWRITE = 1 },
+                    .{ .PAGE_NOACCESS = 1 },
                 ) orelse return error.OutOfMemory;
                 errdefer _ = win32.system.memory.VirtualFree(alloc, alloc_size, .RELEASE);
 
@@ -166,28 +184,45 @@ const StackPool = struct {
                 const alloc_bytes: [*]align(heap.page_size_min) u8 = @ptrCast(@alignCast(alloc));
                 break :blk alloc_bytes[0..alloc_size];
             },
-            else => posix.mmap(
-                null,
-                alloc_size,
-                posix.PROT.READ | posix.PROT.WRITE,
-                .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
-                -1,
-                0,
-            ) catch return error.OutOfMemory,
+            else => blk: {
+                const alloc = posix.mmap(
+                    null,
+                    alloc_size,
+                    posix.PROT.NONE,
+                    .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+                    -1,
+                    0,
+                ) catch return error.OutOfMemory;
+                errdefer posix.munmap(alloc);
+                posix.mprotect(
+                    alloc[0 .. alloc_size - all_arenas_size],
+                    posix.PROT.READ | posix.PROT.WRITE,
+                ) catch return error.OutOfMemory;
+                break :blk alloc;
+            },
         };
         errdefer switch (comptime builtin.os.tag) {
             .windows => _ = win32.system.memory.VirtualFree(allocated.ptr, alloc_size, .RELEASE),
             else => posix.munmap(allocated),
         };
 
-        const stacks: []Stack = @ptrCast(allocated[0 .. @sizeOf(Stack) * stack_count]);
-        const stacks_memory = allocated[cache_size..];
-        for (stacks, 0..) |*stack, i| {
+        const nodes: []Node = @ptrCast(allocated[0 .. @sizeOf(Node) * stack_count]);
+        const stacks_memory = allocated[cache_size..][0..all_stacks_size];
+        const arenas_memory = allocated[cache_size + all_stacks_size ..][0..all_arenas_size];
+        for (nodes, 0..) |*node, i| {
+            const arena_memory = arenas_memory[i * arena_size_with_guard ..][0..arena_size];
+            node.arena = .{
+                .flags = .{},
+                .page_size = page_size,
+                .reserve_len = arena_size,
+                .ptr = arena_memory.ptr,
+            };
+
             const stack_memory: []align(heap.page_size_min) u8 = @alignCast(
                 stacks_memory[i * stack_size ..][0..stack_size],
             );
-            stack.memory = stack_memory;
-            stack.commited_size = if (comptime builtin.os.tag == .windows) page_size else {};
+            node.stack.memory = stack_memory;
+            node.stack.commited_size = if (comptime builtin.os.tag == .windows) page_size else {};
 
             switch (comptime builtin.os.tag) {
                 .windows => {
@@ -216,26 +251,26 @@ const StackPool = struct {
         return .{
             .allocated = allocated,
             .page_size = page_size,
-            .cache = .{ .items = stacks[0..cache_len], .capacity = cache_len },
-            .free_list = .{ .items = stacks[cache_len..], .capacity = stack_count - cache_len },
+            .cache = .{ .items = nodes[0..cache_len], .capacity = cache_len },
+            .free_list = .{ .items = nodes[cache_len..], .capacity = stack_count - cache_len },
         };
     }
 
-    fn deinit(self: StackPool) void {
+    fn deinit(self: MemoryPool) void {
         debug.assert(self.cache.items.len == self.cache.capacity);
         debug.assert(self.free_list.items.len == self.free_list.capacity);
         debug.assert(self.wait_queue.len() == 0);
-        errdefer switch (comptime builtin.os.tag) {
-            .windows => win32.system.memory.VirtualFree(
+        switch (comptime builtin.os.tag) {
+            .windows => _ = win32.system.memory.VirtualFree(
                 self.allocated.ptr,
                 self.allocated.len,
                 .RELEASE,
             ),
             else => posix.munmap(self.allocated),
-        };
+        }
     }
 
-    fn pop(self: *StackPool, waiter: *CmdBuf) ?Stack {
+    fn pop(self: *MemoryPool, waiter: *CmdBuf) ?Node {
         if (self.cache.pop()) |s| return s;
         if (self.free_list.pop()) |s| return s;
         debug.assert(!waiter.enqueued);
@@ -244,12 +279,25 @@ const StackPool = struct {
         return null;
     }
 
-    fn push(self: *StackPool, stack: Stack) ?*CmdBuf {
-        self.cache.appendBounded(stack) catch {
+    fn push(self: *MemoryPool, stack: Stack, arena: Arena) ?*CmdBuf {
+        var arena_ = arena;
+        arena_.pos.store(0, .monotonic);
+        self.cache.appendBounded(.{ .arena = arena, .stack = stack }) catch {
             switch (comptime builtin.os.tag) {
                 .windows => blk: {
+                    if (arena_.commit_len.load(.monotonic) != 0) {
+                        arena_.pos.store(0, .monotonic);
+                        const arena_memory = arena_.ptr.?[0..arena.commit_len.load(.monotonic)];
+                        _ = win32.system.memory.VirtualFree(
+                            arena_memory.ptr,
+                            arena_memory.len,
+                            .DECOMMIT,
+                        );
+                        arena_.commit_len.store(0, .monotonic);
+                    }
+
                     if (stack.commited_size == self.page_size) {
-                        self.free_list.appendAssumeCapacity(stack);
+                        self.free_list.appendAssumeCapacity(.{ .arena = arena_, .stack = stack });
                         break :blk;
                     }
 
@@ -274,17 +322,27 @@ const StackPool = struct {
                     );
 
                     self.free_list.appendAssumeCapacity(.{
-                        .memory = stack.memory,
-                        .commited_size = self.page_size,
+                        .arena = arena_,
+                        .stack = .{
+                            .memory = stack.memory,
+                            .commited_size = self.page_size,
+                        },
                     });
                 },
                 else => {
+                    if (arena_.commit_len.load(.monotonic) != 0) {
+                        arena_.pos.store(0, .monotonic);
+                        const arena_memory = arena_.ptr.?[0..arena.commit_len.load(.monotonic)];
+                        posix.mprotect(@alignCast(arena_memory), posix.PROT.NONE) catch unreachable;
+                        arena_.commit_len.store(0, .monotonic);
+                    }
+
                     posix.madvise(
                         stack.memory.ptr,
                         stack.memory.len,
                         posix.MADV.DONTNEED,
                     ) catch unreachable;
-                    self.free_list.appendAssumeCapacity(stack);
+                    self.free_list.appendAssumeCapacity(.{ .arena = arena_, .stack = stack });
                 },
             }
         };
@@ -831,6 +889,7 @@ pub const Task = struct {
     batch_idx: usize,
     task: *fimo_tasks_meta.Task,
     stack: Stack,
+    arena: Arena,
     enqueued: bool = false,
     bound_to_worker: bool = false,
     worker: ?*Worker,
@@ -1321,7 +1380,7 @@ workers: []Worker,
 cmd_bufs: ItemPool(CmdBuf),
 task_pool: ItemPool(Task),
 wake_msg_pool: ItemPool(WakeMessage),
-stack_pool: StackPool,
+memory_pool: MemoryPool,
 msg_queue: MessageQueue = .{},
 global_channel: GlobalChannel,
 timeout_queue: TimeoutQueue = .{},
@@ -1338,6 +1397,7 @@ pub const InitOptions = struct {
     cmd_buf_capacity: usize,
     worker_count: usize,
     max_load_factor: usize,
+    arena_size: usize,
     stack_size: usize,
     worker_stack_cache_len: usize,
     disable_stack_cache: bool = false,
@@ -1347,6 +1407,7 @@ pub fn init(options: InitOptions) !*Executor {
     debug.assert(options.cmd_buf_capacity != 0);
     debug.assert(options.worker_count != 0);
     debug.assert(options.max_load_factor != 0);
+    debug.assert(options.arena_size != 0);
     debug.assert(options.stack_size != 0);
     debug.assert(options.worker_stack_cache_len != 0);
 
@@ -1359,7 +1420,12 @@ pub fn init(options: InitOptions) !*Executor {
         0
     else
         options.worker_count * options.worker_stack_cache_len;
-    const stack_pool: StackPool = try .init(options.stack_size, num_tasks, cache_len);
+    const stack_pool: MemoryPool = try .init(
+        options.arena_size,
+        options.stack_size,
+        num_tasks,
+        cache_len,
+    );
     errdefer stack_pool.deinit();
 
     const exe = try gpa.create(Executor);
@@ -1371,7 +1437,7 @@ pub fn init(options: InitOptions) !*Executor {
         .cmd_bufs = try .init(gpa, options.cmd_buf_capacity),
         .task_pool = try .init(gpa, num_tasks),
         .wake_msg_pool = try .init(gpa, num_tasks),
-        .stack_pool = stack_pool,
+        .memory_pool = stack_pool,
         .global_channel = try .init(gpa, num_tasks),
         .wait_list = try .init(gpa, num_tasks),
     };
@@ -1414,7 +1480,7 @@ pub fn join(self: *Executor, futex: *Futex) void {
     debug.assert(self.task_count.load(.monotonic) == 0);
     debug.assert(self.cmd_bufs_count.load(.monotonic) == 0);
 
-    self.stack_pool.deinit();
+    self.memory_pool.deinit();
     self.arena.deinit();
 }
 
@@ -1507,7 +1573,7 @@ fn run(self: *Executor, futex: *Futex) void {
                     if (msg.tag == .task_abort)
                         cmd_buf.cancel_requested.store(true, .monotonic);
 
-                    if (self.stack_pool.push(task.stack)) |waiter| {
+                    if (self.memory_pool.push(task.stack, task.arena)) |waiter| {
                         debug.assert(!waiter.enqueued);
                         waiter.enqueued = true;
                         self.process_queue.append(&waiter.node);
@@ -1575,7 +1641,9 @@ fn run(self: *Executor, futex: *Futex) void {
                     .enqueue_task => {
                         const task = cmd.payload.enqueue_task;
                         while (cmd_buf.sub_cmd_idx < task.batch_len) : (cmd_buf.sub_cmd_idx += 1) {
-                            const stack = self.stack_pool.pop(cmd_buf) orelse continue :next_buf;
+                            const memory_node = self.memory_pool.pop(cmd_buf) orelse continue :next_buf;
+                            const arena = memory_node.arena;
+                            const stack = memory_node.stack;
                             const alloc = self.task_pool.create(futex);
                             alloc.* = .{
                                 .owner = cmd_buf,
@@ -1583,6 +1651,7 @@ fn run(self: *Executor, futex: *Futex) void {
                                 .batch_idx = cmd_buf.sub_cmd_idx,
                                 .task = task,
                                 .stack = stack,
+                                .arena = arena,
                                 .worker = cmd_buf.active_worker,
                                 .call_stack = .init(),
                                 .context = .init(.forStack(stack), Worker.start),

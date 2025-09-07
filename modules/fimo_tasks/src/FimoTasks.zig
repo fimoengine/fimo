@@ -7,6 +7,7 @@ const builtin = @import("builtin");
 const fimo_std = @import("fimo_std");
 const ctx = fimo_std.ctx;
 const Status = ctx.Status;
+const Arena = fimo_std.memory.Arena;
 const modules = fimo_std.modules;
 const tracing = fimo_std.tracing;
 const time = fimo_std.time;
@@ -34,6 +35,7 @@ executor: *Executor,
 pub const default_cmd_buf_capacity = 128;
 pub const default_worker_count = 0; // One worker per cpu core.
 pub const default_max_load_factor = 16;
+pub const default_arena_size = 512 * 1024 * 1024;
 pub const default_stack_size = 8 * 1024 * 1024;
 pub const default_worker_stack_cache_len = 4;
 pub const Module = modules.Module(@This());
@@ -65,6 +67,11 @@ pub const fimo_parameters = .{
         .read_group = .dependency,
         .write_group = .dependency,
     },
+    .default_arena_size = .{
+        .default = @as(u32, default_arena_size),
+        .read_group = .dependency,
+        .write_group = .dependency,
+    },
     .default_stack_size = .{
         .default = @as(u32, default_stack_size),
         .read_group = .dependency,
@@ -84,6 +91,7 @@ pub const fimo_exports = .{
     .{ .symbol = symbols.abort, .value = &abort },
     .{ .symbol = symbols.cancel_requested, .value = &cancelRequested },
     .{ .symbol = symbols.sleep, .value = &sleep },
+    .{ .symbol = symbols.task_arena, .value = &taskArena },
     .{ .symbol = symbols.task_local_set, .value = &taskLocalSet },
     .{ .symbol = symbols.task_local_get, .value = &taskLocalGet },
     .{ .symbol = symbols.task_local_clear, .value = &taskLocalClear },
@@ -129,6 +137,7 @@ fn init(self: *@This()) !void {
         .cmd_buf_capacity = default_cmd_buf_capacity,
         .worker_count = @max(std.Thread.getCpuCount() catch 1, 1),
         .max_load_factor = default_max_load_factor,
+        .arena_size = default_arena_size,
         .stack_size = default_stack_size,
         .worker_stack_cache_len = default_worker_stack_cache_len,
     });
@@ -167,6 +176,13 @@ pub fn getDefaultMaxLoadFactor() usize {
     const param = Module.parameters().default_max_load_factor;
     const count: usize = @intCast(param.read());
     if (count == 0) return default_max_load_factor;
+    return count;
+}
+
+pub fn getDefaultArenaSize() usize {
+    const param = Module.parameters().default_arena_size;
+    const count: usize = @intCast(param.read());
+    if (count == 0) return default_arena_size;
     return count;
 }
 
@@ -218,6 +234,11 @@ fn cancelRequested() callconv(.c) bool {
 
 fn sleep(duration: fimo_std.time.compat.Duration) callconv(.c) void {
     Worker.sleep(Duration.initC(duration));
+}
+
+fn taskArena() callconv(.c) ?*Arena {
+    const task = Worker.currentTask() orelse return null;
+    return &task.arena;
 }
 
 fn taskLocalSet(
@@ -282,6 +303,7 @@ pub fn executorInit(
         .cmd_buf_capacity = if (cfg.cmd_buf_capacity == 0) getDefaultCmdBufCapacity() else cfg.cmd_buf_capacity,
         .worker_count = if (cfg.worker_count == 0) getDefaultWorkerCount() else cfg.worker_count,
         .max_load_factor = if (cfg.max_load_factor == 0) getDefaultMaxLoadFactor() else cfg.max_load_factor,
+        .arena_size = if (cfg.arena_size == 0) getDefaultArenaSize() else cfg.arena_size,
         .stack_size = if (cfg.stack_size == 0) getDefaultStackSize() else cfg.stack_size,
         .worker_stack_cache_len = if (cfg.worker_stack_cache_len == 0) getWorkerStackCacheLen() else cfg.worker_stack_cache_len,
         .disable_stack_cache = cfg.disable_stack_cache,
