@@ -439,10 +439,6 @@ pub const Inner = struct {
         self.is_detached = true;
         for (self.symbols.values()) |sym| sym.destroySymbol(@ptrCast(instance));
         if (self.@"export") |exp| {
-            if (instance.imports != null) {
-                for (exp.imports.intoSliceOrEmpty()) |import| if (import.unbind) |unbind| unbind();
-                if (exp.eventUnbindCtx().unbind) |unbind| unbind();
-            }
             if (self.state == .init) {
                 const deinit_event = exp.eventDeinit();
                 if (deinit_event.poll) |poll| {
@@ -451,6 +447,11 @@ pub const Inner = struct {
                         @panic("TODO");
                     }
                 }
+            }
+
+            if (instance.imports != null) {
+                for (exp.imports.intoSliceOrEmpty()) |import| if (import.unbind) |unbind| unbind();
+                if (exp.eventUnbindCtx().unbind) |unbind| unbind();
             }
 
             const deinit_export_event = exp.eventDeinitExport();
