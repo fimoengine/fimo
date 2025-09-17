@@ -661,7 +661,7 @@ fstd_util void ftsk_timeline_semaphore_signal(FTSK_TimelineSemaphore *tsem, FSTD
             ftsk_sym_cancel_requested_symbol, ftsk_sym_sleep_symbol, ftsk_sym_task_arena_symbol,                       \
             ftsk_sym_task_local_set_symbol, ftsk_sym_task_local_get_symbol, ftsk_sym_task_local_clear_symbol,          \
             ftsk_sym_cmd_buf_join_symbol, ftsk_sym_cmd_buf_detach_symbol, ftsk_sym_cmd_buf_cancel_symbol,              \
-            ftsk_sym_cmd_buf_cancel_detach_symbol, ftsk_sym_executor_global_symbol, ftsk_sym_executor_new_symbol,      \
+            ftsk_sym_cmd_buf_cancel_detach_symbol, ftsk_sym_executor_global_symbol, ftsk_sym_executor_init_symbol,     \
             ftsk_sym_executor_current_symbol, ftsk_sym_executor_join_symbol, ftsk_sym_executor_join_requested_symbol,  \
             ftsk_sym_executor_enqueue_symbol, ftsk_sym_executor_enqueue_detached_symbol, ftsk_sym_futex_wait_symbol,   \
             ftsk_sym_futex_waitv_symbol, ftsk_sym_futex_wake_symbol, ftsk_sym_futex_requeue_symbol
@@ -681,7 +681,7 @@ fstd_util void ftsk_timeline_semaphore_signal(FTSK_TimelineSemaphore *tsem, FSTD
 #define FTSK_SYM_CMD_BUF_CANCEL FSTD_MODULE_SYMBOL_NS("cmd_buf_cancel", FTSK_SYM_NS, FTSK__SYM_VERSION)
 #define FTSK_SYM_CMD_BUF_CANCEL_DETACH FSTD_MODULE_SYMBOL_NS("cmd_buf_cancel_detach", FTSK_SYM_NS, FTSK__SYM_VERSION)
 #define FTSK_SYM_EXECUTOR_GLOBAL FSTD_MODULE_SYMBOL_NS("executor_global", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_NEW FSTD_MODULE_SYMBOL_NS("executor_new", FTSK_SYM_NS, FTSK__SYM_VERSION)
+#define FTSK_SYM_EXECUTOR_INIT FSTD_MODULE_SYMBOL_NS("executor_init", FTSK_SYM_NS, FTSK__SYM_VERSION)
 #define FTSK_SYM_EXECUTOR_CURRENT FSTD_MODULE_SYMBOL_NS("executor_current", FTSK_SYM_NS, FTSK__SYM_VERSION)
 #define FTSK_SYM_EXECUTOR_JOIN FSTD_MODULE_SYMBOL_NS("executor_join", FTSK_SYM_NS, FTSK__SYM_VERSION)
 #define FTSK_SYM_EXECUTOR_JOIN_REQUESTED                                                                               \
@@ -711,7 +711,7 @@ FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_DETACH, ftsk_sym_, void, cmd_buf_detach, FTSK_Cm
 FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_CANCEL, ftsk_sym_, void, cmd_buf_cancel, FTSK_CmdBufHandle *cmd_buf)
 FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_CANCEL_DETACH, ftsk_sym_, void, cmd_buf_cancel_detach, FTSK_CmdBufHandle *cmd_buf)
 FSTD_SYMBOL(FTSK_SYM_EXECUTOR_GLOBAL, ftsk_sym_, FTSK_Executor, executor_global)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_NEW, ftsk_sym_, FSTD_Status, executor_new, FTSK_Executor **exe,
+FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_INIT, ftsk_sym_, FSTD_Status, executor_init, FTSK_Executor **exe,
                const FTSK_ExecutorCfg *cfg)
 FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_CURRENT, ftsk_sym_, FTSK_Executor *FSTD_MAYBE_NULL, executor_current)
 FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_JOIN, ftsk_sym_, void, executor_join, FTSK_Executor *exe)
@@ -757,7 +757,7 @@ FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_DETACH, ftsk_sym_, void, cmd_buf_detach, FT
 FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_CANCEL, ftsk_sym_, void, cmd_buf_cancel, FTSK_CmdBufHandle *cmd_buf)
 FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_CANCEL_DETACH, ftsk_sym_, void, cmd_buf_cancel_detach, FTSK_CmdBufHandle *cmd_buf)
 FSTD_SYMBOL_IMPL(FTSK_SYM_EXECUTOR_GLOBAL, ftsk_sym_, FTSK_Executor, executor_global)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_NEW, ftsk_sym_, FSTD_Status, executor_new, FTSK_Executor **exe,
+FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_INIT, ftsk_sym_, FSTD_Status, executor_init, FTSK_Executor **exe,
                     const FTSK_ExecutorCfg *cfg)
 FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_CURRENT, ftsk_sym_, FTSK_Executor *FSTD_MAYBE_NULL, executor_current)
 FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_JOIN, ftsk_sym_, void, executor_join, FTSK_Executor *exe)
@@ -816,7 +816,7 @@ fstd_func_impl void ftsk_cmd_buf_handle_cancel_detach(FTSK_CmdBufHandle *cmd_buf
 fstd_func FTSK_Executor *ftsk_global_executor() { return (FTSK_Executor *)ftsk_sym_executor_global_get(); }
 
 fstd_func FSTD_Status ftsk_executor_init(FTSK_Executor **exe, const FTSK_ExecutorCfg *cfg) {
-    return ftsk_sym_executor_new_get()(exe, cfg);
+    return ftsk_sym_executor_init_get()(exe, cfg);
 }
 
 fstd_func FTSK_Executor *ftsk_executor_current() { return ftsk_sym_executor_current_get()(); }
