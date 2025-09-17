@@ -271,9 +271,9 @@ pub const Symbol = struct {
 
     pub fn format(self: Symbol, w: *std.Io.Writer) std.Io.Writer.Error!void {
         if (self.namespace.len != 0) {
-            try w.print("{s}::{s}@v{}", .{ self.namespace, self.name, self.version });
+            try w.print("{s}::{s}@v{f}", .{ self.namespace, self.name, self.version });
         } else {
-            try w.print("{s}@v{}", .{ self.name, self.version });
+            try w.print("{s}@v{f}", .{ self.name, self.version });
         }
     }
 };

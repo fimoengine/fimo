@@ -280,9 +280,9 @@ const LoadGraph = struct {
 
             // Check that all imported symbols are already exposed, or will be exposed.
             for (info.status.unloaded.export_handle.imports.intoSliceOrEmpty()) |imp| {
-                const imp_name = imp.name.intoSliceOrEmpty();
-                const imp_ns = imp.namespace.intoSliceOrEmpty();
-                const imp_ver = Version.initC(imp.version);
+                const imp_name = imp.id.name.intoSliceOrEmpty();
+                const imp_ns = imp.id.namespace.intoSliceOrEmpty();
+                const imp_ver = Version.initC(imp.id.version);
                 // Skip the module if a dependency could not be loaded.
                 if (set.getSymbol(imp_name, imp_ns, imp_ver)) |sym| {
                     const owner = set.getModuleInfo(sym.owner).?;
@@ -310,8 +310,8 @@ const LoadGraph = struct {
 
             // Check that no exported symbols are already exposed.
             for (info.status.unloaded.export_handle.exports.intoSliceOrEmpty()) |exp| {
-                const e_name = exp.symbol.name.intoSliceOrEmpty();
-                const e_ns = exp.symbol.namespace.intoSliceOrEmpty();
+                const e_name = exp.symbol.id.name.intoSliceOrEmpty();
+                const e_ns = exp.symbol.id.namespace.intoSliceOrEmpty();
                 if (modules.getSymbol(e_name, e_ns) != null) {
                     tracing.logWarn(
                         @src(),
@@ -349,9 +349,9 @@ const LoadGraph = struct {
             }
 
             for (info.status.unloaded.export_handle.imports.intoSliceOrEmpty()) |imp| {
-                const i_name = imp.name.intoSliceOrEmpty();
-                const i_namespace = imp.namespace.intoSliceOrEmpty();
-                const i_version = Version.initC(imp.version);
+                const i_name = imp.id.name.intoSliceOrEmpty();
+                const i_namespace = imp.id.namespace.intoSliceOrEmpty();
+                const i_version = Version.initC(imp.id.version);
                 if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
                     const owner_id = self.modules.get(sym.owner);
                     const owner_info = set.getModuleInfo(sym.owner).?;
@@ -538,8 +538,8 @@ fn addModuleInner(
 ) !void {
     if (self.getModuleInfo(@"export".name.intoSliceOrEmpty()) != null) return error.Duplicate;
     for (@"export".exports.intoSliceOrEmpty()) |exp| {
-        const name = exp.symbol.name.intoSliceOrEmpty();
-        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
+        const name = exp.symbol.id.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.id.namespace.intoSliceOrEmpty();
         if (self.getSymbolAny(name, namespace)) |sym| {
             tracing.logErr(
                 @src(),
@@ -550,15 +550,15 @@ fn addModuleInner(
         }
     }
     errdefer for (@"export".exports.intoSliceOrEmpty()) |exp| {
-        const name = exp.symbol.name.intoSliceOrEmpty();
-        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
+        const name = exp.symbol.id.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.id.namespace.intoSliceOrEmpty();
         if (self.getSymbolAny(name, namespace)) |_| self.removeSymbol(name, namespace);
     };
 
     for (@"export".exports.intoSliceOrEmpty()) |exp| {
-        const name = exp.symbol.name.intoSliceOrEmpty();
-        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
-        const version = Version.initC(exp.symbol.version);
+        const name = exp.symbol.id.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.id.namespace.intoSliceOrEmpty();
+        const version = Version.initC(exp.symbol.id.version);
         try self.addSymbol(
             name,
             namespace,
@@ -626,10 +626,10 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
 
     const imports = @"export".imports.intoSliceOrEmpty();
     for (imports, 0..) |imp, i| {
-        var ns_found = std.mem.eql(u8, imp.namespace.intoSliceOrEmpty(), "");
+        var ns_found = std.mem.eql(u8, imp.id.namespace.intoSliceOrEmpty(), "");
         for (namespaces) |ns| {
             if (ns_found) break;
-            if (std.mem.eql(u8, imp.namespace.intoSliceOrEmpty(), ns.intoSliceOrEmpty())) {
+            if (std.mem.eql(u8, imp.id.namespace.intoSliceOrEmpty(), ns.intoSliceOrEmpty())) {
                 ns_found = true;
             }
         }
@@ -637,7 +637,7 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
             tracing.logWarn(
                 @src(),
                 "required namespace not imported, export='{s}', symbol='{s}', ns='{s}', index='{}'",
-                .{ @"export".name.intoSliceOrEmpty(), imp.name.intoSliceOrEmpty(), imp.namespace.intoSliceOrEmpty(), i },
+                .{ @"export".name.intoSliceOrEmpty(), imp.id.name.intoSliceOrEmpty(), imp.id.namespace.intoSliceOrEmpty(), i },
             );
             has_error = true;
         }
@@ -645,8 +645,8 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
 
     const exports = @"export".exports.intoSliceOrEmpty();
     for (exports, 0..) |exp, i| {
-        const name = exp.symbol.name.intoSliceOrEmpty();
-        const namespace = exp.symbol.namespace.intoSliceOrEmpty();
+        const name = exp.symbol.id.name.intoSliceOrEmpty();
+        const namespace = exp.symbol.id.namespace.intoSliceOrEmpty();
         if (std.mem.startsWith(u8, name, "__")) {
             tracing.logWarn(
                 @src(),
@@ -673,8 +673,8 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
         }
 
         for (imports) |imp| {
-            const imp_name = imp.name.intoSliceOrEmpty();
-            const imp_namespace = imp.namespace.intoSliceOrEmpty();
+            const imp_name = imp.id.name.intoSliceOrEmpty();
+            const imp_namespace = imp.id.namespace.intoSliceOrEmpty();
             if (std.mem.eql(u8, name, imp_name) and
                 std.mem.eql(u8, namespace, imp_namespace))
             {
@@ -690,8 +690,8 @@ fn validate_export(@"export": *const pub_modules.Export) error{InvalidExport}!vo
 
         var count: usize = 0;
         for (exports[0..i]) |x| {
-            const exp_name = x.symbol.name.intoSliceOrEmpty();
-            const exp_namespace = x.symbol.namespace.intoSliceOrEmpty();
+            const exp_name = x.symbol.id.name.intoSliceOrEmpty();
+            const exp_namespace = x.symbol.id.namespace.intoSliceOrEmpty();
             if (std.mem.eql(u8, name, exp_name) and
                 std.mem.eql(u8, namespace, exp_namespace)) count += 1;
         }
@@ -979,9 +979,9 @@ const LoadOp = FSMFuture(struct {
 
         // Recheck that all dependencies could be loaded.
         for (info.status.unloaded.export_handle.imports.intoSliceOrEmpty()) |i| {
-            const i_name = i.name.intoSliceOrEmpty();
-            const i_namespace = i.namespace.intoSliceOrEmpty();
-            const i_version = Version.initC(i.version);
+            const i_name = i.id.name.intoSliceOrEmpty();
+            const i_namespace = i.id.namespace.intoSliceOrEmpty();
+            const i_version = Version.initC(i.id.version);
             if (set.getSymbol(i_name, i_namespace, i_version)) |sym| {
                 const owner = set.getModuleInfo(sym.owner).?;
                 std.debug.assert(owner.status != .unloaded);

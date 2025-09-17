@@ -3291,6 +3291,14 @@ typedef struct {
     };
 } FSTD_ModuleExportParameter;
 
+typedef void (*FSTD_ModuleSymbolExtBind)(const void *symbol);
+typedef void (*FSTD_ModuleSymbolExtUnbind)(void);
+typedef struct {
+    FSTD_ModuleSymbol id;
+    FSTD_ModuleSymbolExtBind FSTD_MAYBE_NULL bind;
+    FSTD_ModuleSymbolExtUnbind FSTD_MAYBE_NULL unbind;
+} FSTD_ModuleSymbolExt;
+
 typedef FSTD_I32 FSTD_ModuleExportSymbolType;
 enum {
     FSTD_ModuleExportSymbolType_Static = (FSTD_ModuleExportSymbolType)0,
@@ -3306,7 +3314,7 @@ enum {
 
 typedef FSTD_Fallible(void *) FSTD_ModuleExportDynamicSymbolInitResult;
 typedef struct {
-    FSTD_ModuleSymbol symbol;
+    FSTD_ModuleSymbolExt symbol;
     FSTD_ModuleExportSymbolType type;
     FSTD_ModuleExportSymbolLinkage linkage;
     union {
@@ -3325,14 +3333,26 @@ typedef struct {
 /// data into the provided event buffer.
 typedef FSTD_I32 FSTD_ModuleExportEventTag;
 enum {
-    FSTD_ModuleExportEventTag_Init = (FSTD_ModuleExportEventTag)0,
-    FSTD_ModuleExportEventTag_Deinit = (FSTD_ModuleExportEventTag)1,
-    FSTD_ModuleExportEventTag_Start = (FSTD_ModuleExportEventTag)2,
-    FSTD_ModuleExportEventTag_Stop = (FSTD_ModuleExportEventTag)3,
-    FSTD_ModuleExportEventTag_DeinitExport = (FSTD_ModuleExportEventTag)4,
-    FSTD_ModuleExportEventTag_Dependencies = (FSTD_ModuleExportEventTag)5,
+    FSTD_ModuleExportEventTag_BindCtx = (FSTD_ModuleExportEventTag)0,
+    FSTD_ModuleExportEventTag_UnbindCtx = (FSTD_ModuleExportEventTag)1,
+    FSTD_ModuleExportEventTag_Init = (FSTD_ModuleExportEventTag)2,
+    FSTD_ModuleExportEventTag_Deinit = (FSTD_ModuleExportEventTag)3,
+    FSTD_ModuleExportEventTag_Start = (FSTD_ModuleExportEventTag)4,
+    FSTD_ModuleExportEventTag_Stop = (FSTD_ModuleExportEventTag)5,
+    FSTD_ModuleExportEventTag_DeinitExport = (FSTD_ModuleExportEventTag)6,
+    FSTD_ModuleExportEventTag_Dependencies = (FSTD_ModuleExportEventTag)7,
     FSTD__ModuleExportEventTag_ = FSTD_I32_MAX,
 };
+
+typedef struct {
+    FSTD_ModuleExportEventTag tag;
+    void (*FSTD_MAYBE_NULL bind)(FSTD_Ctx *ctx);
+} FSTD_ModuleExportEventBindCtx;
+
+typedef struct {
+    FSTD_ModuleExportEventTag tag;
+    void (*FSTD_MAYBE_NULL unbind)(void);
+} FSTD_ModuleExportEventUnbindCtx;
 
 typedef FSTD_Fallible(void *FSTD_MAYBE_NULL) FSTD_ModuleExportEventInitResult;
 typedef struct {
@@ -3371,7 +3391,7 @@ typedef struct {
 typedef FSTD_SliceConst(FSTD_ModuleExportParameter) FSTD_ModuleExportParameters;
 typedef FSTD_SliceConst(FSTD_Path) FSTD_ModuleExportResources;
 typedef FSTD_SliceConst(FSTD_StrConst) FSTD_ModuleExportNamespaces;
-typedef FSTD_SliceConst(FSTD_ModuleSymbol) FSTD_ModuleExportSymbolImports;
+typedef FSTD_SliceConst(FSTD_ModuleSymbolExt) FSTD_ModuleExportSymbolImports;
 typedef FSTD_SliceConst(FSTD_ModuleExportSymbolExport) FSTD_ModuleExportSymbolExports;
 
 struct FSTD_ModuleExport {
@@ -3387,6 +3407,18 @@ struct FSTD_ModuleExport {
     FSTD_ModuleExportSymbolExports exports;
     void (*on_event)(const FSTD_ModuleExport *module, FSTD_ModuleExportEventTag *tag);
 };
+
+fstd_util FSTD_ModuleExportEventBindCtx fstd_module_export_event_bind_ctx(const FSTD_ModuleExport *module) {
+    FSTD_ModuleExportEventBindCtx ev = {.tag = FSTD_ModuleExportEventTag_BindCtx};
+    module->on_event(module, &ev.tag);
+    return ev;
+}
+
+fstd_util FSTD_ModuleExportEventUnbindCtx fstd_module_export_event_unbind_ctx(const FSTD_ModuleExport *module) {
+    FSTD_ModuleExportEventUnbindCtx ev = {.tag = FSTD_ModuleExportEventTag_UnbindCtx};
+    module->on_event(module, &ev.tag);
+    return ev;
+}
 
 fstd_util FSTD_ModuleExportEventInit fstd_module_export_event_init(const FSTD_ModuleExport *module) {
     FSTD_ModuleExportEventInit ev = {.tag = FSTD_ModuleExportEventTag_Init};
@@ -3424,6 +3456,25 @@ fstd_util FSTD_ModuleExportEventDependencies fstd_module_export_event_dependenci
     return ev;
 }
 
+/// Default event handler for a module export.
+///
+/// Can be utilized as a fallback in case a custom event handler is provided.
+fstd_util void fstd_module_export_default_on_event(const FSTD_ModuleExport *module, FSTD_ModuleExportEventTag *tag) {
+    FSTD_UNUSED(module);
+    switch (*tag) {
+        case FSTD_ModuleExportEventTag_BindCtx: {
+            FSTD_ModuleExportEventBindCtx *event = fstd_parent_of(FSTD_ModuleExportEventBindCtx, tag, tag);
+            event->bind = fstd_ctx_register;
+        } break;
+        case FSTD_ModuleExportEventTag_UnbindCtx: {
+            FSTD_ModuleExportEventUnbindCtx *event = fstd_parent_of(FSTD_ModuleExportEventUnbindCtx, tag, tag);
+            event->unbind = fstd_ctx_unregister;
+        } break;
+        default:
+            break;
+    }
+}
+
 #ifdef FSTD_PLATFORM_WINDOWS
 // With the MSVC we have no way to get the start and end of
 // a section, so we use three different sections. According
@@ -3442,24 +3493,36 @@ fstd_util FSTD_ModuleExportEventDependencies fstd_module_export_event_dependenci
 #define FSTD__MODULE_SECTION "fimo_module"
 #endif
 
-#define FSTD_SYMBOL(prefix, type, name)                                                                                \
+#define FSTD_MODULE_SYMBOL_EXT(id_, bind_, unbind_) {.id = id_, .bind = bind_, .unbind = unbind_}
+
+#define FSTD_SYMBOL(id_, prefix, type, name)                                                                           \
     fstd_func const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void);                                          \
-    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const type *ptr);                                 \
+    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr);                                 \
     fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                          \
-    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);                                                        \
+    fstd_internal const FSTD_ModuleSymbolExt FSTD_CONCAT(FSTD_CONCAT(prefix, name), _symbol) = {                       \
+            .id = id_,                                                                                                 \
+            .bind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register),                                                 \
+            .unbind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister),                                             \
+    };
 
-#define FSTD_SYMBOL_FN(prefix, ret, name, ...)                                                                         \
+#define FSTD_SYMBOL_FN(id_, prefix, ret, name, ...)                                                                    \
     fstd_func ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void))(__VA_ARGS__);                                  \
-    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(ret(*const ptr)(__VA_ARGS__));                    \
+    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr);                                 \
     fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                          \
-    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);                                                        \
+    fstd_internal const FSTD_ModuleSymbolExt FSTD_CONCAT(FSTD_CONCAT(prefix, name), _symbol) = {                       \
+            .id = id_,                                                                                                 \
+            .bind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register),                                                 \
+            .unbind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister),                                             \
+    };
 
-#define FSTD_SYMBOL_IMPL(prefix, type, name)                                                                           \
+#define FSTD_SYMBOL_IMPL(id_, prefix, type, name)                                                                      \
     fstd_func_impl const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void) {                                    \
         return (const type *)FSTD_CONCAT(prefix, name).handle;                                                         \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const type *ptr) {                           \
-        fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), (const void *)ptr);                              \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr) {                           \
+        fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), ptr);                                            \
     }                                                                                                                  \
     fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void) {                                    \
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
@@ -3467,12 +3530,12 @@ fstd_util FSTD_ModuleExportEventDependencies fstd_module_export_event_dependenci
     fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
 
 
-#define FSTD_SYMBOL_FN_IMPL(prefix, ret, name, ...)                                                                    \
+#define FSTD_SYMBOL_FN_IMPL(id_, prefix, ret, name, ...)                                                               \
     fstd_func_impl ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)())(__VA_ARGS__) {                                \
         return (ret (*)(__VA_ARGS__))FSTD_CONCAT(prefix, name).handle;                                                 \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(ret(*const ptr)(__VA_ARGS__)) {              \
-        fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), (const void *)ptr);                              \
+    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr) {                           \
+        fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), ptr);                                            \
     }                                                                                                                  \
     fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void) {                                    \
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \

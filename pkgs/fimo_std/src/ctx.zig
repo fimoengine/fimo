@@ -86,9 +86,9 @@ pub const Handle = extern struct {
 
     var lock: std.Thread.Mutex = .{};
     var count: usize = 0;
-    var global: ?*const @This() = null;
+    var global: ?*@This() = null;
 
-    pub fn registerHandle(handle: *const @This()) void {
+    pub fn registerHandle(handle: *@This()) void {
         std.debug.assert(Version.initC(handle.get_version()).sattisfies(context_version));
         lock.lock();
         defer lock.unlock();
@@ -114,7 +114,7 @@ pub const Handle = extern struct {
         }
     }
 
-    pub fn getHandle() *const @This() {
+    pub fn getHandle() *@This() {
         return global orelse unreachable;
     }
 };

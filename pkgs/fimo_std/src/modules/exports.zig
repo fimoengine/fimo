@@ -26,8 +26,31 @@ pub const Parameter = extern struct {
     default_value: extern union { u8: u8, u16: u16, u32: u32, u64: u64, i8: i8, i16: i16, i32: i32, i64: i64 },
 };
 
+pub const SymbolIdExt = extern struct {
+    id: modules.SymbolId,
+    bind: ?*const fn (sym: *const anyopaque) callconv(.c) void,
+    unbind: ?*const fn () callconv(.c) void,
+
+    pub fn fromSymbol(comptime symbol: modules.Symbol) SymbolIdExt {
+        const wrapper = struct {
+            fn bind(sym: *const anyopaque) callconv(.c) void {
+                symbol.getGlobal().register(@ptrCast(@alignCast(sym)));
+            }
+            fn unbind() callconv(.c) void {
+                symbol.getGlobal().unregister();
+            }
+        };
+
+        return .{
+            .id = symbol.intoId(),
+            .bind = &wrapper.bind,
+            .unbind = &wrapper.unbind,
+        };
+    }
+};
+
 pub const SymbolExport = extern struct {
-    symbol: modules.SymbolId,
+    symbol: SymbolIdExt,
     sym_ty: enum(i32) { static = 0, dynamic = 1, _ },
     linkage: enum(i32) { global = 0, _ },
     value: extern union {
@@ -53,15 +76,25 @@ pub const events = struct {
     /// If a module supports an event, it must respond to the event by writing some
     /// data into the provided event buffer.
     pub const Tag = enum(i32) {
-        init = 0,
-        deinit = 1,
-        start = 2,
-        stop = 3,
-        deinit_export = 4,
-        dependencies = 5,
+        bind_ctx = 0,
+        unbind_ctx = 1,
+        init = 2,
+        deinit = 3,
+        start = 4,
+        stop = 5,
+        deinit_export = 6,
+        dependencies = 7,
         _,
     };
 
+    pub const BindCtx = extern struct {
+        tag: Tag = .bind_ctx,
+        bind: ?*const fn (ctx_handle: *ctx.Handle) callconv(.c) void = null,
+    };
+    pub const UnbindCtx = extern struct {
+        tag: Tag = .unbind_ctx,
+        unbind: ?*const fn () callconv(.c) void = null,
+    };
     pub const Init = extern struct {
         tag: Tag = .init,
         poll: ?*const fn (
@@ -103,9 +136,21 @@ pub const Export = extern struct {
     parameters: SliceConst(Parameter) = .fromSlice(null),
     resources: SliceConst(paths.compat.Path) = .fromSlice(null),
     namespaces: SliceConst(SliceConst(u8)) = .fromSlice(null),
-    imports: SliceConst(modules.SymbolId) = .fromSlice(null),
+    imports: SliceConst(SymbolIdExt) = .fromSlice(null),
     exports: SliceConst(SymbolExport) = .fromSlice(null),
     on_event: *const fn (module: *const Export, tag: *events.Tag) callconv(.c) void,
+
+    pub fn eventBindCtx(self: *const Export) events.BindCtx {
+        var event: events.BindCtx = .{};
+        self.on_event(self, &event.tag);
+        return event;
+    }
+
+    pub fn eventUnbindCtx(self: *const Export) events.UnbindCtx {
+        var event: events.UnbindCtx = .{};
+        self.on_event(self, &event.tag);
+        return event;
+    }
 
     pub fn eventInit(self: *const Export) events.Init {
         var event: events.Init = .{};
@@ -194,7 +239,7 @@ pub fn Module(T: type) type {
     comptime var namespace_infos: []const SliceConst(u8) = &.{};
 
     comptime var import_symbols: []const modules.Symbol = &.{};
-    comptime var import_infos: []const modules.SymbolId = &.{};
+    comptime var import_infos: []const SymbolIdExt = &.{};
 
     comptime var export_symbols: []const modules.Symbol = &.{};
     comptime var export_infos: []const SymbolExport = &.{};
@@ -328,11 +373,11 @@ pub fn Module(T: type) type {
             if (@TypeOf(imp) == modules.Symbol) {
                 const imp_s: modules.Symbol = imp;
                 import_symbols = import_symbols ++ [_]modules.Symbol{imp_s};
-                import_infos = import_infos ++ [_]modules.SymbolId{imp_s.intoId()};
+                import_infos = import_infos ++ [_]SymbolIdExt{.fromSymbol(imp_s)};
             } else inline for (imp) |imp2| {
                 const imp_s: modules.Symbol = imp2;
                 import_symbols = import_symbols ++ [_]modules.Symbol{imp_s};
-                import_infos = import_infos ++ [_]modules.SymbolId{imp_s.intoId()};
+                import_infos = import_infos ++ [_]SymbolIdExt{.fromSymbol(imp_s)};
             }
         }
     }
@@ -359,31 +404,11 @@ pub fn Module(T: type) type {
             const value = exp.value;
             if (@typeInfo(@TypeOf(value)) == .pointer) {
                 if (@TypeOf(value) != *const symbol.T) @compileError("fimo: invalid export value, expected `" ++ @typeName(*const symbol.T) ++ "`, found " ++ @typeName(@TypeOf(value)));
-                const wrapper = struct {
-                    fn pollInit(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
-                        _ = inst;
-                        _ = waker;
-                        symbol.getGlobal().register(value);
-                        result.* = .wrap(@constCast(value));
-                        return true;
-                    }
-                    fn pollDeinit(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
-                        _ = inst;
-                        _ = waker;
-                        _ = val;
-                        symbol.getGlobal().unregister();
-                        return true;
-                    }
-                };
-
                 export_infos = export_infos ++ [_]SymbolExport{.{
-                    .symbol = symbol.intoId(),
-                    .sym_ty = .dynamic,
+                    .symbol = .fromSymbol(symbol),
+                    .sym_ty = .static,
                     .linkage = linkage,
-                    .value = .{ .dynamic = .{
-                        .poll_init = &wrapper.pollInit,
-                        .poll_deinit = &wrapper.pollDeinit,
-                    } },
+                    .value = .{ .static = value },
                 }};
             } else {
                 const wrapper = struct {
@@ -399,14 +424,12 @@ pub fn Module(T: type) type {
                                 }
                             else
                                 value.init();
-                            symbol.getGlobal().register(sym);
                             result.* = .wrap(sym);
                             return true;
                         }
                         fn pollDeinit(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
                             _ = inst;
                             _ = waker;
-                            symbol.getGlobal().unregister();
                             if (comptime @hasField(@TypeOf(value), "deinit")) {
                                 const f: fn (*symbol.T) void = value.deinit;
                                 f(val);
@@ -441,7 +464,6 @@ pub fn Module(T: type) type {
                                             }
                                         else
                                             v;
-                                        symbol.getGlobal().register(sym);
                                         result.* = .wrap(sym);
                                         return true;
                                     },
@@ -462,7 +484,6 @@ pub fn Module(T: type) type {
                             _ = inst;
                             _ = val;
                             if (future == null) {
-                                symbol.getGlobal().unregister();
                                 future = value.deinit();
                             }
                             if (future) |*fut| {
@@ -488,7 +509,7 @@ pub fn Module(T: type) type {
                     &wrapper.AsyncDeinit.poll;
 
                 export_infos = export_infos ++ [_]SymbolExport{.{
-                    .symbol = symbol.intoId(),
+                    .symbol = .fromSymbol(symbol),
                     .sym_ty = .dynamic,
                     .linkage = linkage,
                     .value = .{ .dynamic = .{
@@ -517,7 +538,6 @@ pub fn Module(T: type) type {
                         _ = waker;
 
                         if (Global.is_init) @panic("already init");
-                        ctx.Handle.registerHandle(inst.ctxHandle());
                         Global.is_init = true;
                         Global.instance = inst;
 
@@ -526,11 +546,6 @@ pub fn Module(T: type) type {
                                 @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
                             }
                         };
-
-                        const inst_imports = @as([*]const *const anyopaque, @ptrCast(@alignCast(inst.imports())));
-                        inline for (inst_imports[0..import_infos.len], import_symbols) |imp, sym| {
-                            sym.getGlobal().register(@ptrCast(@alignCast(imp)));
-                        }
 
                         const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
                         if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
@@ -565,7 +580,6 @@ pub fn Module(T: type) type {
                     fn poll(inst: *modules.OpaqueInstance, loader: *modules.Loader, waker: tasks.Waker, state: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
                         if (future == null) {
                             if (Global.is_init) @panic("already init");
-                            ctx.Handle.registerHandle(inst.ctxHandle());
                             Global.is_init = true;
                             Global.instance = inst;
 
@@ -574,11 +588,6 @@ pub fn Module(T: type) type {
                                     @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
                                 }
                             };
-
-                            const inst_imports = @as([*]const usize, inst.imports())[0..import_infos.len];
-                            inline for (inst_imports, import_symbols) |imp, sym| {
-                                sym.getGlobal().register(@ptrFromInt(imp));
-                            }
 
                             const Args = std.meta.ArgsTuple(@TypeOf(ev_init));
                             if (std.meta.fields(Args).len > 2) @compileError("fimo: invalid init event, got too many arguments, found: " ++ @typeName(@TypeOf(ev_init)));
@@ -623,7 +632,6 @@ pub fn Module(T: type) type {
                     _ = waker;
 
                     if (Global.is_init) @panic("already init");
-                    ctx.Handle.registerHandle(inst.ctxHandle());
                     Global.is_init = true;
                     Global.instance = inst;
 
@@ -632,11 +640,6 @@ pub fn Module(T: type) type {
                             @field(Global.state, f.name) = @as(*const f.type, @ptrCast(@alignCast(default))).*;
                         }
                     };
-
-                    const inst_imports = @as([*]const usize, inst.imports())[0..import_infos.len];
-                    inline for (inst_imports, import_symbols) |imp, sym| {
-                        sym.getGlobal().register(@ptrFromInt(imp));
-                    }
 
                     state.* = .wrap(&Global.state);
                     return true;
@@ -656,9 +659,7 @@ pub fn Module(T: type) type {
 
                         if (!Global.is_init) @panic("not init");
                         if (@typeInfo(@TypeOf(ev_deinit)).@"fn".params.len == 1) ev_deinit(&Global.state) else ev_deinit();
-                        ctx.Handle.unregisterHandle();
                         Global.instance = undefined;
-                        inline for (import_symbols) |sym| sym.getGlobal().unregister();
                         Global.state = undefined;
                         Global.is_init = false;
                         return true;
@@ -683,9 +684,7 @@ pub fn Module(T: type) type {
                         if (future) |*fut| switch (fut.poll(waker)) {
                             .ready => {
                                 future = null;
-                                ctx.Handle.unregisterHandle();
                                 Global.instance = undefined;
-                                inline for (import_symbols) |sym| sym.getGlobal().unregister();
                                 Global.state = undefined;
                                 Global.is_init = false;
                                 return true;
@@ -708,9 +707,7 @@ pub fn Module(T: type) type {
                     _ = state;
 
                     if (!Global.is_init) @panic("not init");
-                    ctx.Handle.unregisterHandle();
                     Global.instance = undefined;
-                    inline for (import_symbols) |sym| sym.getGlobal().unregister();
                     Global.state = undefined;
                     Global.is_init = false;
                     return true;
@@ -835,6 +832,22 @@ pub fn Module(T: type) type {
         fn on_event(module: *const Export, tag: *events.Tag) callconv(.c) void {
             _ = module;
             switch (tag.*) {
+                .bind_ctx => {
+                    const event: *events.BindCtx = @alignCast(@fieldParentPtr("tag", tag));
+                    event.bind = &struct {
+                        fn bind(ctx_handle: *ctx.Handle) callconv(.c) void {
+                            ctx.Handle.registerHandle(ctx_handle);
+                        }
+                    }.bind;
+                },
+                .unbind_ctx => {
+                    const event: *events.UnbindCtx = @alignCast(@fieldParentPtr("tag", tag));
+                    event.unbind = &struct {
+                        fn unbind() callconv(.c) void {
+                            ctx.Handle.unregisterHandle();
+                        }
+                    }.unbind;
+                },
                 .init => if (comptime ev_init_poll != null) {
                     const event: *events.Init = @alignCast(@fieldParentPtr("tag", tag));
                     event.poll = ev_init_poll;

@@ -44,6 +44,7 @@ pub const InstanceDependency = struct {
 pub const Symbol = struct {
     version: Version,
     symbol: *const anyopaque,
+    unbind: ?*const fn () callconv(.c) void,
     dtor: ?*const fn (
         ctx: *pub_modules.OpaqueInstance,
         waker: pub_tasks.Waker,
@@ -51,6 +52,7 @@ pub const Symbol = struct {
     ) callconv(.c) bool,
 
     fn destroySymbol(self: *const Symbol, ctx: *pub_modules.OpaqueInstance) void {
+        if (self.unbind) |unbind| unbind();
         if (self.dtor) |dtor| {
             if (!dtor(ctx, undefined, @constCast(self.symbol))) {
                 @panic("TODO");
@@ -435,7 +437,12 @@ pub const Inner = struct {
         const instance = self.instance.?;
 
         self.is_detached = true;
+        for (self.symbols.values()) |sym| sym.destroySymbol(@ptrCast(instance));
         if (self.@"export") |exp| {
+            if (instance.imports != null) {
+                for (exp.imports.intoSliceOrEmpty()) |import| if (import.unbind) |unbind| unbind();
+                if (exp.eventUnbindCtx().unbind) |unbind| unbind();
+            }
             if (self.state == .init) {
                 const deinit_event = exp.eventDeinit();
                 if (deinit_event.poll) |poll| {
@@ -449,8 +456,6 @@ pub const Inner = struct {
             const deinit_export_event = exp.eventDeinitExport();
             if (deinit_export_event.deinit) |f| f(deinit_export_event.data);
         }
-
-        for (self.symbols.values()) |sym| sym.destroySymbol(@ptrCast(instance));
 
         self.symbols.clearRetainingCapacity();
         self.parameters.clearRetainingCapacity();
@@ -1046,11 +1051,10 @@ pub const InitExportedOp = FSMFuture(struct {
         // Init imports.
         const exp_imports = self.@"export".imports.intoSliceOrEmpty();
         const imports = try allocator.alloc(*const anyopaque, exp_imports.len);
-        instance.imports = @ptrCast(imports.ptr);
         for (exp_imports, imports) |src, *dst| {
-            const src_name = src.name.intoSliceOrEmpty();
-            const src_namespace = src.namespace.intoSliceOrEmpty();
-            const src_version = Version.initC(src.version);
+            const src_name = src.id.name.intoSliceOrEmpty();
+            const src_namespace = src.id.namespace.intoSliceOrEmpty();
+            const src_version = Version.initC(src.id.version);
             const sym = modules.getSymbolCompatible(
                 src_name,
                 src_namespace,
@@ -1070,6 +1074,11 @@ pub const InitExportedOp = FSMFuture(struct {
             if (inner.getDependency(sym.owner) == null) try inner.addDependency(owner_inner, .static);
             dst.* = owner_sym.symbol;
         }
+        instance.imports = @ptrCast(imports.ptr);
+
+        // Bind ctx and imports.
+        if (self.@"export".eventBindCtx().bind) |bind| bind(instance.ctx_handle);
+        for (exp_imports, imports) |info, import| if (info.bind) |bind| bind(import);
 
         // Init instance data.
         const init_event = self.@"export".eventInit();
@@ -1137,19 +1146,20 @@ pub const InitExportedOp = FSMFuture(struct {
                 else => unreachable,
             };
 
-            const exp_name = exp.symbol.name.intoSliceOrEmpty();
-            const exp_namespace = exp.symbol.namespace.intoSliceOrEmpty();
-            const exp_version = Version.initC(exp.symbol.version);
+            const exp_name = exp.symbol.id.name.intoSliceOrEmpty();
+            const exp_namespace = exp.symbol.id.namespace.intoSliceOrEmpty();
             self.exports[self.export_index] = sym;
             self.inner.addSymbol(exp_name, exp_namespace, .{
                 .symbol = sym,
-                .version = exp_version,
+                .version = .initC(exp.symbol.id.version),
+                .unbind = exp.symbol.unbind,
                 .dtor = dtor,
             }) catch |err| {
                 self.ret = err;
                 self.export_index += 1;
                 return .next;
             };
+            if (exp.symbol.bind) |bind| bind(sym);
         }
         self.ret = @ptrCast(self.instance);
         return .ret;
