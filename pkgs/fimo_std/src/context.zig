@@ -11,6 +11,8 @@ const modules = @import("context/modules.zig");
 const ResourceCount = @import("context/ResourceCount.zig");
 const tasks = @import("context/tasks.zig");
 const tracing = @import("context/tracing.zig");
+const memory = @import("memory.zig");
+const Arena = memory.Arena;
 const pub_ctx = @import("ctx.zig");
 const pub_modules = @import("modules.zig");
 const pub_tracing = @import("tracing.zig");
@@ -20,7 +22,13 @@ const Version = @import("Version.zig");
 
 const Self = @This();
 
+const default_global_arena_reserve = 1024 * 1024 * 1024 * 64; // 64 GiB
+const default_scratch_arena_reserve = 1024 * 1024 * 1024 * 1; // 1 GiB
+
 var lock: std.Thread.Mutex = .{};
+var arena: Arena = undefined;
+var scratch_reserve: usize = undefined;
+var scratch_commit: usize = undefined;
 pub var is_init: bool = false;
 
 var result_count: ResourceCount = .{};
@@ -36,6 +44,8 @@ pub var allocator = switch (builtin.mode) {
 
 pub const ThreadData = struct {
     result: AnyResult = .ok,
+    arenas_init: bool = false,
+    arenas: [2]Arena = @splat(undefined),
     tracing: ?tracing.ThreadData = null,
     node: std.SinglyLinkedList.Node = .{},
 
@@ -45,6 +55,25 @@ pub const ThreadData = struct {
 
     pub fn getOrInit() *ThreadData {
         return Impl.getOrInit();
+    }
+
+    fn getScratchArena(self: *ThreadData, conflict: ?*Arena) *Arena {
+        if (!self.arenas_init) {
+            self.arenas[0] = Arena.init(.{
+                .reserve = scratch_reserve,
+                .commit = scratch_commit,
+            }) catch |err| @panic(@errorName(err));
+            self.arenas[1] = Arena.init(.{
+                .reserve = scratch_reserve,
+                .commit = scratch_commit,
+            }) catch |err| @panic(@errorName(err));
+            self.arenas_init = true;
+        }
+
+        return if (conflict == &self.arenas[0])
+            &self.arenas[1]
+        else
+            &self.arenas[0];
     }
 
     fn replaceResult(self: *ThreadData, with: AnyResult) AnyResult {
@@ -58,11 +87,17 @@ pub const ThreadData = struct {
     }
 
     fn onThreadExit(self: *ThreadData) void {
+        if (self.arenas_init) {
+            self.arenas[0].deinit();
+            self.arenas[1].deinit();
+            self.arenas_init = false;
+        }
         self.replaceResult(.ok).deinit();
         if (self.tracing) |*tr| {
             tr.onThreadExit();
             self.tracing = null;
         }
+        self.* = .{};
     }
 
     const WindowsImpl = struct {
@@ -111,6 +146,7 @@ pub const ThreadData = struct {
             key_is_init = true;
         }
         fn dtor(ptr: *anyopaque) callconv(.c) void {
+            cache = null;
             const data: *ThreadData = @ptrCast(@alignCast(ptr));
             ThreadData.onThreadExit(data);
             list_lock.lock();
@@ -160,10 +196,15 @@ pub fn init(options: []const *const pub_ctx.Cfg) !void {
     };
     try ThreadData.Impl.init();
 
+    var core_cfg: ?*const pub_ctx.CoreCfg = null;
     var tracing_cfg: ?*const pub_tracing.Cfg = null;
     var modules_cfg: ?*const pub_modules.Cfg = null;
     for (options) |opt| {
         switch (opt.id) {
+            .core => {
+                if (core_cfg != null) return error.InvalidInput;
+                core_cfg = @alignCast(@fieldParentPtr("cfg", opt));
+            },
             .tracing => {
                 if (tracing_cfg != null) return error.InvalidInput;
                 tracing_cfg = @alignCast(@fieldParentPtr("cfg", opt));
@@ -175,6 +216,15 @@ pub fn init(options: []const *const pub_ctx.Cfg) !void {
             else => return error.InvalidInput,
         }
     }
+
+    const cfg: pub_ctx.CoreCfg = if (core_cfg) |cfg| cfg.* else .{};
+    const global_arena_reserve = if (cfg.global_arena_reserve == 0) default_global_arena_reserve else cfg.global_arena_reserve;
+    const scratch_arena_reserve = if (cfg.scratch_arena_reserve == 0) default_scratch_arena_reserve else cfg.scratch_arena_reserve;
+    if (cfg.global_arena_commit > global_arena_reserve) return error.InvalidArenaConfig;
+    if (cfg.scratch_arena_commit > scratch_arena_reserve) return error.InvalidArenaConfig;
+    scratch_reserve = scratch_arena_reserve;
+    scratch_commit = cfg.scratch_arena_commit;
+    arena = try .init(.{ .reserve = global_arena_reserve, .commit = cfg.global_arena_commit });
 
     try tracing.init(tracing_cfg orelse &.{});
     errdefer tracing.deinit();
@@ -203,6 +253,7 @@ pub fn deinit() void {
 
     clearResult();
     result_count.waitUntilZero();
+    arena.deinit();
 
     switch (builtin.mode) {
         .Debug, .ReleaseSafe => _ = {
@@ -214,6 +265,17 @@ pub fn deinit() void {
         else => {},
     }
     is_init = false;
+}
+
+pub fn getArena() *Arena {
+    std.debug.assert(is_init);
+    return &arena;
+}
+
+pub fn getScratchArena(conflict: ?*Arena) *Arena {
+    std.debug.assert(is_init);
+    const data = ThreadData.getOrInit();
+    return data.getScratchArena(conflict);
 }
 
 pub fn hasErrorResult() bool {
@@ -256,6 +318,12 @@ const HandleImpl = struct {
     fn deinit() callconv(.c) void {
         Self.deinit();
     }
+    fn getGlobalArena() callconv(.c) *Arena {
+        return Self.getArena();
+    }
+    fn getScratchArena(conflict: ?*Arena) callconv(.c) *Arena {
+        return Self.getScratchArena(conflict);
+    }
     fn hasErrorResult() callconv(.c) bool {
         return Self.hasErrorResult();
     }
@@ -268,6 +336,8 @@ pub var handle = pub_ctx.Handle{
     .get_version = &HandleImpl.getVersion,
     .core_v0 = .{
         .deinit = &HandleImpl.deinit,
+        .get_global_arena = &HandleImpl.getGlobalArena,
+        .get_scratch_arena = &HandleImpl.getScratchArena,
         .has_error_result = &HandleImpl.hasErrorResult,
         .replace_result = &HandleImpl.replaceResult,
     },

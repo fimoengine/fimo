@@ -256,11 +256,12 @@ pub const AnyTssKey = TssKey(anyopaque);
 /// An entry of a command buffer.
 pub const CmdBufCmd = extern struct {
     tag: enum(i32) {
-        select_worker = 0,
-        select_any_worker = 1,
-        enqueue_task = 2,
-        wait_on_barrier = 3,
-        wait_on_cmd_indirect = 4,
+        noop = 0,
+        select_worker = 1,
+        select_any_worker = 2,
+        enqueue_task = 3,
+        wait_on_barrier = 4,
+        wait_on_cmd_indirect = 5,
         _,
     },
     payload: extern union {

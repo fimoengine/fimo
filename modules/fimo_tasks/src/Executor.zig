@@ -1632,7 +1632,8 @@ fn run(self: *Executor, futex: *Futex) void {
             const cmds = cmd_buf.cmd_buf.cmds.get().?;
             while (cmd_buf.cmd_idx < cmds.len) : (cmd_buf.cmd_idx += 1) {
                 const cmd = cmds[cmd_buf.cmd_idx];
-                switch (cmd.tag) {
+                switch (@atomicLoad(@TypeOf(cmd.tag), &cmd.tag, .acquire)) {
+                    .noop => {},
                     .select_worker => {
                         const worker_idx = @intFromEnum(cmd.payload.select_worker);
                         cmd_buf.active_worker = &self.workers[worker_idx];

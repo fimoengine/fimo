@@ -383,17 +383,10 @@ pub const Arena = extern struct {
                 null,
                 reserve + page_size,
                 .{ .RESERVE = 1, .LARGE_PAGES = if (options.flags.large_pages) 1 else 0 },
-                .{ .PAGE_READWRITE = 1 },
+                .{ .PAGE_NOACCESS = 1 },
             ) orelse return error.OutOfMemory;
             errdefer _ = win32.system.memory.VirtualFree(allocated, reserve + page_size, .RELEASE);
             const allocated_u8: [*]u8 = @ptrCast(allocated);
-
-            _ = win32.system.memory.VirtualAlloc(
-                allocated_u8 + reserve,
-                page_size,
-                .{ .COMMIT = 1, .LARGE_PAGES = if (options.flags.large_pages) 1 else 0 },
-                .{ .PAGE_READWRITE = 1, .PAGE_GUARD = 1 },
-            ) orelse return error.OutOfMemory;
             break :blk allocated_u8;
         } else blk: {
             const allocated = posix.mmap(

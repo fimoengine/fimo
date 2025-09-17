@@ -78,11 +78,12 @@ fstd_func void ftsk_tss_key_clear(const FTSK_TssKey *key);
 
 typedef FSTD_I32 FTSK_CmdBufCmdTag;
 enum {
-    FTSK_CmdBufCmdTag_SelectWorker = (FTSK_CmdBufCmdTag)0,
-    FTSK_CmdBufCmdTag_SelectAnyWorker = (FTSK_CmdBufCmdTag)1,
-    FTSK_CmdBufCmdTag_EnqueueTask = (FTSK_CmdBufCmdTag)2,
-    FTSK_CmdBufCmdTag_WaitOnBarrier = (FTSK_CmdBufCmdTag)3,
-    FTSK_CmdBufCmdTag_WaitOnCmdIndirect = (FTSK_CmdBufCmdTag)4,
+    FTSK_CmdBufCmdTag_Noop = (FTSK_CmdBufCmdTag)0,
+    FTSK_CmdBufCmdTag_SelectWorker = (FTSK_CmdBufCmdTag)1,
+    FTSK_CmdBufCmdTag_SelectAnyWorker = (FTSK_CmdBufCmdTag)2,
+    FTSK_CmdBufCmdTag_EnqueueTask = (FTSK_CmdBufCmdTag)3,
+    FTSK_CmdBufCmdTag_WaitOnBarrier = (FTSK_CmdBufCmdTag)4,
+    FTSK_CmdBufCmdTag_WaitOnCmdIndirect = (FTSK_CmdBufCmdTag)5,
     FTSK__CmdBufCmdTag_ = FSTD_I32_MAX,
 };
 
@@ -384,7 +385,7 @@ fstd_util FSTD_U8 ftsk__mutex_spin(FTSK_Mutex *mutex) {
 }
 
 FSTD_EXPAND_GCC_COMPATIBLE(__attribute__((cold)))
-fstd_util bool ftsk__mutex_lock_contended(FTSK_Mutex *mutex, FSTD_Instant timeout) {
+fstd_util bool ftsk__mutex_lock_contended(FTSK_Mutex *mutex, const FSTD_Instant *timeout) {
     FSTD_U8 curr = ftsk__mutex_spin(mutex);
     if (curr == FTSK__MUTEX_UNLOCKED) {
         if (ftsk_mutex_try_lock(mutex))
@@ -398,7 +399,7 @@ fstd_util bool ftsk__mutex_lock_contended(FTSK_Mutex *mutex, FSTD_Instant timeou
                 return true;
         }
 
-        FTSK_FutexStatus status = ftsk_futex_wait(mutex, sizeof(*mutex), FTSK__MUTEX_CONTENDED, 0, &timeout);
+        FTSK_FutexStatus status = ftsk_futex_wait(mutex, sizeof(*mutex), FTSK__MUTEX_CONTENDED, 0, timeout);
         if (status == FTSK_FutexStatus_Timeout)
             return false;
     }
@@ -409,7 +410,7 @@ fstd_util bool ftsk__mutex_lock_contended(FTSK_Mutex *mutex, FSTD_Instant timeou
 /// Once acquired, call `unlock()` on the Mutex to release it.
 fstd_util void ftsk_mutex_lock(FTSK_Mutex *mutex) {
     if (!ftsk_mutex_try_lock(mutex)) {
-        ftsk__mutex_lock_contended(mutex, FSTD_INIT(FSTD_Instant) FSTD_INSTANT_MAX);
+        ftsk__mutex_lock_contended(mutex, fstd_nullptr);
     }
 }
 
@@ -420,7 +421,7 @@ fstd_util void ftsk_mutex_lock(FTSK_Mutex *mutex) {
 fstd_util bool ftsk_mutex_timed_lock(FTSK_Mutex *mutex, FSTD_Duration timeout) {
     if (!ftsk_mutex_try_lock(mutex)) {
         FSTD_Instant t = fstd_instant_add_saturating(fstd_instant_now(), timeout);
-        return ftsk__mutex_lock_contended(mutex, t);
+        return ftsk__mutex_lock_contended(mutex, &t);
     }
     return true;
 }
@@ -441,10 +442,12 @@ typedef struct {
 } FTSK_Condition;
 fstd_static_assert(sizeof(FTSK_Condition) == sizeof(FSTD_U32), "invalid FTSK_Condition size");
 
-fstd_util bool ftsk__condition_wait(FTSK_Condition *condition, FTSK_Mutex *mutex, FSTD_Instant timeout) {
+#define FTSK_CONDITION_INIT FSTD_DEFAULT_STRUCT
+
+fstd_util bool ftsk__condition_wait(FTSK_Condition *condition, FTSK_Mutex *mutex, const FSTD_Instant *timeout) {
     FSTD_U32 current = atomic_load_explicit(&condition->futex, memory_order_acquire);
     ftsk_mutex_unlock(mutex);
-    FTSK_FutexStatus status = ftsk_futex_wait(condition, sizeof(*condition), current, 0, &timeout);
+    FTSK_FutexStatus status = ftsk_futex_wait(condition, sizeof(*condition), current, 0, timeout);
     ftsk_mutex_lock(mutex);
     return status != FTSK_FutexStatus_Timeout;
 }
@@ -464,7 +467,7 @@ fstd_util bool ftsk__condition_wait(FTSK_Condition *condition, FTSK_Mutex *mutex
 /// Given wait() can be interrupted spuriously, the blocking condition should be checked continuously
 /// irrespective of any notifications from `signal()` or `broadcast()`.
 fstd_util void ftsk_condition_wait(FTSK_Condition *condition, FTSK_Mutex *mutex) {
-    ftsk__condition_wait(condition, mutex, FSTD_INIT(FSTD_Instant) FSTD_INSTANT_MAX);
+    ftsk__condition_wait(condition, mutex, fstd_nullptr);
 }
 
 /// Atomically releases the Mutex, blocks the caller task, then re-acquires the Mutex on return.
@@ -487,7 +490,7 @@ fstd_util void ftsk_condition_wait(FTSK_Condition *condition, FTSK_Mutex *mutex)
 /// Returns `true` if the caller was woken up before the timeout elapsed.
 fstd_util bool ftsk_condition_timed_wait(FTSK_Condition *condition, FTSK_Mutex *mutex, FSTD_Duration timeout) {
     FSTD_Instant t = fstd_instant_add_saturating(fstd_instant_now(), timeout);
-    return ftsk__condition_wait(condition, mutex, t);
+    return ftsk__condition_wait(condition, mutex, &t);
 }
 
 /// Unblocks at least one task blocked in a call to `wait()` or `timedWait()` with a given Mutex.
@@ -508,7 +511,148 @@ fstd_util void ftsk_condition_broadcast(FTSK_Condition *condition) {
     ftsk_futex_wake(condition, (FSTD_USize)-1, FSTD_INIT(FTSK_FutexFilter) FTSK_FUTEX_FILTER_ALL);
 }
 
-#define FTSK_CONDITION_INIT FSTD_DEFAULT_STRUCT
+/// A thread-safe boolean that can be set and awaited,
+/// typically to mark/await the completion of some operation.
+typedef struct {
+    _Atomic(FSTD_U8) state;
+} FTSK_Fence;
+fstd_static_assert(sizeof(FTSK_Fence) == sizeof(FSTD_U8), "invalid FTSK_Fence size");
+
+#define FTSK_FENCE_INIT FSTD_DEFAULT_STRUCT
+#define FTSK__FENCE_UNSIGNALED 0
+#define FTSK__FENCE_SIGNALED 1
+#define FTSK__FENCE_CONTENDED 2
+
+/// Checks if the fence is already signaled.
+fstd_util bool ftsk_fence_is_signaled(FTSK_Fence *fence) {
+    return (atomic_load_explicit(&fence->state, memory_order_acquire) & FTSK__FENCE_SIGNALED) != 0;
+}
+
+FSTD_EXPAND_GCC_COMPATIBLE(__attribute__((cold)))
+fstd_util bool ftsk__fence_wait(FTSK_Fence *fence, const FSTD_Instant *timeout) {
+    FSTD_U8 current = atomic_load_explicit(&fence->state, memory_order_relaxed);
+    for (;;) {
+        if ((current & FTSK__FENCE_SIGNALED) != 0) {
+            (void)atomic_load_explicit(&fence->state, memory_order_acquire);
+            return true;
+        }
+        if ((current & FTSK__FENCE_CONTENDED) == 0) {
+            if (!atomic_compare_exchange_weak_explicit(&fence->state, &current, FTSK__FENCE_CONTENDED,
+                                                       memory_order_relaxed, memory_order_relaxed)) {
+                continue;
+            }
+        }
+
+        FTSK_FutexStatus status = ftsk_futex_wait(fence, sizeof(*fence), FTSK__FENCE_CONTENDED, 0, timeout);
+        if (status == FTSK_FutexStatus_Timeout)
+            return false;
+    }
+}
+
+/// Blocks the caller until the fence is signaled.
+fstd_util void ftsk_fence_wait(FTSK_Fence *fence) {
+    if (!ftsk_fence_is_signaled(fence)) {
+        ftsk__fence_wait(fence, fstd_nullptr);
+    }
+}
+
+/// Blocks the caller until the fence is signaled, or the timeout expires.
+fstd_util bool ftsk_fence_timed_wait(FTSK_Fence *fence, FSTD_Duration timeout) {
+    if (!ftsk_fence_is_signaled(fence)) {
+        FSTD_Instant t = fstd_instant_add_saturating(fstd_instant_now(), timeout);
+        return ftsk__fence_wait(fence, &t);
+    }
+    return true;
+}
+
+/// Wakes all waiters of the fence.
+fstd_util void ftsk_fence_signal(FTSK_Fence *fence) {
+    FSTD_U8 curr = atomic_exchange_explicit(&fence->state, FTSK__FENCE_SIGNALED, memory_order_release);
+    if ((curr & FTSK__FENCE_CONTENDED) != 0) {
+        ftsk_futex_wake(fence, ~(FSTD_USize)0, FSTD_INIT(FTSK_FutexFilter) FTSK_FUTEX_FILTER_ALL);
+    }
+}
+
+/// Resets the state of the fence to be unsignaled.
+///
+/// May not be called while threads are waiting on the fence.
+fstd_util void ftsk_fence_reset(FTSK_Fence *fence) {
+    atomic_store_explicit(&fence->state, FTSK__FENCE_UNSIGNALED, memory_order_release);
+}
+
+/// A monotonically increasing counter that can be awaited and signaled.
+typedef struct {
+    _Atomic(FSTD_U64) state;
+} FTSK_TimelineSemaphore;
+fstd_static_assert(sizeof(FTSK_TimelineSemaphore) == sizeof(FSTD_U64), "invalid FTSK_TimelineSemaphore size");
+fstd_static_assert(sizeof(FSTD_USize) <= sizeof(FSTD_U64), "FTSK_TimelineSemaphore supports up to 64 bit pointers");
+
+#define FTSK_FENCE_INIT FSTD_DEFAULT_STRUCT
+#define FTSK_FENCE_INIT_WITH(counter) {.state = counter}
+
+/// Returns the current counter of the semaphore.
+fstd_util FSTD_U64 ftsk_timeline_semaphore_counter(FTSK_TimelineSemaphore *tsem) {
+    return atomic_load_explicit(&tsem->state, memory_order_acquire);
+}
+
+/// Checks if the semaphore is signaled with a count greater or equal to `value`.
+fstd_util bool ftsk_timeline_semaphore_is_signaled(FTSK_TimelineSemaphore *tsem, FSTD_U64 value) {
+    return ftsk_timeline_semaphore_counter(tsem) >= value;
+}
+
+FSTD_EXPAND_GCC_COMPATIBLE(__attribute__((cold)))
+fstd_util bool ftsk__timeline_semaphore_wait(FTSK_TimelineSemaphore *tsem, FSTD_U64 value,
+                                             const FSTD_Instant *timeout) {
+    FSTD_U64 curr = atomic_load_explicit(&tsem->state, memory_order_relaxed);
+    for (;;) {
+        if (curr >= value) {
+            (void)atomic_load_explicit(&tsem->state, memory_order_acquire);
+            return true;
+        }
+        FTSK_FutexStatus status = ftsk_futex_wait(tsem, sizeof(*tsem), curr, value, timeout);
+        if (status == FTSK_FutexStatus_Timeout)
+            return false;
+        if (status == FTSK_FutexStatus_Invalid) {
+            curr = atomic_load_explicit(&tsem->state, memory_order_relaxed);
+            continue;
+        }
+        return true;
+    }
+}
+
+/// Blocks the caller until the semaphore reaches a count greater or equal to `value`.
+fstd_util void ftsk_timeline_semaphore_wait(FTSK_TimelineSemaphore *tsem, FSTD_U64 value) {
+    if (!ftsk_timeline_semaphore_is_signaled(tsem, value)) {
+        ftsk__timeline_semaphore_wait(tsem, value, fstd_nullptr);
+    }
+}
+
+/// Blocks the caller until the semaphore reaches a count greater or equal to `value`, or the timeout expires.
+fstd_util bool ftsk_timeline_semaphore_timed_wait(FTSK_TimelineSemaphore *tsem, FSTD_U64 value, FSTD_Duration timeout) {
+    if (!ftsk_timeline_semaphore_is_signaled(tsem, value)) {
+        FSTD_Instant t = fstd_instant_add_saturating(fstd_instant_now(), timeout);
+        return ftsk__timeline_semaphore_wait(tsem, value, &t);
+    }
+    return true;
+}
+
+/// Sets the internal value of the semaphore, possibly waking waiting tasks.
+///
+/// `value` must be greater than the current value of the semaphore.
+fstd_util void ftsk_timeline_semaphore_signal(FTSK_TimelineSemaphore *tsem, FSTD_U64 value) {
+    fstd_dbg_assert(atomic_load_explicit(&tsem->state, memory_order_relaxed) < value);
+    atomic_store_explicit(&tsem->state, value, memory_order_release);
+    // NOTE(gabriel): Wake all where the token is <= `value`.
+    ftsk_futex_wake(tsem, ~(FSTD_USize)0,
+                    FSTD_INIT(FTSK_FutexFilter){
+                            .token_op = FTSK_FutexFilterOp_Noop,
+                            .token_type = FTSK_FutexFilterTokenType_U64,
+                            .cmp_op = FTSK_FutexFilterCmp_Le,
+                            .cmp_arg_op = FTSK_FutexFilterOp_Noop,
+                            .token_mask = ~(FSTD_USize)0,
+                            .cmp_arg = value,
+                    });
+}
 
 #define FTSK_SYM_NS "fimo-tasks"
 #define FTSK__SYM_VERSION FSTD_CTX_VERSION

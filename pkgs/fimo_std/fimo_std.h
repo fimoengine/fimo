@@ -1449,8 +1449,9 @@ fstd_external FSTD_Path fstd_path_component_as_path(const FSTD_PathComponent *co
 typedef FSTD_I32 FSTD_CfgId;
 enum {
     FSTD__CfgId_Unknown = (FSTD_CfgId)0,
-    FSTD_CfgId_Tracing = (FSTD_CfgId)1,
-    FSTD_CfgId_Modules = (FSTD_CfgId)2,
+    FSTD_CfgId_Core = (FSTD_CfgId)1,
+    FSTD_CfgId_Tracing = (FSTD_CfgId)2,
+    FSTD_CfgId_Modules = (FSTD_CfgId)3,
     FSTD__CfgId_ = FSTD_I32_MAX,
 };
 
@@ -1489,8 +1490,19 @@ fstd_func void fstd_ctx_register(FSTD_Ctx *ctx);
 /// Must be paired up with a `fstd_ctx_register` call.
 fstd_func void fstd_ctx_unregister(void);
 
+/// Core configuration.
+typedef struct {
+    FSTD_Cfg id;
+    FSTD_USize global_arena_reserve_len;
+    FSTD_USize global_arena_commit_len;
+    FSTD_USize scratch_arena_reserve_len;
+    FSTD_USize scratch_arena_commit_len;
+} FSTD_CoreCfg;
+
 typedef struct {
     void (*deinit)(void);
+    FSTD_Arena *(*get_global_arena)(void);
+    FSTD_Arena *(*get_scratch_arena)(FSTD_Arena *FSTD_MAYBE_NULL conflict);
     bool (*has_error_result)(void);
     FSTD_Result (*replace_result)(FSTD_Result new_result);
 } FSTD_CoreVtable;
@@ -1512,6 +1524,16 @@ fstd_func void fstd_ctx_deinit(void);
 ///
 /// May differ from the one specified during compilation.
 fstd_func FSTD_Version fstd_ctx_get_version(void);
+
+/// Returns the global arena shared by all threads.
+fstd_func FSTD_Arena *fstd_ctx_get_global_arena(void);
+
+/// Returns the scratch arena for the current thread.
+///
+/// The scratch arena will be initialized the first time the thread calls this function.
+/// The arena is owned by the calling thread and will be invalidated on thread exit
+/// or after the context is deinitialized.
+fstd_func FSTD_Arena *fstd_ctx_get_scratch_arena(FSTD_Arena *FSTD_MAYBE_NULL conflict);
 
 /// Checks whether the context has an error stored for the current thread.
 fstd_func bool fstd_ctx_has_error_result(void);
@@ -3674,6 +3696,16 @@ fstd_func_impl void fstd_ctx_deinit(void) {
 fstd_func_impl FSTD_Version fstd_ctx_get_version(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->get_version();
+}
+
+fstd_func FSTD_Arena *fstd_ctx_get_global_arena(void) {
+    FSTD_Ctx *handle = fstd_ctx_get();
+    return handle->core_v0.get_global_arena();
+}
+
+fstd_func FSTD_Arena *fstd_ctx_get_scratch_arena(FSTD_Arena *FSTD_MAYBE_NULL conflict) {
+    FSTD_Ctx *handle = fstd_ctx_get();
+    return handle->core_v0.get_scratch_arena(conflict);
 }
 
 fstd_func_impl bool fstd_ctx_has_error_result(void) {

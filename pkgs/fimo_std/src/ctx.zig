@@ -6,6 +6,8 @@ const context_version_opt = @import("context_version");
 const AnyError = @import("AnyError.zig");
 const AnyResult = AnyError.AnyResult;
 const Inner = @import("context.zig");
+const memory = @import("memory.zig");
+const Arena = memory.Arena;
 const modules = @import("modules.zig");
 const tasks = @import("tasks.zig");
 const tracing = @import("tracing.zig");
@@ -16,8 +18,9 @@ pub const context_version = Version.initSemanticVersion(context_version_opt.vers
 
 pub const CfgId = enum(i32) {
     _unknown = 0,
-    tracing = 1,
-    modules = 2,
+    core = 1,
+    tracing = 2,
+    modules = 3,
     _,
 };
 
@@ -116,11 +119,25 @@ pub const Handle = extern struct {
     }
 };
 
+pub const CoreCfg = extern struct {
+    cfg: Cfg = .{ .id = .core },
+    /// Reserve size of the global arena.
+    global_arena_reserve: usize = 0,
+    /// Initial commit size of the global arena.
+    global_arena_commit: usize = 0,
+    /// Reserve size of the per-thread scratch arenas.
+    scratch_arena_reserve: usize = 0,
+    /// Initial commit size of the per-thread scratch arenas.
+    scratch_arena_commit: usize = 0,
+};
+
 /// Base VTable of the context.
 ///
 /// Changing this definition is a breaking change.
 pub const CoreVTable = extern struct {
     deinit: *const fn () callconv(.c) void,
+    get_global_arena: *const fn () callconv(.c) *Arena,
+    get_scratch_arena: *const fn (conflict: ?*Arena) callconv(.c) *Arena,
     has_error_result: *const fn () callconv(.c) bool,
     replace_result: *const fn (new: AnyResult) callconv(.c) AnyResult,
 };
@@ -154,6 +171,22 @@ pub fn isInit() bool {
 pub fn getVersion() Version {
     const handle = Handle.getHandle();
     return Version.initC(handle.get_version());
+}
+
+/// Returns the global arena shared by all threads.
+pub fn getGlobalArena() *Arena {
+    const handle = Handle.getHandle();
+    return handle.core_v0.get_global_arena();
+}
+
+/// Returns the scratch arena for the current thread.
+///
+/// The scratch arena will be initialized the first time the thread calls this function.
+/// The arena is owned by the calling thread and will be invalidated on thread exit
+/// or after the context is deinitialized.
+pub fn getScratchArena(conflict: ?*Arena) *Arena {
+    const handle = Handle.getHandle();
+    return handle.core_v0.get_scratch_arena(conflict);
 }
 
 /// Checks whether the context has an error stored for the current thread.
